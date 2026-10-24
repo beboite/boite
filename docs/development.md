@@ -892,7 +892,8 @@ When the reading column leaves too little margin for the card, it docks
 automatically without changing the saved corner. The dock reserves space above
 the sidebar controls; the list keeps its own scroll. Where the sidebar is
 unavailable, a narrow conversation reserves space below the messages instead
-of covering them. Pin and placement are device preferences under
+of covering them. Empty drafts keep a floating card so pinning does not shift
+the welcome or composer. Pin and placement are device preferences under
 `boite.pinned-quotas.v1`. Reads share the other quota views'
 cache and events; only an owner refresh forces the providers to read again.
 

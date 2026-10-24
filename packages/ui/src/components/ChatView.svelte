@@ -62,6 +62,7 @@
     }
     return local;
   });
+  let quotaInDraft = $derived(!thread && !sending && !phone.current);
   /** An edit or a retry in flight: the message it replaces and what follows leave the screen before the core answers. */
   let kept = $derived.by(() => {
     const held = thread?.messages ?? [];
@@ -172,10 +173,10 @@
         </div>
     {/if}
 
-    {#if pinnedHere && !pinnedQuotas.crowded.get(store)}<Deferred part={parts.PinnedQuota} quiet>{#snippet children(PinnedQuota)}<PinnedQuota {store} area={discussion} />{/snippet}</Deferred>{/if}
+    {#if pinnedHere && !quotaInDraft && (!pinnedQuotas.crowded.get(store) || (!thread && !sending))}<Deferred part={parts.PinnedQuota} quiet>{#snippet children(PinnedQuota)}<PinnedQuota {store} area={discussion} />{/snippet}</Deferred>{/if}
     </div>
 
-    {#if pinnedHere && pinnedQuotas.crowded.get(store)}<Deferred part={parts.PinnedQuota} quiet>{#snippet children(PinnedQuota)}<PinnedQuota {store} inline area={discussion} />{/snippet}</Deferred>{/if}
+    {#if pinnedHere && pinnedQuotas.crowded.get(store) && (thread || sending)}<Deferred part={parts.PinnedQuota} quiet>{#snippet children(PinnedQuota)}<PinnedQuota {store} inline area={discussion} />{/snippet}</Deferred>{/if}
 
     {#if thread}<AgentDock {store} threadId={thread.id} />{/if}
     {#if thread}<ThreadRecovery {store} /><ThreadRetry {store} />{/if}
@@ -204,6 +205,8 @@
         {/if}
       </div>
     {/if}
+    <!-- Desktop drafts anchor against the whole chat so their centered heading stays clear. -->
+    {#if pinnedHere && quotaInDraft}<Deferred part={parts.PinnedQuota} quiet>{#snippet children(PinnedQuota)}<PinnedQuota {store} area={chat} />{/snippet}</Deferred>{/if}
   </section>
 {/if}
 

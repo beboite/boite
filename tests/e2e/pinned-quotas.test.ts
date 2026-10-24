@@ -177,15 +177,57 @@ test('dragging account content moves the card while a drag starting on refresh d
   await page.waitFor('document.hasFocus()');
   await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: points.x, y: points.y, button: 'left', buttons: 1, clickCount: 1 });
   await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: points.endX, y: points.endY, buttons: 1 });
+  await page.waitFor(`document.querySelector('${card}')?.matches(':popover-open') === true`);
   expect(await page.evaluate(`document.querySelector('${card}').matches(':popover-open')`)).toBe(true);
   await page.screenshot(join(import.meta.dir, '.artifacts', 'pinned-quotas-dragging.png'));
   await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: points.endX, y: points.endY, button: 'left', clickCount: 1 });
+  await page.waitFor(`document.querySelector('${card}')?.dataset.position === 'top-right' && JSON.parse(localStorage.getItem('boite.pinned-quotas.v1')).position === 'top-right'`);
+  await page.settleAnimations();
   expect(await page.evaluate(`JSON.parse(localStorage.getItem('boite.pinned-quotas.v1')).position`)).toBe('top-right');
   const refresh = await page.evaluate<{ x: number; y: number }>(`(() => { const b = document.querySelector('[data-testid="pinned-quota-refresh"]').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`);
   await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...refresh, button: 'left', buttons: 1, clickCount: 1 });
   await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: points.x, y: points.y, buttons: 1 });
   await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: points.x, y: points.y, button: 'left', clickCount: 1 });
+  await page.settleAnimations();
+  expect(await page.evaluate(`document.querySelector('${card}').dataset.position`)).toBe('top-right');
   expect(await page.evaluate(`JSON.parse(localStorage.getItem('boite.pinned-quotas.v1')).position`)).toBe('top-right');
+  expect(page.errors()).toEqual([]);
+}, 60_000);
+
+test.each([1024, 390])('pinning quotas preserves the empty draft layout without a sidebar at %ipx', async (width) => {
+  await boot();
+  await enableAndPin();
+  await page.click('[data-testid="new-thread"]');
+  await page.waitFor(`document.querySelector('[data-testid="draft-empty"]')`);
+  await page.evaluate('globalThis.__boiteTest.workspace.active.sidebarCollapsed = true');
+  await page.send('Emulation.setDeviceMetricsOverride', { width, height: width === 390 ? 844 : 1000, deviceScaleFactor: 1, mobile: width === 390 });
+  await page.send('Emulation.setTouchEmulationEnabled', { enabled: width === 390, maxTouchPoints: 1 });
+  await page.evaluate(`(async () => { const { pinnedQuotas } = await import('/src/lib/pinned-quotas.svelte.ts'); pinnedQuotas.set(false); })()`);
+  await page.waitFor(`!document.querySelector('${card}')`);
+  await page.settleAnimations();
+  const layout = `(() => {
+    const composer = document.querySelector('[data-testid="composer"]').getBoundingClientRect();
+    const heading = document.querySelector('${width === 390 ? '.mobile-welcome' : '[data-testid="draft-sentence"]'}').getBoundingClientRect();
+    return { composerTop: composer.top, composerHeight: composer.height, headingTop: heading.top, headingBottom: heading.bottom };
+  })()`;
+  const before = await page.evaluate(layout);
+  await page.evaluate(`(async () => { const { pinnedQuotas } = await import('/src/lib/pinned-quotas.svelte.ts'); pinnedQuotas.set(true); })()`);
+  await page.waitFor(`document.querySelectorAll('${card}').length === 1 && document.querySelectorAll('${account}').length === 2`);
+  await page.settleAnimations();
+  await capture(`draft-${width}`);
+  expect(await page.evaluate(layout)).toEqual(before);
+  expect(await page.evaluate(`(() => {
+    const q = document.querySelector('${card}').getBoundingClientRect();
+    const h = document.querySelector('${width === 390 ? '.mobile-welcome' : '[data-testid="draft-sentence"]'}').getBoundingClientRect();
+    return q.right <= h.left || q.left >= h.right || q.bottom <= h.top || q.top >= h.bottom;
+  })()`)).toBe(true);
+  expect(await page.evaluate(`(() => {
+    const q = document.querySelector('${card}').getBoundingClientRect();
+    const c = document.querySelector('[data-testid="composer"]').getBoundingClientRect();
+    return q.left >= 0 && q.right <= innerWidth && q.top >= 0 && q.bottom <= innerHeight
+      && (q.right <= c.left || q.left >= c.right || q.bottom <= c.top || q.top >= c.bottom)
+      && document.documentElement.scrollWidth <= innerWidth;
+  })()`)).toBe(true);
   expect(page.errors()).toEqual([]);
 }, 60_000);
 
