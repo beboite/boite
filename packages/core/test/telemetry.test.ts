@@ -327,3 +327,45 @@ test('enhanced turn metrics use the frozen execution and keep missing usage abse
   expect(event.cache_write_tokens).toBeUndefined();
   expect(JSON.stringify(event)).not.toContain('private');
 });
+
+test('subagent calls count started child turns with the frozen model and effort, only after opt-in', async () => {
+  const f = fixture();
+  Object.assign(f.host, { journal: { getThread: (id: string) => id === 'child' ? { parentThreadId: 'private-parent', model: 'private/new-selection', effort: 'low' } : { parentThreadId: null } } });
+  const turn = {
+    id: 'private-turn', threadId: 'child', status: 'running', queuedAt: 100, startedAt: 250,
+    execution: { providerId: 'codex', model: 'codex/gpt-6.1-sol', effort: 'high', speed: 'standard', operation: 'delegation' },
+  } as any;
+  await f.telemetry.flush();
+  f.bus.emit('turn.started', turn);
+  await f.telemetry.flush();
+  expect(f.requests.at(-1)!.body.events.some((event: any) => event.name === 'subagent_started')).toBe(false);
+  await f.telemetry.configure('enhanced'); await f.telemetry.flush();
+  f.bus.emit('turn.started', { ...turn, threadId: 'parent' });
+  f.bus.emit('turn.started', { ...turn, execution: { ...turn.execution, operation: 'compact' } });
+  f.bus.emit('turn.started', { ...turn, execution: { ...turn.execution, operation: 'keepalive' } });
+  f.bus.emit('turn.started', turn);
+  // Follow-up and workflow retry turns are calls too, without waiting for completion.
+  f.bus.emit('turn.started', { ...turn, id: 'private-followup', execution: { ...turn.execution, effort: 'xhigh' } });
+  await f.telemetry.flush();
+  const events = f.requests.at(-1)!.body.events;
+  expect(events).toHaveLength(2);
+  expect(events[0]).toMatchObject({ name: 'subagent_started', provider: 'codex', model: 'gpt-6.1-sol', effort: 'high', speed: 'standard' });
+  expect(events[1].effort).toBe('xhigh');
+  expect(events[0].operation).toBeUndefined();
+  expect(JSON.stringify(events)).not.toContain('private');
+});
+
+test('the relay drops basic subagent calls and rebuilds enhanced calls from closed fields', () => {
+  const ids = { eventIdentifier: 'daily', pingIdentifier: 'stable' };
+  const event = { ...telemetryEvent('turn_finished', '2.0.0'), name: 'subagent_started', provider: 'codex', model: 'codex/gpt-6.1-sol', effort: 'high', speed: 'fast', task: 'PRIVATE', parentThreadId: 'PRIVATE', input_tokens: 100, permission_mode: 'plan' };
+  expect(buildBatch('A', [event], ids, 'FR', new Date().toISOString())).toEqual([]);
+  const batch = buildBatch('B', [event], ids, 'FR', new Date().toISOString());
+  expect(batch).toHaveLength(1);
+  expect(batch[0]!.properties).toMatchObject({ provider: 'codex', model: 'gpt-6.1-sol', effort: 'high', speed: 'fast' });
+  expect(batch[0]!.properties.input_tokens).toBeUndefined();
+  expect(batch[0]!.properties.permission_mode).toBeUndefined();
+  expect(JSON.stringify(batch)).not.toContain('PRIVATE');
+  const hostile = buildBatch('B', [{ ...event, model: '/PRIVATE/model', effort: 'PRIVATE', speed: 'PRIVATE' }], ids, 'FR', new Date().toISOString())[0]!.properties;
+  expect(hostile).toMatchObject({ model: 'other', effort: 'other', speed: 'other' });
+  expect(JSON.stringify(hostile)).not.toContain('PRIVATE');
+});

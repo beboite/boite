@@ -53,7 +53,7 @@ export interface Env {
 }
 
 // ─── Payload types ───────────────────────────────────────────────
-import { enhancedDetails, publicOsVersion, type EnhancedDetails } from '../../packages/contracts/src/telemetry.ts';
+import { enhancedDetails, publicOsVersion, subagentDetails, type EnhancedDetails } from '../../packages/contracts/src/telemetry.ts';
 
 export interface TelemetryEvent extends EnhancedDetails {
   name: string;
@@ -68,7 +68,7 @@ export interface TelemetryEvent extends EnhancedDetails {
   provider?: string;
 }
 
-const ALLOWED_EVENTS = new Set(["ping", "first_run", "app_launched", "session_ended", "thread_spawned", "project_added", "turn_finished"]);
+const ALLOWED_EVENTS = new Set(["ping", "first_run", "app_launched", "session_ended", "thread_spawned", "project_added", "turn_finished", "subagent_started"]);
 
 interface TrackPayload {
   mode: "A" | "B";
@@ -405,7 +405,7 @@ export function buildBatch(
   timestamp: string,
 ): PostHogBatchItem[] {
   const isModeB = mode === "B";
-  return events.filter(ev => ALLOWED_EVENTS.has(ev.name)).map((ev) => {
+  return events.filter(ev => ALLOWED_EVENTS.has(ev.name) && (isModeB || ev.name !== "subagent_started")).map((ev) => {
     const distinctId = ev.name === "ping" ? ids.pingIdentifier : ids.eventIdentifier;
     const providers = ["claude", "codex", "opencode", "opencode-v2", "pi", "grok", "antigravity", "antigravity-cli", "muse"];
     const properties: Record<string, unknown> = {
@@ -419,13 +419,14 @@ export function buildBatch(
     // Hosts older than the field send none; leave it absent rather than "other".
     const osVersion = publicOsVersion(ev.os_version);
     if (osVersion) properties.os_version = osVersion;
-    if (ev.name === "thread_spawned" || ev.name === "turn_finished") {
+    if (ev.name === "thread_spawned" || ev.name === "turn_finished" || ev.name === "subagent_started") {
       properties.provider = providers.includes(ev.provider ?? "") ? ev.provider : "other";
     }
     if (ev.name === "turn_finished") {
       properties.outcome = ["done", "error", "stopped"].includes(ev.outcome ?? "") ? ev.outcome : "other";
       if (isModeB) Object.assign(properties, enhancedDetails(ev as unknown as Record<string, unknown>));
     }
+    if (ev.name === "subagent_started") Object.assign(properties, subagentDetails(ev as unknown as Record<string, unknown>));
     if (["app_launched", "session_ended", "turn_finished"].includes(ev.name)) {
       const duration = count(ev.duration_ms);
       if (duration !== undefined) properties.duration_ms = Math.min(604800000, Math.round(duration));
