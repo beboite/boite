@@ -18,6 +18,49 @@ beforeAll(async () => {
 }, 30_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
+test('Windows symlink errors explain the setting on the owning computer and retry at desktop and phone widths', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  for (const locale of ['en', 'fr']) {
+    await page.evaluate(`localStorage.setItem('boite.locale', ${JSON.stringify(locale)})`);
+    await page.navigate(`${origin}/?fake=1&open=recent&brainLinkPermission=1`);
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1100, deviceScaleFactor: 1, mobile: false });
+    await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
+    await page.click(id('nav-settings'));
+    await page.click(id('settings-tab-brain'));
+    await page.waitFor(`document.querySelector('${id('brain-page')}')?.getAttribute('aria-busy') === 'false'`);
+    await page.type(id('brain-path'), 'C:/shared-brain');
+    await page.click(id('brain-save'));
+    await page.waitFor(`document.querySelector('${id('brain-global')}') && !document.querySelector('${id('brain-global')}').disabled`);
+    await page.click(id('brain-global'));
+    await page.waitFor(`document.querySelector('${id('brain-link-retry')}') && !document.querySelector('${id('brain-link-retry')}').disabled`);
+    const help = await page.evaluate<string>(`document.querySelector('${id('brain-link-help')}').textContent`);
+    expect(help).toContain('Win+R');
+    expect(help).toContain('ms-settings:developers');
+    expect(help).toContain(locale === 'en' ? 'Developer Mode' : 'mode développeur');
+    expect(help).toContain(locale === 'en' ? 'computer that holds the brain' : 'ordinateur qui héberge le cerveau');
+    expect(await page.evaluate(`document.querySelectorAll('${id('brain-link-help')}').length`)).toBe(1);
+    await page.evaluate(`document.querySelector('${id('brain-link-help')}').scrollIntoView({ block: 'center' })`);
+    await capture(`brain-windows-desktop-${locale}.png`);
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await page.evaluate(`document.querySelector('${id('brain-link-help')}').scrollIntoView({ block: 'center' })`);
+    expect(await page.evaluate('document.documentElement.scrollWidth <= 390')).toBe(true);
+    await capture(`brain-windows-phone-${locale}.png`);
+    // Retrying alone cannot grant a Windows privilege.
+    await page.click(id('brain-link-retry'));
+    await page.waitFor(`document.querySelector('${id('brain-link-retry')}') && !document.querySelector('${id('brain-link-retry')}').disabled`);
+    expect(await page.evaluate(`document.querySelector('${id('brain-links')}').textContent`)).toContain('0/7');
+    await page.evaluate(`globalThis.__boiteTest.workspace.active.client.setBrainLinkPermission(false)`);
+    await page.click(id('brain-link-retry'));
+    await page.waitFor(`document.querySelector('${id('brain-link-help')}') === null`);
+    expect(await page.evaluate(`document.querySelector('${id('brain-links')}').textContent`)).toContain('7/7');
+    expect(await page.evaluate(`document.querySelector('${id('brain-global')}').checked`)).toBe(true);
+  }
+  await page.evaluate(`localStorage.removeItem('boite.locale')`);
+  await page.navigate(`${origin}/?fake=1&open=recent`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1100, deviceScaleFactor: 1, mobile: false });
+  await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
+}, 30_000);
+
 test('configure, inspect, synchronize and disconnect a brain at desktop and phone widths', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1100, deviceScaleFactor: 1, mobile: false });
   await page.click(id('nav-settings'));
