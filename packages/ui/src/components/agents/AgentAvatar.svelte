@@ -38,6 +38,9 @@
 {/snippet}
 
 <span class="agent-avatar" class:robot={!!robot} data-kind={kind} data-ring={ring ? face : null} style:--size="{size}px" style:--tint={kind === 'mission' ? null : tintOf(id)} style:--ring-tint={ring ? ringTint : null} aria-hidden="true">
+  {#if ring}
+    <svg class="avatar-ring" aria-hidden="true"><circle cx="50%" cy="50%" r={size / 2 + 2.25} /></svg>
+  {/if}
   {#if grouped && members.length >= 2}
     {#each members.slice(0, 2) as member, slot (member.id)}
       <span class="agent-avatar-stack" class:robot={!!robotOf(member.id, member.avatar)} data-slot={slot} style:--tint={tintOf(member.id)}>{@render picture(member, 'still')}</span>
@@ -68,9 +71,12 @@
   /* The status mark only while it works or waits, at most a third of a small picture. */
   .agent-avatar { --mark-size: clamp(6px, calc(var(--size) * 0.24), 9px); }
   /* The ring: a hairline in the robot's colour just outside the disc, breathing while it works, still while it waits or rests. */
-  .agent-avatar[data-ring]::before { content: ''; position: absolute; inset: -3px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--ring-tint) 55%, transparent); pointer-events: none; transition: border-color var(--dur-3) var(--ease-out-quint); }
-  .agent-avatar[data-ring='working']::before { border-color: var(--ring-tint); animation: pulse 1.6s var(--loop-ease-in-out-48) infinite var(--loops); }
-  .agent-avatar[data-ring='waiting']::before { border-color: color-mix(in srgb, var(--ring-tint) 80%, transparent); }
-  @media (prefers-reduced-motion: reduce) { .agent-avatar[data-ring='working']::before { animation: none; } }
-  :global(html[data-motion='reduced']) .agent-avatar[data-ring='working']::before { animation: none; }
+  /* Share the portrait's viewport so CSS border snapping cannot shift or thin the ring at fractional zoom. */
+  .avatar-ring { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+  .avatar-ring circle { fill: none; stroke: color-mix(in srgb, var(--ring-tint) 55%, transparent); stroke-width: 1.5px; transition: stroke var(--dur-3) var(--ease-out-quint); }
+  .agent-avatar[data-ring='working'] .avatar-ring { animation: pulse 1.6s var(--loop-ease-in-out-48) infinite var(--loops); }
+  .agent-avatar[data-ring='working'] circle { stroke: var(--ring-tint); }
+  .agent-avatar[data-ring='waiting'] circle { stroke: color-mix(in srgb, var(--ring-tint) 80%, transparent); }
+  @media (prefers-reduced-motion: reduce) { .agent-avatar[data-ring='working'] .avatar-ring { animation: none; } }
+  :global(html[data-motion='reduced']) .agent-avatar[data-ring='working'] .avatar-ring { animation: none; }
 </style>
