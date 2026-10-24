@@ -11,6 +11,9 @@ export function registerSecretMethods(core: Core): void {
   core.router.register('secrets.answer', (params, ctx) => core.secrets.answer(params, ctx.connection.encrypted === true));
   core.router.register('secrets.use', (params, ctx) => core.secrets.use(params, ctx.connection));
   core.router.register('secrets.list', async (params, ctx) => {
+    for (const field of ['threadId', 'projectId'] as const) {
+      if (field in params && typeof (params as Record<string, unknown>)[field] !== 'string') throw refused(`secrets.list: ${field} must be a string`, { field, expected: field === 'threadId' ? 'a thread id' : 'a project id' });
+    }
     const projectId = 'threadId' in params && typeof params.threadId === 'string'
       ? core.threads.require(params.threadId).projectId
       : 'projectId' in params && typeof params.projectId === 'string' ? core.projects.require(params.projectId).id : null;

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { secretMask } from '@boite/contracts';
@@ -48,9 +48,12 @@ test('write puts the value in an ignored env file, keeps its other lines, and re
   const value = secretValue();
   const ref = await saveSecret(h, owner, threadId, 'API_KEY', value);
   writeFileSync(join(root, '.env'), 'FIRST=1\r\nAPI_KEY=old\r\n# kept comment\r\n');
+  if (process.platform !== 'win32') chmodSync(join(root, '.env'), 0o644);
   const write = (path: string, extra: { allowUnignored?: boolean } = {}) => owner.call('secrets.use', { threadId, ref, use: { action: 'write', path, key: 'API_KEY', ...extra } });
 
   expect(await write(join(root, '.env'))).toEqual({ action: 'write', path: join(root, '.env'), replaced: true });
+  // A file others could read before is narrowed to its owner once it holds the value.
+  if (process.platform !== 'win32') expect(statSync(join(root, '.env')).mode & 0o777).toBe(0o600);
   // The value holds `$`, so it is quoted the way dotenv parsers read it back.
   expect(readFileSync(join(root, '.env'), 'utf8')).toBe(`FIRST=1\r\nAPI_KEY="${value.replaceAll('$', '\\$')}"\r\n# kept comment\r\n`);
 

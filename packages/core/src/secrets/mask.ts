@@ -95,8 +95,8 @@ export class SecretMasks {
   }
 
   #apply(patterns: Pattern[], text: string): string {
-    // Four UTF-8 bytes take two UTF-16 units: no shorter text holds the shortest value masked.
-    if (patterns.length === 0 || text.length < SECRET_MASK_MIN_BYTES / 4 * 2) return text;
+    // A UTF-16 unit is at most three UTF-8 bytes: no shorter text holds the shortest value masked.
+    if (patterns.length === 0 || text.length * 3 < SECRET_MASK_MIN_BYTES) return text;
     const bytes = encoder.encode(text);
     const byLength = new Map<number, Pattern[]>();
     for (const pattern of patterns) {

@@ -3,7 +3,7 @@
  * an ignored env file, or hands it to a command in an env var or on stdin,
  * and gives back only the masked output.
  */
-import { closeSync, existsSync, openSync, readFileSync, realpathSync, statSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, fchmodSync, openSync, readFileSync, realpathSync, statSync, writeSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { SecretExecUse, SecretUseResult, SecretWriteUse, ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
@@ -19,7 +19,7 @@ const encoder = new TextEncoder();
 
 function inside(root: string, path: string): boolean {
   const rel = relative(root, path);
-  return rel === '' ? false : !rel.startsWith('..') && !isAbsolute(rel) && !rel.split(sep).includes('..');
+  return rel !== '' && !isAbsolute(rel) && !rel.split(sep).includes('..');
 }
 
 /** The real path of `file` under the thread's folder, symlinks resolved, or a refusal naming the field. */
@@ -87,6 +87,8 @@ export async function writeSecret(core: Core, threadId: ThreadId, cwd: string, u
   const suffix = encoder.encode(at < 0 ? eol : tail);
   const fd = openSync(path, 'w', 0o600);
   try {
+    // The mode applies only to a new file: an existing one readable by others is narrowed too.
+    if (process.platform !== 'win32') fchmodSync(fd, 0o600);
     writeSync(fd, prefix);
     writeSync(fd, quoted);
     writeSync(fd, suffix);
@@ -126,6 +128,7 @@ export async function execSecret(core: Core, threadId: ThreadId, cwd: string, us
   if (use.action === 'run' && (typeof use.as !== 'string' || !VARIABLE.test(use.as))) throw refused('as: expected an env variable name, letters, digits and _', { field: 'as', expected: VARIABLE.source });
   const timeoutMs = use.timeoutMs === undefined ? RUN_TIMEOUT_MS : use.timeoutMs;
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > RUN_MAX_TIMEOUT_MS) throw refused(`timeoutMs: expected 1000 to ${RUN_MAX_TIMEOUT_MS}`, { field: 'timeoutMs', expected: `1000..${RUN_MAX_TIMEOUT_MS}` });
+  if (use.cwd !== undefined && typeof use.cwd !== 'string') throw refused('cwd: expected a folder path', { field: 'cwd', expected: `a folder inside ${cwd}` });
   const workdir = use.cwd === undefined || use.cwd === '' ? cwd : resolve(cwd, use.cwd);
   let root: string;
   try { root = realpathSync(cwd); } catch { throw refused(`cwd: the conversation's folder ${cwd} does not exist`, { field: 'cwd', expected: cwd }); }

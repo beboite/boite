@@ -22,9 +22,11 @@ test('a saved copy reaches the vault before the card says saved; the agent gets 
   await holdTurn(h, owner, threadId);
   const value = secretValue();
 
-  const { requestId, asked } = await openCard(h, owner, threadId, 'OPENAI_API_KEY');
+  // The same request id sent again before the vault has loaded, then while the card is open, is the same card.
+  const firstId = `sreq_${crypto.randomUUID().replaceAll('-', '')}`;
+  const early = owner.call('secrets.ask', { threadId, name: 'OPENAI_API_KEY', reason: 'retried', requestId: firstId });
+  const { requestId, asked } = await openCard(h, owner, threadId, 'OPENAI_API_KEY', { requestId: firstId });
   expect(h.core.threads.get(threadId).status).toBe('waiting');
-  // The same request id while the card is open is the same card.
   const again = owner.call('secrets.ask', { threadId, name: 'OPENAI_API_KEY', reason: 'retried', requestId });
   const saved: string[] = [];
   h.core.bus.onAny((name, payload) => {
@@ -36,6 +38,8 @@ test('a saved copy reaches the vault before the card says saved; the agent gets 
   expect(result).toMatchObject({ requestId, outcome: 'saved', storage: 'memory' });
   expect(result.ref).toMatch(/^secret:sec_[0-9a-z]{20}$/);
   expect(await again).toEqual(result);
+  expect(await early).toEqual(result);
+  expect(h.core.journal.listMessages(threadId).filter(message => message.parts.some(part => part.type === 'secret_request'))).toHaveLength(1);
   // And once it closed: the answer it got, not a second card.
   expect(await owner.call('secrets.ask', { threadId, name: 'OPENAI_API_KEY', reason: 'retried', requestId })).toEqual(result);
   expect(cardPart(h, threadId, requestId)).toMatchObject({ status: 'saved', ref: result.ref });

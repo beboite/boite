@@ -165,15 +165,20 @@ export class SecretStore {
       throw refused('requestId: expected 8 to 64 letters, digits, _ or -', { field: 'requestId', expected: REQUEST_ID.source });
     }
     const replace = params.replace === true;
-    if (params.requestId !== undefined) {
+    const known = (): Promise<AskResult> | AskResult | undefined => {
+      if (params.requestId === undefined) return undefined;
       const live = this.#pending.get(params.requestId);
       const settled = this.#settled.get(params.requestId);
       const owner = live?.request.threadId ?? settled?.threadId;
       if (owner !== undefined && owner !== thread.id) throw refused('requestId: already used by another conversation', { field: 'requestId', expected: 'a fresh id' });
-      if (live) return this.#wait(live, connection);
-      if (settled) return settled.result;
-    }
+      return live ? this.#wait(live, connection) : settled?.result;
+    };
+    const before = known();
+    if (before !== undefined) return before;
     const storage = (await this.vault()).kind;
+    // A retry with the same id may have opened the card while the vault loaded.
+    const meanwhile = known();
+    if (meanwhile !== undefined) return meanwhile;
     if (!replace && thread.projectId !== null && this.index.kept(thread.projectId, params.name)) {
       return { requestId: params.requestId ?? newId('sreq_'), outcome: 'saved', ref: projectSecretRef(params.name), storage };
     }
@@ -365,10 +370,12 @@ export class SecretStore {
     }
     const value = await vault.take(vaultId);
     if (value === null) {
+      this.masks.remove(scope, secretKey);
       this.index.update(data => {
         data.transit = data.transit.filter(item => item.id !== vaultId);
         data.kept = data.kept.filter(item => item.id !== vaultId);
       });
+      if (parsed.kind === 'project') this.#changed(thread.projectId!);
       throw refused(`ref: the ${vault.kind} vault no longer holds ${name}; ask for it again`, { field: 'ref', expected: 'a live ref' });
     }
     try {

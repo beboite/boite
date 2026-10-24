@@ -35,7 +35,7 @@
   const expired = $derived(part.expiresAt !== undefined && part.expiresAt <= now);
   const open = $derived(part.status === 'pending' && !expired);
   const plain = $derived(encrypted === false);
-  const project = $derived(store.threads.find((thread) => thread.id === threadId)?.projectId !== null);
+  const project = $derived((store.threads.find((thread) => thread.id === threadId)?.projectId ?? null) !== null);
   const outcome = $derived(
     part.status === 'saved' ? fill(part.kept ? s.savedKept : s.saved, { name: part.name })
       : part.status === 'declined' ? fill(s.declined, { name: part.name })
