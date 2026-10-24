@@ -126,6 +126,7 @@ export const REQUESTABLE_SETTINGS = {
   warmProcessMinutes: { page: 'advanced', section: 'execution', sensitive: false },
   autoCompact: { page: 'advanced', section: 'auto-compact', sensitive: false },
   autoResumeLimitedThreads: { page: 'limits', section: 'limit-resume', sensitive: false },
+  deviceStream: { page: 'experiments', section: 'device-stream', sensitive: false },
 } as const satisfies Partial<Record<keyof Settings, SettingPlace>>;
 
 export type RequestableSetting = keyof typeof REQUESTABLE_SETTINGS;
@@ -207,6 +208,7 @@ export type SettingRequestParams = { threadId: ThreadId; reason: string } & (
 const MISSING: Partial<Record<RequestableSetting, unknown>> = {
   asyncQuestions: true,
   autoResumeLimitedThreads: false,
+  deviceStream: false,
   shortAnswers: true,
   toolSummaries: false,
   titleModel: null,
