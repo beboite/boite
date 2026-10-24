@@ -146,14 +146,22 @@ export class ThreadSpawns {
     }
   }
 
-  /** A thread made, titled, marked with its origin and started on its brief. `check` runs once a worktree is ready. */
+  /**
+   * A thread made, titled, marked with its origin and started on its brief.
+   * `check` runs once a worktree is ready; a refusal there deletes the thread
+   * it made (undoably, as Delete does), so no empty thread stays behind.
+   */
   private async launch(launch: Launch, check: () => void = () => undefined): Promise<{ created: ThreadSummary; turn: Turn }> {
     const base = {
       projectId: launch.projectId, ...launch.agent, title: launch.title,
       ...(launch.context === undefined ? {} : { context: launch.context }),
     };
     const created = launch.worktree ? await this.threads.createInWorktree({ ...base, worktree: {} }) : this.threads.create(base);
-    check();
+    try { check(); }
+    catch (error) {
+      await this.threads.remove(created.id).catch(() => undefined);
+      throw error;
+    }
     // The title is the brief's, not one written from a prompt that starts with the origin note.
     saveThread(this.core, { ...this.threads.require(created.id), titleSource: 'user' }, 'thread.retitled');
     // Written before the turn starts: a turn that ends at once still finds where to report.

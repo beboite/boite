@@ -288,13 +288,10 @@ export class ThreadCards {
       if (error instanceof PeerRefusal) throw refused(`Boite on ${peer.name} cannot answer about ${params.key}: ${error.message}; the owner updates it in Settings, Machines and updates`, { field: 'machine' });
       throw unavailable(`${peer.name} did not answer: ${messageOf(error)}`, { field: 'machine' });
     }
-    const drawn = this.drawSetting(params, { ...this.core.settings.get(), [params.key]: read?.value as Settings[typeof params.key] }, { coreId: peer.coreId, name: peer.name });
-    // The owner flipped it while the read was on its way back: the announcement came before the card.
+    // The owner flipped it while the read was on its way back: the announcement, newer, is what that machine has.
     const late = this.announced.get(`${peer.coreId}:${params.key}`);
-    if (late !== undefined && late.seq > since) {
-      this.settle(request => (request.id === drawn.questionId && request.setting !== undefined ? settledMachineSetting(request.setting, peer.coreId, params.key, late.value) : null), `${peer.name}'s settings`);
-    }
-    return drawn;
+    const value = late !== undefined && late.seq > since ? late.value : read?.value;
+    return this.drawSetting(params, { ...this.core.settings.get(), [params.key]: value as Settings[typeof params.key] }, { coreId: peer.coreId, name: peer.name });
   }
 
   private drawSetting(params: SettingRequestParams, settings: Settings, machine: SettingMachine | null): { questionId: RequestId; setting: SettingAsk } {

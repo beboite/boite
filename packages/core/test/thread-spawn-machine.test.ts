@@ -142,7 +142,7 @@ test('a machine outside any group has no other machine to start a thread on', as
 
 test('the owner turning the switch off while the worktree is prepared stops the thread before its first turn', async () => {
   const prompts = answering();
-  const { pc, machine, cli } = await setup();
+  const { pc, machine, cli, notes, notesPath } = await setup();
   await pc.core.settings.set({ groupThreads: true });
   const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
   const threads = pc.core.threads;
@@ -159,14 +159,15 @@ test('the owner turning the switch off while the worktree is prepared stops the 
   release.resolve();
   expect((await started).err).toContain('does not let the other machines of its group start threads there');
   expect(prompts.size).toBe(0);
+  // The thread made for the worktree goes with the refusal.
+  expect(pc.core.journal.listThreads().filter(thread => thread.cwd.startsWith(notesPath) || thread.projectId === notes.id)).toHaveLength(0);
 });
 
-test('a card whose read crossed the owner\'s flip settles as soon as it is drawn', async () => {
-  const prompts = answering();
+test('a card about another machine draws what that machine has, even when the owner flipped it while the read came back', async () => {
+  answering();
   const { desk, pc, owner, threadId, machine, cli } = await setup();
   await owner.call('turns.start', { threadId, prompt: 'Print my letter', clientRequestId: 'user-turn-1' });
   await waitFor(() => desk.core.threads.require(threadId).status === 'idle');
-  // The PC answers false, then its owner flips the switch and its announcement lands before that answer does.
   const announcements: Promise<unknown>[] = [];
   const announce = pc.core.coordination.request.bind(pc.core.coordination);
   pc.core.coordination.request = ((peer, operation, payload) => {
@@ -174,17 +175,27 @@ test('a card whose read crossed the owner\'s flip settles as soon as it is drawn
     if (operation === 'setting.changed') announcements.push(sent);
     return sent;
   }) as typeof pc.core.coordination.request;
+  // The PC answers, then its owner flips the switch and its announcement lands before that answer does.
+  let flipTo = true;
   const read = desk.core.coordination.request.bind(desk.core.coordination);
   desk.core.coordination.request = (async (peer, operation, payload) => {
     const answer = await read(peer, operation, payload);
     if (operation === 'setting.read') {
-      await pc.core.settings.set({ groupThreads: true });
-      await waitFor(() => announcements.length > 0);
+      const heard = announcements.length;
+      await pc.core.settings.set({ groupThreads: flipTo });
+      await waitFor(() => announcements.length > heard);
       await Promise.all(announcements);
     }
     return answer;
   }) as typeof desk.core.coordination.request;
-  expect((await cli(['settings', 'request', 'groupThreads', 'true', '--machine', machine, '--why', 'Print'])).code).toBe(0);
-  await waitFor(() => (prompts.get(threadId) ?? []).some(p => p.includes('applied: groupThreads is now true on')));
+  const ask = () => cli(['settings', 'request', 'groupThreads', 'true', '--machine', machine, '--why', 'Print']);
+
+  // Read false, flipped on: there is nothing left to ask.
+  expect((await ask()).err).toContain('groupThreads is already true on');
   expect(await owner.call('questions.list', { threadId })).toHaveLength(0);
+  // Read true, flipped off: the card asks, from false.
+  flipTo = false;
+  expect((await ask()).code).toBe(0);
+  const [card] = await owner.call('questions.list', { threadId });
+  expect(card?.setting).toMatchObject({ key: 'groupThreads', value: true, previous: false });
 });
