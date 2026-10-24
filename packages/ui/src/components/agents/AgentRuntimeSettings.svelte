@@ -99,7 +99,7 @@
         config.allowedRoutes = config.allowedRoutes.map(route => {
           const replaced = route.providerId === previous.providerId && route.accountId === previous.accountId && route.model === previous.model;
           return replaced ? { ...route, ...d, model } : route;
-        });
+        }).filter(route => view.store.providerOf(route.providerId) && view.store.accounts.some(a => a.id === route.accountId));
       }
       if (d.model && !config.allowedRoutes.some(r => r.providerId === d.providerId && r.accountId === d.accountId && r.model === d.model)) {
         config.allowedRoutes.push({ id: secureId(), name: view.store.modelOf(d)?.name ?? d.model, providerId: d.providerId, accountId: d.accountId, model: d.model, effort: d.effort });

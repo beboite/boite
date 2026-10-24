@@ -29,8 +29,9 @@ record when it was lost.
 
 Opening the conversation does not require its saved provider or account to
 still exist. The warning's Fix it button opens Settings, where choosing a new
-default also replaces that missing default's allowed route. Starting a turn
-still requires an available provider and account.
+default also replaces that missing default's allowed route and removes other
+allowed routes whose provider or account is gone. Starting a turn still
+requires an available provider and an account belonging to it.
 
 An identity keeps its thread, brain and routines when its provider, account
 or model changes; a route change moves the thread's own selection. Paused,

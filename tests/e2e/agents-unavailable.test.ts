@@ -22,6 +22,15 @@ for (const width of [1440, 390]) test(`a bot on a retired provider opens and its
     name: 'B.O.T.S', domain: '', instructions: '', avatar: '', status: 'paused', projectIds: [],
     selection: { providerId: 'antigravity-cli', accountId: 'acc_retired', model: 'retired-model', effort: null, permissionMode: 'default' },
   });
+  const config = harness.core.workforce.resident.config(agent.id);
+  const available = { ...agent.selection, providerId: 'echo', accountId: (await owner.call('accounts.list', {})).find(a => a.providerId === 'echo')!.id, model: 'echo' };
+  // Other allowed routes must not keep the replacement from saving; valid choices stay.
+  harness.core.journal.setSetting(`agents:runtime:${agent.id}`, { ...config, allowedRoutes: [
+    ...config.allowedRoutes,
+    { ...agent.selection, id: 'retired-alternative', name: 'Retired alternative', model: 'retired-alternative' },
+    { ...available, id: 'removed-account', name: 'Removed account', accountId: 'acc_removed' },
+    { ...available, id: 'available', name: 'Available' },
+  ] });
   try {
     page = await BrowserPage.launch({ url: `${harness.url}/?token=${harness.token}`, experiments: ['resident-agents'], windowSize: { width, height: 900 } });
     await page.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`, 30_000);
@@ -37,7 +46,9 @@ for (const width of [1440, 390]) test(`a bot on a retired provider opens and its
     await page.click('[data-provider="echo"]');
     await page.click('[data-model="echo"]');
     await waitFor(() => harness.core.workforce.records.get('profile', agent.id).selection.providerId === 'echo', 10_000);
-    expect((await owner.call('agents.runtime.get', { agentId: agent.id })).allowedRoutes.map(route => route.providerId)).toEqual(['echo']);
+    const repaired = (await owner.call('agents.runtime.get', { agentId: agent.id })).allowedRoutes;
+    expect(repaired.map(route => route.id)).toEqual(['default', 'available']);
+    expect(repaired.map(route => route.providerId)).toEqual(['echo', 'echo']);
     await page.waitFor(`document.querySelector('[data-testid=agent-runtime] [data-testid=save-status]')?.dataset.state === 'saved'`);
     await page.evaluate(`document.querySelector('[data-testid=agent-runtime]').scrollIntoView({ block: 'start' })`);
     await page.settleAnimations();

@@ -92,6 +92,21 @@ for (const missing of ['provider', 'account'] as const) test(`a bot whose ${miss
   await waitFor(() => h.core.journal.getTurn(turn.id)?.status === 'done');
 });
 
+test('a bot with an account from another provider opens but cannot start a turn', async () => {
+  const h = await startTestCore(); cores.push(h);
+  const client = await h.connect();
+  const foreign = { ...h.core.accounts.require(echoAccount(h)), id: 'acc_foreign', providerId: 'claude' };
+  h.core.journal.putAccount(foreign);
+  row(h, 'profile', BOTS, { name: 'B.O.T.S', domain: '', instructions: '', avatar: '', status: 'paused', projectIds: [],
+    selection: { providerId: 'echo', accountId: foreign.id, model: 'echo', effort: null, permissionMode: 'default' } });
+  const { threadId } = await client.call('agents.open', { agentId: BOTS });
+  expect((await client.call('threads.get', { threadId })).title).toBe('B.O.T.S');
+  const error = await client.call('turns.start', { threadId, prompt: 'Do not run with another provider account' }).catch(error => error);
+  expect(error.message).toBe('accountId: account acc_foreign belongs to provider claude; expected provider echo');
+  expect(error.rpc.data).toMatchObject({ field: 'accountId', accountId: foreign.id, providerId: 'claude', expected: 'echo' });
+  expect(h.core.journal.listTurns(threadId)).toHaveLength(0);
+});
+
 test('agents of a hidden-thread core come back as their threads, once, whatever the restarts', async () => {
   const old = await oldCore();
   try {

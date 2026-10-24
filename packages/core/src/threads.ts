@@ -617,10 +617,14 @@ export class ThreadStore {
     // A signed-out or removed account hands the thread to another of its agent (`threads/account-fallback.ts`).
     thread = followAgent(this.core, thread);
     const provider = this.core.providers.require(thread.providerId);
+    const account = this.core.accounts.require(thread.accountId);
+    if (account.providerId !== provider.id) throw refused(`accountId: account ${account.id} belongs to provider ${account.providerId}; expected provider ${provider.id}`, {
+      field: 'accountId', accountId: account.id, providerId: account.providerId, expected: provider.id,
+    });
     assertDriverRunnable(
       provider.protocol,
       this.core.providers.summary(thread.providerId),
-      this.core.accounts.require(thread.accountId),
+      account,
       () => this.core.providers.launcherScriptOnly(thread.providerId),
     );
     checkStoredEffort(provider, thread.accountId, thread.model, thread.effort);
