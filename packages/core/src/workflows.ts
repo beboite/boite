@@ -21,7 +21,7 @@ import { listTemplates, removeTemplate, saveTemplate } from './workflows/templat
 import { planError, text } from './workflows/validation.ts';
 import { NOT_STARTED, failureNotice, unnoticed } from './workflows/notices.ts';
 import { workflowUsage } from './workflows/usage.ts';
-
+import { SharedWorkflowCompute } from './workflows/shared-compute.ts';
 export { registerWorkflowMethods } from './workflows/register.ts';
 
 interface DataRow { data: string }
@@ -68,9 +68,11 @@ export class Workflows {
   private readonly again = new Set<string>();
   private readonly off: () => void;
   private closed = false;
+  private readonly compute: SharedWorkflowCompute;
 
   constructor(private readonly core: Core) {
     this.log = new WorkflowLog(core);
+    this.compute = new SharedWorkflowCompute(core, {load: id => this.load(id), save: run => this.save(run), advance: id => this.advance(id), runs: () => this.runsWhere("status IN ('running', 'paused')")});
     for (const row of core.journal.db.query('SELECT * FROM workflow_steps').all() as StepRow[]) this.stepOf.set(row.thread_id, { runId: row.run_id, key: row.step_key });
     // A running one may hold a failure its root was not told yet: its root's next turn end tells it.
     for (const run of this.runsWhere("status IN ('done', 'failed', 'paused', 'running') AND json_extract(data, '$.delivered') = 0")) this.trackDelivery(run);
@@ -178,6 +180,7 @@ export class Workflows {
   /** Every step that names a model or a level runs on a route that exists and the owner allows, checked before anything starts. */
   private checkRoutes(rootId: string, steps: WorkflowStepPlan[], field = 'steps'): void {
     steps.forEach((step, i) => {
+      if (this.compute.check(rootId, step)) return;
       if (step.model === undefined && step.effort === undefined && step.context === undefined) return;
       try {
         const route = this.core.delegation.resolve(rootId, { profileId: step.profile ?? null, ...(step.model === undefined ? {} : { model: step.model }), ...(step.effort === undefined ? {} : { effort: step.effort }) });
@@ -398,6 +401,7 @@ export class Workflows {
   }
 
   private launch(run: WorkflowRun, node: WorkflowNode, inst: WorkflowInstance, config: DelegationConfig): void {
+    if (this.compute.launch(run, node, inst)) return;
     const now = Date.now();
     const failNow = (error: string) => {
       Object.assign(inst, { status: 'failed', error, finishedAt: now, startedAt: inst.startedAt ?? now });
@@ -823,6 +827,7 @@ export class Workflows {
       }
       Object.assign(current, { status: 'stopped', error: reason, finishedAt: now, delivered: true });
     });
+    this.compute.stop(run);
     for (const node of run.nodes) for (const inst of node.instances) {
       if (inst.status === 'running' && inst.threadId) this.core.scheduler.stop(inst.threadId);
     }
@@ -887,8 +892,6 @@ export class Workflows {
     return removeTemplate(this.core, this.rootOf(threadId), templateId);
   }
 
-  beginClose(): void {
-    this.closed = true;
-    this.off();
-  }
+  beginClose(): void { this.compute.beginClose(); this.closed = true; this.off(); }
+  async close(): Promise<void> {this.beginClose(); await this.compute.close();}
 }

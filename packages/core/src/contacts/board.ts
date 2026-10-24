@@ -305,6 +305,7 @@ export class SharedBoard {
       const entry = this.journal.entry(ctx.shared.id, p.cardId);
       if (entry?.kind !== 'card' || entry.card.assignment?.claimId !== p.claimId || fingerprint(entry.card.assignment.worker) !== fingerprint(p.worker)) throw refused('board.stop: expected the current exact claim');
       this.core.journal.setSetting(key, {hash, state: 'stopping'});
+      await this.core.sharedCompute?.stopBoardClaim(ctx.shared.id, p.claimId, p.worker);
       const binding = {sharedProjectId: ctx.shared.id, cardId: p.cardId, claimId: p.claimId};
       const bindingKey = `activity:shared:${p.worker.threadId}`;
       const owned = fingerprint(this.core.journal.getSetting(bindingKey) ?? null) === fingerprint(binding);
@@ -354,6 +355,9 @@ export class SharedBoard {
     this.follow(p.threadId);
     try { await this.flushAssociation(ctx.shared.id); } catch (error) { if (!this.offline(error)) throw error; }
     return receipt(this, ctx, claimId, 'applied', cardId);
+  }
+  assertClaimOpen(sharedId: string, cardId: string, claimId: string): void {
+    if (this.core.journal.getSetting(this.stopKey(sharedId, cardId, claimId))) throw refused('compute.claim: reservation is stopping or stopped');
   }
   private progress(p: BoardProgress): BoardProgress {
     if (!p) throw invalidParams('board.progress: expected a journalled goal');

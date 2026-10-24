@@ -1,7 +1,7 @@
 /** Explicit bilateral project associations over the existing signed, sealed Contacts link. */
 import { randomUUID } from 'node:crypto';
 import { RpcErrorCode } from '@boite/contracts';
-import type { AgentMatch, AgentTranscript, RpcParams, SharedProject, SharedProjectActor, SharedProjectPeerMethods, SharedProjectPeerRequest, SharedProjectRef, SharedProjectScope, SharedProjectThread, SharedProjectView } from '@boite/contracts';
+import type { AgentMatch, AgentTranscript, RpcParams, SharedComputePolicy, SharedProject, SharedProjectActor, SharedProjectPeerMethods, SharedProjectPeerRequest, SharedProjectRef, SharedProjectScope, SharedProjectThread, SharedProjectView } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import type { Connection } from '../router.ts';
 import { text } from '../coordination-letter.ts';
@@ -29,6 +29,8 @@ export class SharedProjects {
   private readonly off: () => void;
   private closed = false;
   private readonly synchronizers = new Set<(peerId: string) => Promise<void>>();
+  private readonly policyListeners = new Set<(id: string) => void>();
+  configureCompute?: (params: RpcParams<'sharedProjects.configure'>, ctx: SharedPeerContext) => {policy: SharedComputePolicy; changed: boolean};
 
   constructor(readonly core: Core) {
     this.journal = new SharedProjectJournal(core.journal.db);
@@ -89,6 +91,7 @@ export class SharedProjects {
     return { kind: 'agent', project, threadId, address: { coreId: this.self(), threadId }, agent: this.core.coordination.describe(threadId).agent ?? '' };
   }
   scope(p: SharedProjectScope, connection?: Connection): SharedPeerContext {
+    this.core.sharedCompute?.assertScope(p.threadId, p.sharedProjectId);
     const shared = this.require(p.sharedProjectId);
     this.assertActive(shared);
     const { local, remote } = this.endpoints(shared);
@@ -104,9 +107,11 @@ export class SharedProjects {
   list(threadId: string, connection?: Connection): SharedProjectView[] {
     const thread = this.core.threads.require(threadId);
     if (!thread.projectId) return [];
-    return this.journal.all(thread.projectId).map(shared => { this.actor(threadId, this.endpoints(shared).local, connection); return this.view(shared); });
+    const bound = this.core.sharedCompute?.associationFor(threadId);
+    return this.journal.all(thread.projectId).filter(shared => !bound || shared.id === bound).map(shared => { this.actor(threadId, this.endpoints(shared).local, connection); return this.view(shared); });
   }
   get(p: SharedProjectScope, connection?: Connection): SharedProjectView {
+    this.core.sharedCompute?.assertScope(p.threadId, p.sharedProjectId);
     const shared = this.require(p.sharedProjectId);
     this.actor(p.threadId, this.endpoints(shared).local, connection);
     return this.view(shared);
@@ -114,7 +119,8 @@ export class SharedProjects {
   hasContact(coreId: string): boolean { return this.journal.all(undefined, coreId).some(s => s.state === 'active' || s.state === 'revoked'); }
   forThread(threadId: string, peerId: string): SharedProject[] {
     const projectId = this.core.threads.require(threadId).projectId;
-    return projectId ? this.journal.all(projectId, peerId).filter(s => s.state === 'active') : [];
+    const bound = this.core.sharedCompute?.associationFor(threadId);
+    return projectId ? this.journal.all(projectId, peerId).filter(s => s.state === 'active' && (!bound || s.id === bound)) : [];
   }
 
   async offer(p: RpcParams<'sharedProjects.offer'>): Promise<SharedProjectView> {
@@ -167,13 +173,16 @@ export class SharedProjects {
   async configure(p: RpcParams<'sharedProjects.configure'>): Promise<SharedProjectView> {
     if (p.board !== undefined && typeof p.board !== 'boolean') throw invalidParams('board: expected a boolean');
     // Host validation is installed by the compute/reviewer services, never inferred here.
-    if (p.compute !== undefined || p.reviewer !== undefined) throw refused('configure: compute and reviewer require their host policy service');
+    if (p.reviewer !== undefined) throw refused('configure: reviewer requires its host policy service');
+    if (p.computeThreadId !== undefined && p.compute === undefined) throw invalidParams('computeThreadId: expected compute policy in the same host configuration');
     const shared = this.require(p.sharedProjectId);
     this.assertActive(shared);
     const { local, index, remote } = this.endpoints(shared);
-    if (p.board !== undefined && p.board !== shared.access[index].board) {
+    const compute = p.compute === undefined ? undefined : this.configureCompute?.(p, this.scopeForOwner(shared));
+    if (p.compute !== undefined && compute === undefined) throw refused('configure: compute requires its host policy service');
+    if (p.board !== undefined && p.board !== shared.access[index].board || compute?.changed) {
       this.journal.transaction(() => {
-        shared.access[index] = { ...shared.access[index], project: local, board: p.board!, revision: shared.access[index].revision + 1 };
+        shared.access[index] = { ...shared.access[index], project: local, ...(p.board === undefined ? {} : { board: p.board }), ...(compute === undefined ? {} : { compute: compute.policy }), revision: shared.access[index].revision + 1 };
         shared.updatedAt = Date.now();
         this.save(shared);
         this.queueAccess(shared);
@@ -182,6 +191,10 @@ export class SharedProjects {
       await this.flush(remote.ownerCoreId);
     }
     return this.view(this.require(shared.id));
+  }
+  private scopeForOwner(shared: SharedProject): SharedPeerContext {
+    const {local, remote} = this.endpoints(shared);
+    return {shared, local, remote, peerId: remote.ownerCoreId, source: {kind: 'human', project: local}};
   }
   private queue(shared: SharedProject, payload: SharedProjectPeerRequest): void {
     this.journal.enqueue(this.endpoints(shared).remote.ownerCoreId, shared.id, payload);
@@ -262,6 +275,7 @@ export class SharedProjects {
   registerPeer<M extends keyof SharedProjectPeerMethods>(method: M, handler: PeerHandler<M>): void { this.handlers.set(method, handler as never); }
   /** Reuse Contacts reconnect/retry scheduling; extensions do not start polling timers. */
   registerFlush(sync: (peerId: string) => Promise<void>): void { this.synchronizers.add(sync); }
+  registerPolicyListener(listener: (id: string) => void): void { this.policyListeners.add(listener); }
   /** Recheck after a delegated async handler before returning data or acknowledging a write. */
   assertPeer(ctx: SharedPeerContext): void {
     const current = this.require(ctx.shared.id);
@@ -316,7 +330,7 @@ export class SharedProjects {
     else if (p.method === 'search') result = this.localSearch(ctx, p.params?.query);
     else if (p.method === 'read') result = this.localRead(ctx, p.params);
     else if (p.method === 'subscribe') result = this.subscriptions.receiveSubscribe(ctx, p.params);
-    else if (p.method === 'changed') result = this.subscriptions.receiveChanged(ctx, p.params);
+    else if (p.method === 'changed') result = await this.subscriptions.receiveChanged(ctx, p.params);
     else {
       const handler = this.handlers.get(p.method);
       if (!handler) throw refused(`contact.project.method: ${p.method} is not supported`);
@@ -405,7 +419,10 @@ export class SharedProjects {
     if (contact.threadId !== target.threadId) throw refused('transcript.contact: expected the requested thread');
     return { contact: { ...contact, sharedThread: target }, ...checkTranscript(raw) };
   }
-  notify(id: string, kinds: ('threads' | 'board' | 'compute' | 'access')[] = ['access']): void { this.subscriptions.changed(id, kinds); }
+  notify(id: string, kinds: ('threads' | 'board' | 'compute' | 'access')[] = ['access']): void {
+    if (kinds.includes('access')) for (const listener of this.policyListeners) listener(id);
+    this.subscriptions.changed(id, kinds);
+  }
   beginClose(): void { this.closed = true; this.off(); this.subscriptions.close(); }
   async close(): Promise<void> { this.beginClose(); await Promise.allSettled([...this.flushing.values(), this.subscriptions.settled()]); }
 }

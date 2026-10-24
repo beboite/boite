@@ -155,6 +155,8 @@ export interface SharedComputeResult {
 }
 export interface SharedComputeJob {
   id: string;
+  /** Host-monotonic state version, so a delayed start/get cannot overwrite a newer completion. */
+  revision: number;
   sharedProjectId: string;
   requestId: string;
   source: SharedThreadRef;
@@ -231,7 +233,7 @@ export interface SharedProjectsRpcMethods {
   'sharedProjects.decide': { params: { sharedProjectId: string; accept: boolean; requestId: string }; result: SharedProjectView };
   'sharedProjects.revoke': { params: { sharedProjectId: string; requestId: string }; result: SharedProjectView };
   /** Host owner only, applied on the endpoint's owning Store/core. */
-  'sharedProjects.configure': { params: { sharedProjectId: string; board?: boolean; compute?: SharedComputePolicy; reviewer?: SharedReviewConfig }; result: SharedProjectView };
+  'sharedProjects.configure': { params: { sharedProjectId: string; board?: boolean; compute?: SharedComputePolicy; /** Host-local parent whose delegation profiles/accounts back this opt-in. Never forwarded. */ computeThreadId?: ThreadId; reviewer?: SharedReviewConfig }; result: SharedProjectView };
   'sharedProjects.threads': { params: SharedProjectScope; result: { threads: SharedProjectThread[]; unavailable: SharedProjectRef[] } };
   'sharedProjects.search': { params: SharedProjectScope & { query: string }; result: { matches: AgentMatch[]; unavailable: SharedProjectRef[] } };
   'sharedProjects.read': { params: SharedProjectScope & { target: SharedThreadRef; limit?: number; before?: Timestamp }; result: AgentTranscript };
@@ -286,10 +288,10 @@ export interface SharedProjectPeerMethods {
   /** Only the attested worker host, from its journalled goal and current claim. */
   'board.progress': { params: { cardId: string; claimId: string; worker: SharedThreadRef; goal: TodoGoal | null; sequence: number; reviewPassedAt: Timestamp | null }; result: SharedBoardReceipt };
   'compute.models': { params: { host: SharedProjectRef }; result: SharedComputeRoute[] };
-  'compute.start': { params: SharedComputeStart & { source: SharedThreadRef }; result: SharedComputeJob };
+  'compute.start': { params: SharedComputeStart & { source: SharedThreadRef; repository: string }; result: SharedComputeJob };
   'compute.get': { params: { jobId: string }; result: SharedComputeJob };
   'compute.send': { params: { jobId: string; text: string }; result: { ok: true } };
-  'compute.cancel': { params: { jobId: string }; result: SharedComputeJob };
+  'compute.cancel': { params: { jobId: string; /** Allows a cancellation fence to arrive before a delayed start. */ input?: SharedComputeStart; repository?: string; source?: SharedThreadRef }; result: SharedComputeJob };
   /** May only close the sender's access. It cannot widen or restore the receiver's grant. */
   revoke: { params: Record<string, never>; result: { ok: true } };
 }

@@ -1,5 +1,6 @@
 import type { DelegationWorktree, PauseOrigin, ProjectId, ProviderId, ThreadId, Timestamp, Usage } from './index';
 import type { ContextPreset, ContextRequest } from './context-mode';
+import type { SharedComputeResult, SharedProjectRef, SharedThreadRef } from './shared-projects';
 
 /**
  * The shape a step promises for its structured output: a type name, a list of
@@ -44,6 +45,8 @@ export interface WorkflowStepPlan {
    * edits are not copied. The run's summary names the branch to merge.
    */
   worktree?: boolean;
+  /** Explicit shared-project host route. Accounts, tools, checkout and permissions belong to that host. */
+  compute?: { sharedProjectId: string; host: SharedProjectRef; profileId: string; baseCommit: string };
 }
 
 export interface WorkflowLimits {
@@ -105,6 +108,8 @@ export interface WorkflowInstance {
   finishedAt: Timestamp | null;
   /** The step's own worktree, for a step that set `worktree`. Missing otherwise and on older runs. */
   worktree?: DelegationWorktree;
+  /** A remote worker is never used as a local threadId. Persisted across reconnect/restart. */
+  compute?: { requestId: string; jobId: string; host: SharedProjectRef; worker: SharedThreadRef | null; result: SharedComputeResult | null };
 }
 
 export interface WorkflowNode {

@@ -414,6 +414,7 @@ export class TurnContexts {
       // own door goes into the environment: everything a thread launches finds
       // the core, its token and the `boite` CLI, grandchildren included.
       spawn: (cmd: string, args: string[], opts?: SpawnOptions) => {
+        this.core.sharedCompute?.assertSpawn(threadId);
         const spawned = this.core.procs.spawn(threadId, cmd, args, {
           ...opts,
           env: agentEnvOf(this.core, threadId, { ...(opts?.env ?? process.env), ...env }),
@@ -451,6 +452,7 @@ export class TurnContexts {
     session?: { resume: boolean; turnId?: TurnId },
   ): (cmd: string, args: string[], opts?: SpawnOptions) => SpawnedChild {
     return (cmd, args, opts) => {
+      this.core.sharedCompute?.assertSpawn(threadId);
       // The SDK drivers hand a whole environment here, so the agent's own
       // variables are merged onto theirs rather than added to `process.env`.
       const child = this.core.procs.spawnChild(threadId, cmd, args, {

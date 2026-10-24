@@ -257,8 +257,10 @@ The following is the version 1 contract and implementation acceptance plan.
 The primary-core association, scoped thread/search/read service and scoped
 subscriptions are implemented in `contacts/projects.ts`. The durable board
 service is in `contacts/board.ts`, with its protocol in [board.md](board.md#shared-board-protocol).
-Compute, human letters, file enforcement, reviewer, fake handlers and UI below remain
-integration work. Type declarations alone enable no remote execution.
+Host-owned compute admission and the workflow adapter are implemented in
+`contacts/compute.ts` and `workflows/shared-compute.ts`. Compute admits only
+tool-free echo until a host-enforced execution boundary is installed; human
+letters, file enforcement, reviewer, fake handlers and UI remain integration work.
 `packages/contracts/src/shared-projects.ts` declares the vocabulary;
 `coordination.ts` retains the existing contact types. A core must not advertise
 `features.sharedProjects: 1` until its enforcing handlers exist. A contact
@@ -440,14 +442,24 @@ delegation profiles, permission mode and optional host concurrency limit.
 `null` inherits host settings, not a new default ceiling. Peers receive route
 names/models/capabilities, never account IDs, credentials or environment.
 `SharedComputeAllocation` expresses an explicit contribution such as four
-local children and five remote children. The delegation/workflow adapter must
-honor that split without a new exchange/hop cap; the current workflow
-`maxConcurrent: 8` ceiling is not sufficient for nine simultaneous children
-and must be addressed by `shared_compute`, without silently clamping to it.
-The existing `Delegation.spawn` also rejects a parent that is already a child
-(`delegation.ts`); a remote job adapter cannot claim unrestricted nesting by
-passing through that method unchanged. Preserve ordinary local semantics while
-giving shared jobs an explicit, scoped host admission path.
+local children and five remote children. A workflow step's `compute` target
+selects one host. Shared-compute plans have no new default concurrency ceiling;
+an explicit plan limit and each host's contribution/resource settings still
+apply. Ordinary plans keep their existing limits. No exchange/hop counter is
+added. An authenticated shared worker can request work only in its exact
+association, through the next host's admission, never through an unrestricted
+local child or another associated project. Ordinary delegation retains its
+existing parent rules.
+
+Opt-in also names `computeThreadId`, an active host-local parent in this project
+with delegation enabled. Only that parent resolves the offered profiles to
+local accounts. Rebinding, pausing, archiving, changing its route or changing
+the grant fences existing jobs. This parent/account binding stays host-local.
+ACP and pi shared routes are refused because the current adapters cannot
+attest the offered permission semantics. Claude, Codex and Muse retain their
+existing permission mapping, but also require an actual host protection service;
+none starts by default. Echo accepts only default mode and blocks its scripted
+shell escape at the process boundary. A text instruction is not protection.
 
 `sharedCompute.start` names an associated host, approved profile, validated
 repository base commit, task and optional board claim, never a path, shell
@@ -471,6 +483,18 @@ cannot acknowledge cancellation until it hears it; report that state honestly.
 The enforcing host denies locally at once, and checks again before execution,
 tool use and result publication. A regrant cannot revive jobs from an old
 revision. Group membership changes invalidate relay admissions too.
+
+Schema 41 keeps the source request and host job separately. Identity includes
+association, canonical source and request ID; switching hosts under that ID
+is a changed-content retry. Host state revisions prevent late responses from
+overwriting completion. A cancellation can precede start: its durable fence
+blocks the delayed request. Confirmation waits for captured execution, Git
+preparation and result inspection to settle. Restart preserves the job but
+marks interrupted host execution uncertain; it never replays inference. A
+workflow persists the identity before waiting for a launch response, reattaches
+it after restart, and cancels the previous job before an explicit retry.
+Contacts reconnect/flush and scoped invalidations deliver state without a new
+polling timer. Ledger receipts currently have no pruning policy.
 
 `SharedComputeResult` returns credential-free repository identity, branch,
 base commit, exact commit, dirty status and bounded assistant text. Verify

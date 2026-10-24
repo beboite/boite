@@ -97,7 +97,11 @@ export class SharedProjectSubscriptions {
     this.arm(); this.disarm();
     return { expiresAt };
   }
-  receiveChanged(ctx: SharedPeerContext, p: SharedProjectPeerMethods['changed']['params']): { ok: true } {
+  async receiveChanged(ctx: SharedPeerContext, p: SharedProjectPeerMethods['changed']['params']): Promise<{ ok: true }> {
+    if (p?.subscriptionId === null && p.kinds?.length === 1 && p.kinds[0] === 'compute') {
+      await this.service.core.sharedCompute.receiveChanged(ctx, p.jobIds!);
+      return {ok: true};
+    }
     const id = text(p?.subscriptionId, 'subscriptionId', 100);
     if (!Array.isArray(p.kinds) || p.kinds.length > 4 || p.kinds.some(k => !['threads', 'board', 'compute', 'access'].includes(k))) throw invalidParams('changed.kinds: expected threads, board, compute or access');
     const found = [...this.watches.values()].filter(w => w.id === id && w.scope.sharedProjectId === ctx.shared.id);

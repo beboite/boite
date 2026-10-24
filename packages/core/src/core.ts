@@ -63,6 +63,7 @@ import { SharedProjects } from './contacts/projects.ts';
 import { SharedBoard } from './contacts/board.ts';
 import type { RelaySink } from './group/relay.ts';
 import { Delegation } from './delegation.ts';
+import { SharedCompute } from './contacts/compute.ts';
 import { Workflows } from './workflows.ts';
 import { BrainStore } from './brain.ts';
 import { HookLedger } from './hooks.ts';
@@ -193,6 +194,7 @@ export class Core {
   readonly contacts: ContactStore;
   readonly sharedProjects: SharedProjects;
   readonly sharedBoard: SharedBoard;
+  readonly sharedCompute: SharedCompute;
   readonly delegation: Delegation;
   readonly workflows: Workflows;
   readonly brain: BrainStore;
@@ -384,6 +386,7 @@ export class Core {
     this.sharedProjects = new SharedProjects(this);
     this.sharedBoard = new SharedBoard(this);
     this.delegation = new Delegation(this);
+    this.sharedCompute = new SharedCompute(this);
     this.workflows = new Workflows(this);
     this.brain = new BrainStore(this);
     this.hooks = new HookLedger(this);
@@ -517,6 +520,7 @@ export class Core {
     this.contacts.beginClose();
     this.sharedProjects.beginClose();
     this.sharedBoard.beginClose();
+    this.sharedCompute.beginClose();
     this.activity.close();
     this.threads.autoCompact.close();
     this.threads.cacheKeepalive.close();
@@ -567,11 +571,13 @@ export class Core {
     this.desktopUpdates.close();
     await this.drain();
     await this.delegation.close();
+    await this.workflows.close();
     await this.coordination.close();
     await this.group.close();
     await this.contacts.close();
     await this.sharedProjects.close();
     await this.sharedBoard.close();
+    await this.sharedCompute.close();
     await this.speech.close();
     await this.push.close();
     await this.plugins.close();

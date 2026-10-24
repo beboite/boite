@@ -5,6 +5,7 @@ import type { Core } from './core.ts';
 import { folderGone, messageOf, refused } from './errors.ts';
 import { newId } from './ids.ts';
 import { logGit } from './git/git-log.ts';
+import { sharedGitConfig } from './contacts/compute-git.ts';
 
 /** Every branch the core makes on its own starts with this. */
 export const BRANCH_PREFIX = 'boite/';
@@ -304,6 +305,8 @@ export class Worktrees {
   }
 
   private async git(threadId: ThreadId, cwd: string, args: string[], timeoutMs?: number): Promise<{ code: number; stderr: string; stdout: string }> {
+    if (this.core.sharedCompute?.journal.worker(threadId)) args = [...await sharedGitConfig(this.core, threadId, cwd), ...args];
+    this.core.sharedCompute?.assertGit(threadId);
     let spawned;
     try {
       spawned = this.core.procs.spawn(threadId, 'git', args, { cwd });

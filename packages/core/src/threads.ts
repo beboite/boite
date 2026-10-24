@@ -616,6 +616,7 @@ export class ThreadStore {
     if (autonomous !== null) this.core.agentRuntime.admit(thread, autonomous);
     // A signed-out or removed account hands the thread to another of its agent (`threads/account-fallback.ts`).
     thread = followAgent(this.core, thread);
+    this.core.sharedCompute?.assertTurn(threadId);
     const provider = this.core.providers.require(thread.providerId);
     const account = this.core.accounts.require(thread.accountId);
     if (account.providerId !== provider.id) throw refused(`accountId: account ${account.id} belongs to provider ${account.providerId}; expected provider ${provider.id}`, {
