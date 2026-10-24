@@ -87,9 +87,20 @@
   function pickDefault(patch: Partial<AgentSelection>) {
     if (!config) return;
     try {
+      const previous = config.defaultRoute;
       config.defaultRoute = { ...config.defaultRoute, ...patch };
       // The core refuses a default outside the allowed list; picking a new default allows it.
       const d = config.defaultRoute;
+      // Replacing a missing provider or account also repairs its allowed route;
+      // keeping that removed route would make the whole configuration fail validation.
+      const missing = !view.store.providerOf(previous.providerId) || !view.store.accounts.some(a => a.id === previous.accountId);
+      if (missing && d.model && (d.providerId !== previous.providerId || d.accountId !== previous.accountId)) {
+        const model = d.model;
+        config.allowedRoutes = config.allowedRoutes.map(route => {
+          const replaced = route.providerId === previous.providerId && route.accountId === previous.accountId && route.model === previous.model;
+          return replaced ? { ...route, ...d, model } : route;
+        }).filter(route => view.store.providerOf(route.providerId) && view.store.accounts.some(a => a.id === route.accountId));
+      }
       if (d.model && !config.allowedRoutes.some(r => r.providerId === d.providerId && r.accountId === d.accountId && r.model === d.model)) {
         config.allowedRoutes.push({ id: secureId(), name: view.store.modelOf(d)?.name ?? d.model, providerId: d.providerId, accountId: d.accountId, model: d.model, effort: d.effort });
       }

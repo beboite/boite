@@ -632,6 +632,9 @@ export function threadMethods(ctx: FakeContext) {
         if (usable && usable.id !== thread.accountId) moveToAccount(ctx, thread, usable);
         const account = ctx.accounts.find((a) => a.id === thread.accountId);
         if (!account) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'accountId: the account of this conversation was removed; choose another account in it first', data: { threadId: thread.id, accountId: thread.accountId, field: 'accountId', expected: 'an existing account' } });
+        if (account.providerId !== provider.id) throw new RpcFailure({ code: RpcErrorCode.Refused,
+          message: `accountId: account ${account.id} belongs to provider ${account.providerId}; expected provider ${provider.id}`,
+          data: { field: 'accountId', accountId: account.id, providerId: account.providerId, expected: provider.id } });
         checkRunnable(provider, account);
       }
       const error = attachmentError(params.attachments ?? [], provider);
