@@ -219,8 +219,8 @@ threads it opened and write to it; their requests go to the linked machine
 (`relay.out`), which sends them on as its own. A member that loses a grant
 forgets its threads' replies from that project and rejects the letters
 waiting for them, as a revoke does on the linked machine. A copy from a
-machine that left the group reaches nothing. `boite threads ask` works only
-from the linked machine.
+machine that left the group reaches nothing. `boite threads ask` goes through
+a mailbox, as below ([Contacts through your group](#contacts-through-your-group)).
 
 Every machine of the group has full control of the others, so a member
 believes what the linked machine says of a contact; a contact still reaches
@@ -271,7 +271,10 @@ tier, a full queue), the asking thread is told the same way.
 An agent can reach contacts linked on another machine of its own group.
 `boite threads contacts`, directory, search, read, send and ask use that
 machine as a gateway. A directly linked contact takes precedence. Project
-grants, transcript grants and model tiers still apply.
+grants, transcript grants and model tiers still apply. A contact that opened
+this machine's own projects through the gateway is that relayed contact
+(above): its letters cross through the gateway as the member's thread, not a
+mailbox; asking it still takes a mailbox.
 
 The initiating conversation keeps its sent and received letters and receives
 the wake. The gateway creates a durable virtual mailbox, never a conversation

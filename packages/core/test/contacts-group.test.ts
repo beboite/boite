@@ -65,6 +65,9 @@ test('a project of another machine of the group is opened to a contact through t
   await waitFor(() => guest.core.contacts.find(hostId)?.offers.some(offer => offer.name === 'gamma') === true, 10000);
   await waitFor(() => member.core.contacts.members.relayedOf(guestId).length === 1, 10000);
   expect(member.core.contacts.forThread(memberThread)).toEqual([{ name: host.core.contacts.find(guestId)!.name, coreId: guestId, projects: [], link: 'connected' }]);
+  // Listed once, and asking it still finds the host's mailbox route.
+  expect((await member.core.coordination.mailboxes.contacts(memberThread)).filter(entry => entry.coreId === guestId)).toHaveLength(1);
+  expect(member.core.coordination.mailboxes.route(memberThread, guestId)?.via).toBe(hostId);
 
   // The member's thread is listed under the host's id: the contact never learns of the member.
   const alias = memberThreadId(memberId, memberThread);
