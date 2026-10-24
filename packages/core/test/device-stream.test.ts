@@ -219,6 +219,7 @@ describe('the Device panel live stream', () => {
     await desk.stop();
 
     await open();
+    // The first server deleted its jar as it started: this session pushes it again.
     desk = watch(owner);
     await desk.live();
     await owner.call('settings.set', { deviceStream: false });

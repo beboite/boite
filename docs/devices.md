@@ -107,8 +107,9 @@ and `boite device help` names it.
 **The server.** `packages/core/vendor/scrcpy/` holds the scrcpy 5.0.1 server
 jar, its SHA-256 and its Apache 2.0 licence. The core checks the hash, copies
 the jar into `<data dir>/scrcpy/` on first use and loads none of this before.
-Per device, it runs `adb push` once to
-`/data/local/tmp/boite-scrcpy-server-v5.0.1.jar`, reads `adb shell wm size`,
+Per device, it runs `adb push` to
+`/data/local/tmp/boite-scrcpy-server-v5.0.1.jar` at every start (the server
+deletes its jar as it starts), reads `adb shell wm size`,
 listens on a loopback port, maps the server's abstract socket to it with
 `adb reverse`, and starts `app_process` with `audio=false`, `video_codec=h264`,
 `clipboard_autosync=false` and a key frame every two seconds. The device

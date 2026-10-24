@@ -131,7 +131,6 @@ export class DeviceStreams {
   readonly #sessions = new Map<string, Session>();
   readonly #failures = new Map<string, { at: number; reason: string }>();
   /** Devices that got this version of the server since the core started. */
-  readonly #pushed = new Set<string>();
   #jar?: Promise<string>;
   #timer?: ReturnType<typeof setInterval>;
 
@@ -269,11 +268,9 @@ export class DeviceStreams {
     const bitRate = session.size <= 720 ? 1_500_000 : session.size <= 1280 ? 3_000_000 : 5_000_000;
     this.#log('info', `Starting the live stream of ${target.name} at ${session.size} pixels, ${bitRate / 1e6} Mbit/s`, 'device.stream-starting', { deviceId: target.id, size: session.size, bitRate });
     const jar = await this.#serverJar();
-    if (!this.#pushed.has(target.serial)) {
-      const push = await this.#host.adb(target.serial, ['push', jar, DEVICE_SERVER_PATH], 60_000);
-      if (!push.ok) throw new Error(`adb push of the scrcpy server failed: ${push.output}`);
-      this.#pushed.add(target.serial);
-    }
+    // The server deletes its own jar once it runs (`cleanup=true`), so every start pushes it again, as scrcpy's client does.
+    const push = await this.#host.adb(target.serial, ['push', jar, DEVICE_SERVER_PATH], 60_000);
+    if (!push.ok) throw new Error(`adb push of the scrcpy server failed: ${push.output}`);
     if (session.stopped) return;
     const wm = await this.#host.adb(target.serial, ['shell', 'wm', 'size'], 15_000);
     session.natural = wmSize(wm.output);

@@ -30,6 +30,8 @@ export interface FakeSdkState {
   wmSize?: string;
   /** The fake scrcpy server prints this and exits instead of connecting. */
   scrcpyFails?: string;
+  /** The server jar pushed to each serial; the fake server deletes it when it starts, as `cleanup=true` does. */
+  pushed?: Record<string, string>;
   /** What the device's clipboard holds when the fake scrcpy server starts. */
   clipboard?: string;
 }
@@ -149,6 +151,10 @@ async function scrcpyServer(root: string, serial: string, state: FakeSdkState, a
   const port = scid ? state.reverses?.[`localabstract:scrcpy_${scid}`] : undefined;
   if (state.scrcpyFails) { process.stderr.write(`${state.scrcpyFails}\n`); return 1; }
   if (!port) { process.stderr.write(`[server] ERROR: no tunnel for scid ${scid}\n`); return 1; }
+  const jar = args.find((arg) => arg.startsWith('CLASSPATH='))?.slice(10);
+  if (!jar || state.pushed?.[serial] !== jar) { process.stderr.write('Error: Could not find or load main class com.genymobile.scrcpy.Server\n'); return 1; }
+  delete state.pushed![serial];
+  writeFileSync(join(root, 'state.json'), JSON.stringify(state));
   const log = (line: string) => appendFileSync(join(root, 'scrcpy.log'), `${line}\n`);
   log(`start ${scid}`);
   process.stdout.write('[server] INFO: Device: [fake] Boite Phone (Android 15)\n');
@@ -320,6 +326,8 @@ async function main(root: string, tool: string, args: string[]): Promise<number>
     if (args[0] === 'push' && args[1] && args[2]) {
       if (!existsSync(args[1])) { process.stderr.write(`adb: error: cannot stat '${args[1]}': No such file or directory\n`); return 1; }
       out(`${args[1]}: 1 file pushed, 0 skipped.\n`);
+      (state.pushed ??= {})[serial!] = args[2];
+      write(state);
       return 0;
     }
     if (args[0] === 'shell' && args[1] === 'wm' && args[2] === 'size') { out(`Physical size: ${state.wmSize ?? '1080x2400'}\n`); return 0; }
