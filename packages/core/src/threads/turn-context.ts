@@ -126,6 +126,7 @@ export class TurnContexts {
     carried: CarriedInput = {},
     resumePrompt?: string,
   ): TurnContext {
+    const hostContextMode = thread.contextMode;
     thread = this.core.sharedAccess.contextThread(thread);
     const threadId = thread.id;
     const protectedExecution = this.core.sharedAccess.execution.context(threadId);
@@ -410,8 +411,16 @@ export class TurnContexts {
       background: list => this.threads.agentState.noteBackground(threadId, list, backgroundOwner),
       backgroundFinished: (id, state) => this.threads.agentState.finishBackground(threadId, id, backgroundOwner, state),
       wake: (text) => this.threads.deferred.wake(threadId, text),
-      requestPermission: (toolName: string, input: unknown, description: string | null): PermissionTicket =>
-        this.threads.cards.requestPermission(thread, turn, toolName, input, description),
+      requestPermission: (toolName: string, input: unknown, description: string | null): PermissionTicket => {
+        // Shared contexts hide native tools. Approval of the attested protected
+        // facade still follows the host's original context and permission mode.
+        let permissionThread = thread;
+        if (protectedExecution?.toolsAllowed && (toolName === 'boite_exec' || toolName === 'boite_commit')) {
+          protectedExecution.check();
+          permissionThread = {...thread, contextMode: hostContextMode};
+        }
+        return this.threads.cards.requestPermission(permissionThread, turn, toolName, input, description);
+      },
       askQuestion: (ask: QuestionAsk): QuestionTicket => this.threads.cards.askQuestion(thread, turn, ask),
       withdrawQuestion: (questionId) => {
         this.threads.cards.withdrawQuestion(threadId, questionId);

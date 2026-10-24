@@ -131,7 +131,7 @@ static int launch(int count, wchar_t **args) {
   if (count < 5) return failure(L"launch.arguments", ERROR_INVALID_PARAMETER);
   PSID app = NULL; HANDLE job = NULL, streams[3] = {NULL, NULL, NULL};
   LPPROC_THREAD_ATTRIBUTE_LIST list = NULL; PROCESS_INFORMATION child; ZeroMemory(&child, sizeof(child));
-  DWORD error = 0, exit_code = 125; wchar_t *line = NULL;
+  DWORD error = 0, exit_code = 125; wchar_t *line = NULL; BOOL initialized = FALSE;
   HRESULT hr = DeriveAppContainerSidFromAppContainerName(args[2], &app);
   if (FAILED(hr)) return failure(L"profile.derive", (DWORD)hr);
   job = CreateJobObjectW(NULL, NULL);
@@ -151,6 +151,7 @@ static int launch(int count, wchar_t **args) {
   InitializeProcThreadAttributeList(NULL, 4, 0, &bytes);
   list = HeapAlloc(GetProcessHeap(), 0, bytes);
   if (!list || !InitializeProcThreadAttributeList(list, 4, 0, &bytes)) {error = GetLastError(); goto end;}
+  initialized = TRUE;
   SECURITY_CAPABILITIES capabilities; ZeroMemory(&capabilities, sizeof(capabilities));
   capabilities.AppContainerSid = app; /* No network, shared-file or other capability SIDs. */
   DWORD lpac = 1; /* PROCESS_CREATION_ALL_APPLICATION_PACKAGES_OPT_OUT: exclude ambient ALL APPLICATION PACKAGES grants. */
@@ -169,11 +170,13 @@ static int launch(int count, wchar_t **args) {
    * Suspension also lets us reject a missing lowbox before its first instruction. */
   if (!CreateProcessW(args[4], line, NULL, NULL, TRUE, EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED |
       CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT, NULL, args[3], &startup.StartupInfo, &child)) {error = GetLastError(); goto end;}
-  HANDLE child_token = NULL; DWORD is_container = 0, returned = 0;
+  HANDLE child_token = NULL; DWORD is_container = 0, less_privileged = 0, returned = 0;
   if (!OpenProcessToken(child.hProcess, TOKEN_QUERY, &child_token)) {error = GetLastError(); goto end;}
   BOOL checked = GetTokenInformation(child_token, TokenIsAppContainer, &is_container, sizeof(is_container), &returned);
+  checked = checked && GetTokenInformation(child_token, (TOKEN_INFORMATION_CLASS)46,
+    &less_privileged, sizeof(less_privileged), &returned);
   CloseHandle(child_token);
-  if (!checked || !is_container) {error = ERROR_ACCESS_DENIED; goto end;}
+  if (!checked || !is_container || !less_privileged) {error = ERROR_ACCESS_DENIED; goto end;}
   if (ResumeThread(child.hThread) == (DWORD)-1) {error = GetLastError(); goto end;}
   if (WaitForSingleObject(child.hProcess, INFINITE) != WAIT_OBJECT_0 || !GetExitCodeProcess(child.hProcess, &exit_code)) {error = GetLastError(); goto end;}
 end:
@@ -190,7 +193,7 @@ end:
   }
   if (child.hThread) CloseHandle(child.hThread);
   if (child.hProcess) CloseHandle(child.hProcess);
-  if (list) {DeleteProcThreadAttributeList(list); HeapFree(GetProcessHeap(), 0, list);}
+  if (list) {if (initialized) DeleteProcThreadAttributeList(list); HeapFree(GetProcessHeap(), 0, list);}
   for (int i = 0; i < 3; i++) if (streams[i]) CloseHandle(streams[i]);
   if (job) CloseHandle(job);
   if (app) FreeSid(app);

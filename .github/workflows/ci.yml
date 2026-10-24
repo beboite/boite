@@ -202,6 +202,16 @@ jobs:
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
         run: bun test packages/core/test/protected-windows.test.ts --timeout 120000
+      - name: Prepare synthetic native providers
+        if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        run: bun packages/core/test/fixtures/prepare-native-providers.ts
+      - name: Native Windows provider and shared scopes
+        if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        env:
+          BOITE_TEST_NATIVE_EXECUTION: '1'
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: bun test packages/core/test/protected-drivers.test.ts packages/core/test/protected-adapters.test.ts packages/core/test/shared-access.test.ts -t 'native control|useful edits and child|protected .*(remote jobs|scopes retire)' --timeout 120000
       # Core data directories, worktrees and Chrome profiles go to the runner's
       # temp drive (D: on Windows), as in the E2E shards (docs/ci.md#build-cost).
       - run: bun run --cwd packages/core test

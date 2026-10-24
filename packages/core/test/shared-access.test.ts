@@ -56,7 +56,15 @@ async function fixture() {
   return {a, b, sharedProjectId, job, worker, agent};
 }
 
-async function nativeHost(b: Awaited<ReturnType<typeof side>>, protocol: 'claude' | 'codex' | 'muse', api: ReturnType<typeof protectedProviderApi>) {
+type NativeProvider = 'claude' | 'codex' | 'muse' | 'opencode' | 'pi';
+const nativePlatforms = ['linux', 'win32'];
+const nativeProviders: NativeProvider[] = process.platform === 'win32' ? ['claude', 'codex', 'opencode', 'pi'] : ['claude', 'codex', 'muse', 'opencode', 'pi'];
+const nativeMode = (protocol: NativeProvider) => protocol === 'opencode' ? 'default' as const : 'yolo' as const;
+const nativeName = (protocol: NativeProvider, commit = false) => `${protocol === 'claude' ? 'mcp__boite_protected__' : protocol === 'muse' ? 'mcp__boite_protected.' : protocol === 'opencode' ? 'boite_protected_' : ''}boite_${commit ? 'commit' : 'exec'}`;
+const nativeCommand = (script: string) => ({command: process.execPath, args: ['-e', script]});
+const nativeRead = (file: string): [string, string[]] => [process.execPath, ['-e', `process.stdout.write(require('fs').readFileSync(${JSON.stringify(file)}, 'utf8'))`]];
+
+async function nativeHost(b: Awaited<ReturnType<typeof side>>, protocol: NativeProvider, api: ReturnType<typeof protectedProviderApi>) {
   const account = await b.client.call('accounts.add', {providerId: protocol, label: 'Synthetic native account'});
   b.h.core.journal.putAccount({...account, status: 'ok'});
   const accountDir = account.isolationDir!;
@@ -66,19 +74,30 @@ async function nativeHost(b: Awaited<ReturnType<typeof side>>, protocol: 'claude
     writeFileSync(join(accountDir, 'muse/auth.json'), JSON.stringify({schema_version: 1, providers: {meta: {api_key: 'synthetic-fixture-key'}}}));
     writeFileSync(join(accountDir, 'muse/settings.json'), JSON.stringify({schema_version: 1, model: 'protected-model', endpoint_transport: {base_url: api.url, auth: 'bearer'}, run: {subagent_delegation_mode: 'off', reminder_roster: {agents: []}}}));
   }
+  if (protocol === 'pi') {
+    writeFileSync(join(accountDir, 'auth.json'), JSON.stringify({fixture: {type: 'api_key', key: 'synthetic-fixture-key'}}));
+    writeFileSync(join(accountDir, 'models.json'), JSON.stringify({providers: {fixture: {baseUrl: api.url, api: 'anthropic-messages', models: [{id: 'protected-model', name: 'Protected fixture', reasoning: false, input: ['text'], cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}, contextWindow: 200000, maxTokens: 1024}]}}}));
+  }
+  if (protocol === 'opencode') {
+    mkdirSync(join(accountDir, 'opencode'), {recursive: true});
+    writeFileSync(join(accountDir, 'opencode/auth.json'), JSON.stringify({fixture: {type: 'api', key: 'synthetic-fixture-key'}}));
+    writeFileSync(join(accountDir, 'opencode/opencode.json'), JSON.stringify({provider: {fixture: {npm: '@ai-sdk/anthropic', options: {baseURL: api.url + '/v1'}, models: {'protected-model': {name: 'Protected fixture', limit: {context: 200000, output: 1024}}}}}, model: 'fixture/protected-model'}));
+    b.h.core.bus.onAny((name, request) => {if (name === 'permission.requested') void b.client.call('permissions.answer', {requestId: (request as {id: string}).id, decision: 'allow'});});
+  }
   const provider = b.h.core.providers.require(protocol);
-  const model = protocol === 'claude' ? 'claude-sonnet-5' : protocol === 'muse' ? 'protected-model' : 'gpt-6.1-sol';
+  const model = protocol === 'claude' ? 'claude-sonnet-5' : protocol === 'muse' ? 'protected-model' : protocol === 'codex' ? 'gpt-6.1-sol' : 'fixture/protected-model';
   provider.models = [{id: model, name: 'Synthetic fixture', default: true}];
   for (const profile of Object.values(provider.profiles)) if (profile) {
-    profile.executable = [{kind: 'file', value: (protocol === 'muse' ? process.env.BOITE_TEST_MUSE_CLI : Bun.which(protocol)) ?? (() => {throw new Error(`Native fixture requires installed ${protocol}`);})()}];
-    profile.isolation = {...profile.isolation, HOME: accountDir, ...(protocol === 'claude' ? {ANTHROPIC_API_KEY: 'synthetic-fixture-key', ANTHROPIC_BASE_URL: api.url,
+    profile.executable = [{kind: 'file', value: (process.env[`BOITE_TEST_${protocol.toUpperCase()}_CLI`] || Bun.which(protocol)) ?? (() => {throw new Error(`Native fixture requires installed ${protocol}`);})()}];
+    if (protocol === 'pi' && process.platform === 'win32') profile.executable = [{kind: 'npm', value: '@earendil-works/pi-coding-agent#pi'}];
+    profile.isolation = {...profile.isolation, HOME: accountDir, ...(protocol === 'pi' ? {PI_CODING_AGENT_DIR: accountDir} : protocol === 'opencode' ? {XDG_CONFIG_HOME: accountDir, XDG_DATA_HOME: accountDir} : {}), ...(protocol === 'claude' ? {ANTHROPIC_API_KEY: 'synthetic-fixture-key', ANTHROPIC_BASE_URL: api.url,
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_AUTOUPDATER: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1'} : {})};
   }
-  await b.client.call('threads.update', {threadId: b.threadId, accountId: account.id, model, permissionMode: 'yolo'});
+  await b.client.call('threads.update', {threadId: b.threadId, accountId: account.id, model, permissionMode: nativeMode(protocol)});
   return account;
 }
 
-test.skipIf(process.platform !== 'linux' || process.env.BOITE_TEST_NATIVE_EXECUTION !== '1').each(['claude', 'codex', 'muse'] as const)('protected %s remote jobs preserve the host route and return a real consumable commit', async protocol => {
+test.skipIf(!nativePlatforms.includes(process.platform) || process.env.BOITE_TEST_NATIVE_EXECUTION !== '1').each(nativeProviders)('protected %s remote jobs preserve the host route and return a real consumable commit', async protocol => {
   const {a, b, sharedProjectId, job, agent} = await fixture(); agent.close();
   await a.client.call('sharedCompute.cancel', {sharedProjectId, threadId: a.threadId, jobId: job.id, requestId: 'cancel-initial'});
   writeFileSync(join(a.path, 'answer.js'), 'export const answer = 41;\n');
@@ -88,21 +107,21 @@ test.skipIf(process.platform !== 'linux' || process.env.BOITE_TEST_NATIVE_EXECUT
   await git(a.h, a.path, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'Fixture source');
   await git(b.h, b.path, 'fetch', a.path, 'main'); await git(b.h, b.path, 'reset', '--hard', 'FETCH_HEAD');
   await git(b.h, b.path, 'config', 'user.name', 'Fixture'); await git(b.h, b.path, 'config', 'user.email', 'fixture@example.invalid');
-  const api = protectedProviderApi(protocol, [
-    {name: protocol === 'claude' ? 'mcp__boite_protected__boite_exec' : protocol === 'muse' ? 'mcp__boite_protected.boite_exec' : 'boite_exec', input: {command: '/bin/sh', args: ['-c', `set -eu; test ! -e .git; test -z "\${BOITE_TOKEN:-}"; sed -i 's/41/42/' answer.js; ${process.execPath} build answer.js --outdir dist; ${process.execPath} test answer.test.js`]}},
-    {name: protocol === 'claude' ? 'mcp__boite_protected__boite_commit' : protocol === 'muse' ? 'mcp__boite_protected.boite_commit' : 'boite_commit', input: {message: 'Apply validated fixture edit'}},
-  ]);
+  const api = protectedProviderApi(protocol === 'pi' || protocol === 'opencode' ? 'claude' : protocol, [
+    {name: nativeName(protocol), input: nativeCommand(`const fs=require('fs'); if(fs.existsSync('.git')||process.env.BOITE_TOKEN) throw new Error('ambient authority'); fs.writeFileSync('answer.js',fs.readFileSync('answer.js','utf8').replace('41','42')); for (const args of [['build','answer.js','--outdir','dist'],['test','answer.test.js']]) {const p=Bun.spawnSync([process.execPath,...args]); if(p.exitCode) throw new Error(p.stderr.toString());}`)},
+    {name: nativeName(protocol, true), input: {message: 'Apply validated fixture edit'}},
+  ], body => protocol === 'opencode' && !(body as {tools?: unknown[]}).tools?.length);
   try {
     const account = await nativeHost(b, protocol, api);
-    await b.client.call('sharedProjects.configure', {sharedProjectId, computeThreadId: b.threadId, compute: {enabled: true, profiles: ['conversation'], permissionMode: 'yolo', maxConcurrent: null}});
+    await b.client.call('sharedProjects.configure', {sharedProjectId, computeThreadId: b.threadId, compute: {enabled: true, profiles: ['conversation'], permissionMode: nativeMode(protocol), maxConcurrent: null}});
     const routes = await a.client.call('sharedCompute.models', {sharedProjectId, threadId: a.threadId, host: b.ref});
-    expect(routes[0]).toMatchObject({protocol: b.h.core.providers.require(protocol).protocol, permissionMode: 'yolo', protection: {supported: true, boundary: 'isolated-process'}});
+    expect(routes[0]).toMatchObject({protocol: b.h.core.providers.require(protocol).protocol, permissionMode: nativeMode(protocol), protection: {supported: true, boundary: 'isolated-process'}});
     const base = await git(a.h, a.path, 'rev-parse', 'HEAD');
     const started = await a.client.call('sharedCompute.start', {sharedProjectId, threadId: a.threadId, requestId: `native-${protocol}`, host: b.ref, profileId: 'conversation', baseCommit: base, task: 'Edit answer.js, run its test and commit the protected edits.'});
     await waitFor(() => ['done', 'failed'].includes(b.h.core.sharedCompute.journal.get(started.id, 'host')!.job.status), 30000);
     const finished = b.h.core.sharedCompute.journal.get(started.id, 'host')!.job;
-    expect(finished).toMatchObject({status: 'done', providerId: protocol, permissionMode: 'yolo', result: {baseCommit: base, dirty: false}});
-    expect(finished.result!.commit).not.toBe(base);
+    expect(finished).toMatchObject({status: 'done', providerId: protocol, permissionMode: nativeMode(protocol), result: {baseCommit: base, dirty: false}});
+    expect(finished.result!.commit, JSON.stringify(api.requests.map(request => (request as {messages?: {role: string; content: unknown}[]}).messages?.filter(message => message.role === 'user').at(-1)))).not.toBe(base);
     const worker = b.h.core.threads.require(started.worker!.threadId);
     expect(worker.accountId).toBe(account.id);
     expect(readFileSync(join(worker.cwd, 'answer.js'), 'utf8')).toContain('42');
@@ -115,22 +134,20 @@ test.skipIf(process.platform !== 'linux' || process.env.BOITE_TEST_NATIVE_EXECUT
 }, 60000);
 
 // Actual provider processes use the same scope preparation as ordinary turns.
-test.skipIf(process.platform !== 'linux' || process.env.BOITE_TEST_NATIVE_EXECUTION !== '1').each([
-  ['claude', 'letter'], ['codex', 'letter'], ['muse', 'letter'], ['claude', 'board'], ['codex', 'board'], ['muse', 'board'],
-] as const)('protected %s %s scopes retire ordinary warm control, inherit, replace overrides and stop tools', async (protocol, route) => {
+test.skipIf(!nativePlatforms.includes(process.platform) || process.env.BOITE_TEST_NATIVE_EXECUTION !== '1').each(nativeProviders.flatMap(protocol => (['letter', 'board'] as const).map(route => [protocol, route] as const)))('protected %s %s scopes retire ordinary warm control, inherit, replace overrides and stop tools', async (protocol, route) => {
   const {a, b, sharedProjectId, job, agent} = await fixture(); agent.close();
   await a.client.call('sharedCompute.cancel', {sharedProjectId, threadId: a.threadId, jobId: job.id, requestId: 'cancel-initial'});
-  const api = protectedProviderApi(protocol, [], body => protocol === 'claude' && !JSON.stringify((body as {tools?: unknown}).tools ?? []).includes('boite_exec'));
+  const api = protectedProviderApi(protocol === 'pi' || protocol === 'opencode' ? 'claude' : protocol, [], body => protocol !== 'codex' && protocol !== 'muse' && !JSON.stringify((body as {tools?: unknown}).tools ?? []).includes('boite_exec'));
   try {
     const account = await nativeHost(b, protocol, api);
     await b.client.call('settings.set', {warmProcessMinutes: 5});
     writeFileSync(join(b.path, 'answer.txt'), '41');
     writeFileSync(join(b.path, '.env'), 'SYNTHETIC_EXACT_OVERRIDE');
     const ordinary = await b.client.call('turns.start', {threadId: b.threadId, prompt: 'Ordinary host turn'});
-    await waitFor(() => b.h.core.journal.getTurn(ordinary.id)?.status === 'done');
+    await waitFor(() => b.h.core.journal.getTurn(ordinary.id)?.status === 'done', 30000).catch(error => {throw new Error(`Ordinary native turn did not finish: ${JSON.stringify(b.h.core.journal.getTurn(ordinary.id))}; requests: ${JSON.stringify(api.requests)}`, {cause: error});});
     expect(b.h.core.procs.liveCount(b.threadId)).toBeGreaterThan(0);
-    const name = protocol === 'claude' ? 'mcp__boite_protected__boite_exec' : protocol === 'muse' ? 'mcp__boite_protected.boite_exec' : 'boite_exec';
-    api.enqueue({name, input: {command: '/bin/sh', args: ['-c', 'set -eu; test ! -e .env; test ! -e .git; echo 42 > answer.txt']}});
+    const name = nativeName(protocol);
+    api.enqueue({name, input: nativeCommand("const fs=require('fs'); if(fs.existsSync('.env')||fs.existsSync('.git')) throw new Error('hidden files'); fs.writeFileSync('answer.txt','42');")});
     if (route === 'letter') {
       await a.client.call('collaboration.send', {threadId: a.threadId, to: {coreId: b.coreId, threadId: b.threadId}, text: 'Edit the ordinary project file with protected tools', requestId: 'native-letter'});
     } else {
@@ -145,27 +162,27 @@ test.skipIf(process.platform !== 'linux' || process.env.BOITE_TEST_NATIVE_EXECUT
     if (route === 'board') b.h.core.activity.control({threadId: b.threadId, kind: 'goal', action: 'pause'});
     const execution = b.h.core.sharedAccess.execution.context(b.threadId)!;
     expect(b.h.core.procs.protection.policy(b.threadId)?.scope.kind).toBe(route);
-    expect(b.h.core.threads.require(b.threadId)).toMatchObject({accountId: account.id, permissionMode: 'yolo'});
+    expect(b.h.core.threads.require(b.threadId)).toMatchObject({accountId: account.id, permissionMode: nativeMode(protocol)});
     await b.h.core.sharedAccess.execution.prepare(b.threadId);
     expect(b.h.core.sharedAccess.execution.context(b.threadId)?.fingerprint).toBe(execution.fingerprint);
-    const child = b.h.core.threads.create({projectId: b.ref.projectId, providerId: protocol, accountId: account.id, permissionMode: 'yolo'}, {id: `thr_native_${protocol}_${route}`, branch: null, parentThreadId: b.threadId});
+    const child = b.h.core.threads.create({projectId: b.ref.projectId, providerId: protocol, accountId: account.id, permissionMode: nativeMode(protocol)}, {id: `thr_native_${protocol}_${route}`, branch: null, parentThreadId: b.threadId});
     await b.h.core.sharedAccess.execution.prepare(child.id);
-    expect((await b.h.core.sharedAccess.execution.context(child.id)!.execute('/bin/cat', ['.env'])).code).not.toBe(0);
+    expect((await b.h.core.sharedAccess.execution.context(child.id)!.execute(...nativeRead('.env'))).code).not.toBe(0);
     if (protocol === 'claude') {
       const limited = b.h.core.threads.create({projectId: b.ref.projectId, providerId: protocol, accountId: account.id, context: {tools: ['Read']}}, {id: `thr_limited_${protocol}_${route}`, branch: null, parentThreadId: b.threadId});
       await b.h.core.sharedAccess.execution.prepare(limited.id);
-      expect(await thrown(b.h.core.sharedAccess.execution.context(limited.id)!.execute('/bin/true', []))).toThrow('host context disables tools');
+      expect(await thrown(b.h.core.sharedAccess.execution.context(limited.id)!.execute(process.execPath, ['-e', '']))).toThrow('host context disables tools');
     }
     const override = await b.client.call('sharedAccess.override', {sharedProjectId, requestId: 'native-exact', override: {path: '.env', actions: ['read'], jobId: null, reason: 'Synthetic exact native read', expiresAt: Date.now() + 60000}});
     expect(() => execution.check()).toThrow();
     await b.h.core.sharedAccess.execution.prepare(b.threadId);
     const replaced = b.h.core.sharedAccess.execution.context(b.threadId)!;
     expect(replaced.fingerprint).not.toBe(execution.fingerprint);
-    expect((await replaced.execute('/bin/cat', ['.env'])).stdout).toBe('SYNTHETIC_EXACT_OVERRIDE');
+    expect((await replaced.execute(...nativeRead('.env'))).stdout).toBe('SYNTHETIC_EXACT_OVERRIDE');
     await b.client.call('sharedAccess.revokeOverride', {sharedProjectId, overrideId: override.id});
     expect(() => replaced.check()).toThrow();
     await b.h.core.sharedAccess.execution.prepare(b.threadId);
-    api.enqueue({name, input: {command: '/bin/sh', args: ['-c', 'echo running > tool-active; sleep 30']}});
+    api.enqueue({name, input: nativeCommand("require('fs').writeFileSync('tool-active','running'); setInterval(()=>{},1000)")});
     const stopped = await b.client.call('turns.start', {threadId: b.threadId, prompt: 'Run the cancellable protected tool'});
     await waitFor(() => b.h.core.procs.liveCount(b.threadId) > 0, 15000).catch(error => {throw new Error(`Native scope did not start cancellable control: ${JSON.stringify(b.h.core.journal.getTurn(stopped.id))}`, {cause: error});});
     const active = b.h.core.sharedAccess.execution.context(b.threadId)!;
@@ -177,7 +194,7 @@ test.skipIf(process.platform !== 'linux' || process.env.BOITE_TEST_NATIVE_EXECUT
       b.h.core.activity.set({threadId: b.threadId, goal: null});
       await b.h.core.sharedAccess.execution.prepare(b.threadId);
       expect(b.h.core.procs.protection.policy(b.threadId)).toBeNull();
-      const local = b.h.core.procs.spawn(b.threadId, '/bin/cat', ['.env'], {cwd: b.path});
+      const local = b.h.core.procs.spawn(b.threadId, ...nativeRead('.env'), {cwd: b.path});
       expect(await new Response(local.proc.stdout).text()).toBe('SYNTHETIC_EXACT_OVERRIDE'); await local.exited;
       expect(() => b.h.core.sharedAccess.execution.context(child.id)).toThrow();
     } else {

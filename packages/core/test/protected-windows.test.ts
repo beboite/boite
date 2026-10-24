@@ -78,7 +78,7 @@ console.log(JSON.stringify({text:fs.readFileSync('.env','utf8'),written,alias,ho
   }, 120000);
 
   test.each(['revoke', 'expiry', 'root-exit'] as const)('%s terminates a captured detached descendant and cleans task identity and view', async reason => {
-    const {dlopen, FFIType} = await import('bun:ffi');
+    const {dlopen, FFIType, ptr} = await import('bun:ffi');
     const kernel = dlopen('kernel32.dll', {OpenProcess: {args: [FFIType.u32, FFIType.i32, FFIType.u32], returns: FFIType.ptr},
       WaitForSingleObject: {args: [FFIType.ptr, FFIType.u32], returns: FFIType.u32}, CloseHandle: {args: [FFIType.ptr], returns: FFIType.i32}});
     const {procs, root, input} = await setup();
@@ -97,9 +97,20 @@ console.log(JSON.stringify({text:fs.readFileSync('.env','utf8'),written,alias,ho
       if (reason === 'root-exit') await procs.protection.revoke('parent');
       else expect(() => procs.spawn('parent', process.execPath, [], {cwd: root})).toThrow('revoked');
       await waitFor(() => !readdirSync(tmpdir()).some(p => p.startsWith(`boite-protected-${captured.capabilityId}-`)));
-      // Profile recreation succeeds only after the exact owned identity was deleted.
-      const helper = procs.spawn('profile-probe', process.env.BOITE_WINDOWS_SANDBOX_PATH!, ['--version']);
-      expect(await helper.exited).toBe(0);
+      // Recreating the exact name fails with ERROR_ALREADY_EXISTS if cleanup leaked it.
+      const userenv = dlopen('userenv.dll', {
+        CreateAppContainerProfile: {args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.u32, FFIType.ptr], returns: FFIType.i32},
+        DeleteAppContainerProfile: {args: [FFIType.ptr], returns: FFIType.i32},
+      });
+      const advapi = dlopen('advapi32.dll', {FreeSid: {args: [FFIType.ptr], returns: FFIType.ptr}});
+      const name = Buffer.from(`boite.tool.${captured.capabilityId}\0`, 'utf16le'), sid = Buffer.alloc(8);
+      try {
+        expect(userenv.symbols.CreateAppContainerProfile(ptr(name), ptr(name), ptr(name), null, 0, ptr(sid))).toBe(0);
+      } finally {
+        const pointer = sid.readBigUInt64LE(); if (pointer) advapi.symbols.FreeSid(pointer);
+        expect(userenv.symbols.DeleteAppContainerProfile(ptr(name))).toBe(0);
+        userenv.close(); advapi.close();
+      }
     } finally {if (held) kernel.symbols.CloseHandle(held); kernel.close();}
   }, 120000);
 

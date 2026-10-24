@@ -1047,6 +1047,56 @@ integration/security review remain required gates. Native macOS, live inference
 and remote CI of this implementation are unverified. Echo/protocol fixtures
 and synthetic Windows paths cannot substitute for native execution proof.
 
+### Native Windows tool execution
+
+`ProcessPlatform.protectedExecution` selects the Windows LPAC backend. It reuses
+the immutable policy, filtered checkout, exact read exceptions, authority
+callbacks and checked publication used on Linux. It copies explicitly captured
+toolchain executables into a private read-only runtime. Tools work in the private
+checkout directory; the original host checkout path grants no access. Windows
+PE executables are checked by their native extension and captured file identity,
+rather than POSIX execute bits.
+
+`platform/windows/protected-tool.c` creates an unpredictable per-capability
+AppContainer profile and changes ACLs only inside that task's scratch directory.
+It grants the package project edits, private home/temp and runtime reads, with
+read-only ACLs for exact file exceptions. No host directory ACL, firewall policy,
+loopback exemption, elevated token or service is installed. LPAC excludes ambient
+`ALL APPLICATION PACKAGES` grants; only the explicitly allowed private files and
+Windows' public LPAC runtime remain accessible. No network capability or host
+credential environment is supplied.
+
+Each root starts with kernel process attributes for LPAC, only three duplicated
+standard handles and a private non-breakaway Job Object. The launcher verifies
+the suspended child's AppContainer and LPAC token before resuming it. Neither
+the private job handle nor other inheritable host handles reach the tool.
+Launcher termination closes the job and kills descendants. A normal root exit
+also terminates and drains detached descendants before reporting success. Revoke
+and expiry stop captured processes before deleting the private profile and
+filesystem. Windows' normal process registry and guards still trace the launcher
+and its children.
+
+Build with a preinstalled Windows SDK clang or MinGW, then configure the host
+helper path (or put it beside the running core executable):
+
+```sh
+bun packages/core/bin/install-windows-sandbox.ts C:/task-owned/bin/protected-tool.exe
+BOITE_WINDOWS_SANDBOX_PATH=C:/task-owned/bin/protected-tool.exe BOITE_TEST_NATIVE_EXECUTION=1 bun test packages/core/test/protected-windows.test.ts --timeout 120000
+```
+
+The build script also accepts Linux's installed cross compiler to produce the
+userspace PE helper; cross-compilation alone is not native execution proof.
+Nothing compiles or downloads at core startup. Missing helpers or unsupported
+Windows kernel attributes fail closed before a model tool runs. The native
+Windows CI lane runs inside the existing Windows core check, including protection
+changes on a draft PR. It uses synthetic directories/accounts and deterministic
+local provider APIs. Its fixture checks useful builds/tests, secret paths,
+junctions/hardlinks, inheritable handles, host process access, offline networking,
+read-only overrides, expiry/revoke/root-exit descendants and cleanup. Separate
+native driver and shared-access scenarios exercise Claude, Codex, OpenCode and pi.
+Native Muse Windows admission is a separate gate; the Linux Muse result does not
+establish it. macOS has no protected execution backend.
+
 ### Client transport
 
 `Client.call` is generic over the domain contracts. The fake dispatch table

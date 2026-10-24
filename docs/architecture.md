@@ -364,6 +364,15 @@ Only validated project edits are copied back after tools exit and authority is
 rechecked. [Contacts](contacts.md#native-linux-tool-execution) describes setup,
 adapter obligations and native tests. This backend alone does not admit a provider.
 
+Windows protected tools use the same capture/publication policy with a private
+LPAC identity, task-owned directory ACLs and a non-breakaway Job Object. The
+native launcher atomically installs the lowbox, job and standard-handle allowlist
+before the process runs. The job's last handle kills descendants on launcher
+death, and root exit drains descendants before publication. Account/control
+processes stay separate. [Windows setup](contacts.md#native-windows-tool-execution)
+requires an explicitly built userspace helper. macOS has no protected execution
+backend and refuses these routes.
+
 Windows Job Objects provide tree membership events and resource caps. For ordinary
 processes, Linux and macOS record direct children; their process-group termination
 cannot catch a child that starts its own session. The capability report exposes those limits.
