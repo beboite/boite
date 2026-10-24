@@ -52,7 +52,7 @@ export function agentGuide(asyncQuestions: boolean, logAccess = false, skills: r
     '`boite show <file>[:line]`, `boite diff [file]`, `boite browse <url>` open the panel. `boite preview <file.html>` previews HTML/assets; `boite attach <file>` sends files (512 MB max).',
     'Inline `path:line` opens this checkout\'s files. Use `boite attach` for media across machines.',
     VIEW_GUIDE_LINE,
-    'A simple schema is a ```mermaid block in your answer, a formula `$$…$$` or `\\(…\\)`; `boite view` stays for interactive content.',
+    'Simple schema: a ```mermaid block; formula: `$$…$$` or `\\(…\\)`, not `$…$`.',
     ...(asyncQuestions ? ['`boite ask [--open <url>] "<question>" [option ...]` asks asynchronously. Keep working on independent tasks; the answer arrives as a message. Silence grants no approval. Login wall: `--open <url>`, the site and why, options "Signed in" Skip; never in chat.'] : []),
     '`boite settings [bot] [request|open|create]` reads Boite settings or a bot\'s, puts a card in chat for the user to change one, or creates the bot the user asked for.',
     bot

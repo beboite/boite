@@ -319,7 +319,8 @@ test('the parent learns dynamic workflows and coordination within a compact prom
   // Then 7 for `stop|resume`: the parent continues what a stop or a restart cut (3958 measured 2026-10-17, 3951 before).
   // Then 52 for batching browser steps with `&&` or `boite browser run -`: each separate command costs a turn (4010 measured 2026-10-20).
   // Then 30 for `|create` and "or creates the bot the user asked for": a thread the user asked for a bot creates it (4040 measured 2026-10-24).
-  expect(Buffer.byteLength(prompt.replaceAll(h.dataDir, '<data>'))).toBeLessThan(4042);
+  // Then 66 for the line sending a schema to a ```mermaid block and a formula to `$$…$$`, which chat draws (4106 measured 2026-10-24).
+  expect(Buffer.byteLength(prompt.replaceAll(h.dataDir, '<data>'))).toBeLessThan(4108);
   runs.get(threadId)!.finish();
   await waitFor(() => h.core.threads.require(threadId).status === 'idle');
   await owner.call('turns.start', { threadId, prompt: 'Continue' });
