@@ -129,6 +129,10 @@ test('another machine stays within the caller\'s communication settings and the 
     expect(clear.status).toBe(400);
     expect(await clear.json()).toMatchObject({ error: 'machines of a group exchange sealed requests only' });
   }
+  // A signed envelope with no operation is turned away like any malformed one.
+  const blank = JSON.stringify({ from: desk.core.coordination.card().coreId, to: pc.core.coordination.card().coreId, at: Date.now(), nonce: crypto.randomUUID(), payload: {} });
+  const answer = await fetch(`${pc.url}/agent-messages`, { method: 'POST', body: blank, headers: { 'x-boite-peer': desk.core.coordination.card().coreId, 'x-boite-signature': desk.core.coordination.signature(Buffer.from(blank)).toString('base64') } });
+  expect([answer.status, await answer.text()]).toEqual([403, 'invalid signed message']);
 });
 
 test('a machine outside any group has no other machine to start a thread on', async () => {

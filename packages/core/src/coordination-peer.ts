@@ -70,6 +70,7 @@ export class PeerDesk {
       envelope = JSON.parse(raw) as Envelope;
       if (envelope.from !== peer.coreId || envelope.to !== this.side.selfId() || !Number.isSafeInteger(envelope.at) || Math.abs(now - envelope.at) > 60_000) throw new Error('invalid envelope');
       text(envelope.nonce, 'nonce', 100);
+      text(envelope.operation, 'operation', 64);
       for (const [id, at] of this.nonces) if (now - at > 120_000) this.nonces.delete(id);
       const key = `${peer.coreId}:${envelope.nonce}`;
       if (this.nonces.has(key)) throw new Error('replayed request');
