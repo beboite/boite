@@ -45,6 +45,8 @@ export const strings = {
     removeBody: 'Every project you share with it closes, letters waiting both ways are rejected and the link closes. The Tailscale share stays until you remove it in the admin console.',
     requests: {
       title: 'Requests',
+      review: 'Review the contact request',
+      pending: '{count} contact requests waiting',
       asks: '{contact} asks',
       asked: 'You asked {contact}',
       remote: 'Git remote',

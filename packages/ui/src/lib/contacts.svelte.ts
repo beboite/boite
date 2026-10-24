@@ -1,8 +1,8 @@
 /*
  * The Home page's state for one machine: its contacts, their requests, the
  * contact settings and the Tailscale side, read with `contacts.get` and read
- * again on `contacts.updated`. Only the Contacts page and the contact lists
- * import it, so it rides their chunks and never the boot bundle.
+ * again on `contacts.updated`. The Contacts page, lists and request notice
+ * load it with the Contacts experiment.
  */
 
 import type { Contact, ContactInvite, ContactRequest, ContactSettings, ContactsState, ContactTailscale, ProjectId } from '@boite/contracts';
@@ -32,6 +32,7 @@ export class ContactsView {
   #watchers = 0;
   #release: (() => void) | null = null;
   #client: unknown = null;
+  #ready = false;
   #reading = 0;
   #joinAttempt = 0;
 
@@ -49,27 +50,32 @@ export class ContactsView {
       this.#release?.();
       this.#release = null;
       this.#client = null;
+      this.#ready = false;
+      this.#reading += 1;
     };
   }
 
-  /** A reconnection is a new client: subscribe on it and read again. */
+  /** A socket can reconnect on the same client: read again after either one changes. */
   follow(): void {
     const client = this.store.client;
-    if (this.#watchers === 0 || client === this.#client) return;
+    const ready = this.store.connection === 'ready';
+    if (this.#watchers === 0 || (client === this.#client && ready === this.#ready)) return;
     this.#release?.();
     this.#client = client;
+    this.#ready = ready;
+    this.#reading += 1;
     this.#release = client ? client.on('contacts.updated', () => { void this.refresh(); }) : null;
-    void this.refresh();
+    if (ready) void this.refresh();
   }
 
   async refresh(): Promise<void> {
-    const client = this.store.client;
-    if (!client) return;
     const read = ++this.#reading;
+    const client = this.store.client;
+    if (!client || this.store.connection !== 'ready') return;
     try {
       const state = await client.call('contacts.get', {});
       // An older read that lands after a newer one must not put back what changed since.
-      if (read !== this.#reading) return;
+      if (read !== this.#reading || client !== this.store.client) return;
       this.state = state;
       this.loadError = '';
     } catch (error) {
@@ -179,6 +185,7 @@ export class ContactsView {
   }
 
   async join(link: string): Promise<Contact | null> {
+    if (this.isBusy('join')) return null;
     const attempt = ++this.#joinAttempt;
     const until = Date.now() + JOIN_WAIT_MS;
     for (;;) {
@@ -255,7 +262,7 @@ export function watchContacts(machines: () => readonly Machine[]): () => Machine
     const releases = untrack(() => watched.map(view => view.watch()));
     return () => { for (const release of releases) release(); };
   });
-  $effect(() => { for (const { machine, view } of views) { void machine.store.client; untrack(() => view.follow()); } });
+  $effect(() => { for (const { machine, view } of views) { void machine.store.client; void machine.store.connection; untrack(() => view.follow()); } });
   return () => views;
 }
 

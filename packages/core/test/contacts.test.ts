@@ -176,6 +176,30 @@ test('an ask waits for the owner, who opens a project; the asking thread hears t
   expect(mine).toMatchObject({ status: 'accepted', decidedBy: 'owner', project: { id: open.id, name: 'alpha' } });
 }, 30000);
 
+test('contact request answers resume automatic pauses while preserving Stop and owner pauses', async () => {
+  const { host, guest, hostClient, guestClient, hostId } = await linked();
+  const mine = await project(guest, guestClient, 'mine');
+  for (const reason of ['stop', 'owner', 'restart', 'failure'] as const) {
+    const guestThread = await thread(guestClient, mine.id, `Paused by ${reason}`);
+    const asked = await guestClient.call('collaboration.ask', { threadId: guestThread, contact: hostId, text: `A request before ${reason}` });
+    if (reason === 'owner') guest.core.coordination.configure(guestThread, { mode: 'brief', remote: true, resources: '', paused: true });
+    else guest.core.coordination.pause(guestThread, reason);
+    await waitFor(() => requestsOf(host).some(request => request.remoteId === asked.id), 10000);
+    const incoming = requestsOf(host).find(request => request.remoteId === asked.id)!;
+    await hostClient.call('contacts.decide', { id: incoming.id, accept: false, reason: 'No matching project.' });
+    await waitFor(() => letters(guest, guestThread).some(letter => letter.origin === 'contact'), 10000);
+    const automatic = reason === 'restart' || reason === 'failure';
+    expect(guest.core.coordination.get(guestThread).config.paused).toBe(!automatic);
+    if (automatic) {
+      await waitFor(() => letters(guest, guestThread).some(letter => letter.origin === 'contact' && letter.status === 'delivered'));
+      expect(guest.core.coordination.get(guestThread).wakes).toBe(1);
+    } else {
+      expect(letters(guest, guestThread).find(letter => letter.origin === 'contact')?.status).toBe('received');
+      expect(guest.core.coordination.get(guestThread).wakes).toBe(0);
+    }
+  }
+}, 40000);
+
 test('a trusted contact whose git remote matches exactly one project is answered without the owner, and the concierge decides the rest', async () => {
   const { host, guest, hostClient, guestClient, hostId, guestId } = await linked();
   const app = await project(host, hostClient, 'app', 'git@github.com:Acme/App.git');

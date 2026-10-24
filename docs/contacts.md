@@ -160,6 +160,12 @@ joins again by itself for up to 15 minutes, with **Stop** to end it.
 
 ## Projects and requests
 
+A pending incoming request appears at the top of the app, with the contact,
+receiving machine and request text. Dismissing the notice leaves a bell with
+the pending count. Either opens the request on its owning machine, including
+from Settings and on a phone. Reconnection refreshes requests even when the
+Contacts page is closed.
+
 Each side opens projects to the other (`contacts.grant`). An open project's
 threads are listed in the contact's agent directory: title, project, branch,
 model, status and declared resources. Each thread's own coordination settings
@@ -216,6 +222,28 @@ reason for the refusal. When the contact's core refuses the ask itself (a
 tier, a full queue), the asking thread is told the same way.
 
 ## What an agent knows
+
+### Contacts through your group
+
+An agent can reach contacts linked on another machine of its own group.
+`boite threads contacts`, directory, search, read, send and ask use that
+machine as a gateway. A directly linked contact takes precedence. Project
+grants, transcript grants and model tiers still apply.
+
+The initiating conversation keeps its sent and received letters and receives
+the wake. The gateway creates a durable virtual mailbox, never a conversation
+or provider process. The external contact sees that mailbox on the machine it
+already knows, with the initiating thread's title and model. Replies and
+request decisions return to the initiating thread. Pending letters retry
+after a transport failure, within their expiry; the gateway retains its
+mailboxes and reply outbox across restarts.
+
+The internal `contact.route` operation requires a sealed request from a
+current group member. It shares no contact credentials or direct trust with
+the initiating machine. Removing a group admission or gateway contact
+invalidates its mailboxes and withdraws replies still waiting for delivery.
+
+### Sender identity
 
 A letter from a contact carries `contact`, the name this owner gave that
 contact, set by the receiving core from its own list, never taken from the

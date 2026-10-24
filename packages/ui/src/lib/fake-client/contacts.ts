@@ -1,9 +1,9 @@
 /** Contacts: another owner's Boite, linked for agent work on the projects each side opens. Seeded with Chris. */
-import { RpcErrorCode, type Contact, type ContactInvite, type ContactRequest, type ContactsState, type ContactTailscale, type ModelTier } from '@boite/contracts';
+import { RpcErrorCode, type Contact, type ContactInvite, type ContactRequest, type ContactsState, type ContactTailscale, type ModelTier, type Thread } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { encodeInvite, INVITE_PREFIX, inviteShare, readInvite } from '../contact-link';
 import type { FakeContext, FakeMethods } from './context';
-import { coordinationConfig, fakeCore, trusts } from './coordination';
+import { checkContactTier, contactSender, coordinationConfig, deliverContactAnswer, fakeContactRoutes, fakeCore, registerContactState, trusts } from './coordination';
 
 const DAY = 24 * 60 * 60_000;
 const WORDS = ['amber', 'orbit', 'lantern', 'meadow', 'falcon', 'cobalt', 'harbor', 'velvet', 'thistle', 'glacier', 'ember', 'quartz'];
@@ -52,6 +52,7 @@ const states = new WeakMap<FakeContext, ContactsState>();
 const opened = new WeakMap<FakeContext, Set<string>>();
 /** Each core's open invitation tokens: a join spends one, cancelling spends them all. */
 const tokens = new WeakMap<FakeContext, Set<string>>();
+const requests = new WeakMap<ContactRequest, { source: FakeContext; request: ContactRequest; valid: () => boolean }>();
 
 function tokensOf(ctx: FakeContext): Set<string> {
   let live = tokens.get(ctx);
@@ -155,6 +156,26 @@ function words(seed: number): string {
 
 export function contactMethods(ctx: FakeContext) {
   const changed = () => ctx.emit('contacts.updated', {});
+  const checkTier = (thread: Thread) => {
+    const tier = modelTier(thread.providerId, thread.model);
+    const { minTier } = stateOf(ctx).settings;
+    if (tier > minTier) throw new RpcFailure({
+      code: RpcErrorCode.Refused,
+      message: `threadId: this thread runs ${thread.providerId} ${thread.model ?? '(default model)'}, tier ${tier}; contacts take tier ${minTier} or better, set in Contacts`,
+      data: { field: 'threadId', expected: `a thread on a model of tier ${minTier} or better` }
+    });
+  };
+  registerContactState(ctx, () => stateOf(ctx), checkTier);
+  const offers = (contact: Contact) => {
+    const remote = fakeCore(contact.coreId);
+    const reciprocal = remote && stateOf(remote).contacts.find(entry => entry.coreId === ctx.identity.coreId);
+    if (!reciprocal) return;
+    reciprocal.offers = contact.grants.flatMap(grant => {
+      const project = ctx.projects.find(entry => entry.id === grant.projectId && !entry.archived);
+      return project ? [{ projectId: project.id, name: project.name }] : [];
+    });
+    remote!.emit('contacts.updated', {});
+  };
   const project = (projectId: unknown) => {
     const found = ctx.projects.find(entry => entry.id === projectId);
     if (!found || found.archived) throw invalid('projectId: expected an unarchived project of this core', 'projectId');
@@ -239,6 +260,11 @@ export function contactMethods(ctx: FakeContext) {
         link: 'connected', lastSeenAt: ctx.now(), addedAt: ctx.now()
       };
       state.contacts.push(contact);
+      if (inviter) {
+        const hostState = stateOf(inviter);
+        hostState.contacts = [...hostState.contacts.filter(entry => entry.coreId !== ctx.identity.coreId), { ...contact, coreId: ctx.identity.coreId, name: ctx.identity.name, machine: ctx.identity.name, role: 'host', url: ctx.identity.url, grants: [], offers: [] }];
+        inviter.emit('contacts.updated', {});
+      }
       changed();
       return structuredClone(contact);
     },
@@ -265,6 +291,7 @@ export function contactMethods(ctx: FakeContext) {
       const grant = contact.grants.find(entry => entry.projectId === opened.id);
       if (grant) grant.readThreads = params.readThreads ?? grant.readThreads;
       else contact.grants.push({ projectId: opened.id, readThreads: params.readThreads ?? false, grantedAt: ctx.now() });
+      offers(contact);
       changed();
       return structuredClone(contact);
     },
@@ -273,6 +300,7 @@ export function contactMethods(ctx: FakeContext) {
       // Like the core: closing a project that was not open answers the contact as it is.
       const contact = contactOf(stateOf(ctx), params.coreId);
       contact.grants = contact.grants.filter(entry => entry.projectId !== params.projectId);
+      offers(contact);
       changed();
       return structuredClone(contact);
     },
@@ -282,6 +310,13 @@ export function contactMethods(ctx: FakeContext) {
       state.contacts = state.contacts.filter(entry => entry !== contact);
       // Like the core: its requests, both ways, go with it.
       state.requests = state.requests.filter(request => request.coreId !== contact.coreId);
+      const remote = fakeCore(contact.coreId);
+      if (remote) {
+        const other = stateOf(remote);
+        const reciprocal = other.contacts.find(entry => entry.coreId === ctx.identity.coreId);
+        if (reciprocal) { reciprocal.link = 'offline'; reciprocal.offers = []; }
+        remote.emit('contacts.updated', {});
+      }
       changed();
       return { ok: true as const };
     },
@@ -294,6 +329,7 @@ export function contactMethods(ctx: FakeContext) {
         const opened = project(params.projectId);
         const contact = state.contacts.find(entry => entry.coreId === request.coreId);
         if (contact && !contact.grants.some(entry => entry.projectId === opened.id)) contact.grants.push({ projectId: opened.id, readThreads: false, grantedAt: ctx.now() });
+        if (contact) offers(contact);
         request.status = 'accepted';
         request.project = { id: opened.id, name: opened.name };
       } else {
@@ -305,6 +341,12 @@ export function contactMethods(ctx: FakeContext) {
       }
       request.decidedBy = 'owner';
       request.decidedAt = ctx.now();
+      const origin = requests.get(request);
+      if (origin?.valid()) {
+        Object.assign(origin.request, { status: request.status, project: request.project, reason: request.reason, decidedBy: request.decidedBy, decidedAt: request.decidedAt });
+        origin.source.emit('contacts.updated', {});
+        deliverContactAnswer(origin.source, origin.request);
+      }
       changed();
       return structuredClone(request);
     },
@@ -329,35 +371,46 @@ export function contactMethods(ctx: FakeContext) {
       // A thread that keeps to this machine sees no contact.
       const config = coordinationConfig(ctx, params.threadId);
       if (config.mode === 'off' || !config.remote) return [];
-      return stateOf(ctx).contacts.map(contact => ({ name: contact.name, coreId: contact.coreId, projects: contact.offers.map(offer => offer.name), link: contact.link }));
+      return fakeContactRoutes(ctx).map(({ contact }) => ({ name: contact.name, coreId: contact.coreId, projects: contact.offers.map(offer => offer.name), link: contact.link }));
     },
     'collaboration.ask': async (params) => {
       const state = stateOf(ctx);
       const thread = ctx.thread(params?.threadId);
       const config = coordinationConfig(ctx, params.threadId);
-      if (!config.remote) throw refuse('threadId: cross-machine coordination is disabled for this thread', 'threadId');
+      if (!config.remote || config.mode === 'off' || thread.archived) throw refuse('threadId: cross-machine coordination is disabled for this thread', 'threadId');
       if (config.paused) throw refuse('coordination paused by the owner');
-      const contact = named(state, params.contact);
+      const routes = fakeContactRoutes(ctx);
+      const contact = named({ ...state, contacts: routes.map(row => row.contact) }, params.contact);
+      const gateway = routes.find(row => row.contact === contact)!.gateway;
       // The asking thread's model is at least the tier the owner set for contacts.
-      const tier = modelTier(thread.providerId, thread.model);
-      const { minTier } = state.settings;
-      if (tier > minTier) {
-        throw new RpcFailure({
-          code: RpcErrorCode.Refused,
-          message: `threadId: this thread runs ${thread.providerId} ${thread.model ?? '(default model)'}, tier ${tier}; contacts take tier ${minTier} or better, set in Contacts`,
-          data: { field: 'threadId', expected: `a thread on a model of tier ${minTier} or better` }
-        });
-      }
+      checkTier(thread);
+      checkContactTier(gateway, thread);
       const body = text(params.text, 'text', 4000);
+      const destination = fakeCore(contact.coreId);
+      const reciprocal = destination && stateOf(destination).contacts.find(entry => entry.coreId === gateway.identity.coreId);
+      if (destination && reciprocal) checkContactTier(destination, thread);
       if (state.requests.filter(request => request.coreId === contact.coreId && request.direction === 'out' && request.status === 'pending').length >= MAX_PENDING) {
         throw refuse(`at most ${MAX_PENDING} requests may wait at ${contact.name}; wait for an answer`);
       }
       const request: ContactRequest = {
-        id: `creq-${++ctx.seq}`, direction: 'out', coreId: contact.coreId, contact: contact.name,
-        from: { coreId: ctx.identity.coreId, threadId: params.threadId, title: thread.title, machine: ctx.identity.name, resources: '', status: 'running', mode: 'team' },
+        id: `creq-${gateway.identity.coreId}-${++gateway.seq}`, direction: 'out', coreId: contact.coreId, contact: contact.name,
+        from: { coreId: ctx.identity.coreId, threadId: params.threadId, title: thread.title, machine: ctx.identity.name, resources: config.resources, status: thread.status, mode: config.mode, agent: `${thread.providerId} ${thread.model ?? ''}`.trim() },
         text: body, createdAt: ctx.now(), status: 'pending'
       };
       state.requests.unshift(request);
+      if (destination && reciprocal) {
+        const incoming: ContactRequest = { ...request, from: contactSender(ctx, gateway, thread.id, contact.coreId), direction: 'in', coreId: gateway.identity.coreId, contact: reciprocal.name };
+        const roster = ctx.roster;
+        const sourceEpoch = roster?.cores.find(entry => entry.coreId === ctx.identity.coreId)?.epoch;
+        const viaEpoch = roster?.cores.find(entry => entry.coreId === gateway.identity.coreId)?.epoch;
+        const contactAt = contact.addedAt;
+        requests.set(incoming, { source: ctx, request, valid: () =>
+          (gateway === ctx || !!roster && ctx.roster === roster && gateway.roster === roster && roster.cores.some(entry => entry.coreId === ctx.identity.coreId && entry.epoch === sourceEpoch) && roster.cores.some(entry => entry.coreId === gateway.identity.coreId && entry.epoch === viaEpoch))
+          && stateOf(gateway).contacts.some(entry => entry.coreId === contact.coreId && entry.addedAt === contactAt)
+        });
+        stateOf(destination).requests.unshift(incoming);
+        destination.emit('contacts.updated', {});
+      }
       changed();
       return structuredClone(request);
     }

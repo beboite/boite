@@ -13,6 +13,7 @@ import { fill, strings } from '../../lib/strings';
 import { workspace } from '../../lib/workspace.svelte';
 import HomePage from './HomePage.svelte';
 import SidebarContacts from './SidebarContacts.svelte';
+import TitleBar from '../TitleBar.svelte';
 
 let components: ReturnType<typeof mount>[] = [];
 let opened: Store | undefined;
@@ -55,6 +56,50 @@ async function draw(contact: string | null = null): Promise<Store> {
 
 const one = <T extends HTMLElement>(testid: string) => document.querySelector<T>(`[data-testid="${testid}"]`);
 const contacts = async (store: Store) => store.client!.call('contacts.get', {});
+
+test('a contact request stays visible at the top in Settings and opens the machine that received it', async () => {
+  const remote = await connect();
+  const local = new Store();
+  local.machineId = 'local';
+  local.booted = true;
+  local.page = 'settings';
+  workspace.machines = [{ id: 'local', label: 'Local', store: local }, { id: 'home', label: 'Workstation', store: remote }];
+  workspace.active = local;
+  components.push(mount(TitleBar, { target: document.body, props: { store: local } }));
+  await vi.waitFor(() => { flushSync(); expect(one('contact-request-notice')).not.toBeNull(); });
+  expect(one('contact-request-notice')!.textContent).toContain('Chris');
+  expect(one('contact-request-notice')!.textContent).toContain('Workstation');
+  one<HTMLButtonElement>('contact-request-review')!.click();
+  await vi.waitFor(() => expect(workspace.active).toBe(remote));
+  await vi.waitFor(() => expect([remote.page, remote.contact]).toEqual(['home', 'core-chris']));
+  await remote.client!.call('contacts.decide', { id: 'creq-pending', accept: true, projectId: remote.projects[0]!.id });
+  await vi.waitFor(() => { flushSync(); expect(one('contact-request-notice')).toBeNull(); });
+});
+
+test('a dismissed request keeps its header badge, which refreshes after a reconnect without an update', async () => {
+  const store = await connect();
+  store.page = 'settings';
+  const client = store.client!;
+  const call = client.call.bind(client);
+  let decidedWhileOffline = false;
+  vi.spyOn(client, 'call').mockImplementation((async (method, params) => {
+    const value = await call(method, params);
+    if (method !== 'contacts.get' || !decidedWhileOffline) return value;
+    const state = value as Awaited<ReturnType<typeof contacts>>;
+    return { ...state, requests: state.requests.filter(request => request.status !== 'pending') };
+  }) as typeof client.call);
+  components.push(mount(TitleBar, { target: document.body, props: { store } }));
+  await vi.waitFor(() => { flushSync(); expect(one('contact-request-notice')).not.toBeNull(); });
+  one<HTMLButtonElement>('contact-request-dismiss')!.click();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-request-notice')).toBeNull(); });
+  expect(one('contact-request-open')).not.toBeNull();
+  store.connection = 'connecting';
+  flushSync();
+  decidedWhileOffline = true;
+  store.connection = 'ready';
+  flushSync();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-request-open')).toBeNull(); });
+});
 
 function type(input: HTMLInputElement, value: string) {
   input.value = value;
@@ -280,19 +325,27 @@ test('Elsewhere makes a link to this machine on Funnel, without a share; a tailn
   expect(sent).toEqual([]);
 });
 
-test('a join to an inviter whose address is not on the internet yet goes again by itself, and Stop ends it', async () => {
+test('a join retries an unpublished address despite a concurrent submission, and Stop ends it', async () => {
   const store = await draw();
   const call = store.client!.call.bind(store.client!);
   let refusals = 2;
   const joins = vi.fn();
-  vi.spyOn(store.client!, 'call').mockImplementation(((method: string, params: unknown) => {
+  let finishFirst!: () => void;
+  const firstJoin = new Promise<void>(resolve => { finishFirst = resolve; });
+  vi.spyOn(store.client!, 'call').mockImplementation((async (method: string, params: unknown) => {
     if (method !== 'contacts.join') return call(method as never, params as never);
     joins();
+    if (joins.mock.calls.length === 1) await firstJoin;
     if (refusals-- > 0) return Promise.reject(new RpcFailure({ code: RpcErrorCode.Unavailable, message: 'could not find NUNO: Tailscale has not published its address', data: { retryAfterMs: 150 } }));
     return call(method as never, params as never);
   }) as typeof call);
   type(one<HTMLInputElement>('contact-join-link')!, FAKE_CONTACT_INVITE);
   one<HTMLButtonElement>('contact-join')!.click();
+  await vi.waitFor(() => expect(joins).toHaveBeenCalledTimes(1));
+  // Another submission during the RPC must not cancel this join's retries.
+  expect(await contactsOf(store).join(FAKE_CONTACT_INVITE)).toBeNull();
+  expect(joins).toHaveBeenCalledTimes(1);
+  finishFirst();
   await vi.waitFor(() => { flushSync(); expect(one('contact-join-waiting')).not.toBeNull(); });
   await vi.waitFor(() => { flushSync(); expect(one('contact-joined-words')?.querySelectorAll('li')).toHaveLength(8); });
   expect(joins).toHaveBeenCalledTimes(3);

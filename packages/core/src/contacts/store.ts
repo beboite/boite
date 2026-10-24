@@ -518,6 +518,11 @@ export class ContactStore {
     this.core.threads.require(threadId);
     const config = this.core.coordination.config(threadId);
     if (config.mode === 'off' || !config.remote) return [];
+    return this.available();
+  }
+
+  /** Public summaries only, also carried to another member of this owner's group. */
+  available(): RpcResult<'collaboration.contacts'> {
     return this.list().map(contact => ({ name: contact.name, coreId: contact.coreId, projects: contact.offers.map(offer => offer.name), link: this.linkState(contact) }));
   }
 
@@ -528,18 +533,23 @@ export class ContactStore {
     if (config.paused) throw refused('coordination paused by the owner');
     const contact = this.named(params.contact);
     this.checkSendTier(params.threadId);
-    const body = text(params.text, 'text', 4000);
+    return this.askFrom(from, contact.coreId, params.text, gitRemoteOf(this.core.threads.require(params.threadId).cwd) ?? undefined);
+  }
+
+  /** A virtual mailbox carries a group member's attested sender without a real local thread. */
+  askFrom(from: AgentContact, coreId: string, value: string, gitRemote?: string): ContactRequest {
+    const contact = this.named(coreId);
+    const body = text(value, 'text', 4000);
     const requests = this.requests();
     if (requests.filter(request => request.coreId === contact.coreId && request.direction === 'out' && request.status === 'pending').length >= MAX_PENDING) {
       throw refused(`at most ${MAX_PENDING} requests may wait at ${contact.name}; wait for an answer`);
     }
-    const gitRemote = gitRemoteOf(this.core.threads.require(params.threadId).cwd);
     const request: StoredRequest = {
       id: newId('creq_'), direction: 'out', coreId: contact.coreId, contact: contact.name, from, text: body,
       ...(gitRemote ? { gitRemote } : {}), createdAt: Date.now(), status: 'pending', pendingSend: true,
     };
     this.saveRequests([...requests, request]);
-    this.noteSent(params.threadId, contact.coreId);
+    this.noteSent(from.threadId, contact.coreId);
     this.changed();
     this.flush(contact.coreId);
     return this.requestView(request);

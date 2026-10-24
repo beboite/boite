@@ -44,6 +44,8 @@ export const fr: Translation = {
     removeBody: 'Chaque projet que vous lui partagez se ferme, les lettres en attente dans les deux sens sont rejetées et le lien se ferme. Le partage Tailscale reste jusqu\'à ce que vous le retiriez dans la console d\'administration.',
     requests: {
       title: 'Demandes',
+      review: 'Voir la demande du contact',
+      pending: '{count} demandes de contacts en attente',
       asks: '{contact} demande',
       asked: 'Vous avez demandé à {contact}',
       remote: 'Remote git',

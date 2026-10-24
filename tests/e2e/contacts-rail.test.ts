@@ -39,6 +39,31 @@ test('the contacts column\'s rows hold their text: the empty row\'s wrapped tip 
   } finally { await page.close(); }
 }, 30_000);
 
+test('contact requests appear above desktop and phone pages and open the request to answer', async () => {
+  const page = await BrowserPage.launch({ url: 'about:blank', windowSize: { width: 1440, height: 900 } });
+  try {
+    await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `localStorage.setItem('boite.experiments', JSON.stringify(['contacts']));` });
+    await page.navigate(`http://127.0.0.1:${port}/?fake=1&open=recent`);
+    await page.waitFor(`document.querySelector('${id('contact-request-notice')}')`);
+    await page.evaluate(`globalThis.__boiteTest.setTheme('dark')`);
+    await page.settleAnimations();
+    expect(await page.evaluate(`document.querySelector('${id('contact-request-notice')}').getBoundingClientRect().width > 0`)).toBe(true);
+    await page.screenshot(join(import.meta.dir, '.artifacts/contact-request-desktop.png'));
+
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await page.waitFor(`document.querySelector('${id('mobile-header')} ${id('contact-request-open')}')`);
+    await page.settleAnimations();
+    expect(await page.evaluate(`document.querySelector('${id('contact-request-notice')}').getBoundingClientRect().width > 0`)).toBe(true);
+    expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    await page.screenshot(join(import.meta.dir, '.artifacts/contact-request-phone.png'));
+    await page.click(id('contact-request-review'));
+    await page.waitFor(`document.querySelector('${id('contact-requests')} ${id('contact-request-creq-pending')}')`);
+    await page.evaluate(`globalThis.__boiteTest.workspace.active.client.call('contacts.decide', { id: 'creq-pending', accept: false, reason: 'The shared work is finished.' })`);
+    await page.waitFor(`!document.querySelector('${id('contact-request-open')}')`);
+    expect(page.errors()).toEqual([]);
+  } finally { await page.close(); }
+}, 30_000);
+
 test('the shared project picker searches every linked machine on desktop and phone', async () => {
   const page = await BrowserPage.launch({ url: 'about:blank', windowSize: { width: 1440, height: 1000 } });
   const picker = id('contact-open-core-chris');
