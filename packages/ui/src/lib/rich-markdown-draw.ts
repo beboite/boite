@@ -169,7 +169,7 @@ function reason(error: unknown): string {
 }
 
 /** The colors a drawn diagram takes from the page, written into the picture so it keeps them on its own. */
-const DIAGRAM_COLORS = ['--pele-bg', '--pele-fg', '--pele-muted', '--pele-line', '--pele-surface', '--pele-surface-alt', '--pele-border', '--pele-accent', '--pele-critical', '--pele-font', '--pele-radius', ...Array.from({ length: 8 }, (_, index) => `--pele-series-${index + 1}`)];
+const DIAGRAM_COLORS = ['--pele-bg', '--pele-fg', '--pele-muted', '--pele-line', '--pele-surface', '--pele-surface-alt', '--pele-border', '--pele-accent', '--pele-critical', '--pele-error', '--pele-font', '--pele-font-mono', '--pele-radius', ...Array.from({ length: 8 }, (_, index) => `--pele-series-${index + 1}`)];
 
 /** The diagram as an SVG file for the viewer, in the colors it has on screen now. */
 export function viewerItem(figure: HTMLElement): MediaItem {

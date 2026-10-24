@@ -81,6 +81,15 @@ test('a diagram switches to its code and back, and opens in the image viewer', a
   await page.evaluate(`${block}.querySelector('${id('diagram-enlarge')}').click()`);
   await page.waitFor(`document.querySelector('${id('image-viewer')}')`);
   expect(await page.evaluate(`document.querySelector('${id('image-viewer')} img')?.src.startsWith('blob:')`)).toBe(true);
+  // The file carries every color and font the stylesheet gives the diagram, so it looks the same on its own.
+  const missing = await page.evaluate<string[]>(`(async () => {
+    const file = await (await fetch(document.querySelector('${id('image-viewer')} img').src)).text();
+    const style = new DOMParser().parseFromString(file, 'image/svg+xml').documentElement.getAttribute('style') ?? '';
+    const sheet = [...document.styleSheets].flatMap(sheet => { try { return [...sheet.cssRules]; } catch { return []; } })
+      .find(rule => rule.selectorText === '.md-mermaid');
+    return [...sheet.style].filter(name => name.startsWith('--pele-') && !style.includes(name + ':'));
+  })()`);
+  expect(missing).toEqual([]);
   await capture('viewer');
   await page.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
   await page.waitFor(`!document.querySelector('${id('image-viewer')}')`);
