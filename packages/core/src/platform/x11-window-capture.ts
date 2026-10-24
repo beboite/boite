@@ -204,6 +204,8 @@ interface Attributes {
   inputOutput: boolean;
   viewable: boolean;
   overrideRedirect: boolean;
+  /** The window's visual masks: an XImage read from a pixmap has none of its own. */
+  masks: Pick<XImageLayout, 'red' | 'green' | 'blue'> | null;
 }
 
 interface Property {
@@ -222,6 +224,13 @@ function text(property: Property | null, utf8Type: number): string | null {
   if (!property || property.format !== 8) return null;
   const decoder = new TextDecoder(property.type === utf8Type ? 'utf-8' : 'latin1');
   return decoder.decode(property.bytes).replace(/\0+$/, '');
+}
+
+/** A Visual's red, green and blue masks (LP64: ext_data, visualid, class, then the masks from byte 24). */
+function visualMasks(visual: bigint): Attributes['masks'] {
+  if (!visual) return null;
+  const at = pointer(visual);
+  return { red: Number(read.u64(at, 24)), green: Number(read.u64(at, 32)), blue: Number(read.u64(at, 40)) };
 }
 
 /** Whether WM_CLIENT_MACHINE names this host, short or fully qualified. */
@@ -377,7 +386,7 @@ export class X11WindowCapture implements WindowCapture {
     if (failed || !pixmap) return null;
     try {
       // The pixmap includes the border; the window's own pixels start inside it.
-      const image = this.image(pixmap, attributes.border, attributes.border, attributes.width, attributes.height);
+      const image = this.image(pixmap, attributes.border, attributes.border, attributes.width, attributes.height, attributes.masks);
       return image && { ...image, via: 'x11-composite' };
     } finally {
       this.lib.XFreePixmap(this.display, pixmap);
@@ -416,7 +425,7 @@ export class X11WindowCapture implements WindowCapture {
     return { width, height, bgra, via: 'x11' };
   }
 
-  private image(drawable: number, x: number, y: number, width: number, height: number): { width: number; height: number; bgra: Uint8Array } | null {
+  private image(drawable: number, x: number, y: number, width: number, height: number, masks: Attributes['masks'] = null): { width: number; height: number; bgra: Uint8Array } | null {
     failed = 0;
     const image = pointer(this.lib.XGetImage(this.display, drawable, x, y, width, height, ALL_PLANES, Z_PIXMAP));
     if (!image) return null;
@@ -432,6 +441,8 @@ export class X11WindowCapture implements WindowCapture {
         green: Number(read.u64(image, 64)),
         blue: Number(read.u64(image, 72)),
       };
+      // A pixmap has no visual, so Xlib leaves its masks at 0: use the window's.
+      if (masks && layout.red === 0 && layout.green === 0 && layout.blue === 0) Object.assign(layout, masks);
       const data = read.ptr(image, 16);
       if (!data || layout.bytesPerLine * layout.height === 0) return null;
       const bytes = new Uint8Array(toArrayBuffer(pointer(data), 0, layout.bytesPerLine * layout.height));
@@ -502,6 +513,7 @@ export class X11WindowCapture implements WindowCapture {
       inputOutput: view.getInt32(40, true) === INPUT_OUTPUT,
       viewable: view.getInt32(92, true) === IS_VIEWABLE,
       overrideRedirect: view.getInt32(120, true) !== 0,
+      masks: visualMasks(view.getBigUint64(24, true)),
     };
   }
 
