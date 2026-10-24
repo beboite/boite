@@ -185,6 +185,10 @@ export class PeerDesk {
       return { contact: entry, ...transcript(this.core.journal.db, threadId, limit, before, id => this.core.journal.streamingMessage(id)) };
     }
     if (operation === 'receipt') {
+      // A malformed receipt is refused here, before any member is asked.
+      const receipt = payload as { id?: unknown; fromThreadId?: unknown } | null;
+      text(receipt?.id, 'receipt.id', 100);
+      text(receipt?.fromThreadId, 'receipt.fromThreadId', 128);
       try { return this.receipt(peer.coreId, payload); }
       catch (error) { if (relayed || !(error instanceof RpcFailure)) throw error; }
       return members.receipt(peer.coreId, payload);
