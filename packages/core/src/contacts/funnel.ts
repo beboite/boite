@@ -221,6 +221,8 @@ export class ContactFunnel {
       watched.since = Date.now();
       if (url !== null) {
         watched.broken = false;
+        // `open` may have picked another port: the next checks ask there.
+        watched.url = url;
         // Asked again from the next check: what the probe said was about the mounts before.
         this.health = { url, status: 'checking', checkedAt: this.health.checkedAt, repaired: true };
         this.changed();
