@@ -20,10 +20,13 @@ async function modulesLoadedBy(entry: string): Promise<string[]> {
   return JSON.parse(out.trim().split('\n').at(-1) ?? '[]') as string[];
 }
 
-test('the core starts without the unzip library, which only installs use', async () => {
+test('the core starts without unzip, provider SDKs or lazy review inference implementations', async () => {
   const loaded = await modulesLoadedBy(join(import.meta.dir, '../src/core.ts'));
   expect(loaded.length).toBeGreaterThan(20);
   expect(loaded.filter((path) => path.replaceAll('\\', '/').includes('/fflate/'))).toEqual([]);
+  for (const lazy of ['/@anthropic-ai/claude-agent-sdk/', '/@agentclientprotocol/sdk/', '/drivers/claude/side-question.ts']) {
+    expect(loaded.filter(path => path.replaceAll('\\', '/').includes(lazy))).toEqual([]);
+  }
 }, 30_000);
 
 /**

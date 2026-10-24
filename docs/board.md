@@ -118,6 +118,13 @@ unreachable or uncertain host never frees the claim on a timeout. The ordinary
 local board's unlink behavior is unchanged. Process coverage remains the platform's:
 Linux/macOS direct records do not prove termination of an untracked descendant.
 
+Disabling board consent or revoking the association fences pending commands
+and delayed starts durably. The host removes only the goal still carrying
+that exact shared claim and stops its protected descendants. A replacement
+owner activity and unrelated local turns continue. Claims are not freed or
+reassigned by a revocation timeout. Recovery applies the same local fences
+without restarting goal or reviewer inference.
+
 Worker activity supplies the existing checklist and review projection. Only
 the assigned host can report it. Persisted per-claim sequences reject late
 progress; duplicates return their original receipt. Only a completed goal

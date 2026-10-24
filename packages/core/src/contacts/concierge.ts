@@ -7,12 +7,10 @@
  * A protocol without that path never runs it: the request waits for the
  * owner. The core, not the model, applies what it said.
  */
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { AGENT_ENV, type ContactRequest, type DelegationConfig, type ThreadSummary } from '@boite/contracts';
-import { assertDriverRunnable, getDriver } from '../drivers/index.ts';
+import type { ContactRequest, DelegationConfig } from '@boite/contracts';
 import type { Core } from '../core.ts';
-import { newId } from '../ids.ts';
+import { toolFreeInference } from './side-inference.ts';
+export { withoutBoiteCredentials } from './side-inference.ts';
 
 /** A concierge that has not answered by then leaves the request to the owner. */
 const TIMEOUT_MS = 3 * 60_000;
@@ -78,50 +76,16 @@ export class Concierge {
   async decide(request: ContactRequest, projects: { id: string; name: string; gitRemote?: string }[]): Promise<ConciergeVerdict> {
     if (this.closed) throw new Error('the core is stopping');
     const route = this.route();
-    const provider = this.core.providers.require(route.providerId);
-    const account = this.core.accounts.require(route.accountId);
-    assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), account, () => this.core.providers.launcherScriptOnly(provider.id));
-    const driver = getDriver(provider.protocol);
-    if (!driver.sideQuestion) throw new Error(`${provider.name} has no tool-free inference, so it cannot be the concierge`);
-    const cwd = join(this.core.dataDir, 'contacts', 'concierge');
-    mkdirSync(cwd, { recursive: true });
-    const now = Date.now();
-    // Never stored: the driver reads its model, effort and folder, nothing else.
-    const thread: ThreadSummary = {
-      id: newId('thr_'), projectId: null, title: `Concierge for ${request.contact}`.slice(0, 120), titleSource: 'user',
-      providerId: route.providerId, accountId: route.accountId, model: route.model, effort: route.effort, speed: null,
-      cwd, branch: null, permissionMode: 'plan', status: 'idle', unread: false, archived: false, pinned: false,
-      sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null, createdAt: now, updatedAt: now,
-    };
-    // Its processes are traced under their own id and stopped with it; no Boite token reaches them.
-    const procId = `concierge:${thread.id}`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error('the concierge did not answer within 3 minutes')), TIMEOUT_MS);
     timer.unref?.();
     this.runs.add(controller);
-    const installs = this.core.providers.installs;
-    const prompt = conciergePrompt(request, projects);
     let answer: string;
     try {
-      answer = await driver.sideQuestion({
-        thread, provider, question: prompt, prompt, accountEnv: this.core.accounts.accountEnv(account, provider), signal: controller.signal,
-        spawnChild: (cmd, args, opts) => {
-          const child = this.core.procs.spawnChild(procId, cmd, args, { ...opts, env: withoutBoiteCredentials(opts?.env ?? process.env) });
-          // The install stays in place while the child runs.
-          installs.acquire(provider.id);
-          let released = false;
-          const drop = (): void => { if (!released) { released = true; installs.release(provider.id); } };
-          child.once('exit', drop);
-          child.once('error', drop);
-          return child;
-        },
-        log: (level, message) => this.core.log(level, `contacts concierge: ${message}`, { source: 'contacts' }),
-      });
-      controller.signal.throwIfAborted();
+      answer = await toolFreeInference(this.core, route, conciergePrompt(request, projects), controller.signal);
     } finally {
       clearTimeout(timer);
       this.runs.delete(controller);
-      this.core.procs.killTree(procId);
     }
     const verdict = parseConciergeVerdict(answer);
     if (verdict === null) throw new Error('the concierge ended without a CONCIERGE line');
@@ -134,20 +98,4 @@ export class Concierge {
     for (const run of this.runs) run.abort(new Error('the core is stopping'));
     this.runs.clear();
   }
-}
-
-/**
- * The concierge's environment without a Boite credential or identity: a core
- * started from an agent inherits that agent's token, and a tool-free process
- * has no use for the owner's. Provider sign-in variables stay.
- */
-export function withoutBoiteCredentials(env: Record<string, string | undefined>): Record<string, string | undefined> {
-  const agent = new Set<string>(Object.values(AGENT_ENV));
-  const clean: Record<string, string | undefined> = {};
-  for (const [name, value] of Object.entries(env)) {
-    const upper = name.toUpperCase();
-    if (agent.has(upper) || upper.startsWith('BOITE_AGENT_') || upper === 'BOITE_TOKEN' || upper === 'BOITE_PLUGIN_ID') continue;
-    clean[name] = value;
-  }
-  return clean;
 }

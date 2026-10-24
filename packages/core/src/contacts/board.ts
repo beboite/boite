@@ -14,7 +14,7 @@ import { applyAtAuthority, progressAtAuthority, receipt } from './board-authorit
 import { sameProject, threadRef } from './project-policy.ts';
 import { fingerprint } from './project-journal.ts';
 import type { SharedPeerContext } from './projects.ts';
-import { bindBoard } from './access-scopes.ts';
+import { accessBinding, bindBoard } from './access-scopes.ts';
 
 export class SharedBoard {
   readonly journal: SharedBoardJournal;
@@ -54,6 +54,7 @@ export class SharedBoard {
       return { ok: true };
     });
     core.sharedProjects.registerFlush(peerId => this.flush(peerId));
+    core.sharedProjects.registerPolicyListener(id => this.reconcileAccess(id));
     this.off = core.bus.onCommitted((name, payload) => {
       if (this.closed) return;
       if (name === 'thread.activity' || name === 'thread.updated' || name === 'thread.removed') this.follow((payload as {threadId?: string; id?: string}).threadId ?? (payload as {id: string}).id);
@@ -76,6 +77,39 @@ export class SharedBoard {
     for (const threadId of restored) this.follow(threadId);
   }
   private background(work: Promise<unknown>): void { this.pending.add(work); void work.catch(() => undefined).finally(() => this.pending.delete(work)); }
+  /** Permanent association revocation closes only core-tagged shared goals and their captured descendants. */
+  reconcileAccess(id: string): void {
+    if (this.closed) return;
+    const shared = this.core.sharedProjects.require(id);
+    if (shared.state === 'active' && shared.access.every(a => a.board && a.revokedAt === null)) return;
+    for (const value of this.journal.pending(id)) this.journal.settle(id, value, {requestId: value.command.requestId, outcome: 'revoked', revision: this.journal.revision(id), card: null});
+    const local = this.core.sharedProjects.endpoints(shared).local;
+    for (const entry of this.journal.entries(id)) {
+      if (entry.kind !== 'card' || !entry.card.assignment || !sameProject(entry.card.assignment.worker.project, local)) continue;
+      const {claimId, worker} = entry.card.assignment;
+      const key = this.stopKey(id, entry.card.id, claimId);
+      if (!this.core.journal.getSetting(key)) this.core.journal.setSetting(key, {hash: fingerprint({cardId: entry.card.id, claimId, worker}), state: 'revoked'});
+      const binding = this.core.journal.getSetting(`activity:shared:${worker.threadId}`) as {sharedProjectId?: string; claimId?: string} | null;
+      const captured = new Set<string>();
+      // Capture descendants before removing the parent's tag. Their file-policy scopes remain durable.
+      for (const child of this.core.journal.listChildThreads()) {
+        const scope = accessBinding(this.core, child.id);
+        if (scope?.job.sharedProjectId === id && scope.board?.threadId === worker.threadId && scope.board.claimId === claimId) captured.add(child.id);
+      }
+      if (binding?.sharedProjectId === id && binding.claimId === claimId) {
+        const activity = this.core.activity.get(worker.threadId);
+        if (activity.goal && !activity.loop) {
+          captured.add(worker.threadId);
+          this.core.activity.control({threadId: worker.threadId, kind: 'goal', action: 'remove'});
+        }
+      }
+      for (const threadId of captured) {
+        this.core.threads.stopTurn(threadId); this.core.threads.releaseAgent(threadId);
+        this.background(Promise.allSettled([this.core.scheduler.stopAndWait(threadId), this.core.procs.stopAndWait(threadId)]));
+      }
+    }
+    notifySharedTodos(this.core, local.projectId);
+  }
   private authority(shared: SharedProject): boolean { return sameProject(shared.authority, this.core.sharedProjects.endpoints(shared).local); }
   check(ctx: SharedPeerContext, authority = false): void {
     this.core.sharedProjects.assertPeer(ctx);

@@ -183,7 +183,8 @@ export class SharedAccess {
     if (connection?.identity.principal === 'agent') this.core.sharedProjects.scope(p, connection);
     const after = p.after === undefined ? 0 : typeof p.after === 'string' ? this.journal.cursor(shared.id, p.after) : null;
     if (after === null) throw invalidParams('after: expected an event cursor of this association');
-    return {...this.journal.page(p.sharedProjectId, after), verdicts: []};
+    const page = this.journal.page(p.sharedProjectId, after);
+    return {...page, verdicts: this.core.sharedReview.journal.verdicts(shared.id, page.events.map(event => event.id))};
   }
   private owner(id: string) {
     const shared = this.core.sharedProjects.require(id);
@@ -236,6 +237,7 @@ export class SharedAccess {
 
 export function registerSharedAccess(core: Core): void {
   core.router.register('sharedAccess.get', (p, c) => core.sharedAccess.get(p, c.connection));
+  core.router.register('sharedAccess.reviewConfig', p => core.sharedReview.config(p.sharedProjectId));
   core.router.register('sharedAccess.overrides', p => core.sharedAccess.overrides(p.sharedProjectId));
   core.router.register('sharedAccess.override', p => core.sharedAccess.override(p));
   core.router.register('sharedAccess.revokeOverride', p => core.sharedAccess.revokeOverride(p));

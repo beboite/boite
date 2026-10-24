@@ -220,6 +220,7 @@ export class ContactStore {
   mayReach(coreId: string, threadId: string): boolean {
     const thread = this.core.journal.getThread(threadId);
     if (!thread || thread.archived || !this.has(coreId)) return false;
+    if (thread.projectId && this.policyRevoked(coreId, thread.projectId)) return false;
     if (this.grantFor(coreId, threadId)) return true;
     const at = this.recent()[threadId]?.[coreId];
     return typeof at === 'number' && Date.now() - at <= REPLY_WINDOW_MS;
@@ -409,11 +410,20 @@ export class ContactStore {
     return this.view(contact);
   }
 
-  grant(params: RpcParams<'contacts.grant'>): Contact {
+  private policyKey(coreId: string, projectId: string): string { return `contact-policy-revoked:${JSON.stringify([coreId, projectId])}`; }
+  private policyRevoked(coreId: string, projectId: string): boolean { return this.core.journal.getSetting(this.policyKey(coreId, projectId)) === true; }
+  /** A confirmed policy violation requires a new explicit owner grant, even for a trusted contact. */
+  revokeForPolicy(params: RpcParams<'contacts.revoke'>): Contact {
+    this.core.journal.setSetting(this.policyKey(params.coreId, params.projectId), true);
+    return this.revoke(params);
+  }
+  grant(params: RpcParams<'contacts.grant'>, automatic = false): Contact {
     if (params.readThreads !== undefined && typeof params.readThreads !== 'boolean') throw invalidParams('readThreads: expected a boolean', { field: 'readThreads' });
     const project = typeof params.projectId === 'string' ? this.core.journal.getProject(params.projectId) : null;
     if (!project || project.archived) throw invalidParams('projectId: expected an unarchived project of this core', { field: 'projectId' });
+    if (automatic && this.policyRevoked(params.coreId, project.id)) throw refused('projectId: policy-revoked access requires an explicit owner grant');
     const contact = this.mutate(params.coreId, entry => {
+      if (!automatic) this.core.journal.deleteSetting(this.policyKey(params.coreId, project.id));
       const existing = entry.grants.find(grant => grant.projectId === project.id);
       if (existing) existing.readThreads = params.readThreads ?? existing.readThreads;
       else entry.grants.push({ projectId: project.id, readThreads: params.readThreads ?? false, grantedAt: Date.now() });
@@ -472,7 +482,7 @@ export class ContactStore {
       const project = typeof projectId === 'string' ? this.core.journal.getProject(projectId) : null;
       if (!project || project.archived) throw invalidParams('projectId: expected the unarchived project to open', { field: 'projectId' });
       // An existing read grant stays as the owner set it; a new grant never reads conversations.
-      this.grant({ coreId: request.coreId, projectId: project.id });
+      this.grant({ coreId: request.coreId, projectId: project.id }, decidedBy !== 'owner');
       Object.assign(request, { status: 'accepted', project: { id: project.id, name: project.name.slice(0, 200) }, decidedBy, decidedAt: now, pendingSend: true });
     } else {
       const why = reason === undefined || reason === null || reason === '' ? 'The owner declined this request.' : text(reason, 'reason', 500);
@@ -493,10 +503,12 @@ export class ContactStore {
       .map(project => ({ id: project.id, name: project.name.slice(0, 200), ...(() => { const remote = gitRemoteOf(project.path); return remote ? { gitRemote: remote } : {}; })() }));
     if (request.gitRemote) {
       const matches = projects.filter(project => project.gitRemote === request.gitRemote);
-      if (matches.length === 1) { this.settle(id, true, matches[0]!.id, undefined, 'match'); return; }
+      if (matches.length === 1) { if (!this.policyRevoked(request.coreId, matches[0]!.id)) this.settle(id, true, matches[0]!.id, undefined, 'match'); return; }
     }
+    const allowed = projects.filter(project => !this.policyRevoked(request.coreId, project.id));
+    if (!allowed.length) return;
     this.deciding.add(id);
-    this.background(this.concierge.decide(this.requestView(request), projects).then(verdict => {
+    this.background(this.concierge.decide(this.requestView(request), allowed).then(verdict => {
       const current = this.requests().find(entry => entry.id === id);
       if (current?.status !== 'pending' || !this.find(current.coreId)?.trusted) return;
       if (verdict.accept) { this.settle(id, true, verdict.projectId, undefined, 'concierge'); return; }

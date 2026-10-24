@@ -259,8 +259,9 @@ subscriptions are implemented in `contacts/projects.ts`. The durable board
 service is in `contacts/board.ts`, with its protocol in [board.md](board.md#shared-board-protocol).
 Host-owned compute admission and the workflow adapter are implemented in
 `contacts/compute.ts` and `workflows/shared-compute.ts`. Compute admits only
-tool-free echo until a host-enforced execution boundary is installed; human
-letters, file enforcement, reviewer, fake handlers and UI remain integration work.
+tool-free echo until a host-enforced execution boundary is installed. File
+enforcement and the activity reviewer are implemented; human letters, fake
+handlers and UI remain integration work.
 `packages/contracts/src/shared-projects.ts` declares the vocabulary;
 `coordination.ts` retains the existing contact types. A core must not advertise
 `features.sharedProjects: 1` until its enforcing handlers exist. A contact
@@ -612,23 +613,57 @@ remain owner-only and are stored separately from reviewable events.
 `core.sharedAccess.onEvent` supplies a post-persistence feed, and
 `confirmed(eventId, associationId)` recognizes only a locally journalled
 classified denial. Listener failure cannot change the deterministic decision.
-This feed adds no timer, SDK or model process. Verdict projection and the
-reviewer itself are not implemented by the file-policy service.
+This feed adds no timer, SDK or model process.
 
-A lazy host-configured reviewer
-uses the tool-free side-question path over only relevant events, with no owner
-or agent token, hooks, MCP, disk tools or ordinary conversation history.
-Persist a verdict and its evidence event IDs, reason and applied consequence.
+`contacts/review.ts` implements the optional reviewer. The host owner sets
+`sharedProjects.configure.reviewer` and reads that private configuration with
+`sharedAccess.reviewConfig`. It defaults off and has no implicit account or
+fallback model. Provider/account/model/effort and `revokeOnViolation` stay
+host-local. Unsupported tool-free routes record unavailable, never start an
+ordinary turn. Claude and echo support this query path; Codex, ACP, Muse and pi
+do not. The concierge and reviewer share `contacts/side-inference.ts`.
 
-Only a current local policy confirmation plus configured `revokeOnViolation`
-can turn a model's violation verdict into revocation of this exact project
-grant. Suspicion alone cannot widen access or choose another contact/project.
-Repeated verdicts/revokes are idempotent. Invalid output, injected activity,
-timeout, absent inference support or failed inference records unavailable;
-none unblocks a deterministic denial. Delayed verdicts recheck the association
-and access revision. A confirmed revoke also closes reply windows, reads,
-board writes, queued wakes, compute and result delivery. No activity means no
-inference, worker or new timer.
+Schema 43 persists configuration revisions, admitted event work and reasoned
+verdicts. Only activity attributed to the associated remote endpoint is
+admitted, after opt-in. Owner override administration and old history do not
+trigger inference. A request batches up to 32 events, with one request running
+at a time. This page size never caps activity or agent exchanges. The model
+gets only enumerated action, allow/deny, classification and core reason: no
+identities, project names, message/task text, paths, override reasons, file
+bytes, tool arguments or unrelated project lists. Evidence is data, never
+instructions or owner approval. Its fresh tool-free side question has no
+conversation history, tools, MCP, hooks, settings or Boite credentials.
+
+The output is exactly one JSON object with `verdict` and a reason of at most
+500 characters. The host redacts credential-like reason text and persists
+evidence event IDs, assessment and consequence; `sharedAccess.get` includes
+verdicts associated with the events on that page. Invalid output, failure,
+unsupported inference or a 90-second deadline records unavailable. Nothing
+retries inference automatically. A restart marks admitted/interrupted reviews
+unavailable without running them; completed verdicts keep their receipts.
+Only actual new activity starts a new query. No activity means no inference,
+worker or new timer; heavy provider SDKs remain lazy. Shutdown cancels the
+request and waits for its captured processes. Process coverage retains the
+platform limits described above.
+
+Only a locally journalled classified denial plus a model violation and current
+`revokeOnViolation` can revoke. A model violation without that confirmation is
+recorded as suspicious. Before applying a consequence the host rechecks the
+association, both access records, current project grant, contact admission,
+configuration revision and runnable account/provider. A delayed answer cannot
+revoke a newer grant, replacement association or changed configuration.
+
+The verdict and project-grant revocation commit together. Existing Contacts
+revocation rejects pending letters and provider wakes and closes reply windows;
+the shared-policy listeners fence reads, board writes, compute retries/results
+and only the captured shared workers. Board revocation removes core-tagged
+shared goals and stops their protected descendants without touching replacement
+owner activities. A durable contact/project policy hold also prevents a later
+letter or a trusted contact's automatic request from reopening access. A new
+explicit owner grant clears that hold; it cannot reactivate the old association
+or its jobs. Other contacts/projects and ordinary local turns keep their
+authority. Repeated revocation changes no revision twice. Model delay, failure
+or disagreement never unblocks the immediate deterministic file/tool decision.
 
 ### RPC and event permissions
 
@@ -658,6 +693,7 @@ only alongside enforcing handlers and scoped subscriptions.
 | `sharedCompute.start` | Explicit host opt-in and supported protection | Denied | Planned: own source project, current grant and host-approved route |
 | `sharedAccess.get` | Sanitized scoped activity, including historical revocations | Same | Live own association metadata only |
 | `sharedAccess.overrides/override/revokeOverride` | Host only, exact local paths | Denied | Denied |
+| `sharedAccess.reviewConfig` | Host only, inference account and settings | Denied | Denied |
 | `contacts.sendHuman` | Attested human, allowed contact destination | Planned: same | Denied |
 | `sharedProjects.changed` | Explicit connection subscription | Same subscription | Own thread + association, invalidation only |
 

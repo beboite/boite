@@ -253,6 +253,8 @@ export interface SharedProjectsRpcMethods {
   'sharedCompute.send': { params: SharedProjectScope & { jobId: string; text: string; requestId: string }; result: { ok: true } };
   'sharedCompute.cancel': { params: SharedProjectScope & { jobId: string; requestId: string }; result: SharedComputeJob };
   'sharedAccess.get': { params: SharedProjectScope & { after?: string }; result: SharedAccessPage };
+  /** Host owner only: inference accounts/configuration must never reach paired devices, agents or peers. */
+  'sharedAccess.reviewConfig': { params: { sharedProjectId: string }; result: SharedReviewConfig };
   /** Host owner only, including exact local override paths; never a peer or reviewer view. */
   'sharedAccess.overrides': { params: { sharedProjectId: string }; result: SharedFileOverride[] };
   /** Host owner only; exact paths are never forwarded to the contact or reviewer. */

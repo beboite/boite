@@ -104,7 +104,7 @@ export class SharedProjects {
     const contact = this.core.contacts.find(remote.ownerCoreId);
     return { shared, local, remote, contact: { coreId: remote.ownerCoreId, name: contact?.name ?? 'Contact' },
       connection: contact && this.core.contacts.view(contact).link === 'connected' ? 'connected' : sameProject(shared.authority, remote) ? 'authority-unavailable' : 'offline',
-      protection: { defaultDeny: true, activeOverrides: this.core.sharedAccess?.activeOverrides(shared.id) ?? 0, reviewer: 'off' } };
+      protection: { defaultDeny: true, activeOverrides: this.core.sharedAccess?.activeOverrides(shared.id) ?? 0, reviewer: this.core.sharedReview?.status(shared.id) ?? 'off' } };
   }
   list(threadId: string, connection?: Connection): SharedProjectView[] {
     const thread = this.core.threads.require(threadId);
@@ -176,24 +176,37 @@ export class SharedProjects {
   async configure(p: RpcParams<'sharedProjects.configure'>): Promise<SharedProjectView> {
     if (p.board !== undefined && typeof p.board !== 'boolean') throw invalidParams('board: expected a boolean');
     // Host validation is installed by the compute/reviewer services, never inferred here.
-    if (p.reviewer !== undefined) throw refused('configure: reviewer requires its host policy service');
     if (p.computeThreadId !== undefined && p.compute === undefined) throw invalidParams('computeThreadId: expected compute policy in the same host configuration');
-    const shared = this.require(p.sharedProjectId);
-    this.assertActive(shared);
-    const { local, index, remote } = this.endpoints(shared);
-    const compute = p.compute === undefined ? undefined : this.configureCompute?.(p, this.scopeForOwner(shared));
-    if (p.compute !== undefined && compute === undefined) throw refused('configure: compute requires its host policy service');
-    if (p.board !== undefined && p.board !== shared.access[index].board || compute?.changed) {
-      this.journal.transaction(() => {
+    const result = this.core.bus.afterCommit(() => this.journal.transaction(() => {
+      const shared = this.require(p.sharedProjectId);
+      this.assertActive(shared);
+      const {local, index, remote} = this.endpoints(shared);
+      const compute = p.compute === undefined ? undefined : this.configureCompute?.(p, this.scopeForOwner(shared));
+      if (p.compute !== undefined && compute === undefined) throw refused('configure: compute requires its host policy service');
+      // Validate every host policy in the same transaction, including its private compute binding.
+      if (p.reviewer !== undefined) this.core.sharedReview.configure(shared.id, p.reviewer);
+      const changed = p.board !== undefined && p.board !== shared.access[index].board || !!compute?.changed;
+      if (changed) {
         shared.access[index] = { ...shared.access[index], project: local, ...(p.board === undefined ? {} : { board: p.board }), ...(compute === undefined ? {} : { compute: compute.policy }), revision: shared.access[index].revision + 1 };
         shared.updatedAt = Date.now();
         this.save(shared);
         this.queueAccess(shared);
-      });
-      this.notify(shared.id);
-      await this.flush(remote.ownerCoreId);
-    }
-    return this.view(this.require(shared.id));
+      }
+      return {id: shared.id, peerId: remote.ownerCoreId, changed};
+    }));
+    if (result.changed || p.reviewer !== undefined) this.notify(result.id);
+    if (result.changed) await this.flush(result.peerId);
+    return this.view(this.require(result.id));
+  }
+  /** Host-only consequence. Called inside the same transaction as a locally confirmed review verdict. */
+  revokeForPolicy(id: string): void {
+    const shared = this.require(id), {local, remote} = this.endpoints(shared);
+    this.closeAssociation(shared);
+    // Removes this exact project grant and reply windows, rejects queued provider wakes,
+    // and lets existing policy listeners fence board/compute. Unrelated grants stay intact.
+    this.core.contacts.revokeForPolicy({coreId: remote.ownerCoreId, projectId: local.projectId});
+    this.notify(id);
+    this.core.bus.afterCommit(() => {void this.flush(remote.ownerCoreId).catch(() => undefined);});
   }
   private scopeForOwner(shared: SharedProject): SharedPeerContext {
     const {local, remote} = this.endpoints(shared);
