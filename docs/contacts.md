@@ -867,6 +867,23 @@ An unavailable requirement is recorded explicitly rather than counted as passed.
 | Security and network proof | `packages/core/test/contacts.test.ts`, `contacts-group.test.ts`, `contact-mailboxes.test.ts`, `contacts-review-regressions.test.ts`, `access.test.ts`; `tests/e2e/shared-cores.test.ts`: held transcript and readmission regressions | Independent security/network passes identified three access/provenance faults, a review feedback loop, stale lease teardown and compute scan waste. Regressions cover their corrections. Per-peer SQLite expression indexes/selective materialization retain all durable job fences. A fresh native-isolation review is still required when that implementation exists; current fixtures do not prove it. |
 | Transport and UI parity | `tests/contract/shared-projects.ts` through core/fake contract suites; fake/Store tests; `tests/e2e/shared-collaboration.test.ts` at 1440 and 390 px | Same contract and refusals, captured owning Store, canonical remote offers/addresses, connection cache fencing, leases and phone actions. No paid inference, physical phone, real Tailscale/Funnel or remote CI proof is implied. |
 
+Local release proof on 2026-10-24 reran `bun run check`, 733 core tests in
+35 isolated file processes, seven real three-core scenarios, 99 UI tests and
+seven browser tests. All passed at runtime head `9bd9211e`. Desktop (1440 px)
+and phone (390 px) interactions also showed a contact-owned board assignment,
+converged completion, attested human mail, host job results and revocation;
+their captures were opened. Fresh network regression replays recorded one
+inference and no recursive refresh with the reviewer enabled, then zero peer
+leases and no notification traffic after unsubscribe.
+
+The release gate remains incomplete. Claude, Codex, ACP, Muse and pi still
+report unsupported protected execution: useful native shared compute, board
+goals and automatic contact-letter execution remain unavailable. No native
+provider filesystem/process isolation test passed because that production
+boundary is absent. Protocol fixtures, echo jobs, Linux file-policy tests and
+synthetic Windows paths do not replace it. Native Windows/macOS execution,
+live inference and remote CI/review of this implementation remain unverified.
+
 ### Client transport
 
 `Client.call` is generic over the domain contracts. The fake dispatch table
