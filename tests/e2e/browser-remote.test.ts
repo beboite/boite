@@ -135,6 +135,34 @@ test('a device the agent opens shows the same cover naming the machine, and Show
   await size(1280, 900);
 }, 60_000);
 
+test('with the live stream on in Experiments, Show plays the device as video on a canvas', async () => {
+  await page.click('[data-testid=nav-settings]');
+  await page.click('[data-testid=settings-tab-experiments]');
+  await page.waitFor(`document.querySelector('${id('device-stream-on')}')`);
+  expect(await page.evaluate<boolean>(`document.querySelector('${id('device-stream-on')}').checked`)).toBe(false);
+  await page.click(id('device-stream-on'));
+  await page.waitFor(`${store}.settings?.deviceStream === true`);
+  await page.evaluate(`document.querySelector('${id('device-stream-settings')}').scrollIntoView({ block: 'center' })`);
+  await capture('device-stream-settings-desktop.png');
+  await page.click('[data-testid=settings-back]');
+  await page.waitFor(`document.querySelector('[data-thread-id="t-trace"]')`);
+  for (const [width, height, name] of [[1280, 900, 'desktop'], [390, 844, 'phone']] as const) {
+    await size(width, height);
+    await page.evaluate(`${store}.client.call('devices.list', { threadId: 't-trace' }).then(list => ${store}.client.call('devices.open', { threadId: 't-trace', deviceId: list.devices.find(device => device.platform === 'android').id }))`);
+    await page.waitFor(`document.querySelector('${id('device-show')}')?.getBoundingClientRect().width > 0`, 15_000);
+    await page.click(id('device-show'));
+    // The fake core streams 72×160 H.264 frames; the browser's own VideoDecoder draws them.
+    await page.waitFor(`(() => { const canvas = document.querySelector('${id('device-stream')}'); return !!canvas && !canvas.hidden && canvas.width === 72 && canvas.height === 160; })()`, 15_000);
+    expect(await page.evaluate<number>(`document.querySelectorAll('${id('device-frame')}').length`)).toBe(0);
+    await Bun.sleep(500);
+    await capture(`device-stream-${name}.png`);
+    await page.click(id('device-hide'));
+    await page.waitFor(`document.querySelector('${id('device-cover')}')`);
+  }
+  await page.evaluate(`${store}.saveSettings({ deviceStream: false })`);
+  await size(1280, 900);
+}, 60_000);
+
 test('a phone chooses between chat and the agent browser without closing its pages or losing the draft', async () => {
   const origin = await page.evaluate<string>('location.origin');
   await size(390, 844);
