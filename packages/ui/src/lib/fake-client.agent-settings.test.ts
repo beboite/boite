@@ -90,6 +90,13 @@ test('fake bot creation cards: the core\'s refusals, a phone cannot create, and 
   const { questionId, create } = await client.call('agents.settings.create', { threadId, name: 'Scribe', domain: ` ${'d'.repeat(500)} `, effort: 'high', reason: 'Notes of every meeting' });
   // The thread's own route, the effort asked, full access as the Agents page gives.
   expect(create).toEqual({ name: 'Scribe', domain: 'd'.repeat(500), instructions: '', projectIds: [], selection: { providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: 'high', permissionMode: 'bypassPermissions' } });
+  // A thread on its provider's default model proposes the model marked default, not the first listed.
+  const { models } = await client.call('providers.probe', { providerId: 'claude', accountId: 'a-claude-main' });
+  const onDefault = await client.call('threads.create', { projectId: 'p-boite', providerId: 'claude', accountId: 'a-claude-main' });
+  await client.call('turns.start', { threadId: onDefault.id, prompt: 'hello' });
+  await client.settled();
+  expect(models[0]!.default).not.toBe(true);
+  expect((await client.call('agents.settings.create', { threadId: onDefault.id, name: 'Herald', reason: 'r' })).create.selection.model).toBe(models.find(model => model.default === true)!.id);
   await expect(client.call('agents.settings.create', { threadId, name: 'scribe', reason: 'again' })).rejects.toMatchObject({ data: { field: 'name' } });
   const phone = await createClient({ delayMs: 0, principal: 'session' });
   await expect(phone.call('agents.settings.apply', { threadId, questionId })).rejects.toMatchObject({ code: RpcErrorCode.Refused });

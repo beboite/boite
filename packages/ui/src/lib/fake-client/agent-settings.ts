@@ -123,8 +123,10 @@ type Handlers = { [M in AgentSettingMethod]: (params: RpcParams<M>) => RpcResult
 function createRoute(ctx: FakeContext, thread: Thread): AgentCreateContext['route'] {
   return (model, effort) => {
     try {
+      const models = modelsOf(ctx, thread.providerId, thread.accountId);
+      // A thread on its provider's default takes the model marked default, else the first, as the core does.
       const route = model === undefined
-        ? { providerId: thread.providerId, accountId: thread.accountId, model: thread.model ?? modelsOf(ctx, thread.providerId, thread.accountId)[0]?.id ?? null }
+        ? { providerId: thread.providerId, accountId: thread.accountId, model: thread.model ?? models.find(entry => entry.default === true)?.id ?? models[0]?.id ?? null }
         : pickModel(ctx, thread, CREATE_ROUTES, model, effort);
       if (route.model === null) return { ok: false, message: 'model: this thread runs on its provider\'s default model; name one with --model' };
       if (model === undefined && effort !== undefined && !(modelsOf(ctx, route.providerId, route.accountId).find(entry => entry.id === route.model)?.effort?.levels ?? []).some(level => level.id === effort)) {
