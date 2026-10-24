@@ -1,6 +1,7 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
   import CacheKeepaliveSettings from './CacheKeepaliveSettings.svelte';
+  import DeviceStreamSettings from './DeviceStreamSettings.svelte';
   import GoalTrackerSetting from './GoalTrackerSetting.svelte';
   import { untrack } from 'svelte';
   import { EXPERIMENT_IDS, readExperiments, setExperiment, type ExperimentId } from '../lib/experiments';
@@ -50,5 +51,5 @@
     {/each}
   </section>
 
-  {#if store}<CacheKeepaliveSettings {store} />{/if}
+  {#if store}<CacheKeepaliveSettings {store} /><DeviceStreamSettings {store} />{/if}
 </div>

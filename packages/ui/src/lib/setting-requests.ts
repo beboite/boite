@@ -121,6 +121,7 @@ export function settingsSectionLabel(section: string, providers: readonly Provid
     execution: settings.execution,
     origins: strings.machines.browserOrigins,
     'auto-compact': settings.autoCompact,
+    'device-stream': settings.deviceStream,
   };
   return labels[section] ?? null;
 }

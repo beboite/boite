@@ -117,6 +117,8 @@ export const strings = {
     cacheKeepaliveHours: 'For at most',
     cacheKeepaliveHoursHint: 'Counted from the end of the conversation\'s last turn. Pings also stop when the agents finish, when you write or stop, and after as many pings as one cache miss would cost.',
     cacheKeepaliveUnit: 'hours',
+    deviceStream: 'Live device stream',
+    deviceStreamHint: 'The Device panel plays an Android phone plugged into this machine as live video through scrcpy, and sends touches, drags, keys, any text and the clipboard through it. Agents\' taps and typing go through it too while the panel shows the phone. Off, the panel refreshes screenshots and drives the phone with adb input.',
     material: 'Window material',
     workspace: 'Workspace',
     startIn: 'The app opens on',
