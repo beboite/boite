@@ -10,6 +10,8 @@ test('fake bot delegation runs in its sole entrusted project and accepts an expl
   } });
   const { threadId } = await client.call('agents.open', { agentId: bot.id });
   await vi.waitFor(async () => expect((await client.call('threads.get', { threadId })).status).toBe('idle'));
+  expect((await client.call('threads.get', { threadId })).projectId).toBeNull();
+  await expect(client.call('threads.move', { threadId, projectId: 'p-boite' })).rejects.toThrow('cannot be moved');
   const spawn = (requestId: string, project?: string) => client.call('delegation.spawn', { threadId, task: 'Inspect project files', requestId, ...(project ? { project } : {}) });
   const child = await spawn('sole');
   expect(child.thread).toMatchObject({ parentThreadId: threadId, projectId: 'p-boite', cwd: 'C:\\src\\boite', branch: null });
