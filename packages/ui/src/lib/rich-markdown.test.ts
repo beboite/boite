@@ -83,4 +83,30 @@ describe('richMarkdown', () => {
     inside.setEndAfter(host.querySelector('p')!.lastChild!);
     expect(selectedSource(inside)).toBe('\\(E = mc^2\\) here.');
   });
+
+  test('the copy button copies a diagram on a page without the clipboard API', async () => {
+    const host = show('```mermaid\nflowchart LR\n  A --> B\n```');
+    const copy = await vi.waitFor(() => {
+      const found = host.querySelector<HTMLButtonElement>('[data-testid="diagram-copy"]');
+      if (!found) throw new Error('not drawn yet');
+      return found;
+    });
+    // Plain HTTP: no navigator.clipboard, only the copy command and the event it fires.
+    vi.stubGlobal('navigator', { ...navigator, clipboard: undefined });
+    const clipboard = new Map<string, string>();
+    document.execCommand = vi.fn(() => {
+      const event = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent;
+      Object.defineProperty(event, 'clipboardData', { value: { setData: (type: string, value: string) => clipboard.set(type, value) } });
+      host.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    try {
+      copy.click();
+      expect(clipboard.get('text/plain')).toBe('flowchart LR\n  A --> B');
+      expect(copy.textContent).toBe('Copied');
+    } finally {
+      vi.unstubAllGlobals();
+      Reflect.deleteProperty(document, 'execCommand');
+    }
+  });
 });

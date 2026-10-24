@@ -99,7 +99,10 @@ function drawDiagram(element: HTMLElement, enlarge: () => RichMarkdownOptions['o
   const copy = button(strings.common.copy, 'diagram-copy');
   const reset = (): void => { copy.textContent = strings.common.copy; };
   copy.addEventListener('click', () => {
-    navigator.clipboard.writeText(source).then(() => { copy.textContent = strings.chat.copied; }, reset);
+    const copied = (): void => { copy.textContent = strings.chat.copied; };
+    // A page served over plain HTTP, a phone on the LAN, has no clipboard API.
+    if (!navigator.clipboard) { if (copyByCommand(source)) copied(); return; }
+    navigator.clipboard.writeText(source).then(copied, () => { if (copyByCommand(source)) copied(); else reset(); });
   });
   copy.addEventListener('pointerleave', reset);
   copy.addEventListener('blur', reset);
@@ -180,6 +183,24 @@ export function viewerItem(figure: HTMLElement): MediaItem {
   svg.setAttribute('style', [...colors, svg.getAttribute('style') ?? '', background ? `background:${background}` : ''].filter(Boolean).join(';'));
   const blob = new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml' });
   return { src: URL.createObjectURL(blob), name: `${strings.chat.diagram.label}.svg`, mimeType: 'image/svg+xml', kind: 'image' };
+}
+
+/** Copies `text` the older way, which needs no secure page: a copy command whose event carries the text. */
+function copyByCommand(text: string): boolean {
+  const put = (event: ClipboardEvent): void => {
+    event.clipboardData?.setData('text/plain', text);
+    event.preventDefault();
+    // The Markdown node's own copy handler would put the selection back.
+    event.stopPropagation();
+  };
+  document.addEventListener('copy', put, { capture: true });
+  try {
+    return document.execCommand?.('copy') ?? false;
+  } catch {
+    return false;
+  } finally {
+    document.removeEventListener('copy', put, { capture: true });
+  }
 }
 
 const BLOCKS = new Set(['p', 'div', 'li', 'pre', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'tr', 'table', 'ul', 'ol', 'hr']);
