@@ -146,7 +146,8 @@ the request went through Funnel to this core; any other answer is
 `unreachable`. Tailscale usually publishes the name within minutes of turning
 Funnel on, and sometimes not until it is turned off and on again: still
 unpublished after 10 minutes, the core removes its mounts and puts them back
-once, then checks again. Checks run every 30 seconds until one goes through,
+once, then checks again; a repair that could not put them back is not counted
+and is tried again 10 minutes later. Checks run every 30 seconds until one goes through,
 for an hour at most. `contacts.get` gives the result as `funnel` (`checking`,
 `ready`, `unpublished`, `unreachable` or `unknown`, and `repaired`), null once
 the mounts are down. Under an Elsewhere link, the page says when the link is

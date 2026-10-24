@@ -84,8 +84,13 @@ export class ContactFunnel {
   private closing: Promise<void> | null = null;
   /** Where the internet stands with the mounts, kept after the checks stop and cleared when the mounts come down. */
   private health: ContactFunnelState | null = null;
-  /** The checks in progress: `since` is when the mounts last went up, `started` when checking began. */
-  private watched: { url: string; since: number; started: number; timer: ReturnType<typeof setTimeout> | null } | null = null;
+  /**
+   * The checks in progress: `since` is when the mounts last went up or a
+   * repair last failed, `started` when checking began. `broken` once a repair
+   * failed: its mounts may be down, so the next window tries again whatever
+   * the probe says.
+   */
+  private watched: { url: string; since: number; started: number; broken: boolean; timer: ReturnType<typeof setTimeout> | null } | null = null;
   private stopped = false;
   /** Called when `state()` changes. */
   changed: () => void = () => {};
@@ -181,7 +186,7 @@ export class ContactFunnel {
     if (this.stopped || !origin.startsWith('https:') || this.watched?.url === origin) return;
     this.unwatch();
     const now = Date.now();
-    this.watched = { url: origin, since: now, started: now, timer: null };
+    this.watched = { url: origin, since: now, started: now, broken: false, timer: null };
     this.health = { url: origin, status: 'checking', checkedAt: null, repaired: false };
     this.changed();
     this.schedule(0);
@@ -210,15 +215,20 @@ export class ContactFunnel {
     // The first route is the join, which answers a request naming no peer in its own words.
     try { status = await this.probe(watched.url, this.paths[0]!); } catch { status = 'unknown'; }
     if (this.watched !== watched || this.health === null) return;
-    if (status === 'unpublished' && !this.health.repaired && Date.now() - watched.since >= this.timing.repairAfterMs) {
-      const url = await this.repair() ?? this.health.url;
+    if ((status === 'unpublished' || watched.broken) && status !== 'ready' && !this.health.repaired && Date.now() - watched.since >= this.timing.repairAfterMs) {
+      const url = await this.repair();
       if (this.watched !== watched || this.health === null) return;
       watched.since = Date.now();
-      // Asked again from the next check: what the probe said was about the mounts before.
-      this.health = { url, status: 'checking', checkedAt: this.health.checkedAt, repaired: true };
-      this.changed();
-      this.schedule(this.timing.checkMs);
-      return;
+      if (url !== null) {
+        watched.broken = false;
+        // Asked again from the next check: what the probe said was about the mounts before.
+        this.health = { url, status: 'checking', checkedAt: this.health.checkedAt, repaired: true };
+        this.changed();
+        this.schedule(this.timing.checkMs);
+        return;
+      }
+      // Not repaired: the next window tries again, and the owner keeps seeing what the probe said.
+      watched.broken = true;
     }
     const moved = status !== this.health.status;
     this.health = { ...this.health, status, checkedAt: Date.now() };

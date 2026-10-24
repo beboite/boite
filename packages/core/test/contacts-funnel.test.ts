@@ -197,6 +197,31 @@ test('mounts public DNS does not learn go off and on again once, are checked unt
   expect(subject.state()).toBeNull();
 });
 
+test('a repair that cannot put the mounts back is not reported as one, and the next window tries again', async () => {
+  writeState({});
+  const failing = (error: string | null) => {
+    const state = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, unknown>;
+    if (error === null) delete state.funnelError; else state.funnelError = error;
+    writeFileSync(statePath, JSON.stringify(state));
+  };
+  // Mounts that are down are unreachable; once turned off and on again, public DNS knows them.
+  const turnedOff = () => calls().some(call => call.startsWith('serve') && call.endsWith('off'));
+  const subject = funnel(async () => proxies().length === 0 ? 'unreachable' : turnedOff() ? 'ready' : 'unpublished', { checkMs: 10, repairAfterMs: 300, giveUpMs: 60_000 });
+  await mounted(subject);
+  failing('Funnel is not available right now');
+  subject.watch(`https://${DNS}:8443`);
+  // The routes came off and could not go back: not repaired, and the probe says so.
+  await waitFor(() => subject.state()?.status === 'unreachable');
+  expect(subject.state()).toMatchObject({ repaired: false });
+  expect(proxies()).toEqual([]);
+  failing(null);
+  await waitFor(() => subject.state()?.status === 'ready');
+  expect(subject.state()).toMatchObject({ repaired: true });
+  expect(proxies()).toEqual(PATHS.map(path => `${target()}${path}`).sort());
+  subject.release();
+  await subject.settled();
+});
+
 test('the internet check reads public DNS, then needs the join route\'s own refusal from a public address', async () => {
   const answers = new Map<string, { status: number; body: string } | null>([
     ['192.0.2.1', null],
