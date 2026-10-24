@@ -147,6 +147,17 @@ test('a failed step stops what never launched, and a paused run still ends its r
   expect(done.status).toBe('done');
 });
 
+test('Mark done stops a paused run, as the core does', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0, delegationDemo: true });
+  const source = await client.call('threads.get', { threadId: 't-trace' });
+  const { id: threadId } = await client.call('threads.create', { projectId: source.projectId!, providerId: source.providerId, accountId: source.accountId, model: source.model ?? undefined });
+  const two = await client.call('workflows.start', { threadId, plan: { name: 'Two', steps: [{ id: 'a', task: 'Quick.' }, { id: 'b', task: 'Then {{a}}' }] }, requestId: 'two' });
+  await client.call('workflows.control', { threadId, runId: two.id, action: 'pause' });
+  await until(() => client.call('workflows.get', { threadId, runId: two.id }), value => value.nodes[0]!.status === 'done');
+  expect((await client.call('threads.archive', { threadId, onlyIfIdle: true })).archived).toBe(true);
+  expect((await client.call('workflows.get', { threadId, runId: two.id })).status).toBe('stopped');
+});
+
 test('an agent saves new templates but never replaces a saved one', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0, delegationDemo: true });
   const saved = await client.call('workflows.templates.save', { threadId: 't-trace', name: 'Lexer', plan });
