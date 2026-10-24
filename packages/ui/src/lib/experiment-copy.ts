@@ -8,6 +8,7 @@ import { strings } from './strings';
  */
 export function experimentCopy(): Record<ExperimentId, { title: string; hint: string }> {
   return {
+    'pinned-quotas': strings.experiments.pinnedQuotas,
     'recording-indicators': strings.experiments.recordingIndicators,
     'theme-grain': strings.experiments.themeGrain,
     'session-import': strings.experiments.sessionImport,

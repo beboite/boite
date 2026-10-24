@@ -13,6 +13,7 @@ export const parts = {
   Dictation: new LazyComponent(() => import('../components/Dictation.svelte')),
   DiffView: new LazyComponent(() => import('../components/DiffView.svelte')),
   QuotaOverview: new LazyComponent(() => import('../components/QuotaOverview.svelte')),
+  PinnedQuota: new LazyComponent(() => import('../components/PinnedQuota.svelte')),
   CoordinationPanel: new LazyComponent(() => import('../components/CoordinationPanel.svelte')),
   UpdatesNotice: new LazyComponent(() => import('../components/UpdatesNotice.svelte')),
   RobotFace: new LazyComponent(() => import('../components/agents/RobotFace.svelte'))

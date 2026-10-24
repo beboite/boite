@@ -3,6 +3,7 @@ import type { Translation } from '../../i18n.svelte';
 export const fr: Translation = {
 
   experiments: {
+    pinnedQuotas: { title: 'Quotas du modèle épinglés', hint: 'Épingler les limites du fournisseur du modèle dans un coin de la discussion ou sous la liste des conversations' },
     recordingIndicators: { title: 'Actions visibles dans les vidéos', hint: 'Ajouter des repères de clics et les touches de navigation aux enregistrements. Le texte saisi et les mots de passe ne sont jamais affichés comme libellés de touches.' },
     goal2: {
       title: 'Objectifs relus',
