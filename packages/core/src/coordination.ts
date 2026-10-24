@@ -301,7 +301,7 @@ export class Coordination {
     return local;
   }
   /** Only access permissions invalidate a pending lookup; pausing delivery does not revoke reads. */
-  private checkLookupAccess(threadId: string, remote: boolean): void {
+  checkLookupAccess(threadId: string, remote: boolean): void {
     const thread = this.core.threads.require(threadId);
     const config = this.config(threadId);
     if (thread.archived || config.mode === 'off' || (remote && !config.remote)) {

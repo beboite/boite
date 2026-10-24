@@ -51,9 +51,9 @@ export class ContactMailboxes {
     return JSON.stringify([group.id, group.cores.find(entry => entry.coreId === group.self)?.epoch, group.cores.find(entry => entry.coreId === coreId)?.epoch]);
   }
   private source(threadId: string, sending = false): AgentContact {
+    this.core.coordination.checkLookupAccess(threadId, true);
     const from = this.core.coordination.describe(threadId);
     const config = this.core.coordination.config(threadId);
-    if (!config.remote) throw refused('threadId: cross-machine coordination is disabled for this thread');
     if (sending && config.paused) throw refused('coordination paused by the owner');
     return from;
   }
