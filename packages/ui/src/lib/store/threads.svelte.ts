@@ -12,9 +12,8 @@ import type {
   ThreadSummary
 } from '@boite/contracts';
 import { ReadingCache, readingCacheBytes } from '../reading-cache';
-import type { ToolPart } from '../tool-groups';
 import { INITIAL_MESSAGE_PAGE, INITIAL_PAGE_BYTES, READING_PAGE_BYTES, forTransport } from '@boite/contracts';
-import { fullMessage } from './full-message';
+import { DeferredParts } from './deferred-parts';
 import { askPage, ThreadPreloads } from './thread-preload';
 import { lightPage, NewerPages, setMessagesAfter, type ReadingPosition } from './reading-pages.svelte';
 export type { ReadingPosition } from './reading-pages.svelte';
@@ -26,6 +25,7 @@ import { RpcErrorCode, threadActive } from '@boite/contracts';
 import { RpcFailure, wasDropped } from '../client';
 import { wasClosed } from '../rpc-error';
 import { strings } from '../strings';
+import { experimentOn } from '../experiments.svelte';
 import { archiveWhile, keepArchived, pinWhile } from './optimistic';
 
 /** What a rewind hands back to the composer: the removed message's content, and how the agent forgets it. */
@@ -69,10 +69,10 @@ export class Threads {
   /** What that newest run is opening, so an older one knows what to give back. */
   #openTarget: ThreadId | null = null;
   #olderGeneration = 0;
-  /** Refreshing this visit keeps disclosures; leaving it invalidates their pending fetches. */
-  #toolOutputVisit = 0;
+  /** The folded parts of this visit's messages, fetched when opened. */
+  readonly parts: DeferredParts;
 
-  constructor(private readonly ctx: StoreContext) { this.newer = new NewerPages(ctx); this.preloads = new ThreadPreloads(ctx, this); }
+  constructor(private readonly ctx: StoreContext) { this.newer = new NewerPages(ctx); this.preloads = new ThreadPreloads(ctx, this); this.parts = new DeferredParts(ctx, this); }
   get openTarget(): ThreadId | null { return this.#openTarget; }
 
   async capabilities(threadId: ThreadId) {
@@ -99,6 +99,20 @@ export class Threads {
     } catch (error) {
       if (this.ctx.currentClient(client, generation) && this.openThread?.id === threadId) this.ctx.fail(error);
     }
+  }
+
+  /**
+   * The ordinary thread the chat last showed: switching from the Agents page
+   * back to the thread list comes back to it rather than to the agent's thread.
+   */
+  lastChatThreadId: ThreadId | null = null;
+
+  /**
+   * Where a thread opens: a persistent agent's own thread on the Agents page,
+   * beside the agents list, every other one in the chat.
+   */
+  pageOf(thread: Pick<ThreadSummary, 'agentSessionId'>): 'chat' | 'agents' {
+    return thread.agentSessionId && experimentOn('resident-agents') ? 'agents' : 'chat';
   }
 
   invalidateNavigation(): number {
@@ -448,7 +462,7 @@ export class Threads {
     const s = this.ctx.store;
     const { delegation, workbench } = this.ctx;
     if (this.openThread?.id !== thread.id) {
-      this.#toolOutputVisit++;
+      this.parts.leave();
       this.rememberReadingThread();
       this.ctx.drafts.park();
       s.draft = null;
@@ -464,9 +478,10 @@ export class Threads {
     }
     this.openThread = thread;
     if (navigate) {
-      s.page = 'chat';
+      s.page = this.pageOf(thread);
       s.sidebarOpen = false;
       if (thread.projectId) this.ctx.projects.rememberProject(thread.projectId);
+      if (s.page === 'chat') this.lastChatThreadId = thread.id;
     }
     if (workbench.tracedThreadId !== thread.id) s.trace = [];
     else if (refreshTrace && s.traceWatched) void s.refreshTrace();
@@ -485,7 +500,7 @@ export class Threads {
     if (this.openThread?.id !== threadId) {
       const held = this.readingThreads.get(threadId);
       if (!row && !held) return;
-      this.#toolOutputVisit++;
+      this.parts.leave();
       this.rememberReadingThread();
       this.ctx.drafts.park();
       s.draft = null;
@@ -503,8 +518,9 @@ export class Threads {
       this.ctx.requests.keepRequestsOf(threadId);
     }
     if (navigate) {
-      s.page = 'chat';
+      s.page = this.openThread ? this.pageOf(this.openThread) : 'chat';
       s.sidebarOpen = false;
+      if (s.page === 'chat' && this.openThread) this.lastChatThreadId = this.openThread.id;
       const projectId = this.openThread?.projectId;
       if (projectId) this.ctx.projects.rememberProject(projectId);
     }
@@ -551,43 +567,9 @@ export class Threads {
     }
   }
 
-  readonly #toolOutputs = new Map<string, { client: NonNullable<StoreContext['client']>; generation: number; promise: Promise<void> }>();
-  /**
-   * Hydrate only a card the reader opened, shared by duplicate requests: its
-   * output, and on a core with `deferredToolParts` its input and documents.
-   */
-  loadToolOutput(threadId: ThreadId, messageId: MessageId, toolId: string): Promise<void> {
-    const key = JSON.stringify([threadId, messageId, toolId]);
-    const client = this.ctx.client;
-    if (!client) return Promise.reject(new Error(strings.connection.unavailable));
-    const generation = this.#toolOutputVisit;
-    const held = this.#toolOutputs.get(key);
-    if (held?.client === client && held.generation === generation) return held.promise;
-    const whole = this.ctx.store.core?.features?.deferredToolParts === true;
-    const read = whole
-      ? client.call('messages.toolPart', { threadId, messageId, toolId }).then(({ part }) => part as Partial<ToolPart>)
-      : client.call('messages.toolOutput', { threadId, messageId, toolId }).then(({ output }): Partial<ToolPart> => ({ output }));
-    const loading = read.catch(async (error): Promise<Partial<ToolPart> | null> => {
-      if (!(error instanceof RpcFailure) || error.code !== RpcErrorCode.MethodNotFound) throw error;
-      if (this.ctx.client !== client || generation !== this.#toolOutputVisit) return null;
-      const message = await fullMessage(client, this.threadSnapshots(threadId), threadId, messageId, () => this.ctx.client === client && generation === this.#toolOutputVisit);
-      const part = message?.parts.find(part => part.type === 'tool' && part.toolId === toolId);
-      if (part?.type !== 'tool') throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `tool ${toolId} is not a tool of message ${messageId}` });
-      return part;
-    }).then(full => {
-      if (!full || this.ctx.client !== client || generation !== this.#toolOutputVisit) return;
-      for (const message of this.messages(threadId, messageId)) {
-        for (const part of message.parts) {
-          if (part.type !== 'tool' || part.toolId !== toolId) continue;
-          if (part.outputDeferred && full.output !== undefined) { part.output = full.output; delete part.outputDeferred; }
-          if (part.inputDeferred && 'input' in full) { part.input = full.input; delete part.inputDeferred; }
-          if (part.documentsDeferred && full.documents !== undefined) { part.documents = full.documents; delete part.documentsDeferred; }
-        }
-      }
-    }).finally(() => { if (this.#toolOutputs.get(key)?.promise === loading) this.#toolOutputs.delete(key); });
-    this.#toolOutputs.set(key, { client, generation, promise: loading });
-    return loading;
-  }
+  /** Hydrate only a card the reader opened (`store/deferred-parts.ts`). */
+  loadToolOutput(threadId: ThreadId, messageId: MessageId, toolId: string): Promise<void> { return this.parts.toolOutput(threadId, messageId, toolId); }
+  loadMessageAttachment(threadId: ThreadId, messageId: string, partIndex: number): Promise<string> { return this.parts.attachment(threadId, messageId, partIndex); }
 
   async createThread(input: {
     projectId: ProjectId;
@@ -846,35 +828,6 @@ export class Threads {
 
   invalidateSync(threadId: ThreadId): void {
     for (const thread of this.threadSnapshots(threadId)) delete thread.messagesSync;
-  }
-
-  #attachments = new Map<string, { client: NonNullable<StoreContext['client']>; visit: number; promise: Promise<string> }>();
-
-  /** Share duplicate downloads and hydrate only the visit that requested the bytes. */
-  loadMessageAttachment(threadId: ThreadId, messageId: string, partIndex: number): Promise<string> {
-    const client = this.ctx.client;
-    if (!client) return Promise.reject(new Error(strings.connection.unavailable));
-    const visit = this.#toolOutputVisit, generation = this.ctx.clientGeneration;
-    const key = JSON.stringify([threadId, messageId, partIndex]);
-    const held = this.#attachments.get(key);
-    if (held?.client === client && held.visit === visit) return held.promise;
-    const promise = client.call('messages.attachment', { threadId, messageId, partIndex }).catch(async error => {
-      if (!(error instanceof RpcFailure) || error.code !== RpcErrorCode.MethodNotFound) throw error;
-      const message = await fullMessage(client, this.threadSnapshots(threadId), threadId, messageId, () => this.ctx.client === client && visit === this.#toolOutputVisit);
-      const part = message?.parts[partIndex];
-      if (part?.type !== 'file' && part?.type !== 'image') throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `part ${partIndex} is not an attachment of message ${messageId}` });
-      return { data: part.data };
-    }).then(({ data }) => {
-      if (this.ctx.currentClient(client, generation) && this.#toolOutputVisit === visit) {
-        for (const message of this.messages(threadId, messageId)) {
-          const part = message.parts[partIndex];
-          if ((part?.type === 'file' || part?.type === 'image') && part.dataDeferred) { part.data = data; delete part.dataDeferred; }
-        }
-      }
-      return data;
-    }).finally(() => { if (this.#attachments.get(key)?.promise === promise) this.#attachments.delete(key); });
-    this.#attachments.set(key, { client, visit, promise });
-    return promise;
   }
 
   upsertTurn(threadId: ThreadId, turn: Thread['turns'][number]): void {

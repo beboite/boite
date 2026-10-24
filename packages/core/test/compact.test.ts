@@ -22,7 +22,7 @@ test('coordination instructions never become native compaction arguments', async
     let done = client.next('turn.finished', t => t.threadId === threadId);
     await client.call('turns.start', { threadId, prompt: 'remember this' });
     await done;
-    expect(prompts[0]).toContain('boite agents');
+    expect(prompts[0]).toContain('boite threads send');
     done = client.next('turn.finished', t => t.threadId === threadId);
     await client.call('threads.compact', { threadId });
     await done;

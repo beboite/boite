@@ -64,10 +64,10 @@
 
 <style>
   .surface-switch { container-type: inline-size; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: var(--radius-md); background: var(--color-edge); }
-  /* A phone's menu holds Conversations and Agents already, with what waits: the switch would say it twice. */
+  /* A phone's menu holds Conversations and Bots already, with what waits: the switch would say it twice. */
   @media (max-width: 720px) { :global(.app:not(.shell)) .surface-switch { display: none; } }
   /* Each side grows from its own content, so "Conversations" and its count
-     keep their width beside a short "Agents" instead of an equal half each. */
+     keep their width beside a short "Bots" instead of an equal half each. */
   .view { flex: 1 1 auto; min-width: 0; padding-inline: 5px; color: var(--color-muted-foreground); }
   .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .chosen { background: var(--color-active); color: var(--color-foreground); }

@@ -12,7 +12,7 @@ user's DPAPI state, OAuth loopback callback or profile. Local cores are resident
 by default: quitting the shell leaves work running until an owner calls
 `core.shutdown`. Tests can set `BOITE_CORE_RESIDENT=0`; on Windows that mode
 keeps the shell's `KILL_ON_JOB_CLOSE` Job Object. Adopted and remote cores remain
-independent. [Persistent agents](agents.md) describes background work.
+independent. [Bots](bots.md) describes background work.
 
 The shell passes `--data-dir` and adopts a local core only when its PID is alive
 and `/health` reports the shell's version. Split JavaScript bundles must also
@@ -74,9 +74,9 @@ The [CLI](cli.md) uses the agent credential inside a thread.
 Project, settings, provider and account changes reach authenticated connections
 allowed to receive them. Message, permission, question, panel, process and
 activity events are scoped to subscribed threads as well as principal access.
-Questions from persistent agents' hidden session threads also reach owner and
-paired-device clients without a subscription, so their conversation cards stay
-current; the hidden transcript keeps its subscription boundary.
+Questions from bots' threads also reach owner and paired-device
+clients without a subscription, so an agent's row and desk see a card the user
+must answer.
 Subscribing does not prepare a provider session. A reconnect reads pending cards
 from `permissions.list`; an answered, ended or withdrawn request leaves the list
 and emits `permission.resolved`. Driver cancellation withdraws the card instead

@@ -4,8 +4,8 @@ import { parseJson, toTurn, type TurnRow } from './rows.ts';
 
 export function writeTurn(db: Database, turn: Turn): void {
   db.query(
-    `INSERT OR REPLACE INTO turns (id, thread_id, status, queued_at, started_at, finished_at, usage, error, execution, checkpoint, queue_hold, agent_totals)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO turns (id, thread_id, status, queued_at, started_at, finished_at, usage, error, execution, checkpoint, queue_hold, agent_totals, quiet)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     turn.id,
     turn.threadId,
@@ -19,6 +19,7 @@ export function writeTurn(db: Database, turn: Turn): void {
     turn.checkpoint ? JSON.stringify(turn.checkpoint) : null,
     turn.queueHold ? JSON.stringify(turn.queueHold) : null,
     turn.agentTotals ? JSON.stringify(turn.agentTotals) : null,
+    turn.quiet ? 1 : 0,
   );
 }
 

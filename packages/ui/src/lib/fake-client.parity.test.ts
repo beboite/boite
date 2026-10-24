@@ -164,3 +164,15 @@ test('an experimental provider is off until its owner turns it on, and a paired 
   const { loaded } = await client.call('providers.setEnabled', { providerId: 'opencode-v2', enabled: true });
   expect(loaded.find(provider => provider.id === 'opencode-v2')?.enabled).toBe(true);
 });
+
+test('an archived thread with no project reports archived before agent-session, as threads/capabilities.ts', async () => {
+  const { FakeContext } = await import('./fake-client/context');
+  const { seed } = await import('./fake-client/seed');
+  const { capabilityMethods } = await import('./fake-client/capabilities');
+  const ctx = new FakeContext({});
+  seed(ctx);
+  const thread = [...ctx.threads.values()][0]!;
+  Object.assign(thread, { projectId: null, agentSessionId: undefined, archived: true });
+  const capabilities = await capabilityMethods(ctx)['threads.capabilities']({ threadId: thread.id });
+  expect(capabilities.steering.reason).toBe('archived');
+});

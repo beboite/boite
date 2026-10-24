@@ -44,13 +44,13 @@ that ignore positioning shake the interface instead. Hits do not overlap.
 Reduced motion disables new throws and stops any visible rope.
 
 
-## Resident agents
+## Bots
 
-The Agents page ([agents](agents.md)) and every button that leads there: the
-Threads and Agents switch at the top of the sidebar, the phone menu entry, the command palette row and the link from an agent's
+The Bots page ([bots](bots.md)) and every button that leads there: the
+Threads and Bots switch at the top of the sidebar, the phone menu entry, the command palette row and the link from a bot's
 own thread. Turning
-the switch off closes the page if it is open. It hides the page only: agents
-already made keep their routines and missions on the core, which knows nothing
+the switch off closes the page if it is open. It hides the page only: bots
+already made keep their threads and routines on the core, which knows nothing
 of a client's experiments.
 
 ## Contacts
@@ -275,7 +275,7 @@ release elsewhere after a 400 ms grace, a scroll that takes over the finger
 (`pointercancel`), or a hold longer than eight seconds. A newer press releases
 the older one. Pressing the thread already on screen asks for nothing, and a
 subscription held by the open thread or the agents panel is never given back
-by a press. Settings and the Agents page load their code on the press.
+by a press. Settings and the Bots page load their code on the press.
 
 Elements opt in with `data-preload-thread="<thread id>"` or
 `data-preload-view="settings" | "agents"`; one capture listener on the window

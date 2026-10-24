@@ -23,7 +23,8 @@ export function capabilityMethods(ctx: FakeContext): Pick<FakeMethods, 'threads.
         threadId, providerId: thread.providerId, protocol, selectionVersion: thread.selectionVersion ?? 0,
         providerCapabilities: provider?.capabilities ?? null,
         runtimeReason: !provider ? 'provider-unavailable' : !providerEnabled(provider) ? 'provider-disabled' : !provider.available ? 'provider-unavailable' : !account || account.providerId !== thread.providerId || account.status === 'unauthenticated' ? 'account-unavailable' : null,
-        conversationReason: thread.agentSessionId || thread.projectId === null ? 'agent-session' : thread.archived ? 'archived' : null,
+        // A persistent agent's own thread takes the user's messages like any thread; only a projectless one of no agent has no conversation.
+        conversationReason: thread.archived ? 'archived' : !thread.agentSessionId && thread.projectId === null ? 'agent-session' : null,
         busy: threadActive(thread.status) || Boolean(running), steeringSupported, steeringReason,
         compactionReason: !thread.sessionId ? 'no-session' : protocol === 'acp' && !thread.commands.some(command => command.name === 'compact') ? 'no-command' : null,
         preparationSupported: protocol === 'claude-sdk' || protocol === 'codex-appserver',

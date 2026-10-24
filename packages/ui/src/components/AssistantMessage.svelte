@@ -26,6 +26,7 @@
   import KeepaliveMarker from './KeepaliveMarker.svelte';
   import ErrorCard from './ErrorCard.svelte';
   import { keepaliveRun } from '../lib/message-order';
+  import { AgentsView, agentOfThread } from '../lib/agents.svelte';
 
   /**
    * An assistant or system message in the timeline: the model that wrote it,
@@ -64,6 +65,8 @@
   }
 
   const execution = $derived(store.openThread?.turns.find((turn) => turn.id === message.turnId)?.execution);
+  /** The persistent agent whose own thread this is: its answers carry its name. */
+  const agentName = $derived(store.openThread?.id === threadId && store.openThread.agentSessionId ? agentOfThread(AgentsView.of(store).snapshot, threadId)?.name ?? null : null);
   /** Boite's ping of the prompt cache: one line in place of its message (`quietKeepalives`). */
   const ping = $derived(execution?.operation === 'keepalive' ? store.openThread?.turns.find((turn) => turn.id === message.turnId) : undefined);
   const compacting = $derived(execution?.operation === 'compact' ||
@@ -87,9 +90,9 @@
 
 {#if showModel && message.role === 'assistant' && execution}
   {@const model = store.modelsOf(execution.providerId, execution.accountId).find((model) => model.id === execution.model)}
-  <div class="model-attribution" data-testid="message-model">
-    {execution.model && isNamedModel(model ?? { id: execution.model, name: execution.model }) ? model?.name ?? execution.model : providerName(store, execution.providerId)}
-  </div>
+  {@const engine = execution.model && isNamedModel(model ?? { id: execution.model, name: execution.model }) ? model?.name ?? execution.model : providerName(store, execution.providerId)}
+  <!-- A persistent agent's answers are signed with its name; the model it ran on is the tooltip. -->
+  <div class="model-attribution" data-testid="message-model" title={agentName ? engine : undefined}>{agentName ?? engine}</div>
 {/if}
 {#if ping}
   {#if from === 0}<KeepaliveMarker turn={ping} count={keepaliveRun(store.openThread?.turns ?? [], ping.id)} />{/if}

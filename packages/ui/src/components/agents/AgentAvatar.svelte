@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Target, Users } from '@lucide/svelte';
   import type { AgentProfile } from '@boite/contracts';
-  import { avatarText, robotOf, tintOf } from '../../lib/robots';
+  import { avatarText, robotColor, robotOf, tintOf } from '../../lib/robots';
   import { threadTone } from '../../lib/thread-state';
   import StatusMark from '../StatusMark.svelte';
   import Deferred, { parts } from '../Deferred.svelte';
@@ -10,9 +10,11 @@
    * An agent's picture: its robot, or the emoji or letters it chose instead,
    * on a disc. A group stacks two of its members, a mission shows a target.
    * The robot's face says whether it works or waits; the dot says it too, for
-   * a picture too small to read a face, and for text avatars.
+   * a picture too small to read a face, and for text avatars. `ring` draws a
+   * thin ring in the robot's own colour around the disc, the one place that
+   * colour reaches beyond the robot: it pulses while the agent works.
    */
-  let { kind, id, name, avatar = '', members = [], status = 'idle', size = 40 }: {
+  let { kind, id, name, avatar = '', members = [], status = 'idle', size = 40, ring = false }: {
     kind: 'profile' | 'group' | 'team' | 'mission';
     id: string;
     name: string;
@@ -20,11 +22,14 @@
     members?: Pick<AgentProfile, 'id' | 'name' | 'avatar'>[];
     status?: string;
     size?: number;
+    ring?: boolean;
   } = $props();
 
   const grouped = $derived(kind === 'group' || kind === 'team');
   const robot = $derived(kind === 'profile' ? robotOf(id, avatar) : null);
   const face = $derived(status === 'running' ? 'working' : status === 'waiting' ? 'waiting' : 'idle');
+  /** The ring's colour: the robot's body, else the disc's tint. */
+  const ringTint = $derived(robot ? robotColor(robot) : tintOf(id));
 </script>
 
 {#snippet picture(member: Pick<AgentProfile, 'id' | 'name' | 'avatar'>, state: 'idle' | 'working' | 'waiting' | 'still')}
@@ -32,7 +37,7 @@
   {#if own}<Deferred part={parts.RobotFace} quiet>{#snippet children(RobotFace)}<RobotFace robot={own} {state} />{/snippet}</Deferred>{:else}<span class="ui-label">{avatarText(member.name, member.avatar)}</span>{/if}
 {/snippet}
 
-<span class="agent-avatar" class:robot={!!robot} data-kind={kind} style:--size="{size}px" style:--tint={kind === 'mission' ? null : tintOf(id)} aria-hidden="true">
+<span class="agent-avatar" class:robot={!!robot} data-kind={kind} data-ring={ring ? face : null} style:--size="{size}px" style:--tint={kind === 'mission' ? null : tintOf(id)} style:--ring-tint={ring ? ringTint : null} aria-hidden="true">
   {#if grouped && members.length >= 2}
     {#each members.slice(0, 2) as member, slot (member.id)}
       <span class="agent-avatar-stack" class:robot={!!robotOf(member.id, member.avatar)} data-slot={slot} style:--tint={tintOf(member.id)}>{@render picture(member, 'still')}</span>
@@ -62,4 +67,10 @@
   .agent-avatar-stack[data-slot='1'] { right: 0; bottom: 0; }
   /* The status mark only while it works or waits, at most a third of a small picture. */
   .agent-avatar { --mark-size: clamp(6px, calc(var(--size) * 0.24), 9px); }
+  /* The ring: a hairline in the robot's colour just outside the disc, breathing while it works, still while it waits or rests. */
+  .agent-avatar[data-ring]::before { content: ''; position: absolute; inset: -3px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--ring-tint) 55%, transparent); pointer-events: none; transition: border-color var(--dur-3) var(--ease-out-quint); }
+  .agent-avatar[data-ring='working']::before { border-color: var(--ring-tint); animation: pulse 1.6s var(--loop-ease-in-out-48) infinite var(--loops); }
+  .agent-avatar[data-ring='waiting']::before { border-color: color-mix(in srgb, var(--ring-tint) 80%, transparent); }
+  @media (prefers-reduced-motion: reduce) { .agent-avatar[data-ring='working']::before { animation: none; } }
+  :global(html[data-motion='reduced']) .agent-avatar[data-ring='working']::before { animation: none; }
 </style>

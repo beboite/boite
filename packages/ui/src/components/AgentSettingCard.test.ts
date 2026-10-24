@@ -26,7 +26,7 @@ async function setup(): Promise<{ client: FakeClient; store: Store; agent: Agent
   store.attach(client);
   await store.connect();
   await store.open('t-trace');
-  const agent = await client.call('agents.profile.save', { value: { name: 'Mira', domain: '', instructions: '', avatar: '', status: 'active', tools: [], projectIds: [],
+  const agent = await client.call('agents.profile.save', { value: { name: 'Mira', domain: '', instructions: '', avatar: '', status: 'active', projectIds: [],
     selection: { providerId: 'claude', accountId: 'a-claude-main', model: null, effort: null, permissionMode: 'default' } } });
   return { client, store, agent };
 }
@@ -96,17 +96,17 @@ test('unticking one of two projects applies the rest; the card reads changed and
 test('Apply as proposed reads applied; Refuse reads refused and leaves the agent alone', async () => {
   const { client, store, agent } = await setup();
   try {
-    const first = await client.call('agents.settings.request', { threadId: 't-trace', agent: agent.id, key: 'maxRunMinutes', value: 30, reason: 'Builds take longer' });
+    const first = await client.call('agents.settings.request', { threadId: 't-trace', agent: agent.id, key: 'subagents', value: false, reason: 'One task at a time' });
     card(store, await asked(store, first.questionId));
-    expect(query('[data-testid=agent-setting-previous]').textContent).toBe('10 min');
-    expect(query('[data-testid=agent-setting-proposed]').textContent).toBe('30 min');
+    expect(query('[data-testid=agent-setting-previous]').textContent).toBe('On');
+    expect(query('[data-testid=agent-setting-proposed]').textContent).toBe('Off');
     query<HTMLButtonElement>('[data-testid=agent-setting-apply]').click();
     await vi.waitFor(() => expect(store.pendingQuestions.some((question) => question.id === first.questionId)).toBe(false));
-    expect((await client.call('agents.runtime.get', { agentId: agent.id })).maxRunMinutes).toBe(30);
+    expect((await client.call('agents.runtime.get', { agentId: agent.id })).subagents.enabled).toBe(false);
     await verdictRow(store, first.questionId);
     expect(query('[data-testid=agent-setting-card]').getAttribute('data-outcome')).toBe('applied');
     expect(query('[data-testid=agent-setting-verdict]').textContent).toBe('Applied');
-    expect(query('[data-testid=agent-setting-subject]').textContent).toBe('Mira · Maximum minutes per execution: 30 min');
+    expect(query('[data-testid=agent-setting-subject]').textContent).toBe('Mira · Subagents: Off');
 
     await unmount(mounted!);
     const second = await client.call('agents.settings.request', { threadId: 't-trace', agent: agent.id, key: 'autoMemory', value: false, reason: 'The notes are noise' });

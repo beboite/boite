@@ -33,8 +33,8 @@ export interface Parsed {
   skip: boolean;
   /** `settings request|open --why <text>`: the reason the card shows the user. */
   why?: string;
-  /** `settings agent --agent <name>`: the agent, by name or id; omitted, the one whose conversation this is. */
-  agent?: string;
+  /** `settings bot --bot <name>`: the bot, by name or id; omitted, the one whose conversation this is. */
+  bot?: string;
   /** Another core's address; its token comes from BOITE_TOKEN, never the command line. */
   core?: string;
   /** `--context`, `--keep`, `--drop`, `--tools`, `--rules`, `--rules-file`, as typed: `contextRequest` reads them. */
@@ -80,7 +80,8 @@ export function parse(argv: string[]): Parsed {
     else if (arg === '--name') parsed.name = next();
     else if (arg === '--project') parsed.project = next();
     else if (arg === '--why') parsed.why = next();
-    else if (arg === '--agent') parsed.agent = next();
+    // `--agent` is the old spelling, still read.
+    else if (arg === '--bot' || arg === '--agent') parsed.bot = next();
     else if (arg === '--core') parsed.core = next();
     else if (arg === '--limit') {
       const value = number(arg, next());
@@ -111,7 +112,21 @@ export function parse(argv: string[]): Parsed {
     else if (arg.startsWith('--')) throw new Usage(`unknown flag ${arg}`);
     else parsed.positional.push(arg);
   }
+  parsed.positional = canonicalCommand(parsed.positional);
   return parsed;
+}
+
+/**
+ * The old spellings as the commands they became: `agent <x>` is `bot <x>`,
+ * `agents <x>` is `threads <x>` and `settings agent` is `settings bot`.
+ * Bots' brains and the user's notes still name them; help shows only the new.
+ */
+export function canonicalCommand(positional: string[]): string[] {
+  const [command, action] = positional;
+  if (command === 'agent') return ['bot', ...positional.slice(1)];
+  if (command === 'agents') return ['threads', ...positional.slice(1)];
+  if (command === 'settings' && action === 'agent') return ['settings', 'bot', ...positional.slice(2)];
+  return positional;
 }
 
 

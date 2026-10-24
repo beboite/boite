@@ -14,6 +14,7 @@ import { checkTailnetName } from './contacts/invite.ts';
 import { pack, SEALED } from './group/seal.ts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unavailable } from './errors.ts';
+import { isAgentHeld } from './agents/runtime.ts';
 
 const HOUR = 3_600_000;
 /** How long a delivered, expired, rejected or uncertain letter stays in the journal. */
@@ -174,8 +175,8 @@ export class Coordination {
   config(threadId: string): CoordinationConfig {
     const saved = this.core.journal.getSetting(`coordination:${threadId}`) as CoordinationConfig | undefined;
     if (saved) return saved;
-    // Persistent identities have their own group and mission permissions.
-    if (this.core.journal.getThread(threadId)?.agentSessionId) return { ...defaultCoordinationConfig(), mode: 'off', remote: false };
+    // A bot's thread starts on like any other: it finds, reads and messages threads without the owner turning it on,
+    // and still reaches the threads of its projects as theirs (`resident` letters) whatever this says.
     return defaultCoordinationConfig();
   }
   private saveConfig(threadId: string, config: CoordinationConfig): void {
@@ -184,7 +185,6 @@ export class Coordination {
   }
   configure(threadId: string, config: CoordinationConfig): CoordinationView {
     const thread = this.core.threads.require(threadId);
-    if (thread.agentSessionId) throw refused('persistent agent sessions collaborate through their group or mission');
     if (thread.archived) throw refused('coordination requires an unarchived thread');
     if (!config || !['off', 'brief', 'team'].includes(config.mode) || typeof config.resources !== 'string' || config.resources.length > 500 || typeof config.remote !== 'boolean' || typeof config.paused !== 'boolean') throw invalidParams('config: expected mode off/brief/team, resources up to 500 characters, remote and paused booleans');
     // The owner's own choice, pause included, is never lifted by a later message.
@@ -395,7 +395,7 @@ export class Coordination {
     if (this.core.threads.require(threadId).archived || (config.mode === 'off' && !resident)) throw refused('coordination is disabled for this thread');
     if (to.coreId === this.self('').coreId) {
       const contact = (resident ? this.contact(to.threadId, true) : undefined) ?? this.localReach(threadId).find(a => same(a, to)) ?? (to.threadId === threadId ? this.contact(threadId) : undefined);
-      if (!contact) throw refused(`target: ${to.threadId} is not a contact this thread may reach; see boite agents list`);
+      if (!contact) throw refused(`target: ${to.threadId} is not a contact this thread may reach; see boite threads`);
       return { contact, ...transcript(this.core.journal.db, to.threadId, limit, before, id => this.core.journal.streamingMessage(id)) };
     }
     const peer = this.trusted().find(p => p.coreId === to.coreId);
@@ -515,7 +515,7 @@ export class Coordination {
     if (letter.to.coreId !== this.self('').coreId) throw refused('message belongs to another core');
     // Only this core marks a letter as a persistent agent's, and only while the project is entrusted to it. A remote origin is never believed.
     const resident = !peer && this.core.workforce.projects.over(letter.from.threadId, letter.to.threadId) !== null;
-    if (!peer && letter.origin === 'resident' && !resident) throw refused('the project is no longer entrusted to this agent');
+    if (!peer && letter.origin === 'resident' && !resident) throw refused('the project is no longer entrusted to this bot');
     // A contact reaches the projects opened to it and the threads that wrote to it, nothing else: an unknown thread reads the same.
     const contact = peer ? this.core.contacts.find(peer.coreId) : undefined;
     if (contact && !this.core.contacts.mayReach(contact.coreId, letter.to.threadId)) throw refused('letter.to: not a thread of a project opened to you');
@@ -566,7 +566,7 @@ export class Coordination {
   /** Letters an agent wrote to threads it no longer looks after go nowhere. */
   residentRevoked(agentThreadId: string): void {
     const pending = this.rows("status IN ('queued', 'received') AND json_extract(data, '$.origin') = 'resident'").map(row => JSON.parse(row.data) as AgentLetter);
-    for (const letter of pending.filter(l => l.from.threadId === agentThreadId && this.core.workforce.projects.over(agentThreadId, l.to.threadId) === null)) this.update(letter, 'rejected', 'The project is no longer entrusted to this agent');
+    for (const letter of pending.filter(l => l.from.threadId === agentThreadId && this.core.workforce.projects.over(agentThreadId, l.to.threadId) === null)) this.update(letter, 'rejected', 'The project is no longer entrusted to this bot');
   }
 
   /**
@@ -579,7 +579,7 @@ export class Coordination {
     if (!thread || thread.archived) return;
     const list = threads.slice(0, 20).map(entry => `${JSON.stringify(entry.title)} (${entry.machine.replace(/\s+/g, '-')}/${entry.threadId}${entry.status === 'idle' ? '' : `, ${entry.status}`})`);
     const body = request.status === 'accepted'
-      ? `${name} opened its project ${JSON.stringify(request.project?.name ?? '')} to you. ${list.length ? `Its agents: ${list.join('; ')}.` : 'No agent of it can be reached yet.'} Write to one with boite agents send <contact>/<thread-id> <text>; boite agents list shows them.`
+      ? `${name} opened its project ${JSON.stringify(request.project?.name ?? '')} to you. ${list.length ? `Its threads: ${list.join('; ')}.` : 'No thread of it can be reached yet.'} Write to one with boite threads send <contact>/<thread-id> <text>; boite threads shows them.`
       : `${name} refused your request: ${request.reason ?? 'no reason given'}`;
     const now = Date.now();
     const from: AgentContact = { coreId: request.coreId, threadId: request.id, title: `Answer to your request to ${name}`.slice(0, 200), machine: name, resources: '', status: 'idle', mode: 'brief' };
@@ -715,6 +715,8 @@ export class Coordination {
         })();
       }
     } catch (error) {
+      // A persistent agent that is paused or out of budget: its letters wait in the inbox for it.
+      if (isAgentHeld(error)) { this.core.agentRuntime.whenAdmitted(threadId, 'coordination', () => this.kick(threadId)); return; }
       if (!this.closed && !this.core.journal.isClosed()) {
         this.pause(threadId, 'failure'); this.core.log('warn', `coordination ${threadId}: ${messageOf(error)}`);
       }

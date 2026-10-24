@@ -86,8 +86,8 @@ export class AutoCompaction {
   /** Why this thread is not compacted now, or null. */
   private refusal(thread: ThreadSummary, rule: AutoCompact): string | null {
     if (thread.archived) return 'archived';
-    // A resident agent compacts by its own `compactAfterTurns`; a delegated one answers its parent and ends.
-    if (thread.agentSessionId || thread.parentThreadId) return 'not a conversation of the user';
+    // A delegated agent answers its parent and ends.
+    if (thread.parentThreadId) return 'not a conversation of the user';
     if (rule.tokens !== null && (thread.context ?? null) === null) return 'no context reading';
     if (rule.tokens !== null && thread.context!.tokens < rule.tokens) return 'below the threshold';
     return this.threads.compactRefusal(thread);

@@ -358,7 +358,11 @@ export class ThreadCards {
     input: unknown,
     description: string | null,
   ): PermissionTicket {
-    if (this.core.workforce.resident.isCompacting(thread.id)) return Object.assign(Promise.resolve('deny' as const), { requestId: newId('req_'), withdraw: () => undefined });
+    // A thread that must run no tool (a memory pass, `TOOL_FREE_CONTEXT`) gets none, whatever its driver let through.
+    if (thread.contextMode?.tools?.length === 0) {
+      this.core.logs.info(`Permission for ${toolName} denied: this conversation runs no tool`, { source: 'permissions', event: 'permission.denied', threadId: thread.id, turnId: turn.id, data: { tool: toolName } });
+      return Object.assign(Promise.resolve('deny' as const), { requestId: newId('req_'), withdraw: () => undefined });
+    }
     const request: PermissionRequest = {
       id: newId('req_'),
       threadId: thread.id,

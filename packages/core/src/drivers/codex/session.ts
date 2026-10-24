@@ -31,6 +31,7 @@ import {
   COMMAND_TOOL_NAME,
   EXIT_GRACE_MS,
   FILE_CHANGE_TOOL_NAME,
+  contextArgs,
   MODE_POLICY,
   LIVE_TURN_SETTINGS,
   NO_NATIVE_SUBAGENTS,
@@ -340,7 +341,8 @@ export class CodexSession {
 
     const policy = MODE_POLICY[ctx.thread.permissionMode];
     const model = modelOf(ctx);
-    const config = await threadConfig(rpc, ctx.thread.cwd, (level, message) => ctx.log(level, message));
+    // A context mode without MCP turns the user's servers off by name.
+    const config = await threadConfig(rpc, ctx.thread.cwd, (level, message) => ctx.log(level, message), ctx.thread.contextMode?.mcp === false);
     if (ctx.sessionId !== null) {
       const resumed = await resumeThread(rpc, ctx, {
         threadId: ctx.sessionId,
@@ -409,8 +411,9 @@ export class CodexSession {
 
   private spawn(ctx: SessionContext, executable: string, args: string[]): CodexRpc {
     args = subscriptionProxyCodexArgs(args, ctx.accountEnv);
-    if (ctx.thread.permissionMode === 'yolo') args = [...args, '--config', 'features.hooks=false'];
-    args = [...args, ...NO_NATIVE_SUBAGENTS, ...LIVE_TURN_SETTINGS];
+    const context = contextArgs(ctx.thread.contextMode);
+    if (ctx.thread.permissionMode === 'yolo' && !context.includes('features.hooks=false')) args = [...args, '--config', 'features.hooks=false'];
+    args = [...args, ...context, ...NO_NATIVE_SUBAGENTS, ...LIVE_TURN_SETTINGS];
     const child = ctx.spawnChild(executable, args, {
       startup: true,
       cwd: ctx.thread.cwd,

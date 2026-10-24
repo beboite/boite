@@ -274,22 +274,50 @@ This measures local history lookup and title persistence, not provider latency.
 
 ## Persistent-agent history
 
-`bun run bench/agents-snapshot.ts [steps]` records finished work, its run with
-20 KB of frozen instructions, a message and a memory per step, plus a session
-every ten steps, on a temporary core. It then reads `agents.snapshot` over RPC
-and looks up one live session among the recorded ones, six samples each after a
-warm-up. On 2026-09-24, at 2,000 steps:
+`bun run bench/agents-snapshot.ts [steps]` gives one agent's thread a finished
+turn per step (prompt and answer, a third of them routine wakes, one in six
+quiet, each with its cost) and leaves a 20 KB work row of the older agent model
+per step in `agent_entities`, on a temporary core. It then reads
+`agents.snapshot` over RPC and looks up the agent of its thread, six samples
+each after a warm-up. On 2026-10-23, at 2,000 steps, on Linux:
+snapshot 1,018 bytes, median 8.15 ms, and 2.39 ms once the last answer walks
+the thread's own index (below); thread lookup median 0.010 ms. The
+snapshot no longer carries history: the conversation is the thread's, paged
+like any thread, and the status (today's turns and spend, the last answer)
+reads the turns table with SQL instead of loading the thread.
 
-| | main (11631eb) | bounded snapshot |
+The older model measured, on 2026-09-24 at 2,000 steps, 43.0 MB and 351.78 ms
+on main `11631eb` and 121 KB and 3.66 ms with a bounded snapshot of messages,
+memories and work.
+
+### Ten agents at weeks of scale
+
+`bun run bench/agents-load.ts [turns-per-agent]` gives 10 agents 5,000 turns
+each, a desk of 100 watched threads (a third with a linked pull request), 10
+routines each and 20,000 rows of the older agent model, then counts the SQL
+statements each step runs by wrapping `db.query`. On 2026-10-23, on this Linux
+LXC, before and after the desk and status reads were batched:
+
+| Step | Before | After |
 | --- | --- | --- |
-| Snapshot JSON | 43.0 MB | 121 KB |
-| Snapshot median | 351.78 ms | 3.66 ms |
-| Session lookup median | 0.238 ms | 0.021 ms |
+| `agents.snapshot` over RPC | 407 ms, 4,106 statements | 29 ms, 96 statements |
+| One agent's own snapshot | 71 ms, 415 statements | 3.0 ms, 14 statements |
+| Context block, turn that sends nothing | 7.0 ms, 298 statements | 0.8 ms, 7 statements |
+| Context block, fresh session (5.7 KB) | 7.8 ms, 296 statements | 2.0 ms, 9 statements |
+| Stall check, every 10 s | 13.5 ms, 1,000 statements | 0.13 ms, 1 statement |
+| `turn.finished` of a thread in an entrusted project | 3.4 ms, 35 statements | 1.1 ms, 15 statements |
+| Idle core with 10 agents | 86 statements/s | 3.2 statements/s, as with none |
 
-The snapshot carries the newest 50 messages, memories and finished work, all
-unfinished work, and runs without their instructions. At 500 and 8,000 steps it
-measured 86 KB and 260 KB; the difference is the session list, which grows with
-contexts rather than with history. Main measured 10.8 MB at 500 steps.
+The snapshot stays 353 KB at this scale: every agent's desk rides in it. The
+batching: a desk's threads are one `listThreadsIn`, their linked pull requests
+one `settings` read, the stall check one read of the threads at work, the
+context block reads the desk only when it goes out, the last answer walks
+`turns_by_thread` (SQLite picked `turns_by_status` and read every done turn of
+every thread, 31 ms per agent), today's sums go through `turns_by_thread_queue`
+and are kept per thread until a turn or row of that thread changes.
+`agents.changed` goes out once a second while an agent works (6 in 6.1 s of 20
+parts a second). The 500 ms agents tick costs 5 µs and no statement when
+nothing is due.
 
 ## Local and remote connections
 
@@ -680,13 +708,13 @@ them in its cache. A link that asks to save data, or reads as 3G or slower,
 skips that prefetch and fetches each one when it opens (`lib/prefetch.ts`). The
 tour is prefetched only for a device that has not seen it.
 
-Settings, the Agents page with its first snapshot (behind its experiment) and,
+Settings, the Bots page with its first snapshot (behind its experiment) and,
 for the owner, the terminal's xterm modules are fetched in the same idle pass.
-The Agents view lives as long as its machine's store: a return visit draws the
+The Bots view lives as long as its machine's store: a return visit draws the
 last snapshot at once and refreshes it, and nothing follows `agents.changed`
 while the page is away. `bun run bench/agents-page.ts` measures a click on
-Agents until its first conversation row, behind an emulated 40 ms, 4 Mbit/s
-link, on a temporary core with twelve agents. On 2026-10-11 in this Linux
+Bots until its first bot row, behind an emulated 40 ms, 4 Mbit/s
+link, on a temporary core with twelve bots. On 2026-10-11 in this Linux
 container, medians of five against `origin/main` at `4762402b`: first visit
 164 ms before and 110 ms after, return visit 55 ms and 32 ms. The rest of a
 first visit is rendering.

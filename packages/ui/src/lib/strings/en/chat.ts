@@ -107,6 +107,20 @@ export const strings = {
     moveExplained: 'Move explained to the agent',
     moveShow: 'Show what the agent was told',
     moveHide: 'Hide what the agent was told',
+    wake: { routine: 'Routine', event: 'Woken up' },
+    wakeShow: 'Show what the bot read',
+    wakeHide: 'Hide what the bot read',
+    /** A bot's finished turn: its steps folded above its answer, or a wake that had nothing for the user. */
+    fold: {
+      worked: 'Worked {time}', workedBare: 'Worked',
+      stepOne: '1 step', stepMany: '{count} steps',
+      seconds: '{count} s', minutes: '{count} min', hours: '{hours} h {minutes} min',
+      quiet: 'Nothing to report',
+      showSteps: 'Show the steps', hideSteps: 'Hide the steps',
+      showTurn: 'Show the whole turn', hideTurn: 'Fold this turn',
+      memory: { running: 'Updating its memory', done: 'Memory updated', unchanged: 'Memory checked, nothing to change', error: 'Memory update failed' },
+      memoryOpen: 'See its memory on the desk',
+    },
     /** At the foot of a thread the user moved: the note rides on the next prompt, not sent yet. */
     movePending: 'Moved to {project} · the agent will be told with your next message',
     movePendingShow: 'Show what the agent will be told',

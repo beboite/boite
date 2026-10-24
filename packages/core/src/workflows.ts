@@ -9,6 +9,7 @@ import type {
 } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
+import { isAgentHeld } from './agents/runtime.ts';
 import { checkContext } from './context-mode.ts';
 import { newId } from './ids.ts';
 import { assertDriverRunnable } from './drivers/index.ts';
@@ -221,7 +222,6 @@ export class Workflows {
     const root = this.core.threads.require(params.threadId);
     if (root.parentThreadId) throw refused('a workflow step or delegated agent cannot start a workflow; ask its parent');
     if (root.archived) throw refused('cannot start a workflow on an archived thread');
-    if (this.core.workforce.resident.isCompacting(root.id)) throw refused('compaction cannot start a workflow');
     const fingerprint = hash([params.plan, params.templateId ?? null]);
     const existing = this.request(root.id, params.requestId, fingerprint);
     if (existing) return this.view(existing);
@@ -667,6 +667,8 @@ export class Workflows {
     } catch (error) {
       // Said on the run, so the panel shows why the summary is held rather than waiting in silence.
       const reason = messageOf(error);
+      // A persistent agent that is paused or out of budget gets the summary once it may run.
+      if (isAgentHeld(error)) this.core.agentRuntime.whenAdmitted(root.id, `workflow:${run.id}`, () => this.deliver(run.id));
       this.core.log('warn', `workflow ${run.id} result not delivered: ${reason}`);
       this.mutate(run.id, current => current.deliveryError === reason ? false : void (current.deliveryError = reason));
     }
@@ -682,21 +684,14 @@ export class Workflows {
       this.handTo(root, notice.prompt, notice.display);
       this.mutate(run.id, current => { current.failuresNoticed = [...current.failuresNoticed ?? [], ...notice.keys]; });
     } catch (error) {
+      if (isAgentHeld(error)) this.core.agentRuntime.whenAdmitted(root.id, `workflow-failures:${run.id}`, () => this.noticeFailures(run.id));
       this.core.log('warn', `workflow ${run.id} failure not told to ${root.id}: ${messageOf(error)}`);
     }
   }
 
-  /** One turn of the root carrying a prompt: a persistent agent's queued work, or a thread's turn. */
+  /** One turn of the root carrying a prompt, on a persistent agent's thread as on any other. */
   private handTo(root: ThreadSummary, prompt: string, display: string): void {
-    if (root.agentSessionId) {
-      const session = this.core.workforce.session(root.id);
-      this.core.workforce.records.transaction(() => {
-        this.core.delegation.reserveTurn(root.id, 'delegation');
-        // The team's current episode: a new one waits until every subagent of the root is idle.
-        this.core.workforce.resident.enqueue(session.agentId, prompt, session.scope, this.core.journal.getSetting(`delegation-episode:${root.id}`) as string | undefined);
-      });
-      this.core.workforce.changed();
-    } else this.core.threads.startTurn(root.id, prompt, [], undefined, 'delegation', undefined, undefined, display);
+    this.core.threads.startTurn(root.id, prompt, [], undefined, 'delegation', undefined, undefined, display);
   }
 
   /** A held summary goes again once the owner resumes the team. */

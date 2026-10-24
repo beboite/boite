@@ -36,6 +36,7 @@
     store,
     key,
     target = null,
+    bot = null,
     provider,
     canSend,
     answering = false,
@@ -52,6 +53,8 @@
     /** The open thread's id, or the draft's stash key. */
     key: string;
     target?: ComposerTarget | null;
+    /** The persistent agent this box writes to, by name: its model, effort and mode are its settings, so the bar shows no chips. */
+    bot?: string | null;
     provider: ProviderSummary | null | undefined;
     canSend: boolean;
     answering?: boolean;
@@ -243,6 +246,13 @@
 <div class="bar" class:answering class:direct={!!target} bind:this={bar}>
   {#if target && !target.selection}
   <div class="chips">{#if target.chips}{@render target.chips()}{/if}</div>
+  {:else if bot !== null && !answering}
+  <!-- A bot's box: the phone's options keep the attachment, nothing else to pick here. -->
+  {#key `${key}:${store.draft?.projectId ?? ''}`}
+  <ComposerOptions busy={picking} levels={[]} effort={null} agentDefault={false} speeds={[]} speed={null} modes={[]} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={null} {canAttach} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick(speedOptions.pick(speed))} onmode={pickMode} onworktree={() => {}} />
+  {/key}
+  <!-- The chips' room, empty, so the tools keep their place at the end of the row on both widths. -->
+  <div class="chips" aria-hidden="true"></div>
   {:else if !answering}
   {#key `${key}:${store.draft?.projectId ?? ''}`}
   <ComposerOptions busy={picking} levels={effortLevels} effort={activeEffort} {agentDefault} {speeds} speed={speedOptions.speed} {modes} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={store.draft && draftRepository ? store.draft.worktree : null} {canAttach} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick(speedOptions.pick(speed))} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} />

@@ -29,6 +29,8 @@ const TASK_STATUSES: readonly AgentTask['status'][] = ['pending', 'in_progress',
 export class AgentTokens {
   private readonly byThread = new Map<ThreadId, string>();
   private readonly byToken = new Map<string, ThreadId>();
+  /** Threads whose token opens nothing: the core reads their answer and gives them no method (a memory pass). */
+  private readonly sealed = new Set<ThreadId>();
 
   /** The thread's token, the same one for every process it launches. */
   tokenFor(threadId: ThreadId): string {
@@ -42,11 +44,22 @@ export class AgentTokens {
 
   /** The thread a token speaks for, or null: a wrong token says nothing about which. */
   authenticate(token: string): ThreadId | null {
-    return this.byToken.get(token) ?? null;
+    const threadId = this.byToken.get(token);
+    return threadId === undefined || this.sealed.has(threadId) ? null : threadId;
   }
 
-  forget(threadId: ThreadId): void {
+  /** From now on the thread's token, minted or not, authenticates nothing. */
+  seal(threadId: ThreadId): void {
+    this.sealed.add(threadId);
+  }
+
+  /**
+   * The thread's token opens nothing from now on. Its seal goes only with the
+   * thread itself (`removed`): an archived memory pass restored later stays sealed.
+   */
+  forget(threadId: ThreadId, removed = false): void {
     const held = this.byThread.get(threadId);
+    if (removed) this.sealed.delete(threadId);
     if (held === undefined) return;
     this.byThread.delete(threadId);
     this.byToken.delete(held);
@@ -249,13 +262,25 @@ export function registerAgentMethods(core: Core): void {
   });
   // The page a pending question carries, for whoever answers it: a paired phone
   // names a question, never a surface, and only in the conversation it watches.
+  // Opening it again brings back the tab it opened, wherever its sign-in led it.
+  const pageTabs = new Map<string, string>();
   core.router.register('questions.openPage', async (params, { connection }) => {
     const thread = core.threads.require(params.threadId);
     if (connection.identity.principal !== 'owner' && (thread.archived || !connection.subscriptions.has(thread.id))) throw refused('subscribe to the active conversation before opening its page');
     const url = core.threads.listQuestions(thread.id).find((question) => question.id === params.questionId)?.open?.url;
     if (url === undefined) throw refused(`questions.openPage: ${params.questionId} is not a pending question with a page`, { questionId: params.questionId });
     const surface = checkSurface(thread.cwd, { kind: 'browser', url });
-    if (surface.kind === 'browser') await core.browser.command({ threadId: thread.id, action: { kind: 'open', url: surface.url } });
+    if (surface.kind !== 'browser') return { ok: true } as const;
+    const key = `${thread.id}:${params.questionId}`, opened = pageTabs.get(key);
+    if (opened !== undefined && core.browser.status({ threadId: thread.id }).tabs.some((tab) => tab.tabId === opened)) {
+      await core.browser.command({ threadId: thread.id, tabId: opened, action: { kind: 'activate' } });
+      return { ok: true } as const;
+    }
+    const reply = await core.browser.command({ threadId: thread.id, action: { kind: 'open', url: surface.url } });
+    if (reply.tabId !== undefined) {
+      pageTabs.set(key, reply.tabId);
+      if (pageTabs.size > 500) pageTabs.delete(pageTabs.keys().next().value!);
+    }
     return { ok: true } as const;
   });
   core.router.register('threads.tasks.set', (params) => setTasks(core, params));
@@ -272,14 +297,14 @@ export function registerAgentMethods(core: Core): void {
   // Forgetting the token only stops the next hello, so a socket an agent
   // already opened goes too: it used to keep claiming cards and opening
   // panels on a thread the user had put away.
-  const shut = (threadId: ThreadId): void => {
+  const shut = (threadId: ThreadId, removed = false): void => {
     core.browser.release(threadId);
     core.devices.release(threadId);
-    core.agents.forget(threadId);
+    core.agents.forget(threadId, removed);
     core.subscribers.closeAgents(threadId);
   };
   core.bus.onAny((name, payload) => {
-    if (name === 'thread.removed') shut((payload as { threadId: ThreadId }).threadId);
+    if (name === 'thread.removed') shut((payload as { threadId: ThreadId }).threadId, true);
     if (name === 'thread.updated') {
       const thread = payload as ThreadSummary;
       if (thread.archived && !(thread.archiveReason?.type === 'pr-merged' && (thread.status === 'running' || thread.status === 'waiting'))) shut(thread.id);

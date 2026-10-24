@@ -4,6 +4,8 @@
   import { restorePreviewMentions } from '../lib/preview-mentions';
   import { runCommand } from '../lib/commands.svelte';
   import { agentSlashItems, boiteSlashItems, skillSlashItems, slashCompletion, listKey, mentionQueryOf, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
+  import { AgentsView, agentOfThread } from '../lib/agents.svelte';
+  import { composerPlaceholder } from '../lib/composer-placeholder';
   import { attachFiles, receiveDroppedFiles } from '../lib/composer-attachments';
   import { rewindComposerEdit } from '../lib/composer-edit';
   import { fitHeight, selfSizing } from '../lib/composer-size';
@@ -19,7 +21,7 @@
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
   import { claudeKeywords, promptSegments } from '../lib/message-display';
-  import { fill, strings } from '../lib/strings';
+  import { strings } from '../lib/strings';
   import type { Choice, Store } from '../lib/store.svelte';
   import { machineName, workspace } from '../lib/workspace.svelte';
   import ComposerAttachments from './ComposerAttachments.svelte';
@@ -141,20 +143,11 @@
       !(composer?.sending && (composer.editing || reply !== null || !thread))
   );
 
-  // A new conversation asks what the user wants done; one under way names who reads the message.
-  let placeholder = $derived(
-    target
-      ? target.placeholder
-      : reply
-      ? strings.composer.replyPlaceholder
-      : offline
-      ? fill(thread ? strings.composer.placeholderOffline : strings.composer.placeholderOfflineDraft, { machine: machineLabel })
-      : !thread && store.draft
-      ? strings.composer.placeholderNew
-      : store.openProject && provider
-        ? fill(strings.composer.placeholder, { provider: provider.name, project: store.openProject.name })
-        : strings.composer.placeholderNoProject
-  );
+  /** A persistent agent's own thread: the box is addressed to it by name, and its model, effort and mode live in its settings, not on chips. */
+  const bot = $derived(thread?.agentSessionId ? agentOfThread(AgentsView.of(store).snapshot, thread.id)?.name ?? null : null);
+
+  let placeholder = $derived(composerPlaceholder({ target, replying: !!reply, bot, offline, onThread: !!thread, draft: !!store.draft,
+    machine: machineLabel, project: store.openProject?.name ?? null, provider: provider?.name ?? null }));
 
   // -- the slash menu -----------------------------------------------------------
   // `/` on an empty box, then the word being typed: nothing else opens it, and a
@@ -532,7 +525,7 @@
    */
   function recallPrompt(prompt: SentPrompt) {
     const state = stateForInput();
-    const edit = !store.busy && state.queued.length === 0 && thread !== null && !thread.agentSessionId && thread.projectId !== null;
+    const edit = !store.busy && state.queued.length === 0 && thread !== null && (!!thread.agentSessionId || thread.projectId !== null);
     restorePrompt(prompt.text, prompt.previewReferences);
     if (edit) state.attachments = prompt.attachments;
     else if (state.editing) state.attachments = [];
@@ -797,7 +790,7 @@
       </div>
     {/if}
 
-    <ComposerBar bind:this={toolbar} {store} {key} {target} {provider} {canSend} answering={!!reply} sendLabel={reply ? strings.composer.replySend : undefined} bind:choice bind:picking bind:dictating
+    <ComposerBar bind:this={toolbar} {store} {key} {target} {bot} {provider} {canSend} answering={!!reply} sendLabel={reply ? strings.composer.replySend : undefined} bind:choice bind:picking bind:dictating
       onsubmit={() => void submit()}
       onfiles={(files) => void take(files)}
       onpreview={(text, status, error) => { speechPreview = text; speechStatus = status; speechError = error; }}

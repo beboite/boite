@@ -4,8 +4,8 @@
  * The card is a question asked without stopping (threads/cards.ts); Apply is
  * the owner's `agents.settings.apply`, and any change to the agent, from the
  * card or from its settings page, settles the cards it answers. The outcome
- * reaches the thread that asked as a message: a persistent agent's
- * conversation hears it as new work. Shared checks live in
+ * reaches the thread that asked as a message, the way a `boite ask` answer
+ * does, on an agent's thread as on any other. Shared checks live in
  * contracts/agent-setting-requests.ts, where the in-memory client reads them.
  */
 import {
@@ -37,21 +37,21 @@ export class AgentSettingCards {
 
   close(): void { this.off(); }
 
-  /** The agent a call names, by id or name; unnamed, the agent whose conversation or subagent the thread is. */
+  /** The agent a call names, by id or name; unnamed, the agent whose thread, or whose subagent, the thread is. */
   private agentFor(threadId: string, name: string | undefined): AgentProfile {
     const live = this.store.records.list('profile').filter(agent => agent.status !== 'archived');
     if (name === undefined || name.trim() === '') {
       const own = this.store.resident.ownerOf(threadId);
       if (own !== null) return this.store.records.get('profile', own);
-      throw refused(`agent: this thread is no agent's conversation; name one: ${live.map(agent => agent.name).join(', ') || 'there are no agents yet'}`, { field: 'agent' });
+      throw refused(`agent: this thread is no bot's conversation; name one: ${live.map(agent => agent.name).join(', ') || 'there are no bots yet'}`, { field: 'agent' });
     }
     const wanted = name.trim();
     const byId = live.find(agent => agent.id === wanted);
     if (byId !== undefined) return byId;
     const named = live.filter(agent => agent.name.toLowerCase() === wanted.toLowerCase());
     if (named.length === 1) return named[0]!;
-    if (named.length > 1) throw refused(`agent: ${named.length} agents are named ${JSON.stringify(wanted)}; name it by id: ${named.map(agent => agent.id).join(', ')}`, { field: 'agent' });
-    throw refused(`agent: no agent ${JSON.stringify(wanted)}; the agents are ${live.map(agent => agent.name).join(', ') || 'none yet'}`, { field: 'agent', expected: live.map(agent => agent.name) });
+    if (named.length > 1) throw refused(`agent: ${named.length} bots are named ${JSON.stringify(wanted)}; name it by id: ${named.map(agent => agent.id).join(', ')}`, { field: 'agent' });
+    throw refused(`agent: no bot ${JSON.stringify(wanted)}; the bots are ${live.map(agent => agent.name).join(', ') || 'none yet'}`, { field: 'agent', expected: live.map(agent => agent.name) });
   }
 
   private context(agent: AgentProfile): AgentSettingContext {
@@ -147,7 +147,7 @@ export class AgentSettingCards {
       case 'effort': return save({ ...agent, selection: { ...agent.selection, effort: value as string | null } });
       case 'autoMemory': return configure({ ...ctx.config, autoMemory: value as boolean });
       case 'subagents': return configure({ ...ctx.config, subagents: { ...ctx.config.subagents, enabled: value as boolean } });
-      case 'maxRunMinutes': return configure({ ...ctx.config, maxRunMinutes: value as number });
+      case 'dailyBudget': return configure({ ...ctx.config, dailyBudgetUsd: value as number | null });
     }
   }
 

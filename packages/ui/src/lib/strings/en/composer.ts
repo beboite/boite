@@ -23,6 +23,7 @@ export const strings = {
     cacheCancel: 'Keep as is',
     options: 'Message options',
     placeholder: 'Message {provider} in {project}',
+    placeholderBot: 'Message {name}',
     placeholderNoProject: 'Message the agent',
     /** A new conversation, before anything is sent. */
     placeholderNew: 'What do you want to do?',

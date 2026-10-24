@@ -241,6 +241,7 @@ export function sessionKey(ctx: SessionContext): string {
     cwd: ctx.thread.cwd,
     generation: ctx.thread.sessionGeneration ?? 0,
     permissionMode: ctx.thread.permissionMode,
+    contextMode: ctx.thread.contextMode ?? null,
     accountId: ctx.account.id,
     providerId: ctx.provider.id,
     env: ctx.accountEnv,

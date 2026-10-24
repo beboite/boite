@@ -125,8 +125,8 @@ A wait starts when a real turn of the thread ends `done`. Each ping is planned
 from the thread's `promptCache` and checked again when its timer fires. A ping
 goes when all of these hold:
 
-- the thread is the user's conversation: not archived, not a delegated agent,
-  not a resident agent, and it has a session to resume;
+- the thread is the user's conversation, a bot's included: not
+  archived, not a delegated agent, and it has a session to resume;
 - one of its delegated agents is queued, running or waiting, or one of its
   workflows runs;
 - its `promptCache` was written by the thread's current model and account, and

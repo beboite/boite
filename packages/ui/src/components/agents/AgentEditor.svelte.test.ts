@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import type { AgentMission, AgentProfile } from '@boite/contracts';
+import type { AgentProfile } from '@boite/contracts';
 import { AgentsView } from '../../lib/agents.svelte';
 import { confirm } from '../../lib/confirm.svelte';
 import { FakeClient } from '../../lib/fake-client';
@@ -19,7 +19,7 @@ const settle = async () => { for (let i = 0; i < 20; i++) { await Promise.resolv
 const profile: AgentProfile = {
   id: 'a-mira', name: 'Mira', domain: '', instructions: '', avatar: '', status: 'active',
   selection: { providerId: 'echo', accountId: 'echo', model: 'echo', effort: null, permissionMode: 'default' },
-  tools: [], revision: 1, createdAt: 1, updatedAt: 1,
+  revision: 1, createdAt: 1, updatedAt: 1,
 };
 
 /** A view whose saves go through `call`, each returning the record one revision on. */
@@ -41,7 +41,7 @@ async function pickArchived() {
 
 test('archiving still asks for the stored agent name, a cancelled archive saves nothing, and a confirmed one saves by itself', async () => {
   const { call, view } = viewOf(profile, { accounts: [], providerOf: () => undefined, projects: [] });
-  mounted = mount(AgentEditor, { target: document.body, props: { view, kind: 'profile', record: profile, embedded: true, ondone() {}, oncancel() {} } });
+  mounted = mount(AgentEditor, { target: document.body, props: { view, record: profile, embedded: true, ondone() {}, oncancel() {} } });
   await settle();
   expect(document.querySelector('[data-testid="agent-save"]')).toBeNull();
   const name = document.querySelector<HTMLInputElement>('[data-testid="agent-name"]')!;
@@ -69,7 +69,7 @@ test('archiving still asks for the stored agent name, a cancelled archive saves 
 test('an agent is entrusted projects of its machine from its main options, the drafts aside', async () => {
   const projects = [{ id: 'p-game', name: 'Game', kind: 'project' }, { id: 'p-drafts', name: 'Drafts', kind: 'drafts' }, { id: 'p-site', name: 'Site', kind: 'project' }];
   const { call, view } = viewOf(profile, { accounts: [], providerOf: () => undefined, projects, draftsProject: projects[1] });
-  mounted = mount(AgentEditor, { target: document.body, props: { view, kind: 'profile', record: { ...profile, projectIds: ['p-site'] }, embedded: true, ondone() {}, oncancel() {} } });
+  mounted = mount(AgentEditor, { target: document.body, props: { view, record: { ...profile, projectIds: ['p-site'] }, embedded: true, ondone() {}, oncancel() {} } });
   await settle();
   const field = document.querySelector('[data-testid="agent-projects"]')!;
   // Main options: not folded under More options.
@@ -96,11 +96,11 @@ test('an agent\'s identity and model, edited side by side in its Settings tab, b
   await store.connect();
   // Claude's models are read when first asked for, as the picker would.
   await store.probeModels('claude', 'a-claude-main');
-  await client.call('agents.profile.save', { value: { name: 'Ada', domain: '', instructions: '', avatar: '', selection: { providerId: 'claude', accountId: 'a-claude-main', model: 'claude-opus-5-5', effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'] } });
+  await client.call('agents.profile.save', { value: { name: 'Ada', domain: '', instructions: '', avatar: '', selection: { providerId: 'claude', accountId: 'a-claude-main', model: 'claude-opus-5-5', effort: null, permissionMode: 'default' }, status: 'active' } });
   const view = new AgentsView(store);
   await view.refresh();
   const profile = () => view.snapshot!.profiles[0]!;
-  const editor = mount(AgentEditor, { target: document.body, props: { view, kind: 'profile', record: profile(), embedded: true, ondone: () => {}, oncancel: () => {} } });
+  const editor = mount(AgentEditor, { target: document.body, props: { view, record: profile(), embedded: true, ondone: () => {}, oncancel: () => {} } });
   const runtime = mount(AgentRuntimeSettings, { target: document.body, props: { view, agent: profile() } });
   cleanup = async () => { await unmount(runtime); await unmount(editor); view.close(); store.detach(); client.close(); };
   await idle();
@@ -138,18 +138,24 @@ test('an agent\'s identity and model, edited side by side in its Settings tab, b
   expect(profile().name).toBe('Ada Lovelace');
 });
 
-test('a mission whose stored duration is not a whole number of minutes still saves its other fields', async () => {
-  const mission: AgentMission = { id: 'm-ship', title: 'Ship', objective: 'Ship the build', expectedResult: '', teamId: null, projectId: null, agentIds: [], status: 'open', maxTurns: 6, maxDurationMs: 90_000, maxTokens: null, resourceIds: [], revision: 1, createdAt: 1, updatedAt: 1 };
-  const call = vi.fn(async (_method: string, params: { value: Partial<AgentMission> }) => ({ ...mission, ...params.value, revision: 2 }));
-  const view = { snapshot: { profiles: [], groups: [], teams: [], missions: [mission], resources: [], limits: {} }, store: { accounts: [], providerOf: () => undefined, projects: [] }, call, save: (method: string, params: () => { value: Partial<AgentMission> }) => call(method, params()), pending: false };
-  mounted = mount(AgentEditor, { target: document.body, props: { view: view as unknown as AgentsView, kind: 'mission', record: mission, embedded: true, ondone() {}, oncancel() {} } });
-  await settle();
-  const name = document.querySelector<HTMLInputElement>('[data-testid="agent-name"]')!;
-  name.value = 'Ship it';
+test('a new bot is free to act: it is created with full access unless the owner picks another mode', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store();
+  store.attach(client);
+  await store.connect();
+  const view = new AgentsView(store);
+  await view.refresh();
+  let created: AgentProfile | null = null;
+  const editor = mount(AgentEditor, { target: document.body, props: { view, ondone: (agent: AgentProfile) => { created = agent; }, oncancel: () => {} } });
+  cleanup = async () => { await unmount(editor); view.close(); store.detach(); client.close(); };
+  await idle();
+  expect(document.querySelector('[data-testid=agent-runtime]')?.textContent).toContain('Full access');
+  const name = document.querySelector<HTMLInputElement>('[data-testid=agent-name]')!;
+  name.value = 'Nova';
   name.dispatchEvent(new Event('input', { bubbles: true }));
-  name.dispatchEvent(new Event('change', { bubbles: true }));
-  await settle();
-  expect(call).toHaveBeenCalledOnce();
-  // The duration goes back as it was stored, not rounded to whole minutes.
-  expect(call.mock.calls[0]![1]).toMatchObject({ value: { title: 'Ship it', maxDurationMs: 90_000 } });
+  await idle();
+  document.querySelector<HTMLButtonElement>('[data-testid=agent-save]')!.click();
+  await idle();
+  await vi.waitFor(() => expect(created).not.toBeNull());
+  expect(created!.selection.permissionMode).toBe('bypassPermissions');
 });

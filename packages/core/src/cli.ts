@@ -18,7 +18,7 @@ import { connect } from './client.ts';
 import type { CoreClient } from './client.ts';
 import { CORE_VERSION } from './version.ts';
 import { resolveDataDir } from './paths.ts';
-import { agentCommand } from './agents/cli.ts';
+import { botCommand } from './agents/cli.ts';
 import { workflowCommand } from './workflow-cli.ts';
 import { DELEGATE_ACTIONS, delegateCommand } from './delegate-cli.ts';
 import { browserCommand, BROWSER_HELP } from './browser-cli.ts';
@@ -46,8 +46,7 @@ export const USAGE = `usage: boite <command> [args] [--json]
   thread move <project>          move this thread to another project (name,
                                  id or folder) when this turn ends
   thread new <project> <brief>   start a thread in a project; its first answer
-                                 comes back as an agent message
-                                 (--worktree, --title <title>)
+                                 comes back to you (--worktree, --title <title>)
   projects                       the projects added to Boite
   projects add <folder>          add an existing folder as a project, so thread
                                  new and thread move can name it (--name <name>)
@@ -104,10 +103,10 @@ ${CONTROL_HELP}
                                  a card with a button to that Settings page,
                                  for what is not one value: a provider login,
                                  a pairing (pages: ${SETTINGS_PAGES.join(', ')})
-  settings agent [key]           a persistent agent's settings a card may
-                                 change: ${AGENT_SETTING_KEYS.join(', ')}
-                                 (--agent <name>; yours in your own conversation)
-  settings agent request <key> <value> --why <text>
+  settings bot [key]             a bot's settings a card may change:
+                                 ${AGENT_SETTING_KEYS.join(', ')}
+                                 (--bot <name>; yours in your own conversation)
+  settings bot request <key> <value> --why <text>
                                  a card asking the user to change one, such as
                                  projects +boite -old or a list; the outcome
                                  arrives as a message (applied, changed, refused)
@@ -118,32 +117,27 @@ ${CONTROL_HELP}
   todo list                      the project's todo list
   todo add <text>                add a card for the user
   todo claim <id>                mark a card finished, awaiting the user
-  agents list                    other agents here and on linked machines
-  agents find <words>            locate agents by words of their chat, title,
+  threads find <words>           locate threads by words of their chat, title,
                                  project, branch or model
-  agents read <agent>            its conversation (--last <n>, --before <ms>)
-  agents send <agent> <text>     message it; --wait blocks for its answer
-  agents reply <message-id> <text>
-  agents log <agent>             what you and that agent said to each other
-  agents wait [agent]            the next message (--timeout <s>, default 90)
-  agents inbox                   every exchange and its delivery state
-                                 <agent>: <thread-id>, <machine>/<thread-id>
-  agents contacts                other owners' Boites linked as contacts and
+  threads read <thread>          its conversation (--last <n>, --before <ms>)
+  threads send <thread> <text>   message it; --wait blocks for its answer
+  threads reply <message-id> <text>
+  threads log <thread>           what you and that thread said to each other
+  threads wait [thread]          the next message (--timeout <s>, default 90)
+  threads inbox                  every exchange and its delivery state
+                                 <thread>: <thread-id>, <machine>/<thread-id>
+  threads contacts               other owners' Boites linked as contacts and
                                  the projects each opened to you
-  agents ask <contact> <text>    ask a contact for an agent on a project like
+  threads ask <contact> <text>   ask a contact for a thread on a project like
                                  yours; the answer comes back as a message
-  agent context|inbox|missions   this persistent agent's authorized context
-  agent send <ids|-> <text>      post to its group or direct conversation
-  agent reply <message-id> <text>
-  agent acquire <task-id>        acquire a mission task atomically
-  agent submit <task-id> <generation> <result>
-  agent artifact <json>          title, summary, missionId, taskId, paths, commit, verification
-  agent decide <json>            prompt and options; yield until the user answers
-  agent memory [query]           search memory in this context
-  agent remember <json>          title and text, optional id and expectedRevision
-  agent routines                list this identity's scheduled work
-  agent schedule <json>          name, prompt, schedule; optional id, expectedRevision, enabled
-  --request-id <id>              reuse to retry agent, agents send|reply or delegate spawn|send
+  bot memory                     a bot's MEMORY.md and its path
+  bot remember <fact>            add a dated line to MEMORY.md
+  bot routines                   its routines: schedule, next run, last outcome
+  bot schedule <json>            name, prompt, schedule; optional id and enabled
+  bot unschedule <routine-id>    remove one routine
+  bot watch|unwatch <thread-id>  put a thread of its projects on its desk, or
+                                 take one off
+  --request-id <id>              reuse to retry threads send|reply or delegate spawn|send
   delegate models                models, reasoning levels and speeds a subagent can use
   delegate spawn <brief>         start a subagent on one bounded job; its result
                                  comes back as a message (--model <provider/model>,
@@ -179,9 +173,9 @@ ${CONTROL_HELP}
 
   Outside a thread, threads, thread, questions, answer, permissions, allow,
   deny and projects need no --thread: the owner drives every thread, and a
-  message it sends is its own prompt. Inside a persistent agent's conversation
-  they reach the threads of the projects entrusted to it, and its messages
-  reach them as that agent's.
+  message it sends is its own prompt. Inside a bot's conversation they reach
+  the threads of the projects entrusted to it, and its messages reach them as
+  that bot's.
 
   --core <url>                   another core, with its token in BOITE_TOKEN
                                  (an owner token, or a paired device's session)
@@ -290,7 +284,7 @@ export function settingValue(raw: string): unknown {
 }
 
 /**
- * An agent setting as typed: `projects` takes `+name -name` edits or a list
+ * A bot setting as typed: `projects` takes `+name -name` edits or a list
  * (`a,b`, `a b` or JSON), the other keys a value as `settingValue` reads it.
  */
 export function agentSettingArg(key: string, tokens: string[]): unknown {
@@ -300,7 +294,7 @@ export function agentSettingArg(key: string, tokens: string[]): unknown {
   const items = raw.split(/[\s,]+/).filter(item => item.length > 0);
   const edits = items.filter(item => /^[+-]./.test(item));
   if (edits.length === 0) return items;
-  if (edits.length !== items.length) throw new Usage('settings agent request projects takes +name -name edits or a list, not both');
+  if (edits.length !== items.length) throw new Usage('settings bot request projects takes +name -name edits or a list, not both');
   return { add: edits.filter(item => item.startsWith('+')).map(item => item.slice(1)), remove: edits.filter(item => item.startsWith('-')).map(item => item.slice(1)) };
 }
 
@@ -414,8 +408,8 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       }
       print([`server: ${state.currentVersion}`, `update: ${state.phase}`, ...(state.version ? [`version: ${state.version}`] : []), ...(state.error ? [`error: ${state.error}`] : [])], state);
     },
-    agent: async () => {
-      const result = await agentCommand(client, threadId, rest, parsed.requestId ?? crypto.randomUUID());
+    bot: async () => {
+      const result = await botCommand(client, threadId, rest);
       print([JSON.stringify(result)], result);
     },
     attach: async () => {
@@ -432,7 +426,8 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         ...(parsed.context === undefined ? {} : { context: contextRequest(parsed, readRules) }),
       }, print);
     },
-    agents: async () => {
+    // `threads` alone or `threads list` lists (control-cli.ts); the rest talks to other threads.
+    threads: async () => {
       try {
         await agentsCommand(client, threadId, rest, { ...(parsed.requestId === undefined ? {} : { requestId: parsed.requestId }), wait: parsed.wait, ...(parsed.timeout === undefined ? {} : { timeout: parsed.timeout }), ...(parsed.last === undefined ? {} : { last: parsed.last }), ...(parsed.before === undefined ? {} : { before: parsed.before }) }, print);
       } catch (error) {
@@ -500,12 +495,16 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
           ...(parsed.title === undefined ? {} : { title: parsed.title }), ...(parsed.worktree ? { worktree: true } : {}),
           ...(parsed.context === undefined ? {} : { context: contextRequest(parsed, readRules) as RpcParams<'agent.spawn'>['context'] }),
         });
+        // A bot hears of it through events on its desk, not as a message.
+        const persistent = await client.call('agents.snapshot', { threadId }).then(snapshot => snapshot.profiles.length > 0, () => false);
         print([
           `thread: ${spawned.thread.id}`, `title: ${spawned.thread.title}`, `project: ${spawned.project}`, `cwd: ${spawned.thread.cwd}`,
           ...(spawned.thread.branch ? [`branch: ${spawned.thread.branch}`] : []),
           `agent: ${spawned.thread.providerId} ${spawned.thread.model ?? 'default'}`,
           `address: ${spawned.address.coreId}/${spawned.address.threadId}`,
-          'Its first answer comes back to you as an agent message; do not poll. boite agents send <address> <text> steers it.',
+          persistent
+            ? `It is on your desk; each turn it ends wakes you with an event, so do not poll. boite thread send ${spawned.thread.id} <text> steers it.`
+            : 'Its first answer comes back to you as a message; do not poll. boite threads send <address> <text> steers it.',
         ], spawned);
         return;
       }
@@ -589,29 +588,29 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         ], asked);
         return;
       }
-      if (action === 'agent') {
-        const agent = parsed.agent === undefined ? {} : { agent: parsed.agent };
+      if (action === 'bot') {
+        const agent = parsed.bot === undefined ? {} : { agent: parsed.bot };
         if (rest[1] === 'request') {
-          if (parsed.why === undefined || parsed.why.trim().length === 0) throw new Usage('settings agent request needs --why <text>, the reason the user reads on the card');
+          if (parsed.why === undefined || parsed.why.trim().length === 0) throw new Usage('settings bot request needs --why <text>, the reason the user reads on the card');
           const key = want(2, `a key: ${AGENT_SETTING_KEYS.join(', ')}`);
-          if (rest.length < 4) throw new Usage('settings agent request needs a value after the key');
+          if (rest.length < 4) throw new Usage('settings bot request needs a value after the key');
           const asked = await client.call('agents.settings.request', { threadId, reason: parsed.why, key, value: agentSettingArg(key, rest.slice(3)), ...agent });
           const setting = asked.setting;
           print([
             `requested: ${asked.questionId}`,
             `change: ${setting.agentName}'s ${setting.key} ${JSON.stringify(setting.previous)} -> ${JSON.stringify(setting.value)}`,
-            'card: Apply, or the user changes it in the agent\'s settings',
+            'card: Apply, or the user changes it in the bot\'s settings',
             'Keep working. The outcome arrives as a message quoting your reason; without one, nothing changed.',
           ], asked);
           return;
         }
-        if (rest.length > 2) throw new Usage('settings agent expects a key or request <key> <value>');
+        if (rest.length > 2) throw new Usage('settings bot expects a key or request <key> <value>');
         const read = await client.call('agents.settings.read', { threadId, ...agent });
         const shown = rest[1] === undefined ? read.settings : read.settings.filter(reading => reading.key === rest[1]);
-        if (shown.length === 0) throw new Usage(`settings agent: unknown key ${rest[1]}; the keys are ${AGENT_SETTING_KEYS.join(', ')}`);
+        if (shown.length === 0) throw new Usage(`settings bot: unknown key ${rest[1]}; the keys are ${AGENT_SETTING_KEYS.join(', ')}`);
         const named = (reading: (typeof shown)[number], value: unknown): string => JSON.stringify(reading.key === 'projects' && Array.isArray(value) ? value.map(id => reading.choices?.find(choice => choice.id === id)?.label ?? id) : value ?? null);
         print([
-          `agent: ${read.agentName} (${read.agentId})`,
+          `bot: ${read.agentName} (${read.agentId})`,
           ...shown.map(reading => `${reading.key} ${named(reading, reading.value)}${reading.choices?.length ? `\n    choices: ${reading.choices.map(choice => choice.label === choice.id ? choice.id : `${choice.label} (${choice.id})`).join(', ')}` : ''}`),
         ], rest[1] === undefined ? read : shown[0]);
         return;
@@ -709,7 +708,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     const target = targetOf(parsed, io.env);
     try {
       // An agent waiting for an answer holds its call up to five minutes.
-      const waits = parsed.positional[0] === 'agents' && (parsed.wait || parsed.positional[1] === 'wait');
+      const waits = parsed.positional[0] === 'threads' && (parsed.wait || parsed.positional[1] === 'wait');
       client = await connect(target.url, target.token, { client: { name: 'cli', version: CORE_VERSION }, ...(waits ? { requestTimeoutMs: (WAIT_MAX_S + 30) * 1000 } : {}) });
     } catch (error) {
       throw new Error(`no core answers at ${target.url}: ${(error as Error).message}`);

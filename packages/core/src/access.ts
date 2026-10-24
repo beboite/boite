@@ -83,16 +83,13 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['threads.unlinkPullRequest', 'remove a conversation link without changing the GitHub PR'],
   ['threads.watchPullRequest', 'have Boite read one of its own PRs on GitHub and wake its own conversation when it changes; reads only, never writes to GitHub'],
   ['threads.unwatchPullRequest', 'stop its own conversation\'s watches; changes nothing on GitHub'],
-  ['agents.routine.save', 'bounded durable scheduling for its own identity from its direct conversation, when the owner enabled routines'],
-  ['agents.snapshot', 'only the persistent identity, context and resources of this execution'],
-  ['agents.history', 'older messages, work and memory of this execution context, under the snapshot rules'],
-  ['agents.messages', 'chronological message windows held to this execution context, under the history rules'],
-  ['agents.message.send', 'a bounded message as this agent to recipients in its current conversation'],
-  ['agents.memory.save', 'scoped memory with mandatory provenance, no widening of access'],
-  ['agents.task.acquire', 'atomic self-assignment inside the current authorized mission'],
-  ['agents.task.submit', 'submission by the current assignment generation, never final approval'],
-  ['agents.artifact.add', 'versioned results from the current mission and working directory'],
-  ['agents.decision.request', 'durable requests for a human decision without an idle provider process'],
+  // A persistent agent's own records, from its own thread only (agents/store.ts refuses any other agent's).
+  ['agents.snapshot', 'its own identity, routines, desk and status; no other agent, grant or entrustment'],
+  ['agents.brain.get', 'its own AGENTS.md and MEMORY.md, which its context block already carries'],
+  ['agents.memory.note', 'a dated line at the end of its own MEMORY.md, refused past the size every turn reads'],
+  ['agents.routine.save', 'its own routines, the clock its wakes run on; the owner pauses it or caps its daily spend'],
+  ['agents.routine.remove', 'removing one of its own routines'],
+  ['agents.watch', 'putting a thread of its projects on its own desk, or taking one off; it reads nothing it could not already read through resident.thread'],
   ['delegation.result', 'bounded assistant-text pages from an exact terminal turn of its direct delegated child'],
   ['delegation.wait', 'event-driven completion of its direct children; timeout/disconnect never stops their work'],
   ['delegation.get', 'its own team summaries, approved profiles and usage'],
@@ -119,7 +116,7 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['collaboration.wait', 'blocks on its own inbox until a reply arrives'],
   ['collaboration.contacts', 'the contacts it may write to and the project names each opened to this core, never their keys or addresses'],
   ['collaboration.ask', 'a request as this thread to a contact, which that contact\'s owner or concierge decides; it opens nothing here'],
-  // Resident methods name the persistent agent's own direct conversation like
+  // Resident methods name the persistent agent's own thread like
   // every agent method; agents/projects.ts holds each call to the projects the
   // owner entrusted to that agent's profile. Any other thread is refused.
   ['resident.view', 'the projects the owner entrusted to it, so it knows what it may touch'],
@@ -143,7 +140,7 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['questions.ask','a question card on its own thread that it does not wait on; the answer comes back as a message'],
   ['agent.settings', 'the settings it may ask the user about, with their values and pages; credentials, accounts and browser profiles are not among them'],
   ['settings.request', 'a settings card on its own thread proposing a change or pointing at a page; only the owner applies it, through settings.set'],
-  ['agents.settings.read', 'the settings of one of the owner\'s agents a card may propose to change (projects, model, effort, memory pass, subagents, time per task), so it reads before it proposes; never their brains or conversations'],
+  ['agents.settings.read', 'the settings of one of the owner\'s agents a card may propose to change (projects, model, effort, memory pass, subagents, daily budget), so it reads before it proposes; never their brains or conversations'],
   ['agents.settings.request', 'a card on its own thread proposing a change to one agent setting; only the owner applies it, through agents.settings.apply'],
   ['artifacts.publish', 'explicitly sharing a bounded snapshot from its own working directory in its own conversation'],
   ['artifacts.read', 'reading back only a published snapshot belonging to its own conversation'],
@@ -189,7 +186,6 @@ export function assertAllowed(method: RpcMethodName, connection: Connection, par
     }
     return;
   }
-  if (method === 'agents.message.send' && (params as { threadId?: unknown } | null | undefined)?.threadId !== undefined) throw refused('agents.message.send: paired devices must omit threadId and speak as the user');
   if (method === 'git.diff' && !deviceDiffRef((params as { ref?: unknown } | null | undefined)?.ref)) {
     throw refused('git.diff: paired devices compare the working tree with HEAD only', { method, principal: identity.principal });
   }

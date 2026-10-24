@@ -134,7 +134,7 @@ test('the app tells its core the language and experiments it has, and an experim
     // The agent reads what the user sees: on, and named as the Experiments page names it.
     await vi.waitFor(async () => expect((await client.call('agent.settings', { threadId: 't-trace' })).app).toEqual({ language: 'en', device: null, client: null }));
     const read = await client.call('agent.settings', { threadId: 't-trace' });
-    expect(read.settings.find((reading) => reading.key === 'experiment.resident-agents')).toMatchObject({ value: true, label: 'Agents', page: 'experiments', section: 'resident-agents' });
+    expect(read.settings.find((reading) => reading.key === 'experiment.resident-agents')).toMatchObject({ value: true, label: 'Bots', page: 'experiments', section: 'resident-agents' });
     await expect(client.call('settings.request', { threadId: 't-trace', reason: 'x', key: 'experiment.resident-agents', value: true })).rejects.toThrow('already true');
 
     const { questionId } = await client.call('settings.request', { threadId: 't-trace', reason: 'Try the whip', key: 'experiment.whip', value: true });

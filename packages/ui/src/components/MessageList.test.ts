@@ -11,6 +11,8 @@ import type { Store } from '../lib/store.svelte';
 import { workspace } from '../lib/workspace.svelte';
 import { RightPanelStore } from '../lib/right-panel.svelte';
 import AgentMessagesSurface from './AgentMessagesSurface.svelte';
+import { AgentsView, openAgent } from '../lib/agents.svelte';
+import { setExperiment } from '../lib/experiments';
 
 /**
  * jsdom has no layout, so the three numbers the window is computed from are
@@ -229,6 +231,88 @@ test('cache pings are one quiet line between the turns they sit in, with no answ
   expect(document.querySelectorAll('[data-testid="message"]')).toHaveLength(2);
   expect(document.querySelector('[data-testid="timeline"]')?.textContent).not.toContain('ok');
   expect(document.querySelector('[data-testid="message-system"]')).toBeNull();
+});
+
+test('an agent thread folds a finished turn\'s steps behind the count on its summary line and a quiet wake to one line, each opening on a click', async ({ ready }) => {
+  setExperiment('resident-agents', true);
+  onTestFinished(() => setExperiment('resident-agents', false));
+  const { store: owner } = await ready({ delayMs: 0, agentsDemo: true });
+  const view = AgentsView.of(owner);
+  await view.refresh();
+  const mira = view.snapshot!.profiles.find(p => p.name === 'Mira')!;
+  await openAgent(owner, mira.id);
+  stubLayout(1200);
+  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: owner.openThread!.id, messages: owner.openThread!.messages } });
+  flushSync();
+  const timeline = () => document.querySelector('[data-testid="timeline"]')!.textContent ?? '';
+  const folds = () => [...document.querySelectorAll<HTMLElement>('[data-testid="turn-fold"]')];
+  // Its evening routine had nothing to report: one line, its opening and its two calls folded inside.
+  const quiet = folds().find(fold => fold.dataset.kind === 'quiet')!;
+  expect(quiet.textContent).toContain('Nothing to report · 4 issues, 2 pull requests, nothing new · 2 steps');
+  expect(document.querySelector('[data-testid="wake-marker"]')).toBeNull();
+  expect(timeline()).not.toContain('Nothing needs you tonight');
+  expect(document.querySelectorAll('[data-testid="tool-group"], [data-testid="tool-card"]')).toHaveLength(0);
+  // Its last memory pass is a mark on the summary line of the answer it followed, its summary in the tooltip.
+  const pass = document.querySelector<HTMLElement>('[data-testid="memory-pass"]')!;
+  expect(pass.title).toBe('Memory updated · Noted that the welcome screen fits in three lines on a phone.');
+  expect(pass.closest('article')?.textContent).toContain('Noted in my memory');
+  quiet.querySelector('button')!.click();
+  flushSync();
+  expect(document.querySelector('[data-testid="wake-marker"]')?.textContent).toContain('Routine · Evening review');
+  expect(timeline()).toContain('Nothing needs you tonight');
+  expect(document.querySelectorAll('[data-testid="tool-group"], [data-testid="tool-card"]').length).toBeGreaterThan(0);
+  quiet.querySelector('button')!.click();
+  flushSync();
+  await unmount(running);
+
+  // Nova's event turn: its four calls and the narration between them behind "Worked", its answer as its message.
+  const nova = view.snapshot!.profiles.find(p => p.name === 'Nova')!;
+  await openAgent(owner, nova.id);
+  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: owner.openThread!.id, messages: owner.openThread!.messages } });
+  flushSync();
+  // No row above the answer: the summary line under it counts the steps, with the time it worked and when it finished.
+  expect(folds().filter(fold => fold.dataset.kind === 'worked')).toHaveLength(0);
+  const worked = [...document.querySelectorAll<HTMLElement>('[data-testid="turn-steps"]')];
+  // Its answers are signed with its name, not the provider's.
+  expect([...document.querySelectorAll('[data-testid="message-model"]')].map(node => node.textContent?.trim())).toContain('Nova');
+  expect(timeline()).not.toMatch(/^Echo|\bEcho\b/);
+  expect(worked.map(button => button.textContent?.trim())).toEqual(['2 steps', '4 steps']);
+  expect(worked[1]!.closest('[data-testid="turn-summary"]')?.textContent).toMatch(/Worked for 2m 0\ds.*done/);
+  expect(timeline()).toContain('The login fix opened PR #482');
+  expect(timeline()).not.toContain('The e2e job fails; its log names the redirect test.');
+  // The running turn keeps its steps open and live.
+  expect(timeline()).toContain('Checking the release branch first');
+  expect(document.querySelectorAll('[data-testid="tool-group"], [data-testid="tool-card"]').length).toBeGreaterThan(0);
+  worked[1]!.click();
+  flushSync();
+  expect(timeline()).toContain('The e2e job fails; its log names the redirect test.');
+  expect(document.querySelectorAll<HTMLElement>('[data-testid="turn-steps"]')[1]?.getAttribute('aria-expanded')).toBe('true');
+  document.querySelectorAll<HTMLElement>('[data-testid="turn-steps"]')[1]!.click();
+  flushSync();
+  expect(timeline()).not.toContain('The e2e job fails; its log names the redirect test.');
+});
+
+test('a line Boite writes on a wake turn stays a line of its own: only the prompt that opened the turn is its wake row', async ({ ready }) => {
+  setExperiment('resident-agents', true);
+  onTestFinished(() => setExperiment('resident-agents', false));
+  const { store: owner } = await ready({ delayMs: 0, agentsDemo: true });
+  const view = AgentsView.of(owner);
+  await view.refresh();
+  const nova = view.snapshot!.profiles.find(p => p.name === 'Nova')!;
+  await openAgent(owner, nova.id);
+  stubLayout(1200);
+  const thread = owner.openThread!;
+  const wake = thread.turns.findLast(turn => turn.execution?.operation === 'event' || turn.execution?.operation === 'routine')!;
+  const opening = thread.messages.find(message => message.turnId === wake.id)!;
+  // The runtime's notice lands on the thread's latest turn, here the wake turn.
+  const notice: Message = { id: 'msg_budget_notice', threadId: thread.id, turnId: wake.id, role: 'system', parts: [{ type: 'text', text: 'Skipped routine: past the daily budget.' }], state: 'complete', createdAt: opening.createdAt + 1 };
+  const messages = [...thread.messages.filter(message => message.turnId !== wake.id), opening, notice, ...thread.messages.filter(message => message.turnId === wake.id && message.id !== opening.id)];
+  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages } });
+  flushSync();
+  const markers = [...document.querySelectorAll<HTMLElement>('[data-testid="wake-marker"]')];
+  // The opening prompt is the wake row; the notice under it is not a second one.
+  expect(markers.map(marker => marker.textContent?.includes('Skipped routine'))).toEqual([false]);
+  expect(document.querySelector('[data-testid="timeline"]')!.textContent).toContain('Skipped routine: past the daily budget.');
 });
 
 test.for([false, true])('the outline rail is left of the bubbles on a desktop and not drawn on a phone (phone: %s)', async (phone, { createStore }) => {

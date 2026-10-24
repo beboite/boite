@@ -1,6 +1,7 @@
 import type { ActivityTurn, AgentTask, Attachment, GoalReview, MessagePart, RpcParams, ThreadActivity, ThreadSummary, Turn } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
+import { isAgentHeld } from './agents/runtime.ts';
 import { activityResult, parseVerdict, reviewPrompt } from './activity-prompt.ts';
 import { checkAttachmentArray, checkAttachments } from './threads/inputs.ts';
 import { assertDriverRunnable } from './drivers/index.ts';
@@ -136,7 +137,6 @@ export class ActivityStore {
 
   set(params: RpcParams<'threads.activity.set'>): ThreadActivity {
     const thread = this.core.journal.getThread(params.threadId);
-    if (thread?.agentSessionId) throw refused('persistent agent sessions are scheduled through Agents, not thread goals or loops');
     if (!thread || thread.archived) throw refused('activity requires an existing, unarchived thread');
     const attachments = params.attachments ?? [];
     checkAttachmentArray(attachments);
@@ -363,7 +363,11 @@ export class ActivityStore {
         current.loop!.history = [...(current.loop!.history ?? []), { iteration, turnId: turn.id, status: 'running' as const, summary: '', startedAt: Date.now(), finishedAt: null }].slice(-50);
       }
       this.save(threadId);
-    } catch (error) { this.stop(threadId, error instanceof Error ? error.message : String(error)); }
+    } catch (error) {
+      // A persistent agent that is paused or out of budget: the goal waits for it rather than ending.
+      if (isAgentHeld(error)) { this.core.agentRuntime.whenAdmitted(threadId, 'goal', () => this.run(threadId)); return; }
+      this.stop(threadId, error instanceof Error ? error.message : String(error));
+    }
   }
 
   private schedule(threadId: string, delay: number): void {

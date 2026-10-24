@@ -35,6 +35,9 @@ import { contactsShown } from '../contacts-rail.svelte';
 const deviceKinds = $state({ list: readNotificationKinds() });
 
 /** What the window shows around the chat: the page, the sidebar, the palette, the panel, the toasts. */
+/** What opens over an agent's conversation: its settings, or its brain (instructions and memory). */
+export type AgentPane = 'settings' | 'brain';
+
 export class Layout {
   projectPickerOpen = $state(false);
   /** Toasts for threads the user is not looking at, per machine. */
@@ -64,7 +67,7 @@ export class Layout {
   dropping = $state<DropKind | false>(false);
   search = $state('');
   /** The agent an outside link asked the Agents page to open, with a fresh key for repeated asks; the page takes it once. */
-  agentsTarget = $state<{ agentId: string; request: number; pane?: 'settings'; kind?: 'profile' | 'group' | 'team' | 'mission' } | null>(null);
+  agentsTarget = $state<{ agentId: string; request: number; pane?: AgentPane } | null>(null);
   /** The contact the Contacts page shows, by core id; null shows the page that adds one. */
   contact = $state<string | null>(null);
 
@@ -110,20 +113,31 @@ export class Layout {
     if (tab === 'resources') void this.ctx.store.refreshResources();
   }
 
+  /**
+   * The thread list and its chat. Coming from an agent's thread, the chat goes
+   * back to the ordinary thread it showed last, else where the user left off:
+   * an agent's conversation belongs beside the agents list.
+   */
   showChat(): void {
     this.ctx.threads.invalidateNavigation();
     this.page = 'chat';
+    const open = this.ctx.threads.openThread;
+    if (!open?.agentSessionId) return;
+    const back = this.ctx.threads.lastChatThreadId;
+    const row = back ? this.ctx.threads.threads.find(t => t.id === back && !t.archived) : undefined;
+    if (row) void this.ctx.store.open(row.id);
+    else void this.ctx.projects.openWhereLeft();
   }
 
   /**
-   * The Agents page is an experiment: with it off, nothing leads there. `pane`
-   * opens the agent on its settings; `kind` names a group, a team or a mission
-   * instead of an agent.
+   * The Agents page is an experiment: with it off, nothing leads there.
+   * `agentId` opens that agent's thread there; `pane` opens its settings or
+   * its brain over the conversation.
    */
-  showAgents(agentId: string | null = null, pane?: 'settings', kind?: 'profile' | 'group' | 'team' | 'mission'): void {
+  showAgents(agentId: string | null = null, pane?: AgentPane): void {
     if (!experimentOn('resident-agents')) return;
     this.ctx.threads.invalidateNavigation();
-    if (agentId) this.agentsTarget = { agentId, request: (this.agentsTarget?.request ?? 0) + 1, ...(pane ? { pane } : {}), ...(kind && kind !== 'profile' ? { kind } : {}) };
+    if (agentId) this.agentsTarget = { agentId, request: (this.agentsTarget?.request ?? 0) + 1, ...(pane ? { pane } : {}) };
     this.page = 'agents';
     this.sidebarOpen = false;
   }

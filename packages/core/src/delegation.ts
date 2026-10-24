@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, delegationAnswerable as answerable, delegationNeeds as needsOf, delegationReply, nativeAgentsOfTool, processAgentCommand, SPEED_NEEDS_MODEL, threadBusy, type RpcEvents } from '@boite/contracts';
-import type { AgentLetter, BackgroundWait, DelegatedAgent, DelegationConfig, DelegationModels, DelegationResumed, DelegationView, PauseOrigin, PermissionRequest, Principal, QuestionRequest, RequestId, RpcParams, ThreadSummary, Turn, Usage } from '@boite/contracts';
+import type { AgentLetter, BackgroundWait, DelegatedAgent, DelegationConfig, DelegationModels, DelegationResumed, DelegationView, PauseOrigin, PermissionMode, PermissionRequest, Principal, QuestionRequest, RequestId, RpcParams, ThreadContextMode, ThreadSummary, Turn, Usage } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, requiredText as text } from './errors.ts';
+import { isAgentHeld } from './agents/runtime.ts';
 import { checkContext } from './context-mode.ts';
 import { checkSavedSelection, checkSpeed } from './threads/selection.ts';
 import { anyModel, catalog, conversationRoute, discover, providersNamed, resolveRoute, type ChildRoute, type RouteRequest } from './delegation/routes.ts';
@@ -283,7 +284,6 @@ export class Delegation {
   }
 
   spawn(params: RpcParams<'delegation.spawn'>): DelegatedAgent {
-    if (this.core.workforce.resident.isCompacting(params.threadId)) throw refused('compaction cannot start subagents');
     const parent = this.core.threads.require(params.threadId);
     if (parent.parentThreadId) throw refused('delegation supports one level; ask the parent to delegate another task');
     const requestId = text(params.requestId, 'requestId', 128);
@@ -303,7 +303,7 @@ export class Delegation {
     const config = this.available(parent);
     const profile = resolveRoute(this.core, parent, config, request);
     const persistentOwner = this.core.workforce.resident.ownerOf(parent.id);
-    if (persistentOwner && !this.core.workforce.resident.allowed(persistentOwner, { ...profile, permissionMode: parent.permissionMode }, true)) throw refused('account/model access was withdrawn from this agent');
+    if (persistentOwner && !this.core.workforce.resident.allowed(persistentOwner, { ...profile, permissionMode: parent.permissionMode }, true)) throw refused('account/model access was withdrawn from this bot');
     const provider = this.core.providers.require(profile.providerId);
     assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), this.core.accounts.require(profile.accountId), () => this.core.providers.launcherScriptOnly(provider.id));
     const row: AgentRow = { thread_id: '', root_id: parent.id, request_id: requestId, fingerprint, profile_id: profile.id, task };
@@ -376,19 +376,23 @@ export class Delegation {
    * checked here, whoever built the route. `record` runs in the same
    * transaction. `worktree` gives it a git worktree of its own instead of the
    * parent's checkout: its branch and folder now, the worktree itself before
-   * its first turn ([worktrees](./delegation/worktrees.ts)).
+   * its first turn ([worktrees](./delegation/worktrees.ts)). `fixed` is a
+   * context mode and a permission mode the core sets itself, such as a memory
+   * pass that runs no tool; each driver honours what it can of the mode.
    */
-  createChild(parent: ThreadSummary, profile: ChildRoute, title: string, record: (id: string) => void, context?: unknown, worktree = false): string {
+  createChild(parent: ThreadSummary, profile: ChildRoute, title: string, record: (id: string) => void, context?: unknown, worktree = false,
+    fixed?: { contextMode: ThreadContextMode; permissionMode: PermissionMode }): string {
     const id = newId('thr_');
     const { speed: asked, ...route } = profile;
     if (asked != null && route.model === null) throw invalidParams(SPEED_NEEDS_MODEL);
-    const speed = checkSpeed(this.core.providers.require(route.providerId), route.accountId, route.model, asked ?? null);
-    const contextMode = checkContext(this.core.providers.require(route.providerId), context);
+    const provider = this.core.providers.require(route.providerId);
+    const speed = checkSpeed(provider, route.accountId, route.model, asked ?? null);
+    const contextMode = fixed ? { ...fixed.contextMode, tools: fixed.contextMode.tools === null ? null : [...fixed.contextMode.tools] } : checkContext(provider, context);
     const planned = worktree ? this.worktrees.plan(parent, id) : null;
     this.core.journal.db.transaction(() => {
       if (parent.projectId === null) {
         const now = Date.now();
-        const child: ThreadSummary = { ...parent, parentThreadId: parent.id, agentSessionId: undefined, ...route, speed, id, contextMode,
+        const child: ThreadSummary = { ...parent, parentThreadId: parent.id, agentSessionId: undefined, ...route, speed, id, contextMode, ...(fixed ? { permissionMode: fixed.permissionMode } : {}),
           title, titleSource: 'user', status: 'idle', sessionId: null, sessionGeneration: 0, selectionVersion: 0,
           context: null, promptCache: null, load: null, unread: false, pinned: false, createdAt: now, updatedAt: now };
         this.core.journal.append({ type: 'thread.created', threadId: id, version: 1, payload: child }, () => this.core.journal.putThread(child));
@@ -397,7 +401,7 @@ export class Delegation {
       if (planned) this.worktrees.record(id, planned);
       record(id);
       const child = this.core.threads.require(id);
-      this.core.journal.putThread({ ...child, titleSource: 'user' });
+      this.core.journal.putThread({ ...child, titleSource: 'user', ...(fixed ? { contextMode, permissionMode: fixed.permissionMode } : {}) });
     })();
     return id;
   }
@@ -569,22 +573,13 @@ export class Delegation {
           if (!this.closed) for (const letter of letters) this.update(letter, 'uncertain', messageOf(error));
         }
       } else {
-        if (thread.agentSessionId) {
-          const session = this.core.workforce.session(threadId);
-          this.core.workforce.records.transaction(() => {
-            this.reserveTurn(threadId, 'delegation');
-            const episodeId = this.core.journal.getSetting(`delegation-episode:${threadId}`) as string | undefined;
-            const work = this.core.workforce.resident.enqueue(session.agentId, prompt, session.scope, episodeId);
-            for (const letter of letters) this.update(letter, 'delivered', `Durably queued as work ${work.id}`);
-          });
-          this.core.workforce.changed();
-          return;
-        }
         const turn = this.core.threads.startTurn(threadId, prompt, [], undefined, 'delegation');
         // The scheduler may have started it synchronously before startTurn returns.
         for (const letter of letters) this.update(letter, 'uncertain', `${turn.status === 'queued' && this.core.journal.getTurn(turn.id)?.status === 'queued' ? 'Queued for' : 'Awaiting'} provider turn ${turn.id}`);
       }
     } catch (error) {
+      // A persistent agent that is paused or out of budget: the results wait in its inbox.
+      if (isAgentHeld(error)) { this.core.agentRuntime.whenAdmitted(threadId, 'delegation', () => this.kick(threadId)); return; }
       for (const letter of letters) this.update(letter, 'rejected', messageOf(error));
     } finally { this.delivering.delete(threadId); }
   }

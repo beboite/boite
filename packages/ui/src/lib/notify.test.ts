@@ -56,8 +56,8 @@ describe('shouldNotify', () => {
 
 describe('finishNotifies', () => {
   const thread = (id: string, extra: Partial<ThreadSummary> = {}) => ({ id, status: 'idle', ...extra }) as ThreadSummary;
-  const turn = (threadId: string, status: Turn['status'], operation?: 'compact' | 'delegation') =>
-    ({ threadId, status, ...(operation ? { execution: { operation } } : {}) }) as Pick<Turn, 'threadId' | 'status' | 'execution'>;
+  const turn = (threadId: string, status: Turn['status'], operation?: 'compact' | 'delegation' | 'routine', quiet = false) =>
+    ({ threadId, status, ...(operation ? { execution: { operation } } : {}), ...(quiet ? { quiet: true as const } : {}) }) as Pick<Turn, 'threadId' | 'status' | 'execution' | 'quiet'>;
 
   test('a delegated agent never, its parent once the team is done', () => {
     const busy = [thread('root'), thread('child', { parentThreadId: 'root', status: 'running' })];
@@ -69,14 +69,30 @@ describe('finishNotifies', () => {
     expect(finishNotifies(idle, turn('root', 'done', 'delegation'))).toBe(true);
   });
 
-  test('a persistent agent only when it fails, compaction and stops never', () => {
+  test('a persistent agent like any thread unless its wake was quiet, compaction and stops never', () => {
     const threads = [thread('agent', { agentSessionId: 's-1', projectId: null }), thread('plain')];
-    expect(finishNotifies(threads, turn('agent', 'done'))).toBe(false);
+    expect(finishNotifies(threads, turn('agent', 'done'))).toBe(true);
+    expect(finishNotifies(threads, turn('agent', 'done', 'routine', true))).toBe(false);
     expect(finishNotifies(threads, turn('agent', 'error'))).toBe(true);
     expect(finishNotifies(threads, turn('plain', 'done', 'compact'))).toBe(false);
     expect(finishNotifies(threads, turn('plain', 'stopped'))).toBe(false);
     expect(finishNotifies(threads, turn('plain', 'done'))).toBe(true);
     expect(finishNotifies(threads, turn('unknown', 'done'))).toBe(true);
+    // A thread this client does not hold yet keeps the turn's own exclusions: a quiet wake or a compaction is no news.
+    expect(finishNotifies([], turn('agent', 'done', 'routine', true))).toBe(false);
+    expect(finishNotifies([], turn('unknown', 'done', 'compact'))).toBe(false);
+  });
+
+  test('a persistent agent\'s memory pass never holds back the answer it follows, a subagent still does', () => {
+    const agent = thread('agent', { agentSessionId: 's-1', projectId: null });
+    const pass = thread('memory', { parentThreadId: 'agent', status: 'running', createdAt: 100 });
+    const finished = { ...turn('agent', 'done'), finishedAt: 100 };
+    // Started as the turn ended, before any snapshot named it.
+    expect(finishNotifies([agent, pass], finished, new Set())).toBe(true);
+    // Named by the snapshot, whenever it started.
+    expect(finishNotifies([agent, { ...pass, createdAt: 10 }], turn('agent', 'done'), new Set(['memory']))).toBe(true);
+    // A subagent the turn sent and left running is still work the answer waits on.
+    expect(finishNotifies([agent, thread('sub', { parentThreadId: 'agent', status: 'running', createdAt: 50 })], finished, new Set())).toBe(false);
   });
 });
 

@@ -2,9 +2,9 @@
   import { requestStarts, type Message, type Turn } from '@boite/contracts';
   import type { Snippet } from 'svelte';
   import type { Store } from '../lib/store.svelte';
-  import TurnSummary from './TurnSummary.svelte';
+  import TurnSummary, { type SummaryMemory, type SummarySteps } from './TurnSummary.svelte';
 
-  let { store, threadId, turn, turns = [], message, messages, pointed = false, actions }: {
+  let { store, threadId, turn, turns = [], message, messages, pointed = false, steps, memory, actions }: {
     store: Store;
     threadId: string;
     turn: Turn;
@@ -14,6 +14,10 @@
     messages: Message[];
     /** The pointer is on one of the turn's answers, maybe not the one this summary closes. */
     pointed?: boolean;
+    /** A persistent agent's folded steps, counted on the line and opened from it. */
+    steps?: SummarySteps;
+    /** The memory pass that followed this turn, as a mark on the line. */
+    memory?: SummaryMemory;
     actions?: Snippet;
   } = $props();
 
@@ -38,5 +42,7 @@
   background={store.openThread?.turns.at(-1)?.id === turn.id ? store.openThread?.background ?? [] : []}
   stop={() => void store.stop()}
   {pointed}
+  {steps}
+  {memory}
   {actions}
 />

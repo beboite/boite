@@ -151,7 +151,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     check(setup.levels.length >= 2, 'the echo model offers fewer than two effort levels');
     const [low, high] = [setup.levels[0]!, setup.levels.at(-1)!];
     const selection = { providerId: setup.provider.id, accountId: setup.account.id, model: setup.model, effort: null, permissionMode: 'default' as const };
-    const agent = await env.call('agents.profile.save', { value: { name: 'Contract', domain: '', instructions: '', avatar: '', selection, status: 'active', tools: ['messages'] } });
+    const agent = await env.call('agents.profile.save', { value: { name: 'Contract', domain: '', instructions: '', avatar: '', selection, status: 'active' } });
     const config = await env.call('agents.runtime.get', { agentId: agent.id });
     const saved = await env.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: agent.revision, config: { ...config, defaultRoute: { ...config.defaultRoute, effort: high } } });
     same(saved.selection.effort, high, 'saved effort');
@@ -621,15 +621,6 @@ export const SCENARIOS: Record<string, Scenario> = {
     check(!(await env.call('threads.deleted', {})).some(t => t.id === kept.id), 'project removal left a recoverable deletion');
     await refusedWith(env.call('threads.restore', { threadId: kept.id }), RpcErrorCode.NotFound, ['threadId']);
     await refusedWith(env.call('threads.remove', { threadId: 'thr_missing' }), RpcErrorCode.NotFound, ['threadId']);
-  },
-  'projects.remove refuses a project an agent memory names, and keeps it': async (env) => {
-    const setup = await echo(env);
-    await env.call('agents.memory.save', {
-      value: { scope: { kind: 'project', id: setup.projectId }, title: 'Layout', text: 'Tests live beside the code.', sourceScopes: [], sourceRunId: null, expiresAt: null },
-    });
-    const data = await refusedWith(env.call('projects.remove', { projectId: setup.projectId }), RpcErrorCode.Refused, ['projectId']);
-    same(data.projectId, setup.projectId, 'the project');
-    check((await env.call('projects.list', {})).some((entry) => entry.id === setup.projectId), 'the refused project is gone');
   },
   'projects.remove archives each thread before removing it': async (env) => {
     const setup = await echo(env);

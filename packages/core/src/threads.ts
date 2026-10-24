@@ -31,6 +31,7 @@ import type {
 } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { notFound, refused } from './errors.ts';
+import type { AutonomousSource } from './agents/runtime.ts';
 import { newId } from './ids.ts';
 import { assertDriverRunnable, releaseThread } from './drivers/index.ts';
 import { AgentState } from './threads/agent-state.ts';
@@ -484,7 +485,7 @@ export class ThreadStore {
   async remove(threadId: ThreadId): Promise<void> {
     const root = this.require(threadId);
     if (root.agentSessionId || root.parentThreadId) {
-      throw refused('threadId: delete a conversation from its parent; persistent agent sessions are managed through Agents', { threadId, field: 'threadId', expected: 'a top-level conversation without agentSessionId' });
+      throw refused('threadId: delete a conversation from its parent; a bot\'s thread goes when the bot is archived', { threadId, field: 'threadId', expected: 'a top-level conversation without agentSessionId' });
     }
     if (this.removing.has(threadId)) throw refused('threadId: this conversation is already being deleted', { threadId, field: 'threadId', expected: 'a conversation not being deleted' });
     const family = this.core.journal.listThreads().filter(t => t.id === threadId || t.parentThreadId === threadId);
@@ -594,14 +595,10 @@ export class ThreadStore {
     return this.moves.userMove(threadId, projectId, stopBackground);
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: ActivityTurn, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], agentRunId?: string, startedBy?: ThreadLink, sentFrom: SentFrom | null = null): Turn {
+  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: ActivityTurn, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], startedBy?: ThreadLink, sentFrom: SentFrom | null = null): Turn {
     if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
     let thread = this.require(threadId);
     this.codeCheckpoints.assertAvailable(thread.cwd);
-    if (thread.agentSessionId && operation !== 'compact') {
-      const run = agentRunId ? this.core.workforce.records.get('run', agentRunId) : null;
-      if (!run || run.threadId !== threadId || run.status !== 'accepted' || run.id !== clientRequestId) throw refused('persistent agent sessions accept work through Agents, not turns.start');
-    }
     checkAttachmentArray(attachments);
     const referenceError = previewReferencesError(previewReferences, prompt);
     if (referenceError) throw refused(referenceError);
@@ -614,6 +611,9 @@ export class ThreadStore {
       const data: TurnInFlightData = { threadId, reason: 'turn-in-flight', thread: this.withLoad(thread) };
       throw refused('this thread already has an in-flight turn', data);
     }
+    // A turn the core starts by itself on a persistent agent's thread meets the agent's pause and budget first.
+    const autonomous = autonomousSource(operation, activity, clientRequestId);
+    if (autonomous !== null) this.core.agentRuntime.admit(thread, autonomous);
     // A signed-out or removed account hands the thread to another of its agent (`threads/account-fallback.ts`).
     thread = followAgent(this.core, thread);
     const provider = this.core.providers.require(thread.providerId);
@@ -853,5 +853,20 @@ export class ThreadStore {
 
   private withLoad(thread: ThreadSummary): ThreadSummary {
     return withLoad(this.core, thread);
+  }
+}
+
+/**
+ * Where a turn comes from when the core starts it by itself, or null for the
+ * user's message, a routine or an event (`AgentRuntime.attempt` admitted it,
+ * or it is the owner's Run now), a compaction, a cache ping, and a restart
+ * continuing a turn that was running (`threads/handoff.ts`).
+ */
+function autonomousSource(operation: NonNullable<Turn['execution']>['operation'] | undefined, activity: ActivityTurn | undefined, requestId: string | undefined): AutonomousSource | null {
+  switch (operation) {
+    case undefined: return activity ? 'goal' : null;
+    case 'background': case 'coordination': case 'delegation': case 'pull-request': return operation;
+    case 'resume': return requestId?.startsWith('restart_') ? null : 'resume';
+    default: return null;
   }
 }

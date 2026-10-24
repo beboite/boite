@@ -152,7 +152,7 @@ test('the tier takes 1, 2 or 3; an agent asks a contact by name and lists what e
   expect(await client.call('collaboration.contacts', { threadId: 't-trace' })).toEqual([{ name: 'Chris', coreId: 'core-chris', projects: ['website'], link: 'connected' }]);
   const asked = await client.call('collaboration.ask', { threadId: 't-trace', contact: 'chris', text: 'An agent on the website' });
   expect([asked.direction, asked.status, asked.contact]).toEqual(['out', 'pending', 'Chris']);
-  // Any case, and a name's spaces written as hyphens, like `boite agents ask`.
+  // Any case, and a name's spaces written as hyphens, like `boite threads ask`.
   await client.call('contacts.update', { coreId: 'core-chris', name: 'Chris Brown' });
   expect((await client.call('collaboration.ask', { threadId: 't-trace', contact: 'CHRIS-brown', text: 'Docs' })).contact).toBe('Chris Brown');
   expect(await refusal(client.call('collaboration.ask', { threadId: 't-trace', contact: 'Nobody', text: 'x' }))).toEqual({ code: RpcErrorCode.InvalidParams, field: 'contact' });

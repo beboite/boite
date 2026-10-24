@@ -314,11 +314,16 @@ export class FakeContext {
       this.settlingAgentCards = true;
       queueMicrotask(() => { this.settlingAgentCards = false; settleAgentSettings(this); });
     }, {
-      create: (agent, sessionId, work) => createAgentSession(this, agent, sessionId, work),
-      start: (threadId, prompt, agent, attachments) => { Object.assign(this.thread(threadId), agent.selection); return this.startTurn(threadId, prompt, attachments); },
-      prompt: (threadId, turnId) => this.thread(threadId).messages.find(m => m.turnId === turnId && m.role === 'user')?.id,
-      stop: threadId => { void this.stopTurn(threadId); },
+      create: (agent, sessionId) => createAgentSession(this, agent, sessionId),
+      // A wake runs on the thread like a turn the user started; one already running refuses it, as the composer's queue would wait.
+      wake: (threadId, prompt, operation, label) => this.startTurn(threadId, prompt, [], operation, undefined, undefined, [], false, label),
       thread: threadId => this.threads.get(threadId),
+      settle: threadId => { const thread = this.threads.get(threadId); if (thread?.unread) { thread.unread = false; this.touch(thread); } },
+      waiting: threadId => [...this.pendingQuestions.values()].some(q => q.request.threadId === threadId) || [...this.pendingPermissions.values()].some(p => p.request.threadId === threadId),
+      question: threadId => {
+        const ask = [...this.pendingQuestions.values()].find(q => q.request.threadId === threadId)?.request;
+        return ask ? { id: ask.id, text: ask.text, options: ask.options.map(o => o.label) } : null;
+      },
       goal: (threadId, objective) => {
         const methods = activityMethods(this);
         void (objective === null ? methods['threads.activity.control']({ threadId, kind: 'goal', action: 'remove' }) : methods['threads.activity.set']({ threadId, goal: { objective } })).catch(() => {});
@@ -464,11 +469,15 @@ export class FakeContext {
       } as RpcEvents[E];
     }
     observeLog(this, event, payload);
+    if (event === 'thread.removed') this.agents.threadEnded((payload as RpcEvents['thread.removed']).threadId);
+    if (event === 'thread.updated' && (payload as RpcEvents['thread.updated']).archived) this.agents.threadEnded((payload as RpcEvents['thread.updated']).id);
     if (event === 'turn.finished') {
       const turn = payload as Turn;
       const agentThread = this.threads.get(turn.threadId);
       const answer = () => agentThread?.messages.filter(m => m.turnId === turn.id && m.role === 'assistant').flatMap(m => m.parts.flatMap(p => p.type === 'text' ? [p.text] : [])).join('\n') ?? '';
-      if (agentThread?.agentSessionId) this.agents.finished(turn, answer());
+      // The final text block, as the core reads it for `[quiet]`.
+      const finalText = () => agentThread?.messages.filter(m => m.turnId === turn.id && m.role === 'assistant').flatMap(m => m.parts.flatMap(p => p.type === 'text' && p.text.trim() ? [p.text] : [])).at(-1) ?? '';
+      if (agentThread?.agentSessionId) this.agents.finished(turn, finalText());
       const goal = agentThread?.activity?.goal?.status;
       finishActivityTurn(this, turn);
       this.agents.goalEnded(turn, goal, answer);

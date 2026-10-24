@@ -31,6 +31,7 @@
   import SurfaceLauncher from './SurfaceLauncher.svelte';
   import TasksSurface from './TasksSurface.svelte';
   import TraceSurface from './TraceSurface.svelte';
+  import AgentDesk from './agents/AgentDesk.svelte';
 
   let {
     store,
@@ -262,7 +263,10 @@
   }
 
 
+  /** A persistent agent's own thread has a desk, offered first. */
+  const agentThread = $derived(!!store.openThread?.agentSessionId);
   let menuItems = $derived([
+    ...(agentThread ? [{ id: 'desk', label: kindName('desk'), glyph: surfaceGlyph('desk') }] : []),
     ...offeredCards().map((card) => ({
       id: card.kind,
       label: kindName(card.kind),
@@ -457,7 +461,11 @@
          than swapping it in one frame, the way a settings page arrives. -->
     {#key active?.id}
     <div class="surface" use:arrive>
-    {#if active?.kind === 'agents'}
+    {#if active?.kind === 'desk'}
+      {#if store.openThread?.agentSessionId}
+        {#key store.threadKey(store.openThread.id)}<AgentDesk {store} />{/key}
+      {/if}
+    {:else if active?.kind === 'agents'}
       <DelegationSurface {store} surface={active} {panel} />
     {:else if active?.kind === 'messages'}
       <AgentMessagesSurface {store} surface={active} {panel} />

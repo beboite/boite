@@ -32,7 +32,7 @@ test('a thread asks to entrust a project to an agent; Apply entrusts it and the 
   // An agent with no project, and a thread of boite whose agent asks for it to be entrusted.
   const ids = await page.evaluate(`(async () => {
     const store = window.__boiteTest.workspace.active;
-    const agent = await store.client.call('agents.profile.save', { value: { name: 'Scout', domain: 'Follows projects', instructions: '', avatar: '', status: 'active', tools: [], projectIds: [],
+    const agent = await store.client.call('agents.profile.save', { value: { name: 'Scout', domain: 'Follows projects', instructions: '', avatar: '', status: 'active', projectIds: [],
       selection: { providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: null, permissionMode: 'default' } } });
     const thread = await store.client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
     await window.__boiteTest.workspace.select(store, thread.id);
@@ -78,17 +78,27 @@ test('a persistent agent\'s card stands in its conversation', async () => {
   await page.navigate(`http://127.0.0.1:${port}/?fake=1&agents=1`);
   await page.send('Emulation.setDeviceMetricsOverride', DESKTOP);
   await page.waitFor(`document.querySelector('[data-testid="view-agents"]')`);
-  await page.evaluate(`window.__boiteTest.workspace.active.showAgents()`);
-  const card = '[data-testid="agent-transcript"] [data-testid="agent-setting-card"][data-state="pending"]';
-  await page.waitFor(`document.querySelector('${card} [data-testid="agent-setting-project"][data-project="p-notes"]')?.checked === true`);
-  expect(await page.text(`${card} [data-testid="agent-setting-heading"]`)).toBe('Suggested change to Mira');
+  // Mira, at rest in the demo, asks from its own thread for a project it lacks.
+  const ids = await page.evaluate<{ agent: string; project: string }>(`(async () => {
+    const store = window.__boiteTest.workspace.active;
+    const snapshot = await store.client.call('agents.snapshot', {});
+    const mira = snapshot.profiles.find(p => p.name === 'Mira');
+    const threadId = snapshot.sessions.find(s => s.agentId === mira.id).threadId;
+    const project = store.projects.find(p => !(mira.projectIds ?? []).includes(p.id));
+    await store.client.call('agents.settings.request', { threadId, key: 'projects', value: [...(mira.projectIds ?? []), project.id], reason: 'I can follow its releases too.' });
+    store.showAgents(mira.id);
+    return { agent: mira.id, project: project.id };
+  })()`);
+  const card = '.agents-main [data-testid="agent-setting-card"][data-state="pending"]';
+  await page.waitFor(`document.querySelector('${card} [data-testid="agent-setting-project"][data-project="${ids.project}"]')?.checked === true`);
+  expect(await page.text(`${card} [data-testid="agent-setting-reason"]`)).toContain('I can follow its releases too.');
   await page.evaluate(`document.querySelector('${card}').scrollIntoView({ block: 'center' })`);
   await capture('agent-desktop.png');
 
   await page.send('Emulation.setDeviceMetricsOverride', PHONE);
-  // A phone opens on the list of conversations.
-  await page.waitFor(`document.querySelector('[data-testid^="agent-entry-"]')?.getBoundingClientRect().width > 0 || document.querySelector('${card}')?.getBoundingClientRect().width > 0`);
-  await page.evaluate(`document.querySelector('${card}')?.getBoundingClientRect().width > 0 || document.querySelector('[data-testid^="agent-entry-"]').click()`);
+  // A phone keeps the conversation open full screen, or shows the list first.
+  await page.waitFor(`document.querySelector('[data-testid="agent-entry-${ids.agent}"]')?.getBoundingClientRect().width > 0 || document.querySelector('${card}')?.getBoundingClientRect().width > 0`);
+  await page.evaluate(`document.querySelector('${card}')?.getBoundingClientRect().width > 0 || document.querySelector('[data-testid="agent-entry-${ids.agent}"]').click()`);
   await page.waitFor(`document.querySelector('${card}')?.getBoundingClientRect().width > 0`);
   await page.evaluate(`document.querySelector('${card}').scrollIntoView({ block: 'center' })`);
   expect(await page.evaluate(`(() => { const box = document.querySelector('${card}').getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth; })()`)).toBe(true);

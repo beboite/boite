@@ -16,10 +16,11 @@ import type { RpcEventName, RpcMethodName } from './index.ts';
  * working tree.
  */
 export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
-  // A paired phone follows persistent work, talks to agents and answers its owner's decisions.
-  'agents.snapshot', 'agents.message.send', 'agents.decision.answer', 'agents.work.control',
-  'agents.history', // Older records of the kinds agents.snapshot already shows the device.
-  'agents.messages', // Chronological windows of the same conversation messages, including unread positions.
+  // A paired phone lists the owner's agents with their state, desk and routines; talking to one is
+  // `turns.start` on its thread, which the device already reaches.
+  'agents.snapshot',
+  // The agent's own thread, created again if it was lost: a thread the phone then opens like any other.
+  'agents.open',
   'agents.runtime.get', 'agents.brain.get', // Read the same identity settings and memory shown on its host.
   // Follow and steer an owner-enabled team from the phone, without changing routes or limits.
   // Bounded child results and event-driven waits expose the same family read scope as delegation.get.

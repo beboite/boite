@@ -46,7 +46,7 @@ export class ThreadRecovery {
       }
       const thread = this.core.journal.getThread(turn.threadId);
       if (previous === 'queued' && turn.startedAt === null && turn.execution
-        && !turn.execution.operation && thread && !thread.archived && !thread.parentThreadId && !thread.agentSessionId) {
+        && !turn.execution.operation && thread && !thread.archived && !thread.parentThreadId) {
         const held: Turn = { ...turn, queueHold: turn.queueHold ?? { reason: 'core-restarted', since: Date.now() } };
         this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
           if (!turn.queueHold) this.core.journal.append({ type: 'turn.held', threadId: turn.threadId, version: 1, payload: held }, () => this.core.journal.putTurn(held));
@@ -107,7 +107,7 @@ export class ThreadRecovery {
     }
     if (thread.archived) throw refused('cannot resume a prompt on an archived thread', { threadId });
     const target = turn.execution;
-    if (!target || target.operation || thread.parentThreadId || thread.agentSessionId) throw refused('only an unsent conversation prompt can be resumed', { turnId });
+    if (!target || target.operation || thread.parentThreadId) throw refused('only an unsent conversation prompt can be resumed', { turnId });
     this.core.threads.codeCheckpoints.assertAvailable(thread.cwd);
     const provider = this.core.providers.require(target.providerId);
     const account = this.core.accounts.require(target.accountId);

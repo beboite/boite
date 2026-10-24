@@ -6,13 +6,15 @@
  * The same words serve two callers. The owner at a terminal (no agent
  * environment, `core.json` or `--core` with `BOITE_TOKEN`) reaches every
  * thread through the owner methods, and a message it sends is the user's own
- * prompt. A persistent agent the owner entrusted projects to goes through
- * `resident.*` and coordination from its direct conversation: the core holds
- * it to its projects, and its messages reach a thread marked as its own, never
- * as the user's. Deleting threads and deciding permissions stay the owner's.
+ * prompt. A bot the owner entrusted projects to goes through `resident.*`
+ * and coordination from its own thread: the core holds it to its projects,
+ * and its messages reach a thread marked as its own, never as the user's.
+ * Any other thread lists what coordination lets it reach. Deleting threads
+ * and deciding permissions stay the owner's.
  */
-import type { PermissionRequest, Project, ProjectThreadRow, QuestionRequest, RpcParams, ThreadSummary } from '@boite/contracts';
+import type { AgentWatch, PermissionRequest, Project, ProjectThreadRow, QuestionRequest, RpcParams, ThreadSummary } from '@boite/contracts';
 import type { CoreClient } from './client.ts';
+import { contactLine, NO_CONTACT } from './agents-cli.ts';
 import { requiredText, Usage, type Parsed } from './cli-args.ts';
 
 type Printer = (lines: string[], value: unknown) => void;
@@ -23,9 +25,12 @@ export const CONTROL_COMMANDS = ['threads', 'thread', 'questions', 'answer', 'pe
 /** `thread` actions this file answers; `new` and `move <project>` without a target stay with the agent's own commands. */
 const THREAD_ACTIONS = ['show', 'send', 'stop', 'done', 'archive', 'unarchive', 'remove', 'rename'] as const;
 
-export const CONTROL_HELP = `  threads [--project <p>] [--archived]
-                                 threads you may drive: every one as the owner,
-                                 those of the projects entrusted to you as an agent
+export const CONTROL_HELP = `  threads [list] [--project <p>] [--archived]
+                                 the threads you may see and their machine:
+                                 every one here as the owner, those of your
+                                 projects and your desk as a bot, the ones that
+                                 let you reach them here and on linked machines
+                                 from any other thread
   thread show <id>               state, pending questions and permissions, last answer
   thread send <id> <text>        the owner's prompt, or the agent's message
   thread done <id>               put a thread that is not at work in Done
@@ -45,6 +50,8 @@ export function isControlCommand(parsed: Parsed): boolean {
     return action === 'move' && parsed.positional.length === 4 && /^thr_[0-9a-z]+$/.test(parsed.positional[3] ?? '');
   }
   if (command === 'projects') return ['archive', 'unarchive', 'remove'].includes(action ?? '');
+  // `threads find|read|send|...` talk to other threads (agents-cli.ts); only the listing is here.
+  if (command === 'threads') return action === undefined || action === 'list';
   return (CONTROL_COMMANDS as readonly string[]).includes(command ?? '');
 }
 
@@ -98,7 +105,7 @@ export function answerOf(question: QuestionRequest, words: string[]): { optionId
 }
 
 /** A project by id, name (any case) or folder, among the owner's list, as the core's own finder does. */
-function projectOf(projects: Project[], query: string): Project {
+function projectOf<T extends { id: string; name: string; path: string }>(projects: T[], query: string): T {
   const byId = projects.find(project => project.id === query);
   if (byId) return byId;
   const byPath = projects.find(project => project.path === query);
@@ -107,6 +114,28 @@ function projectOf(projects: Project[], query: string): Project {
   if (byName.length > 1) throw new Error(`${byName.length} projects are named ${query}; name one by its id: ${byName.map(project => project.id).join(', ')}`);
   if (byName.length === 0) throw new Error(`no project ${query}; boite projects lists them`);
   return byName[0]!;
+}
+
+/** A thread on a bot's desk outside the projects it lists: the desk's own state, from the thread. */
+function deskLine(watch: AgentWatch): string {
+  const facts = [`desk=${watch.origin}`, watch.pullRequest ? `pr=#${watch.pullRequest.number}:${watch.pullRequest.state}` : null, watch.stalledSince ? 'stalled' : null, 'machine=here'].filter(Boolean).join(' ');
+  return `${watch.threadId} ${watch.state} ${JSON.stringify(watch.title)} ${facts}`;
+}
+
+/**
+ * What a bot sees: the threads of the projects entrusted to it, then the
+ * threads on its desk that are not among them. A bot with no project lists
+ * its desk alone.
+ */
+async function botRows(client: CoreClient, threadId: string, watches: AgentWatch[], project: string | undefined, archived: boolean): Promise<{ rows: ProjectThreadRow[]; desk: AgentWatch[] }> {
+  const view = await client.call('resident.view', { threadId });
+  const projectId = project === undefined ? undefined : projectOf(await client.call('agent.projects', { threadId }), project).id;
+  const entrusted = view.projects.length > 0 && (projectId === undefined || view.projects.some(entry => entry.id === projectId));
+  const rows = entrusted ? await client.call('resident.threads', { threadId, ...(projectId === undefined ? {} : { project: projectId }), ...(archived ? { archived: true } : {}) }) : [];
+  const listed = new Set(rows.map(row => row.id));
+  const desk = watches.filter(watch => !listed.has(watch.threadId) && (projectId === undefined || watch.projectId === projectId)
+    && (watch.state === 'archived' || watch.state === 'done') === archived);
+  return { rows, desk };
 }
 
 export async function controlCommand(client: CoreClient, caller: Caller, threadId: string, parsed: Parsed, print: Printer): Promise<void> {
@@ -165,11 +194,25 @@ export async function controlCommand(client: CoreClient, caller: Caller, threadI
 
   switch (command) {
     case 'threads': {
+      if (rest.length > 1) throw new Usage('threads lists with no more words; threads find <words> searches');
       const project = parsed.project;
-      const rows = owner
-        ? await ownerRows(project, parsed.archived)
-        : await client.call('resident.threads', { threadId, ...(project === undefined ? {} : { project }), ...(parsed.archived ? { archived: true } : {}) });
-      print(rows.length === 0 ? ['threads: none'] : rows.map(threadLine), rows);
+      if (owner) {
+        const rows = await ownerRows(project, parsed.archived);
+        print(rows.length === 0 ? ['threads: none'] : rows.map(row => `${threadLine(row)} machine=here`), rows);
+        return;
+      }
+      const bot = await client.call('agents.snapshot', { threadId }).catch(() => null);
+      if (bot !== null && bot.profiles.length > 0) {
+        const listed = await botRows(client, threadId, bot.watches, project, parsed.archived);
+        print(listed.rows.length + listed.desk.length === 0 ? ['threads: none'] : [...listed.rows.map(row => `${threadLine(row)} machine=here`), ...listed.desk.map(deskLine)], listed);
+        return;
+      }
+      if (parsed.archived) throw new Error('threads --archived lists archived threads for the owner and for bots; another thread sees the open ones it may reach');
+      const [{ self }, result] = await Promise.all([client.call('collaboration.get', { threadId }), client.call('collaboration.directory', { threadId })]);
+      const shown = project === undefined ? result.agents : result.agents.filter(contact => contact.project?.toLowerCase() === project.toLowerCase());
+      const lines = shown.map(contact => contactLine(contact, self.coreId));
+      if (lines.length === 0) lines.push(project === undefined ? NO_CONTACT : `no thread you may reach is in a project named ${project}`);
+      print([...lines, ...result.unavailable.map(name => `unavailable: ${name}`)], { ...result, agents: shown });
       return;
     }
     case 'thread': {

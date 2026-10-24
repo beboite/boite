@@ -56,6 +56,7 @@
   import { startViewHistory } from './lib/view-history.svelte';
   import { agentAutoLink } from './lib/agent-links.svelte';
   import ThreadPreparation from './components/ThreadPreparation.svelte';
+  import AgentsLayout from './components/agents/AgentsLayout.svelte';
 
   let store = $derived(workspace.active);
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
@@ -172,13 +173,6 @@
   });
   hostLocalAgentBrowser();
   let SettingsShell = $state<typeof import('./components/SettingsShell.svelte').default>();
-  let AgentsPage = $state<typeof import('./components/agents/AgentsPage.svelte').default>();
-  let agentsLoadError = $state('');
-  $effect(() => {
-    if (store.page !== 'agents' || !experimentOn('resident-agents') || AgentsPage) return;
-    void import('./components/agents/AgentsPage.svelte').then(module => { AgentsPage = module.default; })
-      .catch(() => { agentsLoadError = strings.agents.offline; });
-  });
   // Switched off with the page open: every machine goes back to its chat, so
   // switching it on again does not reopen a page nobody navigated to.
   $effect(() => {
@@ -361,8 +355,14 @@
     else scrim.hide();
   });
 
+  /**
+   * The thread the right panel belongs to: the chat's open thread, or on the
+   * Agents page the agent's own; an ordinary thread left open behind the
+   * Agents page has no panel there.
+   */
+  const panelThread = $derived(store.page === 'agents' ? (store.openThread?.agentSessionId ? store.openThread : null) : store.openThread);
   $effect(() => {
-    if (store.panelOpen && store.openThread) panelSlot.show();
+    if (store.panelOpen && panelThread) panelSlot.show();
     else panelSlot.hide();
   });
   $effect(() => {
@@ -559,7 +559,7 @@
   {/if}
   <TitleBar {store} />
 
-  <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && (mobileScreen !== 'chat' || mobileRecovery)} class:panel-maximized={store.page === 'chat' && rightPanel.maximized && !rightPanel.floating && store.panelOpen} class:sidebar-folded={sidebarFolded}>
+  <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && (mobileScreen !== 'chat' || mobileRecovery)} class:panel-maximized={(store.page === 'chat' || store.page === 'agents') && rightPanel.maximized && !rightPanel.floating && store.panelOpen} class:sidebar-folded={sidebarFolded}>
     {#if !booted}
       <p class="empty boot" class:long={compacting}>{compacting ? strings.app.compacting : strings.app.loading}</p>
     {:else if wideRecovery}
@@ -580,7 +580,7 @@
         </div>
       {/if}
     {:else if store.page === 'agents' && experimentOn('resident-agents')}
-      {#if AgentsPage}{#key store}<AgentsPage {store} />{/key}{:else}<p class="empty">{agentsLoadError || strings.app.loading}</p>{/if}
+      <AgentsLayout {store} panel={panelSlot} showPanel={panelSlot.shown && panelThread !== null} RightPanel={deferred.RightPanel} />
     {:else if store.page === 'settings'}
       {#if SettingsShell}<SettingsShell {store} onopenthread={() => { mobileScreen = 'chat'; }} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
     {:else}

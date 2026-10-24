@@ -175,8 +175,8 @@ export function programOf(command: string): string {
 const SUBCOMMAND = /^[a-z][a-z0-9-]*$/;
 
 /**
- * The program and the subcommands that say what it does: `boite agents send`
- * for `boite agents send thr_1 "redo it"`, `git status` for `git status --short`.
+ * The program and the subcommands that say what it does: `boite threads send`
+ * for `boite threads send thr_1 "redo it"`, `git status` for `git status --short`.
  */
 export function commandOf(command: string): string {
   const { first, rest } = splitFirst(programSegment(command));
