@@ -1,0 +1,35 @@
+name: Native Windows protection
+
+on:
+  pull_request:
+    paths:
+      - 'packages/core/src/platform/**'
+      - 'packages/core/src/execution-*'
+      - 'packages/core/test/protected*'
+      - '.github/workflows/protected-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-windows-protection-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Native Windows protected tools
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - name: Native production fixture
+        env:
+          BOITE_TEST_NATIVE_EXECUTION: '1'
+        run: bun test packages/core/test/protected-windows.test.ts --timeout 120000
