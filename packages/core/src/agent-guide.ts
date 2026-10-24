@@ -51,6 +51,7 @@ export function agentGuide(asyncQuestions: boolean, logAccess = false, skills: r
       : `\`boite help\` lists commands; \`boite where\` shows cwd/project/branch. Stay in the checkout. \`boite browser|device help\`: agent-browser/emulators; batch browser steps: \`&&\` or \`boite browser run -\`. ${pullRequests}`,
     '`boite show <file>[:line]`, `boite diff [file]`, `boite browse <url>` open the panel. `boite preview <file.html>` previews HTML/assets; `boite attach <file>` sends files (512 MB max).',
     'Inline `path:line` opens this checkout\'s files. Use `boite attach` for media across machines.',
+    '`boite window help`: capture a desktop window (Unity, a game) as a PNG or contact sheet; emulators go through `boite device`. Reading a picture costs about w×h/750 tokens: use `--max` and `--crop`.',
     VIEW_GUIDE_LINE,
     ...(asyncQuestions ? ['`boite ask [--open <url>] "<question>" [option ...]` asks asynchronously. Keep working on independent tasks; the answer arrives as a message. Silence grants no approval. Login wall: `--open <url>`, the site and why, options "Signed in" Skip; never in chat.'] : []),
     '`boite settings [bot] [request|open|create]` reads Boite settings or a bot\'s, puts a card in chat for the user to change one, or creates the bot the user asked for.',

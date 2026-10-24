@@ -174,6 +174,7 @@ export class Connection {
             subagentsDemo: params.get('subagents') === '1',
             boardDemo: params.get('board') === '1',
             watchDemo: params.get('watch') === '1',
+            windowsDemo: params.get('windows') === '1',
             uninstalled: params.get('uninstalled') === '1',
             ...(params.get('principal') === 'session' ? { principal: 'session' as const } : {}),
             ...(params.get('missing') ? { missing: params.get('missing')!.split(',') } : {})

@@ -29,6 +29,7 @@
 - [The right panel](panel.md): browser, changes, files, tasks, workflows and trace beside the chat.
 - [The agent's browser](browser.md): the headless browser an agent drives on its machine, watched from any device.
 - [Devices](devices.md): iOS Simulators and Android emulators the agent opens in the Device panel.
+- [Windows](windows.md): desktop windows an agent captures as a PNG or contact sheet, or shows in the Window panel, with the owner's consent.
 - [Chat files and previews](chat-files.md): files an agent publishes, file links, inline previews, and the pages an agent draws in its answer.
 - [Experiments](experiments.md): bots, contacts, reviewed goals and other unfinished switches.
 - [Pointer interactions](interactions.md): edge scrollbars and loading a thread on the press.

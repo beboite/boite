@@ -9,6 +9,7 @@ import type { AppLanguage, SettingAsk } from './setting-requests.ts';
 import type { ActivityTurn } from './threads';
 import type { Turn } from './turns';
 import type { InlineView } from './view.ts';
+import type { WindowCaptureKind, WindowConsentAnswer } from './windows';
 
 export type MessageRole = 'user' | 'assistant' | 'system';
 
@@ -211,6 +212,21 @@ export type MessagePart =
    * hook that denied a tool call shows on that tool's card instead.
    */
   | { type: 'hook'; event: string; outcome: 'blocked' | 'stopped'; message: string }
+  /**
+   * A native window an agent captured with `boite window`, or whose stream a
+   * viewer started in the Window panel: no capture is silent. `thumbnail` is a
+   * JPEG of at most `WINDOW_THUMBNAIL_MAX` pixels as base64, null when it could
+   * not be made; `path` is the file the agent asked for, `width` and `height`
+   * that file's size (the window's for a stream).
+   */
+  | { type: 'window_capture'; kind: WindowCaptureKind; windowId: string; process: string; width: number; height: number; at: Timestamp; thumbnail: { data: string; width: number; height: number } | null; path?: string; frames?: number }
+  /**
+   * An agent asked to capture an app the project does not allow: the owner
+   * answers Allow once, Always for this project or Refuse. `answer` is null
+   * while the capture waits, `expired` once `expiresAt` passed or the core
+   * restarted. The window's title is left out: the agent can read its thread.
+   */
+  | { type: 'window_consent'; requestId: string; kind: WindowCaptureKind; process: string; path: string; expiresAt: Timestamp; answer: WindowConsentAnswer | 'expired' | null }
   | { type: 'error'; message: string };
 
 export interface Message {

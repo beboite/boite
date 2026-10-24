@@ -126,6 +126,8 @@ export interface FakeClientOptions {
   boardDemo?: boolean;
   /** Two pull request watches on the trace thread, one paused by GitHub's rate limit, on `?fake=1&watch=1`. */
   watchDemo?: boolean;
+  /** Window captures, consent cards in each state and a watched Unity window on the trace thread, on `?fake=1&windows=1`. */
+  windowsDemo?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
   /**

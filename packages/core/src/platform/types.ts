@@ -77,6 +77,56 @@ export interface GuardStatus {
 /** What the firewall's allow command exits with when nobody accepted the administrator prompt. */
 export const FIREWALL_PROMPT_REFUSED = 3;
 
+/** A top-level window a person sees on this machine's desktop (docs/windows.md). */
+export interface NativeWindow {
+  /** The HWND or X11 window id, in decimal. */
+  id: string;
+  pid: number;
+  /** The executable's full path, or '' when the OS will not say: such an app can never be allowed. */
+  path: string;
+  /** The executable's file name: `Unity.exe`. */
+  process: string;
+  title: string;
+  /** The window class (Windows) or WM_CLASS (X11), to tell the sign-in and lock screens apart. */
+  className: string;
+  /** Physical pixels, the size a capture comes out at. */
+  width: number;
+  height: number;
+  minimized: boolean;
+}
+
+/** One picture of a window: BGRA rows from the top, 4 bytes a pixel, no padding. */
+export interface WindowPixels {
+  width: number;
+  height: number;
+  bgra: Uint8Array;
+  /** The path that produced it, for the log: `wgc`, `printwindow`, `x11`. */
+  via: string;
+}
+
+/** Repeated pictures of one window for a clip or the Window panel, keeping what the OS set up between them. */
+export interface WindowFrames {
+  next(): Promise<WindowPixels>;
+  close(): void;
+}
+
+/**
+ * Why a capture failed, as `WindowCaptureError.code`: the service turns each
+ * into the sentence an agent reads.
+ */
+export type WindowCaptureFailure = 'minimized' | 'gone' | 'black' | 'failed';
+
+/**
+ * The OS half of `boite window`. Never restores, raises or focuses a window,
+ * sends it no input and draws no cursor. Loaded on first use.
+ */
+export interface WindowCapture {
+  list(): Promise<NativeWindow[]>;
+  /** Throws `WindowCaptureError` (`platform/window-pixels.ts`). */
+  capture(id: string): Promise<WindowPixels>;
+  frames(id: string): WindowFrames;
+}
+
 /** OS services used by the shared process registry. No native imports here. */
 export interface ProcessPlatform {
   serverUpdates?: ServerUpdatePlatform;
@@ -84,6 +134,11 @@ export interface ProcessPlatform {
   tailscaleCli?(): string | null;
   /** The command lines that read and fix the OS firewall for `program`; Windows only (`windows/firewall.ts`). */
   firewall?: { query(program: string): string[]; allow(program: string): string[] };
+  /**
+   * Native window capture, loaded on first call, or why this machine has none:
+   * Wayland, no display, macOS. Absent reads as unavailable.
+   */
+  windowCapture?(): Promise<WindowCapture | { unavailable: string }>;
   retain(jobs: ProcessEventSink, guards: GuardEventSink): void;
   /** Resolves once nothing native is left holding the user's state: hooks, muted sessions. */
   release(): Promise<void>;

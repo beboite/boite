@@ -24,6 +24,7 @@ import { DELEGATE_ACTIONS, delegateCommand } from './delegate-cli.ts';
 import { browserCommand, BROWSER_HELP } from './browser-cli.ts';
 import { browserRun } from './browser-run.ts';
 import { deviceCommand } from './device-cli.ts';
+import { WINDOW_REQUEST_TIMEOUT_MS, windowCommand } from './window-cli.ts';
 import { agentsCommand, AgentsUsage, WAIT_MAX_S } from './agents-cli.ts';
 import type { RpcParams } from '@boite/contracts';
 import { contextRequest, parse, requiredText, Usage, type Parsed } from './cli-args.ts';
@@ -60,6 +61,8 @@ ${CONTROL_HELP}
   browser help                   inspect, test and capture the built-in browser
   device help                    open an iOS Simulator or Android emulator in the
                                  user's Device panel, capture and drive it
+  window help                    capture a desktop window (Unity, a game) as a PNG
+                                 or a contact sheet, or show it in the Window panel
   pr list|refresh                this conversation's linked pull requests
   pr link|unlink <url>           attach or remove a PR link; does not change GitHub
   pr watch [<url|number>]        wake this thread when the PR's checks fail or
@@ -410,6 +413,10 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       const result = await deviceCommand(rest, io, client, threadId, parsed.timeout);
       print(result.lines, result.value);
     },
+    window: async () => {
+      const result = await windowCommand(rest, io, client, threadId);
+      print(result.lines, result.value);
+    },
     // `boite --limit 5 logs` parsed them as globals: they come first, so the command's own flags still win.
     // A global `--level` yields to the command's own `--min-level`, which it would otherwise override.
     logs: () => logsCommand([...(parsed.limit === undefined ? [] : ['--limit', String(parsed.limit)]), ...(parsed.level === undefined || rest.some(entry => entry === '--min-level' || entry.startsWith('--min-level=')) ? [] : ['--level', parsed.level]), ...rest], client, threadId, agentCaller, io.cwd, print),
@@ -756,8 +763,10 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     const target = targetOf(parsed, io.env);
     try {
       // An agent waiting for an answer holds its call up to five minutes.
+      // A window capture may wait ten minutes for the owner's consent.
       const waits = parsed.positional[0] === 'threads' && (parsed.wait || parsed.positional[1] === 'wait');
-      client = await connect(target.url, target.token, { client: { name: 'cli', version: CORE_VERSION }, ...(waits ? { requestTimeoutMs: (WAIT_MAX_S + 30) * 1000 } : {}) });
+      const requestTimeoutMs = waits ? (WAIT_MAX_S + 30) * 1000 : parsed.positional[0] === 'window' ? WINDOW_REQUEST_TIMEOUT_MS : undefined;
+      client = await connect(target.url, target.token, { client: { name: 'cli', version: CORE_VERSION }, ...(requestTimeoutMs === undefined ? {} : { requestTimeoutMs }) });
     } catch (error) {
       throw new Error(`no core answers at ${target.url}: ${(error as Error).message}`);
     }

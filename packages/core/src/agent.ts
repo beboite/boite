@@ -221,6 +221,15 @@ export function registerAgentMethods(core: Core): void {
   core.router.register('devices.clipboard', (params, { connection }) => core.devices.clipboard(params, connection));
   core.router.register('devices.screenshot', (params, { connection }) => core.devices.screenshot(params, connection));
   core.router.register('devices.close', (params, { connection }) => core.devices.close(params, connection));
+  core.router.register('windows.list', (params, { connection }) => core.windows.list(params, connection));
+  core.router.register('windows.screenshot', (params, { connection }) => core.windows.screenshot(params, connection));
+  core.router.register('windows.clip', (params, { connection }) => core.windows.clip(params, connection));
+  core.router.register('windows.watch', (params, { connection }) => core.windows.watch(params, connection));
+  core.router.register('windows.frame', (params, { connection }) => core.windows.frame(params, connection));
+  core.router.register('windows.close', (params, { connection }) => core.windows.close(params, connection));
+  core.router.register('windows.consent', (params, { connection }) => core.windows.consent(params, connection));
+  core.router.register('windows.allowlist', params => core.windows.allowlist(params));
+  core.router.register('windows.revoke', params => core.windows.revoke(params));
   core.router.register('browser.remoteWatch', (params, { connection }) => core.browser.remoteWatch(params, connection));
   core.router.register('browser.remoteStatus', (params, { connection }) => core.browser.remoteStatus(params, connection));
   core.router.register('browser.command', params => core.browser.command(params));
@@ -302,6 +311,7 @@ export function registerAgentMethods(core: Core): void {
   const shut = (threadId: ThreadId, removed = false): void => {
     core.browser.release(threadId);
     core.devices.release(threadId);
+    core.windows.release(threadId);
     core.agents.forget(threadId, removed);
     core.subscribers.closeAgents(threadId);
   };

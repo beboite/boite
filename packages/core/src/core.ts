@@ -46,6 +46,7 @@ import { scheduleArtifactRetention } from './artifact-retention.ts';
 import { ArtifactPreviews } from './artifact-preview.ts';
 import { AgentBrowser, BROWSER_SCOPE } from './browser.ts';
 import { MobileDevices } from './devices/control.ts';
+import { DesktopWindows } from './windows/service.ts';
 import { LazyMcp } from './mcp/lazy.ts';
 import { QuotaStore } from './quotas.ts';
 import { dropRetiredAccounts } from './account-retirement.ts';
@@ -200,6 +201,7 @@ export class Core {
   readonly browser = new AgentBrowser(this);
   /** Simulators and emulators open in conversations' Device panels. */
   readonly devices = new MobileDevices(this);
+  readonly windows = new DesktopWindows(this);
   /** The user's stdio MCP servers, started when a conversation first calls one (`mcp/lazy.ts`). */
   readonly lazyMcp = new LazyMcp(this);
 
@@ -534,6 +536,7 @@ export class Core {
     const closingAt = performance.now();
     await this.browser.close();
     this.devices.stop();
+    this.windows.stop();
     this.lazyMcp.close();
     this.artifactPreviews.stop();
     this.threads.sideQuestions.close();

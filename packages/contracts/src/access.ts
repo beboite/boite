@@ -88,6 +88,10 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // The same screen as live video, and the device's clipboard for the copy the person watching makes: what the frames
   // and a long press already show. Only for a device open in the subscribed conversation, with no command or path.
   'devices.stream', 'devices.clipboard',
+  // The Window panel on a phone: the subscribed conversation's watched window as JPEG frames once the person presses
+  // Show, the windows the agent could list, emptying the panel, and the owner's answer to a capture consent card,
+  // which the phone shows like a question. No capture to a file, no input, and the allowed apps stay with the owner.
+  'windows.list', 'windows.frame', 'windows.close', 'windows.consent',
   'threads.create',
   // Composing a phone draft uses the same creation authority, with no prompt or arbitrary executable.
   'drafts.prepare', 'drafts.release',
@@ -191,6 +195,7 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   'threads.pullRequestsChanged', // Links already readable on the subscribed conversation.
   'browser.remoteChanged', // The subscribed conversation's agent tabs, as browser.remoteStatus says.
   'devices.changed', // The subscribed conversation's Device panel sessions, as devices.sessions returns them.
+  'windows.changed', // The subscribed conversation's watched window, as windows.list returns it.
   'agents.changed', // Invalidation only; agents.snapshot applies the device read policy.
   // Team invalidation contains only the subscribed root ID; delegation.get enforces its read scope.
   'delegation.changed',

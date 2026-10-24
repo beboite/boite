@@ -74,6 +74,11 @@ export function parse(argv: string[]): Parsed {
       parsed.positional.push(arg);
       continue;
     }
+    // `boite window` parses its own flags (window-cli.ts): its --title names a window, not a thread.
+    if (parsed.positional[0] === 'window' && parsed.positional.length > 1 && !['--json', '--thread', '--data-dir', '--core', '--channel', '--help', '-h'].includes(arg)) {
+      parsed.positional.push(arg);
+      continue;
+    }
     const boolean = BOOLEAN_OPTIONS.find(key => arg === `--${key}`);
     const numeric = NUMBER_OPTIONS.find(key => arg === `--${key}`);
     if (boolean !== undefined) parsed[boolean] = true;

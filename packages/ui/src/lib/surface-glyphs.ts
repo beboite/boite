@@ -1,4 +1,4 @@
-import { Activity, FileText, FolderTree, GitCompare, Globe, LampDesk, ListChecks, MessageSquare, Smartphone, UsersRound } from '@lucide/svelte';
+import { Activity, AppWindow, FileText, FolderTree, GitCompare, Globe, LampDesk, ListChecks, MessageSquare, Smartphone, UsersRound } from '@lucide/svelte';
 import type { Component } from 'svelte';
 import type { SurfaceKind } from './right-panel.svelte';
 
@@ -14,6 +14,7 @@ const GLYPHS: Partial<Record<SurfaceKind, Glyph>> = {
   files: FolderTree,
   file: FileText,
   device: Smartphone,
+  window: AppWindow,
   tasks: ListChecks
 };
 

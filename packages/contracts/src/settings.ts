@@ -158,6 +158,12 @@ export interface Settings {
    */
   deviceStream?: boolean;
   /**
+   * Apps `boite window` never captures, beside `WINDOW_CAPTURE_EXCLUDED`:
+   * executable names (`Signal.exe`) or full paths, matched without case
+   * (docs/windows.md). Missing reads as none.
+   */
+  windowCaptureExclusions?: string[];
+  /**
    * While this machine follows its group's settings home, what it keeps for
    * itself (`SyncKey`): each entry was changed here and the copy skips it.
    * Missing or empty: everything synced follows. Clients write it; the core

@@ -21,6 +21,7 @@ export const strings = {
     file: 'File',
     tasks: 'Tasks',
     device: 'Device',
+    window: 'Window',
     ownerOnly: "Only in the owner's app",
     launcher: 'Open a surface in this panel',
     untitled: 'Browser'

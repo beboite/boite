@@ -1,4 +1,4 @@
-import { Archive, ArrowDown, ArrowLeft, ArrowUp, Copy, FolderMinus, GitBranch, History, Import, Plus, RefreshCw, Settings, Trash2 } from '@lucide/svelte';
+import { AppWindow, Archive, ArrowDown, ArrowLeft, ArrowUp, Copy, FolderMinus, GitBranch, History, Import, Plus, RefreshCw, Settings, Trash2 } from '@lucide/svelte';
 import type { Project } from '@boite/contracts';
 import type { Store } from './store.svelte';
 import { workspace } from './workspace.svelte';
@@ -59,6 +59,7 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
             get checked() { return (owner.projects.find(current => current.id === project.id)?.autoRemoveWorktrees ?? project.autoRemoveWorktrees) === true; },
             get disabled() { return owner.client !== client || owner.clientGeneration !== clientGeneration || !owner.owner || owner.connection !== 'ready' || owner.projectAutoRemoveWorktreesBusy(project.id); }
           }] : []),
+          ...(project.kind === 'drafts' ? [] : [{ id: 'windows', label: strings.windows.settings.allowedHeading, glyph: AppWindow }]),
           ...(project.kind === 'drafts' ? [] : [{ id: 'refresh-icon', label: strings.sidebar.refreshIcon, glyph: RefreshCw, disabled: project.missing === true }])
         ]
       : []),
@@ -106,9 +107,9 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
         const current = owner.projects.find(projectOnOwner => projectOnOwner.id === project.id);
         if (current?.autoRemoveWorktrees !== undefined) await owner.setProjectAutoRemoveWorktrees(project.id, !current.autoRemoveWorktrees);
       }
-      if (action === 'worktrees') {
+      if (action === 'worktrees' || action === 'windows') {
         if (workspace.active !== owner) await workspace.select(owner);
-        owner.showSettings('general', 'worktrees');
+        owner.showSettings('general', action);
       }
       if (action === 'refresh-icon') await owner.refreshProjectIcon(project.id);
       if (action === 'import') {
