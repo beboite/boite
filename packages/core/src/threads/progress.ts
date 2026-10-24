@@ -41,6 +41,8 @@ export class ProgressState {
     // A compaction mid-turn shows how long it has run, so a repeated phase keeps its start.
     const since = old.phase === phase ? old.since ?? old.at : at;
     this.latest.set(threadId, { turnId, phase, detail: short, at, since, providerAt: at });
+    // Native compaction may start while a merged conversation's last prompt finishes.
+    if (phase === 'compacting') this.core.threads.autoCompact.stopIfDone(threadId);
     if (old.phase === phase && old.detail === short && at - (this.published.get(threadId) ?? 0) < 1000) return;
     const thread = this.core.journal.getThread(threadId);
     if (!thread) return;

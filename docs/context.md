@@ -134,6 +134,10 @@ compact again. The timers live in memory: a core restart drops them, and the
 next finished turn arms a new one. The in-memory client implements `turn-end`
 and the threshold only; it has no background work and no cache to wait on.
 
+When a merged PR moves a conversation to Done, its last prompt can finish,
+but a compaction turn is stopped. If the provider announces native compaction
+after Done, that turn is stopped too. The history already written is kept.
+
 ## Turns a provider refused
 
 A turn refused because the model was at capacity tries again by itself, and a

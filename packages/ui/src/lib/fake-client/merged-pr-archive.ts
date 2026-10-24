@@ -85,6 +85,7 @@ export async function sweepMergedPrFixtures(ctx: FakeContext, detectedId?: Threa
     thread.archivedAt = thread.doneAt;
     thread.archiveReason = reason;
     ctx.touch(thread);
+    if (thread.turns.at(-1)?.execution?.operation === 'compact') void ctx.stopTurn(id);
     const project = ctx.projects.find(project => project.id === thread.projectId)!;
     ctx.emit('project.updated', describedProject(ctx, project));
     count++;

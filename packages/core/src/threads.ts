@@ -387,7 +387,10 @@ export class ThreadStore {
       if (thread.projectId !== null) this.core.projects.announce(thread.projectId);
       return saved;
     })());
-    if (archivedThread) this.core.fileTickets.forgetUnder(thread.cwd);
+    if (archivedThread) {
+      this.autoCompact.stopIfDone(thread.id);
+      this.core.fileTickets.forgetUnder(thread.cwd);
+    }
     return archivedThread;
   }
 
