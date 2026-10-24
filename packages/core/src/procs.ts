@@ -16,27 +16,11 @@ import { orphansOf, parentAtStart } from './process-orphans.ts';
 import { forgetOnMissing, resolveSpawnCommand, startResolved } from './spawn-command.ts';
 import { BUSY_CPU_PERCENT, IDLE_LOAD_INTERVAL_MS, LOAD_INTERVAL_MS, LoadPace, worthPushing } from './load-pace.ts';
 import { launchOf } from './git/command.ts';
+import { ExecutionProtections } from './execution-protection.ts';
+import { protectionRunner } from './protection-runner.ts';
 
-export interface SpawnOptions {
-  /** Bounded normal-priority initialization, ended explicitly when the agent is ready. */
-  startup?: boolean;
-  /** Direct spawns are agent roots unless the caller identifies a tool process. */
-  agentRoot?: boolean;
-  cwd?: string | undefined;
-  env?: Record<string, string | undefined> | undefined;
-  /**
-   * `spawn` only: this many more pipes, the child's descriptors 3, 4 and on,
-   * whose ends this process holds in `fds`. The agent browser speaks the
-   * DevTools protocol over two of them instead of a port anyone could reach.
-   */
-  extraPipes?: number;
-  /**
-   * `spawn` only: let the child show its windows; Windows applies `windowsHide`
-   * to a GUI program's first window too. The focus and audio guards then leave
-   * the thread's processes, its job's included, alone: they are the user's app.
-   */
-  showWindow?: boolean;
-}
+import type { SpawnOptions } from './process-spawn-types.ts';
+export type { SpawnOptions } from './process-spawn-types.ts';
 
 export type ChildProcess = Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
 
@@ -120,6 +104,7 @@ export interface ProcRegistryOptions {
  */
 export class ProcRegistry {
   readonly memory: MemoryGuard;
+  readonly protection: ExecutionProtections;
   private readonly unassigned = new Set<number>();
   private readonly startups = new Map<ThreadId, { pid: number; timer: ReturnType<typeof setTimeout> }>();
   private readonly exitTimers = new Map<number, ReturnType<typeof setTimeout>>();
@@ -166,6 +151,7 @@ export class ProcRegistry {
     private readonly platform: ProcessPlatform = processPlatform,
     private readonly options: ProcRegistryOptions = {},
   ) {
+    this.protection = new ExecutionProtections(platform.protectedExecution, protectionRunner(this), id => this.stopAndWait(id), id => this.liveCount(id));
     this.memory = new MemoryGuard(bus, platform);
     this.resources = new ResourceCollection(platform);
     this.orphanGraceMs = options.orphanGraceMs ?? ORPHAN_GRACE_MS;
@@ -279,17 +265,18 @@ export class ProcRegistry {
     this.exitTimers.clear();
     for (const timer of this.forgetTimers.values()) clearTimeout(timer);
     this.forgetTimers.clear();
-    this.closing = this.platform.release();
+    this.closing = this.protection.close().then(() => this.platform.release());
     return this.closing;
   }
 
   spawn(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedProcess {
     this.assertAccepting();
-    const [command, env] = launchOf(cmd, { ...process.env, ...(opts.env ?? {}) });
+    const protectedLaunch = this.protection.launch(threadId, cmd, args, opts);
+    const [command, env] = launchOf(protectedLaunch?.command ?? cmd, protectedLaunch?.env ?? { ...process.env, ...(opts.env ?? {}) });
     const extra = Math.max(0, Math.floor(opts.extraPipes ?? 0));
     const proc = startResolved(command, env, (executable) => Bun.spawn({
-      cmd: [executable, ...args],
-      cwd: opts.cwd,
+      cmd: [executable, ...(protectedLaunch?.args ?? args)],
+      cwd: protectedLaunch?.cwd ?? opts.cwd,
       env,
       ...(extra
         ? { stdio: ['ignore', 'pipe', 'pipe', ...Array.from({ length: extra }, () => 'pipe' as const)] as ['ignore', 'pipe', 'pipe'] }
@@ -326,10 +313,11 @@ export class ProcRegistry {
    */
   spawnPiped(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedPipedProcess {
     this.assertAccepting();
-    const [command, env] = launchOf(cmd, opts.env ?? process.env);
+    const protectedLaunch = this.protection.launch(threadId, cmd, args, opts);
+    const [command, env] = launchOf(protectedLaunch?.command ?? cmd, protectedLaunch?.env ?? opts.env ?? process.env);
     const proc = startResolved(command, env, (executable) => Bun.spawn({
-      cmd: [executable, ...args],
-      cwd: opts.cwd,
+      cmd: [executable, ...(protectedLaunch?.args ?? args)],
+      cwd: protectedLaunch?.cwd ?? opts.cwd,
       env,
       stdin: 'pipe',
       stdout: 'pipe',
@@ -364,6 +352,7 @@ export class ProcRegistry {
    */
   spawnTerminal(threadId: ThreadId, cmd: string, args: string[], opts: TerminalSpawnOptions): SpawnedTerminal {
     this.assertAccepting();
+    this.protection.assertTerminal(threadId);
     const proc = Bun.spawn({
       cmd: [cmd, ...args],
       cwd: opts.cwd,
@@ -427,10 +416,11 @@ export class ProcRegistry {
    */
   spawnChild(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedChild {
     this.assertAccepting();
-    const [command, env] = launchOf(cmd, opts.env);
+    const protectedLaunch = this.protection.launch(threadId, cmd, args, opts);
+    const [command, env] = launchOf(protectedLaunch?.command ?? cmd, protectedLaunch?.env ?? opts.env);
     const executable = resolveSpawnCommand(command, env ?? process.env);
-    const child = spawnNodeChild(executable, args, {
-      cwd: opts.cwd,
+    const child = spawnNodeChild(executable, protectedLaunch?.args ?? args, {
+      cwd: protectedLaunch?.cwd ?? opts.cwd,
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,

@@ -774,6 +774,76 @@ Windows jobs track descendants; Linux/macOS track direct children/process
 groups and cannot promise termination of a detached descendant. Shared
 execution must account for that limit, not claim a captured PID is an OS sandbox.
 
+### Native Linux tool execution
+
+`ProcessPlatform.protectedExecution` now implements a native Linux boundary,
+consumed through `procs.protection`. It does not change the provider admissions
+above. A driver must enforce its native Read/Edit gate and route every shell,
+hook, MCP server, extension and descendant through an attested boundary before
+its route can report support. Account authentication/control remains trusted and
+separate; a tool receives neither the account home nor the ambient environment.
+There is no spawn option to bypass an installed capability.
+
+`install(threadId, input, assertCurrentAuthority)` captures the job, board claim
+or letter, association revisions (including additional intersected scopes),
+canonical checkout inode, selected host route, credential paths, expiry and
+exact read exceptions. It binds before its first await. Reuse the returned
+immutable `fingerprint` in warm-session identity; a new installation has a new
+capability identity. `inherit(parent, child)` binds before a descendant's first
+process. Each launch and `flush(threadId)` rechecks authority and captured
+identities. `revoke(threadId)` closes every inherited binding, kills tools and
+preparation helpers, then removes the private filesystem. Retries stay refused.
+Only the trusted scope owner may `release(threadId)` after retiring the work.
+Grant/claim/job/override revocation must call `revoke`, rather than wait for a
+future tool call; expiry also terminates a running namespace automatically.
+
+The private view omits classified names/content, hard links, symlinks, special
+files and host Git metadata/config/hooks by default. Exact authorized read
+exceptions expose only their captured files, including within a classified
+directory. Configured account credential paths always stay excluded. The host
+checkout is never a writable bind. Tools can read/edit/build/test in its private
+view at the original absolute checkout path. After all tools exit, `flush`
+validates the whole candidate, refuses hidden/linked/credential outputs and
+host changes, then copies permitted file edits/new directories/deletions back.
+Read overrides bind the captured file read-only and expire with their capability.
+The boundary also permits the public system toolchain under `/usr/bin`,
+`/usr/lib`, `/usr/lib64`, `/usr/include`, `/usr/share`, `/bin`, `/lib` and
+`/lib64`, read-only, plus explicitly captured individual toolchain executables.
+Credentials overlapping those runtime roots are refused. Home, temporary files,
+procfs, devices and network namespaces are private. No host service, socket,
+loader variable or credential environment is inherited. Extra descriptors,
+visible windows and terminal launches are refused for protected tools.
+
+The backend requires unprivileged user/mount/PID/network namespaces, seccomp
+and maintained bubblewrap >= 0.13.1. It probes the actual production launch and
+fails closed without any weaker fallback. Its seccomp filter prohibits new
+namespaces (including namespace clone flags and clone3), mount/handle/ptrace
+escape paths and io_uring. Ordinary fork/exec/threads remain available. It
+also denies pathname UNIX socket creation, which could otherwise reach a
+host socket through a public runtime mount; private socketpairs remain usable.
+This works in containers with a read-only `max_user_namespaces` sysctl without
+changing that sysctl. PID namespace teardown also kills detached descendants.
+
+Use an installed maintained `bwrap`, or build the pinned userspace dependency
+with `cc`, `tar` and libcap development files, without elevated installation:
+
+```sh
+bun packages/core/bin/install-linux-sandbox.ts /absolute/task-owned/bin/bwrap
+BOITE_BWRAP_PATH=/absolute/task-owned/bin/bwrap BOITE_TEST_NATIVE_EXECUTION=1 bun test packages/core/test/protected-execution.test.ts --timeout 60000
+```
+
+The installer verifies the upstream 0.13.1 source SHA-256, compiles through the
+registry and removes its build workspace. An optional second argument points to
+an unpacked libcap development package prefix instead of a system development
+installation. The helper path is trusted core configuration. Nothing downloads,
+builds or launches at core startup. Native tests are explicitly enabled by
+`BOITE_TEST_NATIVE_EXECUTION=1`; refusal/cancellation tests run without it.
+`test/fixtures/native-protected-tool.ts` is an ordinary deterministic program
+that edits source, builds it and runs a child test command while attempting
+synthetic file/credential/link/descriptor/child reads. This is native OS evidence,
+not provider inference or proof of a driver's settings/control integration.
+Windows and macOS do not gain this Linux backend.
+
 ### Activity review
 
 Schema 42 persists sanitized `SharedAccessEvent` metadata at enforced boundaries:
@@ -894,6 +964,7 @@ An unavailable requirement is recorded explicitly rather than counted as passed.
 | Human and agent contact mail | `packages/core/test/contact-mailboxes.test.ts`, `coordination.test.ts`; `tests/e2e/shared-cores.test.ts`; `tests/e2e/contact-messaging-ui.test.ts`, `shared-collaboration.test.ts` | Owner/paired human sends, agent impersonation refusal, recipient's configured contact name, separate provenance, both member directions, source journal and mailbox replay/restart. No external letter answers owner approval. |
 | Audit regressions and selective invalidation | `packages/core/test/contacts-review-regressions.test.ts`, `shared-projects.test.ts`, `shared-review.test.ts`, `shared-compute-journal.test.ts`; `packages/ui/src/lib/store-shared-projects.test.ts`; `tests/e2e/shared-cores.test.ts` | Contact wake/steer/hooks/history and intersected guards, transcript post-await revocation/readmission/restoration, human mailbox provenance after gateway restart at the default tier, current-revision direct/member lease teardown, access-only refresh, retained compute fences and cancellations. Native provider letter execution remains refused. |
 | Secret file and tool boundaries | `packages/core/test/shared-access.test.ts`, `shared-review.test.ts`, `ntfs-file-ids.test.ts`; `packages/ui/src/lib/fake-client.shared-projects.test.ts` | Classified files/content, handles/symlinks, Windows path forms/identities, transfer/tickets/HTML/attachments/checkpoints, overrides and immediate revocation. All six protocols have admission checks; only echo/default has an implemented no-tools execution boundary. Selective external-provider isolation is missing. Windows native execution is not established by Linux fixtures. |
+| Native Linux tool boundary | `packages/core/test/protected-execution.test.ts`; `packages/core/test/fixtures/native-protected-tool.ts` | Production registry launches an ordinary program: useful read/edit/build/child test, denied synthetic secrets/outside files/credentials and inheritable descriptors/links/children, isolated network, exact read-only overrides, immutable scope/retry/cwd, expiry/revoke/cleanup (including detached descendants), unsupported-host refusal and ordinary local process retention. Provider adapter integration and native Windows remain separate gates. |
 | Lazy review and confirmed project revoke | `packages/core/test/shared-review.test.ts`; `tests/e2e/shared-cores.test.ts`: member policy revocation without a direct contact | Tool-free deterministic verdicts, confirmation independent of inference, timeout/invalid/stale response, no-work laziness and exact local project hold. A member hold does not mutate gateway grants or obtain owner authority; a stale mirror cannot reopen it. |
 | Security and network proof | `packages/core/test/contacts.test.ts`, `contacts-group.test.ts`, `contact-mailboxes.test.ts`, `contacts-review-regressions.test.ts`, `access.test.ts`; `tests/e2e/shared-cores.test.ts`: held transcript and readmission regressions | Independent security/network passes identified three access/provenance faults, a review feedback loop, stale lease teardown and compute scan waste. Regressions cover their corrections. Per-peer SQLite expression indexes/selective materialization retain all durable job fences. A fresh native-isolation review is still required when that implementation exists; current fixtures do not prove it. |
 | Transport and UI parity | `tests/contract/shared-projects.ts` through core/fake contract suites; fake/Store tests; `tests/e2e/shared-collaboration.test.ts` at 1440 and 390 px | Same contract and refusals, captured owning Store, canonical remote offers/addresses, connection cache fencing, leases and phone actions. No paid inference, physical phone, real Tailscale/Funnel or remote CI proof is implied. |
@@ -918,11 +989,12 @@ protocol/UI fixtures, not native-provider isolation proof.
 
 The release gate remains incomplete. Claude, Codex, ACP, Muse and pi still
 report unsupported protected execution: useful native shared compute, board
-goals and automatic contact-letter execution remain unavailable. No native
-provider filesystem/process isolation test passed because that production
-boundary is absent. Protocol fixtures, echo jobs, Linux file-policy tests and
-synthetic Windows paths do not replace it. Native Windows/macOS execution,
-live inference and remote CI/review of this implementation remain unverified.
+goals and automatic contact-letter execution remain unavailable. The native
+Linux tool boundary has production-process tests, but native provider
+settings/control integration is not yet attested. Protocol fixtures, echo jobs,
+Linux file-policy tests and synthetic Windows paths do not replace that gate.
+Native Windows/macOS execution, live inference and remote CI/review of this
+implementation remain unverified.
 
 ### Client transport
 

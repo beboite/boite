@@ -1,0 +1,130 @@
+import {randomUUID} from 'node:crypto';
+import {assertExecutionPolicy, captureExecutionPolicy, type ExecutionPolicy, type ProtectedExecutionInput} from './execution-policy.ts';
+import type {NativeExecutionBoundary, NativeExecutionSession, ProtectedLaunch, ProtectionRunner} from './platform/protected.ts';
+
+interface Lease {
+  policy: ExecutionPolicy;
+  session: NativeExecutionSession | null;
+  threads: Set<string>;
+  helpers: Set<string>;
+  check(): void;
+  closed: boolean;
+  timer?: ReturnType<typeof setTimeout>;
+  stopping?: Promise<void>;
+  opening?: Promise<NativeExecutionSession>;
+}
+
+/** Host-owned capabilities. Revoked bindings stay closed until the host explicitly releases them. */
+export class ExecutionProtections {
+  private readonly bindings = new Map<string, Lease>();
+  private readonly refused = new Set<string>();
+  constructor(private readonly boundary: NativeExecutionBoundary | undefined,
+    private readonly runner: (threadId: string, ...args: Parameters<ProtectionRunner>) => ReturnType<ProtectionRunner>,
+    private readonly stop: (id: string) => Promise<void>,
+    private readonly live: (id: string) => number) {}
+
+  policy(threadId: string): ExecutionPolicy | null { return this.bindings.get(threadId)?.policy ?? null; }
+
+  async install(threadId: string, input: ProtectedExecutionInput, check: () => void): Promise<ExecutionPolicy> {
+    if (this.bindings.has(threadId) || this.refused.has(threadId) || this.live(threadId)) throw new Error('execution.thread: protection must precede its first process; release the old binding before replacement');
+    this.refused.add(threadId);
+    const policy = captureExecutionPolicy(input);
+    // Bind before the first await: concurrent launches must fail closed while the native probe runs.
+    const lease: Lease = {policy, check, threads: new Set([threadId]), helpers: new Set(), closed: false, session: null};
+    this.bindings.set(threadId, lease);
+    this.refused.delete(threadId);
+    try {
+      this.check(lease);
+      if (!this.boundary) throw new Error('execution.platform: no native protected execution boundary on this host');
+      lease.opening = this.boundary.open(policy, async (...args) => {
+        this.check(lease);
+        const helper = protectionProbeThread();
+        lease.helpers.add(helper);
+        try { return await this.runner(helper, ...args); } finally { lease.helpers.delete(helper); }
+      });
+      const session = await lease.opening;
+      if (lease.closed) { await session.close(); throw new Error('execution.scope: revoked during native preparation'); }
+      lease.session = session;
+      this.check(lease);
+      this.expire(lease);
+      return policy;
+    } catch (error) { await this.revoke(threadId); throw error; }
+  }
+
+  inherit(parent: string, child: string): void {
+    const lease = this.bindings.get(parent);
+    if (!lease) throw new Error('execution.parent: expected an installed protection capability');
+    this.check(lease);
+    if (this.bindings.has(child) || this.refused.has(child) || this.live(child)) throw new Error('execution.child: protection must precede its first process');
+    lease.threads.add(child);
+    this.bindings.set(child, lease);
+  }
+
+  launch(threadId: string, command: string, args: string[], opts: {cwd?: string; extraPipes?: number; showWindow?: boolean}): ProtectedLaunch | null {
+    if (this.refused.has(threadId)) throw new Error('execution.scope: protection descriptor was refused; release required');
+    const lease = this.bindings.get(threadId);
+    if (!lease) return null;
+    try {
+      this.check(lease);
+      if (!lease.session) throw new Error('execution.platform: native protection is not ready');
+      if (opts.extraPipes || opts.showWindow) throw new Error('execution.descriptors: protected tools accept only controlled stdin/stdout/stderr pipes and hidden execution');
+      return lease.session.launch(command, args, opts.cwd ?? lease.policy.checkout);
+    } catch (error) { void this.revoke(threadId).catch(() => {}); throw error; }
+  }
+
+  assertTerminal(threadId: string): void {
+    if (this.bindings.has(threadId) || this.refused.has(threadId)) throw new Error('execution.terminal: protected tools require controlled standard pipes');
+  }
+
+  flush(threadId: string): void {
+    const lease = this.bindings.get(threadId);
+    if (!lease) throw new Error('execution.thread: expected an installed capability');
+    try {
+      this.check(lease);
+      if ([...lease.threads].some(id => this.live(id))) throw new Error('execution.processes: tools must exit before publishing project edits');
+      if (!lease.session) throw new Error('execution.platform: native protection is not ready');
+      lease.session.flush();
+      this.check(lease);
+    } catch (error) { void this.revoke(threadId).catch(() => {}); throw error; }
+  }
+
+  revoke(threadId: string): Promise<void> {
+    const lease = this.bindings.get(threadId);
+    if (!lease) return Promise.resolve();
+    if (lease.stopping) return lease.stopping;
+    lease.closed = true;
+    clearTimeout(lease.timer);
+    lease.stopping = Promise.all([...lease.threads, ...lease.helpers].map(id => this.stop(id))).then(async () => {
+      const session = lease.session ?? await lease.opening?.catch(() => null);
+      await session?.close();
+      lease.session = null;
+    });
+    return lease.stopping;
+  }
+
+  async release(threadId: string): Promise<void> {
+    const lease = this.bindings.get(threadId);
+    await this.revoke(threadId);
+    this.refused.delete(threadId);
+    if (lease) for (const id of lease.threads) this.bindings.delete(id);
+  }
+
+  async close(): Promise<void> { await Promise.all([...this.bindings.keys()].map(id => this.release(id))); this.refused.clear(); }
+
+  private check(lease: Lease): void {
+    if (lease.closed) throw new Error('execution.scope: captured authority was revoked');
+    assertExecutionPolicy(lease.policy);
+    lease.check();
+  }
+
+  private expire(lease: Lease): void {
+    lease.timer = setTimeout(() => {
+      if (Date.now() >= lease.policy.expiresAt) void this.revoke([...lease.threads][0]!).catch(() => {});
+      else this.expire(lease);
+    }, Math.min(lease.policy.expiresAt - Date.now(), 2_147_483_647));
+    lease.timer.unref();
+  }
+}
+
+/** Unpredictable, host-only trace scope for the native prerequisite command. */
+export const protectionProbeThread = (): string => `protection-probe-${randomUUID()}`;

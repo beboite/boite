@@ -4,6 +4,7 @@ import { LinuxLoad, linuxMachineMemory, linuxStartKey, linuxStartedAt } from './
 import type { ProcessPlatform } from './types.ts';
 import { linuxServerUpdates } from './linux-server-update.ts';
 import { findTailscaleCli } from './tailscale.ts';
+import { LinuxExecutionBoundary } from './linux-protected.ts';
 
 /**
  * Linux and macOS currently track direct children through the registry. Linux
@@ -16,6 +17,7 @@ export function createPosixPlatform(
 ): ProcessPlatform {
   const cgroups = os === 'linux' ? new CgroupMemoryReader() : null;
   return {
+    ...(os === 'linux' ? {protectedExecution: new LinuxExecutionBoundary()} : {}),
     ...(os === 'linux' ? { serverUpdates: linuxServerUpdates() } : {}),
     tailscaleCli: () => findTailscaleCli(os),
     retain() {},

@@ -1,6 +1,7 @@
 import type { ResourceByteUsage, Settings, TraceCapability } from '@boite/contracts';
 import type { ServerUpdatePlatform } from '../server-update/types.ts';
 import type { CgroupMemory } from './linux-cgroup.ts';
+import type { NativeExecutionBoundary } from './protected.ts';
 
 export interface NativeProcessInfo {
   exe: string;
@@ -79,6 +80,8 @@ export const FIREWALL_PROMPT_REFUSED = 3;
 
 /** OS services used by the shared process registry. No native imports here. */
 export interface ProcessPlatform {
+  /** Model tool execution only. Trusted account/control processes never gain authority from this descriptor. */
+  protectedExecution?: NativeExecutionBoundary;
   serverUpdates?: ServerUpdatePlatform;
   /** Absolute path of the tailscale CLI, or null when it is not installed. */
   tailscaleCli?(): string | null;

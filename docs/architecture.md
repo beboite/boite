@@ -353,9 +353,20 @@ Every process starts through `procs.spawn`, `procs.spawnChild` or
 `packages/core/src/platform/`; drivers and RPC handlers do not import backends.
 The shell has its own native boundary under `apps/shell/src-tauri/src/platform/`.
 
-Windows Job Objects provide tree membership events and resource caps. Linux and
-macOS record direct children; their process-group termination cannot catch a
-child that starts its own session. The capability report exposes those limits.
+Protected tools install a host-owned `procs.protection` capability before their
+first spawn. It captures association/grant/checkout identity, optional selected
+provider/account/mode, credential paths and exact read overrides. Its immutable
+fingerprint belongs in the provider's warm-session key. The Linux implementation
+uses a private filtered checkout inside bubblewrap user/mount/PID/network
+namespaces and an inherited seccomp filter. All three registry launch APIs enforce
+it, and revocation kills namespace roots before removing their private view.
+Only validated project edits are copied back after tools exit and authority is
+rechecked. [Contacts](contacts.md#native-linux-tool-execution) describes setup,
+adapter obligations and native tests. This backend alone does not admit a provider.
+
+Windows Job Objects provide tree membership events and resource caps. For ordinary
+processes, Linux and macOS record direct children; their process-group termination
+cannot catch a child that starts its own session. The capability report exposes those limits.
 [Trace](trace.md#platform-boundary) owns process records, caps, guards and shutdown.
 
 ## Drivers, one interface
