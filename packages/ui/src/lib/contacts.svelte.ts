@@ -185,6 +185,7 @@ export class ContactsView {
   }
 
   async join(link: string): Promise<Contact | null> {
+    if (this.isBusy('join')) return null;
     const attempt = ++this.#joinAttempt;
     const until = Date.now() + JOIN_WAIT_MS;
     for (;;) {

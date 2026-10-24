@@ -325,19 +325,27 @@ test('Elsewhere makes a link to this machine on Funnel, without a share; a tailn
   expect(sent).toEqual([]);
 });
 
-test('a join to an inviter whose address is not on the internet yet goes again by itself, and Stop ends it', async () => {
+test('a join retries an unpublished address despite a concurrent submission, and Stop ends it', async () => {
   const store = await draw();
   const call = store.client!.call.bind(store.client!);
   let refusals = 2;
   const joins = vi.fn();
-  vi.spyOn(store.client!, 'call').mockImplementation(((method: string, params: unknown) => {
+  let finishFirst!: () => void;
+  const firstJoin = new Promise<void>(resolve => { finishFirst = resolve; });
+  vi.spyOn(store.client!, 'call').mockImplementation((async (method: string, params: unknown) => {
     if (method !== 'contacts.join') return call(method as never, params as never);
     joins();
+    if (joins.mock.calls.length === 1) await firstJoin;
     if (refusals-- > 0) return Promise.reject(new RpcFailure({ code: RpcErrorCode.Unavailable, message: 'could not find NUNO: Tailscale has not published its address', data: { retryAfterMs: 150 } }));
     return call(method as never, params as never);
   }) as typeof call);
   type(one<HTMLInputElement>('contact-join-link')!, FAKE_CONTACT_INVITE);
   one<HTMLButtonElement>('contact-join')!.click();
+  await vi.waitFor(() => expect(joins).toHaveBeenCalledTimes(1));
+  // Another submission during the RPC must not cancel this join's retries.
+  expect(await contactsOf(store).join(FAKE_CONTACT_INVITE)).toBeNull();
+  expect(joins).toHaveBeenCalledTimes(1);
+  finishFirst();
   await vi.waitFor(() => { flushSync(); expect(one('contact-join-waiting')).not.toBeNull(); });
   await vi.waitFor(() => { flushSync(); expect(one('contact-joined-words')?.querySelectorAll('li')).toHaveLength(8); });
   expect(joins).toHaveBeenCalledTimes(3);
