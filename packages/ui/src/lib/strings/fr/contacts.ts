@@ -88,7 +88,8 @@ export const fr: Translation = {
         unpublished: 'Tailscale n\'a pas encore publié l\'adresse de cette machine sur internet. Cela prend généralement quelques minutes. Boite vérifie toutes les 30 secondes et désactive puis réactive Funnel au bout de 10 minutes.',
         repaired: 'Boite a désactivé puis réactivé Funnel pour que Tailscale publie l\'adresse de cette machine, et vérifie à nouveau…',
         stillUnpublished: 'Tailscale n\'a toujours pas publié l\'adresse de cette machine sur internet, même après la désactivation puis la réactivation de Funnel. Redémarrez Tailscale sur cette machine, puis créez une nouvelle invitation.',
-        unreachable: 'L\'adresse de cette machine est publiée sur internet, mais les requêtes n\'atteignent pas Boite. Vérifiez que Tailscale est en cours d\'exécution ici.'
+        unreachable: 'L\'adresse de cette machine est publiée sur internet, mais les requêtes n\'atteignent pas Boite. Vérifiez que Tailscale est en cours d\'exécution ici.',
+        moved: 'Funnel a changé de port depuis la création de ce lien, qui ne permet donc plus d\'atteindre cette machine. Créez une nouvelle invitation.'
       },
       manual: 'Partagez cette machine à la main',
       openConsole: 'Console d\'administration Tailscale',

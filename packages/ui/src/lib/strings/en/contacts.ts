@@ -93,7 +93,8 @@ export const strings = {
         unpublished: 'Tailscale has not put this machine\'s address on the internet yet, which usually takes a few minutes. Boite checks every 30 seconds and turns Funnel off and on again after 10 minutes.',
         repaired: 'Boite turned Funnel off and on again so that Tailscale publishes this machine\'s address, and is checking again…',
         stillUnpublished: 'Tailscale still has not put this machine\'s address on the internet, even after Funnel was turned off and on again. Restart Tailscale on this machine, then make a new invitation.',
-        unreachable: 'This machine\'s address is on the internet, but requests do not reach Boite. Check that Tailscale is running here.'
+        unreachable: 'This machine\'s address is on the internet, but requests do not reach Boite. Check that Tailscale is running here.',
+        moved: 'Funnel moved to another port since this link was made, so it no longer reaches this machine. Make a new invitation.'
       },
       manual: 'Share this machine by hand',
       openConsole: 'Tailscale admin console',

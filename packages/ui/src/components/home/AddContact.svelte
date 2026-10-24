@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, tick, untrack } from 'svelte';
   import { Check, Copy, ExternalLink, Globe, Link2, Share2, TriangleAlert } from '@lucide/svelte';
-  import { inviteShare } from '../../lib/contact-link';
+  import { inviteShare, readInvite } from '../../lib/contact-link';
   import { copyText, type ContactsView, type InviteReach } from '../../lib/contacts.svelte';
   import { clockTime } from '../../lib/format';
   import { fill, strings } from '../../lib/strings';
@@ -50,6 +50,11 @@
     return typeof fqdn === 'string' && !fqdn.endsWith('.ts.net');
   });
   const funnel = $derived(view.state?.funnel ?? null);
+  // Funnel moved to another port since the link was made: the guest would dial the old one.
+  const moved = $derived.by(() => {
+    const origin = view.invite ? readInvite(view.invite.link)?.u : null;
+    return funnel !== null && typeof origin === 'string' && origin !== funnel.url;
+  });
 
   let pasted = $state('');
   const shareStep = $derived(view.state?.tailscale.apiKey === true ? null : inviteShare(pasted));
@@ -116,7 +121,11 @@
     {/if}
     <!-- Whether a request from the internet reaches this machine yet, checked by the core while Funnel is up. -->
     {#if made.via === 'internet' && funnel}
-      {#if funnel.status === 'ready'}
+      {#if moved}
+        <p class="manual" data-testid="contact-invite-reach" data-status="moved">
+          <TriangleAlert size={14} strokeWidth={2} /><span><strong>{labels.invite.reach.wait}</strong> {labels.invite.reach.moved}</span>
+        </p>
+      {:else if funnel.status === 'ready'}
         <p class="hint reach ok" data-testid="contact-invite-reach" data-status="ready"><Check size={12} strokeWidth={2.25} />{labels.invite.reach.ready}</p>
       {:else if funnel.status === 'checking' || funnel.status === 'unknown'}
         <p class="hint" data-testid="contact-invite-reach" data-status={funnel.status}>

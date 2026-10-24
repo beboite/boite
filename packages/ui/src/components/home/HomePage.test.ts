@@ -229,8 +229,11 @@ test('Elsewhere makes a link to this machine on Funnel, without a share; a tailn
   const waiting = await connect();
   const waitingCall = waiting.client!.call.bind(waiting.client!);
   let repaired = false;
+  let moved = false;
   vi.spyOn(waiting.client!, 'call').mockImplementation(((method: string, params: unknown) => method === 'contacts.get'
-    ? waitingCall('contacts.get', {}).then(state => ({ ...state, funnel: state.funnel && { ...state.funnel, status: 'unpublished', repaired } }))
+    ? waitingCall('contacts.get', {}).then(state => ({ ...state, funnel: state.funnel && (moved
+      ? { ...state.funnel, url: state.funnel.url.replace(/:\d+$/, ':10000'), status: 'ready', repaired }
+      : { ...state.funnel, status: 'unpublished', repaired }) }))
     : waitingCall(method as never, params as never)) as typeof waitingCall);
   waiting.showHome(null);
   components.push(mount(HomePage, { target: document.body, props: { store: waiting } }));
@@ -241,6 +244,11 @@ test('Elsewhere makes a link to this machine on Funnel, without a share; a tailn
   repaired = true;
   await contactsOf(waiting).refresh();
   await vi.waitFor(() => { flushSync(); expect(one('contact-invite-reach')!.textContent).toContain(strings.contacts.invite.reach.stillUnpublished); });
+  // A repair put Funnel on another port: the internet reaches it, but not at the port the link shown names.
+  moved = true;
+  await contactsOf(waiting).refresh();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invite-reach')?.dataset.status).toBe('moved'); });
+  expect(one('contact-invite-reach')!.textContent).toContain(strings.contacts.invite.reach.moved);
   for (const component of components.splice(0)) unmount(component);
   document.body.innerHTML = '';
 
