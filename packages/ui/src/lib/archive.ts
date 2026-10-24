@@ -7,6 +7,7 @@ import { fill, strings } from './strings';
 import { undo } from './undo.svelte';
 import { workspace } from './workspace.svelte';
 import type { Store } from './store.svelte';
+import { projectThread } from './thread-rows';
 
 /**
  * The one way the UI archives a thread (row menu, title menu, palette). It goes
@@ -95,7 +96,9 @@ export async function archivedThreads(store: Store, projectId?: ProjectId): Prom
   const client = store.client;
   if (!client) return [];
   const all = await client.call('threads.list', projectId ? { projectId, includeArchived: true } : { includeArchived: true });
-  return all.filter((t) => t.archived && !t.parentThreadId).sort((a, b) => archivedTime(b) - archivedTime(a));
+  const parents = new Map([...store.threads, ...all].map(thread => [thread.id, thread]));
+  return all.filter(t => t.archived && !t.incognito && (projectId === undefined || t.projectId === projectId)
+    && (!t.parentThreadId || projectThread(t, parents.get(t.parentThreadId)))).sort((a, b) => archivedTime(b) - archivedTime(a));
 }
 
 /** Takes a thread out of the archive; its row comes back in the sidebar. */

@@ -25,7 +25,7 @@ export interface Parsed {
   before?: number;
   limit?: number;
   level?: 'debug' | 'info' | 'warn' | 'error';
-  /** `threads --project`: one project by id, name or folder. */
+  /** `threads --project` or `delegate spawn --project`: one project by id, name or folder. */
   project?: string;
   /** `threads --archived`: the archived threads instead. */
   archived: boolean;

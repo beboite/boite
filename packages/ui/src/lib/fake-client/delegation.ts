@@ -6,6 +6,7 @@ import { RpcFailure } from '../client';
 import { addUsage, emptyUsage, toSummary } from './shared';
 import { modelsOf, PROBED_PROTOCOLS, probe } from './provider-catalog';
 import type { FakeContext, FakeMethods } from './context';
+import { delegationProject } from './delegation-project';
 
 function delegationRoot(ctx: FakeContext, threadId: ThreadId): ThreadId {
   const thread = ctx.thread(threadId);
@@ -209,7 +210,7 @@ export function workflowChild(ctx: FakeContext, root: Thread, profile: ChildRout
   const at = ctx.now();
   const turn: Turn = { id: `turn-${id}`, threadId: id, status: 'running', queuedAt: at, startedAt: at, finishedAt: null, usage: null, error: null };
   const child: Thread = {
-    ...root, id, parentThreadId: root.id, title, titleSource: 'user',
+    ...delegationProject(ctx, root), id, parentThreadId: root.id, parentIsBot: root.agentSessionId ? true : undefined, agentSessionId: undefined, title, titleSource: 'user',
     providerId: profile.providerId, accountId: profile.accountId, model: profile.model, effort: profile.effort,
     status: 'running', unread: false, archived: false, pinned: false,
     sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null, activity: undefined, moveNote: null,
@@ -385,7 +386,9 @@ export function delegationMethods(ctx: FakeContext) {
       if (!task || task.length > 12000) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'task must contain 1 to 12000 characters' });
       if (params.speed !== undefined) checkSpeedText(params.speed);
       if (params.worktree !== undefined && typeof params.worktree !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'worktree: expected true, false or absent' });
-      const fingerprint = JSON.stringify([params.profileId ?? null, params.model ?? null, params.effort ?? null, params.speed ?? null, task, params.title ?? null, params.context ?? null, params.worktree === true]);
+      if (params.project !== undefined && (typeof params.project !== 'string' || !params.project.trim() || params.project.length > 4096)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'project: expected 1 to 4096 characters' });
+      const wantedProject = params.project?.trim();
+      const fingerprint = JSON.stringify([params.profileId ?? null, params.model ?? null, params.effort ?? null, params.speed ?? null, task, params.title ?? null, params.context ?? null, params.worktree === true, ...(wantedProject === undefined ? [] : [wantedProject])]);
       const requestKey = `${parent.id}:${params.requestId}`;
       const prior = ctx.delegationRequests.get(requestKey);
       if (prior) {
@@ -405,14 +408,17 @@ export function delegationMethods(ctx: FakeContext) {
       const id = `t-${++ctx.seq}`;
       const at = ctx.now();
       // As the core: a branch and folder of its own, refused outside a project; the fake has no git to make it with.
-      const project = ctx.projects.find(entry => entry.id === parent.projectId);
+      const placement = delegationProject(ctx, parent, wantedProject);
+      const project = ctx.projects.find(entry => entry.id === placement.projectId);
       if (params.worktree === true && (!project || project.kind === 'drafts')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `worktree: ${project?.path ?? 'this conversation'} is not a git repository; spawn without --worktree to share the checkout` });
       const worktree = params.worktree === true && project ? { branch: `boite/sub-${id}`, path: `${project.path}/.boite/worktrees/sub-${id}`, base: null, state: 'pending' as const } : null;
       const child: Thread = {
-        ...parent,
+        ...placement,
         ...(worktree ? { cwd: worktree.path, branch: worktree.branch } : {}),
         id,
         parentThreadId: parent.id,
+        parentIsBot: parent.agentSessionId ? true : undefined,
+        agentSessionId: undefined,
         title: params.title?.trim() || task.split('\n')[0]!.slice(0, 80),
         titleSource: 'user',
         providerId: profile.providerId,
