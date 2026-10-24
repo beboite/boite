@@ -4,7 +4,8 @@ import type { Settings } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import type { FakeContext, FakeMethods } from './context';
 import { gatewayQuotas } from './accounts';
-import { settleSettings } from './requests';
+import { fakeCore } from './coordination';
+import { settleMachineSetting, settleSettings } from './requests';
 
 export function settingsMethods(ctx: FakeContext) {
   const methods = {
@@ -103,7 +104,15 @@ export function settingsMethods(ctx: FakeContext) {
       if (tracker && !ctx.providers.some(p => p.id === tracker.providerId)) {
         throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `goalTracker names ${tracker.providerId}, which is not a loaded provider`, data: { field: 'goalTracker' } });
       }
+      const allowed = ctx.settings.groupThreads === true;
       ctx.settings = { ...ctx.settings, ...keepLaterFavorites(ctx.settings, checked.patch) };
+      // As the core's `setting.changed`: the other members' cards about this machine settle.
+      if ((ctx.settings.groupThreads === true) !== allowed) {
+        for (const core of ctx.roster?.cores ?? []) {
+          const other = core.coreId === ctx.identity.coreId ? undefined : fakeCore(core.coreId);
+          if (other) settleMachineSetting(other, ctx.identity.coreId, 'groupThreads', ctx.settings.groupThreads === true);
+        }
+      }
       ctx.emit('scheduler.updated', structuredClone(ctx.scheduler));
       ctx.emit('settings.updated', { ...ctx.settings });
       settleSettings(ctx, ctx.settings);

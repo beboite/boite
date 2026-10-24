@@ -3,6 +3,7 @@ import type { Core } from './core.ts';
 import { writesTitles } from './drivers/index.ts';
 import { invalidParams } from './errors.ts';
 import { DOUANE_PLUGIN } from './plugins/gateway.ts';
+import { announceGroupThreads } from './threads/group-spawn.ts';
 import { isAbsolute, resolve } from 'node:path';
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -91,6 +92,7 @@ export class SettingsStore {
     this.core.procs.applySettings(next);
     this.core.bus.emit('settings.updated', next);
     this.core.threads.cards.settleSettings(next);
+    if ((previous.groupThreads === true) !== (next.groupThreads === true)) announceGroupThreads(this.core, next.groupThreads === true);
     if (checked.subscriptionProxy !== undefined) {
       for (const account of this.core.accounts.list()) {
         const provider = this.core.providers.get(account.providerId);

@@ -41,6 +41,8 @@ export interface Parsed {
   instructionsFile?: string;
   /** Another core's address; its token comes from BOITE_TOKEN, never the command line. */
   core?: string;
+  /** `thread new --machine <name>`, `settings request --machine <name>`: another machine of the group. */
+  machine?: string;
   /** `--context`, `--keep`, `--drop`, `--tools`, `--rules`, `--rules-file`, as typed: `contextRequest` reads them. */
   context?: { preset?: string; keep?: string; drop?: string; tools?: string; rules?: string; rulesFile?: string };
 }
@@ -94,6 +96,7 @@ export function parse(argv: string[]): Parsed {
     else if (arg === '--domain') parsed.domain = next();
     else if (arg === '--instructions-file') parsed.instructionsFile = next();
     else if (arg === '--core') parsed.core = next();
+    else if (arg === '--machine') parsed.machine = next();
     else if (arg === '--limit') {
       const value = number(arg, next());
       // The widest any command takes (`boite logs`); a command with a lower cap checks its own.

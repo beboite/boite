@@ -16,6 +16,7 @@ export const fr: Translation = {
     retiredAlwaysOn: 'Cette expérience est maintenant toujours active.',
     loadOnPress: 'Chargement à l’appui',
     elsewhere: "C'est dans les Réglages de l'ordinateur qui fait tourner Boite.",
+    machineAway: "{machine} n'est pas connectée ici : changez-le depuis {machine}.",
     loadFailed: "Cette carte de réglage n'a pas chargé.",
     to: 'vers',
     applied: 'Appliqué',
@@ -55,6 +56,7 @@ export const fr: Translation = {
       autoCompact: 'Compaction automatique',
       autoResumeLimitedThreads: 'Reprendre les conversations après une limite d\'usage',
       deviceStream: "Flux en direct de l'appareil",
+      groupThreads: 'Laisser les autres machines lancer des conversations ici',
     },
     zero: {
       agentCpuCapPercent: 'Sans plafond',

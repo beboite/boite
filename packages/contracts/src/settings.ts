@@ -164,6 +164,12 @@ export interface Settings {
    */
   windowCaptureExclusions?: string[];
   /**
+   * Agents on the other machines of this machine's group may start threads
+   * here (`boite thread new --machine`), in its projects, as their own agent
+   * would from this machine. Each machine decides for itself. Missing reads as off.
+   */
+  groupThreads?: boolean;
+  /**
    * While this machine follows its group's settings home, what it keeps for
    * itself (`SyncKey`): each entry was changed here and the copy skips it.
    * Missing or empty: everything synced follows. Clients write it; the core

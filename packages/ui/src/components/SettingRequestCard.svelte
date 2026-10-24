@@ -7,6 +7,8 @@
   import { retiredHint, settingHeading, settingHint, settingLabel, settingPlaceText, settingsReachable, settingValueText } from '../lib/setting-requests';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import { GroupLinks } from '../lib/group-links.svelte';
+  import { workspace } from '../lib/workspace.svelte';
   import InfoTip from './InfoTip.svelte';
 
   /**
@@ -15,7 +17,8 @@
    * draws its switch, any other value an Apply. The switch or Apply goes
    * through `settings.set` like the Settings page, or flips this device's
    * experiment, and the core closes the card once the setting moved, whoever
-   * moved it.
+   * moved it. A card about another machine of the group writes there,
+   * through that machine's Store, and its core tells this one.
    */
   let {
     store,
@@ -54,12 +57,16 @@
   $effect(() => subscribeExperiments((enabled) => { experiments = enabled; }));
   /** True or false: the card draws the switch itself. */
   const toggle = $derived(change !== null && typeof change.value === 'boolean');
+  /** The machine of the group a card is about, when this client is connected to it; else the card's own machine. */
+  const remote = $derived(change?.machine === undefined ? null : workspace.machines.find((machine) => GroupLinks.coreOf(machine) === change.machine?.coreId)?.store ?? null);
+  const away = $derived(change?.machine !== undefined && (remote === null || remote.connection !== 'ready'));
+  const holder = $derived(remote ?? store);
   /** What the switch shows now, from this device or the core's settings. */
-  const now = $derived(change === null ? null : experiment !== null ? experiments.includes(experiment) : retired ? change.previous : (store.settings === null ? change.previous : currentSetting(change.key, store.settings, null)));
-  const canApply = $derived(change !== null && !retired && (experiment !== null || store.owner));
+  const now = $derived(change === null ? null : experiment !== null ? experiments.includes(experiment) : retired || away ? change.previous : (holder.settings === null ? change.previous : currentSetting(change.key, holder.settings, null)));
+  const canApply = $derived(change !== null && !retired && !away && (experiment !== null || holder.owner));
   /** This client's Settings has the card: Show and Open land on it rather than on Home. */
   const reachable = $derived(settingsReachable(setting, { owner: store.owner, phone }));
-  const place = $derived(settingPlaceText(setting, store.providers));
+  const place = $derived([settingPlaceText(setting, store.providers), change?.machine?.name].filter(Boolean).join(' › '));
   const heading = $derived(settingHeading(setting));
   const label = $derived(change ? settingLabel(change.key) : '');
   const hint = $derived(change ? settingHint(change.key) : null);
@@ -79,7 +86,7 @@
       return true;
     }
     busy = true;
-    if (await store.saveSettings({ [change.key]: next } as Partial<Settings>)) return true;
+    if (await holder.saveSettings({ [change.key]: next } as Partial<Settings>)) return true;
     busy = false;
     return false;
   }
@@ -153,6 +160,8 @@
     <p class="place ui-label" data-testid="setting-place">{place}</p>
     {#if retired}
       <p class="hint" data-testid="setting-retired-hint">{retiredHint(change?.key ?? '')}</p>
+    {:else if away && change?.machine}
+      <p class="hint" data-testid="setting-machine-away">{fill(strings.settingRequest.machineAway, { machine: change.machine.name })}</p>
     {:else if change && !canApply}
       <p class="hint" data-testid="setting-guest-hint">{strings.settingRequest.guestHint}</p>
     {:else if !reachable && !canApply}

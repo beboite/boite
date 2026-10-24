@@ -47,7 +47,10 @@ export const USAGE = `usage: boite <command> [args] [--json]
   thread move <project>          move this thread to another project (name,
                                  id or folder) when this turn ends
   thread new <project> <brief>   start a thread in a project; its first answer
-                                 comes back to you (--worktree, --title <title>)
+                                 comes back to you (--worktree, --title <title>,
+                                 --machine <name>: on another machine of the
+                                 group, in a project there, once its owner
+                                 lets the group start threads there)
   projects                       the projects added to Boite
   projects add <folder>          add an existing folder as a project, so thread
                                  new and thread move can name it (--name <name>)
@@ -102,7 +105,9 @@ ${CONTROL_HELP}
                                  the user to change in the chat; value is JSON
                                  or a bare word (experiment.<id> true|false);
                                  the outcome arrives as a message (applied,
-                                 changed or refused)
+                                 changed or refused); --machine <name> asks
+                                 about another machine of the group
+                                 (groupThreads)
   settings open <page>[#<card>] --why <text>
                                  a card with a button to that Settings page,
                                  for what is not one value: a provider login,
@@ -508,6 +513,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     thread: async () => {
       const action = want(0, 'move or new');
       if (action === 'new' && caller === 'owner') {
+        if (parsed.machine !== undefined) throw new Usage('thread new --machine is for an agent in a thread; from a terminal, reach that machine with --core');
         // From a terminal the brief is the user's own prompt, not an agent's.
         await ownerThreadNew(client, parsed, rest, print, contextRequest(parsed, readRules));
         return;
@@ -518,12 +524,14 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         const spawned = await client.call('agent.spawn', {
           threadId, project, prompt, requestId: parsed.requestId ?? crypto.randomUUID(),
           ...(parsed.title === undefined ? {} : { title: parsed.title }), ...(parsed.worktree ? { worktree: true } : {}),
+          ...(parsed.machine === undefined ? {} : { machine: parsed.machine }),
           ...(parsed.context === undefined ? {} : { context: contextRequest(parsed, readRules) as RpcParams<'agent.spawn'>['context'] }),
         });
         // A bot hears of it through events on its desk, not as a message.
-        const persistent = await client.call('agents.snapshot', { threadId }).then(snapshot => snapshot.profiles.length > 0, () => false);
+        const persistent = parsed.machine === undefined && await client.call('agents.snapshot', { threadId }).then(snapshot => snapshot.profiles.length > 0, () => false);
         print([
-          `thread: ${spawned.thread.id}`, `title: ${spawned.thread.title}`, `project: ${spawned.project}`, `cwd: ${spawned.thread.cwd}`,
+          `thread: ${spawned.thread.id}`, `title: ${spawned.thread.title}`, `project: ${spawned.project}`,
+          ...(parsed.machine === undefined ? [] : [`machine: ${parsed.machine}`]), `cwd: ${spawned.thread.cwd}`,
           ...(spawned.thread.branch ? [`branch: ${spawned.thread.branch}`] : []),
           `agent: ${spawned.thread.providerId} ${spawned.thread.model ?? 'default'}`,
           `address: ${spawned.address.coreId}/${spawned.address.threadId}`,
@@ -599,7 +607,8 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       if (action === 'request' || action === 'open') {
         if (parsed.why === undefined || parsed.why.trim().length === 0) throw new Usage(`settings ${action} needs --why <text>, the reason the user reads on the card`);
         const params = action === 'request'
-          ? { threadId, reason: parsed.why, key: want(1, 'a setting key (boite settings lists them)'), value: settingValue(requiredText(rest, 2, 'settings request needs a value after the key', false)) }
+          ? { threadId, reason: parsed.why, key: want(1, 'a setting key (boite settings lists them)'), value: settingValue(requiredText(rest, 2, 'settings request needs a value after the key', false)),
+              ...(parsed.machine === undefined ? {} : { machine: parsed.machine }) }
           : { threadId, reason: parsed.why, ...settingsPlace(want(1, `a page: ${SETTINGS_PAGES.join(', ')}`)) };
         if (action === 'open' && rest.length > 2) throw new Usage('settings open takes one page, with an optional #card');
         const asked = await client.call('settings.request', params);
@@ -607,7 +616,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         print([
           `requested: ${asked.questionId}`,
           ...(setting.kind === 'change'
-            ? [`change: ${setting.key} ${JSON.stringify(setting.previous)} -> ${JSON.stringify(setting.value)}`, typeof setting.value === 'boolean' ? 'card: the switch itself, in the chat' : 'card: Apply in the chat, or open Settings at the setting']
+            ? [`change: ${setting.key} ${JSON.stringify(setting.previous)} -> ${JSON.stringify(setting.value)}${setting.machine === undefined ? '' : ` on ${setting.machine.name}`}`, typeof setting.value === 'boolean' ? 'card: the switch itself, in the chat' : 'card: Apply in the chat, or open Settings at the setting']
             : [`card: opens Settings at ${setting.section === null ? setting.page : `${setting.page}#${setting.section}`}`]),
           'Keep working. The outcome arrives as a message quoting your reason; without one, nothing changed.',
         ], asked);

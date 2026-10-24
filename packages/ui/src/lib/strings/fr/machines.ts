@@ -34,6 +34,8 @@ export const fr: Translation = {
     browserOrigins: 'Origines navigateur autorisées',
     browserOriginsHint: "Les machines du groupe, et les adresses où elles sont servies, sont autorisées toutes seules. N'ajoutez ici qu'une page servie par quelque chose hors du groupe. Une origine http(s) exacte par ligne.",
     you: '{machine} (vous)', youTag: '(vous)',
+    groupThreads: 'Conversations des autres machines',
+    groupThreadsHint: "Les agents des autres machines du groupe peuvent lancer des conversations sur cette machine, dans ses projets, avec leur propre agent (boite thread new --machine). Désactivé par défaut.",
     pick: 'Machine dont ce sont les réglages',
     home: 'Machine par défaut', homeNone: 'Aucune', homeBadge: 'Par défaut',
     homeHint: 'Les autres machines suivent ses réglages : conversations, ressources, clavier et options du brain. Un réglage changé sur une autre machine y reste et prend une étoile.',
