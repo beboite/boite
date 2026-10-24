@@ -62,7 +62,7 @@ function namedRoute(parent: Thread, config: DelegationConfig, profileId: string 
 }
 
 /** `provider/model`, a model id (the parent's provider first) or a unique part of an id or name. */
-function pickModel(ctx: FakeContext, parent: Thread, config: DelegationConfig, wanted: string, effort: string | undefined): ChildRoute {
+export function pickModel(ctx: FakeContext, parent: Thread, config: DelegationConfig, wanted: string, effort: string | undefined): ChildRoute {
   const choices = modelChoices(ctx, parent), query = wanted.toLowerCase();
   const full = (c: DelegationModelChoice) => `${c.providerId}/${c.model}`;
   const byId = choices.filter(c => full(c) === query || c.model.toLowerCase() === query);

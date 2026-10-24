@@ -449,6 +449,32 @@ test('ask draws a card that does not stop the agent, and the answer comes back a
   expect(card).toMatchObject({ async: true, answer: { optionIds: ['2'], text: 'after lunch' } });
 });
 
+test('ask list reads its own pending questions without publishing a question named list', async () => {
+  const client = await harness.connect();
+  const empty = await boite(['ask', 'list', '--json']);
+  expect(empty).toEqual({ code: 0, out: '[]\n', err: '' });
+  const finished = client.next('turn.finished', turn => turn.threadId === threadId, 10000);
+  await client.call('turns.start', { threadId, prompt: 'hello' });
+  await finished;
+  const asked = await boite(['ask', 'Which trailer?', 'New', 'Old', '--json']);
+  expect(asked.code).toBe(0);
+  const { questionId } = JSON.parse(asked.out) as { questionId: string };
+  const before = harness.core.journal.listMessages(threadId);
+
+  const listed = await boite(['ask', 'list', '--json']);
+  expect(listed.err).toBe('');
+  expect(listed.code).toBe(0);
+  expect(JSON.parse(listed.out)).toMatchObject([{ id: questionId, text: 'Which trailer?' }]);
+  expect(await client.call('questions.list', { threadId })).toHaveLength(1);
+  expect(harness.core.journal.listMessages(threadId)).toEqual(before);
+
+  // An ordinary thread can inspect its own cards without a bot's entrusted projects.
+  const own = await boite(['questions', threadId]);
+  expect(own.code).toBe(0);
+  expect(own.out).toContain(`question ${questionId}`);
+  expect(own.out).toContain('option 1: New');
+});
+
 test('skipping async questions neither steers running work nor starts a later turn', async () => {
   let finish!: () => void;
   let starts = 0;

@@ -121,6 +121,7 @@ export class ContactStore implements LinkedContacts {
     this.tailscale = new TailscaleClient(core.dataDir);
     this.concierge = new Concierge(core);
     this.funnel = new ContactFunnel(core, [CONTACT_JOIN_ROUTE, CONTACT_LINK_ROUTE, ROUTE]);
+    this.funnel.changed = () => this.changed();
     this.members = new ContactMembers(core, this);
     this.reach = new ContactReach(core, this);
   }
@@ -291,6 +292,7 @@ export class ContactStore implements LinkedContacts {
       tailscale: await this.tailscaleState(),
       invitations: this.liveInvites().length,
       internet: true,
+      funnel: this.funnel.state(),
     };
   }
 
@@ -880,6 +882,7 @@ export class ContactStore implements LinkedContacts {
   beginClose(): void {
     if (this.closed) return;
     this.closed = true;
+    this.funnel.stop();
     if (this.timer !== null) clearInterval(this.timer);
     this.timer = null;
     for (const { socket } of this.dialed.values()) socket?.close(1001, 'core stopping');

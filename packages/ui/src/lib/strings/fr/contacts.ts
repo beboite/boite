@@ -79,6 +79,18 @@ export const fr: Translation = {
       shared: 'Partage Tailscale créé',
       noShare: 'Sans partage : pour quelqu\'un déjà sur votre Tailscale',
       funnel: 'Joignable par internet via Tailscale Funnel, tant qu\'un contact ou une invitation en a besoin',
+      /** Under a link for another network: whether a request from the internet reaches this machine yet. */
+      reach: {
+        checking: 'Vérification de l\'accès à cette machine par internet…',
+        ready: 'Cette machine est joignable par internet : le lien est prêt à être envoyé',
+        unknown: 'Le DNS public n\'a pas répondu à cette machine. Boite ne peut donc pas encore déterminer si elle est joignable par internet',
+        wait: 'Attendez avant d\'envoyer le lien.',
+        unpublished: 'Tailscale n\'a pas encore publié l\'adresse de cette machine sur internet. Cela prend généralement quelques minutes. Boite vérifie toutes les 30 secondes et désactive puis réactive Funnel au bout de 10 minutes.',
+        repaired: 'Boite a désactivé puis réactivé Funnel pour que Tailscale publie l\'adresse de cette machine, et vérifie à nouveau…',
+        stillUnpublished: 'Tailscale n\'a toujours pas publié l\'adresse de cette machine sur internet, même après la désactivation puis la réactivation de Funnel. Redémarrez Tailscale sur cette machine, puis créez une nouvelle invitation.',
+        unreachable: 'L\'adresse de cette machine est publiée sur internet, mais les requêtes n\'atteignent pas Boite. Vérifiez que Tailscale est en cours d\'exécution ici.',
+        moved: 'Funnel a changé de port depuis la création de ce lien, qui ne permet donc plus d\'atteindre cette machine. Créez une nouvelle invitation.'
+      },
       manual: 'Partagez cette machine à la main',
       openConsole: 'Console d\'administration Tailscale',
       open: 'Invitations valides : {count}',
@@ -92,6 +104,9 @@ export const fr: Translation = {
       placeholder: 'boite://contact#',
       submit: 'Rejoindre',
       joining: 'Connexion',
+      /** The inviter's Funnel address is not in public DNS yet: the same join goes again. */
+      waiting: 'L\'adresse de la personne qui vous invite n\'est pas encore publiée sur internet. Boite réessaie de se connecter toutes les 30 secondes jusqu\'à {time}.',
+      stop: 'Arrêter',
       acceptShare: 'Accepter le partage Tailscale',
       acceptShareTip: 'Cette invitation partage l\'autre machine via Tailscale. Sans clé d\'API ici, acceptez d\'abord le partage dans votre navigateur, puis rejoignez.',
       compare: 'À comparer avec {name}',

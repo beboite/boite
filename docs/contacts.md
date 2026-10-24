@@ -135,6 +135,29 @@ removes old ones left anywhere else, or all of them when nothing needs them. A c
 only when `contacts.get` answers `internet: true`: an older core reads only
 `share` and would share the machine instead.
 
+While the mounts are up, the core checks them from the internet
+(`contacts/funnel-check.ts`), after each invitation for another network and
+at start. This machine cannot see its own Funnel name as the internet does:
+MagicDNS answers it with the tailnet address. So the core resolves the name
+over DNS-over-HTTPS (`dns.google`, then `cloudflare-dns.com`), then posts to
+`/contacts/join` at one of the public addresses, TLS still named after the
+Funnel name. The join route's own refusal of a request naming no peer proves
+the request went through Funnel to this core; any other answer is
+`unreachable`. Tailscale usually publishes the name within minutes of turning
+Funnel on, and sometimes not until it is turned off and on again: still
+unpublished after 10 minutes, the core removes its mounts and puts them back
+once, then checks again; a repair that could not put them back is not counted
+and is tried again 10 minutes later. Checks run every 30 seconds until one goes through,
+for an hour at most. `contacts.get` gives the result as `funnel` (`checking`,
+`ready`, `unpublished`, `unreachable` or `unknown`, and `repaired`), null once
+the mounts are down. Under an Elsewhere link, the page says when the link is
+ready to send, or to wait and what to do.
+
+The guest's side of an https link tells a name DNS does not know from a host
+that does not answer. For the first, `contacts.join` is refused with
+`data.retryAfterMs` (30 seconds): the token was never spent, and the client
+joins again by itself for up to 15 minutes, with **Stop** to end it.
+
 ## Projects and requests
 
 Each side opens projects to the other (`contacts.grant`). An open project's
@@ -284,16 +307,19 @@ gets on Tailscale later listens there after a restart.
 `packages/core/src/contacts/`: `store.ts` (contacts, the link, requests and
 the RPC methods), `members.ts` (projects of the other machines of the group),
 `invitations.ts` (making an invitation and the origin it
-names), `funnel.ts` (the routes on Tailscale Funnel), `join.ts` (both sides
+names), `funnel.ts` (the routes on Tailscale Funnel), `funnel-check.ts`
+(whether the internet reaches them), `join.ts` (both sides
 of a join), `invite.ts` (the link format), `words.ts`
 (fingerprint words), `tier.ts`, `git-remote.ts` (read from the git config
 files, no process), `concierge.ts` and `tailscale.ts`. `contacts.*` are
 owner-only; agents call `collaboration.contacts` and `collaboration.ask`.
 `packages/core/test/contacts.test.ts` links two cores over loopback, and
 `contacts-parts.test.ts` covers the pieces, the Tailscale client against a
-stubbed `fetch`. `contacts-group.test.ts` links a contact to one machine of a two-machine
-group and opens it a project of the other. `contacts-funnel.test.ts` drives the Funnel mounts through
-the fake CLI (`test/fixtures/fake-tailscale.ts`), and `magic-dns.test.ts`
+stubbed `fetch`. `contacts-group.test.ts` links a contact to one machine of a
+two-machine group and opens it a project of the other. `contacts-funnel.test.ts`
+drives the Funnel mounts through the fake CLI (`test/fixtures/fake-tailscale.ts`)
+and the internet check through a stubbed resolver and request, never the
+internet, and `magic-dns.test.ts`
 the tailnet name lookup against a resolver on loopback.
 
 This machine's tailnet name is the PTR record of its tailnet address at

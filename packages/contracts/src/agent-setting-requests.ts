@@ -90,7 +90,8 @@ export function agentSettingValue(profile: AgentProfile, config: AgentRuntimeCon
   }
 }
 
-function projectIds(raw: unknown, current: readonly string[], projects: readonly AgentSettingChoice[]): Checked<string[]> {
+/** Project names or ids as ids, sorted: a list replaces `current`, `{ add, remove }` edits it. */
+export function agentProjectIds(raw: unknown, current: readonly string[], projects: readonly AgentSettingChoice[]): Checked<string[]> {
   const resolve = (name: unknown): Checked<string> => {
     if (typeof name !== 'string' || name.trim().length === 0) return { ok: false, message: 'projects: expected project names or ids' };
     const wanted = name.trim();
@@ -133,7 +134,7 @@ function projectIds(raw: unknown, current: readonly string[], projects: readonly
 /** A proposed value as the agent's settings would store it, or why it cannot be. */
 export function normalizeAgentSetting(key: AgentSettingKey, raw: unknown, ctx: AgentSettingContext): Checked<unknown> {
   switch (key) {
-    case 'projects': return projectIds(raw, ctx.profile.projectIds ?? [], ctx.projects);
+    case 'projects': return agentProjectIds(raw, ctx.profile.projectIds ?? [], ctx.projects);
     case 'model': return typeof raw === 'string' && raw.trim() ? ctx.model(raw.trim()) : { ok: false, message: 'model: expected a model id' };
     case 'effort': return raw === null || typeof raw === 'string' ? ctx.effort(raw === null ? null : raw.trim() || null) : { ok: false, message: 'effort: expected a reasoning level or null' };
     case 'autoMemory':
