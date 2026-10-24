@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { readSettings, type Settings, type SettingAsk } from '@boite/contracts';
+import { readSettings, settledSetting, type RequestableKey, type Settings, type SettingAsk } from '@boite/contracts';
 import { settingsReachable, settingValueText } from './setting-requests';
 
 const open = (page: SettingAsk['page'], section: string | null): SettingAsk => ({ kind: 'open', page, section });
@@ -31,4 +31,10 @@ test('a reading is a copy: sorting or pushing to it leaves the settings and the 
   expect(settings.browserOrigins).toEqual(['https://b.example', 'https://a.example']);
   origins(readSettings({} as Settings)).push('https://c.example');
   expect(origins(readSettings({} as Settings))).toEqual([]);
+});
+
+test('a card about a graduated experiment is never settled by a core setting moving', () => {
+  // Asked before the switch left the Experiments page: an old card in a thread.
+  const card: SettingAsk = { kind: 'change', key: 'experiment.open-chat-links' as RequestableKey, value: true, previous: false, page: 'experiments', section: 'open-chat-links', sensitive: false, app: 'app-12345678' };
+  expect(settledSetting(card, { agentCpuCapPercent: 40 } as Settings)).toBeNull();
 });

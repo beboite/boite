@@ -11,6 +11,7 @@ export const strings = {
     dismiss: 'Dismiss',
     sensitiveHint: 'Check this one before changing it: it guards this computer, its history or its files.',
     guestHint: 'Only the computer running Boite can change this setting.',
+    retired: 'This experiment has its own switch in Settings now.',
     elsewhere: 'This is in the Settings of the computer running Boite.',
     loadFailed: 'This settings card did not load.',
     to: 'to',

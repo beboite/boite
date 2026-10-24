@@ -257,6 +257,11 @@
         <input id="{uid}-chat-artifacts" aria-labelledby="{uid}-chat-artifacts-name" type="checkbox" role="switch" checked={featureOn('chat-artifacts')} data-testid="setting-chat-artifacts"
           onchange={event => setFeature('chat-artifacts', event.currentTarget.checked)} />
       </label>
+      <label class="switch-row" for="{uid}-preview-comments">
+        <span class="text ui-label-box"><span class="ui-label" id="{uid}-preview-comments-name">{strings.features.previewComments.title}</span><InfoTip topic={strings.features.previewComments.title} text={strings.features.previewComments.hint} /></span>
+        <input id="{uid}-preview-comments" aria-labelledby="{uid}-preview-comments-name" type="checkbox" role="switch" checked={featureOn('preview-comments')} data-testid="setting-preview-comments"
+          onchange={event => setFeature('preview-comments', event.currentTarget.checked)} />
+      </label>
     {/if}
     {#if hasMaterial}
       <div class="switch-row">

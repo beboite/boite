@@ -150,6 +150,15 @@ export function experimentOf(key: string): ExperimentId | null {
   return isExperimentId(id) ? id : null;
 }
 
+/**
+ * True for any `experiment.<id>` key, shipped or since graduated: a card
+ * asked about a switch this build no longer lists is still a device's switch,
+ * which a core setting never settles and `settings.set` never writes.
+ */
+export function isExperimentKey(key: string): boolean {
+  return key.startsWith('experiment.');
+}
+
 /** One readable setting, as `agent.settings` lists it. */
 export interface SettingReading extends SettingPlace {
   key: RequestableKey;
@@ -326,7 +335,7 @@ export function checkSettingRequest(params: SettingRequestParams, settings: Sett
  * flips no switch (`settledExperiment`).
  */
 export function settledSetting(setting: SettingAsk, settings: Settings): QuestionAnswer | null {
-  if (setting.kind !== 'change' || experimentOf(setting.key) !== null) return null;
+  if (setting.kind !== 'change' || isExperimentKey(setting.key)) return null;
   const now = effectiveSetting(settings, setting.key as RequestableSetting);
   if (sameSetting(now, setting.previous)) return null;
   return { optionIds: [sameSetting(now, setting.value) ? 'applied' : 'changed'], value: now };

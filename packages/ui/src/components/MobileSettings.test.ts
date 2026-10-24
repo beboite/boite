@@ -144,11 +144,12 @@ test('the phone settings hold this phone\'s three screens and the machine\'s ess
   await waitFor(() => store.settingsTab === 'limits' && document.querySelector('[data-testid=mobile-usage-tab-limits][aria-selected=true]') !== null);
   await back();
 
-  // Appearance takes the files and previews switch and leaves the desktop's rows behind.
+  // Appearance takes the files and previews and element reference switches, and leaves the desktop's rows behind.
   query<HTMLButtonElement>('[data-testid=settings-tab-appearance]').click();
   await waitFor(() => document.querySelector('[data-testid=appearance-page]') !== null);
   expect(document.querySelector('[data-testid=setting-chat-artifacts]')).not.toBeNull();
-  for (const id of ['chat-width-comfortable', 'terminal-gpu', 'settings-buttons', 'start-in-drafts']) expect(document.querySelector(`[data-testid=${id}]`)).toBeNull();
+  expect(document.querySelector('[data-testid=setting-preview-comments]')).not.toBeNull();
+  for (const id of ['chat-width-comfortable', 'terminal-gpu', 'settings-buttons', 'start-in-drafts', 'setting-edge-scrollbars']) expect(document.querySelector(`[data-testid=${id}]`)).toBeNull();
 });
 
 test('on a phone too, a page of one machine is picked above it without moving the window', async () => {

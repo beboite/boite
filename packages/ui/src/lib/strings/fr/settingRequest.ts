@@ -12,6 +12,7 @@ export const fr: Translation = {
     dismiss: 'Ignorer',
     sensitiveHint: "Vérifiez celui-ci avant de le changer : il protège cet ordinateur, son historique ou ses fichiers.",
     guestHint: "Seul l'ordinateur qui fait tourner Boite peut changer ce réglage.",
+    retired: 'Cette expérience a maintenant son propre interrupteur dans les réglages.',
     elsewhere: "C'est dans les Réglages de l'ordinateur qui fait tourner Boite.",
     loadFailed: "Cette carte de réglage n'a pas chargé.",
     to: 'vers',

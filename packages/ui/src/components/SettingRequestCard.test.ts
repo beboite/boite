@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import type { Message, QuestionRequest } from '@boite/contracts';
+import type { Message, QuestionRequest, RequestableKey } from '@boite/contracts';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
 import AssistantMessage from './AssistantMessage.svelte';
@@ -152,6 +152,32 @@ test('the app tells its core the language and experiments it has, and an experim
     await vi.waitFor(() => expect(store.openThread!.messages.some((message) => message.role === 'user' && message.parts.some((part) => part.type === 'text' && part.text === '> Try the whip\n\napplied: experiment.whip is now true'))).toBe(true));
   } finally {
     localStorage.removeItem('boite.experiments');
+    store.detach();
+    client.close();
+  }
+});
+
+test('a card about a graduated experiment can only be refused: it writes no core setting', async () => {
+  const { client, store } = await setup();
+  const save = vi.spyOn(store, 'saveSettings');
+  try {
+    mounted = mount(SettingRequestCard, {
+      target: document.body,
+      props: {
+        store,
+        text: 'Open links in their apps',
+        setting: { kind: 'change', key: 'experiment.open-chat-links' as RequestableKey, value: true, previous: false, page: 'experiments', section: 'open-chat-links', sensitive: false, app: 'app-12345678' },
+        answer: null,
+        pending: true,
+        respond: async () => undefined
+      }
+    });
+    flushSync();
+    expect(query('[data-testid=setting-retired-hint]').textContent).toContain('own switch');
+    expect(query<HTMLInputElement>('[data-testid=setting-switch]').disabled).toBe(true);
+    expect(document.querySelector('[data-testid=setting-apply]')).toBeNull();
+    expect(save).not.toHaveBeenCalled();
+  } finally {
     store.detach();
     client.close();
   }

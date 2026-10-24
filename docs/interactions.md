@@ -67,7 +67,8 @@ link, touch presses wait for their click; the mouse keeps preloading. A row of
 a machine that is no longer connected preloads nothing, and a press whose
 page was refused leaves the click to ask again.
 
-It stays off whenever `navigator.webdriver` is true, so Playwright and other
+It stays off whenever `navigator.webdriver` is true, so Playwright, the end-to-end
+harness (`tests/e2e/lib/cdp.ts` marks every page it launches) and other
 driven browsers measure the plain click. Its own test opts in with
 `window.__BOITE_PRESS_PRELOAD_TEST__`.
 
