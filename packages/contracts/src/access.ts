@@ -36,6 +36,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'collaboration.directory',
   // Exact associated-project views and connection-owned invalidations; administration remains owner-only.
   'sharedProjects.list', 'sharedProjects.get', 'sharedProjects.threads', 'sharedProjects.search', 'sharedProjects.read', 'sharedProjects.subscribe',
+  'sharedBoard.get', 'sharedBoard.apply', 'sharedBoard.start', // Board actions on a paired phone recheck bilateral consent and its canonical local worker.
   // Dictation uses the owner's configured engine. Devices cannot change paths or credentials.
   'speech.status',
   'speech.transcribe',

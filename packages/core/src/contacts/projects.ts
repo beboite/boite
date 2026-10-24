@@ -28,6 +28,7 @@ export class SharedProjects {
   private readonly flushing = new Map<string, Promise<void>>();
   private readonly off: () => void;
   private closed = false;
+  private readonly synchronizers = new Set<(peerId: string) => Promise<void>>();
 
   constructor(readonly core: Core) {
     this.journal = new SharedProjectJournal(core.journal.db);
@@ -220,7 +221,7 @@ export class SharedProjects {
     const job = (async () => {
       for (;;) {
         const entry = this.journal.queued(peerId)[0];
-        if (!entry) return;
+        if (!entry) break;
         if (this.closed) return;
         try { await this.exchange(peerId, entry.payload); }
         catch (error) {
@@ -233,6 +234,7 @@ export class SharedProjects {
         }
         this.journal.ack(entry.id);
       }
+      for (const sync of this.synchronizers) if (!this.closed) await sync(peerId);
     })();
     this.flushing.set(peerId, job);
     try { await job; } finally { this.flushing.delete(peerId); }
@@ -242,7 +244,7 @@ export class SharedProjects {
     if (!peer || this.closed) throw refused('coreId: contact permission revoked');
     return this.core.coordination.request(peer, 'contact.project', payload);
   }
-  async request<M extends keyof SharedProjectPeerMethods>(ctx: SharedPeerContext, method: M, params: SharedProjectPeerMethods[M]['params'], requestId = randomUUID()): Promise<SharedProjectPeerMethods[M]['result']> {
+  async request<M extends keyof SharedProjectPeerMethods>(ctx: SharedPeerContext, method: M, params: SharedProjectPeerMethods[M]['params'], requestId: string = randomUUID()): Promise<SharedProjectPeerMethods[M]['result']> {
     const { shared, source } = ctx;
     this.assertActive(this.require(shared.id));
     const { index } = this.endpoints(shared);
@@ -258,6 +260,8 @@ export class SharedProjects {
   }
 
   registerPeer<M extends keyof SharedProjectPeerMethods>(method: M, handler: PeerHandler<M>): void { this.handlers.set(method, handler as never); }
+  /** Reuse Contacts reconnect/retry scheduling; extensions do not start polling timers. */
+  registerFlush(sync: (peerId: string) => Promise<void>): void { this.synchronizers.add(sync); }
   /** Recheck after a delegated async handler before returning data or acknowledging a write. */
   assertPeer(ctx: SharedPeerContext): void {
     const current = this.require(ctx.shared.id);

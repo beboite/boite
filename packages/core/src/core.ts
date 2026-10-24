@@ -60,6 +60,7 @@ import { Coordination } from './coordination.ts';
 import { GroupStore, type NetworkSink } from './group.ts';
 import { ContactStore } from './contacts/store.ts';
 import { SharedProjects } from './contacts/projects.ts';
+import { SharedBoard } from './contacts/board.ts';
 import type { RelaySink } from './group/relay.ts';
 import { Delegation } from './delegation.ts';
 import { Workflows } from './workflows.ts';
@@ -191,6 +192,7 @@ export class Core {
   /** Other owners' Boites linked for agent work on the projects each side opens. */
   readonly contacts: ContactStore;
   readonly sharedProjects: SharedProjects;
+  readonly sharedBoard: SharedBoard;
   readonly delegation: Delegation;
   readonly workflows: Workflows;
   readonly brain: BrainStore;
@@ -380,6 +382,7 @@ export class Core {
     this.group.restore();
     this.contacts = new ContactStore(this);
     this.sharedProjects = new SharedProjects(this);
+    this.sharedBoard = new SharedBoard(this);
     this.delegation = new Delegation(this);
     this.workflows = new Workflows(this);
     this.brain = new BrainStore(this);
@@ -513,6 +516,7 @@ export class Core {
     this.group.beginClose();
     this.contacts.beginClose();
     this.sharedProjects.beginClose();
+    this.sharedBoard.beginClose();
     this.activity.close();
     this.threads.autoCompact.close();
     this.threads.cacheKeepalive.close();
@@ -567,6 +571,7 @@ export class Core {
     await this.group.close();
     await this.contacts.close();
     await this.sharedProjects.close();
+    await this.sharedBoard.close();
     await this.speech.close();
     await this.push.close();
     await this.plugins.close();

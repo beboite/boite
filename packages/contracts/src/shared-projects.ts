@@ -71,11 +71,13 @@ export interface SharedProjectThread {
 }
 
 export interface SharedBoardAssignment {
-  /** The accepted claim operation's requestId, also the idempotency key for starting its goal. */
+  /** Authority-minted identity scoped to association, actor, card and request; also the goal start key. */
   claimId: string;
   actor: SharedProjectActor;
   worker: SharedThreadRef;
   state: 'reserved' | 'running' | 'uncertain' | 'complete';
+  /** Attested by the worker host, retained when its thread is unavailable. Contact names stay local. */
+  workerInfo?: { agent: string; machine: string };
 }
 /** Projection into the existing Todo/goal board, not a second four-state task system. */
 export interface SharedBoardCard {
@@ -88,6 +90,8 @@ export interface SharedBoardCard {
   goal: TodoGoal | null;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+  /** A host-local edit awaiting the immutable authority. Never sent as an authoritative change. */
+  pending?: boolean;
 }
 export interface SharedBoardTombstone { id: string; revision: number; deletedAt: Timestamp }
 export type SharedBoardChange = { revision: number } & (
@@ -95,8 +99,8 @@ export type SharedBoardChange = { revision: number } & (
   | { kind: 'deleted'; tombstone: SharedBoardTombstone }
 );
 export type SharedBoardPage =
-  | { kind: 'snapshot'; revision: number; cards: SharedBoardCard[]; tombstones: SharedBoardTombstone[] }
-  | { kind: 'delta'; from: number; to: number; changes: SharedBoardChange[]; more: boolean };
+  | { kind: 'snapshot'; revision: number; cards: SharedBoardCard[]; tombstones: SharedBoardTombstone[]; authorityAvailable?: boolean }
+  | { kind: 'delta'; from: number; to: number; changes: SharedBoardChange[]; more: boolean; authorityAvailable?: boolean };
 /** No caller-supplied actor or goal/checklist: the core attests both from its own journal. */
 export type SharedBoardCommand = { requestId: string; cardId: string } & (
   | { kind: 'add'; text: string }
@@ -107,7 +111,8 @@ export type SharedBoardCommand = { requestId: string; cardId: string } & (
 );
 export interface SharedBoardReceipt {
   requestId: string;
-  outcome: 'applied' | 'conflict' | 'deleted' | 'revoked';
+  /** queued is durable locally and optimistic; it never authorizes starting work. */
+  outcome: 'applied' | 'conflict' | 'deleted' | 'revoked' | 'queued';
   revision: number;
   card: SharedBoardCard | null;
 }
@@ -234,6 +239,8 @@ export interface SharedProjectsRpcMethods {
   'sharedProjects.subscribe': { params: SharedProjectScope & { enabled: boolean }; result: { ok: true } };
   'sharedBoard.get': { params: SharedProjectScope & { after?: number }; result: SharedBoardPage };
   'sharedBoard.apply': { params: SharedProjectScope & { command: SharedBoardCommand }; result: SharedBoardReceipt };
+  /** Start this host's reserved worker once, after checking the authority again. Never queues a start offline. */
+  'sharedBoard.start': { params: SharedProjectScope & { cardId: string; claimId: string }; result: SharedBoardReceipt };
   'sharedCompute.models': { params: SharedProjectScope & { host: SharedProjectRef }; result: SharedComputeRoute[] };
   'sharedCompute.start': { params: SharedProjectScope & SharedComputeStart; result: SharedComputeJob };
   'sharedCompute.list': { params: SharedProjectScope; result: SharedComputeJob[] };
@@ -271,9 +278,13 @@ export interface SharedProjectPeerMethods {
   search: { params: { query: string }; result: AgentMatch[] };
   read: { params: { target: SharedThreadRef; limit?: number; before?: Timestamp }; result: AgentTranscript };
   'board.get': { params: { after?: number }; result: SharedBoardPage };
-  'board.apply': { params: { command: SharedBoardCommand }; result: SharedBoardReceipt };
+  'board.apply': { params: { command: SharedBoardCommand; workerInfo?: { agent: string; machine: string } }; result: SharedBoardReceipt };
+  /** Durable authority revision hint. Receiver pulls deltas; receiving one never echoes it. */
+  'board.changed': { params: { revision: number }; result: { ok: true } };
+  /** Only the authority may ask the assigned host to stop this exact claim before releasing it. */
+  'board.stop': { params: { cardId: string; claimId: string; worker: SharedThreadRef }; result: { stopped: true } };
   /** Only the attested worker host, from its journalled goal and current claim. */
-  'board.progress': { params: { cardId: string; claimId: string; worker: SharedThreadRef; goal: TodoGoal | null; sequence: number }; result: SharedBoardReceipt };
+  'board.progress': { params: { cardId: string; claimId: string; worker: SharedThreadRef; goal: TodoGoal | null; sequence: number; reviewPassedAt: Timestamp | null }; result: SharedBoardReceipt };
   'compute.models': { params: { host: SharedProjectRef }; result: SharedComputeRoute[] };
   'compute.start': { params: SharedComputeStart & { source: SharedThreadRef }; result: SharedComputeJob };
   'compute.get': { params: { jobId: string }; result: SharedComputeJob };

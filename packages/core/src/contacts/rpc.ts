@@ -1,9 +1,11 @@
 /** The contact methods: `contacts.*` for the owner, `collaboration.contacts` and `collaboration.ask` for agents. Who may call which is in `access.ts`. */
 import type { Core } from '../core.ts';
 import { registerSharedProjectMethods } from './projects.ts';
+import { registerSharedBoardMethods } from './board.ts';
 
 export function registerContactMethods(core: Core): void {
   registerSharedProjectMethods(core);
+  registerSharedBoardMethods(core);
   core.router.register('contacts.get', () => core.contacts.state());
   core.router.register('contacts.invite', p => core.contacts.invite(p.share, p.internet));
   core.router.register('contacts.cancelInvites', () => core.contacts.cancelInvites());

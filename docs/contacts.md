@@ -151,8 +151,9 @@ contact's `offers`.
 With the [project board](board.md) on, a contact's page shows each project
 shared with that contact as its board's four counts: to do, in progress, in
 review and done. A click opens the board in the project's last conversation.
-These are this core's cards and stay on it: the contact sees none of them
-until shared projects sync their board.
+These counts include local cards and the explicitly associated shared cards.
+Local cards stay private. The [shared board protocol](board.md#shared-board-protocol)
+requires both endpoint owners' board consent.
 
 An agent asks a contact for help with `boite threads ask <contact> "<text>"`
 (`collaboration.ask`): "an agent on a project like X". The request carries the
@@ -254,8 +255,9 @@ refused every invitation.
 
 The following is the version 1 contract and implementation acceptance plan.
 The primary-core association, scoped thread/search/read service and scoped
-subscriptions are implemented in `contacts/projects.ts`. The board, compute,
-human letters, file enforcement, reviewer, fake handlers and UI below remain
+subscriptions are implemented in `contacts/projects.ts`. The durable board
+service is in `contacts/board.ts`, with its protocol in [board.md](board.md#shared-board-protocol).
+Compute, human letters, file enforcement, reviewer, fake handlers and UI below remain
 integration work. Type declarations alone enable no remote execution.
 `packages/contracts/src/shared-projects.ts` declares the vocabulary;
 `coordination.ts` retains the existing contact types. A core must not advertise
@@ -417,8 +419,10 @@ back into a new local command. Compaction retains tombstones and deduplication
 evidence, including through restart or a long-offline replica.
 
 Claim is a compare-and-set against the card revision at the authority. A
-successful receipt reserves the card to one exact worker and claim request
-ID before any goal starts. Start/link the ordinary goal idempotently under
+successful receipt reserves the card to one exact worker and returns a claim
+ID scoped to association, actor, card and request before any goal starts.
+Different agents can reuse a request ID without sharing a claim identity.
+Start/link the ordinary goal idempotently under
 that ID. A losing claim starts no work and removes only its own empty draft,
 as the existing board does. There is no timeout-based authority failover or
 automatic claim expiry. An unreachable authority leaves edits pending and
