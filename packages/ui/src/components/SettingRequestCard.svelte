@@ -1,10 +1,10 @@
 <script lang="ts">
   import { ArrowRight, Settings2, ShieldAlert } from '@lucide/svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { currentSetting, experimentOf, type QuestionAnswer, type Settings, type SettingAsk } from '@boite/contracts';
+  import { currentSetting, experimentOf, isExperimentKey, type QuestionAnswer, type Settings, type SettingAsk } from '@boite/contracts';
   import { readExperiments, setExperiment, subscribeExperiments } from '../lib/experiments';
   import { keepFocus } from '../lib/focus';
-  import { settingHeading, settingHint, settingLabel, settingPlaceText, settingsReachable, settingValueText } from '../lib/setting-requests';
+  import { retiredHint, settingHeading, settingHint, settingLabel, settingPlaceText, settingsReachable, settingValueText } from '../lib/setting-requests';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import InfoTip from './InfoTip.svelte';
@@ -48,13 +48,15 @@
   const change = $derived(setting.kind === 'change' ? setting : null);
   /** An experiment is this device's own switch, which any of the user's devices flips for itself. */
   const experiment = $derived(change === null ? null : experimentOf(change.key));
+  /** An experiment this build no longer lists: it graduated, and the card can only be refused. */
+  const retired = $derived(change !== null && experiment === null && isExperimentKey(change.key));
   let experiments = $state(readExperiments());
   $effect(() => subscribeExperiments((enabled) => { experiments = enabled; }));
   /** True or false: the card draws the switch itself. */
   const toggle = $derived(change !== null && typeof change.value === 'boolean');
   /** What the switch shows now, from this device or the core's settings. */
-  const now = $derived(change === null ? null : experiment !== null ? experiments.includes(experiment) : (store.settings === null ? change.previous : currentSetting(change.key, store.settings, null)));
-  const canApply = $derived(change !== null && (experiment !== null || store.owner));
+  const now = $derived(change === null ? null : experiment !== null ? experiments.includes(experiment) : retired ? change.previous : (store.settings === null ? change.previous : currentSetting(change.key, store.settings, null)));
+  const canApply = $derived(change !== null && !retired && (experiment !== null || store.owner));
   /** This client's Settings has the card: Show and Open land on it rather than on Home. */
   const reachable = $derived(settingsReachable(setting, { owner: store.owner, phone }));
   const place = $derived(settingPlaceText(setting, store.providers));
@@ -149,7 +151,9 @@
       </div>
     {/if}
     <p class="place ui-label" data-testid="setting-place">{place}</p>
-    {#if change && !canApply}
+    {#if retired}
+      <p class="hint" data-testid="setting-retired-hint">{retiredHint(change?.key ?? '')}</p>
+    {:else if change && !canApply}
       <p class="hint" data-testid="setting-guest-hint">{strings.settingRequest.guestHint}</p>
     {:else if !reachable && !canApply}
       <p class="hint" data-testid="setting-elsewhere-hint">{strings.settingRequest.elsewhere}</p>

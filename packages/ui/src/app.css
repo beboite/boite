@@ -1645,7 +1645,7 @@ tr:last-child td {
   }
 }
 
-/* The edge-scrollbars experiment (lib/edge-scrollbars.ts): native bars take no
+/* The edge-scrollbars feature (lib/edge-scrollbars.ts): native bars take no
    room and an overlay thumb fades in as the mouse nears a container's edge.
    The script sets the class only for a fine pointer without forced colors, and
    these selectors outrank the `*` rules above. */

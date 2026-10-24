@@ -352,6 +352,41 @@ open their surface, `close-surface` closes the active tab. The defaults are in
 opens a surface: A, B, C, D, F, K, M, T. M opens Discussions, D the Device
 surface and B the Browser, the conversation's.
 
+## Preview comments
+
+Settings, General, **Preview comments** is on by default. Open a Browser tab in the integrated panel and choose Reference an element.
+Clicking an element inserts an `@element` mention at the cursor in the
+existing composer. Write around it and send normally. Draft text,
+attachments and queued messages stay intact. On a phone-sized window, selection
+returns to the composer. There is no separate comment form.
+
+References stay inline with the text, in the accent color, in drafts and sent
+messages. Editing a mention removes its element association. Click
+one to reopen its thread's browser and highlight the element. A closed tab is
+reopened at the captured URL; a surviving tab that changed pages is refused.
+Missing elements and inaccessible pages report errors. Open shadow roots are
+supported, including sibling elements within them. The highlight follows scroll
+and resize for three seconds. Existing references remain clickable with the
+switch off.
+
+Each message carries up to eight typed references. The core validates the URL,
+mention positions, selector, shadow-root path, selected text and viewport bounds, then supplies
+them as labeled untrusted context to every agent. The visible message keeps
+only the user's prose and inline mentions. References survive queued sends,
+failed sends, idempotent retries and prompt recall. Stashing a referenced draft
+or sending it with `/goal` or `/loop` is refused explicitly, preserving the draft.
+
+Escape cancels selection. Switching it off or leaving the surface
+cancels the picker. Desktop child webviews support selection across origins.
+The iframe test bridge only inspects accessible same-origin documents and
+reports inaccessible pages explicitly. Selected page content is untrusted data;
+it never grants the page access to host commands. This version does not attach
+a screenshot to the reference.
+
+`preview-comments.test.ts` (end to end) covers the desktop and phone-sized
+interfaces. Preview unit tests cover owning-machine boundaries and selection
+validation. No live provider login is required.
+
 ## Experimental PR review
 
 Settings, Experiments, **PR review** adds **Read in Boite** to each PR linked
