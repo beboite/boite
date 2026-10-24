@@ -561,6 +561,8 @@ or claimed cards, with the count in the refusal; the user's adds have no limit.
 
 `ask` draws a question card in the thread without stopping the agent: the
 thread does not turn `waiting` and the card stays open after the turn ends.
+`ask list` lists the calling thread's pending questions without creating a
+card, like `questions <thread-id>` for that same thread. `ask help` shows usage.
 A core restart keeps it too: an open card is read back from the journal at
 startup, for as long as events are kept (30 days).
 Each extra argument is an option label; with none the question takes free
