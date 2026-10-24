@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AGENT_ENV, parseWindowCrop, type MessagePart, type RpcEvents } from '@boite/contracts';
@@ -58,7 +58,8 @@ describe('window capture', () => {
     owner = await harness.connect();
     ({ threadId } = await echoThread(harness, owner));
     const thread = harness.core.threads.require(threadId);
-    cwd = thread.cwd;
+    // The service answers with the file's real path: macOS's temporary folder sits behind /var -> /private/var.
+    cwd = realpathSync(thread.cwd);
     projectId = thread.projectId!;
     agent = await connect(harness.url, harness.core.agents.tokenFor(threadId), { client: { name: 'boite-cli', version: 'test' } });
     windows = [win('101'), win('202', { path: 'C:\\Tools\\KeePass\\KeePass.exe', process: 'KeePass.exe', title: 'Database.kdbx' })];
@@ -136,7 +137,9 @@ describe('window capture', () => {
     const second = await agent.call('windows.screenshot', { threadId, target: { title: 'SCENE 101' } });
     expect(second.windowId).toBe('101');
     expect(parts('window_consent')).toHaveLength(1);
-    expect((await owner.call('windows.revoke', { projectId, path: UNITY.toUpperCase() })).apps).toEqual([]);
+    // Executable paths fold case only where the file system does.
+    if (process.platform !== 'win32') expect((await owner.call('windows.revoke', { projectId, path: UNITY.toUpperCase() })).apps).toHaveLength(1);
+    expect((await owner.call('windows.revoke', { projectId, path: process.platform === 'win32' ? UNITY.toUpperCase() : UNITY })).apps).toEqual([]);
     expect((await agent.call('windows.list', { threadId })).windows[0]).toEqual({ id: '101', process: 'Unity.exe', pid: 101, width: 64, height: 40, minimized: false, allowed: false });
   });
 

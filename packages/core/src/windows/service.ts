@@ -93,7 +93,8 @@ export interface DesktopWindowsOptions {
 
 /** The executable's name as targets and exclusions compare it: lower case, `.exe` dropped. */
 const appName = (name: string) => name.toLowerCase().replace(/\.exe$/, '');
-const samePath = (a: string, b: string) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+/** An executable's path as the allowlist compares it: case only folds where the file system does. */
+const pathKey = (path: string) => (process.platform === 'win32' ? path.toLowerCase() : path);
 
 export class DesktopWindows {
   readonly #core: Core;
@@ -209,7 +210,7 @@ export class DesktopWindows {
     if (!watch || watch.windowId !== windowId) throw refused(`window ${windowId} is not open in this conversation's Window panel`, { windowId });
     const width = bounded(maxWidth, FRAME_WIDTH, 'maxWidth');
     const jpegQuality = bounded(quality, FRAME_QUALITY, 'quality');
-    if ((watch.grant === 'always' || watch.grant === 'allowed') && !this.#allowedPaths(thread.projectId).has(watch.path.toLowerCase())) {
+    if ((watch.grant === 'always' || watch.grant === 'allowed') && !this.#allowedPaths(thread.projectId).has(pathKey(watch.path))) {
       this.#close(threadId, 'its app was taken off the project\'s list');
       throw refused(`${watch.process} is no longer allowed in this project`, { windowId });
     }
@@ -258,7 +259,7 @@ export class DesktopWindows {
   revoke({ projectId, path }: RpcParams<'windows.revoke'>): RpcResult<'windows.revoke'> {
     this.#core.projects.require(projectId);
     if (typeof path !== 'string' || path.length === 0 || path.length > 1024) throw invalidParams('path must be an allowed app\'s path from windows.allowlist', { field: 'path' });
-    const removed = this.#apps(projectId).filter(app => samePath(app.path, path));
+    const removed = this.#apps(projectId).filter(app => pathKey(app.path) === pathKey(path));
     for (const app of removed) this.#core.journal.db.query('DELETE FROM window_allowlist WHERE project_id = ? AND path = ?').run(projectId, app.path);
     if (removed.length > 0) this.#core.logs.info(`${removed[0]!.process} taken off a project's allowed windows`, { source: 'windows', event: 'window.revoked', data: { projectId, process: removed[0]!.process } });
     // A panel showing that app under the old grant closes on its next frame.
@@ -313,7 +314,7 @@ export class DesktopWindows {
       throw refused('a contact\'s letter is part of this turn: windows are captured only for the owner\'s own requests', { threadId: thread.id });
     }
     if (window.path === '') throw refused(`the system does not tell which program owns window ${window.id}, so it cannot be allowed`, { windowId: window.id });
-    if (allowed.has(window.path.toLowerCase())) return { backend, window, grant: 'allowed' };
+    if (allowed.has(pathKey(window.path))) return { backend, window, grant: 'allowed' };
     const grant = await this.#ask(thread, window, kind);
     return { backend, window, grant };
   }
@@ -342,7 +343,7 @@ export class DesktopWindows {
       named = `a window of ${target.process.trim()}`;
     } else {
       const part = target.title!.trim().toLowerCase();
-      matches = windows.filter(window => allowed.has(window.path.toLowerCase()) && !this.#excluded(window) && window.title.toLowerCase().includes(part));
+      matches = windows.filter(window => allowed.has(pathKey(window.path)) && !this.#excluded(window) && window.title.toLowerCase().includes(part));
       named = 'an allowed app\'s window with that title';
     }
     if (matches.length === 0) throw refused(`no ${named}: \`boite window list\` shows the windows${target.title !== undefined ? ', and titles only for apps the project allows' : ''}`, { target });
@@ -360,7 +361,7 @@ export class DesktopWindows {
 
   #describe(window: NativeWindow, allowed: Set<string>): DesktopWindow {
     const excluded = this.#excluded(window);
-    const isAllowed = !excluded && window.path !== '' && allowed.has(window.path.toLowerCase());
+    const isAllowed = !excluded && window.path !== '' && allowed.has(pathKey(window.path));
     return {
       id: window.id,
       process: window.process,
@@ -376,6 +377,7 @@ export class DesktopWindows {
 
   #excluded(window: NativeWindow): boolean {
     const name = appName(window.process);
+    // Exclusions fold case on every system: a near match excludes too much, never too little.
     const path = window.path.toLowerCase();
     const extra = this.#core.settings.get().windowCaptureExclusions ?? [];
     return [...WINDOW_CAPTURE_EXCLUDED, ...extra].some(entry => {
@@ -387,7 +389,7 @@ export class DesktopWindows {
   // --- consent ------------------------------------------------------------
 
   async #ask(thread: ThreadSummary, window: NativeWindow, kind: WindowCaptureKind): Promise<Grant> {
-    const key = `${thread.id}\n${window.path.toLowerCase()}`;
+    const key = `${thread.id}\n${pathKey(window.path)}`;
     const waiting = this.#consents.get(key);
     if (waiting) return waiting.promise;
     const turn = this.#core.journal.runningTurn(thread.id) ?? this.#core.journal.lastTurn(thread.id);
@@ -455,7 +457,7 @@ export class DesktopWindows {
   /** Lower-cased paths: Windows paths compare without case, and an X11 app's path is its own `/proc` link. */
   #allowedPaths(projectId: ProjectId | string | null): Set<string> {
     if (projectId === null) return new Set();
-    return new Set(this.#apps(projectId).map(app => app.path.toLowerCase()));
+    return new Set(this.#apps(projectId).map(app => pathKey(app.path)));
   }
 
   #allow(projectId: ProjectId | string, window: NativeWindow): void {
@@ -558,7 +560,7 @@ export class DesktopWindows {
     if (!stream || now - stream.checkedAt > STREAM_RECHECK_MS) {
       // A window id can be reused once its window closes: the panel shows only the app it was opened on.
       const window = (await backend.list()).find(candidate => candidate.id === watch.windowId);
-      if (!window || window.pid !== watch.pid || !samePath(window.path, watch.path)) {
+      if (!window || window.pid !== watch.pid || pathKey(window.path) !== pathKey(watch.path)) {
         this.#close(thread.id, 'the window closed');
         throw refused(`window ${watch.windowId} of ${watch.process} is gone`, { windowId: watch.windowId, code: 'gone' });
       }
