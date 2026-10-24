@@ -72,6 +72,8 @@ export interface ThreadLink {
   projectId: ProjectId;
   /** The project's name when the link was made. */
   project: string;
+  /** The other machine of the group the thread is on, by its name, when it is not this one. */
+  machine?: string;
 }
 
 /** What `agent.spawn` answers: the new thread, its first turn and how to reach its agent. */
@@ -159,6 +161,11 @@ export interface AgentDoorRpcMethods {
    * Team), for a delegated child or a persistent agent session, and for a
    * thread an agent started until the user has written in it. `requestId`
    * makes a retry return the same thread.
+   *
+   * `machine` (a member's name or core id prefix) starts it on another
+   * machine of the caller's group, in a project named there, once that
+   * machine's owner turned on `groupThreads`. The same gates apply on the
+   * caller's side, and that machine across projects in every case.
    */
-  'agent.spawn': { params: { threadId: ThreadId; project: string; prompt: string; title?: string; worktree?: boolean; context?: ContextRequest | ContextPreset; requestId: string }; result: AgentSpawn };
+  'agent.spawn': { params: { threadId: ThreadId; project: string; prompt: string; title?: string; worktree?: boolean; context?: ContextRequest | ContextPreset; requestId: string; machine?: string }; result: AgentSpawn };
 }

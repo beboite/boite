@@ -374,9 +374,10 @@ brains and the user's notes name them; `boite help` shows only the new ones
 boite where                      thread, title, project, cwd, branch, worktree, agent
 boite thread move <project>      move this thread to another project (name, id or
                                  folder) when this turn ends
-boite thread new <project> <brief> [--worktree] [--title <title>] [context flags]
-                                 start a thread in a project; its first answer
-                                 comes back as a message
+boite thread new <project> <brief> [--worktree] [--title <title>] [--machine <name>] [context flags]
+                                 start a thread in a project, on this machine or
+                                 another of the group; its first answer comes
+                                 back as a message
 boite projects                   the projects added to Boite
 boite projects add <folder> [--name <name>]
                                  add an existing folder as a project
@@ -509,6 +510,30 @@ so it starts threads in any project, where they land on its
 none. A retry
 with the same `--request-id` returns the thread already started.
 
+`--machine <name>` starts it on another machine of the same group, by its
+name as Settings lists it, case and spaces aside (a core id prefix of six characters or more works too),
+in a project of that machine named as it names its own. The thread there is
+an ordinary one of that machine: its owner sees it in that machine's sidebar,
+and the starter's line and the new thread's note name the other machine. It
+runs on the caller's provider when that machine has an account signed in for
+it, else it is refused; the model, effort and speed follow when that machine
+lists the model, else its defaults apply. The first answer comes back the same
+way, as a letter between the two machines, and `threads send <machine>/<id>`
+steers it after. The caller's Communication settings decide as for a project
+of its own machine, except that another machine is always "elsewhere": a thread
+restricted to its own project cannot use it. The started thread obeys its own
+machine's rule: it starts nothing until the user writes in it. A bot's thread
+starts threads on its own machine only.
+
+The machine that would hold the thread decides whether it accepts them: its
+**Threads from the other machines** switch (`groupThreads`), on its row of the
+group card, is off by default. While it is off the CLI is refused with
+`<machine> does not let the other machines of its group start threads there;
+propose the switch to the user with boite settings request groupThreads true
+--machine <machine> --why "<what the thread is for>"`. Only a member of the
+group can ask: a contact or a paired device has no such operation. From a
+terminal, `--machine` is refused; `--core` reaches the other machine instead.
+
 `projects` prints one row per project: its id, name and folder, `(this
 thread)` on the caller's own, `no-git` on a folder `--worktree` cannot use and
 `drafts` on the drafts project. Archived projects are left out, although
@@ -611,6 +636,13 @@ refuse the value, when the setting already holds it (`experiment.resident-agents
 is already true`: the agent learns the state before the user has to say it),
 when a card on that key is already open in the thread, and for an experiment
 when the value is not true or false or no app has reported yet.
+
+`--machine <name>` asks about another machine of the group, for the settings
+that machine holds about the others: `groupThreads` only. The card reads the
+value there, names the machine, and its switch changes that machine's setting
+when this window is connected to it with full control; otherwise it says to
+change it from that machine. It settles when that machine reports the change to
+the group or when a `thread new --machine` there succeeds.
 
 The card makes the change in the chat. A true-or-false setting, an experiment
 included, draws its switch showing the value now; any other value shows the

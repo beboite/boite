@@ -12,6 +12,7 @@ import { boundedBody, type Envelope } from './coordination-wire.ts';
 import { pack, SEALED, sealResponse, unpack, type Sealing } from './group/seal.ts';
 import type { Core } from './core.ts';
 import { invalidParams, refused, RpcFailure } from './errors.ts';
+import { machineSettingChanged, readMachineSetting } from './threads/group-spawn.ts';
 
 /** What the desk reads of the coordination it answers for. */
 export interface PeerSide {
@@ -69,6 +70,7 @@ export class PeerDesk {
       envelope = JSON.parse(raw) as Envelope;
       if (envelope.from !== peer.coreId || envelope.to !== this.side.selfId() || !Number.isSafeInteger(envelope.at) || Math.abs(now - envelope.at) > 60_000) throw new Error('invalid envelope');
       text(envelope.nonce, 'nonce', 100);
+      text(envelope.operation, 'operation', 64);
       for (const [id, at] of this.nonces) if (now - at > 120_000) this.nonces.delete(id);
       const key = `${peer.coreId}:${envelope.nonce}`;
       if (this.nonces.has(key)) throw new Error('replayed request');
@@ -84,7 +86,8 @@ export class PeerDesk {
       this.core.group.backoff.heard(peer.coreId);
       if (rate.count > 120) return new Response('peer rate limit', { status: 429 });
     } catch { return new Response('invalid signed message', { status: 403 }); }
-    const groupOnly = envelope.operation === 'group.sync' || envelope.operation === 'group.push' || envelope.operation === 'contact.route'; // the group's own: sealed, from a member
+    const groupOnly = envelope.operation === 'group.sync' || envelope.operation === 'group.push' || envelope.operation === 'contact.route'
+      || envelope.operation === 'thread.start' || envelope.operation.startsWith('setting.'); // the group's own: sealed, from a member
     if (this.core.group.removedPeer(peer.coreId) !== null && (groupOnly || !this.side.trusted().some(p => p.coreId === peer.coreId))) {
       return this.signed({ nonce: envelope.nonce, error: 'this machine was removed from the group', gone: true }, 410, sealing);
     }
@@ -108,6 +111,8 @@ export class PeerDesk {
         if (contact && groupOnly) throw refused('operation: a contact takes no part in this core\'s group');
         if (!contact && envelope.operation.startsWith('contact.') && envelope.operation !== 'contact.route') throw refused('operation: only a contact sends contact operations');
         if (!member && envelope.operation.startsWith('relay.')) throw refused('operation: only a machine of this core\'s group relays for a contact');
+        if (!member && envelope.operation === 'thread.start') throw refused('operation: only a machine of this core\'s group starts threads here');
+        if (!member && envelope.operation.startsWith('setting.')) throw refused('operation: only a machine of this core\'s group reads or announces its settings');
         if (envelope.operation === 'contact.route') result = await this.core.coordination.mailboxes.handle(currentPeer, envelope.payload);
         else if (contact) result = await this.contact(currentPeer, envelope.operation, envelope.payload, false);
         else if (envelope.operation === 'directory') result = this.side.directory();
@@ -134,7 +139,10 @@ export class PeerDesk {
           const as = this.core.contacts.peers().find(p => p.coreId === relayed.coreId);
           if (!as || relayed.grants.length === 0) throw refused('nothing of this machine is opened to that contact any more');
           result = await this.contact(as, request?.operation as string, request?.payload, true);
-        } else throw invalidParams(member ? 'operation: expected directory, deliver, receipt, search, read, group.sync, group.push or relay.*' : 'operation: expected directory, deliver, receipt, search, read, group.sync or group.push');
+        } else if (envelope.operation === 'thread.start') result = await this.core.threads.spawns.startFor(currentPeer, envelope.payload);
+        else if (envelope.operation === 'setting.read') result = readMachineSetting(this.core, envelope.payload);
+        else if (envelope.operation === 'setting.changed') result = machineSettingChanged(this.core, currentPeer, envelope.payload);
+        else throw invalidParams(member ? 'operation: expected directory, deliver, receipt, search, read, group.sync, group.push, relay.*, thread.start or setting.*' : 'operation: expected directory, deliver, receipt, search, read, group.sync or group.push');
       } catch (reason) {
         status = reason instanceof RpcFailure ? 400 : 500;
         error = reason instanceof RpcFailure ? reason.message : 'Machine could not process the request';

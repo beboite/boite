@@ -23,7 +23,12 @@ export function withProjects(core: Core, local: string, letter: AgentLetter): Ag
 
 /** How `other` relates to `threadId`: who started whom, delegation, the agent the project is entrusted to, else where it is. */
 export function relationOf(core: Core, localCore: string, threadId: string, other: AgentAddress): AgentRelation {
-  if (other.coreId !== 'local' && other.coreId !== localCore) return 'machine';
+  if (other.coreId !== 'local' && other.coreId !== localCore) {
+    // `boite thread new --machine`: the two ends still know who started whom.
+    if (core.threads.spawns.originCore(threadId) === other.coreId && core.threads.spawns.originOf(threadId)?.threadId === other.threadId) return 'starter';
+    if (core.threads.spawns.startedOn(threadId, other.coreId, other.threadId)) return 'started';
+    return 'machine';
+  }
   const self = core.journal.getThread(threadId);
   const peer = core.journal.getThread(other.threadId);
   if (!self || !peer) return 'other-project';

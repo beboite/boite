@@ -15,6 +15,7 @@ export const strings = {
     retiredAlwaysOn: 'This experiment is now always on.',
     loadOnPress: 'Load on press',
     elsewhere: 'This is in the Settings of the computer running Boite.',
+    machineAway: '{machine} is not connected here: change it from {machine}.',
     loadFailed: 'This settings card did not load.',
     to: 'to',
     applied: 'Applied',
@@ -55,6 +56,7 @@ export const strings = {
       autoCompact: 'Automatic compaction',
       autoResumeLimitedThreads: 'Resume threads after a usage limit',
       deviceStream: 'Live device stream',
+      groupThreads: 'Let the other machines start threads here',
     },
     /** What 0 means for the settings where it is not a number. */
     zero: {

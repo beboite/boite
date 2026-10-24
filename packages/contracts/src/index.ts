@@ -183,11 +183,11 @@ export { TITLE_MODEL_DEFAULTS, defaultTitleModel, newestModel } from './title-mo
 export { GOAL_TRACKER_DEFAULTS, GOAL_CHECKLIST_MAX_ITEMS, GOAL_CHECKLIST_SOURCE_MAX, GOAL_CHECKLIST_TEXT_MAX, defaultTrackerModel, trackerEffort, type GoalTrackerRule } from './goal-tracker.ts';
 export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';
 export {
-  APP_LANGUAGES, CLIENT_APP_PATTERN, CLIENT_LABELS_MAX, CLIENT_LABEL_CHARS, EXPERIMENT_IDS, REQUESTABLE_SETTINGS, REQUESTABLE_SETTING_KEYS, SETTING_REASON_MAX, SETTINGS_PAGES, SETTINGS_SECTION_PATTERN,
-  checkClientPreferences, checkSettingRequest, settledExperiment, currentSetting, effectiveSetting, experimentOf, isExperimentId, isExperimentKey, isRequestableSetting, isSettingsPage, readSettings,
-  sameClientPreferences, sameSetting, settingAnswerText, settledSetting,
-  type AppLanguage, type ClientPreferences, type ExperimentId, type ExperimentSettingKey, type RequestableKey, type RequestableSetting, type SettingAsk,
-  type SettingNormalizer, type SettingOutcome, type SettingPlace, type SettingReading, type SettingRequestCheck, type SettingRequestParams, type SettingsPage,
+  APP_LANGUAGES, CLIENT_APP_PATTERN, CLIENT_LABELS_MAX, CLIENT_LABEL_CHARS, EXPERIMENT_IDS, MACHINE_SETTINGS, REQUESTABLE_SETTINGS, REQUESTABLE_SETTING_KEYS, SETTING_REASON_MAX, SETTINGS_PAGES, SETTINGS_SECTION_PATTERN,
+  checkClientPreferences, checkSettingRequest, settledExperiment, currentSetting, effectiveSetting, experimentOf, isExperimentId, isExperimentKey, isMachineSetting, isRequestableSetting, isSettingsPage, readSettings,
+  sameClientPreferences, sameSetting, settingAnswerText, settledMachineSetting, settledSetting,
+  type AppLanguage, type ClientPreferences, type ExperimentId, type ExperimentSettingKey, type MachineSetting, type RequestableKey, type RequestableSetting, type SettingAsk,
+  type SettingMachine, type SettingNormalizer, type SettingOutcome, type SettingPlace, type SettingReading, type SettingRequestCheck, type SettingRequestParams, type SettingsPage,
   type SettingsReading,
 } from './setting-requests.ts';
 export {
