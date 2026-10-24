@@ -14,6 +14,8 @@ import type { RpcEventName, RpcMethodName } from './index.ts';
  * may turn the owner's saved subscription gateway on or off, never its kind,
  * URLs or key. The only paths a device names are read-only, inside a thread's
  * working tree.
+ * Reserved shared-project methods stay owner-only until their handlers and
+ * association scope checks are installed; see docs/contacts.md for permissions.
  */
 export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
   // A paired phone lists the owner's agents with their state, desk and routines; talking to one is

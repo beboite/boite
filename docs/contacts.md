@@ -250,9 +250,328 @@ This machine's tailnet name is the PTR record of its tailnet address at
 machine by its bare host name, so a Windows core had no tailnet name and
 refused every invitation.
 
-## Not yet
+## Completion protocol
 
-Shared projects (both sides' threads in one view, a kanban synced with
-`/goal2`), shared compute between owners, a person writing straight to a
-contact's agent, default denial of secret files in opened projects and the
-review agent that can revoke a contact are later phases.
+The following is the version 1 contract and implementation acceptance plan.
+At this contract stage, the services, fake handlers and UI described below do
+not exist yet. Type declarations alone enable no remote execution or access.
+`packages/contracts/src/shared-projects.ts` declares the vocabulary;
+`coordination.ts` retains the existing contact types. A core must not advertise
+`features.sharedProjects: 1` until its enforcing handlers exist. A contact
+negotiates `capabilities.sharedProjects: 1` and `humanLetters: 1` through sealed
+`contact.sync`; absence means legacy traffic only, never implicit consent.
+Existing unilateral grants, asks, board counts and agent letters keep their
+meaning. Unknown methods fail closed; a new client must not send an optional
+machine selector to an old core that would ignore it.
+
+### Identity and association
+
+`SharedProjectRef` is `(ownerCoreId, coreId, projectId)`. `ownerCoreId` is the
+contact-link identity vouching for that owner's side. `coreId` owns the selected
+project and runs its work, including on a different member of that owner's
+group. A bare project, thread, card or job ID is never a cross-machine key.
+`SharedThreadRef` adds the canonical host-local `threadId` and a separate public
+`AgentAddress` advertised for routing that thread. The canonical key is
+`(ownerCoreId, coreId, projectId, threadId)`; aliases are not identity. Keep the
+public address unchanged when a group member relays it, and preserve the local
+origin in that origin core's journal. Contact names come from the receiver's own configuration on
+every read, including after rename. An endpoint reveals only the selected
+machine's identity/display name, never its keys, addresses or group roster.
+
+PR #755 defines `ContactGrant.machine`/`name` and the optional `machine` on
+`contacts.grant`/`revoke`. Missing machine still means the linked core. It hides
+member threads behind the linked core and a `<thread>~<member-prefix>` alias.
+PR #756 keeps A's public A/C addresses when B carries its contact traffic,
+using durable `cmb_` mailboxes at B without a real B conversation. These are
+different directions of relay and must compose: preserve the advertised
+alias and the originating A conversation. Neither mailbox IDs nor truncated
+member suffixes become execution authority. Version 1 explicitly discloses
+the selected endpoint metadata when associating, without changing legacy
+contact directories or treating a contact as an owner/group member.
+
+The owner offers one local registered project and one exact advertised remote
+endpoint with `sharedProjects.offer`. Persist a fresh association ID, both
+endpoints and the proposing project's existing execution core as immutable
+board authority. The other owner accepts or declines with
+`sharedProjects.decide`; a trusted contact/concierge cannot accept it. Each
+endpoint independently controls its grant revision, board consent and compute
+policy. Association does not turn on `readThreads` or compute. Both current
+project grants and explicit board consent are required for board traffic.
+Revocation is final for that association ID; associating again mints a new ID.
+
+`sharedProjects.list/get/threads/read` are scoped to a local source conversation
+in one endpoint. The combined view contains only those two endpoints' allowed
+threads, grouped by owner and machine. Directory eligibility still respects
+archive, communication Off, project-only and remote restrictions. Transcript
+reads and chat search additionally need the destination's current
+`readThreads`; association never widens that grant. Foreign rows are read-only
+descriptors, not local `ThreadSummary` rows or connections with owner RPC.
+The existing `collaboration.search/read/send` remain the agent entry points;
+their source-project filter must honor the association before returning data.
+
+### Transport and durable state
+
+Reuse `/agent-messages`, the contact link and coordination signing/sealing.
+One new operation, `contact.project`, carries `SharedProjectPeerRequest`, not
+arbitrary RPC forwarding. `offer` and `decide` admit only the authenticated
+owner-side control exchange. All scoped methods carry the association ID,
+destination grant revision, request ID and source actor attested by the
+calling core. Reject mismatched sender/endpoint, revoked admission, stale
+grant, wrong destination or source project before dispatch and again after
+asynchronous reads. `access` changes only the authenticated sender's own
+access record; a peer can narrow its participation, never grant itself ours.
+The same validation runs after every group relay. Extend the existing
+group-only relays to carry this bounded payload; contacts never gain access
+to `group.*`, group relays, tickets or owner tokens.
+
+Persist associations, per-endpoint access revisions, outgoing commands,
+receipts and board changes in the journal. Request IDs are unique within
+`(association, authenticated actor)`; reuse with changed content is refused.
+Transport retries get fresh envelope nonces but the same operation ID.
+Keep a canonical content fingerprint with every receipt. A transport failure
+is retryable, a signed policy refusal final, and an uncertain provider
+submission is never automatically replayed. A committed command and its
+receipt precede acknowledgement. No timer or SDK starts for an unused feature.
+
+`sharedProjects.subscribe` is connection-owned and scoped to its local thread
+and association. `sharedProjects.changed` is an invalidation containing only
+that scope. Reads recover from their last durable cursor after reconnect;
+unsubscribe, disconnect, moving the source thread, removal and revocation
+release subscriptions. Notifications go only to explicit subscribers, with
+coalescing and backpressure; no global foreign-thread stream. Delayed results
+recheck current permission and client/navigation generation.
+
+Peer `subscribe` records a bounded lease tied to the current contact link/group
+admission and attested source scope. Close, expiry or revoke removes it. Renew
+only while a local subscriber exists, catching up from its cursor; no subscribers
+means no renewal timer. Peer `changed` carries only kinds/revisions and scoped
+job IDs, triggering permission-checked pulls. A nonterminal job also follows its
+source through this path so terminal results reach its parent without a UI.
+
+### Board and claims
+
+Reuse `Todo.status`, `TodoGoal`, `/goal2` and the drawer board. To do is open
+without an assignment; In progress is an open assigned card; In review is
+claimed or currently reviewing; Done is the user's confirmation. Checklist
+and progress come only from the assigned host's actual goal journal, never a
+client's claimed checklist. Keep local-only todo storage and behavior intact.
+
+The authority serializes accepted commands in a durable increasing revision
+log. Edits are optimistic locally and queued durably while offline. Text and
+ordinary status edits merge field by field in authority acceptance order;
+the last accepted edit of a field wins, never a wall-clock comparison. An
+agent still cannot confirm, remove or reopen a user-confirmed Done card.
+Remove writes a permanent tombstone. Later edits/adds for that ID return
+`deleted`; recreating a task needs a new card ID. A snapshot carries surviving
+cards and tombstones; deltas carry contiguous authority revisions. Ignore
+repeated/older revisions, fetch gaps, and never turn a received projection
+back into a new local command. Compaction retains tombstones and deduplication
+evidence, including through restart or a long-offline replica.
+
+Claim is a compare-and-set against the card revision at the authority. A
+successful receipt reserves the card to one exact worker and claim request
+ID before any goal starts. Start/link the ordinary goal idempotently under
+that ID. A losing claim starts no work and removes only its own empty draft,
+as the existing board does. There is no timeout-based authority failover or
+automatic claim expiry. An unreachable authority leaves edits pending and
+claims unavailable. An uncertain worker cannot be reassigned until its host
+proves the previous execution stopped. Release first stops that captured
+execution. Goal progress accepts only the current claim's authenticated host
+and increasing host sequence, preventing stale progress from restoring a
+released/deleted card. Phone menus expose every move, confirmation and removal.
+
+### Compute and results
+
+Compute defaults off independently of contact trust, board consent and read
+grants. `sharedProjects.configure` on the owning host selects its permitted
+delegation profiles, permission mode and optional host concurrency limit.
+`null` inherits host settings, not a new default ceiling. Peers receive route
+names/models/capabilities, never account IDs, credentials or environment.
+`SharedComputeAllocation` expresses an explicit contribution such as four
+local children and five remote children. The delegation/workflow adapter must
+honor that split without a new exchange/hop cap; the current workflow
+`maxConcurrent: 8` ceiling is not sufficient for nine simultaneous children
+and must be addressed by `shared_compute`, without silently clamping to it.
+The existing `Delegation.spawn` also rejects a parent that is already a child
+(`delegation.ts`); a remote job adapter cannot claim unrestricted nesting by
+passing through that method unchanged. Preserve ordinary local semantics while
+giving shared jobs an explicit, scoped host admission path.
+
+`sharedCompute.start` names an associated host, approved profile, validated
+repository base commit, task and optional board claim, never a path, shell
+command, account or remote permission override. Bind it to the authenticated
+source conversation and host access revision. Persist a job and an admission
+reservation before calling existing delegation/scheduler/worktree machinery.
+Duplicate starts return the same job; changed-content retries fail. Use the
+host's own registered repository, account, quota, permission mode and process
+caps. Validate the base object/repository before creating an isolated worktree.
+Do not inherit a remote parent's account, bypass mode, hooks or Boite token.
+Local nested delegation stays subject to the same shared scope; it cannot
+escape into an unrestricted child or another project.
+
+The requester follows only its own jobs; the host owner inspects/cancels all
+jobs on this association. Remote steering is an external agent letter, never
+an answer to a host permission card. Cancellation/revocation closes admission,
+retries, result delivery and authority for exactly these captured job IDs,
+including after restart. Keep terminal ledger entries as deduplication fences.
+Unrelated jobs and ordinary local turns continue. An offline remote host
+cannot acknowledge cancellation until it hears it; report that state honestly.
+The enforcing host denies locally at once, and checks again before execution,
+tool use and result publication. A regrant cannot revive jobs from an old
+revision. Group membership changes invalidate relay admissions too.
+
+`SharedComputeResult` returns credential-free repository identity, branch,
+base commit, exact commit, dirty status and bounded assistant text. Verify
+these against the host job/worktree and the local registered repository,
+including object format and provenance. Fetch/integrate through the project's
+normal approved git workflow; never execute a returned command, trust an
+arbitrary URL/path or auto-merge a result. Changed files, artifacts and any
+bundle/patch still pass the shared-file policy. A failed or revoked job
+cannot publish a late success. Results remain verifiable data across reconnect.
+
+### Human letters and file boundaries
+
+`contacts.sendHuman` authenticates an owner or paired human, resolves the local
+source conversation, checks the same allowed destination/reply path and
+idempotent receipt as agent mail, then attests `origin: 'contact-human'`.
+An agent cannot call it or supply its provenance. The receiver assigns its
+own contact name and association scope. Human contact, contact agent, local
+delegation `user` origin and actual owner prompt remain distinct in provider
+input and the timeline. A contact human has no invented model/tier; agent mail
+continues to obey `minTier`. Require negotiated human-letter support, never
+fall back to an owner prompt on an older peer. None of these external letters
+answers an approval or changes host settings.
+
+Shared work denies environment variants, private keys, credentials, secrets
+and paths outside its allowed project by default. Enforce before reading and
+before releasing bytes, at file listing/read/tickets, git diffs/checkpoints,
+tool execution, attachment/published snapshot/HTML preview, transcript/search
+projection and compute/result boundaries. Canonicalize with the host OS,
+containment after symlink resolution and file-handle identity checks. Include
+Windows case, drive-relative, UNC, extended/device, alternate-stream and
+separator forms; do not trust lexical prefix checks. Revalidate a ticket and
+override at use time, including after revoke. Ordinary local sessions retain
+their existing permissions.
+
+Reuse the credential directory/file classifications already in `workdir.ts`
+(`DEVICE_SECRET_DIRS` and `DEVICE_SECRET_FILE`), and extend them for this shared
+scope. They currently guard paired file reads, not arbitrary provider tools or
+agent/owner file reads. `existingInside`/`openChecked` provide containment and
+handle identity checks; neither is a secret policy by itself. Shared rules
+also deny `.env` variants by default, including template-named variants unless
+the host explicitly permits that exact file.
+
+A host-only `SharedFileOverride` names one exact canonical relative file,
+actions, optional job, expiry and reason, and can be revoked. It neither
+disables the policy globally nor travels as remote authority. A route reports
+`SharedExecutionProtection`: enforced isolated process, no-tools execution, or
+unsupported with a reason. A prompt, resource cap, approval callback or the
+Codex workspace-write mode alone cannot guarantee file read isolation. Refuse
+protected shared execution when the actual process/tool boundary cannot
+enforce it. Keep the host's permission semantics; never silently substitute
+another driver/mode or enable bypass.
+
+| Driver | Existing boundary and limitation | Required shared admission |
+| --- | --- | --- |
+| Claude | SDK `canUseTool` is reached only for approval; `PreToolUse` currently records tools. YOLO allows approvals and disables configured hooks. Arbitrary shell/MCP/native child work can read outside a lexical tool gate. | Enforce below bypass and across children, tools, processes and output; otherwise refuse. |
+| Codex | Native approval/sandbox pair; workspace-write permits reads outside the workspace and unrestricted modes skip approval. A mode change replaces the process. | Verify an actual file-denying execution boundary; no claim that read-only/workspace-write hides secrets. |
+| ACP | Advertised modes are provider-specific; a refused/absent setter currently logs a warning and continues. Approval events do not cover every operation. | Capability-specific enforcement; a protected shared start must fail closed on an unenforceable route. |
+| Muse | Native approval mode plus launch-time sandbox flags; permissive modes disable its sandbox. No evidence here of selective secret read denial. | Verify process isolation and keep the chosen supported mode; otherwise refuse. |
+| pi | RPC has no approval call; permission mode does not reach the CLI. | Require host process isolation or deny protected compute, never simulate an approval gate. |
+| echo | In-process deterministic fixture; no provider tools/network. | Exercise the same admission/revoke ledger; report no-tools, not proof of external driver isolation. |
+
+Claude and echo currently implement the tool-free `sideQuestion` used by
+`contacts/concierge.ts`; Codex, ACP, Muse and pi do not. A reviewer on a route
+without that capability records unavailable and starts no ordinary tool-using
+turn. This is separate from whether that route can run protected compute.
+Windows jobs track descendants; Linux/macOS track direct children/process
+groups and cannot promise termination of a detached descendant. Shared
+execution must account for that limit, not claim a captured PID is an OS sandbox.
+
+### Activity review
+
+The host journals sanitized `SharedAccessEvent` metadata as part of admission:
+association, attested actor, action, allow/deny, classification and a bounded
+core-generated reason. Never include secret bytes, raw tool arguments,
+credential-bearing paths or unrelated projects. A lazy host-configured reviewer
+uses the tool-free side-question path over only relevant events, with no owner
+or agent token, hooks, MCP, disk tools or ordinary conversation history.
+Persist a verdict and its evidence event IDs, reason and applied consequence.
+
+Only a current local policy confirmation plus configured `revokeOnViolation`
+can turn a model's violation verdict into revocation of this exact project
+grant. Suspicion alone cannot widen access or choose another contact/project.
+Repeated verdicts/revokes are idempotent. Invalid output, injected activity,
+timeout, absent inference support or failed inference records unavailable;
+none unblocks a deterministic denial. Delayed verdicts recheck the association
+and access revision. A confirmed revoke also closes reply windows, reads,
+board writes, queued wakes, compute and result delivery. No activity means no
+inference, worker or new timer.
+
+### RPC and event permissions
+
+All new owner methods still validate the selected owning Store/core. The
+device allowlist is in `packages/contracts/src/access.ts`; the agent method
+allowlist remains in `packages/core/src/access.ts`. Neither allowlist enables
+the reserved methods at the contract stage. All new RPCs default to owner-only
+and remain unregistered; the new event is neither emitted nor allowlisted.
+The following rows for new methods describe intended permissions, installed
+only alongside enforcing handlers and scoped subscriptions.
+
+| Methods | Owner | Paired device | Agent with its own `threadId` |
+| --- | --- | --- | --- |
+| Existing `contacts.*` administration; `sharedProjects.offer/decide/revoke/configure` | Yes, local endpoint only | Denied | Denied |
+| Existing `collaboration.get/directory` | Yes | Yes | Yes, own source; peer grants still apply |
+| Existing `collaboration.send/search/read/wait/contacts/ask` | Yes | Denied | Yes, own source; contact tier/read/reply rules still apply |
+| Existing `collaboration.configure/identity/peers/check/trust/untrust/bridge.*` | Yes | Denied | Denied; a contact cannot become a trusted owner link |
+| Existing `todos.list/add/update` and `todos.updated` | Local project | Same | Own project; no Done/reopen Done; event project scope |
+| Existing `todos.remove` | Yes | Yes | Denied |
+| Existing `delegation.get/result/wait/send/stop` | Own family | Follow/steer/stop | Own parent/child relationship |
+| Existing `delegation.spawn/models/resume`; `delegation.configure` | Yes | Denied | Spawn/models and permitted resume only; never configure |
+| Existing `files.list/read`, `git.status/diff` | Local scope | Existing project/credential guards and HEAD diff only | Own thread; shared policy applies additionally |
+| Existing `artifacts.publish/view/preview`; `artifacts.read` | Local scope | Published snapshot read only | Own thread only; no contact file/preview authority |
+| `sharedProjects.list/get/threads/read/subscribe` | Source project scope | Planned: same scope | Planned: own associated project; reads still need readThreads |
+| `sharedBoard.get/apply` | Association + board consent | Planned: same; every board action | Planned: own association, add/edit/claim; no remove/Done/reopen Done |
+| `sharedCompute.models/list/get/send/cancel` | Host jobs or source scope | Planned: follow/steer/cancel existing jobs, no admission | Planned: own source jobs; no host policy or permission answers |
+| `sharedCompute.start` | Explicit host opt-in and supported protection | Denied | Planned: own source project, current grant and host-approved route |
+| `sharedAccess.get` | Sanitized scoped activity | Planned: same | Planned: own association metadata only |
+| `sharedAccess.overrides/override/revokeOverride` | Host only, exact local paths | Denied | Denied |
+| `contacts.sendHuman` | Attested human, allowed contact destination | Planned: same | Denied |
+| `sharedProjects.changed` | Explicit connection subscription | Planned: same subscription | Planned: own thread + association, invalidation only |
+
+Agents never receive all shared-project events. The server needs an explicit
+shared-scope filter as well as `AGENT_EVENTS`, and then the client/fake step
+adds that event and the planned methods with reasons. A signed contact request
+uses the peer method subset, never these owner/device/agent WebSocket roles.
+
+### Acceptance matrix and implementation ownership
+
+These are required behavioral scenarios, not claims of tests already passing.
+Each fixture uses fresh data directories and deterministic echo/stub providers.
+`integration` must replace scenario descriptions with test names/evidence,
+and `proof` must run them on the integrated branch with inspected captures.
+
+| Outcome | Existing entry points/consumers | Required behavior and test ownership |
+| --- | --- | --- |
+| 1. Explicit project association and foreign threads | `contacts/store.ts`, `contacts/rpc.ts`, `coordination.ts`, `coordination-lookup.ts`, `coordination-peer.ts`; UI `lib/contacts.svelte.ts`, owning `lib/store.svelte.ts`/`lib/workspace.svelte.ts`, project chooser and sidebar | `shared_projects`: two cores with identical project/thread IDs associate exact endpoints; private projects/settings/contacts remain absent; readThreads off denies transcript/chat search; rename, archive, revoke during await, offline recovery and restart. `client_transport`: same core/fake refusals/events. `collaboration_ui`: both owners grouped by person/machine at desktop/phone widths. |
+| 2. Synchronized board and goal | `todos.ts`, `activity.ts`; UI `components/ProjectBoard.svelte`, `lib/board.ts`, `lib/fake-client/todos.ts`; contracts `todos.ts` | `board_replication`: simultaneous CAS claims start exactly one goal; mixed-field offline edits converge in accepted order; duplicate delivery adds no revision/echo; restart retains receipts and permanent deletes; stale goal sequence/old claim cannot revive a card; lost authority prevents work. `collaboration_ui`: menu moves, checklists, person/machine/agent, confirm/remove without drag on phone. |
+| 3. Host-authorized compute and git result | `delegation.ts`, `delegation/routes.ts`, `delegation/worktrees.ts`, `workflows.ts`, `workflows/register.ts`, `procs.ts`, `resource-usage.ts`, `platform/` | `shared_compute`: two/three-core fixture runs four local/five remote under the correct host profiles and configured contribution; duplicate start/retry/restart is one job; reject wrong repository, ref/path/account/mode/result injection; verify exact branch/base/commit and consume through normal git workflow; host cancel/revoke stops only captured jobs and rejects late result/retry. All six driver capability/permission paths tested with protocol fixtures, no paid calls. |
+| 4. Human contact letter | `coordination-letter.ts`, `coordination.ts`, `coordination-peer.ts`, UI `components/AgentDiscussion.svelte`, `lib/timeline-rows.ts`, `lib/fake-client/coordination.ts`; PR #756 origin-thread mailbox route | `client_transport`: owner/paired human sends, agent impersonation refused, receiving local contact name wins, contact-human/agent/owner prompt visibly distinct, no permission/question answered, repeat ID stable. Three cores preserve canonical destination, source journal and one wake through B/restart. `collaboration_ui`: direct message from allowed agent row on desktop/phone. |
+| 5. Secret file policy | `workdir.ts` file RPC/credential classification/handle checks, `files.ts` listing, `server/file-response.ts`, `artifacts.ts`, `artifact-preview.ts`, `views.ts`, `attachments.ts`, git/checkpoints, driver tool/process admission | `file_protection`: .env variants/private keys/credential classifications denied before read or transfer, path traversal/symlink swap/Windows forms/ticket after revoke/HTML neighbouring asset/git diff/transcript/tool/child escape covered; ordinary file succeeds, ordinary local session unchanged, exact host override expires/revokes. Unsupported protected execution fails before spawn in core and fake. `security_review` independently verifies real boundaries. |
+| 6. Lazy review and confirmed revoke | `contacts/concierge.ts`, `drivers/types.ts` sideQuestion, `drivers/claude/side-question.ts`, `drivers/echo.ts`; shared admission event feed | `activity_reviewer`: legitimate vs suspicious vs confirmed violation using stubs; malicious activity cannot instruct the reviewer or select another project; timeout/invalid/unsupported/delayed output remains unavailable; denial immediate with reviewer stalled; concurrent/replayed verdict and restart revoke once; unrelated project and secret canaries absent; no-work core starts no reviewer/SDK/worker/timer. |
+| 7. Security and network proof | `contacts/join.ts`, `invitations.ts`, `funnel.ts`, `group/seal.ts`, `group/relay.ts`, `coordination-wire.ts`, `coordination-peer.ts`, all surfaces above; `tests/contract/scenarios.ts` | `security_review`: signatures/seal/replay/nonce/destination/origin, grant changes during awaits, invitation/Funnel mounts, group admissions/relays, file/ticket/preview exposure, message provenance, job/result authority and revoke. `network_review`: fresh bytes/requests/idle resources and restart/reconnect for 0/1/multiple active associations, offline retries and unsubscribe; no unrelated broadcasts or steady polling. `review_fixes`: each confirmed finding red before fix, then green. `proof`/`final_review`: full check, relevant suites, multi-core E2E, inspected desktop/phone captures. |
+
+Paths in the table are relative to `packages/core/src/` unless prefixed UI or
+contracts. UI paths are under `packages/ui/src/`. Verify exact source names
+when implementing: the table identifies the present integration boundaries,
+not new services to create automatically.
+
+The real/fake parity work belongs to `client_transport`: implement every new
+RPC in `packages/ui/src/lib/fake-client/`, extend `FakeMethods` exhaustiveness,
+owning Stores, events/reconnect and the shared scenarios in
+`tests/contract/scenarios.ts`. `Client.call` is already generic. The core and
+fake contract runners are `packages/core/test/contract.test.ts` and
+`packages/ui/src/lib/fake-client.contract.test.ts`. No temporary known
+divergence may stand in for a required capability. Integrate the reviewed
+#755 and #756 commits rather than copying their routing implementations;
+reconcile their shared contact/peer/docs edits before final validation.
