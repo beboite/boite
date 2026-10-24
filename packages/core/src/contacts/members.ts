@@ -142,11 +142,31 @@ export class ContactMembers {
   private async ask(member: CoordinationPeer, contactId: string, operation: Operation, payload: unknown): Promise<unknown> {
     const contact = this.entry(contactId, member.coreId);
     if (!contact) throw refused('no longer a contact');
-    try { return await within(this.core.coordination.request(member, 'relay.in', { contact, operation, payload }), RELAY_MS, member.name); }
+    const admission = () => {
+      const entry = this.entry(contactId, member.coreId);
+      if (!entry) throw refused('no longer a contact');
+      const {link: _link, ...policy} = entry;
+      return JSON.stringify([memberAdmission(this.core, member.coreId), this.core.contacts.find(contactId)?.addedAt, policy]);
+    };
+    const before = admission();
+    let changed = false;
+    // A revoked permission cannot authorize an old response when the owner later
+    // restores the same values. Observe policy changes throughout this await.
+    const off = this.core.bus.onAny(name => {
+      if (name !== 'contacts.updated' && name !== 'group.updated') return;
+      try { if (admission() !== before) changed = true; }
+      catch { changed = true; }
+    });
+    try {
+      const answer = await within(this.core.coordination.request(member, 'relay.in', { contact, operation, payload }), RELAY_MS, member.name);
+      if (changed || admission() !== before) throw refused('relay: contact, member admission or project permissions changed during request');
+      return answer;
+    }
     catch (error) {
+      if (error instanceof RpcFailure) throw error;
       if (error instanceof PeerRefusal) throw refused(error.message);
       throw new Error(messageOf(error));
-    }
+    } finally { off(); }
   }
 
   requestProject(member: CoordinationPeer, contactId: string, payload: unknown): Promise<unknown> {

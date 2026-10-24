@@ -26,6 +26,8 @@ export function createSharedCompute(db: Database): void {
   );
   CREATE INDEX IF NOT EXISTS shared_compute_scope ON shared_compute_jobs(association_id,role);
   CREATE INDEX IF NOT EXISTS shared_compute_worker ON shared_compute_jobs(worker_id) WHERE worker_id IS NOT NULL;`);
+  db.exec(`CREATE INDEX IF NOT EXISTS shared_compute_host_peer ON shared_compute_jobs(json_extract(data,'$.job.source.project.ownerCoreId')) WHERE role='host';
+    CREATE INDEX IF NOT EXISTS shared_compute_source_peer ON shared_compute_jobs(json_extract(data,'$.job.host.ownerCoreId')) WHERE role='source';`);
 }
 export class SharedComputeJournal {
   constructor(private readonly db: Database) {}
@@ -39,6 +41,13 @@ export class SharedComputeJournal {
   }
   all(associationId?: string): ComputeRecord[] {
     return (this.db.query('SELECT data FROM shared_compute_jobs WHERE (? IS NULL OR association_id=?) ORDER BY rowid').all(associationId ?? null, associationId ?? null) as { data: string }[]).map(r => JSON.parse(r.data));
+  }
+  /** Keep durable replay fences, but materialize only this peer's notification/retry work. */
+  forPeer(peerId: string, role: ComputeRecord['role']): ComputeRecord[] {
+    const query = role === 'host'
+      ? "SELECT data FROM shared_compute_jobs WHERE role='host' AND json_extract(data,'$.job.source.project.ownerCoreId')=? ORDER BY rowid"
+      : "SELECT data FROM shared_compute_jobs WHERE role='source' AND json_extract(data,'$.job.host.ownerCoreId')=? AND (json_extract(data,'$.job.status') NOT IN ('done','failed','cancelled','revoked') OR coalesce(json_extract(data,'$.cancelRequest'),'') <> '') ORDER BY rowid";
+    return (this.db.query(query).all(peerId) as {data: string}[]).map(row => JSON.parse(row.data));
   }
   put(record: ComputeRecord): void {
     this.db.query('INSERT INTO shared_compute_jobs VALUES(?,?,?,?,?) ON CONFLICT(id,role) DO UPDATE SET worker_id=excluded.worker_id,data=excluded.data')

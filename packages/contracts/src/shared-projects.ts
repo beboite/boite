@@ -228,6 +228,9 @@ export interface SharedAccessPage { events: SharedAccessEvent[]; verdicts: Share
 
 /** Every agent-capable local call names its authenticated local source thread. */
 export interface SharedProjectScope { threadId: ThreadId; sharedProjectId: string }
+export type SharedProjectChangeKind = 'threads' | 'board' | 'compute' | 'access';
+/** Missing kinds from an older core means all surfaces. Access audit updates do not invalidate threads. */
+export interface SharedProjectChange extends SharedProjectScope { kinds?: SharedProjectChangeKind[] }
 export interface SharedProjectsRpcMethods {
   'sharedProjects.list': { params: { threadId: ThreadId }; result: SharedProjectView[] };
   'sharedProjects.get': { params: SharedProjectScope; result: SharedProjectView };
@@ -265,7 +268,7 @@ export interface SharedProjectsRpcMethods {
 }
 export interface SharedProjectsRpcEvents {
   /** Invalidation only; every read rechecks live permissions. Sent only to this connection's shared-project scope. */
-  'sharedProjects.changed': SharedProjectScope;
+  'sharedProjects.changed': SharedProjectChange;
 }
 
 /**

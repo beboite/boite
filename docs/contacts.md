@@ -79,7 +79,7 @@ invites. A Headscale inviter can only invite someone on its own tailnet.
 4. Both apps show the same eight words, derived from both public keys. Two
    owners who read the same eight words know nobody sat between them.
 5. The invitee's core keeps a WebSocket open to the inviter at
-   `/coordination/contact/link` and redials with backoff, from one second to
+   `/coordination/contact/link` and redials with backoff, from two seconds to
    a minute. It dials with a hello in its headers: from, to, the time and a
    nonce, signed. Before the upgrade, the inviter refuses a hello more than a
    minute off, a nonce it has seen or a signature by another key. That link
@@ -494,12 +494,21 @@ submission is never automatically replayed. A committed command and its
 receipt precede acknowledgement. No timer or SDK starts for an unused feature.
 
 `sharedProjects.subscribe` is connection-owned and scoped to its local thread
-and association. `sharedProjects.changed` is an invalidation containing only
-that scope. Reads recover from their last durable cursor after reconnect;
+and association. `sharedProjects.changed` contains that scope and the changed
+surface kinds (`threads`, `board`, `compute`, `access`). An older core's event
+without kinds invalidates all surfaces. Audit/verdict changes reread access and
+project policy without rereading threads: reviewing a directory read cannot
+recursively trigger more reads and inference. Policy changes invalidate all
+four surfaces. Reads recover from their last durable cursor after reconnect;
 unsubscribe, disconnect, moving the source thread, removal and revocation
 release subscriptions. Notifications go only to explicit subscribers, with
 coalescing and backpressure; no global foreign-thread stream. Delayed results
-recheck current permission and client/navigation generation.
+recheck current permission and client/navigation generation. Unsubscribe and
+disconnect retain the admitted source but send the current grant revision,
+releasing an online peer lease even after a consent change. The legacy member
+relay also rechecks the contact admission, member epochs and exact grants after
+awaiting its answer, before returning any discovery data or transcript. A
+permission withdrawn and restored during the wait still fences the old answer.
 
 Peer `subscribe` records a bounded lease tied to the current contact link/group
 admission and attested source scope. Close, expiry or revoke removes it. Renew
@@ -627,10 +636,36 @@ continues to obey `minTier`. Require negotiated human-letter support, never
 fall back to an owner prompt on an older peer. None of these external letters
 answers an approval or changes host settings.
 
-`contacts/access-policy.ts` binds shared compute workers, shared board goals
-and their children to the captured checkout, association and grant revision.
-It denies environment variants, private keys, credential directories/files,
-hard links and paths outside that checkout. Both the supplied spelling and
+The gateway preserves authenticated `contact-human` provenance through durable
+mailbox delivery and retry. Human replies have no model tier or agent label.
+The initiating core trusts this provenance only from its saved, sealed group
+route; an agent RPC cannot mint it or impersonate the internal `contact` origin.
+
+`contacts/access-policy.ts` binds shared compute workers, shared board goals,
+ordinary associated conversations consuming contact mail, and their children
+to the captured checkout, association and grant revision. Before a wake, steer
+or safe-tool-boundary hook passes external text to a provider, `letter-scopes.ts`
+captures that authority. Contact humans and core-formatted contact request
+answers remain external data. Multiple consumed associations intersect their
+file permissions; replacing a goal or restarting does not release the history's
+protection. A scoped agent may reply to the associated contact through the
+ordinary destination checks, but cannot forward execution to an unrestricted
+local sibling. Other ordinary owner conversations retain their permissions.
+A new remote compute worker starts with its own captured host authority and
+fresh task; its host parent supplies an account/profile, never conversation
+history. That parent's old letter scopes do not replace the new job boundary.
+
+Legacy correspondence and pre-policy consumed history have no captured file
+authority: they use the no-tools route and deny file/tool/upload/publication
+RPCs. Such history cannot resume an unrestricted native session. Unsupported
+native providers hold contact mail in the inbox before exposing its text,
+including on an active warm session; local work already running without that
+mail continues. This refusal closes the unprotected entry, but also leaves
+real-provider automatic correspondence unavailable until selective execution
+is implemented. It does not complete the required shared-compute feature.
+
+The file policy denies environment variants, private keys, credential
+directories/files, hard links and paths outside that checkout. Both the supplied spelling and
 the canonical target are classified. Foreign Windows drive-relative, UNC,
 device, stream and backslash spellings are rejected, including on Linux;
 internal paths use canonical relative slash notation. Open descriptors must
@@ -826,9 +861,10 @@ An unavailable requirement is recorded explicitly rather than counted as passed.
 | Shared four-column board and goal | `packages/core/test/shared-board.test.ts`; `tests/e2e/shared-cores.test.ts`; `packages/ui/src/components/shared/SharedCollaboration.test.ts`; `tests/e2e/shared-collaboration.test.ts` | Atomic competing claims, receipts, field patches, offline replay/restarts, permanent deletes, protected goal start/release/progress, retained busy assignment, person/machine/agent labels and phone menus. External-provider goal execution is unavailable. |
 | Host compute and actual Git consumption | `packages/core/test/shared-compute.test.ts`; `tests/e2e/shared-cores.test.ts`: consume an attested Git result and cancel reverse compute after member restart | Host account/profile, contribution settings, durable job and exact result, repository/base validation, restart and captured cancellation. The source performs a real fixture-controlled fetch, object/ancestry check and cherry-pick of the returned commit. No automatic peer URL/command execution. Claude/Codex/ACP/Muse/pi compute remains unavailable. |
 | Human and agent contact mail | `packages/core/test/contact-mailboxes.test.ts`, `coordination.test.ts`; `tests/e2e/shared-cores.test.ts`; `tests/e2e/contact-messaging-ui.test.ts`, `shared-collaboration.test.ts` | Owner/paired human sends, agent impersonation refusal, recipient's configured contact name, separate provenance, both member directions, source journal and mailbox replay/restart. No external letter answers owner approval. |
+| Audit regressions and selective invalidation | `packages/core/test/contacts-review-regressions.test.ts`, `shared-projects.test.ts`, `shared-review.test.ts`, `shared-compute-journal.test.ts`; `packages/ui/src/lib/store-shared-projects.test.ts`; `tests/e2e/shared-cores.test.ts` | Contact wake/steer/hooks/history and intersected guards, transcript post-await revocation/readmission/restoration, human mailbox provenance after gateway restart at the default tier, current-revision direct/member lease teardown, access-only refresh, retained compute fences and cancellations. Native provider letter execution remains refused. |
 | Secret file and tool boundaries | `packages/core/test/shared-access.test.ts`, `shared-review.test.ts`, `ntfs-file-ids.test.ts`; `packages/ui/src/lib/fake-client.shared-projects.test.ts` | Classified files/content, handles/symlinks, Windows path forms/identities, transfer/tickets/HTML/attachments/checkpoints, overrides and immediate revocation. All six protocols have admission checks; only echo/default has an implemented no-tools execution boundary. Selective external-provider isolation is missing. Windows native execution is not established by Linux fixtures. |
 | Lazy review and confirmed project revoke | `packages/core/test/shared-review.test.ts`; `tests/e2e/shared-cores.test.ts`: member policy revocation without a direct contact | Tool-free deterministic verdicts, confirmation independent of inference, timeout/invalid/stale response, no-work laziness and exact local project hold. A member hold does not mutate gateway grants or obtain owner authority; a stale mirror cannot reopen it. |
-| Security and network proof | `packages/core/test/contacts.test.ts`, `contacts-group.test.ts`, `contact-mailboxes.test.ts`, `access.test.ts`; `tests/e2e/shared-cores.test.ts`: held transcript and readmission regressions | Signature/seal/replay/destination, member grant/admission changes, permission roles, transcript and result authority, exact revoke. Dedicated independent final security/network audit and fresh traffic/idle measurements are still required; these tests make no performance claim. |
+| Security and network proof | `packages/core/test/contacts.test.ts`, `contacts-group.test.ts`, `contact-mailboxes.test.ts`, `contacts-review-regressions.test.ts`, `access.test.ts`; `tests/e2e/shared-cores.test.ts`: held transcript and readmission regressions | Independent security/network passes identified three access/provenance faults, a review feedback loop, stale lease teardown and compute scan waste. Regressions cover their corrections. Per-peer SQLite expression indexes/selective materialization retain all durable job fences. A fresh native-isolation review is still required when that implementation exists; current fixtures do not prove it. |
 | Transport and UI parity | `tests/contract/shared-projects.ts` through core/fake contract suites; fake/Store tests; `tests/e2e/shared-collaboration.test.ts` at 1440 and 390 px | Same contract and refusals, captured owning Store, canonical remote offers/addresses, connection cache fencing, leases and phone actions. No paid inference, physical phone, real Tailscale/Funnel or remote CI proof is implied. |
 
 ### Client transport

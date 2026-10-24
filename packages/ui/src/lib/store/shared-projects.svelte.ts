@@ -1,5 +1,5 @@
 /** Shared data belongs to one Store/client, never to a foreign thread with the same ID. */
-import type { AgentTranscript, RpcMethodName, RpcParams, RpcResult, SharedAccessPage, SharedBoardCard, SharedBoardPage, SharedComputeJob, SharedProjectScope, SharedProjectThread, SharedProjectView } from '@boite/contracts';
+import type { AgentTranscript, RpcMethodName, RpcParams, RpcResult, SharedAccessPage, SharedBoardCard, SharedBoardPage, SharedComputeJob, SharedProjectChangeKind, SharedProjectScope, SharedProjectThread, SharedProjectView } from '@boite/contracts';
 import type { Client } from '../client';
 import { secureId } from '../secure-id';
 import { strings } from '../strings';
@@ -27,7 +27,7 @@ interface Watch {
   subscribed: boolean;
   epoch: number;
   reading: Promise<void> | null;
-  trailing: boolean;
+  pending: Set<SharedSurface> | null;
   accessAfter?: string;
 }
 const scopeKey = (p: SharedProjectScope) => JSON.stringify([p.threadId, p.sharedProjectId]);
@@ -65,7 +65,7 @@ export class SharedProjects {
     let watch = this.#watches.get(key);
     if (!watch) {
       this.scopes[key] = {scope: {...scope}, project: null, threads: [], unavailable: [], board: [], boardRevision: null, authorityAvailable: false, jobs: [], access: null, loading: false, error: null};
-      watch = {value: this.scopes[key]!, consumers: new Map(), client: null, subscribed: false, epoch: 0, reading: null, trailing: false};
+      watch = {value: this.scopes[key]!, consumers: new Map(), client: null, subscribed: false, epoch: 0, reading: null, pending: null};
       this.#watches.set(key, watch);
     }
     watch.consumers.set(token, new Set(surfaces));
@@ -81,10 +81,10 @@ export class SharedProjects {
     };
   }
 
-  changed(scope: {sharedProjectId: string; threadId?: string}): void {
+  changed(scope: {sharedProjectId: string; threadId?: string; kinds?: SharedProjectChangeKind[]}): void {
     for (const watch of this.#watches.values()) {
       const target = watch.value.scope;
-      if (target.sharedProjectId === scope.sharedProjectId && (scope.threadId === undefined || target.threadId === scope.threadId)) void this.refresh(target);
+      if (target.sharedProjectId === scope.sharedProjectId && (scope.threadId === undefined || target.threadId === scope.threadId)) void this.refresh(target, scope.kinds);
     }
   }
   /** Reconnects keep only consumer intent; every old result and server lease is invalid. */
@@ -110,7 +110,7 @@ export class SharedProjects {
     watch.client = null;
     watch.subscribed = false;
     watch.reading = null;
-    watch.trailing = false;
+    watch.pending = null;
     if (send && client?.state === 'ready') void client.call('sharedProjects.subscribe', {...watch.value.scope, enabled: false}).catch(() => undefined);
   }
   #client(): Client {
@@ -118,14 +118,19 @@ export class SharedProjects {
     if (!client || client.state !== 'ready') throw new Error('This machine is disconnected.');
     return client;
   }
-  refresh(scope: SharedProjectScope): Promise<void> {
+  refresh(scope: SharedProjectScope, kinds?: readonly SharedProjectChangeKind[]): Promise<void> {
     const watch = this.#watches.get(scopeKey(scope));
     if (!watch || this.ctx.client?.state !== 'ready') return Promise.resolve();
-    if (watch.reading) { watch.trailing = true; return watch.reading; }
+    const surfaces = new Set([...watch.consumers.values()].flatMap(s => [...s]).filter(s => !kinds || kinds.includes(s)));
+    if (watch.reading) {
+      watch.pending ??= new Set();
+      for (const surface of surfaces) watch.pending.add(surface);
+      return watch.reading;
+    }
     const client = this.ctx.client, epoch = watch.epoch;
     const current = () => watch.epoch === epoch && this.ctx.client === client && this.#watches.get(scopeKey(scope)) === watch;
     watch.value.loading = true;
-    const read = this.#read(watch, client, current).catch(error => {
+    const read = this.#read(watch, client, current, surfaces).catch(error => {
       if (!current()) return;
       this.#clear(watch);
       watch.value.error = this.ctx.reason(error);
@@ -134,12 +139,12 @@ export class SharedProjects {
       if (!current()) return;
       watch.reading = null;
       watch.value.loading = false;
-      if (watch.trailing) { watch.trailing = false; void this.refresh(scope); }
+      if (watch.pending) { const pending = [...watch.pending]; watch.pending = null; void this.refresh(scope, pending); }
     });
     watch.reading = read;
     return read;
   }
-  async #read(watch: Watch, client: Client, current: () => boolean): Promise<void> {
+  async #read(watch: Watch, client: Client, current: () => boolean, surfaces: ReadonlySet<SharedSurface>): Promise<void> {
     const p = watch.value.scope;
     const project = await client.call('sharedProjects.get', p);
     if (!current()) return;
@@ -158,7 +163,6 @@ export class SharedProjects {
       if (!current()) return;
       watch.subscribed = true;
     }
-    const surfaces = new Set([...watch.consumers.values()].flatMap(s => [...s]));
     const apply = async <T>(promise: Promise<T>, put: (value: T) => void) => { const result = await promise; if (current()) put(result); };
     await Promise.all([
       ...(surfaces.has('threads') ? [apply(client.call('sharedProjects.threads', p), r => {watch.value.threads = r.threads; watch.value.unavailable = r.unavailable;})] : []),

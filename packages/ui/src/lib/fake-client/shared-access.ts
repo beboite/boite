@@ -23,7 +23,7 @@ export function recordSharedAccess(ctx: FakeContext, shared: SharedProject, acto
   if (state.review.enabled && !sameProject(actor.project,endpoints(ctx,shared).local)) {
     // Echo is not a verdict provider. No fake route silently invents a successful model judgment.
     state.verdicts.push({id:`srv_${secureId()}`,sharedProjectId:shared.id,eventIds:[event.id],verdict:'unavailable',reason:'Activity review could not produce a valid verdict',action:'none',at:Date.now()});
-    notifyShared(ctx,shared.id);
+    notifyShared(ctx,shared.id,['access']);
   }
 }
 /** An in-memory file boundary for captured fixtures; filesystem identity is tested by the real core. */
@@ -74,13 +74,13 @@ export function sharedAccessMethods(ctx: FakeContext) {
         const state=sharedAccessState(ctx,s.id),worker=o.jobId===null?null:sharedState(ctx).hostJob?.(s.id,o.jobId)?.worker;
         state.overrides.push(value);state.roots.set(value.id,worker?ctx.thread(worker.threadId).cwd:ctx.projects.find(p=>p.id===endpoints(ctx,s).local.projectId)!.path);state.identities.set(value.id,JSON.stringify([s.access[endpoints(ctx,s).index].revision,ctx.files.get(path)])); return value;
       });
-      notifyShared(ctx,s.id); return cloneShared(value);
+      notifyShared(ctx,s.id,['access']); return cloneShared(value);
     },
     'sharedAccess.revokeOverride': async p => {
       requireShared(ctx,p.sharedProjectId);
       const o=sharedAccessState(ctx,p.sharedProjectId).overrides.find(o=>o.id===p.overrideId);
       if (!o) throw refusedShared('overrideId: expected a host override of this association');
-      o.revokedAt ??= Date.now(); notifyShared(ctx,p.sharedProjectId); return {ok:true as const};
+      o.revokedAt ??= Date.now(); notifyShared(ctx,p.sharedProjectId,['access']); return {ok:true as const};
     },
   } satisfies Partial<FakeMethods>;
 }

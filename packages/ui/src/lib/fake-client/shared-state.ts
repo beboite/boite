@@ -97,7 +97,7 @@ export function remoteShared(ctx: FakeContext, shared: SharedProject): FakeConte
   const {local, remote} = endpoints(ctx, shared), contact = sharedContact(ctx, remote.ownerCoreId, local), target = fakeCore(remote.coreId);
   return contact?.link === 'connected' && target && sharedContact(target, local.ownerCoreId, remote)?.link === 'connected' ? target : undefined;
 }
-export function notifyShared(ctx: FakeContext, id: string): void {
+export function notifyShared(ctx: FakeContext, id: string, kinds: import('@boite/contracts').SharedProjectChangeKind[] = ['threads','board','compute','access']): void {
   for (const side of connected) {
     const state = sharedState(side);
     if (!state.projects.has(id)) continue;
@@ -107,7 +107,7 @@ export function notifyShared(ctx: FakeContext, id: string): void {
       const shared = state.projects.get(id)!;
       let live = shared.state === 'active';
       try { sharedActor(side, p.threadId, endpoints(side, shared).local); } catch { live = false; }
-      side.bus.deliver('sharedProjects.changed', cloneShared(p));
+      side.bus.deliver('sharedProjects.changed', {...cloneShared(p),kinds:[...kinds]});
       if (!live) state.subscriptions.delete(key);
     }
   }

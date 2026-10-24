@@ -55,6 +55,20 @@ async function associated() {
   return { a, b, offered, scope };
 }
 
+test.each(['unsubscribe', 'disconnect'] as const)('a current grant revision closes the peer lease on %s', async action => {
+  const {a,b,scope}=await associated();
+  await a.client.call('sharedProjects.subscribe',{...scope,enabled:true});
+  await b.client.call('sharedProjects.configure',{sharedProjectId:scope.sharedProjectId,board:true});
+  await waitFor(()=>a.h.core.sharedProjects.require(scope.sharedProjectId).access[1].revision===b.h.core.sharedProjects.require(scope.sharedProjectId).access[1].revision);
+  if(action==='unsubscribe') await a.client.call('sharedProjects.subscribe',{...scope,enabled:false});
+  else a.client.close();
+  await b.client.call('threads.update',{threadId:b.threadId,title:'After unsubscribe'});
+  await new Promise(resolve=>setTimeout(resolve,250));
+  const subscriptions=b.h.core.sharedProjects.subscriptions as unknown as {leases:Map<string,unknown>;timer:unknown};
+  expect(subscriptions.leases.size).toBe(0);
+  expect(subscriptions.timer).toBeNull();
+},30000);
+
 test('two owners explicitly associate colliding ids; scoped threads and readThreads never expose private projects', async () => {
   const { a, b, offered, scope } = await associated();
   expect((await a.client.call('sharedProjects.get', scope)).shared.state).toBe('active');
@@ -210,7 +224,7 @@ test('subscriptions invalidate only their connection/source/association and rele
     events.length = 0;
     await b.client.call('threads.update', { threadId: b.threadId, title: 'changed remotely' });
     await waitFor(() => events.length > 0);
-    expect(events.every(p => JSON.stringify(p) === JSON.stringify(scope))).toBe(true);
+    expect(events.every(p => JSON.stringify(p) === JSON.stringify({...scope,kinds:['threads']}))).toBe(true);
     expect(leaked).toEqual([]);
     await a.client.call('sharedProjects.subscribe', { ...scope, enabled: false });
     await new Promise(resolve => setTimeout(resolve, 150));
@@ -223,7 +237,7 @@ test('subscriptions invalidate only their connection/source/association and rele
     await other.call('sharedProjects.subscribe', { ...scope, enabled: true });
     await b.client.call('threads.update', { threadId: b.threadId, title: 'subscribed phone' });
     await waitFor(() => leaked.length > 0);
-    expect(leaked.every(p => JSON.stringify(p) === JSON.stringify(scope))).toBe(true);
+    expect(leaked.every(p => JSON.stringify(p) === JSON.stringify({...scope,kinds:['threads']}))).toBe(true);
     other.close();
     await new Promise(resolve => setTimeout(resolve, 150));
     const original = b.h.core.coordination.request.bind(b.h.core.coordination);

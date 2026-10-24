@@ -76,3 +76,17 @@ test('read-only shared calls do not invalidate their own watched view', async ()
   await sa.shared.call('sharedAccess.overrides', {sharedProjectId: as.sharedProjectId});
   expect(refresh).not.toHaveBeenCalled();
 });
+
+test('access-only invalidations update verdicts without recursively reading watched threads', async () => {
+  const {a,sa,as}=await setup();
+  releases.push(sa.shared.watch(as,['threads','access','board','compute']));
+  await vi.waitFor(()=>expect(sa.shared.view(as)?.loading).toBe(false));
+  await vi.waitFor(()=>expect(sa.shared.view(as)?.threads.length).toBeGreaterThan(1));
+  const calls=vi.spyOn(a,'call');
+  sa.shared.changed({...as,kinds:['access']} as Parameters<typeof sa.shared.changed>[0]);
+  await vi.waitFor(()=>expect(calls.mock.calls.some(([m])=>m==='sharedAccess.get')).toBe(true));
+  await vi.waitFor(()=>expect(sa.shared.view(as)?.loading).toBe(false));
+  expect(calls.mock.calls.filter(([m])=>m==='sharedProjects.threads')).toHaveLength(0);
+  expect(calls.mock.calls.filter(([m])=>m==='sharedCompute.list'||m==='sharedBoard.get')).toHaveLength(0);
+  expect(calls.mock.calls.filter(([m])=>m==='sharedProjects.get')).toHaveLength(1);
+});

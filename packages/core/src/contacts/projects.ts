@@ -458,7 +458,7 @@ export class SharedProjects {
     if (contact.threadId !== target.address.threadId) throw refused('transcript.contact: expected the requested thread');
     return { contact: { ...contact, sharedThread: target }, ...checkTranscript(raw) };
   }
-  notify(id: string, kinds: ('threads' | 'board' | 'compute' | 'access')[] = ['access']): void {
+  notify(id: string, kinds: ('threads' | 'board' | 'compute' | 'access')[] = ['threads', 'board', 'compute', 'access']): void {
     if (kinds.includes('access')) for (const listener of this.policyListeners) listener(id);
     this.subscriptions.changed(id, kinds);
   }

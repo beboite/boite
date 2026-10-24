@@ -292,11 +292,15 @@ export class ContactMailboxes {
     if (!box || letter.to.coreId !== this.self()) throw refused('letter.to: unknown contact mailbox');
     this.valid(box);
     const from = checkRemoteContact(letter.from, this.contact(peer.coreId));
-    this.core.contacts.checkAttestedTier(from.agent);
+    const human = letter.origin === 'contact-human';
+    if (letter.origin !== undefined && !['agent', 'contact-human'].includes(letter.origin)) throw refused('letter.origin: expected contact agent or attested contact-human');
+    if (human && this.core.contacts.find(peer.coreId)?.capabilities?.humanLetters !== 1) throw refused('letter.origin: contact-human requires negotiated humanLetters support');
+    if (!human) this.core.contacts.checkAttestedTier(from.agent);
     this.timestamps(letter, LETTER_TTL_MS);
     if (letter.replyTo !== null && !this.rows("mailbox = ? AND direction = 'out' AND id = ?", box.id, letter.replyTo).length) throw refused('replyTo: expected a letter sent from this contact mailbox');
     const accepted: AgentLetter = { ...letter, from, text: text(letter.text, 'letter.text'), status: 'received', error: null, contact: { coreId: box.coreId, name: box.name } };
-    delete accepted.origin;
+    if (human) { delete accepted.from.agent; accepted.origin = 'contact-human'; }
+    else delete accepted.origin;
     const canonical = { ...accepted, to: { coreId: box.source.coreId, threadId: box.source.threadId }, toTitle: box.source.title, toProject: box.source.project, toMachine: box.source.machine };
     const stored = this.store(box.id, 'in', accepted, canonical);
     queueMicrotask(() => this.tick());
@@ -325,7 +329,7 @@ export class ContactMailboxes {
     const fingerprint = createHash('sha256').update(JSON.stringify([wire.id, wire.from.coreId, wire.from.threadId, wire.to, wire.text, wire.replyTo])).digest('hex');
     const existing = this.rows('mailbox = ? AND direction = ? AND id = ?', mailbox, direction, wire.id)[0];
     if (existing) {
-      if (existing.fingerprint !== fingerprint) throw refused('message id already used for different content');
+      if (existing.fingerprint !== fingerprint || (existing.wire.origin === 'contact-human') !== (wire.origin === 'contact-human')) throw refused('message id already used for different content');
       return existing;
     }
     const stored = { mailbox, direction, wire, canonical, fingerprint };

@@ -7,6 +7,25 @@ import { thrown } from '../../packages/core/test/settle.ts';
 import { receiveProject } from '../../packages/core/src/contacts/project-relay.ts';
 import { connect } from '../../packages/core/src/client.ts';
 
+test.each(['unsubscribe','disconnect'] as const)('a member lease closes after its consent revision changes on %s',async action=>{
+  const f=await sharedCores(),{a,b,member:m}=f;
+  try {
+    const offered=await a.client.call('sharedProjects.offer',{coreId:b.coreId,projectId:a.ref.projectId,remote:m.ref,requestId:'lease-member'});
+    const scope={threadId:a.threadId,sharedProjectId:offered.shared.id};
+    await m.client.call('sharedProjects.decide',{sharedProjectId:scope.sharedProjectId,accept:true,requestId:'accept-lease'});
+    await a.client.call('sharedProjects.subscribe',{...scope,enabled:true});
+    await m.client.call('sharedProjects.configure',{sharedProjectId:scope.sharedProjectId,board:true});
+    await waitFor(()=>a.h.core.sharedProjects.require(scope.sharedProjectId).access[1].revision===m.h.core.sharedProjects.require(scope.sharedProjectId).access[1].revision);
+    if(action==='disconnect') a.client.close();
+    else await a.client.call('sharedProjects.subscribe',{...scope,enabled:false});
+    await m.client.call('threads.update',{threadId:m.threadId,title:'After member unsubscribe'});
+    await new Promise(resolve=>setTimeout(resolve,250));
+    const subscriptions=m.h.core.sharedProjects.subscriptions as unknown as {leases:Map<string,unknown>;timer:unknown};
+    expect(subscriptions.leases.size).toBe(0);
+    expect(subscriptions.timer).toBeNull();
+  } finally {await f.close();}
+},30000);
+
 test('two owners associate a group member, exchange human letters, share a board and consume an attested Git result', async () => {
   const f = await sharedCores(), {a, b, member: m} = f;
   try {

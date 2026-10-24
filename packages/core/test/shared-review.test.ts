@@ -60,6 +60,29 @@ test('a configured shared reviewer records a reasoned legitimate verdict lazily'
   expect(calls()).toBe(1);
 }, 30000);
 
+test('one watched directory read finishes its review without triggering another directory read', async () => {
+  const {a,b,id,configure}=await fixture();
+  const calls=reviewer('{"verdict":"legitimate","reason":"Allowed scoped read."}');
+  const scope={threadId:a.threadId,sharedProjectId:id};
+  await a.client.call('sharedProjects.subscribe',{...scope,enabled:true});
+  await configure();
+  await new Promise(resolve=>setTimeout(resolve,200));
+  let reads=0,watching=true;
+  const off=a.client.on('sharedProjects.changed',change=>{
+    if(watching && change.sharedProjectId===id && (!change.kinds||change.kinds.includes('threads'))) {
+      reads++;
+      void a.client.call('sharedProjects.threads',scope).catch(()=>undefined);
+    }
+  });
+  try {
+    await a.client.call('sharedProjects.threads',scope);
+    await waitFor(()=>calls()>0&&!b.h.core.sharedReview.busy);
+    await new Promise(resolve=>setTimeout(resolve,250));
+    expect(calls()).toBe(1);
+    expect(reads).toBe(0);
+  } finally {watching=false;off();}
+},30000);
+
 test('review configuration stays host-owner only and never widens the peer grant', async () => {
   const {a, b, id, scope, config, configure} = await fixture();
   const before = b.h.core.sharedProjects.require(id);

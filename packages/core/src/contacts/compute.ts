@@ -518,8 +518,8 @@ export class SharedCompute {
   async flush(peerId: string): Promise<void> {
     const running = this.flushing.get(peerId); if (running) return running;
     const work = (async () => {
-      for (const record of this.journal.all().filter(r => r.role === 'host' && r.job.source.project.ownerCoreId === peerId)) await this.notifySource(record);
-      for (const record of this.journal.all().filter(r => r.role === 'source' && r.job.host.ownerCoreId === peerId && (!terminalCompute(r.job) || r.cancelRequest))) {
+      for (const record of this.journal.forPeer(peerId, 'host')) await this.notifySource(record);
+      for (const record of this.journal.forPeer(peerId, 'source')) {
         if (this.closed) return;
         try { await this.dispatch(record); } catch { /* Contacts owns reconnect timing; no new timer or inference retry. */ }
       }

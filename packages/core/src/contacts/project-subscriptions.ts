@@ -41,7 +41,10 @@ export class SharedProjectSubscriptions {
     this.timer = null;
   }
   private async renew(watch: Watch, enabled: boolean): Promise<void> {
-    const ctx = enabled ? this.service.scope(watch.scope, watch.connection) : watch.context;
+    // Closing retains the admitted source identity, including after disconnect,
+    // but must use current policy rather than the last enable's revision.
+    const shared = this.service.require(watch.scope.sharedProjectId);
+    const ctx = enabled ? this.service.scope(watch.scope, watch.connection) : {...watch.context, shared, ...this.service.endpoints(shared)};
     if (enabled) watch.context = ctx;
     await this.service.request(ctx, 'subscribe', { subscriptionId: watch.id, enabled, leaseMs: LEASE_MS });
   }
@@ -106,21 +109,21 @@ export class SharedProjectSubscriptions {
     if (!Array.isArray(p.kinds) || p.kinds.length > 4 || p.kinds.some(k => !['threads', 'board', 'compute', 'access'].includes(k))) throw invalidParams('changed.kinds: expected threads, board, compute or access');
     const found = [...this.watches.values()].filter(w => w.id === id && w.scope.sharedProjectId === ctx.shared.id);
     if (!found.length) throw refused('subscriptionId: expected a live local subscription');
-    for (const watch of found) this.deliver(watch);
+    for (const watch of found) this.deliver(watch, p.kinds);
     return { ok: true };
   }
-  private deliver(watch: Watch): void {
+  private deliver(watch: Watch, kinds: Kind[] = ['threads', 'board', 'compute', 'access']): void {
     const key = this.key(watch.connection, watch.scope);
     if (!this.watches.has(key) || this.closed) return;
     try { this.service.scope(watch.scope, watch.connection); }
     catch {
       // The last invalidation lets this exact view discard its data, then its subscription ends.
-      watch.connection.sendEvent('sharedProjects.changed', watch.scope);
+      watch.connection.sendEvent('sharedProjects.changed', {...watch.scope, kinds: ['threads', 'board', 'compute', 'access']});
       this.remove(key);
       this.background(this.renew(watch, false));
       return;
     }
-    watch.connection.sendEvent('sharedProjects.changed', watch.scope);
+    watch.connection.sendEvent('sharedProjects.changed', {...watch.scope, kinds});
   }
   changed(id: string, kinds: Kind[]): void {
     if (this.closed) return;
@@ -134,7 +137,7 @@ export class SharedProjectSubscriptions {
     }
   }
   invalidateAll(): void {
-    for (const watch of this.watches.values()) this.changed(watch.scope.sharedProjectId, ['access']);
+    for (const watch of this.watches.values()) this.changed(watch.scope.sharedProjectId, ['threads', 'board', 'compute', 'access']);
   }
   sourceChanged(threadId: string): void {
     for (const watch of this.watches.values()) if (watch.scope.threadId === threadId) {
@@ -158,7 +161,7 @@ export class SharedProjectSubscriptions {
   private flush(): void {
     const dirty = [...this.dirty]; this.dirty.clear();
     for (const [id, kinds] of dirty) {
-      for (const watch of this.watches.values()) if (watch.scope.sharedProjectId === id) this.deliver(watch);
+      for (const watch of this.watches.values()) if (watch.scope.sharedProjectId === id) this.deliver(watch, [...kinds]);
       for (const [key, lease] of this.leases) if (lease.context.shared.id === id) {
         const shared = this.service.require(id);
         if (lease.expiresAt <= Date.now() || shared.state !== 'active') { this.leases.delete(key); continue; }

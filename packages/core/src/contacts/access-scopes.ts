@@ -13,6 +13,8 @@ export interface AccessBinding {
   actor?: SharedProjectActor;
   compute?: ComputeRecord;
   board?: {threadId: string; cardId: string; claimId: string};
+  /** Intersect permissions when history contains more than one external authority. */
+  additional?: AccessBinding[];
 }
 interface BoardScope {sharedProjectId: string; cardId: string; claimId: string; revision: number; root: string; actor: SharedProjectActor}
 export function computeBinding(record: ComputeRecord): AccessBinding {

@@ -12,6 +12,7 @@ import { projectName, senderContext, withProjects, withRelations } from './coord
 import { firstAnswer, PeerGone, PeerRefusal, post, settle, type Answer, type Envelope, type Operation } from './coordination-wire.ts';
 import { checkTailnetName } from './contacts/invite.ts';
 import { outgoingContact, incomingContact } from './contacts/human-letters.ts';
+import {protectLetters} from './contacts/letter-scopes.ts';
 import type { Connection } from './router.ts';
 import { projectCoordination } from './contacts/project-coordination.ts';
 import { pack, SEALED } from './group/seal.ts';
@@ -515,8 +516,8 @@ export class Coordination {
     const config = this.config(target.threadId);
     const from = peer ? checkRemoteContact(letter.from, peer) : this.contact(letter.from.threadId, resident);
     if (peer && !config.remote) throw refused('recipient has not enabled cross-machine coordination');
-    const provenance = routed ? {} : incomingContact(this.core, { ...letter, from }, peer);
-    if (routed && letter.origin !== 'contact') this.core.contacts.checkAttestedTier(from.agent, contact?.coreId);
+    const provenance = routed ? (letter.origin === 'contact-human' ? {origin: 'contact-human' as const, from: {...from, agent: undefined}} : {}) : incomingContact(this.core, { ...letter, from }, peer);
+    if (routed && letter.origin !== 'contact' && letter.origin !== 'contact-human') this.core.contacts.checkAttestedTier(from.agent, contact?.coreId);
     for (const row of this.rows('id = ?', letter.id)) {
       const known = JSON.parse(row.data) as AgentLetter;
       if (!same(known.from, from) || !same(known.to, target) || known.text !== letter.text || known.replyTo !== letter.replyTo || (known.origin === 'contact-human') !== (letter.origin === 'contact-human')) throw refused('message id already used for different content');
@@ -623,6 +624,7 @@ export class Coordination {
     if (this.delivering.has(threadId)) return null;
     const letters = this.inbox(threadId);
     if (!letters.length) return null;
+    protectLetters(this.core, threadId, letters);
     this.restoreProject(threadId);
     const prompt = letterPrompt(letters, senderContext(this.core, this.self('').coreId, threadId));
     this.core.threads.noteCoordination(threadId, turnId, prompt);
@@ -670,6 +672,7 @@ export class Coordination {
     const letters = this.rows("thread_id = ? AND direction = 'in' AND status = 'uncertain'", threadId)
       .map(row => JSON.parse(row.data) as AgentLetter).filter(letter => letter.error === 'Queued for provider delivery');
     if (!letters.length || this.closed || letters.some(letter => letter.expiresAt <= Date.now() || !this.mayReceive(letter))) return false;
+    protectLetters(this.core, threadId, letters);
     this.restoreProject(threadId);
     for (const letter of letters) this.update(letter, 'uncertain', `Awaiting provider turn ${turnId}`);
     return true;
@@ -700,6 +703,7 @@ export class Coordination {
     if (!letters.length) return;
     this.delivering.add(threadId);
     try {
+      protectLetters(this.core, threadId, letters);
       const prompt = letterPrompt(letters, senderContext(this.core, this.self('').coreId, threadId));
       if (thread.status === 'running') {
         if (!this.core.threads.canSteer(threadId)) return;
