@@ -52,7 +52,7 @@ test('write puts the value in an ignored env file, keeps its other lines, and re
 
   expect(await write(join(root, '.env'))).toEqual({ action: 'write', path: join(root, '.env'), replaced: true });
   // The value holds `$`, so it is quoted the way dotenv parsers read it back.
-  expect(readFileSync(join(root, '.env'), 'utf8')).toBe(`FIRST=1\r\nAPI_KEY="${value.replace('$', '\\$')}"\r\n# kept comment\r\n`);
+  expect(readFileSync(join(root, '.env'), 'utf8')).toBe(`FIRST=1\r\nAPI_KEY="${value.replaceAll('$', '\\$')}"\r\n# kept comment\r\n`);
 
   const outside = await rejection(write(join(h.dataDir, 'outside.env')));
   expect(outside.reason).toMatchObject({ message: expect.stringContaining('outside the conversation\'s folder'), rpc: { data: { field: 'path', expected: expect.stringContaining('a file inside') } } });
