@@ -136,7 +136,9 @@
   async function drain(): Promise<void> {
     while (typed.length) {
       const value = typed.shift()!, client = store.client, target = showing;
-      if (!alive || !client || !target?.input || paused || store.connection !== 'ready') { typed = []; return; }
+      if (!alive || !client || !target?.input || store.connection !== 'ready') { typed = []; return; }
+      // A pause drops what was typed, but a finger lifted still reaches the device, which would otherwise keep it pressed.
+      if (paused && !(value.kind === 'touch' && (value.action === 'up' || value.action === 'cancel'))) continue;
       try { await client.call('devices.input', { threadId, deviceId: target.deviceId, input: value }); error = ''; }
       catch (cause) { typed = []; if (alive) error = errorText(cause); return; }
       finally { if (alive) kick(); }
@@ -268,17 +270,25 @@
       untrack(() => { streamNote = store.settings?.deviceStream === true ? strings.devicePanel.streamDecoder : ''; });
       return;
     }
+    let streamError = '';
     const player = playDeviceStream({
       ask: after => client.call('devices.stream', { threadId, deviceId, maxSize: streamSize({ width: areaWidth, height: areaHeight }, window.devicePixelRatio, !desk), ...(after ? { after } : {}) }),
       canvas: () => canvas,
       live(picture) { stream = picture; streamNote = ''; stop(); frame = null; },
       fallback(reason) { stream = null; fingers.clear(); streamNote = fallbackNote(reason); resume(); },
-      error(message) { if (stream) error = message; },
+      error(message) { if (stream) error = streamError = message; },
+      // Only the error the stream reported clears; one from an input stays until the next input.
+      ok() { if (streamError && error === streamError) error = ''; streamError = ''; },
     });
     return () => {
       player.stop();
-      // A pause or a hidden page keeps the last picture on the canvas; anything else goes back to screenshots.
-      untrack(() => { if (!paused && !pageHidden) { stream = null; fingers.clear(); } });
+      untrack(() => {
+        // Fingers still down are lifted on the device this effect played, before a pause, a hidden page or another device.
+        for (const finger of fingers.values()) void client.call('devices.input', { threadId, deviceId, input: { kind: 'touch', action: 'cancel', x: 0, y: 0, pointerId: finger } }).catch(() => {});
+        fingers.clear();
+        // A pause or a hidden page keeps the last picture on the canvas; anything else goes back to screenshots.
+        if (!paused && !pageHidden) stream = null;
+      });
     };
   });
 

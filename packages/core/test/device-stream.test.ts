@@ -38,6 +38,8 @@ describe('the scrcpy wire format', () => {
     expect(avcCodec(config)).toBe('avc1.42c01e');
     expect(() => new VideoReader().push(Uint8Array.of(0, 0, 0, 0))).toThrow('scrcpy sent no stream');
     expect(new DeviceMessageReader().push(Uint8Array.of(1, 0, 0, 0, 0, 0, 0, 0, 7))).toEqual([{ type: 'ack', sequence: 7 }]);
+    // A clipboard longer than any scrcpy sends is refused at its header, before its bytes pile up.
+    expect(() => new DeviceMessageReader().push(Uint8Array.of(0, 0x40, 0, 0, 0))).toThrow('the device sent a clipboard message of 1073741824 bytes');
   });
 });
 
@@ -202,7 +204,8 @@ describe('the Device panel live stream', () => {
       expect(sdk.servers().some((line) => line.startsWith('exit'))).toBe(false);
       await desk.stop();
       await waitFor(() => sdk.servers().some((line) => line.startsWith('exit')), 5000);
-      expect(sdk.state().reverses).toEqual({});
+      // The tunnel is removed without waiting for adb.
+      await waitFor(() => Object.keys(sdk.state().reverses ?? {}).length === 0, 5000);
       expect(await input(agent, { kind: 'tap', x: 1, y: 2 })).toEqual({ ok: true, via: 'adb' });
     } finally {
       phone.close();
@@ -258,8 +261,21 @@ describe('the Device panel live stream', () => {
     await waitFor(() => desk.answers.at(-1)?.state === 'failed', 15_000);
     await desk.stop();
     expect(desk.answers.at(-1)!.reason).toContain('Could not create video encoder');
-    expect(sdk.state().reverses).toEqual({});
+    // The tunnel is removed without waiting for adb.
+    await waitFor(() => Object.keys(sdk.state().reverses ?? {}).length === 0, 5000);
     expect(await input(agent, { kind: 'tap', x: 3, y: 4 })).toEqual({ ok: true, via: 'adb' });
     expect(await thrown(input(agent, { kind: 'text', text: 'ça' }))).toThrow('show the device in the Device panel to start it');
+  }, 30_000);
+
+  test('text the device had not confirmed when its session ended is refused, not reported as sent', async () => {
+    await owner.call('settings.set', { deviceStream: true });
+    sdk.set({ clipboardUnconfirmed: true });
+    const desk = watch(owner);
+    await desk.live();
+    const pending = thrown(input(agent, { kind: 'text', text: 'café' }));
+    await waitFor(() => sdk.controls().some((message) => message.type === 'setClipboard'), 5000);
+    await agent.call('devices.close', { threadId, deviceId: PHONE });
+    expect(await pending).toThrow('the live stream of Galaxy S23 ended before its clipboard was set');
+    await desk.stop();
   }, 30_000);
 });

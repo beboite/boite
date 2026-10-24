@@ -30,6 +30,8 @@ export interface StreamHandlers {
   fallback(reason: StreamFallback): void;
   /** A call that failed; the player tries again. */
   error(message: string): void;
+  /** A call answered after one failed: the error it reported is over. */
+  ok(): void;
 }
 
 export interface StreamPlayer { stop(): void }
@@ -89,12 +91,16 @@ export function playDeviceStream(handlers: StreamHandlers): StreamPlayer {
     const support = await VideoDecoder.isConfigSupported(config).catch(() => null);
     if (stopped) return false;
     if (!support?.supported) return false;
-    decoder = new VideoDecoder({
-      output: draw,
-      // A decoding error starts again from the next key frame.
-      error: () => { decoder = null; at = null; },
-    });
-    decoder.configure(config);
+    try {
+      decoder = new VideoDecoder({
+        output: draw,
+        // A decoding error starts again from the next key frame.
+        error: () => { decoder = null; at = null; },
+      });
+      decoder.configure(config);
+    } catch {
+      return false;
+    }
     return true;
   }
   function decode(chunks: MobileDeviceStreamChunk[]) {
@@ -102,21 +108,30 @@ export function playDeviceStream(handlers: StreamHandlers): StreamPlayer {
       if (!decoder || decoder.state !== 'configured') return;
       // A chunk missing in between, or a decoder that fell behind, waits for a key frame.
       if (!chunk.key && (!at || chunk.seq !== at.seq + 1 || decoder.decodeQueueSize > QUEUE_MAX)) { at = null; return; }
-      decoder.decode(new EncodedVideoChunk({ type: chunk.key ? 'key' : 'delta', timestamp: chunk.pts, data: bytes(chunk.base64) }));
+      try {
+        decoder.decode(new EncodedVideoChunk({ type: chunk.key ? 'key' : 'delta', timestamp: chunk.pts, data: bytes(chunk.base64) }));
+      } catch {
+        // A chunk the browser cannot read: start again from the next key frame.
+        at = null;
+        return;
+      }
       at = { id: picture!.id, seq: chunk.seq };
     }
   }
 
   async function loop() {
+    let failing = false;
     while (!stopped) {
       let answer: MobileDeviceStream;
       try {
         answer = await handlers.ask(at ?? undefined);
         failures = 0;
+        if (failing) { failing = false; handlers.ok(); }
       } catch (cause) {
         if (stopped) return;
         if (cause instanceof RpcFailure && cause.code === RpcErrorCode.MethodNotFound) { drop(); handlers.fallback({ why: 'unavailable' }); return; }
         failures++;
+        failing = true;
         handlers.error(errorText(cause));
         await sleep(Math.min(5000, 250 * 2 ** failures));
         continue;
@@ -146,7 +161,22 @@ export function playDeviceStream(handlers: StreamHandlers): StreamPlayer {
     }
   }
 
-  void loop();
+  /** Anything the loop did not expect falls back to screenshots, then tries again like a failed session. */
+  async function run() {
+    while (!stopped) {
+      try {
+        await loop();
+        return;
+      } catch (cause) {
+        if (stopped) return;
+        drop();
+        handlers.fallback({ why: 'failed', reason: errorText(cause) });
+        await sleep(RETRY_MS);
+      }
+    }
+  }
+
+  void run();
   return {
     stop() {
       stopped = true;

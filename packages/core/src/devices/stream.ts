@@ -109,7 +109,7 @@ interface Session {
   emptySince?: number;
   waiters: Set<() => void>;
   clipboards: ((text: string) => void)[];
-  acks: Map<number, () => void>;
+  acks: Map<number, (ok: boolean) => void>;
   sequence: number;
   child?: SpawnedProcess;
   listener?: Server;
@@ -130,7 +130,7 @@ export class DeviceStreams {
   readonly #failureMs: number;
   readonly #sessions = new Map<string, Session>();
   readonly #failures = new Map<string, { at: number; reason: string }>();
-  /** Devices that got this version of the server since the core started. */
+  /** The vendored jar, checked and copied into the data directory on the first start. */
   #jar?: Promise<string>;
   #timer?: ReturnType<typeof setInterval>;
 
@@ -231,7 +231,14 @@ export class DeviceStreams {
       }, REPLY_TIMEOUT_MS);
       const done = (text: string) => { clearTimeout(timer); resolve(text); };
       session.clipboards.push(done);
-      this.#send(session, getClipboardMessage(copy));
+      try {
+        this.#send(session, getClipboardMessage(copy));
+      } catch (error) {
+        // A waiter left behind would take the next caller's reply.
+        session.clipboards.splice(session.clipboards.indexOf(done), 1);
+        clearTimeout(timer);
+        throw error;
+      }
     });
   }
 
@@ -273,6 +280,7 @@ export class DeviceStreams {
     if (!push.ok) throw new Error(`adb push of the scrcpy server failed: ${push.output}`);
     if (session.stopped) return;
     const wm = await this.#host.adb(target.serial, ['shell', 'wm', 'size'], 15_000);
+    if (session.stopped) return;
     session.natural = wmSize(wm.output);
     if (!session.natural) throw new Error(`adb shell wm size gave no screen size: ${wm.output.slice(0, 200)}`);
     const listener = session.listener = createServer();
@@ -286,11 +294,13 @@ export class DeviceStreams {
       });
       listener.on('error', reject);
     });
+    // A listen that fails throws below, before anything awaits `both`.
+    both.catch(() => {});
     const port = await new Promise<number>((resolve, reject) => {
       listener.once('error', reject);
       listener.listen(0, '127.0.0.1', () => resolve((listener.address() as { port: number }).port));
     });
-    if (session.stopped) return;
+    if (session.stopped) { listener.close(); return; }
     const reverse = await this.#host.adb(target.serial, ['reverse', socketName(session.scid), `tcp:${port}`], 15_000);
     if (!reverse.ok) throw new Error(`adb reverse failed: ${reverse.output}`);
     session.reversed = true;
@@ -326,7 +336,7 @@ export class DeviceStreams {
       try {
         for (const message of messages.push(new Uint8Array(bytes))) {
           if (message.type === 'clipboard') session.clipboards.shift()?.(message.text);
-          else { session.acks.get(message.sequence)?.(); session.acks.delete(message.sequence); }
+          else { session.acks.get(message.sequence)?.(true); session.acks.delete(message.sequence); }
         }
       } catch (error) {
         this.#fail(session, error instanceof Error ? error.message : String(error));
@@ -351,6 +361,9 @@ export class DeviceStreams {
       session.run = crypto.randomUUID().slice(0, 8);
       session.chunks = [];
       session.bytes = 0;
+      // A new encoder (a rotation) sends its own SPS and PPS before its first key frame.
+      session.config = undefined;
+      session.codec = undefined;
       session.state = 'starting';
       return this.#notify(session);
     }
@@ -417,7 +430,8 @@ export class DeviceStreams {
       void child.exited.finally(() => clearTimeout(timer));
     }
     for (const done of session.clipboards.splice(0)) done('');
-    for (const ack of session.acks.values()) ack();
+    // Text not yet confirmed never reached the device.
+    for (const ack of session.acks.values()) ack(false);
     session.acks.clear();
     this.#notify(session);
     if (!keepViewers) for (const viewer of session.viewers.values()) viewer.off?.();
@@ -484,10 +498,16 @@ export class DeviceStreams {
     const sequence = ++session.sequence;
     const acked = new Promise<boolean>((resolve) => {
       const timer = setTimeout(() => { session.acks.delete(sequence); resolve(false); }, REPLY_TIMEOUT_MS);
-      session.acks.set(sequence, () => { clearTimeout(timer); resolve(true); });
+      session.acks.set(sequence, (ok) => { clearTimeout(timer); resolve(ok); });
     });
-    this.#send(session, setClipboardMessage(sequence, text, paste));
-    if (!(await acked)) throw refused(`${session.target.name} did not confirm its clipboard`, { deviceId: session.target.id });
+    try {
+      this.#send(session, setClipboardMessage(sequence, text, paste));
+    } catch (error) {
+      session.acks.get(sequence)?.(false);
+      session.acks.delete(sequence);
+      throw error;
+    }
+    if (!(await acked)) throw refused(session.stopped ? `the live stream of ${session.target.name} ended before its clipboard was set` : `${session.target.name} did not confirm its clipboard`, { deviceId: session.target.id });
   }
 
   // --- helpers ---

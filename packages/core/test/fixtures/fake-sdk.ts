@@ -34,6 +34,8 @@ export interface FakeSdkState {
   pushed?: Record<string, string>;
   /** What the device's clipboard holds when the fake scrcpy server starts. */
   clipboard?: string;
+  /** The fake scrcpy server sets the clipboard it is sent but never confirms it. */
+  clipboardUnconfirmed?: boolean;
 }
 
 /** A control message the fake scrcpy server received, decoded. */
@@ -211,7 +213,7 @@ async function scrcpyServer(root: string, serial: string, state: FakeSdkState, a
         const sequence = Number(view.getBigUint64(1));
         message = { type: 'setClipboard', sequence, paste: view.getUint8(9) === 1, text: value };
         clipboard = value;
-        if (sequence > 0) {
+        if (sequence > 0 && !state.clipboardUnconfirmed) {
           const ack = new DataView(new ArrayBuffer(9));
           ack.setUint8(0, 1);
           ack.setBigUint64(1, BigInt(sequence));

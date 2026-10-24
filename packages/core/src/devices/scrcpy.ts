@@ -21,6 +21,8 @@ const CODEC_H264 = 0x68_32_36_34;
 export const INJECT_TEXT_MAX_BYTES = 300;
 /** The server's `CLIPBOARD_TEXT_MAX_LENGTH`: its message cap less the header. */
 export const CLIPBOARD_MAX_BYTES = (1 << 18) - 14;
+/** The server's `DeviceMessage.MAX_SIZE`: the longest message it sends back, header included. */
+const DEVICE_MESSAGE_MAX = 1 << 18;
 
 const TYPE = { keycode: 0, text: 1, touch: 2, scroll: 3, getClipboard: 8, setClipboard: 9, rotate: 11 } as const;
 export const TOUCH_ACTIONS = { down: 0, up: 1, move: 2, cancel: 3 } as const;
@@ -178,6 +180,8 @@ export class DeviceMessageReader {
       if (type === 0) {
         if (view.byteLength < 5) break;
         const length = view.getUint32(1);
+        // The server truncates a device message to 256 KiB; a longer one is not scrcpy's.
+        if (5 + length > DEVICE_MESSAGE_MAX) throw new Error(`the device sent a clipboard message of ${length} bytes`);
         if (view.byteLength < 5 + length) break;
         out.push({ type: 'clipboard', text: new TextDecoder().decode(this.#buffer.subarray(5, 5 + length)) });
         this.#buffer = this.#buffer.subarray(5 + length);

@@ -273,6 +273,7 @@ export class MobileDevices {
   async clipboard(params: RpcParams<'devices.clipboard'>, connection?: Connection): Promise<RpcResult<'devices.clipboard'>> {
     if (params.copy !== undefined && params.copy !== 'copy' && params.copy !== 'cut') throw refused('device clipboard copy must be copy or cut');
     const target = this.#ready(params.threadId, params.deviceId, connection);
+    if (target.platform !== 'android' || !target.serial) throw refused('the device clipboard needs an Android device: iOS Simulators have no live stream', { deviceId: target.id });
     if (!this.#live?.live(target.id)) {
       throw refused(`the device clipboard needs the live stream: ${this.#streaming() ? 'show the device in the Device panel to start it' : STREAM_OFF}`, { deviceId: target.id });
     }
