@@ -3,6 +3,12 @@ import type { Translation } from '../../i18n.svelte';
 export const fr: Translation = {
 
   quotas: {
+    pin: 'Épingler les quotas du modèle',
+    unpin: 'Désépingler les quotas du modèle',
+    pinnedTitle: 'Quotas du modèle',
+    pinnedEmpty: 'Aucun quota disponible pour le fournisseur de ce modèle.',
+    position: 'Déplacer la carte de quotas',
+    positions: { 'top-left': 'En haut à gauche', 'top-right': 'En haut à droite', 'bottom-left': 'En bas à gauche', 'bottom-right': 'En bas à droite', dock: 'Ancrer sous les conversations' },
     alerts: 'Alertes',
     alertsOf: 'Alertes de {account}',
     alertsHint: "Une notification chaque fois qu'une fenêtre descend à une part restante choisie, une fois par fenêtre. Choisissez-en plusieurs ou ajoutez la vôtre. Les limites sont relues toutes les cinq minutes tant qu'une alerte est réglée.",

@@ -1,5 +1,9 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { MediaQuery } from 'svelte/reactivity';
+  import { experimentOn } from '../lib/experiments.svelte';
+  import { pinnedQuotas } from '../lib/pinned-quotas.svelte';
+  import Deferred, { parts } from './Deferred.svelte';
   import { ChevronDown, FolderOpen, VenetianMask } from '@lucide/svelte';
   import { fill, strings } from '../lib/strings';
   import { modePhrase } from '../lib/permission-modes';
@@ -27,6 +31,10 @@
   let { store, locked = null }: { store: Store; locked?: string | null } = $props();
 
   let thread = $derived(store.openThread);
+  const phone = new MediaQuery('(max-width: 720px)');
+  let pinnedHere = $derived(experimentOn('pinned-quotas') && pinnedQuotas.current.pinned
+    && (!phone.current || !store.sidebarOpen)
+    && (pinnedQuotas.current.position !== 'dock' || store.sidebarCollapsed || phone.current));
   /**
    * The prompt on its way to the core, drawn after what the thread holds. A
    * draft shows it too, while its thread is still being created. One whose
@@ -94,6 +102,7 @@
      or it shrinks a second time when the thread opens. -->
   <section class="chat" class:drafting={!thread && !sending} bind:this={chat} data-testid="chat">
     {#if thread?.forkOrigin}{#key thread.id}<ForkReturn {store} {thread} />{/key}{/if}
+    <div class="discussion">
     {#if thread}
       <!-- One timeline per thread: the heights it measured and the ids that
            already played the rise belong to that thread alone, and kept across
@@ -149,6 +158,9 @@
         </div>
       </div>
     {/if}
+
+    {#if pinnedHere}<Deferred part={parts.PinnedQuota} quiet>{#snippet children(PinnedQuota)}<PinnedQuota {store} />{/snippet}</Deferred>{/if}
+    </div>
 
     {#if thread}<AgentDock {store} threadId={thread.id} />{/if}
     {#if thread}<ThreadRecovery {store} /><ThreadRetry {store} />{/if}
@@ -222,6 +234,8 @@
     height: 100%;
     min-height: 0;
   }
+
+  .discussion { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
 
   .chat.drafting {
     --composer-input-height: 80px;

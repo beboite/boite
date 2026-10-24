@@ -9,6 +9,7 @@
   import { strings } from '../lib/strings';
   import QuotaPopup from './QuotaPopup.svelte';
   import QuotaMachineScope from './QuotaMachineScope.svelte';
+  import QuotaPin from './QuotaPin.svelte';
 
   /**
    * The sidebar's gauge: the tray's glance at every account's subscription
@@ -130,6 +131,7 @@
       order={store.settings?.quotaOrder ?? []} reorder={store.owner ? (quotaOrder) => store.saveSettings({ quotaOrder }) : undefined}
       refresh={() => read(true)} connect={() => page('accounts')} settings={() => page('limits')} {close} testPrefix="limits-glance">
       {#snippet title()}<QuotaMachineScope {store} />{/snippet}
+      {#snippet actions()}<QuotaPin />{/snippet}
     </QuotaPopup>
   </div>
 {/if}
