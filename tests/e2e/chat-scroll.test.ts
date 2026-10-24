@@ -409,9 +409,12 @@ test('a row growing above a reader just off the bottom leaves the reader there',
   expect(await page.evaluate<boolean>(`!!document.querySelector('${jump}')`)).toBe(true);
 
   // The last row growing below moves no scroll position; a notch down into the 80 px still takes the bottom back.
+  await page.evaluate(`(() => { const t = document.querySelector('${timeline}'); const note = (kind) => window.__scrolls.push([kind, t.scrollTop, t.scrollHeight, t.clientHeight, t.offsetWidth - t.clientWidth, performance.now() | 0]); window.__scrolls = []; note('start'); t.addEventListener('scroll', () => note('scroll')); window.addEventListener('wheel', () => note('wheel'), true); })()`);
   await page.evaluate(`(() => { const grown = document.createElement('div'); grown.style.height = '100px'; [...document.querySelectorAll('${timeline} [data-mid]')].at(-1).firstElementChild.append(grown); })()`);
   await page.waitFor(`${gap} > 120`);
   await page.evaluate('new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))');
   await page.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: 70 });
-  await page.waitFor(`!document.querySelector('${jump}')`, 2_000);
+  await page.waitFor(`!document.querySelector('${jump}')`, 2_000).catch(async (error) => {
+    throw new Error(`${error.message}\nScrolls: ${await page.evaluate<string>(`JSON.stringify({ edge: document.documentElement.className, scrolls: window.__scrolls })`)}`);
+  });
 }, 30_000);
