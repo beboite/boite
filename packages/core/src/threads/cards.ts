@@ -13,6 +13,9 @@ import {
   type SettingAsk,
   type SettingRequestParams,
   checkSettingRequest,
+  isMachineSetting,
+  MACHINE_SETTINGS,
+  type SettingMachine,
   settledExperiment,
   type ClientPreferences,
   type ExperimentId,
@@ -26,7 +29,9 @@ import { checkSurface } from '../agent.ts';
 import { answerText, attachToAnswer } from '../attachments.ts';
 import type { Core } from '../core.ts';
 import type { PermissionTicket, QuestionAsk, QuestionTicket } from '../drivers/types.ts';
-import { notFound, refused, RpcFailure } from '../errors.ts';
+import { PeerRefusal } from '../coordination-wire.ts';
+import { invalidParams, messageOf, notFound, refused, RpcFailure, unavailable } from '../errors.ts';
+import { memberNamed } from './group-spawn.ts';
 import { newId } from '../ids.ts';
 import type { ThreadStore } from '../threads.ts';
 import { nativeCommandPrompt } from './operations.ts';
@@ -248,11 +253,35 @@ export class ThreadCards {
    * Apply is `settings.set`, the owner's, and `settleSettings` closes the card
    * when the value moves, so a paired phone cannot answer "applied".
    */
-  requestSetting(params: SettingRequestParams): { questionId: RequestId; setting: SettingAsk } {
+  requestSetting(params: SettingRequestParams): { questionId: RequestId; setting: SettingAsk } | Promise<{ questionId: RequestId; setting: SettingAsk }> {
+    if (params.machine !== undefined) return this.requestMachineSetting(params);
+    return this.drawSetting(params, this.core.settings.get(), null);
+  }
+
+  /**
+   * A card about another machine of the group: that machine says what it
+   * has now (`setting.read`), and says again when the owner changes it
+   * (`setting.changed`), which settles the card.
+   */
+  private async requestMachineSetting(params: SettingRequestParams): Promise<{ questionId: RequestId; setting: SettingAsk }> {
+    this.threads.require(params.threadId);
+    if (typeof params.machine !== 'string' || params.machine.trim().length === 0 || params.machine.length > 128) throw invalidParams('settings.request.machine: expected a machine name or core id');
+    if (!isMachineSetting(params.key)) throw refused(`${String(params.key)} is this machine's own; a card for another machine asks about ${MACHINE_SETTINGS.join(', ')}`, { field: 'key', expected: MACHINE_SETTINGS });
+    const peer = memberNamed(this.core, params.machine, 'settings.request');
+    let read: { value?: unknown };
+    try { read = (await this.core.coordination.request(peer, 'setting.read', { key: params.key })) as { value?: unknown }; }
+    catch (error) {
+      if (error instanceof PeerRefusal) throw refused(`Boite on ${peer.name} cannot answer about ${params.key}: ${error.message}; the owner updates it in Settings, Machines and updates`, { field: 'machine' });
+      throw unavailable(`${peer.name} did not answer: ${messageOf(error)}`, { field: 'machine' });
+    }
+    return this.drawSetting(params, { ...this.core.settings.get(), [params.key]: read?.value as Settings[typeof params.key] }, { coreId: peer.coreId, name: peer.name });
+  }
+
+  private drawSetting(params: SettingRequestParams, settings: Settings, machine: SettingMachine | null): { questionId: RequestId; setting: SettingAsk } {
     const thread = this.threads.require(params.threadId);
     if (thread.archived) throw refused('cannot ask on an archived thread', { threadId: thread.id });
     const open = [...this.questions.values()].flatMap(entry => (entry.request.threadId === thread.id && entry.request.setting ? [entry.request.setting] : []));
-    const checked = checkSettingRequest(params, this.core.settings.get(), patch => {
+    const checked = checkSettingRequest(params, settings, patch => {
       try {
         return { ok: true, patch: this.core.settings.normalize(patch) };
       } catch (error) {
@@ -260,7 +289,7 @@ export class ThreadCards {
         const field = (error.data as { field?: unknown } | undefined)?.field;
         return { ok: false, message: error.message, field: typeof field === 'string' ? field : 'value' };
       }
-    }, open, this.core.clients.current());
+    }, open, this.core.clients.current(), machine);
     if (!checked.ok) throw refused(checked.message, checked.data);
     const { reason, setting, options } = checked;
     const { questionId } = this.drawAsync(thread, { text: reason, options, allowText: false, multiple: false, async: true, setting });

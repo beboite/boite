@@ -17,6 +17,17 @@
   import PairMachine from './PairMachine.svelte';
   import type { Store } from '../lib/store.svelte';
   let { mobile = false, onopenthread }: { mobile?: boolean; onopenthread?: () => void } = $props();
+  const uid = $props.id();
+  /**
+   * The switch a machine of a group holds for itself: whether the agents of
+   * the other machines may start threads there (`groupThreads`). Drawn for a
+   * member this client owns and reaches, once the group has another machine.
+   */
+  function groupThreadsShown(machine: Machine, owner: Store, coreId: string | undefined): boolean {
+    const store = machine.store;
+    return coreId !== undefined && (owner.group?.cores.length ?? 0) > 1 && owner.group?.cores.some(core => core.coreId === coreId) === true
+      && store.owner && store.connection === 'ready' && store.settings !== null;
+  }
   /** The thread a failure on that machine was about: opening it shows the cause in its chat, and clears the line. */
   function openFailedThread(machine: Machine) {
     const owner = machine.store;
@@ -193,6 +204,14 @@
               {/if}
             </div>
           </div>
+          {#if groupThreadsShown(machine, owner, coreId)}
+            <label class="group-threads" for="{uid}-threads-{machine.id}" data-testid="machine-group-threads">
+              <span class="ui-label-box"><span class="ui-label" id="{uid}-threads-{machine.id}-name">{strings.machines.groupThreads}</span><InfoTip topic={strings.machines.groupThreads} text={strings.machines.groupThreadsHint} /></span>
+              <input id="{uid}-threads-{machine.id}" aria-labelledby="{uid}-threads-{machine.id}-name" type="checkbox" role="switch" data-testid="machine-group-threads-switch"
+                checked={machine.store.settings?.groupThreads === true}
+                onchange={async (event) => { const input = event.currentTarget; if (!(await machine.store.saveSettings({ groupThreads: input.checked }))) input.checked = machine.store.settings?.groupThreads === true; }} />
+            </label>
+          {/if}
           <div class="disclosure-fold" class:open={customizing === machine.id} inert={customizing !== machine.id}>
             <div>
               <div class="icon-choices" role="group" aria-label={strings.machines.icon}>
@@ -258,6 +277,18 @@
     gap: 12px;
     min-height: 40px;
   }
+  /* Under the machine's name, as wide as its identity column. */
+  .group-threads {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 6px 0 0 48px;
+    font-size: var(--text-sm);
+    color: var(--color-muted-foreground);
+    cursor: pointer;
+  }
+  .machine-card.away .group-threads { display: none; }
   .logo {
     display: grid;
     place-items: center;
