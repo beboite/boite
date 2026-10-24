@@ -18,6 +18,8 @@ export interface BrainLink {
   path: string;
   state: 'linked' | 'existing' | 'blocked';
   error: string | null;
+  /** A Windows file-symlink privilege refusal, with localized recovery steps in the client. */
+  remedy?: 'windows-developer-mode';
 }
 
 export interface BrainEntry {

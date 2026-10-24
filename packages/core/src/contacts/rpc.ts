@@ -13,6 +13,6 @@ export function registerContactMethods(core: Core): void {
   core.router.register('contacts.decide', p => core.contacts.decide(p));
   core.router.register('contacts.settings', p => core.contacts.setSettings(p.settings));
   core.router.register('contacts.tailscaleKey', p => core.contacts.setTailscaleKey(p.key));
-  core.router.register('collaboration.contacts', p => core.contacts.forThread(p.threadId));
-  core.router.register('collaboration.ask', p => core.contacts.ask(p));
+  core.router.register('collaboration.contacts', p => core.coordination.mailboxes.contacts(p.threadId));
+  core.router.register('collaboration.ask', p => core.coordination.mailboxes.ask(p));
 }

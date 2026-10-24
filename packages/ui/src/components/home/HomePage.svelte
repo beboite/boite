@@ -28,7 +28,7 @@
 
   onMount(() => view.watch());
   // A reconnection is a new client: follow it and read again.
-  $effect(() => { void store.client; view.follow(); });
+  $effect(() => { void store.client; void store.connection; view.follow(); });
 </script>
 
 <div class="settings contacts" data-testid="home-page">

@@ -175,6 +175,15 @@ Boite repairs missing managed links at core startup and after synchronization.
 Closing Boite leaves the links working. Git can replace `AGENTS.md` atomically
 without breaking them. Windows requires file-symlink permission, normally
 provided by Developer Mode; a refusal stays visible per harness.
+When Windows refuses a file symlink with a privilege error, Connected harnesses
+shows recovery steps in the app's language. On the computer hosting the brain,
+press Win+R, open `ms-settings:developers`, enable Developer Mode and accept the
+Windows confirmation. Return to Brain and select Try again to reapply the saved
+configuration without switching sharing off. If Windows requires administrator
+approval or an organization manages this setting, contact that computer's
+administrator. Other link or restore errors also offer Try again, with their
+original error and destination preserved. Failed installations restore the
+original file where possible and keep any pending backup tracked.
 
 The source must be a readable, nonempty file within the brain, at most 64 KiB.
 Harness-specific size limits and discovery settings still apply. A running

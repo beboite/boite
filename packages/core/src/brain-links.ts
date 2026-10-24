@@ -18,9 +18,9 @@ function pointsTo(path: string, source: string): boolean {
   return stat(path)?.isSymbolicLink() === true && resolve(dirname(path), readlinkSync(path)) === source;
 }
 
-function restoreBackup(backup: string, path: string): void {
+function restoreBackup(backup: string, path: string, createLink: (source: string, path: string) => void): void {
   // Exclusive creation preserves a file that appeared after the destination check.
-  if (lstatSync(backup).isSymbolicLink()) symlinkSync(readlinkSync(backup), path, 'file');
+  if (lstatSync(backup).isSymbolicLink()) createLink(readlinkSync(backup), path);
   else linkSync(backup, path);
   unlinkSync(backup);
 }
@@ -28,7 +28,20 @@ function restoreBackup(backup: string, path: string): void {
 /** Own only the links created here. Backups survive a user replacing a managed link. */
 export class BrainLinks {
   private errors = new Map<string, string>();
-  constructor(private readonly storage: LinkStorage, private readonly profiles: BrainProfiles = { home: homePath(), env: process.env }) {}
+  private permissionPaths = new Set<string>();
+  constructor(private readonly storage: LinkStorage, private readonly profiles: BrainProfiles = { home: homePath(), env: process.env }, private readonly platform = process.platform) {}
+
+  private createLink = (source: string, path: string): void => {
+    try { symlinkSync(source, path, 'file'); }
+    catch (cause) {
+      if (this.platform === 'win32' && (cause as NodeJS.ErrnoException).code === 'EPERM') this.permissionPaths.add(path);
+      throw cause;
+    }
+  };
+
+  private remedy(path: string): Pick<BrainLink, 'remedy'> {
+    return this.permissionPaths.has(path) ? { remedy: 'windows-developer-mode' } : {};
+  }
 
   private targets(): Target[] {
     const { home, env } = this.profiles;
@@ -67,13 +80,13 @@ export class BrainLinks {
 
   status(root: string | null): BrainLink[] {
     const owned = this.storage.get();
-    if (!root) return owned.map(link => ({ name: 'Global instructions', path: link.path, state: 'blocked', error: this.errors.get(link.path) ?? `Restore pending at ${link.path}${link.backup ? `; original backup at ${link.backup}` : ''}` }));
+    if (!root) return owned.map(link => ({ name: 'Global instructions', path: link.path, state: 'blocked', error: this.errors.get(link.path) ?? `Restore pending at ${link.path}${link.backup ? `; original backup at ${link.backup}` : ''}`, ...this.remedy(link.path) }));
     const source = join(root, 'AGENTS.md'), sourceError = this.sourceError(root);
     const targets = this.targets();
     const result: BrainLink[] = targets.map(target => {
       try {
         const error = sourceError ?? this.targetError(target) ?? this.errors.get(target.path);
-        if (error) return { ...target, state: 'blocked', error };
+        if (error) return { ...target, state: 'blocked', error, ...this.remedy(target.path) };
         if (pointsTo(target.path, source) || (target.path === source && stat(source)?.isFile())) {
           return { ...target, state: owned.some(link => link.path === target.path && link.source === source) ? 'linked' : 'existing', error: null };
         }
@@ -81,7 +94,7 @@ export class BrainLinks {
       } catch (cause) { return { ...target, state: 'blocked', error: messageOf(cause) }; }
     });
     for (const link of owned) if (!targets.some(target => target.path === link.path)) {
-      result.push({ name: 'Previous profile', path: link.path, state: 'blocked', error: this.errors.get(link.path) ?? `Restore pending at ${link.path}; original backup: ${link.backup ?? 'none'}` });
+      result.push({ name: 'Previous profile', path: link.path, state: 'blocked', error: this.errors.get(link.path) ?? `Restore pending at ${link.path}; original backup: ${link.backup ?? 'none'}`, ...this.remedy(link.path) });
     }
     return result;
   }
@@ -91,6 +104,7 @@ export class BrainLinks {
     const source = root ? join(root, 'AGENTS.md') : null;
     const targets = root ? this.targets() : [];
     const errors = this.errors = new Map<string, string>();
+    this.permissionPaths.clear();
     const save = () => this.storage.set(owned);
     // Restore old destinations before adopting a new folder or profile location.
     for (const link of [...owned]) {
@@ -100,7 +114,7 @@ export class BrainLinks {
           if (!pointsTo(link.path, link.source)) throw new Error(`${link.path}: changed outside Boite; original backup kept at ${link.backup ?? 'none'}`);
           unlinkSync(link.path);
         }
-        if (link.backup) restoreBackup(link.backup, link.path);
+        if (link.backup) restoreBackup(link.backup, link.path, this.createLink);
         owned = owned.filter(candidate => candidate.path !== link.path); save();
       } catch (cause) { errors.set(link.path, messageOf(cause)); }
     }
@@ -116,7 +130,7 @@ export class BrainLinks {
         if (managed) {
           if (info || managed.source !== source) throw new Error(`${target.path}: changed outside Boite; original backup kept at ${managed.backup ?? 'none'}`);
           mkdirSync(dirname(target.path), { recursive: true });
-          symlinkSync(source, target.path, 'file');
+          this.createLink(source, target.path);
           continue;
         }
         if (info && !info.isFile() && (!info.isSymbolicLink() || stat(target.path, true)?.isDirectory())) throw new Error(`${target.path}: expected a file or file symlink; directory preserved`);
@@ -126,15 +140,15 @@ export class BrainLinks {
         owned.push({ path: target.path, source, backup }); save();
         try {
           if (backup) renameSync(target.path, backup);
-          symlinkSync(source, target.path, 'file');
+          this.createLink(source, target.path);
         }
         catch (cause) {
-          if (backup && stat(backup) && !stat(target.path)) restoreBackup(backup, target.path);
+          if (backup && stat(backup) && !stat(target.path)) restoreBackup(backup, target.path, this.createLink);
           if (!backup || !stat(backup)) { owned = owned.filter(link => link.path !== target.path); save(); }
           throw cause;
         }
       } catch (cause) {
-        const hint = process.platform === 'win32' && (cause as NodeJS.ErrnoException).code === 'EPERM' ? ' Enable Windows Developer Mode to allow file symlinks.' : '';
+        const hint = this.permissionPaths.has(target.path) ? ' Windows refused a file symlink. Press Win+R, open ms-settings:developers, enable Developer Mode, then retry in Boite.' : '';
         const pending = owned.find(link => link.path === target.path)?.backup;
         errors.set(target.path, `${messageOf(cause)}${hint}${pending ? ` Original backup: ${pending}` : ''}`);
       }

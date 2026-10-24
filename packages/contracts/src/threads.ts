@@ -169,6 +169,8 @@ export interface ThreadSummary {
   worktreeRemoved?: ThreadWorktreeRemoval | null;
   /** Core-owned delegation relationship. Absent on ordinary conversations. */
   parentThreadId?: ThreadId | null;
+  /** Derived from the parent row, including archived bots; keeps project workers visible after reconnect. */
+  parentIsBot?: true;
   /** What the conversation starts without, fixed at creation. Absent: the whole setup. */
   contextMode?: ThreadContextMode | null;
   /** Last accepted user message, independent of assistant activity and renames. */

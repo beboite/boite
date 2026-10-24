@@ -200,12 +200,12 @@ export class Journal {
       .run(project.id, project.name, project.path, project.createdAt, project.archived === true ? 1 : 0, project.worktreeDefault === true ? 1 : 0);
   }
 
-  /** How many of a project's own threads are archived, sub-threads left out, per project id. */
-  /** Per project, its archived top-level threads and how many of them are done (`done_at` set). */
+  /** Archived project threads, including work delegated by a bot, and how many are done. */
   archivedThreadCounts(): Map<string, { archived: number; done: number }> {
     const rows = this.db
-      .query('SELECT project_id, COUNT(*) AS count, COUNT(done_at) AS done FROM threads WHERE archived = 1 AND parent_thread_id IS NULL AND project_id IS NOT NULL AND id NOT IN (SELECT thread_id FROM thread_deletions) GROUP BY project_id')
-      .all() as { project_id: string; count: number; done: number }[];
+      .query(`SELECT project_id, COUNT(*) AS count, COUNT(done_at) AS done FROM threads WHERE archived = 1
+        AND (parent_thread_id IS NULL OR EXISTS (SELECT 1 FROM threads parent WHERE parent.id = threads.parent_thread_id AND parent.agent_session_id IS NOT NULL))
+        AND project_id IS NOT NULL AND id NOT IN (SELECT thread_id FROM thread_deletions) GROUP BY project_id`).all() as { project_id: string; count: number; done: number }[];
     return new Map(rows.map((row) => [row.project_id, { archived: row.count, done: row.done }]));
   }
 

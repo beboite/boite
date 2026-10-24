@@ -149,10 +149,11 @@ ${CONTROL_HELP}
                                  comes back as a message (--model <provider/model>,
                                  --effort <level>, --speed <tier>, --title <title>,
                                  --profile <id>, --worktree for a git worktree of
-                                 its own branched from your HEAD instead of your
-                                 checkout, and a context mode: --context
+                                 its own from your checkout's HEAD (the project's
+                                 for a bot), and a context mode: --context
                                  light|neutral, --keep|--drop <parts>, --tools
                                  <Tool,...>, --rules <text>|--rules-file <path>)
+                                 --project <p> places a bot's child in an entrusted project
   delegate list                  every subagent and workflow: state, model, time
   delegate send <thread-id> <text>
                                  steer or reuse a subagent, or ask the parent;
@@ -425,6 +426,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     delegate: async () => {
       if (rest[0] === undefined) throw new Usage(`delegate needs ${DELEGATE_ACTIONS}`);
       await delegateCommand(client, threadId, rest, {
+        ...(parsed.project === undefined ? {} : { project: parsed.project }),
         ...(parsed.requestId === undefined ? {} : { requestId: parsed.requestId }), ...(parsed.timeout === undefined ? {} : { timeout: parsed.timeout }),
         ...(parsed.title === undefined ? {} : { title: parsed.title }), ...(parsed.model === undefined ? {} : { model: parsed.model }),
         ...(parsed.effort === undefined ? {} : { effort: parsed.effort }), ...(parsed.speed === undefined ? {} : { speed: parsed.speed }), ...(parsed.profile === undefined ? {} : { profile: parsed.profile }),

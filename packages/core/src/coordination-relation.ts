@@ -8,6 +8,19 @@ import type { AgentAddress, AgentLetter, AgentRelation } from '@boite/contracts'
 import { excerpt, type LetterContext } from './coordination-letter.ts';
 import type { Core } from './core.ts';
 
+export function projectName(core: Core, threadId: string): string | undefined {
+  const projectId = core.journal.getThread(threadId)?.projectId;
+  return projectId ? core.journal.getProject(projectId)?.name.slice(0, 200) : undefined;
+}
+
+/** Old local letters predate project metadata. Fill it without rewriting history. */
+export function withProjects(core: Core, local: string, letter: AgentLetter): AgentLetter {
+  return { ...letter,
+    from: letter.from.coreId === local && letter.from.project === undefined ? { ...letter.from, project: projectName(core, letter.from.threadId) } : letter.from,
+    toProject: letter.toProject ?? (letter.to.coreId === local ? projectName(core, letter.to.threadId) : undefined),
+  };
+}
+
 /** How `other` relates to `threadId`: who started whom, delegation, the agent the project is entrusted to, else where it is. */
 export function relationOf(core: Core, localCore: string, threadId: string, other: AgentAddress): AgentRelation {
   if (other.coreId !== 'local' && other.coreId !== localCore) return 'machine';

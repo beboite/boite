@@ -244,10 +244,7 @@ export class ContactStore implements LinkedContacts {
     return this.list().some(contact => contact.role === 'host') || this.liveInvites().length > 0;
   }
 
-  linkOf(coreId: string): Contact['link'] {
-    const contact = this.find(coreId);
-    return contact ? this.linkState(contact) : 'offline';
-  }
+  linkOf(coreId: string): Contact['link'] { const contact = this.find(coreId); return contact ? this.linkState(contact) : 'offline'; }
 
   private linkState(contact: StoredContact): Contact['link'] {
     if (contact.role === 'host') return this.hosted.has(contact.coreId) ? 'connected' : 'offline';
@@ -271,9 +268,6 @@ export class ContactStore implements LinkedContacts {
     const contacts = this.list();
     const found = contacts.find(contact => contact.coreId === wanted)
       ?? contacts.filter(contact => contact.name.toLowerCase() === wanted || contact.name.replace(/\s+/g, '-').toLowerCase() === wanted)[0];
-    const relayed = found ? undefined : this.members.relayed().find(entry => entry.coreId === wanted || entry.name.toLowerCase() === wanted || entry.name.replace(/\s+/g, '-').toLowerCase() === wanted);
-    const via = relayed ? this.core.group.peers().find(peer => peer.coreId === relayed.via) : undefined;
-    if (via) throw refused(`contact: ${relayed!.name} is linked to ${via.name}; ask it from a thread there`, { field: 'contact' });
     if (!found) throw invalidParams(`contact: ${value} is not one of this core's contacts; see boite threads contacts`, { field: 'contact' });
     return found;
   }
@@ -441,14 +435,6 @@ export class ContactStore implements LinkedContacts {
     return this.view(contact);
   }
 
-  /** A member no longer opens these of its projects to a contact another member holds, or none (`null`). */
-  projectsClosed(coreId: string, projectIds: string[] | null): void {
-    // The contact's own link to this core keeps its replies.
-    if (projectIds !== null) this.reach.forgetReplies(coreId, threadId => projectIds.includes(this.core.journal.getThread(threadId)?.projectId ?? ''));
-    else if (!this.has(coreId)) this.reach.forgetReplies(coreId, () => true);
-    this.core.coordination.rejectContactLetters(coreId, 'Project closed to this contact');
-  }
-
   remove(coreId: string): { ok: true } {
     const contact = this.find(coreId);
     if (!contact) throw invalidParams('coreId: expected the core id of one of this core\'s contacts', { field: 'coreId' });
@@ -532,10 +518,15 @@ export class ContactStore implements LinkedContacts {
     this.core.threads.require(threadId);
     const config = this.core.coordination.config(threadId);
     if (config.mode === 'off' || !config.remote) return [];
-    const own = this.list().map(contact => ({ name: contact.name, coreId: contact.coreId, projects: contact.offers.map(offer => offer.name), link: this.linkState(contact) }));
+    const own = this.available();
     const relayed = this.members.relayed().filter((entry, index, all) => !own.some(contact => contact.coreId === entry.coreId) && all.findIndex(other => other.coreId === entry.coreId) === index)
       .map(entry => ({ name: entry.name, coreId: entry.coreId, projects: entry.offers, link: entry.link }));
     return [...own, ...relayed];
+  }
+
+  /** Public summaries only, also carried to another member of this owner's group. */
+  available(): RpcResult<'collaboration.contacts'> {
+    return this.list().map(contact => ({ name: contact.name, coreId: contact.coreId, projects: contact.offers.map(offer => offer.name), link: this.linkState(contact) }));
   }
 
   ask(params: RpcParams<'collaboration.ask'>): ContactRequest {
@@ -545,18 +536,23 @@ export class ContactStore implements LinkedContacts {
     if (config.paused) throw refused('coordination paused by the owner');
     const contact = this.named(params.contact);
     this.reach.checkSendTier(params.threadId);
-    const body = text(params.text, 'text', 4000);
+    return this.askFrom(from, contact.coreId, params.text, gitRemoteOf(this.core.threads.require(params.threadId).cwd) ?? undefined);
+  }
+
+  /** A virtual mailbox carries a group member's attested sender without a real local thread. */
+  askFrom(from: AgentContact, coreId: string, value: string, gitRemote?: string): ContactRequest {
+    const contact = this.named(coreId);
+    const body = text(value, 'text', 4000);
     const requests = this.requests();
     if (requests.filter(request => request.coreId === contact.coreId && request.direction === 'out' && request.status === 'pending').length >= MAX_PENDING) {
       throw refused(`at most ${MAX_PENDING} requests may wait at ${contact.name}; wait for an answer`);
     }
-    const gitRemote = gitRemoteOf(this.core.threads.require(params.threadId).cwd);
     const request: StoredRequest = {
       id: newId('creq_'), direction: 'out', coreId: contact.coreId, contact: contact.name, from, text: body,
       ...(gitRemote ? { gitRemote } : {}), createdAt: Date.now(), status: 'pending', pendingSend: true,
     };
     this.saveRequests([...requests, request]);
-    this.reach.noteSent(params.threadId, contact.coreId);
+    this.reach.noteSent(from.threadId, contact.coreId);
     this.changed();
     this.flush(contact.coreId);
     return this.requestView(request);

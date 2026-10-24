@@ -57,6 +57,21 @@ afterEach(async () => {
   await harness.stop();
 });
 
+test('delegate spawn --project reaches the core from a bot looking after several projects', async () => {
+  const client = await harness.connect();
+  const projects = await client.call('projects.list', {});
+  const project = projects[0]!;
+  const otherPath = join(harness.dataDir, 'other-project');
+  mkdirSync(otherPath);
+  const second = await client.call('projects.add', { path: otherPath, name: 'Other' });
+  const bot = await makeAgent(harness, client, { projectIds: [project.id, second.id] });
+  threadId = bot.threadId;
+  await client.call('delegation.configure', { threadId, config: { enabled: true, paused: false, profiles: [], anyModel: true } });
+  const run = await boite(['delegate', 'spawn', 'Inspect the project', '--project', project.name, '--json']);
+  expect([run.err, run.code]).toEqual(['', 0]);
+  expect(JSON.parse(run.out).thread).toMatchObject({ projectId: project.id, cwd: project.path, parentThreadId: threadId });
+});
+
 test('splits a trailing line off a path and leaves a drive letter alone', () => {
   expect(splitLine('src/a.ts:12')).toEqual({ path: 'src/a.ts', line: 12 });
   expect(splitLine('C:\\x\\a.ts')).toEqual({ path: 'C:\\x\\a.ts', line: undefined });

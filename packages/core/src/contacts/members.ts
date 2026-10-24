@@ -53,8 +53,6 @@ export interface LinkedContacts {
   list(): { coreId: string; grants: { machine?: string }[] }[];
   linkOf(coreId: string): Contact['link'];
   settings(): { minTier: ModelTier };
-  /** The member dropped grants or the whole contact: its replies and pending letters follow. */
-  projectsClosed(coreId: string, projectIds: string[] | null): void;
   /** The copies changed: peers are listed again. */
   reset(): void;
   /** Starts the contacts' timer, which retries the pushes. */
@@ -330,7 +328,10 @@ export class ContactMembers {
   }
 
   /** A request of this core's agent for a relayed contact, sent through the member it is linked to. */
-  async send(via: CoordinationPeer, contactId: string, operation: Operation, payload: unknown): Promise<unknown> {
+  async send(contact: CoordinationPeer, operation: Operation, payload: unknown): Promise<unknown> {
+    const via = this.via(contact.coreId);
+    if (!via) throw unavailable(`${contact.name} is linked to a machine that left this group`);
+    const contactId = contact.coreId;
     if (!RELAYED.includes(operation)) throw refused(`${operation}: ask from ${via.name}, the machine linked to that contact`);
     return this.core.coordination.request(via, 'relay.out', { contact: contactId, operation, payload });
   }
@@ -385,9 +386,9 @@ export class ContactMembers {
     // What the member no longer opens: its replies end and its letters go nowhere.
     for (const old of before.filter(entry => entry.via === via)) {
       const now = next.find(entry => entry.via === via && entry.coreId === old.coreId);
-      if (!now) { if (whole || entries.some(entry => entry.coreId === old.coreId)) this.contacts.projectsClosed(old.coreId, null); continue; }
+      if (!now) { if (whole || entries.some(entry => entry.coreId === old.coreId)) this.core.contacts.reach.closed(old.coreId, null); continue; }
       const dropped = old.grants.filter(grant => !now.grants.some(kept => kept.projectId === grant.projectId)).map(grant => grant.projectId);
-      if (dropped.length > 0) this.contacts.projectsClosed(old.coreId, dropped);
+      if (dropped.length > 0) this.core.contacts.reach.closed(old.coreId, dropped);
     }
   }
 
