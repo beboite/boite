@@ -275,8 +275,11 @@ test('cancellation before a delayed start is durable; follow-up retries create o
 test('driver permission capability checks preserve exact policies without live probes or a fallback', () => {
   for (const protocol of ['claude-sdk', 'codex-appserver', 'muse'] as const)
     for (const mode of ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk', 'yolo'] as const) expect(sharedPermissionSupport(protocol, mode)).toBe(true);
-  for (const protocol of ['acp', 'pi'] as const)
-    for (const mode of ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk', 'yolo'] as const) expect(sharedPermissionSupport(protocol, mode)).toBe(false);
+  for (const mode of ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk', 'yolo'] as const) {
+    expect(sharedPermissionSupport('acp', mode)).toBe(false);
+    expect(sharedPermissionSupport('acp', mode, 'opencode')).toBe(mode === 'default' || mode === 'plan');
+    expect(sharedPermissionSupport('pi', mode)).toBe(mode === 'yolo' || mode === 'bypassPermissions');
+  }
   expect(sharedPermissionSupport('echo', 'default')).toBe(true); expect(sharedPermissionSupport('echo', 'yolo')).toBe(false);
 });
 

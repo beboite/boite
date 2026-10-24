@@ -31,7 +31,7 @@ export class SharedCompute {
   private closed = false;
   private readonly off: () => void;
   /** Protection service must report an actual execution boundary before admitting tools. */
-  protection: (ctx: SharedPeerContext, route: ChildRoute) => SharedExecutionProtection = (_ctx, route) => this.core.sharedAccess.execution.support(this.core.providers.require(route.providerId).protocol);
+  protection: (ctx: SharedPeerContext, route: ChildRoute) => SharedExecutionProtection = (_ctx, route) => this.core.sharedAccess.execution.support(this.core.providers.require(route.providerId).protocol, route.providerId);
   /** Called after capturing the prepared checkout, before starting its first provider turn. */
   guardStart: (ctx: SharedPeerContext, worker: SharedThreadRef, job: SharedComputeJob) => void | Promise<void> = (ctx, worker) => {
     const thread = this.core.threads.require(worker.threadId);
@@ -123,7 +123,7 @@ export class SharedCompute {
     for (const id of policy.profiles) {
       const route = this.core.delegation.resolve(parent.id, { profileId: id });
       const protocol = this.core.providers.require(route.providerId).protocol;
-      if (!sharedPermissionSupport(protocol, policy.permissionMode)) throw refused(`compute.permissionMode: ${protocol} cannot attest this shared execution permission policy`);
+      if (!sharedPermissionSupport(protocol, policy.permissionMode, route.providerId)) throw refused(`compute.permissionMode: ${protocol} cannot attest this shared execution permission policy`);
     }
     const rebound = this.core.journal.getSetting(hostKey(ctx.shared.id)) !== threadId;
     this.core.journal.setSetting(hostKey(ctx.shared.id), threadId);
@@ -134,7 +134,7 @@ export class SharedCompute {
     if (!policy.profiles.includes(profileId)) throw refused('compute.profileId: expected an explicitly offered host delegation profile');
     const route = this.core.delegation.resolve(parent.id, { profileId });
     const provider = this.core.providers.require(route.providerId);
-    if (!sharedPermissionSupport(provider.protocol, policy.permissionMode)) throw refused(`compute.permissionMode: ${provider.protocol} cannot enforce the offered semantics`);
+    if (!sharedPermissionSupport(provider.protocol, policy.permissionMode, route.providerId)) throw refused(`compute.permissionMode: ${provider.protocol} cannot enforce the offered semantics`);
     assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), this.core.accounts.require(route.accountId), () => this.core.providers.launcherScriptOnly(provider.id));
     return { parent, policy, route };
   }

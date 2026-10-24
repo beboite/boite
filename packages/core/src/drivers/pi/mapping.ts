@@ -135,6 +135,7 @@ export function modelArgs(ctx: SessionContext): string[] {
 export function sessionKey(ctx: SessionContext): string {
   const model = ctx.thread.model;
   return JSON.stringify({
+    protection: ctx.protectedExecution?.fingerprint ?? null,
     contextMode: ctx.thread.contextMode ?? null,
     ownModel: model === null || model === AGENT_OWN_MODEL,
     ownEffort: ctx.thread.effort === null,

@@ -53,7 +53,7 @@ export function protectLetters(core: Core, threadId: string, letters: AgentLette
   if (!external.length) return;
   const thread = core.threads.require(threadId);
   const protocol = core.providers.require(thread.providerId).protocol;
-  if (!core.sharedAccess.execution.support(protocol).supported || protocol === 'echo' && thread.permissionMode !== 'default') throw refused('shared file policy: contact letter execution requires a protected provider route');
+  if (!core.sharedAccess.execution.support(protocol, thread.providerId, thread.permissionMode).supported || protocol === 'echo' && thread.permissionMode !== 'default') throw refused('shared file policy: contact letter execution requires a protected provider route');
   const captured = core.sharedAccess.bound(threadId);
   const associations = captured ? [captured, ...(captured.additional ?? [])].map(b => b.job.sharedProjectId) : [];
   if (protocol !== 'echo' && ['queued', 'running', 'waiting'].includes(thread.status)

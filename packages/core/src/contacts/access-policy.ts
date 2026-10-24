@@ -90,7 +90,7 @@ export class SharedAccess {
     if (record) this.live(record);
     const thread = this.core.threads.require(threadId);
     const protocol = this.core.providers.require(thread.providerId).protocol;
-    if (protocol === 'echo' ? thread.permissionMode !== 'default' : !record || !this.execution.support(protocol).supported) this.denyTool(threadId);
+    if (protocol === 'echo' ? thread.permissionMode !== 'default' : !record || !this.execution.support(protocol, thread.providerId, thread.permissionMode).supported) this.denyTool(threadId);
   }
   contextThread(thread: ThreadSummary): ThreadSummary { return this.protected(thread.id) ? {...thread, contextMode: {...TOOL_FREE_CONTEXT}} : thread; }
   assertScope(threadId: string, sharedProjectId: string): void {

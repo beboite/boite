@@ -1,5 +1,5 @@
 /** Host-owned routes and captured fake jobs. Fixture Git is explicit; no caller result is trusted. */
-import { CONVERSATION_PROFILE_ID, type Protocol, type SharedExecutionProtection, type SharedComputeJob, type SharedComputePolicy, type SharedComputeRoute, type SharedProject, type SharedProjectRef, type RpcParams } from '@boite/contracts';
+import { CONVERSATION_PROFILE_ID, type Protocol, type PermissionMode, type SharedExecutionProtection, type SharedComputeJob, type SharedComputePolicy, type SharedComputeRoute, type SharedProject, type SharedProjectRef, type RpcParams } from '@boite/contracts';
 import type { FakeContext, FakeMethods } from './context';
 import { contactState, modelTier } from './contacts';
 import { delegationConfig, workflowChild, workflowAnswer, type ChildRoute } from './delegation';
@@ -13,9 +13,15 @@ function stateOf(ctx:FakeContext):HostState{let state=states.get(ctx);if(!state)
 const terminal=(job:SharedComputeJob)=>['done','failed','cancelled','revoked'].includes(job.status);
 /** Fixture capability only. The in-memory client never attests an actual OS boundary. */
 export function setSharedNativeExecution(ctx:FakeContext,available:boolean):void{stateOf(ctx).nativeProtected=available;}
-export function sharedProtection(ctx:FakeContext,protocol:Protocol):SharedExecutionProtection{
+export function sharedPermission(protocol:Protocol,mode:PermissionMode,providerId?:string):boolean{
+  if(protocol==='pi')return mode==='yolo'||mode==='bypassPermissions';
+  if(protocol==='acp')return providerId==='opencode'&&(mode==='default'||mode==='plan');
+  return protocol!=='echo'||mode==='default';
+}
+export function sharedProtection(ctx:FakeContext,protocol:Protocol,providerId?:string,mode?:PermissionMode):SharedExecutionProtection{
+  if(mode&&!sharedPermission(protocol,mode,providerId))return {supported:false,reason:`execution.permissionMode: ${providerId??protocol} cannot enforce ${mode}`};
   if(protocol==='echo')return {supported:true,boundary:'no-tools'};
-  if(stateOf(ctx).nativeProtected&&(protocol==='claude-sdk'||protocol==='codex-appserver'))return {supported:true,boundary:'isolated-process'};
+  if(stateOf(ctx).nativeProtected&&(protocol==='claude-sdk'||protocol==='codex-appserver'||protocol==='pi'||protocol==='acp'&&providerId==='opencode'))return {supported:true,boundary:'isolated-process'};
   return {supported:false,reason:`${protocol}: protected shared execution is unavailable`};
 }
 export function setSharedRepository(ctx:FakeContext,projectId:string,repository:string,head:string):void{
@@ -37,7 +43,7 @@ export function validateSharedCompute(ctx:FakeContext,shared:SharedProject,p:Rpc
   if(policy.enabled){
     if(!policy.profiles.length||new Set(policy.profiles).size!==policy.profiles.length)throw invalidShared('compute.profiles: expected distinct host profile IDs');
     for(const profileId of policy.profiles){const {route}=parentRoute(ctx,shared,profileId,p.computeThreadId);const protocol=ctx.providers.find(p=>p.id===route.providerId)?.protocol;
-      if(protocol==='pi'||protocol==='acp'||protocol==='echo'&&policy.permissionMode!=='default')throw refusedShared(`compute.permissionMode: ${protocol} cannot attest this shared execution permission policy`);
+      if(!protocol||!sharedPermission(protocol,policy.permissionMode,route.providerId))throw refusedShared(`compute.permissionMode: ${protocol} cannot attest this shared execution permission policy`);
     }
   }
   return {policy:cloneShared(policy),rebound:policy.enabled&&p.computeThreadId!==undefined&&stateOf(ctx).bindings.get(shared.id)!==p.computeThreadId,commit:()=>{if(policy.enabled&&p.computeThreadId)stateOf(ctx).bindings.set(shared.id,p.computeThreadId);}};
@@ -55,7 +61,7 @@ function routes(ctx:FakeContext,shared:SharedProject):SharedComputeRoute[]{
     const {route}=parentRoute(ctx,shared,profileId),provider=ctx.providers.find(p=>p.id===route.providerId)!;
     if(!provider?.available)throw refusedShared('compute.providerId: host provider unavailable');
     return {profileId,providerId:provider.id,protocol:provider.protocol,model:route.model,efforts:provider.models.find(m=>m.id===route.model)?.effort?.levels.map(l=>l.id)??[],permissionMode:policy.permissionMode,
-      protection:sharedProtection(ctx,provider.protocol)};
+      protection:sharedProtection(ctx,provider.protocol,route.providerId,policy.permissionMode)};
   });
 }
 export function finishSharedCompute(ctx:FakeContext,jobId:string,text:string):void{

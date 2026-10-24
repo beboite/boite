@@ -15,21 +15,22 @@ export function commit(raw: unknown, field: string): string {
   return raw;
 }
 /** No ACP fallback to a plain mode and no pi promise of approvals it cannot enforce. */
-export function sharedPermissionSupport(protocol: Protocol, mode: PermissionMode): boolean {
-  if (protocol === 'pi' || protocol === 'acp') return false;
+export function sharedPermissionSupport(protocol: Protocol, mode: PermissionMode, providerId?: string): boolean {
+  if (protocol === 'pi') return mode === 'yolo' || mode === 'bypassPermissions';
+  if (protocol === 'acp') return providerId === 'opencode' && (mode === 'default' || mode === 'plan');
   if (protocol === 'echo') return mode === 'default';
   return protocol === 'claude-sdk' || protocol === 'codex-appserver' || protocol === 'muse';
 }
 /** Approval callbacks, cwd and provider sandbox names do not attest selective secret-file isolation. */
-export function sharedExecutionProtection(protocol: Protocol, nativeAvailable = false): SharedExecutionProtection {
+export function sharedExecutionProtection(protocol: Protocol, nativeAvailable = false, providerId?: string): SharedExecutionProtection {
   if (protocol === 'echo') return {supported: true, boundary: 'no-tools'};
-  if (nativeAvailable && (protocol === 'claude-sdk' || protocol === 'codex-appserver')) return {supported: true, boundary: 'isolated-process'};
+  if (nativeAvailable && (protocol === 'claude-sdk' || protocol === 'codex-appserver' || protocol === 'pi' || protocol === 'acp' && providerId === 'opencode')) return {supported: true, boundary: 'isolated-process'};
   const reason: Record<Exclude<Protocol, 'echo'>, string> = {
     'claude-sdk': 'Claude protected tools require a supported native host boundary and its userspace helper',
     'codex-appserver': 'Codex protected tools require a supported native host boundary and its userspace helper',
-    acp: 'ACP modes and approval coverage are provider-specific; protected shared execution is unavailable',
-    muse: 'Muse sandbox modes do not attest selective secret read denial; protected shared execution is unavailable',
-    pi: 'pi RPC has no enforceable approval gate or selective secret isolation',
+    acp: 'Protected ACP requires verified OpenCode 1.19.3 with its core-owned extension and a native host boundary; generic ACP claims are insufficient',
+    muse: 'Muse 1.3.0 disables session MCP with an empty native toolset and rejects MCP-only toolsets; no verified native-tool gate is available',
+    pi: 'pi protected tools require its native extension and a supported native host boundary; native approvals remain unavailable',
   };
   return {supported: false, reason: reason[protocol]};
 }

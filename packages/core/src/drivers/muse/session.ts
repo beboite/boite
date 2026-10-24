@@ -347,6 +347,7 @@ export class MuseSession {
 
   private async open(ctx: SessionContext): Promise<void> {
     if (this.ended) throw new Error('the muse session was closed before it started');
+    if (ctx.protectedExecution) throw new Error('execution.muse: native 1.3.0 cannot retain session MCP with an empty native toolset; no verified native-tool gate, so protected execution is unavailable');
     this.quotaSink = ctx.quota ?? null;
     this.contextSink = ctx.context;
     const executable = museExecutable(ctx.provider);

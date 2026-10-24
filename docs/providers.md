@@ -1035,8 +1035,40 @@ The protected fingerprint participates in warm identity. Codex cold protected
 starts replay through a fresh native thread because `thread/resume` cannot
 replace dynamic tools. Ordinary local sessions keep the mappings below.
 See [protected shared execution](contacts.md#native-linux-tool-execution) for
-host prerequisites and the deterministic native driver proof. ACP, Muse and pi
-remain explicitly unsupported on this shared route.
+host prerequisites and the deterministic native driver proof.
+
+OpenCode 1.19.3 uses its native ACP plugin hooks to deny every
+non-core tool and command, plus a core-only remote MCP server. It supports only
+its native default/build and plan modes. Other versions need a verified hook
+path and bundled SDK inventory before admission. Other ACP implementations, including
+OpenCode 2, cannot obtain this capability by advertising ACP permission support.
+Private discovery retains the selected API/OAuth account and JSON provider/model
+selection, including normalized JSONC and custom configuration files. Only SDKs
+bundled by this native version may load; external SDK imports, legacy TOML and
+remote-configuration credentials are refused explicitly. User plugins, MCP,
+commands and project configuration cannot follow the protected session.
+
+pi 1.4.0 uses its own extension API: builtins, discovered extensions, MCP, skills,
+prompts and project context are disabled, and a core extension registers only
+protected tools and rejects other tool calls. Selected native account
+authentication remains available to trusted provider control; model selection
+is captured privately. Command-valued keys/headers and executable environment
+preloads are refused before launch. Only YOLO and bypass modes
+are admitted, because pi RPC has no native approval mode. The descriptor keeps
+`capabilities.approvals: false`. ACP/pi fingerprints distinguish ordinary and
+protected warm sessions, and every warm turn checks revocation before prompting.
+Protected pi cold starts use a new private transcript and the core's captured
+continuation instead of reopening ordinary or differently scoped native history.
+The forced shared-turn context suppresses native resources while captured host
+tool permissions control the protected tools. An actual host tool-free context
+exposes neither native nor protected tools.
+
+Muse 1.3.0 remains refused. Its MSP session MCP works, but native file tools can
+still read host credentials with its native shell sandbox enabled and native
+shell/writes disabled. An empty native toolset also removes MCP tools;
+a MCP-only toolset is rejected at startup as unknown tool names. Its
+`hook/list` MSP method is unavailable. These exact limitations have native
+loopback fixtures; no replacement agent or weaker permission mode is used.
 
 - Claude takes a changed mode in place through the SDK's `setPermissionMode`,
   sent before the next prompt and only when the mode moved. Claude can also move

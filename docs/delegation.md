@@ -267,8 +267,9 @@ mandatory protected adapters and the common OS executor when available. Their
 trusted native account/control stays local; model tools receive a filtered
 project view without account credentials, hooks or ambient host access.
 `boite_commit` publishes validated edits on the captured branch for real Git
-result verification. ACP/Muse/pi remain refused until their adapters implement
-the boundary. No permission fallback or implicit bypass is introduced.
+result verification. OpenCode 1.19.3 (default/build or plan) and pi (YOLO/bypass)
+now use their own native extension and the common executor. Muse and other ACP
+implementations remain refused until their adapters implement the boundary. No permission fallback or implicit bypass is introduced.
 
 ## Agent commands
 

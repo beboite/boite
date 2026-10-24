@@ -1,13 +1,14 @@
 import {createHash} from 'node:crypto';
 import {homedir} from 'node:os';
-import {join, isAbsolute} from 'node:path';
+import {join, isAbsolute, resolve} from 'node:path';
 import {existsSync} from 'node:fs';
 import type {Core} from '../core.ts';
 import type {ProtectedExecutionInput} from '../execution-policy.ts';
 import type {ProtectedDriverExecution} from '../drivers/protected.ts';
 import type {AccessBinding} from './access-scopes.ts';
 import {policyFile} from './file-policy.ts';
-import {sharedExecutionProtection} from './compute-policy.ts';
+import {sharedExecutionProtection, sharedPermissionSupport} from './compute-policy.ts';
+import type {PermissionMode} from '@boite/contracts';
 import {refused} from '../errors.ts';
 import {protectedTools} from '../protected-tools.ts';
 import {computeGit, computeChangedFiles} from './compute-git.ts';
@@ -25,8 +26,9 @@ export class SharedNativeExecution {
       if (name === 'sharedProjects.changed' || name === 'thread.updated') this.reconcile();
     });
   }
-  support(protocol: Parameters<typeof sharedExecutionProtection>[0]) {
-    return sharedExecutionProtection(protocol, this.core.procs.protection.available);
+  support(protocol: Parameters<typeof sharedExecutionProtection>[0], providerId?: string, mode?: PermissionMode) {
+    if (mode && !sharedPermissionSupport(protocol, mode, providerId)) return {supported: false as const, reason: `execution.permissionMode: ${providerId ?? protocol} cannot enforce ${mode}`};
+    return sharedExecutionProtection(protocol, this.core.procs.protection.available, providerId);
   }
   context(id: string): ProtectedDriverExecution | undefined {
     if (!this.binding(id) || this.core.providers.require(this.core.threads.require(id).providerId).protocol === 'echo') return;
@@ -46,7 +48,7 @@ export class SharedNativeExecution {
     this.check(binding);
     const thread = this.core.threads.require(id), protocol = this.core.providers.require(thread.providerId).protocol;
     if (protocol === 'echo') return null;
-    const support = this.support(protocol);
+    const support = this.support(protocol, thread.providerId, thread.permissionMode);
     if (!support.supported) throw refused(`execution.provider: ${support.reason}`);
     const records = [binding, ...(binding.additional ?? [])];
     const scopes = records.map(b => ({kind: b.compute ? 'job' as const : b.board ? 'board' as const : 'letter' as const,
@@ -68,9 +70,18 @@ export class SharedNativeExecution {
     const account = this.core.accounts.require(thread.accountId);
     const environment = {...process.env, ...this.core.accounts.accountEnv(account, this.core.providers.require(thread.providerId))};
     const credentialFiles = Object.entries(environment).filter(([name, value]) => /credential|(?:auth|token|secret|api_?key).*file|^(?:CODEX_HOME|CLAUDE_CONFIG_DIR|AWS_CONFIG_FILE)$/i.test(name) && typeof value === 'string' && isAbsolute(value)).map(([, value]) => value!);
+    const home = environment['HOME'] || homedir();
+    const selectedPath = (name: string, fallback: string) => resolve(binding.checkoutPath, environment[name] || fallback);
+    const piDirectory = environment['PI_CODING_AGENT_DIR'] || join(home, '.pi', 'agent');
+    const providerCredentials = protocol === 'pi' ? [resolve(binding.checkoutPath, piDirectory === '~' ? home : piDirectory.startsWith('~/') ? join(home, piDirectory.slice(2)) : piDirectory)]
+      : protocol === 'acp' && thread.providerId === 'opencode' ? [
+        join(selectedPath('XDG_CONFIG_HOME', join(home, '.config')), 'opencode'),
+        join(selectedPath('XDG_DATA_HOME', join(home, '.local', 'share')), 'opencode'),
+        ...['OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR'].flatMap(name => environment[name] ? [selectedPath(name, '')] : []),
+      ] : [];
     return {scope: scopes[0]!, additionalScopes: scopes.slice(1), checkout: binding.checkoutPath,
       route: {providerId: thread.providerId, accountId: thread.accountId, permissionMode: thread.permissionMode, ...(binding.compute ? {profileId: binding.compute.job.profileId} : {})},
-      credentialPaths: [...(account.isolationDir ? [account.isolationDir] : []), ...['.claude', '.codex', '.ssh', '.aws', '.config'].map(p => join(homedir(), p)), ...credentialFiles],
+      credentialPaths: [...(account.isolationDir ? [account.isolationDir] : []), ...['.claude', '.codex', '.ssh', '.aws', '.config'].map(p => join(homedir(), p)), ...credentialFiles, ...providerCredentials],
       executables: [process.execPath], readOverrides, expiresAt: Number.MAX_SAFE_INTEGER};
   }
   private key(input: ProtectedExecutionInput, id: string): string { return createHash('sha256').update(JSON.stringify([input, this.core.threads.require(id).contextMode?.tools ?? null])).digest('hex'); }
