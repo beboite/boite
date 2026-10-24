@@ -65,8 +65,9 @@ is `/home/node/.local` (`NPM_CONFIG_PREFIX`), and its `bin` comes before
 `/opt/agents` on `PATH`. An agent update, from the Providers page or the
 agent's own command (`codex update`, `pi update self`), installs there, in the
 home volume, and that copy runs from then on. It outlives an image update, so
-it is the copy Boite updates next; delete it from
-`/home/node/.local/lib/node_modules` to fall back on the image's.
+it is the copy Boite updates next. `npm uninstall -g <package>`
+(`npm uninstall -g @openai/codex`) removes its `bin` entry and its
+`lib/node_modules` copy, and the image's runs again.
 
 ### Updates and rollback
 
