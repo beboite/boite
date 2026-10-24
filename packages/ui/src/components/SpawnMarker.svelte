@@ -10,7 +10,8 @@
    * The linked thread opens on a click while this machine still has it.
    */
   let { store, link, direction }: { store: Store; link: ThreadLink; direction: 'from' | 'to' } = $props();
-  let label = $derived(fill(direction === 'from' ? strings.chat.startedByAgent : strings.chat.agentStartedThread, { title: link.title, project: link.project }));
+  // A thread on another machine of the group says which.
+  let label = $derived(fill(direction === 'from' ? strings.chat.startedByAgent : strings.chat.agentStartedThread, { title: link.title, project: link.machine ? `${link.project} · ${link.machine}` : link.project }));
   let present = $derived(store.threads.some((thread) => thread.id === link.threadId && !thread.archived));
 </script>
 

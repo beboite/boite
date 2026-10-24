@@ -43,6 +43,8 @@ export const strings = {
     syncStopped: 'The copy stopped at {stage}: {error}. What came before it stays copied.',
     syncStages: { settings: 'the settings', keybindings: 'the keybindings', brain: 'the brain switches' },
     threadFailed: 'A thread failed here: {thread}',
+    groupThreads: 'Threads from the other machines',
+    groupThreadsHint: 'Agents on the other machines of the group may start threads on this machine, in its projects, on their own agent (boite thread new --machine). Off by default.',
     agentLinkAddressRequired: 'Update both machines to relay through the app, or set a reachable HTTPS address for {machine} in General settings.',
   }
 } as const;
