@@ -415,7 +415,8 @@ asks for it instead of working around it. The card is asked without stopping and
 Apply (`agents.settings.apply`, owner only) goes through the same checks as the
 bot's settings page, and for projects the owner can untick part of the
 proposal first. Any change to the bot, from the card or from the page,
-settles the cards it answers, and a card whose key no longer exists closes, as\ndoes one about a bot archived since, except the card that archived it; the
+settles the cards it answers, and a card whose key no longer exists closes, as
+does one about a bot archived since, except the card that archived it; the
 asking thread reads the outcome as a message. Code:
 `agents/setting-cards.ts`, shared checks in
 `packages/contracts/src/agent-setting-requests.ts`.
