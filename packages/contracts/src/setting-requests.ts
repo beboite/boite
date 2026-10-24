@@ -15,7 +15,7 @@ import type { QuestionAnswer, QuestionOption, Settings, ThreadId } from './index
  * The experiments this build ships, in the order Settings lists them. Each
  * device turns them on for itself (`packages/ui/src/lib/experiments.ts`).
  */
-export const EXPERIMENT_IDS = ['theme-grain', 'session-import', 'prompt-cache', 'open-chat-links', 'preview-comments', 'resident-agents', 'whip', 'recording-indicators', 'goal2', 'edge-scrollbars', 'press-preload', 'contacts'] as const;
+export const EXPERIMENT_IDS = ['theme-grain', 'session-import', 'prompt-cache', 'resident-agents', 'whip', 'recording-indicators', 'goal2', 'contacts'] as const;
 export type ExperimentId = (typeof EXPERIMENT_IDS)[number];
 
 export function isExperimentId(id: unknown): id is ExperimentId {
@@ -148,6 +148,15 @@ export type RequestableKey = RequestableSetting | ExperimentSettingKey;
 export function experimentOf(key: string): ExperimentId | null {
   const id = key.startsWith('experiment.') ? key.slice('experiment.'.length) : null;
   return isExperimentId(id) ? id : null;
+}
+
+/**
+ * True for any `experiment.<id>` key, shipped or since graduated: a card
+ * asked about a switch this build no longer lists is still a device's switch,
+ * which a core setting never settles and `settings.set` never writes.
+ */
+export function isExperimentKey(key: string): boolean {
+  return key.startsWith('experiment.');
 }
 
 /** One readable setting, as `agent.settings` lists it. */
@@ -326,7 +335,7 @@ export function checkSettingRequest(params: SettingRequestParams, settings: Sett
  * flips no switch (`settledExperiment`).
  */
 export function settledSetting(setting: SettingAsk, settings: Settings): QuestionAnswer | null {
-  if (setting.kind !== 'change' || experimentOf(setting.key) !== null) return null;
+  if (setting.kind !== 'change' || isExperimentKey(setting.key)) return null;
   const now = effectiveSetting(settings, setting.key as RequestableSetting);
   if (sameSetting(now, setting.previous)) return null;
   return { optionIds: [sameSetting(now, setting.value) ? 'applied' : 'changed'], value: now };

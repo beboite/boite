@@ -15,8 +15,7 @@
  * context meter asks the same of `prompt-cache` before drawing its timer. The
  * bottom-left launchers and the store ask `resident-agents` before offering
  * the dedicated Agents interface. The composer asks `goal2` before taking
- * `/goal2` as a reviewed goal. `interaction-experiments.ts` starts
- * `edge-scrollbars.ts` and `press-preload.ts` while their switches are on.
+ * `/goal2` as a reviewed goal.
  */
 
 import { EXPERIMENT_IDS, type ExperimentId } from '@boite/contracts';

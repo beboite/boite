@@ -4,7 +4,6 @@
   import { workspace } from '../lib/workspace.svelte';
   import { ParagraphScan, answerText } from '../lib/message-display';
   import { strings } from '../lib/strings';
-  import { experimentOn } from '../lib/experiments.svelte';
   import { featureOn } from '../lib/features.svelte';
   import type { Store } from '../lib/store.svelte';
   import ChatFile from './ChatFile.svelte';
@@ -25,7 +24,7 @@
     text: string; live?: boolean; typing?: boolean; bubble?: boolean; store?: Store; threadId?: string; views?: readonly Message[];
   } = $props();
   let selected = $state<{ path: string; line?: number } | null>(null);
-  const directLinks = $derived(experimentOn('open-chat-links'));
+  const directLinks = $derived(featureOn('open-chat-links'));
   const rich = $derived(featureOn('chat-artifacts') || directLinks);
   let opening = false;
   function follow(event: MouseEvent): void {

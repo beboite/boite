@@ -6,7 +6,7 @@ import { startUi } from './lib/ui.ts';
 let server: { close(): Promise<void> };
 let page: BrowserPage;
 const timeline = '[data-testid=timeline]';
-const toggle = '[data-testid=experiment-edge-scrollbars]';
+const toggle = '[data-testid=setting-edge-scrollbars]';
 const artifacts = join(import.meta.dir, '.artifacts');
 const POINTER = '(hover: hover) and (pointer: fine)';
 
@@ -49,9 +49,9 @@ function thumb() {
   })()`);
 }
 
-async function setExperiment(on: boolean) {
+async function setSwitch(on: boolean) {
   await page.click('[data-testid=nav-settings]');
-  await page.click('[data-testid=settings-tab-experiments]');
+  await page.click('[data-testid=settings-tab-appearance]');
   expect(await page.evaluate(`!!document.querySelector('${toggle}')`)).toBe(true);
   const checked = await page.evaluate<boolean>(`document.querySelector('${toggle}').getAttribute('aria-checked') === 'true' || document.querySelector('${toggle}').checked === true`);
   if (checked !== on) await page.click(toggle);
@@ -63,7 +63,7 @@ async function setExperiment(on: boolean) {
 
 /**
  * Headless Chromium on Linux reports no pointing device, and CDP cannot emulate
- * one. The driver answers the experiment's one gate query as a desktop with a
+ * one. The driver answers the scrollbars' one gate query as a desktop with a
  * mouse would; every other query, CSS included, stays the browser's own.
  */
 const MOUSE = `(() => {
@@ -80,6 +80,8 @@ beforeAll(async () => {
   server = await startUi(port);
   page = await BrowserPage.launch({ url: 'about:blank', windowSize: { width: 1280, height: 900 } });
   await page.send('Page.addScriptToEvaluateOnNewDocument', { source: MOUSE });
+  // On by default: the test starts from native bars and turns them on in Appearance.
+  await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('boite.features', '{"edge-scrollbars":false}'); } catch {}` });
   await page.navigate(`http://127.0.0.1:${port}/?fake=1&open=recent&long=1`);
   await page.waitFor(`document.querySelector('${timeline}') && document.querySelector('${timeline}').scrollHeight > document.querySelector('${timeline}').clientHeight`);
   await settled();
@@ -88,12 +90,12 @@ beforeAll(async () => {
 afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
 test('edge scrollbars take no room, fade in near the edge, drag, and turn off cleanly', async () => {
-  // The experiment's gate, answered by the driver when headless has no mouse.
+  // The scrollbars' gate, answered by the driver when headless has no mouse.
   expect(await page.evaluate<boolean>(`matchMedia('${POINTER}').matches`)).toBe(true);
   const before = await box();
   await page.screenshot(join(artifacts, 'edge-scrollbars-off.png'));
 
-  await setExperiment(true);
+  await setSwitch(true);
   const on = await box();
   expect(on.client).toBe(on.offset);
   // The native bar's width went back to the content; the bubbles did not move sideways because of anything else.
@@ -173,7 +175,7 @@ test('edge scrollbars take no room, fade in near the edge, drag, and turn off cl
   await frames();
   expect(await page.evaluate<number>(`document.querySelectorAll('.edge-scrollbar-layer .edge-scrollbar-thumb').length`)).toBe(0);
 
-  await setExperiment(false);
+  await setSwitch(false);
   const off = await box();
   expect(off.client).toBeLessThan(off.offset);
   expect(await page.evaluate<boolean>(`document.querySelector('.edge-scrollbar-layer') === null`)).toBe(true);
