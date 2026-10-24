@@ -59,7 +59,7 @@ real('a bot project worker appears live in the project and opens as a conversati
   await owner.call('threads.update', { threadId: worker.thread.id, title: 'Verified project build' });
   await page.waitFor(`document.querySelector(${JSON.stringify(archivedWorker)})?.textContent.includes('Verified project build')`);
   await page.evaluate(`document.querySelector('[data-testid="archived-threads"]').scrollIntoView({ block: 'center' })`);
-  await page.waitFor(`(() => { const box = document.querySelector(${JSON.stringify(archivedBot)}).getBoundingClientRect(); return box.top >= 0 && box.bottom <= innerHeight; })()`);
+  await page.waitFor(`(() => { const box = document.querySelector('[data-testid="archived-threads"]').getBoundingClientRect(); return box.top >= 0 && box.bottom <= innerHeight; })()`);
   await page.settleAnimations();
   await page.screenshot(join(ARTIFACTS, 'archive-desktop.png'));
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
