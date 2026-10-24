@@ -2,20 +2,24 @@
  * Agent setting cards on the in-memory client, as `packages/core/src/agents/setting-cards.ts`
  * draws them: a thread, or a persistent agent about itself, asks the user to
  * change one of an agent's settings; Apply writes it through the agent's own
- * settings, and any change to the agent settles the cards it answers.
+ * settings, and any change to the agent settles the cards it answers. A
+ * creation card proposes a new bot, which Apply creates.
  */
 import {
-  AGENT_SETTING_KEYS, RpcErrorCode, agentSettingValue, checkAgentSettingRequest, normalizeAgentSetting, settledAgentSetting,
-  type AgentProfile, type AgentSettingAsk, type AgentSettingContext, type AgentSettingReading, type AgentSettingRequestParams,
-  type RpcParams, type RpcResult, type Thread, type Turn,
+  AGENT_SETTING_KEYS, RpcErrorCode, agentSettingValue, checkAgentCreateRequest, checkAgentSettingRequest, normalizeAgentSetting, settledAgentCreate, settledAgentSetting,
+  type AgentCreateAsk, type AgentProfile, type AgentSelection, type AgentSettingAsk, type AgentSettingContext, type AgentSettingReading, type AgentSettingRequestParams,
+  type AgentCreateContext, type DelegationConfig, type RpcParams, type RpcResult, type Thread, type Turn,
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import type { AgentSettingMethod } from '../fake-agents';
 import type { FakeContext } from './context';
+import { pickModel } from './delegation';
 import { modelsOf } from './provider-catalog';
-import { askAgentSetting } from './requests';
+import { askAgentCreate, askAgentSetting } from './requests';
 
 const refused = (message: string, data?: Record<string, unknown>) => new RpcFailure({ code: RpcErrorCode.Refused, message, ...(data ? { data } : {}) });
+/** As the core: a new bot may run on any installed model, whatever the thread's subagent settings. */
+const CREATE_ROUTES: DelegationConfig = { enabled: true, paused: false, profiles: [], anyModel: true };
 
 /** The agent a call names, by id or name; unnamed, the agent whose session the thread is. */
 function agentFor(ctx: FakeContext, threadId: string, name: string | undefined): AgentProfile {
@@ -74,9 +78,20 @@ export function requestAgentSetting(ctx: FakeContext, thread: Thread, turn: Turn
 
 /** Every open card the agents' settings now answer settles; one about a removed or archived agent closes. */
 export function settleAgentSettings(ctx: FakeContext, agentId?: string): void {
+  let bots: AgentProfile[] | null = null;
   for (const [questionId, pending] of [...ctx.pendingQuestions]) {
+    if (!ctx.pendingQuestions.has(questionId)) continue;
+    // A creation card settles once a bot of its name exists, made from it or on the Agents page.
+    const create = pending.request.agentCreate;
+    if (create !== undefined) {
+      const made = settledAgentCreate(create, bots ??= ctx.agents.liveProfiles());
+      if (made === null) continue;
+      ctx.pendingQuestions.delete(questionId);
+      pending.resolve(made);
+      continue;
+    }
     const ask = pending.request.agentSetting;
-    if (ask === undefined || (agentId !== undefined && ask.agentId !== agentId) || !ctx.pendingQuestions.has(questionId)) continue;
+    if (ask === undefined || (agentId !== undefined && ask.agentId !== agentId)) continue;
     const profile = ctx.agents.profileOf(ask.agentId);
     const answer = settledAgentSetting(ask, profile, profile && profile.status !== 'archived' ? ctx.agents.configOf(profile.id) : null);
     if (answer === null) continue;
@@ -104,6 +119,34 @@ function write(ctx: FakeContext, agent: AgentProfile, key: AgentSettingAsk['key'
 
 type Handlers = { [M in AgentSettingMethod]: (params: RpcParams<M>) => RpcResult<M> };
 
+/** As the core's creation route: the asking thread's own, or the model named; effort only when asked, permissions as the Agents page. */
+function createRoute(ctx: FakeContext, thread: Thread): AgentCreateContext['route'] {
+  return (model, effort) => {
+    try {
+      const route = model === undefined
+        ? { providerId: thread.providerId, accountId: thread.accountId, model: thread.model ?? modelsOf(ctx, thread.providerId, thread.accountId)[0]?.id ?? null }
+        : pickModel(ctx, thread, CREATE_ROUTES, model, effort);
+      if (route.model === null) return { ok: false, message: 'model: this thread runs on its provider\'s default model; name one with --model' };
+      if (model === undefined && effort !== undefined && !(modelsOf(ctx, route.providerId, route.accountId).find(entry => entry.id === route.model)?.effort?.levels ?? []).some(level => level.id === effort)) {
+        return { ok: false, message: 'the model does not offer this reasoning effort' };
+      }
+      const selection: AgentSelection = { providerId: route.providerId, accountId: route.accountId, model: route.model, effort: effort ?? null, permissionMode: 'bypassPermissions' };
+      return { ok: true, value: selection };
+    } catch (error) {
+      if (error instanceof RpcFailure) return { ok: false, message: error.message };
+      throw error;
+    }
+  };
+}
+
+function createBot(ctx: FakeContext, create: AgentCreateAsk): AgentProfile {
+  const taken = settledAgentCreate(create, ctx.agents.liveProfiles());
+  if (taken !== null) throw refused(`agents.settings.apply: a bot named ${JSON.stringify(create.name)} already exists (${String(taken.value)})`, { field: 'questionId' });
+  const saved = ctx.agents.create({ name: create.name, domain: create.domain, instructions: create.instructions, avatar: '', status: 'active', projectIds: create.projectIds, selection: create.selection });
+  settleAgentSettings(ctx);
+  return saved;
+}
+
 export function agentSettingMethods(ctx: FakeContext): Handlers {
   return {
     'agents.settings.read': params => {
@@ -128,8 +171,23 @@ export function agentSettingMethods(ctx: FakeContext): Handlers {
       if (!turn) throw refused('the thread has no turn to ask in yet', { threadId: thread.id });
       return requestAgentSetting(ctx, thread, turn, params);
     },
+    'agents.settings.create': params => {
+      const thread = ctx.thread(params.threadId);
+      if (thread.archived) throw refused('cannot ask on an archived thread', { threadId: thread.id });
+      const turn = thread.turns.find(entry => entry.status === 'running') ?? thread.turns.at(-1);
+      if (!turn) throw refused('the thread has no turn to ask in yet', { threadId: thread.id });
+      const open = [...ctx.pendingQuestions.values()].flatMap(pending => (pending.request.threadId === thread.id && pending.request.agentCreate ? [pending.request.agentCreate] : []));
+      const checked = checkAgentCreateRequest(params, {
+        bots: ctx.agents.liveProfiles(),
+        projects: ctx.projects.filter(project => project.kind !== 'drafts').map(project => ({ id: project.id, label: project.name })),
+        route: createRoute(ctx, thread),
+      }, open);
+      if (!checked.ok) throw refused(checked.message, checked.data);
+      return { questionId: askAgentCreate(ctx, thread, turn, checked.reason, checked.options, checked.create), create: checked.create };
+    },
     'agents.settings.apply': params => {
       const ask = ctx.pendingQuestions.get(params.questionId)?.request;
+      if (ask?.threadId === params.threadId && ask.agentCreate !== undefined) return createBot(ctx, ask.agentCreate);
       if (ask?.threadId !== params.threadId || ask.agentSetting === undefined) {
         throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `agents.settings.apply: ${String(params.questionId)} is no open agent setting card of thread ${String(params.threadId)}`, data: { field: 'questionId' } });
       }

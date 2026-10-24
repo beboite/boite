@@ -1,3 +1,4 @@
+import type { AgentCreateAsk } from './agent-create-requests.ts';
 import type { AgentSettingAsk } from './agent-setting-requests.ts';
 import type { ProviderId, RequestId, ThreadId, Timestamp, TurnId } from './ids';
 import type { Attachment } from './messages';
@@ -68,6 +69,11 @@ export interface QuestionRequest {
    * `text` is its reason. Always asynchronous.
    */
   agentSetting?: AgentSettingAsk;
+  /**
+   * A bot creation card (`agents.settings.create`): a thread proposes a new
+   * bot. `text` is its reason. Always asynchronous.
+   */
+  agentCreate?: AgentCreateAsk;
   /** A page the card opens in the thread's browser (`boite ask --open`), as for a sign-in. */
   open?: { url: string };
   createdAt: Timestamp;

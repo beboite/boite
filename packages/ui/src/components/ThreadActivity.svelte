@@ -13,6 +13,7 @@
   import SettingRequestCard from './SettingRequestCardLoader.svelte';
   import { settingHeading } from '../lib/setting-requests';
   import AgentSettingCard from './AgentSettingCardLoader.svelte';
+  import AgentCreateCard from './AgentCreateCardLoader.svelte';
   import GoalChecklist from './GoalChecklistLoader.svelte';
 
   let { store, reserveInComposer = false, onroom }: {
@@ -194,11 +195,11 @@
     {#if shown}
       <div class="questions" data-testid="activity-questions" data-count={asked.length}>
         <div class="activity-row question-row">
-          {#if shown.setting}<Settings2 size={16} />{:else if shown.agentSetting}<Bot size={16} />{:else}<MessageCircleQuestionMark size={16} />{/if}
+          {#if shown.setting}<Settings2 size={16} />{:else if shown.agentSetting || shown.agentCreate}<Bot size={16} />{:else}<MessageCircleQuestionMark size={16} />{/if}
           <button type="button" class="ghost objective question-toggle" aria-expanded={questionOpen}
             title={questionOpen ? strings.activity.questionFold : strings.activity.questionUnfold} data-testid="activity-question-toggle"
             onclick={() => (questionOpen = !questionOpen)}>
-            <span class="question-line ui-label">{questionOpen ? (shown.setting ? settingHeading(shown.setting) : shown.agentSetting ? fill(strings.agentSettingRequest.heading, { name: shown.agentSetting.agentName }) : strings.chat.questionAsyncHeading) : shown.text}</span>
+            <span class="question-line ui-label">{questionOpen ? (shown.setting ? settingHeading(shown.setting) : shown.agentSetting ? fill(strings.agentSettingRequest.heading, { name: shown.agentSetting.agentName }) : shown.agentCreate ? strings.agentCreateRequest.heading : strings.chat.questionAsyncHeading) : shown.text}</span>
             <ChevronDown size={16} class={questionOpen ? 'turned' : ''} />
           </button>
           {#if replyOf(store, shown.id).replying}
@@ -223,7 +224,19 @@
                 {#if child}
                   {@render fromChild(child, 'activity-subagent-question')}
                 {/if}
-                {#if question.agentSetting}
+                {#if question.agentCreate}
+                <AgentCreateCard
+                  {store}
+                  threadId={question.threadId}
+                  questionId={question.id}
+                  text={question.text}
+                  create={question.agentCreate}
+                  answer={null}
+                  pending
+                  docked
+                  respond={(optionId) => store.answerQuestion(question.threadId, question.id, [optionId])}
+                />
+                {:else if question.agentSetting}
                 <AgentSettingCard
                   {store}
                   threadId={question.threadId}

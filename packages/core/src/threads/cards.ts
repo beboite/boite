@@ -238,7 +238,10 @@ export class ThreadCards {
     this.foldAsyncCard(request.id, answer);
     this.asyncChanged(request.threadId);
     pending.resolve(answer);
-    const text = request.agentSetting === undefined ? answerTextOf(request, answer) : this.core.workforce.settingCards.answerText(request.agentSetting, answer);
+    const cards = this.core.workforce.settingCards;
+    const text = request.agentSetting !== undefined ? cards.answerText(request.agentSetting, answer)
+      : request.agentCreate !== undefined ? cards.createAnswerText(request.agentCreate, answer)
+      : answerTextOf(request, answer);
     this.threads.deferred.deliverAnswer(request.threadId, `> ${request.text}\n\n${text}`);
   }
 
@@ -402,6 +405,7 @@ export class ThreadCards {
       ...(ask.async === true ? { async: true } : {}),
       ...(ask.setting === undefined ? {} : { setting: ask.setting }),
       ...(ask.agentSetting === undefined ? {} : { agentSetting: ask.agentSetting }),
+      ...(ask.agentCreate === undefined ? {} : { agentCreate: ask.agentCreate }),
       ...(ask.open === undefined ? {} : { open: ask.open }),
       createdAt: Date.now(),
     };

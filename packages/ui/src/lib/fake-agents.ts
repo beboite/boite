@@ -105,6 +105,10 @@ export class FakeAgents {
 
   // What the rest of the fake core asks.
 
+  /** An agent's own thread, as the core's `sessionOf`: what a creation card's answer names. */
+  conversationOf(agentId: string): string | null { return this.threadOf(agentId); }
+  /** A creation card applied: the bot and its first turn, as `agents.profile.save` makes them. */
+  create(value: RpcParams<'agents.profile.save'>['value']): AgentProfile { return this.saveProfile({ value }, true); }
   /** The core keeps a project an agent looks after only through its own records, none of which the fake keeps. */
   referencesProject(_projectId: string): boolean { return false; }
   /** An agent's profile as stored, or null once removed: what an agent setting card reads. */

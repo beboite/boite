@@ -9,6 +9,7 @@
 import { strings as subscriptionProxy } from './strings/en/subscriptionProxy';
 import { strings as settingRequest } from './strings/en/settingRequest';
 import { strings as agentSettingRequest } from './strings/en/agentSettingRequest';
+import { strings as agentCreateRequest } from './strings/en/agentCreateRequest';
 import { strings as remoteBrowser } from './strings/en/remoteBrowser';
 import { strings as agentBrowser } from './strings/en/agentBrowser';
 import { strings as devicePanel } from './strings/en/devicePanel';
@@ -97,6 +98,7 @@ export const strings = {
   ...subscriptionProxy,
   ...settingRequest,
   ...agentSettingRequest,
+  ...agentCreateRequest,
   ...remoteBrowser,
   ...agentBrowser,
   ...devicePanel,

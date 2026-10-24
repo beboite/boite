@@ -100,6 +100,11 @@ export function registerModules(core: Core): void {
     await core.delegation.prepareRoutes(params.threadId, probe, [typeof params.model === 'string' ? params.model : undefined]);
     return core.delegation.spawn(params);
   });
+  // A bot's model resolves as a subagent's: read the lists a named model needs first.
+  core.router.register('agents.settings.create', async params => {
+    await core.delegation.prepareRoutes(params.threadId, probe, [typeof params.model === 'string' ? params.model : undefined]);
+    return core.workforce.settingCards.create(params);
+  });
   core.router.register('delegation.send', (params, ctx) => core.delegation.send(params, ctx.connection.identity.principal === 'agent' ? 'agent' : 'user'));
   // The agent's own stop leaves a pause it may lift; the owner's, one only the owner's next message releases.
   core.router.register('delegation.stop', (params, ctx) => ({ stopped: core.delegation.stop(params.threadId, params.agentId, ctx.connection.identity.principal === 'agent' ? 'agent' : 'stop') }));

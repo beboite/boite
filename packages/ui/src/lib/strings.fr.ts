@@ -13,6 +13,7 @@ import type { Translation } from './i18n.svelte';
 import { fr as subscriptionProxy } from './strings/fr/subscriptionProxy';
 import { fr as settingRequest } from './strings/fr/settingRequest';
 import { fr as agentSettingRequest } from './strings/fr/agentSettingRequest';
+import { fr as agentCreateRequest } from './strings/fr/agentCreateRequest';
 import { fr as remoteBrowser } from './strings/fr/remoteBrowser';
 import { fr as agentBrowser } from './strings/fr/agentBrowser';
 import { fr as devicePanel } from './strings/fr/devicePanel';
@@ -101,6 +102,7 @@ export const fr: Translation = {
   ...subscriptionProxy,
   ...settingRequest,
   ...agentSettingRequest,
+  ...agentCreateRequest,
   ...remoteBrowser,
   ...agentBrowser,
   ...devicePanel,

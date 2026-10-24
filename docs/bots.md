@@ -406,6 +406,15 @@ asking thread reads the outcome as a message. Code:
 `agents/setting-cards.ts`, shared checks in
 `packages/contracts/src/agent-setting-requests.ts`.
 
+A thread asked to set up a bot proposes it the same way: `boite settings bot
+create <name> --why <reason>`, with its role, instructions, model and projects
+([CLI](cli.md)). The card shows the bot as it will be; Create
+(`agents.settings.apply`, owner only) makes it exactly as the Agents page does,
+its conversation and its "Just created" first turn included, so creating a bot
+always takes one tap from the owner. The asking thread reads the new bot's
+id and conversation, to brief it with `boite threads send`. Shared checks in
+`packages/contracts/src/agent-create-requests.ts`.
+
 ## Routines
 
 Routines (`agents/routines.ts`) belong to one identity and wake it on its own

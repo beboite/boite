@@ -83,7 +83,7 @@ export function requestExcerpt(request: Pick<QuestionRequest, 'text'> | Pick<Per
  * it gets: a permission, or a card asking to apply a change (a setting, an
  * agent's setting), is an approval; anything else the agent asks is a question.
  */
-export function requestKind(request: Pick<QuestionRequest, 'setting' | 'agentSetting'> | Pick<PermissionRequest, 'toolName'>): NotificationKind {
+export function requestKind(request: Pick<QuestionRequest, 'setting' | 'agentSetting' | 'agentCreate'> | Pick<PermissionRequest, 'toolName'>): NotificationKind {
   if ('toolName' in request) return 'approvals';
-  return request.agentSetting !== undefined || request.setting?.kind === 'change' ? 'approvals' : 'questions';
+  return request.agentSetting !== undefined || request.agentCreate !== undefined || request.setting?.kind === 'change' ? 'approvals' : 'questions';
 }

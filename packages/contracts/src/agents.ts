@@ -1,5 +1,6 @@
 import type { DelegationConfig, DelegationProfile, PermissionMode, RequestId } from './index';
 import type { AgentSettingApplyParams, AgentSettingAsk, AgentSettingRequestParams, AgentSettingsReading, AgentSettingsReadParams } from './agent-setting-requests';
+import type { AgentCreateAsk, AgentCreateRequestParams } from './agent-create-requests';
 
 /**
  * A persistent agent is a thread with an identity. Its conversation is its own
@@ -247,7 +248,21 @@ export interface AgentsRpcMethods {
    * settings; the thread reads `applied`, `changed` or `refused`.
    */
   'agents.settings.request': { params: AgentSettingRequestParams; result: { questionId: RequestId; setting: AgentSettingAsk } };
-  /** Apply a pending agent setting card, or the user's edit of it. Owner only, like `agents.profile.save`. */
+  /**
+   * A card on the caller's thread asking the user to create a bot (`boite
+   * settings bot create`), asked without stopping, with `reason` as its text.
+   * The model resolves as for `boite delegate`; omitted, the bot runs on the
+   * thread's own route. Refused for a name a bot already holds or a card
+   * already open proposes, an unknown model or project, or drafts. Apply is
+   * `agents.settings.apply`; the card settles once a bot of that name exists,
+   * and the thread reads `created` with its id and conversation, or `refused`.
+   */
+  'agents.settings.create': { params: AgentCreateRequestParams; result: { questionId: RequestId; create: AgentCreateAsk } };
+  /**
+   * Apply a pending agent setting card, or the user's edit of it, or create the
+   * bot a creation card proposes (`value` is ignored there). Owner only, like
+   * `agents.profile.save`.
+   */
   'agents.settings.apply': { params: AgentSettingApplyParams; result: AgentProfile };
 }
 export interface AgentsRpcEvents {

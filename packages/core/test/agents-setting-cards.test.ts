@@ -189,3 +189,65 @@ test('an agent whose stored model its provider no longer lists still takes a pro
   expect(await thrown(owner.call('agents.profile.save', { id: agent.id, expectedRevision: profile().revision, value: { ...profile(), selection: { ...profile().selection, model: 'echo/other' } } })))
     .toThrow('the provider does not offer this model');
 });
+
+test('a discussion asks the user to create a bot; the owner creates it from the card and the discussion hears its conversation', async () => {
+  const { h, owner, prompts, worker, notes, run, drawn } = await setup();
+  const creations = () => h.core.threads.listQuestions(worker).filter(q => q.agentCreate);
+  const heard = (text: string) => (prompts.get(worker) ?? []).some(p => p.includes(text));
+  await owner.call('turns.start', { threadId: worker, prompt: 'Set up a communication bot' });
+  await waitFor(() => h.core.journal.listTurns(worker).some(t => t.status === 'done'));
+  const manual = join(h.dataDir, 'manual.md');
+  await Bun.write(manual, 'Write the release notes.');
+
+  // A taken name, an unknown project or model is refused before any card is drawn.
+  expect((await run(['settings', 'bot', 'create', 'ada', '--why', 'Another Ada'], worker)).err).toContain('a bot named "Ada" already exists');
+  expect((await run(['settings', 'bot', 'create', 'Herald', '--project', 'Nowhere', '--why', 'Releases'], worker)).err).toContain('no project "Nowhere"');
+  expect((await run(['settings', 'bot', 'create', 'Herald', '--model', 'gpt-nothing', '--why', 'Releases'], worker)).err).toContain('no installed model matches "gpt-nothing"');
+  expect((await run(['settings', 'bot', 'create', 'Herald'], worker)).err).toContain('needs --why');
+  expect(creations()).toHaveLength(0);
+
+  const asked = await run(['settings', 'bot', 'create', 'Herald', '--project', 'Notes', '--domain', 'release communication', '--instructions-file', manual, '--why', 'You asked for a communication bot.'], worker);
+  expect(asked.err).toBe('');
+  expect(asked.out).toContain('bot: Herald on echo/');
+  const [card] = creations();
+  expect(card!.text).toBe('You asked for a communication bot.');
+  // The thread's own route, with full access as the Agents page creates a bot.
+  expect(card!.agentCreate).toMatchObject({ name: 'Herald', domain: 'release communication', instructions: 'Write the release notes.', projectIds: [notes.id], selection: { providerId: 'echo', effort: null, permissionMode: 'bypassPermissions' } });
+  expect((await run(['settings', 'bot', 'create', 'herald', '--why', 'Again'], worker)).err).toContain('a card proposing a bot named "herald" is already open');
+
+  // Creating is the owner's: the thread's agent cannot apply its own card.
+  const agentClient = await connect(h.url, h.core.agents.tokenFor(worker));
+  expect(await thrown(agentClient.call('agents.settings.apply', { threadId: worker, questionId: card!.id }))).toThrow("not one of the agent's methods");
+  agentClient.close();
+
+  const bot = await owner.call('agents.settings.apply', { threadId: worker, questionId: card!.id });
+  expect(bot).toMatchObject({ name: 'Herald', status: 'active', projectIds: [notes.id], selection: card!.agentCreate!.selection });
+  const botThread = h.core.workforce.sessionOf(bot.id)!.threadId;
+  expect(creations()).toHaveLength(0);
+  expect(drawn(worker, card!.id)!.answer).toEqual({ optionIds: ['created'], value: bot.id });
+  await waitFor(() => heard(`created: the bot Herald (${bot.id}) exists`));
+  expect(prompts.get(worker)!.at(-1)).toContain(`boite threads send ${botThread} <text>`);
+  // Its first turn introduces it, as a bot made on the Agents page.
+  await waitFor(() => (prompts.get(botThread) ?? []).length > 0);
+});
+
+test('a refused bot card creates nothing, and a bot made on the Agents page settles a card proposing its name', async () => {
+  const { h, owner, prompts, worker, run, drawn } = await setup();
+  const creations = () => h.core.threads.listQuestions(worker).filter(q => q.agentCreate);
+  const heard = (text: string) => (prompts.get(worker) ?? []).some(p => p.includes(text));
+  await owner.call('turns.start', { threadId: worker, prompt: 'Two bots' });
+  await waitFor(() => h.core.journal.listTurns(worker).some(t => t.status === 'done'));
+  expect((await run(['settings', 'bot', 'create', 'Scout', '--why', 'Watch the issues.'], worker)).code).toBe(0);
+  expect((await run(['settings', 'bot', 'create', 'Scribe', '--why', 'Write the notes.'], worker)).code).toBe(0);
+  const [scout, scribe] = creations();
+
+  await owner.call('questions.answer', { threadId: worker, questionId: scout!.id, optionIds: ['refuse'] });
+  await waitFor(() => heard('refused: no bot Scout was created'));
+  expect(h.core.workforce.records.list('profile').map(p => p.name)).not.toContain('Scout');
+
+  const made = await owner.call('agents.profile.save', { value: { name: 'scribe', domain: '', instructions: '', avatar: '', status: 'active', projectIds: [], selection: scribe!.agentCreate!.selection } });
+  await waitFor(() => creations().length === 0);
+  expect(drawn(worker, scribe!.id)!.answer).toEqual({ optionIds: ['created'], value: made.id });
+  // The name is taken now: applying a stale card would make a second one.
+  expect(await thrown(owner.call('agents.settings.apply', { threadId: worker, questionId: scribe!.id }))).toThrow();
+});

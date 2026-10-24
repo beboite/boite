@@ -191,11 +191,15 @@ export {
   type SettingsReading,
 } from './setting-requests.ts';
 export {
-  AGENT_DAILY_BUDGET, AGENT_PROJECTS_MAX, AGENT_SETTING_KEYS, agentSettingAnswerText, agentSettingValue, checkAgentSettingRequest, isAgentSettingKey,
+  AGENT_DAILY_BUDGET, AGENT_PROJECTS_MAX, AGENT_SETTING_KEYS, agentProjectIds, agentSettingAnswerText, agentSettingValue, checkAgentSettingRequest, isAgentSettingKey,
   normalizeAgentSetting, settledAgentSetting,
   type AgentSettingApplyParams, type AgentSettingAsk, type AgentSettingChoice, type AgentSettingContext, type AgentSettingKey, type AgentSettingReading,
   type AgentSettingRequestCheck, type AgentSettingRequestParams, type AgentSettingsReading, type AgentSettingsReadParams,
 } from './agent-setting-requests.ts';
+export {
+  AGENT_DOMAIN_MAX, AGENT_INSTRUCTIONS_MAX, AGENT_NAME_MAX, agentCreateAnswerText, checkAgentCreateRequest, settledAgentCreate,
+  type AgentCreateAsk, type AgentCreateContext, type AgentCreateRequestCheck, type AgentCreateRequestParams,
+} from './agent-create-requests.ts';
 export { SPEECH_CATALOGUE, SPEECH_CUSTOM_ID, SPEECH_DEFAULT_MODEL, isSpeechModelId, speechUrlProblem, type SpeechCatalogueModel, type SpeechModelTier, type SpeechBackend } from './speech-models.ts';
 
 export { sideQuestionSnapshot } from './side-question-snapshot.ts';

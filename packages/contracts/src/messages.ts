@@ -1,4 +1,5 @@
 import type { ThreadLink } from './agent-door';
+import type { AgentCreateAsk } from './agent-create-requests.ts';
 import type { AgentSettingAsk } from './agent-setting-requests.ts';
 import type { ImageMimeType } from './attachment-limits.ts';
 import type { NativeAgentUpdate } from './delegation';
@@ -197,6 +198,8 @@ export type MessagePart =
       setting?: SettingAsk;
       /** An agent setting card: see `QuestionRequest.agentSetting`. */
       agentSetting?: AgentSettingAsk;
+      /** A bot creation card: see `QuestionRequest.agentCreate`. */
+      agentCreate?: AgentCreateAsk;
       /** A page to open: see `QuestionRequest.open`. */
       open?: { url: string };
     }
