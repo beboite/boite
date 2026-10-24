@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { AGENT_ENV, parseWindowCrop, type MessagePart, type RpcEvents } from '@boite/contracts';
 import { runCli } from '../src/cli.ts';
 import { connect, type CoreClient } from '../src/client.ts';
@@ -193,6 +193,11 @@ describe('window capture', () => {
     expect(await thrown(agent.call('windows.screenshot', { threadId, target: { id: '101' }, output: join(cwd, 'taken.png') }))).toThrow('already exists');
     await answered;
     expect(readFileSync(join(cwd, 'taken.png'), 'utf8')).toBe('x');
+    // A file where the temporary folder goes is named, not an internal mkdir error.
+    const temp = join(harness.dataDir, 'window-temp', threadId);
+    mkdirSync(dirname(temp), { recursive: true });
+    writeFileSync(temp, 'x');
+    expect(await thrown(agent.call('windows.screenshot', { threadId, target: { id: '101' } }))).toThrow(`${temp} is not a folder of this user's: remove it and capture again`);
   });
 
   test('boite window lists, captures, clips a contact sheet and opens the Window panel', async () => {

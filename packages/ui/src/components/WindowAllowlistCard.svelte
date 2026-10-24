@@ -59,7 +59,11 @@
     busy = true;
     try {
       const result = await store.client?.call('windows.revoke', { projectId: project.id, path: app.path });
-      if (result) lists = { ...lists, [project.id]: result.apps };
+      if (result) {
+        lists = { ...lists, [project.id]: result.apps };
+        // A reading that started before the revoke answered would bring the app back: read again after it.
+        void load();
+      }
     } catch (error) {
       store.error = errorText(error);
     } finally {

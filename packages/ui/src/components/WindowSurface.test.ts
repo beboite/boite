@@ -144,7 +144,18 @@ test('the allowed apps list removes an app only after the confirmation', async (
   apps.push(mount(WindowAllowlistCard, { target: document.body, props: { store } })); await settle();
   const project = document.querySelector<HTMLElement>('[data-testid=window-allowlist-project][data-project-id=p-boite]')!;
   expect(project.textContent).toContain('Unity.exe');
-  const calls = vi.spyOn(client, 'call');
+  // A Refresh that read the list before the revoke, and answers after it.
+  const call = client.call.bind(client);
+  let holding = false, release = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const calls = vi.spyOn(client, 'call').mockImplementation((async (method: string, params: unknown) => {
+    const answer = call(method as never, params as never);
+    if (method === 'windows.allowlist' && holding) await held;
+    return answer;
+  }) as typeof client.call);
+  holding = true;
+  $<HTMLButtonElement>('window-allowlist-refresh')!.click(); await settle();
+  holding = false;
   project.querySelector<HTMLButtonElement>('[data-testid=window-allowlist-remove]')!.click(); await settle();
   expect(confirm.current?.title).toBe('Stop allowing Unity.exe?');
   confirm.answer(false); await settle();
@@ -152,6 +163,8 @@ test('the allowed apps list removes an app only after the confirmation', async (
   project.querySelector<HTMLButtonElement>('[data-testid=window-allowlist-remove]')!.click(); await settle();
   confirm.answer(true); await settle();
   expect(calls).toHaveBeenCalledWith('windows.revoke', { projectId: 'p-boite', path: expect.stringMatching(/Unity\.exe$/i) });
+  expect($('window-allowlist-empty')).not.toBeNull();
+  release(); await settle();
   expect($('window-allowlist-empty')).not.toBeNull();
 });
 

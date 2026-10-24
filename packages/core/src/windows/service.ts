@@ -36,7 +36,7 @@ import {
   type WindowTarget,
   type WindowWatch,
 } from '@boite/contracts';
-import { lstatSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, realpathSync, type Stats, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { Core } from '../core.ts';
@@ -550,10 +550,12 @@ export class DesktopWindows {
    */
   #temp(thread: ThreadSummary): string {
     const temp = join(this.#tempRoot, thread.id);
-    mkdirSync(temp, { recursive: true, mode: 0o700 });
+    // A file or a link in the way makes mkdir fail: the checks below say which one to remove.
+    try { mkdirSync(temp, { recursive: true, mode: 0o700 }); } catch { /* checked below */ }
     for (const folder of [this.#tempRoot, temp]) {
-      const stat = lstatSync(folder);
-      if (!stat.isDirectory() || (process.getuid !== undefined && stat.uid !== process.getuid())) {
+      let stat: Stats | undefined;
+      try { stat = lstatSync(folder); } catch { /* missing: refused below */ }
+      if (!stat?.isDirectory() || (process.getuid !== undefined && stat.uid !== process.getuid())) {
         throw refused(`${folder} is not a folder of this user's: remove it and capture again`, { field: 'output' });
       }
     }

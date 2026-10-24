@@ -38,6 +38,7 @@ function loadX11() {
     XTranslateCoordinates: { args: [P, U64, U64, I32, I32, P, P, P], returns: I32 },
     XGetImage: { args: [P, U64, I32, I32, U32, U32, U64, I32], returns: P },
     XFreePixmap: { args: [P, U64], returns: I32 },
+    XClearArea: { args: [P, U64, I32, I32, U32, U32, I32], returns: I32 },
     XFree: { args: [P], returns: I32 },
     XSync: { args: [P, I32], returns: I32 },
     XSetErrorHandler: { args: [FN], returns: P },
@@ -450,6 +451,12 @@ export class X11WindowCapture implements WindowCapture {
         failed = 0;
         return false;
       }
+      // The new pixmap holds nothing where the window was covered, and the server
+      // exposes nothing by itself: ask for the background and an Expose, so the
+      // app paints the whole window into it during the settle.
+      this.lib.XClearArea(this.display, window, 0, 0, 0, 0, 1);
+      this.lib.XSync(this.display, 0);
+      failed = 0;
     }
     this.redirects.set(window, count + 1);
     return true;

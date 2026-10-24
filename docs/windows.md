@@ -186,6 +186,9 @@ On an X11 session, the backend uses libX11 through `bun:ffi`
   allowed, so it is refused.
 - With libXcomposite, it reads the window's own pixmap, so a covered window
   comes out whole. Without it, `XGetImage` returns whatever lies on top.
+  Without a compositing window manager, the first read redirects the window
+  and asks for an Expose, as uncovering it would, so the app paints the
+  covered part.
 - An X error such as `BadWindow` is turned into "gone" instead of ending the
   process.
 
