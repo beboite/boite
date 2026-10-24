@@ -34,7 +34,7 @@
   const phone = new MediaQuery('(max-width: 720px)');
   let pinnedHere = $derived(experimentOn('pinned-quotas') && pinnedQuotas.current.pinned
     && (!phone.current || !store.sidebarOpen)
-    && (pinnedQuotas.current.position !== 'dock' || store.sidebarCollapsed || phone.current));
+    && (pinnedQuotas.current.position !== 'dock' || store.page !== 'chat' || store.sidebarCollapsed || phone.current));
   /**
    * The prompt on its way to the core, drawn after what the thread holds. A
    * draft shows it too, while its thread is still being created. One whose

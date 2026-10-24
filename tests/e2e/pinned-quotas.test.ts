@@ -22,11 +22,11 @@ beforeAll(async () => {
 }, 120_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 60_000);
 
-async function boot(width = 1440, machines = false) {
+async function boot(width = 1440, machines = false, agents = false) {
   await page.send('Emulation.setDeviceMetricsOverride', { width, height: width === 390 ? 844 : 1000, deviceScaleFactor: 1, mobile: width === 390 });
   await page.send('Emulation.setTouchEmulationEnabled', { enabled: width === 390, maxTouchPoints: 1 });
   await page.evaluate(`localStorage.removeItem('boite.experiments'); localStorage.removeItem('boite.pinned-quotas.v1'); localStorage.removeItem('boite.quotas')`);
-  await page.navigate(`${origin}/?fake=1&open=recent${machines ? '&machines=1' : ''}`);
+  await page.navigate(`${origin}/?fake=1&open=recent${machines ? '&machines=1' : ''}${agents ? '&agents=1' : ''}`);
   await page.waitFor('globalThis.__boiteTest?.workspace.active?.openThread');
   if (machines) await page.waitFor('globalThis.__boiteTest.workspace.machines.length === 2');
   await fixture();
@@ -167,6 +167,42 @@ test('dock reserves rail space above the foot and leaves the final thread reacha
   expect(await fitsConversation()).toBe(true);
   expect(await page.evaluate(`JSON.parse(localStorage.getItem('boite.pinned-quotas.v1')).position`)).toBe('dock');
   await page.evaluate('globalThis.__boiteTest.workspace.active.sidebarCollapsed = false');
+  await page.waitFor(`document.querySelectorAll('${card}').length === 1 && document.querySelector('${card}')?.dataset.position === 'dock'`);
+  expect(page.errors()).toEqual([]);
+}, 60_000);
+
+test('a saved dock preference falls back to the chat in bot conversations and returns to the sidebar', async () => {
+  await boot(1440, false, true);
+  await enableAndPin();
+  await move('dock');
+  await page.evaluate(`(async () => {
+    const { setExperiment } = await import('/src/lib/experiments.ts');
+    setExperiment('resident-agents', true);
+    const store = globalThis.__boiteTest.workspace.active;
+    const agent = (await store.client.call('agents.snapshot', {})).profiles.find(profile => profile.name === 'Mira');
+    store.showAgents(agent.id);
+  })()`);
+  await page.waitFor(`globalThis.__boiteTest.workspace.active.page === 'agents' && globalThis.__boiteTest.workspace.active.openThread?.agentSessionId && document.querySelector('.agents-main [data-testid="chat"]')`);
+  await fixture();
+  await page.evaluate('globalThis.__boiteTest.workspace.active.panel.hide()');
+  await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
+  for (const width of [1440, 390]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height: width === 390 ? 844 : 1000, deviceScaleFactor: 1, mobile: width === 390 });
+    await page.send('Emulation.setTouchEmulationEnabled', { enabled: width === 390, maxTouchPoints: 1 });
+    await page.settleAnimations();
+    expect(await page.evaluate(`document.querySelector('.agents-main ${card}')?.checkVisibility() === true`)).toBe(true);
+    expect(await page.evaluate(`document.querySelectorAll('${card}').length`)).toBe(1);
+    expect(await page.evaluate(`document.querySelector('${card}')?.dataset.position`)).toBe('bottom-left');
+    expect(await page.evaluate(`document.querySelectorAll('${account}').length`)).toBe(2);
+    expect(await fitsConversation()).toBe(true);
+    expect(await page.evaluate(`JSON.parse(localStorage.getItem('boite.pinned-quotas.v1')).position`)).toBe('dock');
+    await page.evaluate(`globalThis.__boiteTest.setTheme('dark')`);
+    await page.settleAnimations();
+    await page.screenshot(join(import.meta.dir, '.artifacts', `pinned-quotas-agents-${width}-dark.png`));
+  }
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await page.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+  await page.evaluate('globalThis.__boiteTest.workspace.active.showChat()');
   await page.waitFor(`document.querySelectorAll('${card}').length === 1 && document.querySelector('${card}')?.dataset.position === 'dock'`);
   expect(page.errors()).toEqual([]);
 }, 60_000);

@@ -887,9 +887,10 @@ Settings, Experiments, Pinned model quotas adds a pin to Account limits and
 the Limits page. The card follows the open conversation's model provider,
 including every matching Douane account, and offers four conversation corners
 or a dock below the thread list. The dock reserves space above the sidebar
-controls; the list keeps its own scroll. A folded sidebar or phone chat shows
-the docked card in the conversation instead. Pin and placement are device
-preferences under `boite.pinned-quotas.v1`. Reads share the other quota views'
+controls; the list keeps its own scroll. Where the dock is unavailable (folded
+sidebar, phone chat or bot conversation), the card falls back to the
+conversation. Pin and placement are device preferences under
+`boite.pinned-quotas.v1`. Reads share the other quota views'
 cache and events; only an owner refresh forces the providers to read again.
 
 Use `app.css` tokens for colour, radii, spacing and motion, and mirror every
