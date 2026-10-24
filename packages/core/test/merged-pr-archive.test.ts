@@ -140,6 +140,42 @@ test.each(['badge', 'linked PR'] as const)('a merge detected by the %s moves dir
   } finally { finish(); agent.close(); core.procs.killTree(f.threadId); await owned.exited; }
 });
 
+test.each(['before Done', 'after Done', 'scheduled turn'] as const)('Done stops compaction: %s', async timing => {
+  const f = await fixture();
+  const core = harness.core;
+  let report!: () => void;
+  let finish!: () => void;
+  let stops = 0;
+  const gate = new Promise<void>(resolve => { finish = resolve; });
+  restoreDriver = setDriver('echo', { protocol: 'echo', startTurn(ctx) {
+    const message = ctx.emit.startMessage('assistant');
+    ctx.emit.part(message, 0, { type: 'text', text: 'The change has merged.' });
+    ctx.emit.complete(message, 'complete');
+    report = () => ctx.reportProgress?.('compacting');
+    return {
+      stop() { stops++; finish(); },
+      done: gate.then(() => ({ status: 'stopped' as const, sessionId: null, usage: null })),
+    };
+  } });
+  const turn = core.threads.startTurn(f.threadId, 'Finish reporting the merged change.', [], undefined,
+    timing === 'scheduled turn' ? 'compact' : undefined);
+  try {
+    await waitFor(() => core.threads.runner.handles.has(f.threadId));
+    if (timing === 'before Done') report();
+    expect(await f.client.call('threads.pullRequest', { threadId: f.threadId })).toMatchObject({ state: 'MERGED' });
+    await waitFor(() => core.threads.require(f.threadId).doneAt != null, 1500);
+    if (timing === 'after Done') {
+      expect(stops).toBe(0); // The final answer can still finish until compaction starts.
+      report();
+    }
+    expect(stops).toBe(1);
+    await waitFor(() => core.journal.getTurn(turn.id)?.status === 'stopped', 1500);
+    expect(core.threads.require(f.threadId)).toMatchObject({ archived: true, status: 'idle', doneAt: expect.any(Number) });
+    const saved = await f.client.call('threads.get', { threadId: f.threadId });
+    expect(saved.messages.flatMap(message => message.parts)).toContainEqual({ type: 'text', text: 'The change has merged.' });
+  } finally { finish(); }
+});
+
 test.each(['restore', 'draft'] as const)('detected merges respect a late %s during checkout validation', async change => {
   const f = await fixture();
   const core = harness.core;
