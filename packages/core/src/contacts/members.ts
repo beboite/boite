@@ -21,7 +21,7 @@ import { address, text } from '../coordination-letter.ts';
 import { checkMatchExtras, checkRemoteContact, checkTranscript } from '../coordination-lookup.ts';
 import { PeerRefusal, type Operation } from '../coordination-wire.ts';
 import type { Core } from '../core.ts';
-import { invalidParams, messageOf, refused, unavailable } from '../errors.ts';
+import { invalidParams, messageOf, refused, RpcFailure, unavailable } from '../errors.ts';
 import { checkTier } from './tier.ts';
 
 const MIRROR = 'contacts:relayed';
@@ -57,6 +57,8 @@ export interface LinkedContacts {
   projectsClosed(coreId: string, projectIds: string[] | null): void;
   /** The copies changed: peers are listed again. */
   reset(): void;
+  /** Starts the contacts' timer, which retries the pushes. */
+  arm(): void;
 }
 
 function within<T>(job: Promise<T>, ms: number, what: string): Promise<T> {
@@ -182,15 +184,26 @@ export class ContactMembers {
   }
 
   /** The receipt of a letter the contact sent a member's thread: the members holding its projects are asked in turn. */
+  /**
+   * The receipt of a letter the contact sent a member's thread: every member
+   * holding its projects is asked at once, within the relay's bound. Unknown
+   * is final only when each of them said so: a member that did not answer
+   * leaves the contact to ask again.
+   */
   async receipt(contactId: string, payload: unknown): Promise<AgentLetter> {
-    for (const member of this.holders(contactId)) {
-      let answer: AgentLetter | null;
-      try { answer = await this.ask(member, contactId, 'receipt', payload) as AgentLetter | null; }
-      catch { continue; }
-      if (!answer || typeof answer !== 'object') continue;
-      const to = address(answer.to, 'receipt.to');
-      return { ...answer, to: { coreId: this.selfId(), threadId: memberThreadId(member.coreId, to.threadId) }, toMachine: this.core.info().hostname ?? 'Boite' };
+    const found = await Promise.all(this.holders(contactId).map(async member => {
+      try {
+        const answer = await this.ask(member, contactId, 'receipt', payload) as AgentLetter | null;
+        if (!answer || typeof answer !== 'object') return { member, letter: null, down: true };
+        return { member, letter: answer, down: false };
+      } catch (error) { return { member, letter: null, down: !(error instanceof RpcFailure) }; }
+    }));
+    const hit = found.find(entry => entry.letter !== null);
+    if (hit) {
+      const to = address(hit.letter!.to, 'receipt.to');
+      return { ...hit.letter!, to: { coreId: this.selfId(), threadId: memberThreadId(hit.member.coreId, to.threadId) }, toMachine: this.core.info().hostname ?? 'Boite' };
     }
+    if (found.some(entry => entry.down)) throw new Error('a machine holding this contact\'s projects did not answer');
     throw refused('unknown receipt');
   }
 
@@ -205,6 +218,11 @@ export class ContactMembers {
     const operation = request?.operation as Operation;
     if (!RELAYED.includes(operation)) throw invalidParams('relay.operation: expected directory, search, read, deliver or receipt');
     if (!this.contacts.find(contactId)) throw refused('relay.contact: not a contact of this machine any more');
+    // The member's copy may be behind a revoke it missed: this core's grants decide, and the copy is pushed again.
+    if (!this.holdersOf(contactId).includes(member.coreId)) {
+      this.mark([member.coreId]);
+      throw refused('relay.contact: nothing of this machine is opened to that contact any more');
+    }
     const peer = this.core.contacts.peers().find(entry => entry.coreId === contactId && !this.core.contacts.isRelayPeer(entry));
     if (!peer) throw refused('relay.contact: not a contact of this machine any more');
     let payload = request?.payload;
@@ -247,8 +265,12 @@ export class ContactMembers {
     }
     if (!changed) return;
     this.core.journal.setSetting(MIRROR_PENDING, pending);
+    this.contacts.arm();
     this.push();
   }
+
+  /** A member's copy is still to push: the contacts' timer keeps running for it. */
+  behind(): boolean { return Object.keys(this.pendingPush()).length > 0; }
 
   /** The members that hold this contact's projects. */
   holdersOf(contactId: string): string[] {

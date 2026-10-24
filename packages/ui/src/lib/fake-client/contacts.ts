@@ -304,7 +304,7 @@ export function contactMethods(ctx: FakeContext) {
       if (params.accept) {
         const opened = project(params.projectId);
         const contact = state.contacts.find(entry => entry.coreId === request.coreId);
-        if (contact && !contact.grants.some(entry => entry.projectId === opened.id)) contact.grants.push({ projectId: opened.id, readThreads: false, grantedAt: ctx.now() });
+        if (contact && !contact.grants.some(entry => entry.projectId === opened.id && !entry.machine)) contact.grants.push({ projectId: opened.id, readThreads: false, grantedAt: ctx.now() });
         request.status = 'accepted';
         request.project = { id: opened.id, name: opened.name };
       } else {

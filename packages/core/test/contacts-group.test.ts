@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { AgentLetter } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { memberThreadId } from '../src/contacts/members.ts';
+import { RpcFailure } from '../src/errors.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
 
@@ -110,4 +111,53 @@ test('a grant names a machine of the group and one of its projects, and only mem
   // This core's own id is this core.
   expect(await thrown(hostClient.call('contacts.grant', { coreId: guestId, projectId: gamma.id, machine: host.core.coordination.card().coreId }))).toThrow('expected an unarchived project of this core');
   expect((await hostClient.call('contacts.get', {})).contacts[0]!.grants).toEqual([]);
+}, 30000);
+
+/** The host's requests to the member fail as a network would while `down` holds for that operation. */
+function cut(host: TestCore, member: string, operations: string[]): { restore(): void } {
+  const coordination = host.core.coordination;
+  const real = coordination.request.bind(coordination);
+  coordination.request = (peer, operation, payload) => peer.coreId === member && operations.includes(operation) ? Promise.reject(new Error('machine unreachable')) : real(peer, operation, payload);
+  return { restore: () => { coordination.request = real; } };
+}
+
+test('a member that missed a revoke reaches nothing through the linked machine, and a removal is pushed again until heard', async () => {
+  const { host, guest, member, hostClient, guestClient, memberClient, hostId, guestId, memberId } = await setup();
+  const gamma = await project(member, memberClient, 'gamma');
+  const memberThread = await thread(memberClient, gamma.id, 'Gamma work');
+  const mine = await project(guest, guestClient, 'mine');
+  const guestThread = await thread(guestClient, mine.id, 'Guest work');
+  await guestClient.call('contacts.grant', { coreId: hostId, projectId: mine.id });
+  await hostClient.call('contacts.grant', { coreId: guestId, projectId: gamma.id, machine: memberId });
+  await waitFor(() => member.core.contacts.members.relayedOf(guestId).length === 1, 10000);
+  await waitFor(() => host.core.contacts.find(guestId)?.offers.length === 1, 10000);
+  expect((await member.core.coordination.directory(memberThread)).agents.map(agent => agent.threadId)).toContain(guestThread);
+
+  // The member is off when the grant closes: its copy stays, yet the linked machine relays nothing for it.
+  const down = cut(host, memberId, ['relay.mirror']);
+  await hostClient.call('contacts.revoke', { coreId: guestId, projectId: gamma.id, machine: memberId });
+  expect(member.core.contacts.members.relayedOf(guestId)).toHaveLength(1);
+  const stale = await member.core.coordination.directory(memberThread);
+  expect(stale.agents.map(agent => agent.threadId)).not.toContain(guestThread);
+
+  // Removing the last contact keeps the timer that retries the member's copy.
+  await hostClient.call('contacts.grant', { coreId: guestId, projectId: gamma.id, machine: memberId });
+  await hostClient.call('contacts.remove', { coreId: guestId });
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  expect(host.core.contacts.members.behind()).toBe(true);
+  expect((host.core.contacts as unknown as { timer: unknown }).timer).not.toBeNull();
+  down.restore();
+}, 60000);
+
+test('a receipt a member could not answer is asked again, never refused', async () => {
+  const { host, hostClient, memberClient, guestId, memberId, member } = await setup();
+  const gamma = await project(member, memberClient, 'gamma');
+  await hostClient.call('contacts.grant', { coreId: guestId, projectId: gamma.id, machine: memberId });
+  const down = cut(host, memberId, ['relay.in']);
+  const failure = await host.core.contacts.members.receipt(guestId, { id: crypto.randomUUID(), fromThreadId: 'thr_x' }).catch((error: unknown) => error);
+  down.restore();
+  expect(failure).toBeInstanceOf(Error);
+  expect(failure).not.toBeInstanceOf(RpcFailure);
+  // Every member answered and none knows it: that is final.
+  expect(await thrown(host.core.contacts.members.receipt(guestId, { id: crypto.randomUUID(), fromThreadId: 'thr_x' }))).toThrow('unknown receipt');
 }, 30000);

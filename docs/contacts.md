@@ -173,13 +173,18 @@ contact's current copy, and the answer comes back under the linked machine's
 core id, the thread id followed by `~` and the first 16 characters of the
 member's core id. The contact sees neither the member's name, its address nor
 its key. A member that does not answer within 3.5 s lists no thread; a letter
-to one of its threads waits and is sent again until it expires.
+to one of its threads, or its receipt, waits and is asked again until it
+expires. The members are asked a receipt at once, and it is unknown only
+when each of them said so.
 
 The member keeps a copy of each contact it was opened to: its name, the
 owner's model tier on the linked machine, what the contact opened in return
 and the grants on the member's own projects. The linked machine pushes it
 (`relay.mirror`) on every grant, revoke, rename, tier, offer or link change,
-and retries every 30 seconds until the member heard it. With that copy the
+and retries every 30 seconds until the member heard it, even once the last
+contact is gone. A member whose copy missed a revoke reaches nothing through
+the linked machine, which answers from its own grants and pushes the copy
+again. With that copy the
 member's agents list the contact (`boite threads contacts`), reach the
 threads it opened and write to it; their requests go to the linked machine
 (`relay.out`), which sends them on as its own. A member that loses a grant

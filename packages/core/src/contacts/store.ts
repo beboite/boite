@@ -835,7 +835,7 @@ export class ContactStore implements LinkedContacts {
     this.started = true;
     this.listening = this.wantsTailnet();
     this.funnel.start(this.listening);
-    if (this.list().length > 0 || this.liveInvites().length > 0) this.arm();
+    if (this.list().length > 0 || this.liveInvites().length > 0 || this.members.behind()) this.arm();
     this.members.push();
   }
 
@@ -854,7 +854,8 @@ export class ContactStore implements LinkedContacts {
     const open = this.liveInvites().length;
     if (open < this.openSeen) this.changed();
     this.openSeen = open;
-    if (contacts.length === 0 && open === 0) {
+    // A member's copy still to push keeps the timer, even once the last contact went.
+    if (contacts.length === 0 && open === 0 && !this.members.behind()) {
       if (this.timer !== null) clearInterval(this.timer);
       this.timer = null;
       return;

@@ -72,10 +72,17 @@ test('accepting opens the picked project to the asker; refusing without a reason
   const pending = state.requests.find(request => request.status === 'pending')!;
   // A blank reason fails the core's `text()`: no field named.
   expect(await refusal(client.call('contacts.decide', { id: pending.id, accept: false, reason: '  ' }))).toEqual({ code: RpcErrorCode.InvalidParams, field: undefined });
+  // Another machine of the group already opened its own p-notes: accepting still opens this core's.
+  const member = new FakeClient({ delayMs: 0, coreId: 'machine-b' });
+  clients.push(member);
+  await member.connect();
+  await client.call('group.create', { name: 'Home' });
+  await member.call('group.join', { invite: (await client.call('group.invite', {})).invite });
+  await client.call('contacts.grant', { coreId: state.contacts[0]!.coreId, projectId: 'p-notes', machine: 'machine-b' });
   const accepted = await client.call('contacts.decide', { id: pending.id, accept: true, projectId: 'p-notes' });
   expect([accepted.status, accepted.decidedBy, accepted.project?.name]).toEqual(['accepted', 'owner', 'notes']);
   const chris = (await client.call('contacts.get', {})).contacts[0]!;
-  expect(chris.grants.map(grant => [grant.projectId, grant.readThreads])).toContainEqual(['p-notes', false]);
+  expect(chris.grants.map(grant => [grant.projectId, grant.readThreads, grant.machine ?? null])).toEqual(expect.arrayContaining([['p-notes', false, null], ['p-notes', false, 'machine-b']]));
   expect(await refusal(client.call('contacts.decide', { id: pending.id, accept: false, reason: 'late' }))).toEqual({ code: RpcErrorCode.InvalidParams, field: 'id' });
   const out = state.requests.find(request => request.direction === 'out')!;
   expect(await refusal(client.call('contacts.decide', { id: out.id, accept: true, projectId: 'p-notes' }))).toEqual({ code: RpcErrorCode.InvalidParams, field: 'id' });
