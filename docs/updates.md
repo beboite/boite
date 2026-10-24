@@ -123,7 +123,9 @@ install it quietly (`app_update_install_quietly`). The shell installs only
 when both hold:
 
 - the main window is not on screen: hidden in the tray. A window on screen may
-  be in use even with nothing running, and its restart would take it away;
+  be in use even with nothing running, and its restart would take it away. It
+  is checked again right before the core is asked, so a window restored from
+  the tray while the install waited calls it off;
 - the core grants `POST /shutdown-if-idle`, asked once: no turn, queued
   execution, RPC, peer request, tracked process or provider background work.
   The handoff that ends running turns, which Update uses, is never asked.

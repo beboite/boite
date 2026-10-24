@@ -347,7 +347,8 @@ async fn install(app: AppHandle, state: State<'_, AppUpdater>, quiet: bool) -> R
     let core = app.clone();
     let control = state.install.clone();
     let stopped = tauri::async_runtime::spawn_blocking(move || match core.try_state::<crate::local_core::CoreState>() {
-        Some(engine) => engine.wait_for_install(&control, quiet, || {
+        // Checked again right before the core is asked: a window restored from the tray meanwhile calls it off.
+        Some(engine) => engine.wait_for_install(&control, quiet, || !crate::window::main_window(&core).is_some_and(|window| window.is_visible().unwrap_or(true)), || {
             core.state::<AppUpdater>().change(&core, |s| s.phase = "installing".into());
         }),
         None => Err("the shell has no local core state; nothing was installed".into()),
