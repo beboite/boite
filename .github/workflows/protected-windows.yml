@@ -29,6 +29,10 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
+      - name: Build userspace native helper
+        run: |
+          bun packages/core/bin/install-windows-sandbox.ts "$env:RUNNER_TEMP\protected-tool.exe"
+          "BOITE_WINDOWS_SANDBOX_PATH=$env:RUNNER_TEMP\protected-tool.exe" >> $env:GITHUB_ENV
       - name: Native production fixture
         env:
           BOITE_TEST_NATIVE_EXECUTION: '1'

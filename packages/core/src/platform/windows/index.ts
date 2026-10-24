@@ -6,8 +6,10 @@ import * as jobs from './jobs.ts';
 import * as guard from './guard.ts';
 import { findTailscaleCli } from '../tailscale.ts';
 import { firewallAllow, firewallQuery } from './firewall.ts';
+import { WindowsExecutionBoundary } from './protected.ts';
 
 export const platform: ProcessPlatform = {
+  protectedExecution: new WindowsExecutionBoundary(),
   tailscaleCli: () => findTailscaleCli('windows'),
   firewall: { query: firewallQuery, allow: firewallAllow },
   retain(events, protections) {
