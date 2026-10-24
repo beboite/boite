@@ -94,7 +94,7 @@ export class ProtectedCheckout {
   }
 
   /** Verify the whole candidate before writing. Host changes conflict rather than overwrite newer work. */
-  flush(): void {
+  flush(): readonly string[] {
     if (this.closed) throw new Error('execution.checkout: private view is closed');
     assertExecutionPolicy(this.policy);
     this.checkOverrides();
@@ -119,6 +119,8 @@ export class ProtectedCheckout {
         }
       };
       walk('');
+      const changed = [...next].filter(([path, state]) => this.files.get(path)?.digest !== state.digest).map(([path]) => path);
+      changed.push(...[...this.files.keys()].filter(path => !next.has(path)));
       for (const [path, identity] of this.directories) {
         const host = join(this.policy.checkout, path);
         if (!lstatSync(host).isDirectory() || realpathSync(host) !== host || executionIdentity(host) !== identity) throw new Error('execution.checkout: captured directory was replaced');
@@ -163,6 +165,7 @@ export class ProtectedCheckout {
         const host = join(this.policy.checkout, path);
         this.files.set(path, {...state, identity: policyIdentity(host, lstatSync(host, {bigint: true})), override: this.policy.readOverrides.some(o => o.path === path)});
       }
+      return changed;
     } finally { rmSync(publication, {recursive: true, force: true}); }
   }
 

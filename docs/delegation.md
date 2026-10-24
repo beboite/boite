@@ -262,9 +262,13 @@ host confirms it. Interrupted host execution is uncertain after restart and
 is never automatically resubmitted.
 
 Actual host file protection is required before enabling providers with tools.
-Without that service only tool-free echo is admitted. ACP/pi cannot currently
-attest shared permission semantics and are refused. No permission fallback or
-implicit bypass is introduced.
+Without that service only tool-free echo is admitted. Claude/Codex use their
+mandatory protected adapters and the common OS executor when available. Their
+trusted native account/control stays local; model tools receive a filtered
+project view without account credentials, hooks or ambient host access.
+`boite_commit` publishes validated edits on the captured branch for real Git
+result verification. ACP/Muse/pi remain refused until their adapters implement
+the boundary. No permission fallback or implicit bypass is introduced.
 
 ## Agent commands
 

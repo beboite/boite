@@ -92,6 +92,36 @@ test('human mail uses the destination contact name; provenance is not RPC input 
   expect((await b.call('threads.get',{threadId:bs.threadId})).messages.every(m=>!m.parts.some(p=>p.type==='text'&&p.text===request.text))).toBe(true);
 });
 
+test('native capability fixtures retain host mode/account and leave unsupported adapters refused',async()=>{
+  const {a,b,ap,bp,as,bs,remote}=await sharedPair();
+  await a.call('contacts.settings',{settings:{minTier:2}});
+  const base='b'.repeat(40);a.setSharedRepository(ap.id,'https://example.test/shared.git',base);b.setSharedRepository(bp.id,'https://example.test/shared.git',base);
+  const nativeSeen:string[]=[];
+  const accounts=await b.call('accounts.list',{}),{loaded:providers}=await b.call('providers.list',{});
+  for(const protocol of ['claude-sdk','codex-appserver','muse','acp','pi'] as const){
+    const provider=providers.find(p=>p.protocol===protocol&&p.available);
+    if(!provider)continue;
+    const account=accounts.find(a=>a.providerId===provider.id)!;
+    const parent=await b.call('threads.create',{projectId:bp.id,providerId:provider.id,accountId:account.id});
+    await b.call('delegation.configure',{threadId:parent.id,config:{enabled:true,paused:false,profiles:[]}});
+    if(protocol==='acp'||protocol==='pi'){
+      await expect(b.call('sharedProjects.configure',{sharedProjectId:bs.sharedProjectId,computeThreadId:parent.id,compute:{enabled:true,profiles:['conversation'],permissionMode:'yolo',maxConcurrent:null}})).rejects.toMatchObject({code:RpcErrorCode.Refused});continue;
+    }
+    await b.call('sharedProjects.configure',{sharedProjectId:bs.sharedProjectId,computeThreadId:parent.id,compute:{enabled:true,profiles:['conversation'],permissionMode:'yolo',maxConcurrent:null}});
+    b.setSharedNativeExecution(false);
+    expect((await a.call('sharedCompute.models',{...as,host:remote}))[0]?.protection.supported).toBe(false);
+    b.setSharedNativeExecution(true);
+    expect((await a.call('sharedCompute.models',{...as,host:remote}))[0]).toMatchObject({providerId:provider.id,permissionMode:'yolo',protection:protocol==='muse'?{supported:false}:{supported:true,boundary:'isolated-process'}});
+    if(protocol==='claude-sdk'||protocol==='codex-appserver'){
+      nativeSeen.push(protocol);
+      const job=await a.call('sharedCompute.start',{...as,host:remote,profileId:'conversation',baseCommit:base,requestId:protocol,task:'Synthetic protected native fixture'});
+      expect(job).toMatchObject({providerId:provider.id,permissionMode:'yolo'});
+      expect((await b.call('threads.list',{projectId:bp.id})).find(t=>t.id===job.worker!.threadId)?.accountId).toBe(account.id);
+    }
+  }
+  expect(nativeSeen).toEqual(['claude-sdk','codex-appserver']);
+});
+
 test('compute uses the selected host profile, refuses unsafe execution, scopes jobs and revokes results',async()=>{
   const {a,b,ap,bp,aid,bid,as,bs,remote}=await sharedPair();
   await a.call('contacts.settings',{settings:{minTier:2}});

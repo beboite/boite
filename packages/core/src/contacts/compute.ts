@@ -9,7 +9,7 @@ import { assertDriverRunnable } from '../drivers/index.ts';
 import { modelsFor } from '../threads/selection.ts';
 import { type ChildRoute } from '../delegation/routes.ts';
 import { SharedComputeJournal, terminalCompute, type ComputeRecord } from './compute-journal.ts';
-import { computeInput, checkedComputeJob, sharedPermissionSupport, sharedExecutionProtection } from './compute-policy.ts';
+import { computeInput, checkedComputeJob, sharedPermissionSupport } from './compute-policy.ts';
 import { computeBase, computeGit, computeRepository } from './compute-git.ts';
 import { gitCommonDirOf } from './git-remote.ts';
 import { computePolicy, sameProject, threadRef, projectAddress } from './project-policy.ts';
@@ -31,7 +31,7 @@ export class SharedCompute {
   private closed = false;
   private readonly off: () => void;
   /** Protection service must report an actual execution boundary before admitting tools. */
-  protection: (ctx: SharedPeerContext, route: ChildRoute) => SharedExecutionProtection = (_ctx, route) => sharedExecutionProtection(this.core.providers.require(route.providerId).protocol);
+  protection: (ctx: SharedPeerContext, route: ChildRoute) => SharedExecutionProtection = (_ctx, route) => this.core.sharedAccess.execution.support(this.core.providers.require(route.providerId).protocol);
   /** Called after capturing the prepared checkout, before starting its first provider turn. */
   guardStart: (ctx: SharedPeerContext, worker: SharedThreadRef, job: SharedComputeJob) => void | Promise<void> = (ctx, worker) => {
     const thread = this.core.threads.require(worker.threadId);
@@ -488,6 +488,7 @@ export class SharedCompute {
     const work = (async () => {
       if (record.role === 'host' && record.job.worker) {
         const id = record.job.worker.threadId;
+        await this.core.procs.protection.revoke(id);
         this.core.threads.stopTurn(id); this.core.threads.releaseAgent(id);
         await Promise.allSettled([this.core.scheduler.stopAndWait(id), this.core.procs.stopAndWait(id), this.active.get(record.job.id), this.preparing.get(record.job.id), this.finishing.get(record.job.id), this.core.delegation.worktrees.settle(id)]);
         // Preparation/inspection that was already in flight may have captured its next git after the first stop.

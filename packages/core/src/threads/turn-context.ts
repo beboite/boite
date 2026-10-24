@@ -90,6 +90,7 @@ export class TurnContexts {
     const current = (): boolean => this.core.journal.getThread(threadId)?.selectionVersion === thread.selectionVersion;
     return {
       thread, provider, account,
+      protectedExecution: this.core.sharedAccess.execution.context(threadId),
       sessionId: thread.sessionId,
       resumeAt: thread.sessionResumeAt ?? null,
       sessionBefore: this.sessionBefore(thread, ''),
@@ -112,7 +113,7 @@ export class TurnContexts {
       background: list => this.threads.agentState.noteBackground(threadId, list, backgroundOwner),
       backgroundFinished: (id, state) => this.threads.agentState.finishBackground(threadId, id, backgroundOwner, state),
       spawnChild: this.leasedSpawnChild(threadId, provider, { resume: thread.sessionId !== null }),
-      finishStartup: () => this.core.procs.finishStartup(threadId),
+      finishStartup: () => this.core.procs.finishStartup(this.core.procs.protection.controlScope(threadId) ?? threadId),
       lazyMcp: this.lazyMcpFor(thread),
     };
   }
@@ -127,6 +128,7 @@ export class TurnContexts {
   ): TurnContext {
     thread = this.core.sharedAccess.contextThread(thread);
     const threadId = thread.id;
+    const protectedExecution = this.core.sharedAccess.execution.context(threadId);
     const backgroundOwner = { providerId: provider.id, sessionGeneration: thread.sessionGeneration ?? 0, parentTurnId: turn.id };
     const env = this.core.accounts.accountEnv(account, provider);
     // When each tool card first showed up and when it stopped running, by slot.
@@ -367,6 +369,7 @@ export class TurnContexts {
     };
     return {
       thread,
+      protectedExecution,
       account,
       provider,
       turn,
@@ -434,7 +437,7 @@ export class TurnContexts {
         return spawned;
       },
       spawnChild: this.leasedSpawnChild(threadId, provider, { resume: thread.sessionId !== null, turnId: turn.id }),
-      finishStartup: () => this.core.procs.finishStartup(threadId),
+      finishStartup: () => this.core.procs.finishStartup(this.core.procs.protection.controlScope(threadId) ?? threadId),
       lazyMcp: this.lazyMcpFor(thread),
       killTree: () => {
         this.core.procs.killTree(threadId);
@@ -459,11 +462,13 @@ export class TurnContexts {
     session?: { resume: boolean; turnId?: TurnId },
   ): (cmd: string, args: string[], opts?: SpawnOptions) => SpawnedChild {
     return (cmd, args, opts) => {
-      this.core.sharedAccess.denyTool(threadId);
+      const execution = session ? this.core.sharedAccess.execution.context(threadId) : undefined;
+      if (!execution) this.core.sharedAccess.denyTool(threadId);
       this.core.sharedCompute?.assertSpawn(threadId);
       // The SDK drivers hand a whole environment here, so the agent's own
       // variables are merged onto theirs rather than added to `process.env`.
-      const child = this.core.procs.spawnChild(threadId, cmd, args, {
+      const scope = execution ? this.core.procs.protection.control(threadId) : threadId;
+      const child = this.core.procs.spawnChild(scope, cmd, args, {
         ...opts,
         env: agentEnvOf(this.core, threadId, opts?.env ?? process.env),
       });

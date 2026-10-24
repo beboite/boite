@@ -22,6 +22,7 @@ function storedScope(core: Core, threadId: string): LetterScope | null {
   if (!rows.length) return null;
   const scope: LetterScope = {bindings: [], legacy: true, peers: rows.map(r => r.peer)};
   core.journal.setSetting(`shared-file-letters:${threadId}`, scope);
+  core.sharedAccess.execution.reconcile();
   return scope;
 }
 
@@ -51,7 +52,20 @@ export function protectLetters(core: Core, threadId: string, letters: AgentLette
   const external = letters.filter(l => l.contact);
   if (!external.length) return;
   const thread = core.threads.require(threadId);
-  if (core.providers.require(thread.providerId).protocol !== 'echo' || thread.permissionMode !== 'default') throw refused('shared file policy: contact letter execution requires a protected provider route');
+  const protocol = core.providers.require(thread.providerId).protocol;
+  if (!core.sharedAccess.execution.support(protocol).supported || protocol === 'echo' && thread.permissionMode !== 'default') throw refused('shared file policy: contact letter execution requires a protected provider route');
+  const captured = core.sharedAccess.bound(threadId);
+  const associations = captured ? [captured, ...(captured.additional ?? [])].map(b => b.job.sharedProjectId) : [];
+  if (protocol !== 'echo' && ['queued', 'running', 'waiting'].includes(thread.status)
+    && external.some(l => !l.sharedProjectId || !associations.includes(l.sharedProjectId))) {
+    throw refused('shared file policy: new contact authority waits until the native turn is idle');
+  }
+  if (protocol !== 'echo' && !captured) {
+    // An ordinary running session has unrestricted tools. Hold the letter until
+    // that turn ends; it must never be steered into the old process.
+    if (['queued', 'running', 'waiting'].includes(thread.status)) throw refused('shared file policy: contact letter waits for protected native preparation after the local turn');
+    core.threads.releaseAgent(threadId);
+  }
   const scope = storedScope(core, threadId) ?? {bindings: [], legacy: false, peers: []};
   for (const letter of external) {
     if (!scope.peers.includes(letter.contact!.coreId)) scope.peers.push(letter.contact!.coreId);
@@ -71,5 +85,6 @@ export function protectLetters(core: Core, threadId: string, letters: AgentLette
     if (thread.projectId !== local.projectId) throw refused('letter.to: expected the captured project');
   }
   core.journal.setSetting(`shared-file-letters:${threadId}`, scope);
+  core.sharedAccess.execution.reconcile();
   core.sharedAccess.assertTurn(threadId);
 }

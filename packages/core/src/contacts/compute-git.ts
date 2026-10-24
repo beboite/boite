@@ -8,6 +8,11 @@ import { gitRemoteOf } from './git-remote.ts';
 export async function computeGit(core: Core, threadId: string, cwd: string, args: string[]): Promise<string> {
   return rawGit(core, threadId, cwd, [...await sharedGitConfig(core, threadId, cwd), ...args]);
 }
+/** Git's own ignore rules, without parsing quoted filenames or staging unrelated files. */
+export async function computeChangedFiles(core: Core, threadId: string, cwd: string, paths: string[]): Promise<string[]> {
+  const output = await rawGit(core, threadId, cwd, [...await sharedGitConfig(core, threadId, cwd), '--literal-pathspecs', 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', ...paths], false);
+  return [...new Set(output.split('\0').filter(Boolean))];
+}
 /** Git preparation/inspection is core work: host hooks, filters and fsmonitor must not execute outside the job boundary. */
 export async function sharedGitConfig(core: Core, threadId: string, cwd: string): Promise<string[]> {
   const emptyHooks = join(core.dataDir, 'shared-compute-empty-hooks'); mkdirSync(emptyHooks, {recursive: true});
@@ -18,9 +23,10 @@ export async function sharedGitConfig(core: Core, threadId: string, cwd: string)
   }));
   return ['-c', `core.hooksPath=${emptyHooks}`, '-c', 'core.fsmonitor=false', ...[...filters].flatMap(key => ['-c', `${key}.process=`, '-c', `${key}.smudge=`, '-c', `${key}.clean=`, '-c', `${key}.required=false`])];
 }
-async function rawGit(core: Core, threadId: string, cwd: string, args: string[]): Promise<string> {
+async function rawGit(core: Core, threadId: string, cwd: string, args: string[], trim = true): Promise<string> {
   core.sharedCompute?.assertGit(threadId);
-  const spawned = core.procs.spawn(threadId, 'git', ['--no-pager', '--no-optional-locks', ...args], { cwd });
+  const scope = core.procs.protection.policy(threadId) ? core.procs.protection.control(threadId) : threadId;
+  const spawned = core.procs.spawn(scope, 'git', ['--no-pager', '--no-optional-locks', ...args], { cwd });
   let timer: ReturnType<typeof setTimeout> | undefined;
   // Bound process output at the reader, rather than collecting arbitrary repo/config errors.
   const read = async (stream: ReadableStream<Uint8Array> | null): Promise<string> => {
@@ -28,14 +34,14 @@ async function rawGit(core: Core, threadId: string, cwd: string, args: string[])
     const reader = stream.getReader(), decoder = new TextDecoder(); let size = 0, value = '';
     try {
       for (;;) { const next = await reader.read(); if (next.done) break; size += next.value.length; if (size > 65536) { spawned.proc.kill(); throw refused('compute.git: output exceeded 65536 bytes'); } value += decoder.decode(next.value, {stream: true}); }
-      return (value + decoder.decode()).trim();
+      return value + decoder.decode();
     } finally { reader.releaseLock(); }
   };
   try {
     timer = setTimeout(() => { spawned.proc.kill(); }, 15000);
     const [out, , code] = await Promise.all([read(spawned.proc.stdout), read(spawned.proc.stderr), spawned.exited]);
     if (code !== 0) throw refused(`compute.git: ${args[0]} could not verify the captured repository or commit`);
-    return out;
+    return trim ? out.trim() : out;
   } finally { clearTimeout(timer); }
 }
 export function computeRepository(core: Core, projectId: string): string {

@@ -765,6 +765,7 @@ export class ThreadStore {
    * its exit, and with no `turn.finished` to follow nothing else would sweep it.
    */
   releaseAgent(threadId: ThreadId): void {
+    void this.core.procs.protection.revoke(threadId).catch(() => {});
     this.agentState.cancelBackground(threadId);
     releaseThread(threadId);
     this.core.procs.sweepSoon(threadId);

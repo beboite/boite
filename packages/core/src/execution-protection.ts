@@ -12,6 +12,7 @@ interface Lease {
   timer?: ReturnType<typeof setTimeout>;
   stopping?: Promise<void>;
   opening?: Promise<NativeExecutionSession>;
+  controlId?: string;
 }
 
 /** Host-owned capabilities. Revoked bindings stay closed until the host explicitly releases them. */
@@ -24,6 +25,20 @@ export class ExecutionProtections {
     private readonly live: (id: string) => number) {}
 
   policy(threadId: string): ExecutionPolicy | null { return this.bindings.get(threadId)?.policy ?? null; }
+  controlScope(threadId: string): string | null { return this.bindings.get(threadId)?.controlId ?? null; }
+  get available(): boolean { return !!this.boundary && (this.boundary.available?.() ?? false); }
+  assert(threadId: string): void {
+    const lease = this.bindings.get(threadId);
+    if (!lease) throw new Error('execution.thread: expected an installed capability');
+    try {this.check(lease);} catch (error) {void this.revoke(threadId).catch(() => {}); throw error;}
+  }
+  /** Trusted provider control and fixed core Git operations, never model-supplied commands. */
+  control(threadId: string): string {
+    const lease = this.bindings.get(threadId);
+    if (!lease) throw new Error('execution.thread: expected an installed capability');
+    this.check(lease);
+    const id = lease.controlId ??= protectionProbeThread(); lease.helpers.add(id); return id;
+  }
 
   async install(threadId: string, input: ProtectedExecutionInput, check: () => void): Promise<ExecutionPolicy> {
     if (this.bindings.has(threadId) || this.refused.has(threadId) || this.live(threadId)) throw new Error('execution.thread: protection must precede its first process; release the old binding before replacement');
@@ -76,15 +91,16 @@ export class ExecutionProtections {
     if (this.bindings.has(threadId) || this.refused.has(threadId)) throw new Error('execution.terminal: protected tools require controlled standard pipes');
   }
 
-  flush(threadId: string): void {
+  flush(threadId: string): readonly string[] {
     const lease = this.bindings.get(threadId);
     if (!lease) throw new Error('execution.thread: expected an installed capability');
     try {
       this.check(lease);
       if ([...lease.threads].some(id => this.live(id))) throw new Error('execution.processes: tools must exit before publishing project edits');
       if (!lease.session) throw new Error('execution.platform: native protection is not ready');
-      lease.session.flush();
+      const changed = lease.session.flush() ?? [];
       this.check(lease);
+      return changed;
     } catch (error) { void this.revoke(threadId).catch(() => {}); throw error; }
   }
 

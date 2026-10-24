@@ -47,6 +47,8 @@ import { CodexRateLimits } from './rate-limits.ts';
 import { SpentWindows, turnError } from './availability.ts';
 import { SessionRetention } from '../session-retention.ts';
 import { noteReady } from '../driver-log.ts';
+import {PROTECTED_CODEX_ARGS, protectedCodexConfig, protectedCodexThread} from './protected.ts';
+import {PROTECTED_TOOL, protectedTool, PROTECTED_COMMIT, protectedCommit} from '../protected.ts';
 
 /** `hook/completed` statuses as the ledger counts them; `running` is not an end. */
 const HOOK_OUTCOMES: Record<string, HookOutcome> = {
@@ -329,6 +331,9 @@ export class CodexSession {
   }
 
   private async open(ctx: SessionContext): Promise<void> {
+    // thread/resume cannot replace dynamicTools. Replaying through the core's
+    // existing session-loss retry installs them on thread/start before any prompt.
+    if (ctx.protectedExecution && ctx.sessionId !== null) throw new ThreadLostError('Protected Codex tools require thread/start; replay the captured conversation');
     const profile = profileFor(ctx.provider);
     const executable = profile === undefined ? null : resolveExecutable(profile);
     if (executable === null) {
@@ -338,17 +343,17 @@ export class CodexSession {
     const rpc = await this.initialize(ctx, executable, profile?.launch?.args ?? []);
     rpc.notify('initialized', {});
     void this.reportSkippedHooks(rpc, ctx);
-
     const policy = MODE_POLICY[ctx.thread.permissionMode];
     const model = modelOf(ctx);
     // A context mode without MCP turns the user's servers off by name.
-    const config = await threadConfig(rpc, ctx.thread.cwd, (level, message) => ctx.log(level, message), ctx.thread.contextMode?.mcp === false);
+    const config = {...await threadConfig(rpc, ctx.thread.cwd, (level, message) => ctx.log(level, message), !!ctx.protectedExecution || ctx.thread.contextMode?.mcp === false, !!ctx.protectedExecution), ...protectedCodexConfig(ctx)};
+    const sandbox = ctx.protectedExecution ? protectedCodexThread(ctx) : {sandbox: policy.sandbox};
     if (ctx.sessionId !== null) {
       const resumed = await resumeThread(rpc, ctx, {
         threadId: ctx.sessionId,
         cwd: ctx.thread.cwd,
         approvalPolicy: policy.approvalPolicy,
-        sandbox: policy.sandbox,
+        ...sandbox,
         ...(model === null ? {} : { model }),
         config,
         excludeTurns: true,
@@ -362,7 +367,7 @@ export class CodexSession {
       config,
       cwd: ctx.thread.cwd,
       approvalPolicy: policy.approvalPolicy,
-      sandbox: policy.sandbox,
+      ...sandbox,
       ...(model === null ? {} : { model }),
     });
     this.threadId = created.thread.id;
@@ -414,6 +419,7 @@ export class CodexSession {
     const context = contextArgs(ctx.thread.contextMode);
     if (ctx.thread.permissionMode === 'yolo' && !context.includes('features.hooks=false')) args = [...args, '--config', 'features.hooks=false'];
     args = [...args, ...context, ...NO_NATIVE_SUBAGENTS, ...LIVE_TURN_SETTINGS];
+    if (ctx.protectedExecution) {ctx.protectedExecution.check(); args = [...args, ...PROTECTED_CODEX_ARGS];}
     const child = ctx.spawnChild(executable, args, {
       startup: true,
       cwd: ctx.thread.cwd,
@@ -737,6 +743,17 @@ export class CodexSession {
 
   private async onRequest(ctx: SessionContext, method: string, raw: unknown): Promise<unknown> {
     const params = (raw ?? {}) as Record<string, unknown>;
+    if (ctx.protectedExecution) {
+      ctx.protectedExecution.check();
+      if (method === 'item/tool/call' && params['tool'] === PROTECTED_TOOL) {
+        return protectedTool(this.current?.ctx ?? null, params['arguments'], this.current?.stopped ?? Promise.resolve());
+      }
+      if (method === 'item/tool/call' && params['tool'] === PROTECTED_COMMIT) return protectedCommit(this.current?.ctx ?? null, params['arguments'], this.current?.stopped ?? Promise.resolve());
+      if (method === 'item/permissions/requestApproval') return {permissions: {}};
+      if (method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval') return {decision: 'decline'};
+      if (method === 'mcpServer/elicitation/request') return {action: 'decline'};
+      if (method === 'item/tool/call') throw new Error('execution.codex.tool: only the captured protected tool is installed');
+    }
     switch (method) {
       case 'item/commandExecution/requestApproval': {
         const decision = await this.askUser(

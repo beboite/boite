@@ -30,9 +30,13 @@ export class SharedBoard {
   private closed = false;
   private readonly off: () => void;
   /** File protection installs a host-enforced admission gate. Only the no-tools echo route works by default. */
-  guardStart: (ctx: SharedPeerContext, worker: SharedThreadRef) => void | Promise<void> = (_ctx, worker) => {
+  guardStart: (ctx: SharedPeerContext, worker: SharedThreadRef) => void | Promise<void> = async (_ctx, worker) => {
     const thread = this.core.threads.require(worker.threadId);
-    if (this.core.providers.require(thread.providerId).protocol !== 'echo') throw refused('sharedBoard.start: this host must install shared execution file protection for this provider');
+    if (!this.core.sharedAccess.execution.support(this.core.providers.require(thread.providerId).protocol).supported) throw refused('sharedBoard.start: this host must install shared execution file protection for this provider');
+    if (!['queued', 'running', 'waiting'].includes(thread.status)) {
+      this.core.threads.releaseAgent(thread.id);
+      await this.core.procs.stopAndWait(thread.id);
+    }
   };
 
   constructor(readonly core: Core) {

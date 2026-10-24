@@ -21,11 +21,12 @@ export function sharedPermissionSupport(protocol: Protocol, mode: PermissionMode
   return protocol === 'claude-sdk' || protocol === 'codex-appserver' || protocol === 'muse';
 }
 /** Approval callbacks, cwd and provider sandbox names do not attest selective secret-file isolation. */
-export function sharedExecutionProtection(protocol: Protocol): SharedExecutionProtection {
+export function sharedExecutionProtection(protocol: Protocol, nativeAvailable = false): SharedExecutionProtection {
   if (protocol === 'echo') return {supported: true, boundary: 'no-tools'};
+  if (nativeAvailable && (protocol === 'claude-sdk' || protocol === 'codex-appserver')) return {supported: true, boundary: 'isolated-process'};
   const reason: Record<Exclude<Protocol, 'echo'>, string> = {
-    'claude-sdk': 'Claude tool hooks are not process isolation; selective secret read protection is unavailable',
-    'codex-appserver': 'Codex read approvals do not cover ordinary file reads; selective secret isolation is unavailable',
+    'claude-sdk': 'Claude protected tools require a supported native host boundary and its userspace helper',
+    'codex-appserver': 'Codex protected tools require a supported native host boundary and its userspace helper',
     acp: 'ACP modes and approval coverage are provider-specific; protected shared execution is unavailable',
     muse: 'Muse sandbox modes do not attest selective secret read denial; protected shared execution is unavailable',
     pi: 'pi RPC has no enforceable approval gate or selective secret isolation',

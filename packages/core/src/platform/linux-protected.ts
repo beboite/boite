@@ -15,6 +15,7 @@ const environment = (): Record<string, string> => ({PATH: '/usr/bin:/bin', HOME:
 /** Uses the maintained, unprivileged bubblewrap launcher. Never tries sudo, setuid or a weaker fallback. */
 export class LinuxExecutionBoundary implements NativeExecutionBoundary {
   constructor(private readonly executable: () => string | null = () => process.env.BOITE_BWRAP_PATH || Bun.which('bwrap')) {}
+  available(): boolean { const path = this.executable(); return !!path && existsSync(path); }
 
   async open(policy: ExecutionPolicy, run: ProtectionRunner): Promise<NativeExecutionSession> {
     if (policy.credentialPaths.some(c => RUNTIME.some(path => inside(path, c) || inside(c, path)))) {

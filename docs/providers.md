@@ -1022,6 +1022,22 @@ remaining approval requests; ACP has no standard hook-disable call. Antigravity
 uses its permission-skip flag. Questions seeking input still ask for real
 answers; YOLO does not invent form values or complete a device sign-in.
 
+Protected shared work adds an immutable file/tool capability to the host-selected
+mode and account. Claude removes native tools and user MCP/plugins/hooks and
+provides only in-process protected tools. Codex disables alternate execution
+features and MCP servers, applies a granular filesystem root deny and offline
+profile, and provides host dynamic tools. `boite_exec` runs project commands
+through the OS boundary; job-only `boite_commit` uses fixed trusted Git operations.
+Default/acceptEdits require host approval, bypass/YOLO retain automatic approvals,
+and plan/dontAsk refuse mediated commands. Restricted context tool lists expose
+no generic command tool. Native mode changes retire/re-admit the capability.
+The protected fingerprint participates in warm identity. Codex cold protected
+starts replay through a fresh native thread because `thread/resume` cannot
+replace dynamic tools. Ordinary local sessions keep the mappings below.
+See [protected shared execution](contacts.md#native-linux-tool-execution) for
+host prerequisites and the deterministic native driver proof. ACP, Muse and pi
+remain explicitly unsupported on this shared route.
+
 - Claude takes a changed mode in place through the SDK's `setPermissionMode`,
   sent before the next prompt and only when the mode moved. Claude can also move
   by itself: EnterPlanMode puts it in `plan`, and an ExitPlanMode the user

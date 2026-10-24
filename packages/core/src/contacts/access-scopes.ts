@@ -22,7 +22,8 @@ export function computeBinding(record: ComputeRecord): AccessBinding {
 }
 export function bindBoard(core: Core, ctx: SharedPeerContext, worker: SharedThreadRef, cardId: string, claimId: string): void {
   const thread = core.threads.require(worker.threadId), {index} = core.sharedProjects.endpoints(ctx.shared);
-  if (core.providers.require(thread.providerId).protocol !== 'echo' || thread.permissionMode !== 'default') throw refused('shared file policy: board execution requires a supported no-tools permission route');
+  const protocol = core.providers.require(thread.providerId).protocol;
+  if (!core.sharedAccess.execution.support(protocol).supported || protocol === 'echo' && thread.permissionMode !== 'default') throw refused('shared file policy: board execution requires a protected provider route');
   if (['queued', 'running', 'waiting'].includes(thread.status) || core.procs.liveCount(thread.id) > 0) throw refused('shared file policy: board execution requires an idle host conversation');
   const entry = core.sharedBoard.journal.entry(ctx.shared.id, cardId);
   if (entry?.kind !== 'card' || entry.card.assignment?.claimId !== claimId) throw refused('shared file policy: expected the current board claim');

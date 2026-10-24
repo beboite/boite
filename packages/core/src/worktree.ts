@@ -309,7 +309,8 @@ export class Worktrees {
     this.core.sharedCompute?.assertGit(threadId);
     let spawned;
     try {
-      spawned = this.core.procs.spawn(threadId, 'git', args, { cwd });
+      const scope = this.core.procs.protection.policy(threadId) ? this.core.procs.protection.control(threadId) : threadId;
+      spawned = this.core.procs.spawn(scope, 'git', args, { cwd });
     } catch (error) {
       throw refused(`git did not start (${messageOf(error)}): a worktree needs git on PATH`, { cwd, args });
     }

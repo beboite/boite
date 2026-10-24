@@ -12,11 +12,12 @@ export type ProtectionRunner = (command: string, args: string[], cwd: string) =>
 export interface NativeExecutionSession {
   launch(command: string, args: string[], cwd: string): ProtectedLaunch;
   /** Publish only validated project edits, after all namespace roots exited and authority was rechecked. */
-  flush(): void;
+  flush(): readonly string[] | void;
   close(): void | Promise<void>;
 }
 
 export interface NativeExecutionBoundary {
+  available?(): boolean;
   /** Opens a private filesystem and verifies a real sandbox launch; failure never falls back. */
   open(policy: ExecutionPolicy, run: ProtectionRunner): Promise<NativeExecutionSession>;
 }

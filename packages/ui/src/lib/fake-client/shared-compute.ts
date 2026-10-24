@@ -1,5 +1,5 @@
 /** Host-owned routes and captured fake jobs. Fixture Git is explicit; no caller result is trusted. */
-import { CONVERSATION_PROFILE_ID, type SharedComputeJob, type SharedComputePolicy, type SharedComputeRoute, type SharedProject, type SharedProjectRef, type RpcParams } from '@boite/contracts';
+import { CONVERSATION_PROFILE_ID, type Protocol, type SharedExecutionProtection, type SharedComputeJob, type SharedComputePolicy, type SharedComputeRoute, type SharedProject, type SharedProjectRef, type RpcParams } from '@boite/contracts';
 import type { FakeContext, FakeMethods } from './context';
 import { contactState, modelTier } from './contacts';
 import { delegationConfig, workflowChild, workflowAnswer, type ChildRoute } from './delegation';
@@ -7,10 +7,17 @@ import { secureId } from '../secure-id';
 import { assertSharedActive, cloneShared, endpoints, invalidShared, notifyShared, onceShared, projectAddress, remoteShared, requireShared, refusedShared, sameProject, sharedScope, sharedState, sharedText } from './shared-state';
 
 interface Record {job:SharedComputeJob;content:string;task:string;repository:string;parent:string;base:string;accountId:string;cancelRequest?:string}
-interface HostState {bindings:Map<string,string>;jobs:Map<string,Record>;requests:Map<string,Record>;sources:Map<string,Record>;repos:Map<string,{repository:string;head:string;commits:Set<string>}>}
+interface HostState {nativeProtected:boolean;bindings:Map<string,string>;jobs:Map<string,Record>;requests:Map<string,Record>;sources:Map<string,Record>;repos:Map<string,{repository:string;head:string;commits:Set<string>}>}
 const states=new WeakMap<FakeContext,HostState>();
-function stateOf(ctx:FakeContext):HostState{let state=states.get(ctx);if(!state){state={bindings:new Map(),jobs:new Map(),requests:new Map(),sources:new Map(),repos:new Map()};states.set(ctx,state);}return state;}
+function stateOf(ctx:FakeContext):HostState{let state=states.get(ctx);if(!state){state={nativeProtected:false,bindings:new Map(),jobs:new Map(),requests:new Map(),sources:new Map(),repos:new Map()};states.set(ctx,state);}return state;}
 const terminal=(job:SharedComputeJob)=>['done','failed','cancelled','revoked'].includes(job.status);
+/** Fixture capability only. The in-memory client never attests an actual OS boundary. */
+export function setSharedNativeExecution(ctx:FakeContext,available:boolean):void{stateOf(ctx).nativeProtected=available;}
+export function sharedProtection(ctx:FakeContext,protocol:Protocol):SharedExecutionProtection{
+  if(protocol==='echo')return {supported:true,boundary:'no-tools'};
+  if(stateOf(ctx).nativeProtected&&(protocol==='claude-sdk'||protocol==='codex-appserver'))return {supported:true,boundary:'isolated-process'};
+  return {supported:false,reason:`${protocol}: protected shared execution is unavailable`};
+}
 export function setSharedRepository(ctx:FakeContext,projectId:string,repository:string,head:string):void{
   if(!ctx.projects.some(p=>p.id===projectId)||!/^https:\/\/[^/@\s]+\/[^?\s]+$/.test(repository)||!/^([a-f0-9]{40}|[a-f0-9]{64})$/.test(head))throw invalidShared('repository fixture: expected a project, credential-free repository and full commit');
   stateOf(ctx).repos.set(projectId,{repository,head,commits:new Set([head])});
@@ -48,7 +55,7 @@ function routes(ctx:FakeContext,shared:SharedProject):SharedComputeRoute[]{
     const {route}=parentRoute(ctx,shared,profileId),provider=ctx.providers.find(p=>p.id===route.providerId)!;
     if(!provider?.available)throw refusedShared('compute.providerId: host provider unavailable');
     return {profileId,providerId:provider.id,protocol:provider.protocol,model:route.model,efforts:provider.models.find(m=>m.id===route.model)?.effort?.levels.map(l=>l.id)??[],permissionMode:policy.permissionMode,
-      protection:provider.protocol==='echo'?{supported:true as const,boundary:'no-tools' as const}:{supported:false as const,reason:`${provider.protocol}: protected shared execution is unavailable`}};
+      protection:sharedProtection(ctx,provider.protocol)};
   });
 }
 export function finishSharedCompute(ctx:FakeContext,jobId:string,text:string):void{

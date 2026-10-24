@@ -368,13 +368,13 @@ The version 1 association, scoped thread/search/read service and scoped
 subscriptions are implemented in `contacts/projects.ts`. The durable board
 service is in `contacts/board.ts`, with its protocol in [board.md](board.md#shared-board-protocol).
 Host-owned compute admission and the workflow adapter are implemented in
-`contacts/compute.ts` and `workflows/shared-compute.ts`. Compute admits only
-tool-free echo until a host-enforced execution boundary is installed. File
+`contacts/compute.ts` and `workflows/shared-compute.ts`. Compute admits tool-free
+echo and protected Claude/Codex on a host with a native boundary/helper. File
 enforcement, activity review, attested human letters and the Client/Store/fake
 transport and project/board/Contacts components are implemented. Direct and
-group-member associations share the signed/sealed transport. External provider
-execution remains unavailable as detailed below; this protocol is not a claim
-that the full Contacts roadmap is complete.
+group-member associations share the signed/sealed transport. ACP/Muse/pi
+execution remains refused pending their adapters, and native Windows remains
+a separate gate; this protocol does not claim the whole roadmap is complete.
 `packages/contracts/src/shared-projects.ts` declares the vocabulary;
 `coordination.ts` retains the existing contact types. A core must not advertise
 `features.sharedProjects: 1` until its enforcing handlers exist. A contact
@@ -604,8 +604,9 @@ enabling compute. Saving an unchanged policy keeps the grant revision and
 running jobs' authority.
 ACP and pi shared routes are refused because the current adapters cannot
 attest the offered permission semantics. Claude, Codex and Muse retain their
-existing permission mapping, but also require an actual host protection service;
-none starts by default. Echo accepts only default mode and blocks its scripted
+existing permission mapping. Claude and Codex additionally use the protected
+native adapter on hosts with an available tool boundary and helper. Muse remains
+refused until its adapter attests that boundary. Echo accepts only default mode and blocks its scripted
 shell escape at the process boundary. A text instruction is not protection.
 
 `sharedCompute.start` names an associated host, approved profile, validated
@@ -690,9 +691,11 @@ authority: they use the no-tools route and deny file/tool/upload/publication
 RPCs. Such history cannot resume an unrestricted native session. Unsupported
 native providers hold contact mail in the inbox before exposing its text,
 including on an active warm session; local work already running without that
-mail continues. This refusal closes the unprotected entry, but also leaves
-real-provider automatic correspondence unavailable until selective execution
-is implemented. It does not complete the required shared-compute feature.
+mail continues. Claude and Codex retire idle ordinary control before consuming associated mail
+and install the protected capability before preparation. Mail introducing a new
+authority waits for an active native turn to finish; it cannot enter the old
+unrestricted process. Unsupported protocols and legacy unscoped native mail stay
+held.
 
 The file policy denies environment variants, private keys, credential
 directories/files, hard links and paths outside that checkout. Both the supplied spelling and
@@ -750,21 +753,48 @@ protected shared execution when the actual process/tool boundary cannot
 enforce it. Keep the host's permission semantics; never silently substitute
 another driver/mode or enable bypass.
 
-Current `sharedExecutionProtection` admits only echo in its default no-tools
-route. Claude, Codex, ACP, Muse and pi advertise `supported: false` with a
-protocol-specific reason and are refused before a protected turn starts.
-There is no isolated external provider implementation yet. Consequently real
-provider shared compute and shared board execution remain unavailable; the
-deterministic fixture coverage does not complete that feature.
+`sharedExecutionProtection` admits echo/default with no tools, and Claude/Codex
+with an available host native boundary/helper. Native preparation probes the real
+launch and fails closed on an unusable helper or kernel. Other adapters remain
+unsupported. The in-memory client defaults to unsupported native execution;
+`setSharedNativeExecution` explicitly supplies a fixture capability for parity,
+never OS evidence.
 
-| Driver | Existing boundary and limitation | Required shared admission |
+| Driver | Mandatory protected control path | Shared admission |
 | --- | --- | --- |
-| Claude | SDK `canUseTool` is reached only for approval; `PreToolUse` currently records tools. YOLO allows approvals and disables configured hooks. Arbitrary shell/MCP/native child work can read outside a lexical tool gate. | Enforce below bypass and across children, tools, processes and output; otherwise refuse. |
-| Codex | Native approval/sandbox pair; workspace-write permits reads outside the workspace and unrestricted modes skip approval. A mode change replaces the process. | Verify an actual file-denying execution boundary; no claim that read-only/workspace-write hides secrets. |
-| ACP | Advertised modes are provider-specific; a refused/absent setter currently logs a warning and continues. Approval events do not cover every operation. | Capability-specific enforcement; a protected shared start must fail closed on an unenforceable route. |
-| Muse | Native approval mode plus launch-time sandbox flags; permissive modes disable its sandbox. No evidence here of selective secret read denial. | Verify process isolation and keep the chosen supported mode; otherwise refuse. |
-| pi | RPC has no approval call; permission mode does not reach the CLI. | Require host process isolation or deny protected compute, never simulate an approval gate. |
-| echo | In-process deterministic fixture; no provider tools/network. | Exercise the same admission/revoke ledger; report no-tools, not proof of external driver isolation. |
+| Claude | SDK `tools: []`, explicit native-tool denies, empty setting sources, strict in-process MCP only, no plugins/skills and configured hooks disabled. Only `boite_exec` and job-bound `boite_commit` run through the host mediator. A bypassable `canUseTool` callback is not the security boundary. | Isolated-process on an available native host. |
+| Codex | CLI strict configuration, native shell/hooks/plugins/apps/browser/elevation/memory disabled, all effective MCP servers disabled, granular filesystem root deny and no network. Only host dynamic tools enter the executor. Configuration discovery failure refuses startup. | Isolated-process on an available native host. |
+| ACP | Modes and tool paths remain provider-specific. | Unsupported until its adapter attests enforcement. |
+| Muse | Existing native sandbox flags do not attest selective secret denial. | Unsupported until its adapter attests enforcement. |
+| pi | RPC has no enforceable approval gate. | Unsupported until its adapter attests enforcement. |
+| echo | Deterministic in-process provider with tool launches refused. | Default no-tools only. |
+
+`contacts/native-execution.ts` captures jobs, board claims and associated contact
+letters before warm preparation and every attempt. Its authority callback checks
+all consumed grants, host route/account/mode/profile, checkout and exact read
+exceptions. Every authority must grant the same exception; the earliest expiry
+wins. Changing that capture revokes the old capability and its control/tools.
+The capability fingerprint participates in both native warm-session keys.
+Codex `thread/resume` cannot replace dynamic tools, so protected cold starts use
+the existing session-loss replay to open `thread/start` with the mandatory tool
+profile. Warm sessions with the same capability remain reusable.
+
+`boite_exec` accepts only command, argv and an optional checkout cwd. It runs
+through the production process registry and OS boundary, then publishes only
+validated edits. It cannot set environment, pass descriptors or request escape
+or elevation. Default/acceptEdits ask the host for each command; bypass/YOLO skip
+that approval; plan/dontAsk refuse commands. A host context with a restricted
+tool list exposes no general command tool. The selected native mode/account
+remain unchanged.
+
+`boite_commit` is available only on a captured shared-compute branch. It stages
+only the executor's validated changed-file manifest, requires an empty staged
+index, rechecks captured file identities, disables hooks/filters/signing and
+returns a real host Git object. Model tools never see host Git metadata.
+Stop, archive, host selection changes and durable policy revocation close tools
+and tracked trusted control. A later host-admitted attempt can install a new
+capability; dropping a board goal releases the parent's process boundary, while
+its captured descendants and consumed letter history stay scoped.
 
 Claude and echo currently implement the tool-free `sideQuestion` used by
 `contacts/concierge.ts`; Codex, ACP, Muse and pi do not. A reviewer on a route
@@ -777,10 +807,9 @@ execution must account for that limit, not claim a captured PID is an OS sandbox
 ### Native Linux tool execution
 
 `ProcessPlatform.protectedExecution` now implements a native Linux boundary,
-consumed through `procs.protection`. It does not change the provider admissions
-above. A driver must enforce its native Read/Edit gate and route every shell,
-hook, MCP server, extension and descendant through an attested boundary before
-its route can report support. Account authentication/control remains trusted and
+consumed through `procs.protection` by the Claude/Codex protected adapters.
+Other adapters must enforce their native file/tool gates and close alternate
+shell, hook, MCP, extension and descendant paths before reporting support. Account authentication/control remains trusted and
 separate; a tool receives neither the account home nor the ambient environment.
 There is no spawn option to bypass an installed capability.
 
@@ -841,7 +870,11 @@ builds or launches at core startup. Native tests are explicitly enabled by
 `test/fixtures/native-protected-tool.ts` is an ordinary deterministic program
 that edits source, builds it and runs a child test command while attempting
 synthetic file/credential/link/descriptor/child reads. This is native OS evidence,
-not provider inference or proof of a driver's settings/control integration.
+independent of provider inference. `protected-drivers.test.ts` additionally runs
+the installed Claude SDK/CLI and Codex app-server against deterministic loopback
+API responses, exercising useful edits/build/child tests, native forged file and
+escape tools, synthetic credentials and hostile configured MCP/hooks. This
+proves the production driver/control/tool path, without live inference.
 Windows and macOS do not gain this Linux backend.
 
 ### Activity review
@@ -959,12 +992,12 @@ An unavailable requirement is recorded explicitly rather than counted as passed.
 | Required outcome | Executable evidence | Coverage and current limit |
 | --- | --- | --- |
 | Explicit association and allowed foreign threads | `packages/core/test/shared-projects.test.ts`; `tests/e2e/shared-cores.test.ts`: two owners associate a group member; member initiates association; `packages/ui/src/lib/fake-client.shared-projects.test.ts` | Exact colliding owner/core/project/thread IDs, private project exclusion, read/search grants, wrong source/route refusal, owner/paired/agent roles, reverse member offer and persisted association. No foreign owner RPC is created. |
-| Shared four-column board and goal | `packages/core/test/shared-board.test.ts`; `tests/e2e/shared-cores.test.ts`; `packages/ui/src/components/shared/SharedCollaboration.test.ts`; `tests/e2e/shared-collaboration.test.ts` | Atomic competing claims, receipts, field patches, offline replay/restarts, permanent deletes, protected goal start/release/progress, retained busy assignment, person/machine/agent labels and phone menus. External-provider goal execution is unavailable. |
-| Host compute and actual Git consumption | `packages/core/test/shared-compute.test.ts`; `SharedCollaboration.test.ts`: reopen a host from another thread; `tests/e2e/shared-cores.test.ts`: consume an attested Git result and cancel reverse compute after member restart | Host account/profile, persisted private parent, unchanged-policy authority, contribution settings, durable job and exact result, repository/base validation, restart and captured cancellation. The source performs a real fixture-controlled fetch, object/ancestry check and cherry-pick of the returned commit. No automatic peer URL/command execution. Claude/Codex/ACP/Muse/pi compute remains unavailable. |
+| Shared four-column board and goal | `packages/core/test/shared-board.test.ts`; `tests/e2e/shared-cores.test.ts`; `packages/ui/src/components/shared/SharedCollaboration.test.ts`; `tests/e2e/shared-collaboration.test.ts` | Atomic competing claims, receipts, field patches, offline replay/restarts, permanent deletes, protected goal start/release/progress, retained busy assignment, person/machine/agent labels and phone menus. Claude/Codex native goal transitions are covered in `shared-access.test.ts`; other adapters and native Windows remain separate gates. |
+| Host compute and actual Git consumption | `packages/core/test/shared-compute.test.ts`; `SharedCollaboration.test.ts`: reopen a host from another thread; `tests/e2e/shared-cores.test.ts`: consume an attested Git result and cancel reverse compute after member restart | Host account/profile, persisted private parent, unchanged-policy authority, contribution settings, durable job and exact result, repository/base validation, restart and captured cancellation. The source performs a real fixture-controlled fetch, object/ancestry check and cherry-pick of the returned commit. No automatic peer URL/command execution. Claude/Codex native fixtures also edit/test/commit through the production driver and consume the returned real commit; ACP/Muse/pi remain refused. |
 | Human and agent contact mail | `packages/core/test/contact-mailboxes.test.ts`, `coordination.test.ts`; `tests/e2e/shared-cores.test.ts`; `tests/e2e/contact-messaging-ui.test.ts`, `shared-collaboration.test.ts` | Owner/paired human sends, agent impersonation refusal, recipient's configured contact name, separate provenance, both member directions, source journal and mailbox replay/restart. No external letter answers owner approval. |
-| Audit regressions and selective invalidation | `packages/core/test/contacts-review-regressions.test.ts`, `shared-projects.test.ts`, `shared-review.test.ts`, `shared-compute-journal.test.ts`; `packages/ui/src/lib/store-shared-projects.test.ts`; `tests/e2e/shared-cores.test.ts` | Contact wake/steer/hooks/history and intersected guards, transcript post-await revocation/readmission/restoration, human mailbox provenance after gateway restart at the default tier, current-revision direct/member lease teardown, access-only refresh, retained compute fences and cancellations. Native provider letter execution remains refused. |
-| Secret file and tool boundaries | `packages/core/test/shared-access.test.ts`, `shared-review.test.ts`, `ntfs-file-ids.test.ts`; `packages/ui/src/lib/fake-client.shared-projects.test.ts` | Classified files/content, handles/symlinks, Windows path forms/identities, transfer/tickets/HTML/attachments/checkpoints, overrides and immediate revocation. All six protocols have admission checks; only echo/default has an implemented no-tools execution boundary. Selective external-provider isolation is missing. Windows native execution is not established by Linux fixtures. |
-| Native Linux tool boundary | `packages/core/test/protected-execution.test.ts`; `packages/core/test/fixtures/native-protected-tool.ts` | Production registry launches an ordinary program: useful read/edit/build/child test, denied synthetic secrets/outside files/credentials and inheritable descriptors/links/children, isolated network, exact read-only overrides, immutable scope/retry/cwd, expiry/revoke/cleanup (including detached descendants), unsupported-host refusal and ordinary local process retention. Provider adapter integration and native Windows remain separate gates. |
+| Audit regressions and selective invalidation | `packages/core/test/contacts-review-regressions.test.ts`, `shared-projects.test.ts`, `shared-review.test.ts`, `shared-compute-journal.test.ts`; `packages/ui/src/lib/store-shared-projects.test.ts`; `tests/e2e/shared-cores.test.ts` | Contact wake/steer/hooks/history and intersected guards, transcript post-await revocation/readmission/restoration, human mailbox provenance after gateway restart at the default tier, current-revision direct/member lease teardown, access-only refresh, retained compute fences and cancellations. Claude/Codex native associated-letter execution and ordinary warm-session retirement are covered in `shared-access.test.ts`; unsupported routes remain held. |
+| Secret file and tool boundaries | `packages/core/test/shared-access.test.ts`, `shared-review.test.ts`, `ntfs-file-ids.test.ts`; `packages/ui/src/lib/fake-client.shared-projects.test.ts` | Classified files/content, handles/symlinks, Windows path forms/identities, transfer/tickets/HTML/attachments/checkpoints, overrides and immediate revocation. All six protocols have admission checks; echo/default reports no-tools, Claude/Codex use the native boundary and ACP/Muse/pi remain refused. Windows native execution is not established by Linux fixtures. |
+| Native Linux tool boundary | `packages/core/test/protected-execution.test.ts`; `packages/core/test/fixtures/native-protected-tool.ts` | Production registry launches an ordinary program: useful read/edit/build/child test, denied synthetic secrets/outside files/credentials and inheritable descriptors/links/children, isolated network, exact read-only overrides, immutable scope/retry/cwd, expiry/revoke/cleanup (including detached descendants), unsupported-host refusal and ordinary local process retention. Claude/Codex integration is covered by `protected-drivers.test.ts` and native `shared-access.test.ts` scenarios. Other adapters and native Windows remain separate gates. |
 | Lazy review and confirmed project revoke | `packages/core/test/shared-review.test.ts`; `tests/e2e/shared-cores.test.ts`: member policy revocation without a direct contact | Tool-free deterministic verdicts, confirmation independent of inference, timeout/invalid/stale response, no-work laziness and exact local project hold. A member hold does not mutate gateway grants or obtain owner authority; a stale mirror cannot reopen it. |
 | Security and network proof | `packages/core/test/contacts.test.ts`, `contacts-group.test.ts`, `contact-mailboxes.test.ts`, `contacts-review-regressions.test.ts`, `access.test.ts`; `tests/e2e/shared-cores.test.ts`: held transcript and readmission regressions | Independent security/network passes identified three access/provenance faults, a review feedback loop, stale lease teardown and compute scan waste. Regressions cover their corrections. Per-peer SQLite expression indexes/selective materialization retain all durable job fences. A fresh native-isolation review is still required when that implementation exists; current fixtures do not prove it. |
 | Transport and UI parity | `tests/contract/shared-projects.ts` through core/fake contract suites; fake/Store tests; `tests/e2e/shared-collaboration.test.ts` at 1440 and 390 px | Same contract and refusals, captured owning Store, canonical remote offers/addresses, connection cache fencing, leases and phone actions. No paid inference, physical phone, real Tailscale/Funnel or remote CI proof is implied. |
@@ -987,14 +1020,15 @@ contribution preserved its binding, grant revision and running jobs at both ends
 The desktop and phone captures were opened. These remain deterministic
 protocol/UI fixtures, not native-provider isolation proof.
 
-The release gate remains incomplete. Claude, Codex, ACP, Muse and pi still
-report unsupported protected execution: useful native shared compute, board
-goals and automatic contact-letter execution remain unavailable. The native
-Linux tool boundary has production-process tests, but native provider
-settings/control integration is not yet attested. Protocol fixtures, echo jobs,
-Linux file-policy tests and synthetic Windows paths do not replace that gate.
-Native Windows/macOS execution, live inference and remote CI/review of this
-implementation remain unverified.
+The overall release gate remains incomplete. Claude/Codex now have native
+Linux driver/control/tool fixtures proving useful edits/build/tests, native
+forged-tool denial, account/mode retention, associated letters/board goals,
+warm transitions, protected stop/overrides and real Git result consumption.
+These run installed clients against deterministic local APIs without inference.
+ACP/Muse/pi adapters, native Windows and independent integration/security review
+remain separate required gates. Native macOS, live inference and remote CI of
+this implementation are unverified. Echo/protocol fixtures and synthetic Windows
+paths cannot substitute for native execution proof.
 
 ### Client transport
 

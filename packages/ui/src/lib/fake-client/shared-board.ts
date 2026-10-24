@@ -1,3 +1,4 @@
+import {sharedProtection} from './shared-compute';
 /** Deterministic in-memory authority, receipts, terminal deletes and offline replica edits. */
 import { TODO_STATUSES, TODO_TEXT_MAX, type SharedBoardCard, type SharedBoardChange, type SharedBoardCommand, type SharedBoardPage, type SharedBoardReceipt, type SharedProject, type SharedProjectActor, type SharedProjectScope, type SharedThreadRef, type Todo } from '@boite/contracts';
 import type { FakeContext, FakeMethods } from './context';
@@ -161,7 +162,7 @@ export function sharedBoardMethods(ctx:FakeContext){
       const card=boardOf(host,shared.id).cards.get(p.cardId),assignment=card?.assignment,board=boardOf(ctx,shared.id);
       if(!assignment||assignment.claimId!==p.claimId||!sameProject(assignment.worker.project,local)||assignment.worker.threadId!==p.threadId||board.starts.has(`stopped:${p.claimId}`))throw refusedShared('claimId: expected this host worker reservation');
       const worker=ctx.thread(p.threadId),protocol=ctx.providers.find(provider=>provider.id===worker.providerId)?.protocol;
-      if(protocol!=='echo'||worker.permissionMode!=='default')throw refusedShared('shared file policy: protected shared execution requires an enforceable host boundary');
+      if(!protocol||!sharedProtection(ctx,protocol).supported||protocol==='echo'&&worker.permissionMode!=='default')throw refusedShared('shared file policy: protected shared execution requires an enforceable host boundary');
       if(!board.starts.has(p.claimId)){
         board.starts.add(p.claimId);
         await activityMethods(ctx)['threads.activity.set']({threadId:p.threadId,goal:{objective:card!.text,review:true}});

@@ -10,6 +10,7 @@ import { PolicyPathError, policyFile, policyIdentity, secretPath, secretText, ty
 import type { SharedPeerContext } from './projects.ts';
 import { accessBinding, computeBinding, type AccessBinding } from './access-scopes.ts';
 import {letterScope} from './letter-scopes.ts';
+import {SharedNativeExecution} from './native-execution.ts';
 
 type FileAction = 'read' | 'publish';
 interface Publication {threadId: string; binding: Omit<AccessBinding, 'compute'>; files: {path: string; identity: string}[]}
@@ -27,9 +28,11 @@ export type AccessReason = 'normal-file' | 'host-override' | 'secret-file' | 'pa
 /** Synchronous deterministic enforcement; the optional reviewer consumes this feed later. No worker or timer. */
 export class SharedAccess {
   readonly journal: SharedAccessJournal;
+  readonly execution: SharedNativeExecution;
   private readonly listeners = new Set<(event: SharedAccessEvent) => void>();
   constructor(readonly core: Core) {
     this.journal = new SharedAccessJournal(core.journal.db);
+    this.execution = new SharedNativeExecution(core, id => this.bound(id), binding => this.live(binding));
     core.router.guard = (method, params, ctx) => this.rpc(method, params, ctx);
     core.sharedCompute.publishText = (record, value) => {
       this.live(computeBinding(record));
@@ -86,7 +89,8 @@ export class SharedAccess {
     if (!this.protected(threadId)) return;
     if (record) this.live(record);
     const thread = this.core.threads.require(threadId);
-    if (this.core.providers.require(thread.providerId).protocol !== 'echo' || thread.permissionMode !== 'default') this.denyTool(threadId);
+    const protocol = this.core.providers.require(thread.providerId).protocol;
+    if (protocol === 'echo' ? thread.permissionMode !== 'default' : !record || !this.execution.support(protocol).supported) this.denyTool(threadId);
   }
   contextThread(thread: ThreadSummary): ThreadSummary { return this.protected(thread.id) ? {...thread, contextMode: {...TOOL_FREE_CONTEXT}} : thread; }
   assertScope(threadId: string, sharedProjectId: string): void {
@@ -244,6 +248,7 @@ export class SharedAccess {
       return value.id;
     }));
     this.core.sharedProjects.notify(ctx.shared.id);
+    this.execution.reconcile();
     return this.overrides(ctx.shared.id).find(o => o.id === result)!;
   }
   revokeOverride(p: RpcParams<'sharedAccess.revokeOverride'>): {ok: true} {
@@ -253,6 +258,7 @@ export class SharedAccess {
     if (found.value.revokedAt === null) {
       found.value.revokedAt = Date.now(); this.journal.putOverride(found);
       this.record(ctx, 'file', 'allowed', 'override-revoked'); this.core.sharedProjects.notify(ctx.shared.id);
+      this.execution.reconcile();
     }
     return {ok: true};
   }

@@ -1,7 +1,7 @@
 import { sharedProjectMethods } from './fake-client/shared-projects';
 import { sharedLookupMethods } from './fake-client/shared-lookup';
 import { sharedBoardMethods } from './fake-client/shared-board';
-import { sharedComputeMethods, setSharedRepository, finishSharedCompute } from './fake-client/shared-compute';
+import { sharedComputeMethods, setSharedRepository, setSharedNativeExecution, finishSharedCompute } from './fake-client/shared-compute';
 import { sharedAccessMethods } from './fake-client/shared-access';
 import { sharedLetterMethods } from './fake-client/shared-letters';
 import { sharedState, sharedContact, reconcileShared, refusedShared } from './fake-client/shared-state';
@@ -363,6 +363,7 @@ export class FakeClient implements ObservableClient {
   }
 
   /** Explicit deterministic Git fixture, separate from any RPC input. */
+  setSharedNativeExecution(available: boolean): void { setSharedNativeExecution(this.#ctx, available); }
   setSharedRepository(projectId: string, repository: string, head: string): void { setSharedRepository(this.#ctx, projectId, repository, head); }
   finishSharedCompute(jobId: string, text: string): void { finishSharedCompute(this.#ctx, jobId, text); }
   get sharedSubscriptions() { return [...sharedState(this.#ctx).subscriptions.values()].map(p => ({...p})); }

@@ -175,7 +175,11 @@ export class ThreadFocus {
     const latest = this.core.threads.require(threadId);
     if (latest.selectionVersion !== thread.selectionVersion || latest.sessionGeneration !== thread.sessionGeneration || latest.archived) return;
     if (['running', 'queued', 'waiting'].includes(latest.status)) return;
-    await driver.prepare(this.core.threads.contexts.makeSessionContext(thread, provider, account));
+    const protection = this.core.sharedAccess.execution.prepare(threadId);
+    if (protection) await protection;
+    const ready = this.core.threads.require(threadId);
+    if (ready.selectionVersion !== latest.selectionVersion || ready.sessionGeneration !== latest.sessionGeneration || ready.archived || ['running', 'queued', 'waiting'].includes(ready.status)) return;
+    await driver.prepare(this.core.threads.contexts.makeSessionContext(ready, provider, account));
   }
 
   close(): void {

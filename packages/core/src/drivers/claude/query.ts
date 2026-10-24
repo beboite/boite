@@ -38,7 +38,7 @@ export interface LiveSetup {
 }
 
 /** What this turn asks the running query to be, whatever the last one asked for. */
-export function liveSetup(thread: { model: string | null; effort: string | null; permissionMode: PermissionMode; speed?: string | null; contextMode?: { hooks: boolean } | null }): LiveSetup {
+export function liveSetup(thread: { model: string | null; effort: string | null; permissionMode: PermissionMode; speed?: string | null; contextMode?: { hooks: boolean } | null }, protectedExecution = false): LiveSetup {
   const effort = thread.effort;
   return {
     model: thread.model,
@@ -46,7 +46,7 @@ export function liveSetup(thread: { model: string | null; effort: string | null;
     fastMode: thread.speed === 'fast',
     permissionMode: thread.permissionMode === 'yolo' ? 'bypassPermissions' : thread.permissionMode,
     // A context mode without hooks keeps them off whatever the permission mode.
-    disableHooks: thread.permissionMode === 'yolo' || thread.contextMode?.hooks === false,
+    disableHooks: protectedExecution || thread.permissionMode === 'yolo' || thread.contextMode?.hooks === false,
   };
 }
 
@@ -130,6 +130,7 @@ export function sessionKey(ctx: SessionContext): string {
     resumeAt: ctx.resumeAt ?? null,
     accountId: ctx.account.id,
     env: ctx.accountEnv,
+    protection: ctx.protectedExecution?.fingerprint ?? null,
   });
 }
 
