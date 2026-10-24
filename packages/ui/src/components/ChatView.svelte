@@ -102,7 +102,7 @@
      or it shrinks a second time when the thread opens. -->
   <section class="chat" class:drafting={!thread && !sending} bind:this={chat} data-testid="chat">
     {#if thread?.forkOrigin}{#key thread.id}<ForkReturn {store} {thread} />{/key}{/if}
-    <div class="discussion">
+    <div class="discussion" class:draft-body={!thread && !sending} data-testid={!thread && !sending ? 'draft-empty' : undefined}>
     {#if thread}
       <!-- One timeline per thread: the heights it measured and the ids that
            already played the rise belong to that thread alone, and kept across
@@ -117,7 +117,6 @@
     {:else if sending}
       <MessageList {store} threadId={DRAFT_STASH_KEY} {messages} />
     {:else}
-      <div class="draft-body" data-testid="draft-empty">
         <div class="mobile-welcome">
           <img src="./icons/icon.svg" alt="" width="42" height="42" />
           <h1>{strings.mobile.draftTitle}</h1>
@@ -156,7 +155,6 @@
             </p>
           {/if}
         </div>
-      </div>
     {/if}
 
     {#if pinnedHere}<Deferred part={parts.PinnedQuota} quiet>{#snippet children(PinnedQuota)}<PinnedQuota {store} />{/snippet}</Deferred>{/if}
@@ -247,7 +245,9 @@
      top as the composer sits above the bottom: one centred block. */
   .draft-body {
     flex: 1 1 0;
+    min-height: auto;
     display: flex;
+    flex-direction: row;
     align-items: flex-end;
     justify-content: center;
     padding: 24px 20px 32px;
