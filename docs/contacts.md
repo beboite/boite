@@ -253,8 +253,10 @@ refused every invitation.
 ## Completion protocol
 
 The following is the version 1 contract and implementation acceptance plan.
-At this contract stage, the services, fake handlers and UI described below do
-not exist yet. Type declarations alone enable no remote execution or access.
+The primary-core association, scoped thread/search/read service and scoped
+subscriptions are implemented in `contacts/projects.ts`. The board, compute,
+human letters, file enforcement, reviewer, fake handlers and UI below remain
+integration work. Type declarations alone enable no remote execution.
 `packages/contracts/src/shared-projects.ts` declares the vocabulary;
 `coordination.ts` retains the existing contact types. A core must not advertise
 `features.sharedProjects: 1` until its enforcing handlers exist. A contact
@@ -263,6 +265,52 @@ negotiates `capabilities.sharedProjects: 1` and `humanLetters: 1` through sealed
 Existing unilateral grants, asks, board counts and agent letters keep their
 meaning. Unknown methods fail closed; a new client must not send an optional
 machine selector to an old core that would ignore it.
+
+### Implemented association service
+
+Both owners first grant their selected project through Contacts. Offering
+requires the peer's negotiated `sharedProjects: 1`; an ordinary trusted contact
+cannot accept an offer. The owner of the receiving endpoint accepts explicitly.
+Offers never enable conversation reads, board consent or compute. Pending and
+declined offers leave the existing unilateral lookup path available. Once an
+association is active, or has been revoked, lookups to that contact use the
+source project's exact active associations; unscoped peer directory/search/read
+requests are refused. This prevents a revoked association falling back to a
+broader legacy query. Agent letters still use the existing delivery path; their
+association scope belongs to the human-letter/delivery integration.
+
+Journal schema 39 keeps associations, content-bound operation receipts,
+the durable control outbox and the local grant fingerprint. Grant or project
+revocation closes an association permanently. Changing `readThreads` advances
+the endpoint's grant revision; reads check current access after awaiting their
+response, including a destination revision check before publishing a transcript.
+Contact names are resolved locally on every read. A contact rename changes no
+endpoint identity or grant revision.
+
+`sharedProjects.search` and the peer `search` method complete the foundation's
+search contract. Agent actors carry their host-attested `agent` provider/model
+description so both owners enforce their current model tier. The existing
+`collaboration.directory/search/read` entry points route through these scoped
+queries. Foreign descriptors keep canonical endpoint/thread identity and a
+separate public address; the combined array groups the local endpoint first,
+then the remote owner/machine. It creates no local foreign thread or owner
+connection.
+
+Connection watches use 60-second peer leases, renewed every 20 seconds only
+while subscribed. Invalidations coalesce for 50 ms and carry only the local
+source thread and association ID. They are delivered directly to the subscribed
+connection, never broadcast from the event bus. Unsubscribe, disconnect,
+source moves, archive and revocation release the watch; link loss removes peer
+leases and reconnect renews live watches. Without watches or leases this
+service starts no notification timer. A closed subscription ID stays rejected
+for the two-minute wire replay window so a delayed enable cannot recreate it.
+
+Member endpoints currently fail with a member-relay requirement. Integrating
+PR #755 must extend its existing `ContactMembers` relay for the bounded
+`contact.project` payload, preserve canonical host IDs separately from its
+public aliases and revalidate member admission. It must not infer authority
+from the alias suffix or copy the relay into a second implementation. PR #756's
+source mailboxes remain a separate dependency.
 
 ### Identity and association
 
@@ -299,7 +347,7 @@ policy. Association does not turn on `readThreads` or compute. Both current
 project grants and explicit board consent are required for board traffic.
 Revocation is final for that association ID; associating again mints a new ID.
 
-`sharedProjects.list/get/threads/read` are scoped to a local source conversation
+`sharedProjects.list/get/threads/search/read` are scoped to a local source conversation
 in one endpoint. The combined view contains only those two endpoints' allowed
 threads, grouped by owner and machine. Directory eligibility still respects
 archive, communication Off, project-only and remote restrictions. Transcript
@@ -530,14 +578,14 @@ only alongside enforcing handlers and scoped subscriptions.
 | Existing `delegation.spawn/models/resume`; `delegation.configure` | Yes | Denied | Spawn/models and permitted resume only; never configure |
 | Existing `files.list/read`, `git.status/diff` | Local scope | Existing project/credential guards and HEAD diff only | Own thread; shared policy applies additionally |
 | Existing `artifacts.publish/view/preview`; `artifacts.read` | Local scope | Published snapshot read only | Own thread only; no contact file/preview authority |
-| `sharedProjects.list/get/threads/read/subscribe` | Source project scope | Planned: same scope | Planned: own associated project; reads still need readThreads |
+| `sharedProjects.list/get/threads/search/read/subscribe` | Source project scope | Same scope | Own associated project; reads still need readThreads |
 | `sharedBoard.get/apply` | Association + board consent | Planned: same; every board action | Planned: own association, add/edit/claim; no remove/Done/reopen Done |
 | `sharedCompute.models/list/get/send/cancel` | Host jobs or source scope | Planned: follow/steer/cancel existing jobs, no admission | Planned: own source jobs; no host policy or permission answers |
 | `sharedCompute.start` | Explicit host opt-in and supported protection | Denied | Planned: own source project, current grant and host-approved route |
 | `sharedAccess.get` | Sanitized scoped activity | Planned: same | Planned: own association metadata only |
 | `sharedAccess.overrides/override/revokeOverride` | Host only, exact local paths | Denied | Denied |
 | `contacts.sendHuman` | Attested human, allowed contact destination | Planned: same | Denied |
-| `sharedProjects.changed` | Explicit connection subscription | Planned: same subscription | Planned: own thread + association, invalidation only |
+| `sharedProjects.changed` | Explicit connection subscription | Same subscription | Own thread + association, invalidation only |
 
 Agents never receive all shared-project events. The server needs an explicit
 shared-scope filter as well as `AGENT_EVENTS`, and then the client/fake step

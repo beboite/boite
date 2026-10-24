@@ -387,7 +387,7 @@ export class ContactStore {
     for (let n = 2; taken.has(name.toLowerCase()); n += 1) name = `${card.machine} ${n}`;
     const contact: StoredContact = {
       coreId: card.coreId, name, machine: card.machine, fingerprint: fingerprintWords(this.core.coordination.card().publicKey, card.publicKey),
-      role, ...(url === undefined ? {} : { url }), trusted: false, grants: [], offers: [], lastSeenAt: null, addedAt: Date.now(),
+      role, ...(url === undefined ? {} : { url }), trusted: false, grants: [], offers: [], lastSeenAt: null, addedAt: Date.now(), syncPending: 1,
       publicKey: card.publicKey, box: card.box,
     };
     this.save([...contacts, contact]);
@@ -553,7 +553,9 @@ export class ContactStore {
       projectId: text(offer?.projectId, `sync.offers[${index}].projectId`, 128), name: text(offer?.name, `sync.offers[${index}].name`, 200),
     }));
     const contact = this.find(coreId);
-    if (contact && JSON.stringify(contact.offers) !== JSON.stringify(checked)) this.mutate(coreId, entry => { entry.offers = checked; });
+    const rawCaps = (payload as { capabilities?: { sharedProjects?: unknown; humanLetters?: unknown } }).capabilities;
+    const capabilities = rawCaps?.sharedProjects === 1 ? { sharedProjects: 1 as const } : {};
+    if (contact && (JSON.stringify(contact.offers) !== JSON.stringify(checked) || JSON.stringify(contact.capabilities) !== JSON.stringify(capabilities))) this.mutate(coreId, entry => { entry.offers = checked; entry.capabilities = capabilities; });
     return { ok: true };
   }
 
@@ -624,6 +626,7 @@ export class ContactStore {
   }
 
   private async tell(coreId: string): Promise<void> {
+    await this.core.sharedProjects.flush(coreId);
     const peer = (): CoordinationPeer => {
       const found = this.peers().find(entry => entry.coreId === coreId);
       if (!found) throw new Error('no longer a contact');
@@ -633,7 +636,7 @@ export class ContactStore {
     if (!contact) return;
     if (contact.syncPending) {
       const version = contact.syncPending;
-      try { await this.core.coordination.request(peer(), 'contact.sync', { offers: this.offersFor(contact) }); }
+      try { await this.core.coordination.request(peer(), 'contact.sync', { offers: this.offersFor(contact), capabilities: { sharedProjects: 1 } }); }
       catch (error) { if (!(error instanceof PeerRefusal)) throw error; }
       if (this.find(coreId)?.syncPending === version) this.mutate(coreId, entry => { delete entry.syncPending; });
     }
@@ -663,6 +666,8 @@ export class ContactStore {
       this.changed();
       if (refusedAsk) this.core.coordination.contactAnswer(this.requestView(current), this.find(coreId)?.name ?? current.contact, []);
     }
+    // A grant can change while this flush awaited sync/answers; send its queued revision now.
+    await this.core.sharedProjects.flush(coreId);
   }
 
   // -- Join: the host's side.
@@ -725,7 +730,7 @@ export class ContactStore {
       },
     };
     this.core.coordination.bridge.register(data.coreId, true, route);
-    this.mutate(data.coreId, entry => { entry.lastSeenAt = Date.now(); });
+    this.mutate(data.coreId, entry => { entry.lastSeenAt = Date.now(); entry.syncPending = (entry.syncPending ?? 0) + 1; });
     this.flush(data.coreId);
   }
 
@@ -773,7 +778,7 @@ export class ContactStore {
       link.socket = socket;
       link.state = 'connected';
       this.backoff.heard(coreId);
-      if (this.has(coreId)) this.mutate(coreId, entry => { entry.lastSeenAt = Date.now(); });
+      if (this.has(coreId)) this.mutate(coreId, entry => { entry.lastSeenAt = Date.now(); entry.syncPending = (entry.syncPending ?? 0) + 1; });
       this.flush(coreId);
       socket.onMessage(text => { this.background(this.serve(coreId, socket, text)); });
       socket.onClose(lost);

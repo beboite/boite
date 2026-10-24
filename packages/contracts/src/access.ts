@@ -34,6 +34,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // A phone's own rendering errors and failed calls land in the owner's diagnostics, bounded per connection.
   'diagnostics.report',
   'collaboration.directory',
+  // Exact associated-project views and connection-owned invalidations; administration remains owner-only.
+  'sharedProjects.list', 'sharedProjects.get', 'sharedProjects.threads', 'sharedProjects.search', 'sharedProjects.read', 'sharedProjects.subscribe',
   // Dictation uses the owner's configured engine. Devices cannot change paths or credentials.
   'speech.status',
   'speech.transcribe',
@@ -187,6 +189,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
 
 /** Push events must not bypass the read permissions enforced on RPC calls. */
 export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
+  'sharedProjects.changed', // Direct delivery only to the connection's exact subscribed association and source.
   'threads.pullRequestsChanged', // Links already readable on the subscribed conversation.
   'browser.remoteChanged', // The subscribed conversation's agent tabs, as browser.remoteStatus says.
   'devices.changed', // The subscribed conversation's Device panel sessions, as devices.sessions returns them.
@@ -215,6 +218,7 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
 
 /** The server also checks the thread or project scope of these agent events. */
 export const AGENT_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
+  'sharedProjects.changed', // Direct delivery only to this agent's exact subscribed association and source.
   // The server restricts this invalidation to the agent's own subscribed thread.
   'delegation.changed',
   'thread.activity', 'todos.updated', 'collaboration.changed',

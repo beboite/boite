@@ -1,4 +1,4 @@
-import type { AgentAddress, AgentContact, AgentLetter, AgentTranscript } from './coordination';
+import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentTranscript } from './coordination';
 import type { AccountId, ProjectId, ProviderId, ThreadId, Timestamp } from './ids';
 import type { Protocol } from './providers';
 import type { PermissionMode } from './threads';
@@ -23,7 +23,7 @@ export interface SharedThreadRef { project: SharedProjectRef; threadId: ThreadId
 /** Minted by the source core from its authenticated caller, never accepted from RPC input. */
 export type SharedProjectActor =
   | { kind: 'human'; project: SharedProjectRef }
-  | { kind: 'agent'; project: SharedProjectRef; threadId: ThreadId; address: AgentAddress };
+  | { kind: 'agent'; project: SharedProjectRef; threadId: ThreadId; address: AgentAddress; agent: string };
 
 export interface SharedComputePolicy {
   enabled: boolean;
@@ -228,6 +228,7 @@ export interface SharedProjectsRpcMethods {
   /** Host owner only, applied on the endpoint's owning Store/core. */
   'sharedProjects.configure': { params: { sharedProjectId: string; board?: boolean; compute?: SharedComputePolicy; reviewer?: SharedReviewConfig }; result: SharedProjectView };
   'sharedProjects.threads': { params: SharedProjectScope; result: { threads: SharedProjectThread[]; unavailable: SharedProjectRef[] } };
+  'sharedProjects.search': { params: SharedProjectScope & { query: string }; result: { matches: AgentMatch[]; unavailable: SharedProjectRef[] } };
   'sharedProjects.read': { params: SharedProjectScope & { target: SharedThreadRef; limit?: number; before?: Timestamp }; result: AgentTranscript };
   /** Connection-owned scope, released on unsubscribe, disconnect, project move or revoke. */
   'sharedProjects.subscribe': { params: SharedProjectScope & { enabled: boolean }; result: { ok: true } };
@@ -267,6 +268,7 @@ export interface SharedProjectPeerMethods {
   /** Invalidation only, to an admitted subscriber or the source of a nonterminal job; reads enforce scope again. */
   changed: { params: { subscriptionId: string | null; kinds: ('threads' | 'board' | 'compute' | 'access')[]; boardRevision?: number; jobIds?: string[] }; result: { ok: true } };
   threads: { params: Record<string, never>; result: SharedProjectThread[] };
+  search: { params: { query: string }; result: AgentMatch[] };
   read: { params: { target: SharedThreadRef; limit?: number; before?: Timestamp }; result: AgentTranscript };
   'board.get': { params: { after?: number }; result: SharedBoardPage };
   'board.apply': { params: { command: SharedBoardCommand }; result: SharedBoardReceipt };

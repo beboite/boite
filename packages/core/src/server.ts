@@ -794,6 +794,8 @@ export function startServer(options: ServerOptions): RunningServer {
   };
 
   const broadcast = (name: RpcEventName, payload: EventPayload): void => {
+    // These invalidations belong to explicit association watches, never the global bus.
+    if (name === 'sharedProjects.changed') return;
     const scoped =
       name === 'threads.pullRequestsChanged' ||
       name.startsWith('message.') ||

@@ -11,6 +11,7 @@ import { address, coordinationGuide, coordinationUrl, LETTER_TTL_MS, letterPromp
 import { senderContext, withRelations } from './coordination-relation.ts';
 import { boundedBody, firstAnswer, MAX_BODY, PeerGone, PeerRefusal, post, ROUTE, settle, type Answer, type Envelope, type Operation } from './coordination-wire.ts';
 import { checkTailnetName } from './contacts/invite.ts';
+import { projectCoordination } from './contacts/project-coordination.ts';
 import { pack, SEALED } from './group/seal.ts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unavailable } from './errors.ts';
@@ -327,7 +328,7 @@ export class Coordination {
     if (config.remote) {
       const found = await Promise.all(this.trusted().map(async peer => {
         try {
-          const remote = await this.exchange(peer, 'directory', {}) as AgentContact[];
+          const remote = await projectCoordination(this.core, threadId, peer, 'directory', {}) as AgentContact[];
           if (!this.trusted().some(p => p.coreId === peer.coreId)) throw new Error('peer revoked');
           if (!Array.isArray(remote) || remote.length > 100) throw new Error('invalid remote directory');
           return { peer, contacts: remote.map(a => checkRemoteContact(a, peer)) };
@@ -350,7 +351,7 @@ export class Coordination {
     if (!config.remote || config.mode === 'off') return { results: [], unavailable: [] };
     const found = await Promise.all(peers.map(async peer => {
       try {
-        const answer = await this.exchange(peer, operation, payload);
+        const answer = await projectCoordination(this.core, threadId, peer, operation, payload);
         if (!this.trusted().some(p => p.coreId === peer.coreId)) throw new Error('peer revoked');
         return { peer, result: check(answer, peer), failed: null };
       } catch (error) { return { peer, result: null, failed: error instanceof PeerRefusal ? `${peer.name} (${error.message})` : peer.name }; }

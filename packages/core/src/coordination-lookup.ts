@@ -2,6 +2,7 @@ import type { AgentContact, AgentMatch, AgentTranscriptEntry, CoordinationPeer, 
 import type { Database } from 'bun:sqlite';
 import { address, text } from './coordination-letter.ts';
 import { invalidParams } from './errors.ts';
+import { threadRef } from './contacts/project-policy.ts';
 
 /** At most this many words in a search; each costs one scan of the candidates' chat. */
 export const SEARCH_WORDS = 8;
@@ -140,6 +141,8 @@ export function checkRemoteContact(contact: AgentContact, peer: CoordinationPeer
   const project = optional(contact.project);
   const agent = optional(contact.agent);
   const branch = optional(contact.branch);
+  const sharedThread = contact.sharedThread === undefined ? undefined : threadRef(contact.sharedThread);
+  if (sharedThread && (sharedThread.address.coreId !== contact.coreId || sharedThread.address.threadId !== contact.threadId)) throw invalidParams('agent.sharedThread: expected this descriptor address');
   return {
     ...address(contact, 'agent'), title: text(contact.title, 'agent.title', 200), machine: peer.name, resources: typeof contact.resources === 'string' && contact.resources.length <= 500 ? contact.resources : '', status: contact.status, mode: contact.mode,
     ...(project === undefined ? {} : { project }), ...(agent === undefined ? {} : { agent }),
@@ -147,5 +150,6 @@ export function checkRemoteContact(contact: AgentContact, peer: CoordinationPeer
     ...(contact.lastCompletedAt === null || Number.isSafeInteger(contact.lastCompletedAt) && contact.lastCompletedAt! >= 0 ? { lastCompletedAt: contact.lastCompletedAt } : {}),
     ...(typeof contact.projectArchived === 'boolean' ? { projectArchived: contact.projectArchived } : {}),
     ...(typeof contact.paused === 'boolean' ? { paused: contact.paused } : {}),
+    ...(sharedThread === undefined ? {} : { sharedThread }),
   };
 }

@@ -84,7 +84,7 @@ export class PeerDesk {
     // Reading an unsigned body cannot hold an update. Admission may have won
     // during that await, so authenticated processing must enter the same gate.
     if (this.side.closed() || this.core.stopping) return new Response('the core is stopping', { status: 503 });
-    return this.core.router.trackRequest(() => {
+    return this.core.router.trackRequest(async () => {
       let result: unknown;
       let error: string | undefined;
       let status = 200;
@@ -94,7 +94,9 @@ export class PeerDesk {
         if (!currentPeer) throw refused('peer permission revoked');
         if (contact && groupOnly) throw refused('operation: a contact takes no part in this core\'s group');
         if (!contact && envelope.operation.startsWith('contact.')) throw refused('operation: only a contact sends contact operations');
-        if (envelope.operation === 'directory') result = contact ? this.side.contactDirectory(peer.coreId) : this.side.directory();
+        if (contact && this.core.sharedProjects.hasContact(peer.coreId) && ['directory', 'search', 'read'].includes(envelope.operation)) throw refused('operation: associated projects require scoped contact.project queries');
+        if (envelope.operation === 'contact.project') result = await this.core.sharedProjects.receive(peer.coreId, envelope.payload);
+        else if (envelope.operation === 'directory') result = contact ? this.side.contactDirectory(peer.coreId) : this.side.directory();
         else if (envelope.operation === 'deliver') result = this.side.receive(envelope.payload as AgentLetter, peer);
         else if (envelope.operation === 'search') {
           const words = searchWords(((envelope.payload as { words?: unknown })?.words as string[] | undefined)?.join?.(' '));

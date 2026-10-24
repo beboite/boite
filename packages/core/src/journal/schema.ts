@@ -5,8 +5,9 @@ import { nativeAgentPartSql } from './native-agent-parts.ts';
 import { addPartBlobCodecs, createPartBlobs } from './part-blobs.ts';
 import { createCommandLines } from './processes.ts';
 import { parseJson } from './rows.ts';
+import { createSharedProjects } from '../contacts/project-journal.ts';
 
-export const SCHEMA_VERSION = 38;
+export const SCHEMA_VERSION = 39;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -450,6 +451,7 @@ export function migrate(db: Database, file: string): { from: number; to: number 
     db.exec('ALTER TABLE turns ADD COLUMN quiet INTEGER NOT NULL DEFAULT 0;');
     version = 38;
   }
+  createSharedProjects(db);
   version = Math.max(version, SCHEMA_VERSION);
   if (row?.user_version !== version) db.exec(`PRAGMA user_version = ${version}`);
   return { from: row?.user_version ?? 0, to: version };
