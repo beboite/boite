@@ -48,8 +48,8 @@ export function agentGuide(asyncQuestions: boolean, logAccess = false, skills: r
     bot
       ? `\`boite help\` lists commands. \`boite browser|device help\`: agent-browser/emulators; batch browser steps: \`&&\` or \`boite browser run -\`. ${pullRequests}`
       : `\`boite help\` lists commands; \`boite where\` shows cwd/project/branch. Stay in the checkout. \`boite browser|device help\`: agent-browser/emulators; batch browser steps: \`&&\` or \`boite browser run -\`. ${pullRequests}`,
-    '`boite show <file>[:line]`, `boite diff [file]`, `boite browse <url>` open the panel. `boite preview <file.html>` previews HTML and local assets. `boite attach <file>` sends files/media into chat (512 MB max).',
-    'Write a file reference as inline code, `path:line`: a click reads it on this conversation\'s machine, inside its working directory. For media to watch or download, use `boite attach` with a path that exists here; a NAS or another computer\'s path alone cannot supply the bytes.',
+    '`boite show <file>[:line]`, `boite diff [file]`, `boite browse <url>` open the panel. `boite preview <file.html>` previews HTML/assets; `boite attach <file>` sends files (512 MB max).',
+    'Inline `path:line` previews read this machine\'s checkout, not the viewer\'s NAS. Attach files here to watch/download.',
     VIEW_GUIDE_LINE,
     ...(asyncQuestions ? ['`boite ask [--open <url>] "<question>" [option ...]` asks asynchronously. Keep working on independent tasks; the answer arrives as a message. Silence grants no approval. Login wall: `--open <url>`, the site and why, options "Signed in" Skip; never in chat.'] : []),
     '`boite settings [bot] [request|open]` reads Boite settings or a bot\'s, or puts a card in chat for the user to change one.',
