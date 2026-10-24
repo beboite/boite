@@ -247,8 +247,12 @@ inspector answers only when the JavaScript thread is free.
 
 A draft pull request runs `draft` mode: the changes job, the Linux x64 core
 suite, type checks and UI tests, and the focused telemetry and E2E type checks,
-each only when its paths changed. Windows, macOS, desktop packages, E2E,
-stress, Docker and the APK wait: their checks skip.
+each only when its paths changed. Protection code, protected fixtures and shared
+toolchain inputs also select the existing `Core tests (Windows x64)` job.
+It builds the userspace sandbox helper, runs the opt-in native protection fixture
+and keeps the ordinary Windows core suite. No extra required check name is added.
+Other drafts leave Windows out. macOS, desktop packages, E2E, stress, Docker and
+the APK wait: their checks skip.
 
 A skip passes in a ruleset, so a draft must not satisfy it:
 

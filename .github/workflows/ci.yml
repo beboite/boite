@@ -3,7 +3,7 @@ name: ci
 on:
   push:
     branches: [main]
-  # A draft runs the Linux checks; ready_for_review starts the full run, and
+  # A draft runs Linux, plus native Windows for protection inputs; ready_for_review starts the full run, and
   # converted_to_draft cancels one in progress and fails its planning (changes job).
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
@@ -83,6 +83,7 @@ jobs:
       stress: ${{ steps.filter.outputs.stress }}
       portable: ${{ steps.filter.outputs.portable }}
       coreRunners: ${{ steps.filter.outputs.coreRunners }}
+      nativeWindows: ${{ steps.filter.outputs.nativeWindows }}
       stale: ${{ steps.stale.outputs.stale }}
     steps:
       # A rerun keeps its event: an old draft run rerun once the pull request
@@ -188,6 +189,19 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+      - name: Build userspace native helper
+        if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        shell: pwsh
+        run: |
+          bun packages/core/bin/install-windows-sandbox.ts "$env:RUNNER_TEMP\protected-tool.exe"
+          "BOITE_WINDOWS_SANDBOX_PATH=$env:RUNNER_TEMP\protected-tool.exe" >> $env:GITHUB_ENV
+      - name: Native Windows protected tools
+        if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        env:
+          BOITE_TEST_NATIVE_EXECUTION: '1'
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: bun test packages/core/test/protected-windows.test.ts --timeout 120000
       # Core data directories, worktrees and Chrome profiles go to the runner's
       # temp drive (D: on Windows), as in the E2E shards (docs/ci.md#build-cost).
       - run: bun run --cwd packages/core test

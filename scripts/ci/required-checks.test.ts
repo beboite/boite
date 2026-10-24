@@ -151,6 +151,24 @@ test('each core job runs on its CORE_ALL runner when coreRunners lists it', () =
   expect(pr.includes('"os":"ubuntu-24.04-arm"')).toBe(true);
 });
 
+test('protection changes run the native fixture inside the existing Windows core check', () => {
+  const ci = loadWorkflow('ci.yml');
+  const changes = ci.jobs.changes as Job & { outputs: Record<string, string> };
+  expect(changes.outputs.nativeWindows).toBe('${{ steps.filter.outputs.nativeWindows }}');
+  const windows = ci.jobs['core-windows-x64'] as Job & { steps: { name?: string; if?: string; run?: string; env?: Record<string, string> }[] };
+  const helper = windows.steps.find(step => step.name === 'Build userspace native helper')!;
+  const native = windows.steps.find(step => step.name === 'Native Windows protected tools')!;
+  expect(helper.if).toBe("runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'");
+  expect(native.if).toBe(helper.if);
+  expect(helper.run).toContain('bun packages/core/bin/install-windows-sandbox.ts');
+  expect(helper.run).toContain('BOITE_WINDOWS_SANDBOX_PATH=');
+  expect(helper.run).toContain('$env:GITHUB_ENV');
+  expect(windows.steps.indexOf(helper)).toBeLessThan(windows.steps.indexOf(native));
+  expect(native.env).toMatchObject({ BOITE_TEST_NATIVE_EXECUTION: '1', TEMP: '${{ runner.temp }}', TMP: '${{ runner.temp }}' });
+  expect(native.run).toBe('bun test packages/core/test/protected-windows.test.ts --timeout 120000');
+  expect(windows.steps.some(step => step.run === 'bun run --cwd packages/core test')).toBe(true);
+});
+
 test('each portable desktop job builds its PORTABLE_ALL platform when platforms lists it', () => {
   const jobs = Object.entries(loadWorkflow('desktop.yml').jobs).filter(([id]) => id.startsWith('portable-'));
   expect(jobs.map(([id, job]) => ({
