@@ -83,10 +83,13 @@ test('fake bot creation cards: the core\'s refusals, a phone cannot create, and 
   await expect(client.call('agents.settings.create', { threadId, name: 'Scribe', projects: ['nowhere'], reason: 'r' })).rejects.toMatchObject({ data: { field: 'projects' } });
   await expect(client.call('agents.settings.create', { threadId, name: 'Scribe', model: 'gpt-9', reason: 'r' })).rejects.toMatchObject({ data: { field: 'model' } });
   await expect(client.call('agents.settings.create', { threadId, name: 'Scribe', reason: '' })).rejects.toMatchObject({ data: { field: 'reason' } });
+  // A model that is not text is refused, not read as omitted (which would take the thread's route).
+  await expect(client.call('agents.settings.create', { threadId, name: 'Scribe', model: 123 as unknown as string, reason: 'r' })).rejects.toMatchObject({ data: { field: 'model' } });
 
-  const { questionId, create } = await client.call('agents.settings.create', { threadId, name: 'Scribe', effort: 'high', reason: 'Notes of every meeting' });
+  // Bounds hold on the trimmed text, as the name's do.
+  const { questionId, create } = await client.call('agents.settings.create', { threadId, name: 'Scribe', domain: ` ${'d'.repeat(500)} `, effort: 'high', reason: 'Notes of every meeting' });
   // The thread's own route, the effort asked, full access as the Agents page gives.
-  expect(create).toEqual({ name: 'Scribe', domain: '', instructions: '', projectIds: [], selection: { providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: 'high', permissionMode: 'bypassPermissions' } });
+  expect(create).toEqual({ name: 'Scribe', domain: 'd'.repeat(500), instructions: '', projectIds: [], selection: { providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: 'high', permissionMode: 'bypassPermissions' } });
   await expect(client.call('agents.settings.create', { threadId, name: 'scribe', reason: 'again' })).rejects.toMatchObject({ data: { field: 'name' } });
   const phone = await createClient({ delayMs: 0, principal: 'session' });
   await expect(phone.call('agents.settings.apply', { threadId, questionId })).rejects.toMatchObject({ code: RpcErrorCode.Refused });

@@ -76,8 +76,9 @@ export function checkAgentCreateRequest(params: Omit<AgentCreateRequestParams, '
   if (open.some(card => sameName(card.name, name))) return { ok: false, message: `a card proposing a bot named ${JSON.stringify(name)} is already open in this thread`, data: { field: 'name' } };
   const text = (value: unknown, field: string, max: number): Checked<string> => {
     if (value === undefined) return { ok: true, value: '' };
-    if (typeof value !== 'string' || value.length > max) return { ok: false, message: `${field}: expected text of at most ${max} characters` };
-    return { ok: true, value: value.trim() };
+    const trimmed = typeof value === 'string' ? value.trim() : undefined;
+    if (trimmed === undefined || trimmed.length > max) return { ok: false, message: `${field}: expected text of at most ${max} characters` };
+    return { ok: true, value: trimmed };
   };
   const domain = text(params.domain, 'domain', AGENT_DOMAIN_MAX);
   if (!domain.ok) return { ok: false, message: domain.message, data: { field: 'domain' } };
@@ -85,7 +86,11 @@ export function checkAgentCreateRequest(params: Omit<AgentCreateRequestParams, '
   if (!instructions.ok) return { ok: false, message: instructions.message, data: { field: 'instructions' } };
   const projectIds = agentProjectIds(params.projects ?? [], [], ctx.projects);
   if (!projectIds.ok) return { ok: false, message: projectIds.message, data: { field: 'projects' } };
-  const optional = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : undefined);
+  // Omitted or blank picks the default; anything but text is refused, not read as omitted.
+  for (const field of ['model', 'effort'] as const) {
+    if (params[field] !== undefined && typeof params[field] !== 'string') return { ok: false, message: `${field}: expected a ${field} name`, data: { field } };
+  }
+  const optional = (value: string | undefined) => value?.trim() || undefined;
   const route = ctx.route(optional(params.model), optional(params.effort));
   if (!route.ok) return { ok: false, message: route.message, data: { field: 'model' } };
   return {
