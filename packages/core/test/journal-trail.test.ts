@@ -92,11 +92,19 @@ test('opening a journal builds no planner statistics; the retention ticks build 
     expect(stats()).toEqual([]);
     const pending = journal.staleStatistics(true);
     expect(pending).toContain('ANALYZE "main"."events"');
+    expect(pending).not.toContain('ANALYZE "main"."shared_project_outbox"');
     expect(() => journal.analyze('DROP TABLE events')).toThrow('expected an ANALYZE statement');
     for (const statement of pending) journal.analyze(statement);
     expect(stats()).toContain('events');
     // Nothing left stale, after the migration or after a quiet day.
     expect(journal.staleStatistics(true)).toEqual([]);
     expect(journal.staleStatistics()).toEqual([]);
+    // An empty outbox cannot retain statistics, but its first row must make it eligible.
+    journal.db.query("INSERT INTO shared_project_outbox(contact_id, association_id, data) VALUES ('fixture', 'fixture', '{}')").run();
+    const populated = journal.staleStatistics(true);
+    expect(populated).toContain('ANALYZE "main"."shared_project_outbox"');
+    for (const statement of populated) journal.analyze(statement);
+    expect(stats()).toContain('shared_project_outbox');
+    expect(journal.staleStatistics(true)).toEqual([]);
   } finally { journal.close(); }
 });

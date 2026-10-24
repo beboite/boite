@@ -13,7 +13,12 @@ import type { Database } from 'bun:sqlite';
 export function staleStatistics(db: Database, all: boolean): string[] {
   const statements = (db.query(`PRAGMA optimize=${all ? '0x10003' : '0x03'}`).all() as Record<string, unknown>[])
     .map(row => String(Object.values(row)[0]))
-    .filter(statement => /^ANALYZE /i.test(statement));
+    .filter(statement => /^ANALYZE /i.test(statement))
+    .filter(statement => {
+      const table = /^ANALYZE "main"\."(\w+)"$/i.exec(statement)?.[1];
+      // SQLite stores no statistics for an empty table and otherwise proposes it again forever.
+      return table === undefined || db.query(`SELECT 1 FROM "${table}" LIMIT 1`).get() !== null;
+    });
   if (!all) return statements;
   const missing = neverAnalyzed(db).map(table => `ANALYZE "main"."${table}"`).filter(statement => !statements.includes(statement));
   return [...statements, ...missing];
