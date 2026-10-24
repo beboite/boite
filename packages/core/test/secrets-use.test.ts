@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { secretMask } from '@boite/contracts';
@@ -51,7 +51,8 @@ test('write puts the value in an ignored env file, keeps its other lines, and re
   if (process.platform !== 'win32') chmodSync(join(root, '.env'), 0o644);
   const write = (path: string, extra: { allowUnignored?: boolean } = {}) => owner.call('secrets.use', { threadId, ref, use: { action: 'write', path, key: 'API_KEY', ...extra } });
 
-  expect(await write(join(root, '.env'))).toEqual({ action: 'write', path: join(root, '.env'), replaced: true });
+  // The path given back is the real one: on macOS the temp folder is under /private.
+  expect(await write(join(root, '.env'))).toEqual({ action: 'write', path: realpathSync(join(root, '.env')), replaced: true });
   // A file others could read before is narrowed to its owner once it holds the value.
   if (process.platform !== 'win32') expect(statSync(join(root, '.env')).mode & 0o777).toBe(0o600);
   // The value holds `$`, so it is quoted the way dotenv parsers read it back.
