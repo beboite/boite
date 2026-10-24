@@ -94,9 +94,9 @@ export class ContactReach {
 
   /** A member no longer opens these of its projects to a contact another member holds, or none (`null`). */
   closed(coreId: string, projectIds: string[] | null): void {
-    // The contact's own link to this core keeps its replies.
+    // The contact's own link to this core, or another member still relaying it, keeps its replies.
     if (projectIds !== null) this.forgetReplies(coreId, threadId => projectIds.includes(this.core.journal.getThread(threadId)?.projectId ?? ''));
-    else if (!this.contacts.has(coreId)) this.forgetReplies(coreId, () => true);
+    else if (!this.contacts.has(coreId) && this.contacts.members.relayedOf(coreId).length === 0) this.forgetReplies(coreId, () => true);
     this.core.coordination.rejectContactLetters(coreId, 'Project closed to this contact');
   }
 }

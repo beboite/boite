@@ -124,6 +124,8 @@ export class ContactStore implements LinkedContacts {
     this.funnel.changed = () => this.changed();
     this.members = new ContactMembers(core, this);
     this.reach = new ContactReach(core, this);
+    // A member that leaves the group takes the contacts it relayed out of `peers()`.
+    core.bus.onAny(name => { if (name === 'group.updated') this.reset(); });
   }
 
   // -- Storage.

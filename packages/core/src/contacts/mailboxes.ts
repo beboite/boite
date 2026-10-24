@@ -95,7 +95,9 @@ export class ContactMailboxes {
       // A contact that opened this core's projects through that member is listed already, and still asked through a mailbox.
       const relayed = this.core.coordination.trusted().find(peer => peer.coreId === contact.coreId);
       if (contact.coreId === this.self() || (relayed && !this.core.contacts.isRelayPeer(relayed))) continue;
-      if (this.route(threadId, contact.coreId) && result.some(entry => entry.coreId === contact.coreId)) continue;
+      // Each listing refreshes the route's admission; a second gateway for the same contact does not replace the first.
+      const existing = this.route(threadId, contact.coreId);
+      if (existing && existing.via !== via && result.some(entry => entry.coreId === contact.coreId)) continue;
       this.remember(threadId, via, contact, admission);
       if (!result.some(entry => entry.coreId === contact.coreId)) result.push(contact);
     }

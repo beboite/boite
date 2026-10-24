@@ -164,3 +164,31 @@ test('a receipt a member could not answer is asked again, never refused', async 
   // Every member answered and none knows it: that is final.
   expect(await thrown(host.core.contacts.members.receipt(guestId, { id: crypto.randomUUID(), fromThreadId: 'thr_x' }))).toThrow('unknown receipt');
 }, 30000);
+
+test('a contact still relayed by another member keeps the reply windows when one member drops it', async () => {
+  const { host, member, memberClient, guestId, hostId } = await setup();
+  const other = await startTestCore();
+  cores.push(other);
+  await other.core.group.join((await host.core.group.invite()).invite);
+  const otherId = other.core.coordination.card().coreId;
+  await waitFor(() => member.core.group.peers().some(peer => peer.coreId === otherId), 10000);
+  const gamma = await project(member, memberClient, 'gamma');
+  const delta = await project(member, memberClient, 'delta');
+  const replying = await thread(memberClient, delta.id, 'Delta work');
+  const entry = { coreId: guestId, name: 'Chris', minTier: 2, link: 'connected', offers: [], grants: [{ projectId: gamma.id, readThreads: false }] };
+  member.core.contacts.members.mirrored(hostId, { contacts: [entry] });
+  member.core.contacts.members.mirrored(otherId, { contacts: [entry] });
+  // A thread outside the opened project wrote to the contact: it may hear back.
+  member.core.contacts.reach.noteSent(replying, guestId);
+  member.core.contacts.members.mirrored(hostId, { contacts: [] });
+  expect(member.core.contacts.reach.mayReach(guestId, replying)).toBe(true);
+  member.core.contacts.members.mirrored(otherId, { contacts: [] });
+  expect(member.core.contacts.reach.mayReach(guestId, replying)).toBe(false);
+
+  // Relayed by a member that then leaves the group: the contact is no longer a peer here.
+  member.core.contacts.members.mirrored(otherId, { contacts: [entry] });
+  expect(member.core.coordination.trusted().some(peer => peer.coreId === guestId)).toBe(true);
+  host.core.group.remove(otherId);
+  await waitFor(() => !member.core.group.peers().some(peer => peer.coreId === otherId), 10000);
+  expect(member.core.coordination.trusted().some(peer => peer.coreId === guestId)).toBe(false);
+}, 30000);
