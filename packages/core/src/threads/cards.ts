@@ -21,6 +21,8 @@ import {
   type ExperimentId,
   settingAnswerText,
   settledSetting,
+  settledMachineSetting,
+  type CoordinationPeer,
   type ThreadId,
   type ThreadSummary,
   type Turn,
@@ -71,6 +73,8 @@ interface PendingQuestion {
  */
 export class ThreadCards {
   private readonly permissions = new Map<RequestId, PendingPermission>();
+  private readonly announced = new Map<string, { seq: number; value: unknown }>();
+  private announcements = 0;
   readonly questions = new Map<RequestId, PendingQuestion>();
   /** Where each open asynchronous card is drawn, so its answer can be written back after its turn ended. */
   readonly asyncCards = new Map<RequestId, { threadId: ThreadId; messageId: MessageId; partIndex: number; part: Extract<MessagePart, { type: 'question' }> }>();
@@ -263,18 +267,34 @@ export class ThreadCards {
    * has now (`setting.read`), and says again when the owner changes it
    * (`setting.changed`), which settles the card.
    */
+  /**
+   * `setting.changed` from a member: the cards about that setting settle. The
+   * last value heard is kept, numbered, for a card whose read crossed it.
+   */
+  machineSettingChanged(peer: CoordinationPeer, key: string, value: unknown): void {
+    this.announced.set(`${peer.coreId}:${key}`, { seq: ++this.announcements, value });
+    this.settle(request => (request.setting === undefined ? null : settledMachineSetting(request.setting, peer.coreId, key, value)), `${peer.name}'s settings`);
+  }
+
   private async requestMachineSetting(params: SettingRequestParams): Promise<{ questionId: RequestId; setting: SettingAsk }> {
     this.threads.require(params.threadId);
     if (typeof params.machine !== 'string' || params.machine.trim().length === 0 || params.machine.length > 128) throw invalidParams('settings.request.machine: expected a machine name or core id');
     if (!isMachineSetting(params.key)) throw refused(`${String(params.key)} is this machine's own; a card for another machine asks about ${MACHINE_SETTINGS.join(', ')}`, { field: 'key', expected: MACHINE_SETTINGS });
     const peer = memberNamed(this.core, params.machine, 'settings.request');
+    const since = this.announcements;
     let read: { value?: unknown };
     try { read = (await this.core.coordination.request(peer, 'setting.read', { key: params.key })) as { value?: unknown }; }
     catch (error) {
       if (error instanceof PeerRefusal) throw refused(`Boite on ${peer.name} cannot answer about ${params.key}: ${error.message}; the owner updates it in Settings, Machines and updates`, { field: 'machine' });
       throw unavailable(`${peer.name} did not answer: ${messageOf(error)}`, { field: 'machine' });
     }
-    return this.drawSetting(params, { ...this.core.settings.get(), [params.key]: read?.value as Settings[typeof params.key] }, { coreId: peer.coreId, name: peer.name });
+    const drawn = this.drawSetting(params, { ...this.core.settings.get(), [params.key]: read?.value as Settings[typeof params.key] }, { coreId: peer.coreId, name: peer.name });
+    // The owner flipped it while the read was on its way back: the announcement came before the card.
+    const late = this.announced.get(`${peer.coreId}:${params.key}`);
+    if (late !== undefined && late.seq > since) {
+      this.settle(request => (request.id === drawn.questionId && request.setting !== undefined ? settledMachineSetting(request.setting, peer.coreId, params.key, late.value) : null), `${peer.name}'s settings`);
+    }
+    return drawn;
   }
 
   private drawSetting(params: SettingRequestParams, settings: Settings, machine: SettingMachine | null): { questionId: RequestId; setting: SettingAsk } {

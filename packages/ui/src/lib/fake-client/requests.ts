@@ -171,10 +171,15 @@ export function fakeMember(ctx: FakeContext, query: string, method: string): Set
   const fold = (name: string) => name.trim().replace(/\s+/g, '-').toLowerCase();
   const roster = ctx.roster;
   if (roster === null) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method}.machine: this machine is in no group; --machine names another machine of its group`, data: { field: 'machine' } });
+  const refuse = (message: string, expected?: string[]) => new RpcFailure({ code: RpcErrorCode.Refused, message: `${method}.machine: ${message}`, data: { field: 'machine', ...(expected === undefined ? {} : { expected }) } });
   const others = roster.cores.filter(core => core.coreId !== ctx.identity.coreId);
   const found = others.filter(core => core.coreId === wanted || fold(core.name) === fold(wanted) || (/^[0-9a-f]{6,}$/.test(wanted) && core.coreId.startsWith(wanted)));
-  if (found.length !== 1) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method}.machine: no machine ${wanted} in this group`, data: { field: 'machine' } });
-  return { coreId: found[0]!.coreId, name: found[0]!.name };
+  const self = roster.cores.find(core => core.coreId === ctx.identity.coreId);
+  if (self !== undefined && (self.coreId === wanted || (fold(self.name) === fold(wanted) && found.length === 0))) throw refuse(`${self.name} is this machine; leave --machine out`);
+  if (found.length === 1) return { coreId: found[0]!.coreId, name: found[0]!.name };
+  const names = others.map(core => roster.cores.some(other => other.coreId !== core.coreId && fold(other.name) === fold(core.name)) ? core.coreId.slice(0, 8) : core.name.replace(/\s+/g, '-'));
+  if (found.length === 0) throw refuse(`no machine ${wanted} in this group; ${names.length === 0 ? 'it has no other machine' : `the others are ${names.join(', ')}`}`, names);
+  throw refuse(`${found.length} machines are named ${wanted}; name one by a core id prefix: ${found.map(core => core.coreId.slice(0, 8)).join(', ')}`);
 }
 
 /** `settings.request` on a thread whose turn is known; the fake agent's `[settings]` markers come here too. */

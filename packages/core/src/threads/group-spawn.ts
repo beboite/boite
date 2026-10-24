@@ -6,7 +6,7 @@
  * starts it on the caller's provider and model when it has them. The first
  * answer goes back through coordination, as for a thread started here.
  */
-import { effectiveSetting, isMachineSetting, settledMachineSetting } from '@boite/contracts';
+import { effectiveSetting, isMachineSetting } from '@boite/contracts';
 import type { CoordinationPeer, ContextPreset, ContextRequest, PermissionMode, ThreadLink } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { loggedInAccount } from '../delegation/routes.ts';
@@ -126,7 +126,7 @@ export function readMachineSetting(core: Core, payload: unknown): { key: string;
 export function machineSettingChanged(core: Core, peer: CoordinationPeer, payload: unknown): { ok: true } {
   const { key, value } = (payload ?? {}) as { key?: unknown; value?: unknown };
   if (!isMachineSetting(key) || typeof value !== 'boolean') throw invalidParams('setting: expected groupThreads and true or false');
-  core.threads.cards.settle(request => (request.setting === undefined ? null : settledMachineSetting(request.setting, peer.coreId, key, value)), `${peer.name}'s settings`);
+  core.threads.cards.machineSettingChanged(peer, key, value);
   return { ok: true };
 }
 

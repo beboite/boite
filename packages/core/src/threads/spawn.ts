@@ -243,6 +243,10 @@ export class ThreadSpawns {
       const { created, turn } = await this.launch({
         projectId: target.id, title: start.title, prompt: start.prompt, note, worktree: start.worktree, ...(start.context === undefined ? {} : { context: start.context }),
         agent: agentHere(this.core, start, here), origin: { origin, reported: false, coreId: peer.coreId },
+      // Worktree preparation can outlive the owner's switch and the asker's membership.
+      }, () => {
+        if (this.core.settings.get().groupThreads !== true) throw refused(GROUP_THREADS_OFF);
+        if (!this.core.group.peers().some(member => member.coreId === peer.coreId)) throw refused('thread.start: the machine that asked is no longer in this group');
       });
       this.record(key, { at: Date.now(), requestId: start.requestId, fingerprint, threadId: created.id, turnId: turn.id }, GROUP_LEDGER);
       return this.answer(created.id, turn.id);

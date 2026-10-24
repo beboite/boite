@@ -121,6 +121,14 @@ test('another machine stays within the caller\'s communication settings and the 
   // A card about another machine asks only about what that machine lets the others do.
   expect((await cli(['settings', 'request', 'muteAgents', 'false', '--machine', machine, '--why', 'x'])).err).toContain('is this machine\'s own');
   expect((await cli(['settings', 'request', 'groupThreads', 'true', '--machine', machine, '--why', 'x'])).err).toContain('already true on');
+
+  // A member's thread.start and setting operations arrive sealed or not at all, as the roster does.
+  for (const operation of ['thread.start', 'setting.read', 'setting.changed']) {
+    const body = JSON.stringify({ from: desk.core.coordination.card().coreId, to: pc.core.coordination.card().coreId, at: Date.now(), nonce: crypto.randomUUID(), operation, payload: {} });
+    const clear = await fetch(`${pc.url}/agent-messages`, { method: 'POST', body, headers: { 'x-boite-peer': desk.core.coordination.card().coreId, 'x-boite-signature': desk.core.coordination.signature(Buffer.from(body)).toString('base64') } });
+    expect(clear.status).toBe(400);
+    expect(await clear.json()).toMatchObject({ error: 'machines of a group exchange sealed requests only' });
+  }
 });
 
 test('a machine outside any group has no other machine to start a thread on', async () => {
@@ -130,4 +138,53 @@ test('a machine outside any group has no other machine to start a thread on', as
   let err = '';
   await runCli(['thread', 'new', 'test', 'Brief', '--machine', 'pc'], { out: () => {}, err: s => { err += s; }, env: { BOITE_THREAD_ID: threadId, BOITE_CORE_URL: h.url, BOITE_AGENT_TOKEN: h.core.agents.tokenFor(threadId) }, cwd: h.dataDir });
   expect(err).toContain('this machine is in no group');
+});
+
+test('the owner turning the switch off while the worktree is prepared stops the thread before its first turn', async () => {
+  const prompts = answering();
+  const { pc, machine, cli } = await setup();
+  await pc.core.settings.set({ groupThreads: true });
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  const threads = pc.core.threads;
+  const create = threads.create.bind(threads);
+  threads.createInWorktree = async (params) => {
+    const { worktree: _worktree, ...base } = params;
+    entered.resolve();
+    await release.promise;
+    return create(base);
+  };
+  const started = cli(['thread', 'new', 'notes', 'Brief', '--machine', machine, '--worktree']);
+  await entered.promise;
+  await pc.core.settings.set({ groupThreads: false });
+  release.resolve();
+  expect((await started).err).toContain('does not let the other machines of its group start threads there');
+  expect(prompts.size).toBe(0);
+});
+
+test('a card whose read crossed the owner\'s flip settles as soon as it is drawn', async () => {
+  const prompts = answering();
+  const { desk, pc, owner, threadId, machine, cli } = await setup();
+  await owner.call('turns.start', { threadId, prompt: 'Print my letter', clientRequestId: 'user-turn-1' });
+  await waitFor(() => desk.core.threads.require(threadId).status === 'idle');
+  // The PC answers false, then its owner flips the switch and its announcement lands before that answer does.
+  const announcements: Promise<unknown>[] = [];
+  const announce = pc.core.coordination.request.bind(pc.core.coordination);
+  pc.core.coordination.request = ((peer, operation, payload) => {
+    const sent = announce(peer, operation, payload);
+    if (operation === 'setting.changed') announcements.push(sent);
+    return sent;
+  }) as typeof pc.core.coordination.request;
+  const read = desk.core.coordination.request.bind(desk.core.coordination);
+  desk.core.coordination.request = (async (peer, operation, payload) => {
+    const answer = await read(peer, operation, payload);
+    if (operation === 'setting.read') {
+      await pc.core.settings.set({ groupThreads: true });
+      await waitFor(() => announcements.length > 0);
+      await Promise.all(announcements);
+    }
+    return answer;
+  }) as typeof desk.core.coordination.request;
+  expect((await cli(['settings', 'request', 'groupThreads', 'true', '--machine', machine, '--why', 'Print'])).code).toBe(0);
+  await waitFor(() => (prompts.get(threadId) ?? []).some(p => p.includes('applied: groupThreads is now true on')));
+  expect(await owner.call('questions.list', { threadId })).toHaveLength(0);
 });
