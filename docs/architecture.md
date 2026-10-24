@@ -534,6 +534,15 @@ Browser origins and coordination peers are read off the same roster. A member
 listens on its tailnet address beside the one it started on. [Groups](groups.md)
 describes the trust this assumes and where it stops.
 
+Contacts link different owners rather than adding group members. Explicit
+shared projects keep their association, board authority and execution on the
+selected original cores. A group gateway forwards only the bounded
+`contact.project` protocol under a current exact project grant, with canonical
+source/target endpoints and admission checks before and after the wait. It
+never turns that peer into an owner RPC client. File/tool enforcement and
+captured cancellation remain on the execution host. [Contacts](contacts.md)
+documents the protocol, acceptance evidence and unavailable provider isolation.
+
 ## The phone keeps the app
 
 The service worker registers after first paint on the core's HTTP(S) origin.

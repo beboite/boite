@@ -67,6 +67,11 @@ The base is a full commit ID. The host owns model, effort, permissions, context
 and checkout; combining this target with `model`, `profile`, `effort`, `context`
 or `worktree` is refused.
 
+`host.coreId` may differ from `host.ownerCoreId` when an explicitly associated
+project executes on a group member. Preserve the complete tuple from the
+shared directory; a public relay thread alias is not an execution host or an
+owner credential. Restart and cancellation keep the captured host/job identity.
+
 A path reads a step's structured output, or its final answer when it has none.
 On a fanned-out step, `review.bugs` collects the bugs of every item into one
 list. The core checks the whole plan before anything starts: a name that is no profile,

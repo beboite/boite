@@ -17,17 +17,17 @@ export function sharedProjectMethods(ctx: FakeContext) {
     },
     'sharedProjects.get': async p => {assertWorkerScope(ctx,p);const s = requireShared(ctx,p.sharedProjectId); sharedActor(ctx,p.threadId,endpoints(ctx,s).local); return sharedView(ctx,s);},
     'sharedProjects.offer': async p => {
-      const local = {ownerCoreId: ctx.identity.coreId, coreId: p.machine ?? ctx.identity.coreId, projectId: p.projectId}, remote = projectReference(p.remote), contact = sharedContact(ctx,p.coreId);
-      if (local.coreId !== ctx.identity.coreId || remote.coreId !== p.coreId) throw refusedShared('machine: member association requires member relay support');
+      const contact = sharedContact(ctx,p.coreId), local = {ownerCoreId: contact?.via ?? ctx.identity.coreId, coreId: p.machine ?? ctx.identity.coreId, projectId: p.projectId}, remote = projectReference(p.remote);
+      if (local.coreId !== ctx.identity.coreId) throw refusedShared('machine: offer from the project owning Store/core');
       if (remote.ownerCoreId !== p.coreId || !granted(ctx,local,p.coreId)) throw refusedShared('projectId: expected a project explicitly granted to this contact');
       if (contact?.capabilities?.sharedProjects !== 1) throw refusedShared('coreId: contact must negotiate sharedProjects version 1');
       const id = onceShared(ctx, `offer:${p.projectId}:${sharedText(p.requestId,'requestId')}`,p,() => {
         const initial = (project: SharedProjectRef) => ({project,revision:1,board:false,compute:{enabled:false,profiles:[],permissionMode:'default' as const,maxConcurrent:null},revokedAt:null});
         const shared: SharedProject = {id:`shp_${secureId()}`,projects:[local,remote],authority:local,state:'pending',access:[initial(local),initial(remote)],createdAt:Date.now(),updatedAt:Date.now()};
         sharedState(ctx).projects.set(shared.id,shared);
-        sharedState(ctx).policies.set(shared.id,JSON.stringify(sharedContact(ctx,p.coreId)?.grants.find(g=>g.projectId===local.projectId)));
+        sharedState(ctx).policies.set(shared.id,JSON.stringify(sharedContact(ctx,p.coreId,local)?.grants.find(g=>g.projectId===local.projectId)));
         const target = fakeCore(remote.coreId);
-        if (target && granted(target,remote,ctx.identity.coreId)) {sharedState(target).projects.set(shared.id,shared);sharedState(target).policies.set(shared.id,JSON.stringify(sharedContact(target,ctx.identity.coreId)?.grants.find(g=>g.projectId===remote.projectId)));}
+        if (target && granted(target,remote,local.ownerCoreId)) {sharedState(target).projects.set(shared.id,shared);sharedState(target).policies.set(shared.id,JSON.stringify(sharedContact(target,local.ownerCoreId,remote)?.grants.find(g=>g.projectId===remote.projectId)));}
         else if (target) shared.state = 'declined';
         return shared.id;
       });

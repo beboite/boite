@@ -1,7 +1,8 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { defaultCoordinationConfig, RpcErrorCode } from '@boite/contracts';
 import { FakeClient } from './fake-client';
 import { FAKE_CONTACT_INVITE } from './fake-client/contacts';
+import { fakeCore } from './fake-client/coordination';
 import { RpcFailure } from './client';
 import { encodeInvite, inviteShare, readInvite } from './contact-link';
 
@@ -22,6 +23,91 @@ async function fake(): Promise<{ client: FakeClient; events: () => number }> {
   client.on('contacts.updated', () => { heard += 1; });
   return { client, events: () => heard };
 }
+
+async function routedClients() {
+  const [source, gateway, outside] = ['source', 'gateway', 'outside'].map(name => new FakeClient({ delayMs: 0, coreId: `core-${name}`, coreName: name }));
+  clients.push(source!, gateway!, outside!);
+  await Promise.all(clients.map(client => client.connect()));
+  await source!.call('group.create', { name: 'Work' });
+  await gateway!.call('group.join', { invite: (await source!.call('group.invite', {})).invite });
+  await outside!.call('contacts.join', { link: (await gateway!.call('contacts.invite', { share: false })).link });
+  for (const client of clients) await client.call('contacts.settings', { settings: { minTier: 2 } });
+  await outside!.call('contacts.grant', { coreId: 'core-gateway', projectId: 'p-boite', readThreads: true });
+  return { source: source!, gateway: gateway!, outside: outside! };
+}
+
+test('a group contact keeps both sides of its exchange in the initiating conversation', async () => {
+  const { source, gateway, outside } = await routedClients();
+  expect((await source!.call('collaboration.contacts', { threadId: 't-trace' })).map(contact => contact.coreId)).toContain('core-outside');
+  const target = (await source!.call('collaboration.directory', { threadId: 't-trace' })).agents.find(agent => agent.coreId === 'core-outside' && agent.threadId === 't-trace')!;
+  expect(target).toBeDefined();
+  const sent = await source!.call('collaboration.send', { threadId: 't-trace', to: target, text: 'Which port is free?', requestId: 'routed-question' });
+  const received = (await outside!.call('collaboration.get', { threadId: 't-trace' })).messages.find(letter => letter.id === sent.id)!;
+  expect(received.from.coreId).toBe('core-gateway');
+  expect(received.from.threadId).not.toBe('t-trace');
+  const answer = await outside!.call('collaboration.send', { threadId: 't-trace', to: received.from, text: 'Port 8080 is free.', replyTo: sent.id, requestId: 'routed-answer' });
+  expect(answer.createdAt).toBeGreaterThan(sent.createdAt);
+  const mine = (await source!.call('collaboration.get', { threadId: 't-trace' })).messages;
+  expect(mine.map(letter => letter.id)).toEqual([sent.id, answer.id]);
+  expect(mine[1]).toMatchObject({ from: { coreId: 'core-outside', threadId: 't-trace' }, to: { coreId: 'core-source', threadId: 't-trace' }, status: 'delivered' });
+  expect((await gateway!.call('collaboration.get', { threadId: 't-trace' })).messages).toEqual([]);
+  const asked = await source!.call('collaboration.ask', { threadId: 't-trace', contact: 'outside', text: 'An agent for the notes project' });
+  expect(asked.from.coreId).toBe('core-source');
+  const incoming = (await outside!.call('contacts.get', {})).requests.find(request => request.id === asked.id)!;
+  expect(incoming.from).toMatchObject({ coreId: 'core-gateway', threadId: received.from.threadId });
+  await outside!.call('contacts.decide', { id: incoming.id, accept: true, projectId: 'p-notes' });
+  expect((await source!.call('collaboration.get', { threadId: 't-trace' })).messages.at(-1)).toMatchObject({ origin: 'contact', to: { coreId: 'core-source', threadId: 't-trace' }, status: 'delivered' });
+  expect((await source!.call('collaboration.contacts', { threadId: 't-trace' })).find(contact => contact.coreId === 'core-outside')!.projects).toContain('notes');
+  await outside!.call('contacts.revoke', { coreId: 'core-gateway', projectId: 'p-boite' });
+  await expect(source!.call('collaboration.send', { threadId: 't-trace', to: target, text: 'No longer allowed', requestId: 'routed-revoked' })).rejects.toBeInstanceOf(RpcFailure);
+});
+
+test('a direct contact preserves mutual-trust sends, search and transcript grants', async () => {
+  const source = new FakeClient({ delayMs: 0, coreId: 'core-source', coreName: 'source' });
+  const target = new FakeClient({ delayMs: 0, coreId: 'core-target', coreName: 'target' });
+  clients.push(source, target);
+  await Promise.all(clients.map(client => client.connect()));
+  await source.call('contacts.join', { link: (await target.call('contacts.invite', { share: false })).link });
+  const from = await source.call('collaboration.identity', {}), to = await target.call('collaboration.identity', {});
+  await source.call('collaboration.trust', { peer: to });
+  await target.call('collaboration.trust', { peer: { ...from, readThreads: true } });
+  const address = { coreId: to.coreId, threadId: 't-trace' };
+  const transcript = await source.call('collaboration.read', { threadId: 't-trace', target: address });
+  expect(transcript.entries.length).toBeGreaterThan(0);
+  const query = transcript.entries.find(entry => entry.role === 'user' && entry.text.length > 1)!.text;
+  expect((await source.call('collaboration.search', { threadId: 't-trace', query })).matches).toContainEqual(expect.objectContaining({ ...address, matched: expect.arrayContaining(['chat']) }));
+  const sent = await source.call('collaboration.send', { threadId: 't-trace', to: address, text: 'Use the trusted link', requestId: 'mutual-trust' });
+  expect(sent.status).toBe('delivered');
+  expect(sent.contact).toBeUndefined();
+  expect((await source.call('collaboration.contacts', { threadId: 't-trace' })).map(contact => contact.coreId)).toContain(to.coreId);
+  for (const client of [source, target]) await client.call('contacts.settings', { settings: { minTier: 2 } });
+  expect((await source.call('collaboration.ask', { threadId: 't-trace', contact: to.coreId, text: 'Open another project' })).coreId).toBe(to.coreId);
+});
+
+test('an expired routed letter updates the initiating sender copy', async () => {
+  const { source, outside } = await routedClients();
+  await outside.call('collaboration.configure', { threadId: 't-trace', config: { ...defaultCoordinationConfig(), paused: true } });
+  const sent = await source.call('collaboration.send', { threadId: 't-trace', to: { coreId: 'core-outside', threadId: 't-trace' }, text: 'Deliver before expiry', requestId: 'routed-expiry' });
+  expect(sent.status).toBe('received');
+  const changed: string[] = [];
+  source.on('collaboration.changed', event => { changed.push(event.threadId); });
+  const clock = vi.spyOn(fakeCore('core-outside')!, 'now').mockReturnValue(sent.expiresAt + 1);
+  try {
+    await outside.call('collaboration.configure', { threadId: 't-trace', config: defaultCoordinationConfig() });
+    expect((await outside.call('collaboration.get', { threadId: 't-trace' })).messages.find(letter => letter.id === sent.id)?.status).toBe('expired');
+    expect((await source.call('collaboration.get', { threadId: 't-trace' })).messages.find(letter => letter.id === sent.id)?.status).toBe('expired');
+    expect(changed).toContain('t-trace');
+  } finally { clock.mockRestore(); }
+});
+
+test('a mailbox reply respects the gateway model tier even with a direct contact to the gateway', async () => {
+  const { source, gateway, outside } = await routedClients();
+  const sent = await source.call('collaboration.send', { threadId: 't-trace', to: { coreId: 'core-outside', threadId: 't-trace' }, text: 'Ask the outside worker', requestId: 'tier-question' });
+  const incoming = (await outside.call('collaboration.get', { threadId: 't-trace' })).messages.find(letter => letter.id === sent.id)!;
+  await gateway.call('contacts.settings', { settings: { minTier: 1 } });
+  await expect(outside.call('collaboration.send', { threadId: 't-trace', to: incoming.from, text: 'This reply is below the gateway tier', replyTo: sent.id, requestId: 'tier-answer' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+  expect((await source.call('collaboration.get', { threadId: 't-trace' })).messages.map(letter => letter.id)).toEqual([sent.id]);
+});
 
 async function refusal(call: Promise<unknown>): Promise<{ code: number; field?: unknown }> {
   try {
@@ -72,10 +158,17 @@ test('accepting opens the picked project to the asker; refusing without a reason
   const pending = state.requests.find(request => request.status === 'pending')!;
   // A blank reason fails the core's `text()`: no field named.
   expect(await refusal(client.call('contacts.decide', { id: pending.id, accept: false, reason: '  ' }))).toEqual({ code: RpcErrorCode.InvalidParams, field: undefined });
+  // Another machine of the group already opened its own p-notes: accepting still opens this core's.
+  const member = new FakeClient({ delayMs: 0, coreId: 'machine-b' });
+  clients.push(member);
+  await member.connect();
+  await client.call('group.create', { name: 'Home' });
+  await member.call('group.join', { invite: (await client.call('group.invite', {})).invite });
+  await client.call('contacts.grant', { coreId: state.contacts[0]!.coreId, projectId: 'p-notes', machine: 'machine-b' });
   const accepted = await client.call('contacts.decide', { id: pending.id, accept: true, projectId: 'p-notes' });
   expect([accepted.status, accepted.decidedBy, accepted.project?.name]).toEqual(['accepted', 'owner', 'notes']);
   const chris = (await client.call('contacts.get', {})).contacts[0]!;
-  expect(chris.grants.map(grant => [grant.projectId, grant.readThreads])).toContainEqual(['p-notes', false]);
+  expect(chris.grants.map(grant => [grant.projectId, grant.readThreads, grant.machine ?? null])).toEqual(expect.arrayContaining([['p-notes', false, null], ['p-notes', false, 'machine-b']]));
   expect(await refusal(client.call('contacts.decide', { id: pending.id, accept: false, reason: 'late' }))).toEqual({ code: RpcErrorCode.InvalidParams, field: 'id' });
   const out = state.requests.find(request => request.direction === 'out')!;
   expect(await refusal(client.call('contacts.decide', { id: out.id, accept: true, projectId: 'p-notes' }))).toEqual({ code: RpcErrorCode.InvalidParams, field: 'id' });

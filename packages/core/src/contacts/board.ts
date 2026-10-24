@@ -11,7 +11,7 @@ import { newId } from '../ids.ts';
 import { SharedBoardJournal, type PendingBoardCommand, type BoardProgress } from './board-journal.ts';
 import { boardCard, boardCommand, boardDelta, boardGoal, boardWorkerInfo, integer } from './board-policy.ts';
 import { applyAtAuthority, progressAtAuthority, receipt } from './board-authority.ts';
-import { sameProject, threadRef } from './project-policy.ts';
+import { projectAddress, sameProject, threadRef } from './project-policy.ts';
 import { fingerprint } from './project-journal.ts';
 import type { SharedPeerContext } from './projects.ts';
 import { accessBinding, bindBoard } from './access-scopes.ts';
@@ -58,9 +58,9 @@ export class SharedBoard {
     this.off = core.bus.onCommitted((name, payload) => {
       if (this.closed) return;
       if (name === 'thread.activity' || name === 'thread.updated' || name === 'thread.removed') this.follow((payload as {threadId?: string; id?: string}).threadId ?? (payload as {id: string}).id);
-      if (name === 'contacts.updated' || name === 'project.updated' || name === 'project.removed') {
-        for (const contact of core.contacts.list()) {
-          const linked = core.contacts.linked(contact.coreId), before = this.links.get(contact.coreId) ?? false;
+      if (name === 'contacts.updated' || name === 'group.updated' || name === 'project.updated' || name === 'project.removed') {
+        for (const contact of core.contacts.peers()) {
+          const linked = core.contacts.linkOf(contact.coreId) === 'connected', before = this.links.get(contact.coreId) ?? false;
           this.links.set(contact.coreId, linked);
           if (linked && !before) for (const shared of core.sharedProjects.journal.all(undefined, contact.coreId)) if (!this.authority(shared)) this.needsPull.add(shared.id);
         }
@@ -141,7 +141,7 @@ export class SharedBoard {
     if (this.closed || this.timer) return;
     this.timer = setTimeout(() => {
       this.timer = null;
-      for (const contact of this.core.contacts.list()) if (this.core.contacts.linked(contact.coreId)) this.background(this.flush(contact.coreId));
+      for (const contact of this.core.contacts.peers()) if (this.core.contacts.linkOf(contact.coreId) === 'connected') this.background(this.flush(contact.coreId));
     }, 50);
     this.timer.unref?.();
   }
@@ -440,7 +440,7 @@ export class SharedBoard {
     const base = {cardId: p.todoId, requestId: newId('board_')};
     if (p.goalThreadId !== undefined && (p.text !== undefined || p.status !== undefined && p.status !== 'open')) throw invalidParams('todos.update: link changes are separate from text or status edits');
     let command: SharedBoardCommand;
-    if (p.goalThreadId) command = {...base, kind: 'claim', expectedRevision: current.card.revision, worker: {project: ctx.local, threadId: p.goalThreadId, address: {coreId: ctx.local.ownerCoreId, threadId: p.goalThreadId}}};
+    if (p.goalThreadId) command = {...base, kind: 'claim', expectedRevision: current.card.revision, worker: {project: ctx.local, threadId: p.goalThreadId, address: projectAddress(ctx.local, p.goalThreadId)}};
     else if (p.goalThreadId === null) {
       if (!current.card.assignment) return this.todos(ctx.local.projectId).find(t => t.id === p.todoId && t.shared?.sharedProjectId === ctx.shared.id)!;
       command = {...base, kind: 'release', claimId: current.card.assignment.claimId};

@@ -134,6 +134,9 @@ test('Grain is visible above solid and acrylic surfaces and the settings fit a p
 
 test('the Limits page turns the monitoring of each account on and off', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
+  // Resizing removes the phone panel through an asynchronous history.back().
+  // Let it land before a new document can be taken back to the previous fixture.
+  await page.waitFor(`!document.querySelector('${id('mobile-settings-detail')}') && !history.state?.boiteOverlay`);
   await page.navigate(`${uiUrl}/?fake=1&open=recent`);
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
   await page.click(id('nav-settings')); await page.click(id('settings-tab-limits'));
@@ -155,6 +158,7 @@ test('the Limits page turns the monitoring of each account on and off', async ()
 
 test('Short answers starts on and saves when flipped', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await page.waitFor(`!document.querySelector('${id('mobile-settings-detail')}') && !history.state?.boiteOverlay`);
   await page.navigate(`${uiUrl}/?fake=1&open=recent`);
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
   await page.click(id('nav-settings')); await page.click(id('settings-tab-general'));
@@ -170,6 +174,7 @@ test('Short answers starts on and saves when flipped', async () => {
 
 test('the experiment adds the Threads and Agents switch on the desktop and Agents in the phone menu', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await page.waitFor(`!document.querySelector('${id('mobile-settings-detail')}') && !history.state?.boiteOverlay`);
   await page.navigate(`${uiUrl}/?fake=1&open=recent`);
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
   // Off, there is one place to be: no switch at all.

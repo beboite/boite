@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import type { Contact, SharedProjectScope } from '@boite/contracts';
+  import type { Contact, ContactOffer, SharedProjectRef, SharedProjectScope } from '@boite/contracts';
   import type { Store } from '../../lib/store.svelte';
   import { errorText } from '../../lib/errors';
   import { secureId } from '../../lib/secure-id';
@@ -26,11 +26,16 @@
     const release = client.on('contacts.updated', load);
     return () => { alive = false; release(); };
   });
-  async function offer(remoteProjectId: string) {
+  const remoteOf = (offer: ContactOffer): SharedProjectRef => offer.sharedProject ?? {ownerCoreId: contact.coreId, coreId: contact.coreId, projectId: offer.projectId};
+  const keyOf = (ref: SharedProjectRef) => JSON.stringify([ref.ownerCoreId, ref.coreId, ref.projectId]);
+  let offers = $derived(contact.offers.filter(o => !projects.some(p => p.shared.state !== 'revoked' && p.shared.state !== 'declined' && keyOf(p.remote) === keyOf(remoteOf(o)))));
+  async function offer(key: string) {
     if (!store.owner || busy || !thread) return;
+    const selected = offers.find(o => keyOf(remoteOf(o)) === key);
+    if (!selected) return;
     busy = true; error = '';
     try {
-      await store.shared.call('sharedProjects.offer', {coreId: contact.coreId, projectId, remote: {ownerCoreId: contact.coreId, coreId: contact.coreId, projectId: remoteProjectId}, requestId: secureId()});
+      await store.shared.call('sharedProjects.offer', {coreId: contact.coreId, projectId, remote: remoteOf(selected), requestId: secureId()});
       await store.shared.load(thread.id);
     } catch (e) { error = errorText(e); }
     finally { busy = false; }
@@ -48,7 +53,7 @@
   <button type="button" class="ghost small" disabled={busy || !thread} onclick={() => void refresh()} data-testid="shared-associations-refresh">{strings.shared.refresh}</button>
   {#each projects as project (project.shared.id)}
     <div class="row" data-testid="shared-association" data-state={project.shared.state}>
-      <span>{contact.offers.find(o => o.projectId === project.remote.projectId)?.name ?? strings.shared.heading} · {strings.shared.state[project.shared.state]}</span>
+      <span>{contact.offers.find(o => keyOf(remoteOf(o)) === keyOf(project.remote))?.name ?? strings.shared.heading} · {strings.shared.state[project.shared.state]}</span>
       {#if project.shared.state === 'pending' && project.shared.projects[1].coreId === project.local.coreId && store.owner}
         <button type="button" class="small" disabled={busy} onclick={() => void decide(project.shared.id, true)} data-testid="shared-association-accept">{strings.shared.accept}</button>
         <button type="button" class="ghost small" disabled={busy} onclick={() => void decide(project.shared.id, false)}>{strings.shared.decline}</button>
@@ -58,7 +63,7 @@
     </div>
   {/each}
   {#if store.owner && contact.capabilities?.sharedProjects === 1}
-    <Menu items={contact.offers.filter(o => !projects.some(p => p.shared.state !== 'revoked' && p.shared.state !== 'declined' && p.remote.projectId === o.projectId)).map(o => ({id: o.projectId, label: o.name}))}
+    <Menu items={offers.map(o => ({id: keyOf(remoteOf(o)), label: o.name}))}
       label={strings.shared.pickProject} disabled={busy || !thread || !contact.offers.length} onpick={id => void offer(id)} testid="shared-associate"><span>{strings.shared.associate}</span></Menu>
     {#if !thread}<p class="hint">{strings.shared.needsThread}</p>{:else if !contact.offers.length}<p class="hint">{strings.shared.noOffers}</p>{/if}
   {/if}

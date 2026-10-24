@@ -217,8 +217,11 @@ export class SharedProjects {
     let discard = false;
     try {
       if (client !== this.ctx.client || epoch !== this.#epoch) { discard = true; throw new Error(strings.shared.offline); }
+      const directory = await client.call('sharedProjects.threads', scope);
+      const ref = directory.threads.find(t => this.threadKey(t.ref) === JSON.stringify([project.local.ownerCoreId, project.local.coreId, project.local.projectId, worker.id]))?.ref;
+      if (!ref || client !== this.ctx.client || epoch !== this.#epoch) { discard = true; throw new Error(strings.shared.offline); }
       const receipt = await client.call('sharedBoard.apply', {...scope, command: {kind: 'claim', cardId: card.id, expectedRevision: card.revision,
-        requestId: secureId(), worker: {project: project.local, threadId: worker.id, address: {coreId: project.local.ownerCoreId, threadId: worker.id}}}});
+        requestId: secureId(), worker: ref}});
       const reserved = receipt.outcome === 'applied' && receipt.card?.assignment !== null;
       if (!reserved || !receipt.card?.assignment) { discard = true; throw new Error(strings.shared.conflict); }
       await client.call('sharedBoard.start', {...scope, threadId: worker.id, cardId: card.id, claimId: receipt.card.assignment.claimId});

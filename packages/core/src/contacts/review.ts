@@ -9,6 +9,7 @@ import { fingerprint } from './project-journal.ts';
 import { sameProject } from './project-policy.ts';
 import { SharedReviewJournal, type ReviewWork } from './review-journal.ts';
 import { toolFreeInference } from './side-inference.ts';
+import { projectContact } from './project-relay.ts';
 
 const ACTIONS = new Set(['directory', 'read', 'letter', 'board', 'compute', 'file', 'tool', 'attachment', 'result']);
 const REASONS = new Set(['normal-file', 'host-override', 'secret-file', 'path-boundary', 'secret-content', 'unsupported-tool', 'scoped-request', 'request-denied', 'publication']);
@@ -90,9 +91,9 @@ export class SharedReview {
   private authority(id: string): string {
     const shared = this.core.sharedProjects.require(id);
     this.core.sharedProjects.assertActive(shared);
-    const {local, remote} = this.core.sharedProjects.endpoints(shared), contact = this.core.contacts.find(remote.ownerCoreId);
-    return fingerprint({access: shared.access, projects: shared.projects, contact: contact?.addedAt,
-      grant: contact?.grants.find(g => g.projectId === local.projectId && (!g.machine || g.machine === local.coreId))});
+    const {local, remote} = this.core.sharedProjects.endpoints(shared), contact = projectContact(this.core, local, remote.ownerCoreId);
+    return fingerprint({access: shared.access, projects: shared.projects, contact: contact && 'addedAt' in contact ? contact.addedAt : contact,
+      grant: contact?.grants.find(g => g.projectId === local.projectId && (!('machine' in g) || !g.machine || g.machine === local.coreId))});
   }
   private current(work: ReviewWork): boolean {
     if (this.closed || this.core.stopping) return false;

@@ -300,7 +300,7 @@ export interface SharedProjectPeerMethods {
   /** May only close the sender's access. It cannot widen or restore the receiver's grant. */
   revoke: { params: Record<string, never>; result: { ok: true } };
 }
-export type SharedProjectPeerRequest =
+export type SharedProjectPeerRequest = { route?: {source: SharedProjectRef; target: SharedProjectRef} } & (
   | { method: 'offer'; requestId: string; project: SharedProject }
   | { method: 'decide'; requestId: string; sharedProjectId: string; accept: boolean }
   | { [M in keyof SharedProjectPeerMethods]: {
@@ -310,4 +310,4 @@ export type SharedProjectPeerRequest =
       grantRevision: number;
       source: SharedProjectActor;
       params: SharedProjectPeerMethods[M]['params'];
-    } }[keyof SharedProjectPeerMethods];
+    } }[keyof SharedProjectPeerMethods]);

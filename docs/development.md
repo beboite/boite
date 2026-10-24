@@ -569,6 +569,16 @@ The native shell cases require their executable and adjacent files;
 `BOITE_E2E_SKIP_SHELL=1` explicitly selects a partial core/browser run.
 It does not establish native macOS or Linux WebView coverage.
 
+`bun test tests/e2e/shared-cores.test.ts` starts three real cores on loopback
+with independent temporary journals and Git repositories: two Contact owners
+and one group member. It exercises both association directions, signed/sealed
+relays, role and route refusals, board claims/tombstones, host compute,
+member restart, scoped cancellation, policy revocation and actual Git result
+fetch/object verification/cherry-pick. It runs echo only and performs no paid
+inference or real account action. `shared-collaboration.test.ts` separately
+checks desktop/phone presentation through two in-memory clients. Neither
+fixture proves selective external-provider isolation or native Windows behavior.
+
 Windows process usage reaches the registry through a completion-port event,
 or a one-second fallback after the child exits (`procs.ts`). Cleanup assertions
 must wait for both the expected PID set and install leases before checking them;

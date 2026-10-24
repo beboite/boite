@@ -237,6 +237,14 @@ Core preparation and inspection disable Git hooks, filters and fsmonitor for
 these jobs. Bounded result text remains data. Fetching and merging the branch
 uses the project's ordinary approved Git workflow; the result executes nothing.
 
+The host can be a group member behind a Contact gateway. Its canonical
+owner/core/project tuple selects the original host; the gateway does not
+choose its account, spawn the worker or consume its result. The real three-core
+fixture in `tests/e2e/shared-cores.test.ts` fetches the captured worker branch
+from a fixture-controlled local repository, checks the advertised object and
+base ancestry, then cherry-picks that commit on the source integration branch.
+This verifies normal Git consumption without executing a peer-supplied URL.
+
 Follow-ups stay external instructions and cannot approve a host permission
 card. Stop/revoke fences exactly the captured job, including delayed starts,
 and waits for its tracked processes and preparation; siblings and the host's

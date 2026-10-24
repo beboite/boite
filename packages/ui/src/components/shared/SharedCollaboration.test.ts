@@ -2,6 +2,7 @@ import { afterEach, beforeAll, expect, test, vi } from 'vitest';
 import { createRawSnippet, flushSync, mount, tick, unmount } from 'svelte';
 import { sharedFlow } from '../../test/shared-flow';
 import { Store } from '../../lib/store.svelte';
+import { FakeClient } from '../../lib/fake-client';
 import { setExperiment } from '../../lib/experiments';
 import SharedProjectThreads from './SharedProjectThreads.svelte';
 import SharedProjectDialog from './SharedProjectDialog.svelte';
@@ -145,6 +146,26 @@ test('association needs the second owner consent and an open Contacts page can r
   await click('shared-association-accept');
   await vi.waitFor(() => expect(document.querySelector('[data-testid=shared-association][data-state=active]')).not.toBeNull());
   expect((await a.call('sharedProjects.get', {...as, sharedProjectId: pending.shared.id})).shared.state).toBe('active');
+});
+
+test('association choices distinguish a gateway and its member with the same project id', async () => {
+  const {store, a, b, ap, bp, aid, bid, as} = await setup();
+  await a.call('sharedProjects.revoke', {sharedProjectId:as.sharedProjectId,requestId:'replace-for-member'});
+  const memberId = 'c'.repeat(64), member = new FakeClient({delayMs:0,coreId:memberId});
+  cleanup.push(() => member.close()); await member.connect();
+  await b.call('group.create', {name:'Shared fixtures'});
+  await member.call('group.join', {invite:(await b.call('group.invite',{})).invite});
+  await b.call('contacts.grant', {coreId:aid,projectId:bp.id,machine:memberId});
+  const contact = (await a.call('contacts.get',{})).contacts.find(c=>c.coreId===bid)!;
+  expect(contact.offers.filter(o=>o.projectId===bp.id)).toHaveLength(2);
+  const calls = vi.spyOn(a,'call');
+  show(SharedAssociations,{store,contact,projectId:ap.id}); await settle();
+  await click('shared-associate');
+  const options = [...document.querySelectorAll<HTMLButtonElement>('[data-value]')];
+  const keys = options.map(o=>JSON.parse(o.dataset.value!));
+  expect(keys).toEqual(expect.arrayContaining([[bid,bid,bp.id],[bid,memberId,bp.id]]));
+  options.find(o=>JSON.parse(o.dataset.value!)[1]===memberId)!.click(); await settle();
+  expect(calls).toHaveBeenCalledWith('sharedProjects.offer', expect.objectContaining({coreId:bid,projectId:ap.id,remote:{ownerCoreId:bid,coreId:memberId,projectId:bp.id}}));
 });
 
 test('a remote board worker opens through its canonical directory, never as a colliding local thread', async () => {

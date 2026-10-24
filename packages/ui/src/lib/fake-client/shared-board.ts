@@ -4,7 +4,7 @@ import type { FakeContext, FakeMethods } from './context';
 import { fakeCore } from './coordination';
 import { activityMethods } from './activity';
 import { secureId } from '../secure-id';
-import { assertSharedActive, cloneShared, endpoints, invalidShared, notifyShared, onceShared, remoteShared, refusedShared, sameProject, sharedScope, sharedState, sharedText } from './shared-state';
+import { assertSharedActive, cloneShared, endpoints, invalidShared, notifyShared, onceShared, projectAddress, remoteShared, refusedShared, sameProject, sharedScope, sharedState, sharedText } from './shared-state';
 
 interface Board {revision:number; changes:SharedBoardChange[]; cards:Map<string,SharedBoardCard>; tombstones:Map<string,{id:string;revision:number;deletedAt:number}>; pending:{scope:SharedProjectScope;source:SharedProjectActor;command:SharedBoardCommand}[]; starts:Set<string>; generations:Map<string,number>}
 const boards = new WeakMap<FakeContext,Map<string,Board>>();
@@ -52,7 +52,7 @@ function applied(host:FakeContext,source:SharedProjectActor,s:SharedProject,c:Sh
     if(c.kind==='update')card={...card,...(c.text===undefined?{}:{text:c.text}),...(c.status===undefined?{}:{status:c.status})};
     if(c.kind==='claim'){
       const worker=c.worker,workerHost=fakeCore(worker?.project?.coreId),thread=workerHost?.threads.get(worker?.threadId);
-      if(!worker||!sameProject(worker.project,source.project)||worker.address.coreId!==worker.project.ownerCoreId||worker.address.threadId!==worker.threadId||source.kind==='agent'&&worker.threadId!==source.threadId)throw refusedShared('command.worker: expected the authenticated source worker on its own host');
+      if(!worker||!sameProject(worker.project,source.project)||worker.address.coreId!==projectAddress(worker.project,worker.threadId).coreId||worker.address.threadId!==projectAddress(worker.project,worker.threadId).threadId||source.kind==='agent'&&worker.threadId!==source.threadId)throw refusedShared('command.worker: expected the authenticated source worker on its own host');
       if(!thread||thread.archived||thread.projectId!==worker.project.projectId)throw refusedShared('command.worker: expected an available local worker');
       if(old!.revision!==c.expectedRevision||old!.status!=='open'||old!.assignment||[...board.cards.values()].some(card=>card.assignment&&sameWorker(card.assignment.worker,worker)))return receipt('conflict');
       card.assignment={claimId:secureId(),actor:source,worker,state:'reserved',workerInfo:{agent:`${thread.providerId} ${thread.model??''}`.trim(),machine:workerHost!.identity.name}};

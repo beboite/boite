@@ -143,8 +143,8 @@ export class SharedProjectSubscriptions {
     }
   }
   contactChanged(): void {
-    for (const contact of this.service.core.contacts.list()) {
-      const connected = this.service.core.contacts.view(contact).link === 'connected';
+    for (const contact of this.service.core.contacts.peers()) {
+      const connected = this.service.core.contacts.linkOf(contact.coreId) === 'connected';
       const before = this.links.get(contact.coreId) ?? false;
       this.links.set(contact.coreId, connected);
       if (!connected) for (const [key, lease] of this.leases) if (lease.context.peerId === contact.coreId) this.leases.delete(key);
@@ -152,7 +152,7 @@ export class SharedProjectSubscriptions {
         this.deliver(watch); this.background(this.renew(watch, true));
       }
     }
-    for (const [key, lease] of this.leases) if (!this.service.core.contacts.has(lease.context.peerId)) this.leases.delete(key);
+    for (const [key, lease] of this.leases) if (!this.service.core.contacts.isContact(lease.context.peerId)) this.leases.delete(key);
     this.disarm();
   }
   private flush(): void {

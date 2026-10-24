@@ -1,8 +1,10 @@
 import type { SharedComputePolicy, SharedProject, SharedProjectAccess, SharedProjectActor, SharedProjectRef, SharedThreadRef } from '@boite/contracts';
 import { text } from '../coordination-letter.ts';
 import { invalidParams, refused } from '../errors.ts';
+import { memberThreadId } from './member-address.ts';
 
 export const sameProject = (a: SharedProjectRef, b: SharedProjectRef): boolean => a.ownerCoreId === b.ownerCoreId && a.coreId === b.coreId && a.projectId === b.projectId;
+export const projectAddress = (project: SharedProjectRef, threadId: string) => ({coreId: project.ownerCoreId, threadId: project.ownerCoreId === project.coreId ? threadId : memberThreadId(project.coreId, threadId)});
 export const disabledCompute = (): SharedComputePolicy => ({ enabled: false, profiles: [], permissionMode: 'default', maxConcurrent: null });
 export const initialAccess = (project: SharedProjectRef): SharedProjectAccess => ({ project, revision: 1, board: false, compute: disabledCompute(), revokedAt: null });
 
@@ -15,9 +17,9 @@ export function threadRef(value: unknown): SharedThreadRef {
   const raw = value as Partial<SharedThreadRef> | null;
   const project = projectRef(raw?.project, 'target.project');
   const threadId = text(raw?.threadId, 'target.threadId', 128);
-  // Member aliases will be validated by #755's existing relay, never guessed from their suffix.
-  if (raw?.address?.coreId !== project.ownerCoreId || raw.address.threadId !== threadId || project.ownerCoreId !== project.coreId) throw refused('target.address: expected the endpoint canonical thread address; member projects require the member relay');
-  return { project, threadId, address: { coreId: project.ownerCoreId, threadId } };
+  const expected = projectAddress(project, threadId);
+  if (raw?.address?.coreId !== expected.coreId || raw.address.threadId !== expected.threadId) throw refused('target.address: expected the selected endpoint public thread address');
+  return { project, threadId, address: expected };
 }
 export function computePolicy(value: unknown): SharedComputePolicy {
   const raw = value as Partial<SharedComputePolicy> | null;
@@ -31,11 +33,11 @@ export function accessRecord(value: unknown, project: SharedProjectRef): SharedP
     || raw.revokedAt !== null && (!Number.isSafeInteger(raw.revokedAt) || raw.revokedAt! < 0)) throw invalidParams('access: expected the sender endpoint, positive revision, board and revokedAt');
   return { project, revision: raw.revision!, board: raw.board, compute: computePolicy(raw.compute), revokedAt: raw.revokedAt! };
 }
-export function offeredProject(value: unknown, sender: string, self: string): SharedProject {
+export function offeredProject(value: unknown, sender: string, self: string, owner = self): SharedProject {
   const raw = value as Partial<SharedProject> | null;
   if (!raw || !Array.isArray(raw.projects) || raw.projects.length !== 2 || !Array.isArray(raw.access) || raw.access.length !== 2) throw invalidParams('offer.project: expected two project endpoints and access records');
   const projects: [SharedProjectRef, SharedProjectRef] = [projectRef(raw.projects[0]), projectRef(raw.projects[1])];
-  if (projects[0].ownerCoreId !== sender || projects[0].coreId !== sender || projects[1].ownerCoreId !== self || projects[1].coreId !== self || !sameProject(projectRef(raw.authority), projects[0])) throw refused('offer.project: expected authenticated sender and local endpoint; member projects require the member relay');
+  if (projects[0].ownerCoreId !== sender || projects[1].ownerCoreId !== owner || projects[1].coreId !== self || !sameProject(projectRef(raw.authority), projects[0])) throw refused('offer.project: expected authenticated sender and the selected local endpoint');
   if (raw.state !== 'pending' || !Number.isSafeInteger(raw.createdAt) || !Number.isSafeInteger(raw.updatedAt)) throw invalidParams('offer.project: expected pending state and timestamps');
   const access: [SharedProjectAccess, SharedProjectAccess] = [accessRecord(raw.access[0], projects[0]), initialAccess(projects[1])];
   // An offer cannot grant anything on the receiver, including board or compute consent.

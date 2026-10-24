@@ -10,6 +10,7 @@ import { fill, strings } from '../../lib/strings';
 import { workspace } from '../../lib/workspace.svelte';
 import HomePage from './HomePage.svelte';
 import SidebarContacts from './SidebarContacts.svelte';
+import TitleBar from '../TitleBar.svelte';
 
 let components: ReturnType<typeof mount>[] = [];
 let opened: Store | undefined;
@@ -52,6 +53,50 @@ async function draw(contact: string | null = null): Promise<Store> {
 
 const one = <T extends HTMLElement>(testid: string) => document.querySelector<T>(`[data-testid="${testid}"]`);
 const contacts = async (store: Store) => store.client!.call('contacts.get', {});
+
+test('a contact request stays visible at the top in Settings and opens the machine that received it', async () => {
+  const remote = await connect();
+  const local = new Store();
+  local.machineId = 'local';
+  local.booted = true;
+  local.page = 'settings';
+  workspace.machines = [{ id: 'local', label: 'Local', store: local }, { id: 'home', label: 'Workstation', store: remote }];
+  workspace.active = local;
+  components.push(mount(TitleBar, { target: document.body, props: { store: local } }));
+  await vi.waitFor(() => { flushSync(); expect(one('contact-request-notice')).not.toBeNull(); });
+  expect(one('contact-request-notice')!.textContent).toContain('Chris');
+  expect(one('contact-request-notice')!.textContent).toContain('Workstation');
+  one<HTMLButtonElement>('contact-request-review')!.click();
+  await vi.waitFor(() => expect(workspace.active).toBe(remote));
+  await vi.waitFor(() => expect([remote.page, remote.contact]).toEqual(['home', 'core-chris']));
+  await remote.client!.call('contacts.decide', { id: 'creq-pending', accept: true, projectId: remote.projects[0]!.id });
+  await vi.waitFor(() => { flushSync(); expect(one('contact-request-notice')).toBeNull(); });
+});
+
+test('a dismissed request keeps its header badge, which refreshes after a reconnect without an update', async () => {
+  const store = await connect();
+  store.page = 'settings';
+  const client = store.client!;
+  const call = client.call.bind(client);
+  let decidedWhileOffline = false;
+  vi.spyOn(client, 'call').mockImplementation((async (method, params) => {
+    const value = await call(method, params);
+    if (method !== 'contacts.get' || !decidedWhileOffline) return value;
+    const state = value as Awaited<ReturnType<typeof contacts>>;
+    return { ...state, requests: state.requests.filter(request => request.status !== 'pending') };
+  }) as typeof client.call);
+  components.push(mount(TitleBar, { target: document.body, props: { store } }));
+  await vi.waitFor(() => { flushSync(); expect(one('contact-request-notice')).not.toBeNull(); });
+  one<HTMLButtonElement>('contact-request-dismiss')!.click();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-request-notice')).toBeNull(); });
+  expect(one('contact-request-open')).not.toBeNull();
+  store.connection = 'connecting';
+  flushSync();
+  decidedWhileOffline = true;
+  store.connection = 'ready';
+  flushSync();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-request-open')).toBeNull(); });
+});
 
 function type(input: HTMLInputElement, value: string) {
   input.value = value;

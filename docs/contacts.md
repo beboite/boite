@@ -137,6 +137,12 @@ only when `contacts.get` answers `internet: true`: an older core reads only
 
 ## Projects and requests
 
+A pending incoming request appears at the top of the app, with the contact,
+receiving machine and request text. Dismissing the notice leaves a bell with
+the pending count. Either opens the request on its owning machine, including
+from Settings and on a phone. Reconnection refreshes requests even when the
+Contacts page is closed.
+
 Each side opens projects to the other (`contacts.grant`). An open project's
 threads are listed in the contact's agent directory: title, project, branch,
 model, status and declared resources. Each thread's own coordination settings
@@ -147,6 +153,58 @@ wrote to a contact, or asked it something, may hear back from it for 7 days
 after its last letter, even in a project not opened to it. A grant change
 reaches the contact as `contact.sync`, retried until heard, and becomes the
 contact's `offers`.
+
+**Share a project** reuses the new-thread project search: type a project,
+machine or folder name. Projects are grouped by machine and omit drafts,
+archived projects and existing grants. The menu lists every connected owner
+machine linked to this contact, and every machine of the same
+[group](groups.md) as one of them. The shared list names the machine that
+holds each project; opening its board uses that machine's Store, even when
+two machines have the same project ID.
+
+### Projects of the other machines of the group
+
+A contact is linked to one machine, yet the owner may open it a project of
+any machine of that machine's group: `contacts.grant` with `machine`, the
+member's core id. The linked machine asks the member for the project
+(`relay.project`), keeps the grant with the member's id and the project's
+name, and announces that name in the contact's offers. Reading, revoking and
+the read switch go through the linked machine too, with the same `machine`.
+A machine linked to the contact itself is asked directly.
+
+For legacy unilateral lookups, the linked machine answers for the member
+(`contacts/members.ts`): a directory, a search, a read, a letter or a receipt
+for one of the member's threads is relayed to the member (`relay.in`) with the
+contact's current copy, and the answer comes back under the linked machine's
+core id, the thread id followed by `~` and the first 16 characters of the
+member's core id. These legacy descriptors disclose neither the member's name, its address nor
+its key. Explicit shared-project offers additionally disclose the canonical
+member endpoint, and accepted directories disclose its machine label, as
+described under [Completion protocol](#completion-protocol). A member that does not answer within 3.5 s lists no thread; a letter
+to one of its threads, or its receipt, waits and is asked again until it
+expires. The members are asked a receipt at once, and it is unknown only
+when each of them said so.
+
+The member keeps a copy of each contact it was opened to: its name, the
+owner's model tier on the linked machine, what the contact opened in return
+and the grants on the member's own projects. The linked machine pushes it
+(`relay.mirror`) on every grant, revoke, rename, tier, offer or link change,
+and retries every 30 seconds until the member heard it, even once the last
+contact is gone. A member whose copy missed a revoke reaches nothing through
+the linked machine, which answers from its own grants and pushes the copy
+again. With that copy the
+member's agents list the contact (`boite threads contacts`), reach the
+threads it opened and write to it; their requests go to the linked machine
+(`relay.out`), which sends them on as its own. A member that loses a grant
+forgets its threads' replies from that project and rejects the letters
+waiting for them, as a revoke does on the linked machine. A copy from a
+machine that left the group reaches nothing. `boite threads ask` goes through
+a mailbox, as below ([Contacts through your group](#contacts-through-your-group)).
+
+Every machine of the group has full control of the others, so a member
+believes what the linked machine says of a contact; a contact still reaches
+only what was opened to it. Both machines run a Boite that knows these
+operations: an older member refuses the grant with "update it".
 
 With the [project board](board.md) on, a contact's page shows each project
 shared with that contact as its board's four counts: to do, in progress, in
@@ -187,6 +245,31 @@ reason for the refusal. When the contact's core refuses the ask itself (a
 tier, a full queue), the asking thread is told the same way.
 
 ## What an agent knows
+
+### Contacts through your group
+
+An agent can reach contacts linked on another machine of its own group.
+`boite threads contacts`, directory, search, read, send and ask use that
+machine as a gateway. A directly linked contact takes precedence. Project
+grants, transcript grants and model tiers still apply. A contact that opened
+this machine's own projects through the gateway is that relayed contact
+(above): its letters cross through the gateway as the member's thread, not a
+mailbox; asking it still takes a mailbox.
+
+The initiating conversation keeps its sent and received letters and receives
+the wake. The gateway creates a durable virtual mailbox, never a conversation
+or provider process. The external contact sees that mailbox on the machine it
+already knows, with the initiating thread's title and model. Replies and
+request decisions return to the initiating thread. Pending letters retry
+after a transport failure, within their expiry; the gateway retains its
+mailboxes and reply outbox across restarts.
+
+The internal `contact.route` operation requires a sealed request from a
+current group member. It shares no contact credentials or direct trust with
+the initiating machine. Removing a group admission or gateway contact
+invalidates its mailboxes and withdraws replies still waiting for delivery.
+
+### Sender identity
 
 A letter from a contact carries `contact`, the name this owner gave that
 contact, set by the receiving core from its own list, never taken from the
@@ -233,15 +316,18 @@ gets on Tailscale later listens there after a restart.
 ## Code and tests
 
 `packages/core/src/contacts/`: `store.ts` (contacts, the link, requests and
-the RPC methods), `invitations.ts` (making an invitation and the origin it
+the RPC methods), `members.ts` (projects of the other machines of the group),
+`invitations.ts` (making an invitation and the origin it
 names), `funnel.ts` (the routes on Tailscale Funnel), `join.ts` (both sides
 of a join), `invite.ts` (the link format), `words.ts`
 (fingerprint words), `tier.ts`, `git-remote.ts` (read from the git config
 files, no process), `concierge.ts` and `tailscale.ts`. `contacts.*` are
-owner-only; agents call `collaboration.contacts` and `collaboration.ask`.
+owner-only for administration; `contacts.sendHuman` also permits paired devices.
+Agents call `collaboration.contacts` and `collaboration.ask`.
 `packages/core/test/contacts.test.ts` links two cores over loopback, and
 `contacts-parts.test.ts` covers the pieces, the Tailscale client against a
-stubbed `fetch`. `contacts-funnel.test.ts` drives the Funnel mounts through
+stubbed `fetch`. `contacts-group.test.ts` links a contact to one machine of a two-machine
+group and opens it a project of the other. `contacts-funnel.test.ts` drives the Funnel mounts through
 the fake CLI (`test/fixtures/fake-tailscale.ts`), and `magic-dns.test.ts`
 the tailnet name lookup against a resolver on loopback.
 
@@ -253,16 +339,17 @@ refused every invitation.
 
 ## Completion protocol
 
-The following is the version 1 contract and implementation acceptance plan.
-The primary-core association, scoped thread/search/read service and scoped
+The version 1 association, scoped thread/search/read service and scoped
 subscriptions are implemented in `contacts/projects.ts`. The durable board
 service is in `contacts/board.ts`, with its protocol in [board.md](board.md#shared-board-protocol).
 Host-owned compute admission and the workflow adapter are implemented in
 `contacts/compute.ts` and `workflows/shared-compute.ts`. Compute admits only
 tool-free echo until a host-enforced execution boundary is installed. File
 enforcement, activity review, attested human letters and the Client/Store/fake
-transport are implemented. Components, group-relay integration and final
-multi-core/UI validation remain integration work.
+transport and project/board/Contacts components are implemented. Direct and
+group-member associations share the signed/sealed transport. External provider
+execution remains unavailable as detailed below; this protocol is not a claim
+that the full Contacts roadmap is complete.
 `packages/contracts/src/shared-projects.ts` declares the vocabulary;
 `coordination.ts` retains the existing contact types. A core must not advertise
 `features.sharedProjects: 1` until its enforcing handlers exist. A contact
@@ -312,12 +399,30 @@ leases and reconnect renews live watches. Without watches or leases this
 service starts no notification timer. A closed subscription ID stays rejected
 for the two-minute wire replay window so a delayed enable cannot recreate it.
 
-Member endpoints currently fail with a member-relay requirement. Integrating
-PR #755 must extend its existing `ContactMembers` relay for the bounded
-`contact.project` payload, preserve canonical host IDs separately from its
-public aliases and revalidate member admission. It must not infer authority
-from the alias suffix or copy the relay into a second implementation. PR #756's
-source mailboxes remain a separate dependency.
+Member endpoints execute on their original core. A `contact.project` request
+carries explicit canonical `route.source` and `route.target` endpoints. The
+linked gateway checks the authenticated contact, current group admission and
+exact member/project grant before forwarding through existing `relay.in/out`.
+It compares the admission epochs, contact admission and complete grant again
+after awaiting a response. A changed read grant cannot release an older
+transcript while its member mirror is delayed. The member accepts only the
+selected gateway's mirror. Saved mirrors bind both membership epochs and do
+not survive removal and readmission as authority.
+
+The gateway creates no association, board, worker or project copy. Canonical
+identities remain owner/core/project/thread tuples; public thread addresses
+use the gateway and the existing member alias. Authority is never derived by
+parsing that alias. The explicit grant advertises the member's canonical core
+fingerprint and project identity; an accepted shared directory also discloses
+its machine label. Legacy unassociated queries retain the linked machine's
+labels and privacy projection. Source mailboxes from contact requests remain
+separate from these project endpoints.
+
+The Contacts association control uses the project's owning Store, including
+when the grant is configured at another gateway. Remote offers and menu keys
+use all three endpoint fields, so colliding project IDs remain separate. A
+new board worker's public address comes from the scoped directory rather
+than being constructed by the UI.
 
 ### Identity and association
 
@@ -663,8 +768,12 @@ and only the captured shared workers. Board revocation removes core-tagged
 shared goals and stops their protected descendants without touching replacement
 owner activities. A durable contact/project policy hold also prevents a later
 letter or a trusted contact's automatic request from reopening access. A new
-explicit owner grant clears that hold; it cannot reactivate the old association
-or its jobs. Other contacts/projects and ordinary local turns keep their
+explicit owner grant clears that hold. A member without a direct contact may
+instead initiate a new owner proposal under its gateway's current grant; only
+that new local proposal clears the member's hold, and the peer must accept
+the replacement association. A mirror refresh, incoming offer or replay cannot
+clear it. Neither path reactivates the old association or its jobs.
+Other contacts/projects and ordinary local turns keep their
 authority. Repeated revocation changes no revision twice. Model delay, failure
 or disagreement never unblocks the immediate deterministic file/tool decision.
 
@@ -704,27 +813,23 @@ shared-scope filter as well as `AGENT_EVENTS`; `sharedProjects.subscribe` owns
 that connection's exact source/association lease. A signed contact request
 uses the peer method subset, never these owner/device/agent WebSocket roles.
 
-### Acceptance matrix and implementation ownership
+### Acceptance matrix
 
-These are required behavioral scenarios, not claims of tests already passing.
-Each fixture uses fresh data directories and deterministic echo/stub providers.
-`integration` must replace scenario descriptions with test names/evidence,
-and `proof` must run them on the integrated branch with inspected captures.
+The named suites exercise behavior on fresh journals and deterministic fixtures.
+Core fixtures use real RPC sockets and signed/sealed peer transport. Browser
+fixtures use the in-memory client and prove presentation, not OS isolation.
+An unavailable requirement is recorded explicitly rather than counted as passed.
 
-| Outcome | Existing entry points/consumers | Required behavior and test ownership |
+| Required outcome | Executable evidence | Coverage and current limit |
 | --- | --- | --- |
-| 1. Explicit project association and foreign threads | `contacts/store.ts`, `contacts/rpc.ts`, `coordination.ts`, `coordination-lookup.ts`, `coordination-peer.ts`; UI `lib/contacts.svelte.ts`, owning `lib/store.svelte.ts`/`lib/workspace.svelte.ts`, project chooser and sidebar | `shared_projects`: two cores with identical project/thread IDs associate exact endpoints; private projects/settings/contacts remain absent; readThreads off denies transcript/chat search; rename, archive, revoke during await, offline recovery and restart. `client_transport`: same core/fake refusals/events. `collaboration_ui`: both owners grouped by person/machine at desktop/phone widths. |
-| 2. Synchronized board and goal | `todos.ts`, `activity.ts`; UI `components/ProjectBoard.svelte`, `lib/board.ts`, `lib/fake-client/todos.ts`; contracts `todos.ts` | `board_replication`: simultaneous CAS claims start exactly one goal; mixed-field offline edits converge in accepted order; duplicate delivery adds no revision/echo; restart retains receipts and permanent deletes; stale goal sequence/old claim cannot revive a card; lost authority prevents work. `collaboration_ui`: menu moves, checklists, person/machine/agent, confirm/remove without drag on phone. |
-| 3. Host-authorized compute and git result | `delegation.ts`, `delegation/routes.ts`, `delegation/worktrees.ts`, `workflows.ts`, `workflows/register.ts`, `procs.ts`, `resource-usage.ts`, `platform/` | `shared_compute`: two/three-core fixture runs four local/five remote under the correct host profiles and configured contribution; duplicate start/retry/restart is one job; reject wrong repository, ref/path/account/mode/result injection; verify exact branch/base/commit and consume through normal git workflow; host cancel/revoke stops only captured jobs and rejects late result/retry. All six driver capability/permission paths tested with protocol fixtures, no paid calls. |
-| 4. Human contact letter | `coordination-letter.ts`, `coordination.ts`, `coordination-peer.ts`, UI `components/AgentDiscussion.svelte`, `lib/timeline-rows.ts`, `lib/fake-client/coordination.ts`; PR #756 origin-thread mailbox route | `client_transport`: owner/paired human sends, agent impersonation refused, receiving local contact name wins, contact-human/agent/owner prompt visibly distinct, no permission/question answered, repeat ID stable. Three cores preserve canonical destination, source journal and one wake through B/restart. `collaboration_ui`: direct message from allowed agent row on desktop/phone. |
-| 5. Secret file policy | `workdir.ts` file RPC/credential classification/handle checks, `files.ts` listing, `server/file-response.ts`, `artifacts.ts`, `artifact-preview.ts`, `views.ts`, `attachments.ts`, git/checkpoints, driver tool/process admission | `file_protection`: .env variants/private keys/credential classifications denied before read or transfer, path traversal/symlink swap/Windows forms/ticket after revoke/HTML neighbouring asset/git diff/transcript/tool/child escape covered; ordinary file succeeds, ordinary local session unchanged, exact host override expires/revokes. Unsupported protected execution fails before spawn in core and fake. `security_review` independently verifies real boundaries. |
-| 6. Lazy review and confirmed revoke | `contacts/concierge.ts`, `drivers/types.ts` sideQuestion, `drivers/claude/side-question.ts`, `drivers/echo.ts`; shared admission event feed | `activity_reviewer`: legitimate vs suspicious vs confirmed violation using stubs; malicious activity cannot instruct the reviewer or select another project; timeout/invalid/unsupported/delayed output remains unavailable; denial immediate with reviewer stalled; concurrent/replayed verdict and restart revoke once; unrelated project and secret canaries absent; no-work core starts no reviewer/SDK/worker/timer. |
-| 7. Security and network proof | `contacts/join.ts`, `invitations.ts`, `funnel.ts`, `group/seal.ts`, `group/relay.ts`, `coordination-wire.ts`, `coordination-peer.ts`, all surfaces above; `tests/contract/scenarios.ts` | `security_review`: signatures/seal/replay/nonce/destination/origin, grant changes during awaits, invitation/Funnel mounts, group admissions/relays, file/ticket/preview exposure, message provenance, job/result authority and revoke. `network_review`: fresh bytes/requests/idle resources and restart/reconnect for 0/1/multiple active associations, offline retries and unsubscribe; no unrelated broadcasts or steady polling. `review_fixes`: each confirmed finding red before fix, then green. `proof`/`final_review`: full check, relevant suites, multi-core E2E, inspected desktop/phone captures. |
-
-Paths in the table are relative to `packages/core/src/` unless prefixed UI or
-contracts. UI paths are under `packages/ui/src/`. Verify exact source names
-when implementing: the table identifies the present integration boundaries,
-not new services to create automatically.
+| Explicit association and allowed foreign threads | `packages/core/test/shared-projects.test.ts`; `tests/e2e/shared-cores.test.ts`: two owners associate a group member; member initiates association; `packages/ui/src/lib/fake-client.shared-projects.test.ts` | Exact colliding owner/core/project/thread IDs, private project exclusion, read/search grants, wrong source/route refusal, owner/paired/agent roles, reverse member offer and persisted association. No foreign owner RPC is created. |
+| Shared four-column board and goal | `packages/core/test/shared-board.test.ts`; `tests/e2e/shared-cores.test.ts`; `packages/ui/src/components/shared/SharedCollaboration.test.ts`; `tests/e2e/shared-collaboration.test.ts` | Atomic competing claims, receipts, field patches, offline replay/restarts, permanent deletes, protected goal start/release/progress, retained busy assignment, person/machine/agent labels and phone menus. External-provider goal execution is unavailable. |
+| Host compute and actual Git consumption | `packages/core/test/shared-compute.test.ts`; `tests/e2e/shared-cores.test.ts`: consume an attested Git result and cancel reverse compute after member restart | Host account/profile, contribution settings, durable job and exact result, repository/base validation, restart and captured cancellation. The source performs a real fixture-controlled fetch, object/ancestry check and cherry-pick of the returned commit. No automatic peer URL/command execution. Claude/Codex/ACP/Muse/pi compute remains unavailable. |
+| Human and agent contact mail | `packages/core/test/contact-mailboxes.test.ts`, `coordination.test.ts`; `tests/e2e/shared-cores.test.ts`; `tests/e2e/contact-messaging-ui.test.ts`, `shared-collaboration.test.ts` | Owner/paired human sends, agent impersonation refusal, recipient's configured contact name, separate provenance, both member directions, source journal and mailbox replay/restart. No external letter answers owner approval. |
+| Secret file and tool boundaries | `packages/core/test/shared-access.test.ts`, `shared-review.test.ts`, `ntfs-file-ids.test.ts`; `packages/ui/src/lib/fake-client.shared-projects.test.ts` | Classified files/content, handles/symlinks, Windows path forms/identities, transfer/tickets/HTML/attachments/checkpoints, overrides and immediate revocation. All six protocols have admission checks; only echo/default has an implemented no-tools execution boundary. Selective external-provider isolation is missing. Windows native execution is not established by Linux fixtures. |
+| Lazy review and confirmed project revoke | `packages/core/test/shared-review.test.ts`; `tests/e2e/shared-cores.test.ts`: member policy revocation without a direct contact | Tool-free deterministic verdicts, confirmation independent of inference, timeout/invalid/stale response, no-work laziness and exact local project hold. A member hold does not mutate gateway grants or obtain owner authority; a stale mirror cannot reopen it. |
+| Security and network proof | `packages/core/test/contacts.test.ts`, `contacts-group.test.ts`, `contact-mailboxes.test.ts`, `access.test.ts`; `tests/e2e/shared-cores.test.ts`: held transcript and readmission regressions | Signature/seal/replay/destination, member grant/admission changes, permission roles, transcript and result authority, exact revoke. Dedicated independent final security/network audit and fresh traffic/idle measurements are still required; these tests make no performance claim. |
+| Transport and UI parity | `tests/contract/shared-projects.ts` through core/fake contract suites; fake/Store tests; `tests/e2e/shared-collaboration.test.ts` at 1440 and 390 px | Same contract and refusals, captured owning Store, canonical remote offers/addresses, connection cache fencing, leases and phone actions. No paid inference, physical phone, real Tailscale/Funnel or remote CI proof is implied. |
 
 ### Client transport
 
@@ -756,6 +861,6 @@ through `packages/core/test/contract.test.ts` and
 `packages/ui/src/lib/fake-client.contract.test.ts`. Additional fake/Store tests
 exercise duplicate IDs on two machines, offline board edits/cancellation,
 agent/phone rights, secret-text projection, exact overrides and reconnect races.
-No temporary known divergence stands in for a required capability. Integrate the reviewed
-#755 and #756 commits rather than copying their routing implementations;
-reconcile their shared contact/peer/docs edits before final validation.
+The integrated member relay and source mailbox implementations share Contacts
+admission and transport. Their internal routes grant neither owner RPC rights
+nor access to another endpoint with the same project or thread ID.

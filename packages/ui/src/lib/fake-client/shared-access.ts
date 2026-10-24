@@ -1,7 +1,7 @@
 /** Host-private protection configuration and sanitized access pages in the fake transport. */
 import type { SharedProjectActor, SharedProject, SharedAccessAction, SharedReviewConfig, SharedAccessEvent, SharedSecretClass } from '@boite/contracts';
 import type { FakeContext, FakeMethods } from './context';
-import { assertWorkerScope, cloneShared, endpoints, invalidShared, notifyShared, onceShared, requireShared, sharedAccessState, sharedScope, sharedText, sharedTextProjection, sharedState, assertSharedActive, refusedShared } from './shared-state';
+import { assertWorkerScope, cloneShared, endpoints, invalidShared, notifyShared, onceShared, requireShared, sameProject, sharedAccessState, sharedScope, sharedText, sharedTextProjection, sharedState, assertSharedActive, refusedShared } from './shared-state';
 import { secureId } from '../secure-id';
 
 export function validateReview(ctx: FakeContext, input: SharedReviewConfig): SharedReviewConfig {
@@ -20,7 +20,7 @@ export function recordSharedAccess(ctx: FakeContext, shared: SharedProject, acto
   const state = sharedAccessState(ctx,shared.id);
   const event = {id:`sae_${secureId()}`,sharedProjectId:shared.id,actor:actor.kind==='human'?actor:{...actor,agent:'shared agent'},action,decision,reason,classification,jobId,at:Date.now()};
   state.events.push(event);
-  if (state.review.enabled && actor.project.ownerCoreId !== ctx.identity.coreId) {
+  if (state.review.enabled && !sameProject(actor.project,endpoints(ctx,shared).local)) {
     // Echo is not a verdict provider. No fake route silently invents a successful model judgment.
     state.verdicts.push({id:`srv_${secureId()}`,sharedProjectId:shared.id,eventIds:[event.id],verdict:'unavailable',reason:'Activity review could not produce a valid verdict',action:'none',at:Date.now()});
     notifyShared(ctx,shared.id);

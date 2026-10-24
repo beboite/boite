@@ -9,8 +9,9 @@ import { checkMatchExtras, checkRemoteContact, checkTranscript, searchContacts, 
 import { PeerRefusal } from '../coordination-wire.ts';
 import { invalidParams, refused, RpcFailure } from '../errors.ts';
 import { SharedProjectJournal, fingerprint } from './project-journal.ts';
-import { accessRecord, initialAccess, offeredProject, projectRef, sameProject, sourceActor, threadRef } from './project-policy.ts';
+import { accessRecord, initialAccess, offeredProject, projectRef, sameProject, sourceActor, threadRef, projectAddress } from './project-policy.ts';
 import { SharedProjectSubscriptions } from './project-subscriptions.ts';
+import { projectContact, checkProjectRoute, projectRoute } from './project-relay.ts';
 import { redactSharedText, redactSharedContact } from './file-policy.ts';
 
 export interface SharedPeerContext {
@@ -38,9 +39,14 @@ export class SharedProjects {
     this.subscriptions = new SharedProjectSubscriptions(this);
     this.off = core.bus.onCommitted((name, payload) => {
       if (this.closed) return;
-      if (name === 'contacts.updated' || name === 'project.updated' || name === 'project.removed') this.reconcile();
+      if (name === 'group.updated' || name === 'contacts.updated' || name === 'project.updated' || name === 'project.removed') this.reconcile();
       const threadId = name === 'thread.created' || name === 'thread.updated' ? (payload as { id: string }).id : (payload as { threadId?: string }).threadId;
-      if (name === 'contacts.updated') { this.subscriptions.invalidateAll(); this.subscriptions.contactChanged(); }
+      if (name === 'contacts.updated') {
+        this.subscriptions.invalidateAll(); this.subscriptions.contactChanged();
+        // Member mirrors have no direct ContactStore.tell loop. Reuse the same
+        // durable flush on mirror/reconnect changes, rather than adding polling.
+        for (const peer of core.contacts.peers().filter(p => core.contacts.isRelayPeer(p))) queueMicrotask(() => { if (!this.closed) void this.flush(peer.coreId).catch(() => undefined); });
+      }
       if (threadId && (name.startsWith('thread.') || name === 'collaboration.changed' || name === 'turn.finished' || name === 'message.completed')) {
         this.subscriptions.sourceChanged(threadId);
         const projectId = core.journal.getThread(threadId)?.projectId;
@@ -55,7 +61,7 @@ export class SharedProjects {
 
   self(): string { return this.core.coordination.card().coreId; }
   endpoints(shared: SharedProject): { local: SharedProjectRef; remote: SharedProjectRef; index: 0 | 1 } {
-    const index = shared.projects[0].ownerCoreId === this.self() ? 0 : 1;
+    const index = shared.projects[0].coreId === this.self() ? 0 : 1;
     return { local: shared.projects[index], remote: shared.projects[index === 0 ? 1 : 0], index };
   }
   require(id: string): SharedProject {
@@ -70,14 +76,14 @@ export class SharedProjects {
   }
   private policy(shared: SharedProject): string {
     const { local, remote } = this.endpoints(shared);
-    const contact = this.core.contacts.find(remote.ownerCoreId);
-    const grant = contact?.grants.find(g => g.projectId === local.projectId && (!g.machine || g.machine === local.coreId));
-    return fingerprint({ contact: contact?.addedAt, grant });
+    const contact = projectContact(this.core, local, remote.ownerCoreId);
+    const grant = contact?.grants.find(g => g.projectId === local.projectId && (!('machine' in g) || !g.machine || g.machine === local.coreId));
+    return fingerprint({ contact: contact && 'addedAt' in contact ? contact.addedAt : local.ownerCoreId, grant });
   }
-  private grant(local: SharedProjectRef, peerId: string): boolean {
+  private grant(local: SharedProjectRef, peerId: string, ownerProposal = false): boolean {
     const project = this.core.journal.getProject(local.projectId);
-    return local.ownerCoreId === this.self() && local.coreId === this.self() && !!project && !project.archived
-      && this.core.contacts.find(peerId)?.grants.some(g => g.projectId === local.projectId && (!g.machine || g.machine === local.coreId)) === true;
+    return local.coreId === this.self() && !!project && !project.archived && (ownerProposal || !this.core.contacts.policyRevoked(peerId, local.projectId))
+      && projectContact(this.core, local, peerId)?.grants.some(g => g.projectId === local.projectId && (!('machine' in g) || !g.machine || g.machine === local.coreId)) === true;
   }
   assertActive(shared: SharedProject): void {
     const { local, remote } = this.endpoints(shared);
@@ -89,7 +95,7 @@ export class SharedProjects {
     if (thread.projectId !== project.projectId || thread.archived || config.mode === 'off' || !config.remote) throw refused('threadId: expected an unarchived source of the associated project with remote coordination enabled');
     if (connection?.identity.principal !== 'agent' && connection !== undefined) return { kind: 'human', project };
     this.core.contacts.checkSendTier(threadId);
-    return { kind: 'agent', project, threadId, address: { coreId: this.self(), threadId }, agent: this.core.coordination.describe(threadId).agent ?? '' };
+    return { kind: 'agent', project, threadId, address: projectAddress(project, threadId), agent: this.core.coordination.describe(threadId).agent ?? '' };
   }
   scope(p: SharedProjectScope, connection?: Connection): SharedPeerContext {
     this.core.sharedCompute?.assertScope(p.threadId, p.sharedProjectId);
@@ -101,9 +107,9 @@ export class SharedProjects {
   }
   private view(shared: SharedProject): SharedProjectView {
     const { local, remote } = this.endpoints(shared);
-    const contact = this.core.contacts.find(remote.ownerCoreId);
+    const contact = projectContact(this.core, local, remote.ownerCoreId);
     return { shared, local, remote, contact: { coreId: remote.ownerCoreId, name: contact?.name ?? 'Contact' },
-      connection: contact && this.core.contacts.view(contact).link === 'connected' ? 'connected' : sameProject(shared.authority, remote) ? 'authority-unavailable' : 'offline',
+      connection: contact && ('via' in contact ? contact.link : this.core.contacts.view(contact).link) === 'connected' ? 'connected' : sameProject(shared.authority, remote) ? 'authority-unavailable' : 'offline',
       protection: { defaultDeny: true, activeOverrides: this.core.sharedAccess?.activeOverrides(shared.id) ?? 0, reviewer: this.core.sharedReview?.status(shared.id) ?? 'off' } };
   }
   list(threadId: string, connection?: Connection): SharedProjectView[] {
@@ -128,13 +134,17 @@ export class SharedProjects {
 
   async offer(p: RpcParams<'sharedProjects.offer'>): Promise<SharedProjectView> {
     const peerId = text(p.coreId, 'coreId', 100);
-    const local = projectRef({ ownerCoreId: this.self(), coreId: p.machine ?? this.self(), projectId: p.projectId });
+    const owner = this.core.contacts.has(peerId) ? this.self() : this.core.contacts.members.relayedOf(peerId).find(e => e.grants.some(g => g.projectId === p.projectId))?.via;
+    const local = projectRef({ ownerCoreId: owner, coreId: p.machine ?? this.self(), projectId: p.projectId });
     const remote = projectRef(p.remote, 'remote');
-    if (local.coreId !== this.self() || remote.coreId !== peerId) throw refused('machine: member association requires #755 member relay support');
-    if (remote.ownerCoreId !== peerId || !this.grant(local, peerId)) throw refused('projectId: expected a project explicitly granted to this contact');
-    if (this.core.contacts.find(peerId)?.capabilities?.sharedProjects !== 1) throw refused('coreId: contact must negotiate sharedProjects version 1 before association');
+    if (local.coreId !== this.self()) throw refused('machine: offer from the project owning Store/core');
+    if (remote.ownerCoreId !== peerId || !this.grant(local, peerId, true)) throw refused('projectId: expected a project explicitly granted to this contact');
+    if (projectContact(this.core, local, peerId)?.capabilities?.sharedProjects !== 1) throw refused('coreId: contact must negotiate sharedProjects version 1 before association');
     const requestId = text(p.requestId, 'requestId', 100);
     const id = this.journal.transaction(() => this.journal.once(`owner:offer:${local.projectId}`, requestId, { method: 'offer', ...p }, () => {
+      // A fresh owner proposal renews only this host's policy hold. Peer offers,
+      // mirrored grants and old request receipts can never perform this action.
+      this.core.contacts.restoreForOwner(peerId, local.projectId);
       const now = Date.now();
       const shared: SharedProject = { id: `shp_${randomUUID()}`, projects: [local, remote], authority: local, state: 'pending', access: [initialAccess(local), initialAccess(remote)], createdAt: now, updatedAt: now };
       this.save(shared);
@@ -271,7 +281,9 @@ export class SharedProjects {
   private exchange(peerId: string, payload: SharedProjectPeerRequest): Promise<unknown> {
     const peer = this.core.contacts.peers().find(p => p.coreId === peerId);
     if (!peer || this.closed) throw refused('coreId: contact permission revoked');
-    return this.core.coordination.request(peer, 'contact.project', payload);
+    const shared = payload.method === 'offer' ? payload.project : this.require(payload.sharedProjectId);
+    const {local, remote} = this.endpoints(shared);
+    return this.core.coordination.request(peer, 'contact.project', {...payload, route: {source: local, target: remote}});
   }
   async request<M extends keyof SharedProjectPeerMethods>(ctx: SharedPeerContext, method: M, params: SharedProjectPeerMethods[M]['params'], requestId: string = randomUUID()): Promise<SharedProjectPeerMethods[M]['result']> {
     const { shared, source } = ctx;
@@ -300,12 +312,12 @@ export class SharedProjects {
     if (ctx.source.kind === 'agent') this.core.contacts.checkAttestedTier(ctx.source.agent);
   }
   async receive(peerId: string, value: unknown): Promise<unknown> {
-    if (!this.core.contacts.has(peerId)) throw refused('coreId: expected a contact');
+    if (!this.core.contacts.isContact(peerId)) throw refused('coreId: expected a contact');
     const p = value as SharedProjectPeerRequest;
     if (!p || typeof p.method !== 'string') throw invalidParams('contact.project: expected a method');
     const requestId = text(p.requestId, 'requestId', 100);
     if (p.method === 'offer') return this.journal.transaction(() => this.journal.once(`peer:${peerId}:${text(p.project?.id, 'offer.id', 100)}`, requestId, p, () => {
-      const shared = offeredProject(p.project, peerId, this.self());
+      const shared = offeredProject(p.project, peerId, this.self(), projectRoute(p)?.target.ownerCoreId);
       const { local } = this.endpoints(shared);
       if (!this.grant(local, peerId)) throw refused('offer.project: local project is not granted to this contact');
       if (this.journal.get(shared.id)) throw refused('offer.id: association already exists');
@@ -315,6 +327,7 @@ export class SharedProjects {
     }));
     const shared = this.require(p.sharedProjectId);
     const { local, remote, index } = this.endpoints(shared);
+    checkProjectRoute(p, local, remote);
     if (remote.ownerCoreId !== peerId) throw refused('sharedProjectId: not associated with this contact');
     if (p.method === 'decide') return this.journal.transaction(() => this.journal.once(`peer:${peerId}:${shared.id}`, requestId, p, () => {
       if (index !== 0 || shared.state !== 'pending' || typeof p.accept !== 'boolean' || !this.grant(local, peerId)) throw refused('decide: expected a pending outgoing association and current project grant');
@@ -367,9 +380,9 @@ export class SharedProjects {
     this.assertActive(this.require(ctx.shared.id));
     return this.core.journal.listThreads(ctx.local.projectId).filter(t => !t.archived && this.core.coordination.config(t.id).mode !== 'off' && this.core.coordination.config(t.id).remote)
       .sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 100).map(t => {
-        const ref = { project: ctx.local, threadId: t.id, address: { coreId: ctx.local.ownerCoreId, threadId: t.id } };
-        const agent = { ...redactSharedContact(this.core.coordination.describe(t.id)), sharedThread: ref };
-        return { ref, agent, machine: agent.machine, readThreads: ctx.source.project.ownerCoreId === this.self() || this.core.contacts.mayRead(ctx.peerId, t.id) };
+        const ref = { project: ctx.local, threadId: t.id, address: projectAddress(ctx.local, t.id) };
+        const agent = { ...redactSharedContact(this.core.coordination.describe(t.id)), ...ref.address, sharedThread: ref };
+        return { ref, agent, machine: agent.machine, readThreads: sameProject(ctx.source.project, ctx.local) || this.core.contacts.mayRead(ctx.peerId, t.id) };
       });
   }
   private remoteThreads(ctx: SharedPeerContext, value: unknown): SharedProjectThread[] {
@@ -395,7 +408,10 @@ export class SharedProjects {
   private localSearch(ctx: SharedPeerContext, query: unknown): AgentMatch[] {
     const entries = this.localThreads(ctx);
     const words = searchWords(query);
-    return [true, false].flatMap(read => searchContacts(this.core.journal.db, entries.filter(t => t.readThreads === read).map(t => t.agent), words, read, redactSharedText));
+    return [true, false].flatMap(read => searchContacts(this.core.journal.db, entries.filter(t => t.readThreads === read).map(t => ({...t.agent, threadId: t.ref.threadId})), words, read, redactSharedText)).map(match => {
+      const ref = entries.find(t => t.ref.threadId === match.threadId)!.ref;
+      return {...match, ...ref.address, sharedThread: ref};
+    });
   }
   async search(p: SharedProjectScope & { query: string }, connection?: Connection): Promise<{ matches: AgentMatch[]; unavailable: SharedProjectRef[] }> {
     const ctx = this.scope(p, connection);
@@ -410,7 +426,7 @@ export class SharedProjects {
         if (!sameProject(ref.project, ctx.remote)) throw refused('matches.project: expected the associated endpoint');
         const peer = this.core.contacts.peers().find(p => p.coreId === ctx.peerId)!;
         const agent = checkRemoteContact(row, peer);
-        if (agent.threadId !== ref.threadId) throw refused('matches.threadId: expected the scoped thread');
+        if (agent.threadId !== ref.address.threadId) throw refused('matches.threadId: expected the scoped thread');
         return { ...agent, ...checkMatchExtras(row), sharedThread: ref };
       });
     } catch (error) { if (error instanceof RpcFailure && error.code !== RpcErrorCode.Unavailable) throw error; unavailable.push(ctx.remote); }
@@ -439,7 +455,7 @@ export class SharedProjects {
     this.scope(p, connection);
     const peer = this.core.contacts.peers().find(p => p.coreId === ctx.peerId)!;
     const contact = checkRemoteContact(raw?.contact, peer);
-    if (contact.threadId !== target.threadId) throw refused('transcript.contact: expected the requested thread');
+    if (contact.threadId !== target.address.threadId) throw refused('transcript.contact: expected the requested thread');
     return { contact: { ...contact, sharedThread: target }, ...checkTranscript(raw) };
   }
   notify(id: string, kinds: ('threads' | 'board' | 'compute' | 'access')[] = ['access']): void {

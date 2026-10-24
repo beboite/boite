@@ -97,6 +97,10 @@ A claim compares `expectedRevision`, requires an open unassigned card and
 reserves a canonical worker on its own endpoint. The same worker cannot hold
 another card of this association. Competing claims get one applied receipt;
 the other gets conflict. A queued receipt never authorizes execution.
+On a member endpoint, the worker's canonical core/thread and public gateway
+address differ. Clients obtain both from the scoped directory after creating
+the local worker; they never derive authority by parsing an alias. The board
+and immutable claim authority remain on the original endpoint cores.
 The authority returns a claim ID scoped to association, actor, card and request.
 Use the assignment's returned ID for start, release and progress; a request ID
 alone is not a claim ID, since different agents may reuse it.

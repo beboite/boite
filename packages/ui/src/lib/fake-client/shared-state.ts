@@ -4,11 +4,12 @@ import { RpcFailure } from '../client';
 import { secureId } from '../secure-id';
 import type { FakeContext, FakeMethods } from './context';
 import { coordinationConfig, fakeCore } from './coordination';
-import { contactState, modelTier } from './contacts';
+import { contactFor, contactState, modelTier } from './contacts';
 
 export const invalidShared = (message: string) => new RpcFailure({code: RpcErrorCode.InvalidParams, message});
 export const refusedShared = (message: string) => new RpcFailure({code: RpcErrorCode.Refused, message});
 export const sameProject = (a: SharedProjectRef, b: SharedProjectRef) => a.ownerCoreId === b.ownerCoreId && a.coreId === b.coreId && a.projectId === b.projectId;
+export const projectAddress = (p: SharedProjectRef, threadId: string) => ({coreId: p.ownerCoreId, threadId: p.coreId === p.ownerCoreId ? threadId : `${threadId}~${p.coreId.slice(0,16)}`});
 export const cloneShared = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 /** Same conservative text projection as the core's Contacts file policy. */
 export function sharedTextProjection(value: string): string {
@@ -46,7 +47,7 @@ export function sharedState(ctx: FakeContext): State {
   states.set(ctx, state);
   connected.add(ctx);
   ctx.bus.onState(s => { if (s !== 'ready') state.subscriptions.clear(); if (s === 'closed') connected.delete(ctx); });
-  for (const event of ['contacts.updated', 'project.updated', 'project.removed', 'thread.updated', 'thread.removed', 'delegation.changed'] as const) ctx.bus.on(event, () => reconcileShared(ctx));
+  for (const event of ['contacts.updated', 'group.updated', 'project.updated', 'project.removed', 'thread.updated', 'thread.removed', 'delegation.changed'] as const) ctx.bus.on(event, () => reconcileShared(ctx));
   return state;
 }
 export function onceShared<T>(ctx: FakeContext, key: string, input: unknown, run: () => T, contentRefusal = false): T {
@@ -63,10 +64,10 @@ export function requireShared(ctx: FakeContext, id: string): SharedProject {
   if (!shared) throw refusedShared('sharedProjectId: expected an associated project of this core');
   return shared;
 }
-export function sharedContact(ctx: FakeContext, id: string): Contact | undefined { return contactState(ctx).contacts.find(c => c.coreId === id); }
+export function sharedContact(ctx: FakeContext, id: string, local?: SharedProjectRef): (Contact & {via?: string}) | undefined { return contactFor(ctx, id, local?.ownerCoreId); }
 export function granted(ctx: FakeContext, ref: SharedProjectRef, peer: string): boolean {
   return ref.coreId === ctx.identity.coreId && ctx.projects.some(p => p.id === ref.projectId && !p.archived)
-    && sharedContact(ctx, peer)?.grants.some(g => g.projectId === ref.projectId && (!g.machine || g.machine === ref.coreId)) === true;
+    && sharedContact(ctx, peer, ref)?.grants.some(g => g.projectId === ref.projectId && (!g.machine || g.machine === ref.coreId)) === true;
 }
 export function assertSharedActive(ctx: FakeContext, shared: SharedProject): void {
   const {local, remote} = endpoints(ctx, shared);
@@ -79,7 +80,7 @@ export function sharedActor(ctx: FakeContext, threadId: string, local: SharedPro
   if (ctx.agentThreadId !== threadId) throw refusedShared('threadId: expected the authenticated agent source');
   const agent = `${thread.providerId} ${thread.model ?? ''}`;
   if (modelTier(thread.providerId, thread.model) > contactState(ctx).settings.minTier) throw refusedShared('threadId: model is below the contact tier');
-  return {kind: 'agent', project: local, threadId, address: {coreId: ctx.identity.coreId, threadId}, agent};
+  return {kind: 'agent', project: local, threadId, address: projectAddress(local,threadId), agent};
 }
 export function sharedScope(ctx: FakeContext, p: SharedProjectScope) {
   assertWorkerScope(ctx,p);
@@ -93,8 +94,8 @@ export function assertWorkerScope(ctx:FakeContext,p:SharedProjectScope):void {
   if(bound&&bound!==p.sharedProjectId)throw refusedShared('sharedProjectId: expected this worker association');
 }
 export function remoteShared(ctx: FakeContext, shared: SharedProject): FakeContext | undefined {
-  const {remote} = endpoints(ctx, shared), contact = sharedContact(ctx, remote.ownerCoreId), target = fakeCore(remote.coreId);
-  return contact?.link === 'connected' && target && sharedContact(target, ctx.identity.coreId)?.link === 'connected' ? target : undefined;
+  const {local, remote} = endpoints(ctx, shared), contact = sharedContact(ctx, remote.ownerCoreId, local), target = fakeCore(remote.coreId);
+  return contact?.link === 'connected' && target && sharedContact(target, local.ownerCoreId, remote)?.link === 'connected' ? target : undefined;
 }
 export function notifyShared(ctx: FakeContext, id: string): void {
   for (const side of connected) {
@@ -117,7 +118,7 @@ export function reconcileShared(ctx: FakeContext): void {
     if (shared.state !== 'revoked' && !granted(ctx, local, remote.ownerCoreId)) {
       shared.state = 'revoked'; shared.access[index].revokedAt = Date.now(); shared.access[index].revision++;
     }
-    const policy=JSON.stringify(sharedContact(ctx,remote.ownerCoreId)?.grants.find(g=>g.projectId===local.projectId));
+    const policy=JSON.stringify(sharedContact(ctx,remote.ownerCoreId,local)?.grants.find(g=>g.projectId===local.projectId));
     const previous=sharedState(ctx).policies.get(shared.id);
     if (previous!==undefined && policy!==previous && shared.state==='active') shared.access[index].revision++;
     sharedState(ctx).policies.set(shared.id,policy??'missing');
@@ -125,7 +126,7 @@ export function reconcileShared(ctx: FakeContext): void {
   }
 }
 export function sharedView(ctx: FakeContext, shared: SharedProject): SharedProjectView {
-  const {local, remote} = endpoints(ctx, shared), contact = sharedContact(ctx, remote.ownerCoreId), access = sharedAccessState(ctx, shared.id);
+  const {local, remote} = endpoints(ctx, shared), contact = sharedContact(ctx, remote.ownerCoreId,local), access = sharedAccessState(ctx, shared.id);
   return cloneShared({shared, local, remote, contact: {coreId: remote.ownerCoreId, name: contact?.name ?? 'Contact'},
     connection: remoteShared(ctx, shared) ? 'connected' : sameProject(shared.authority, remote) ? 'authority-unavailable' : 'offline',
     protection: {defaultDeny: true, activeOverrides: shared.state === 'active' ? access.overrides.filter(o => o.revokedAt === null && o.expiresAt > Date.now() && access.identities.get(o.id) === JSON.stringify([shared.access[endpoints(ctx,shared).index].revision,ctx.files.get(o.path)])).length : 0, reviewer: access.review.enabled ? 'idle' : 'off'}});
@@ -133,11 +134,12 @@ export function sharedView(ctx: FakeContext, shared: SharedProject): SharedProje
 export function sharedThreads(ctx: FakeContext, shared: SharedProject, project: SharedProjectRef, viewer: FakeContext): SharedProjectThread[] {
   assertSharedActive(ctx, shared);
   return [...ctx.threads.values()].filter(t => t.projectId === project.projectId && !t.archived && coordinationConfig(ctx, t.id).mode !== 'off' && coordinationConfig(ctx, t.id).remote).sort((a,b) => b.updatedAt - a.updatedAt).slice(0,100).map(t => {
-    const ref = {project, threadId: t.id, address: {coreId: project.ownerCoreId, threadId: t.id}};
+    const ref = {project, threadId: t.id, address: projectAddress(project,t.id)};
     const agent = {coreId: ref.address.coreId, threadId: ref.address.threadId, title: t.title, machine: ctx.identity.name, resources: coordinationConfig(ctx, t.id).resources, status: t.status, mode: coordinationConfig(ctx, t.id).mode,
       project: ctx.projects.find(p => p.id === project.projectId)?.name, agent: `${t.providerId}${t.model ? ` ${t.model}` : ''}`, branch: t.branch, activeAt: t.updatedAt, sharedThread: ref};
     const safe={...agent,title:sharedTextProjection(agent.title),machine:sharedTextProjection(agent.machine),resources:sharedTextProjection(agent.resources),...(agent.project?{project:sharedTextProjection(agent.project)}:{}),...(agent.branch?{branch:sharedTextProjection(agent.branch)}:{}),agent:sharedTextProjection(agent.agent)};
-    return {ref, agent:safe, machine: sharedTextProjection(ctx.identity.name), readThreads: ctx === viewer || sharedContact(ctx, viewer.identity.coreId)?.grants.find(g => g.projectId === project.projectId)?.readThreads === true};
+    const viewerOwner = endpoints(viewer,shared).local.ownerCoreId;
+    return {ref, agent:safe, machine: sharedTextProjection(ctx.identity.name), readThreads: ctx === viewer || sharedContact(ctx, viewerOwner,project)?.grants.find(g => g.projectId === project.projectId)?.readThreads === true};
   });
 }
 

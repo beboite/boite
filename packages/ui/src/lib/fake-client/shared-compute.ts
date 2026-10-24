@@ -4,7 +4,7 @@ import type { FakeContext, FakeMethods } from './context';
 import { contactState, modelTier } from './contacts';
 import { delegationConfig, workflowChild, workflowAnswer, type ChildRoute } from './delegation';
 import { secureId } from '../secure-id';
-import { assertSharedActive, cloneShared, endpoints, invalidShared, notifyShared, onceShared, remoteShared, requireShared, refusedShared, sameProject, sharedScope, sharedState, sharedText } from './shared-state';
+import { assertSharedActive, cloneShared, endpoints, invalidShared, notifyShared, onceShared, projectAddress, remoteShared, requireShared, refusedShared, sameProject, sharedScope, sharedState, sharedText } from './shared-state';
 
 interface Record {job:SharedComputeJob;content:string;task:string;repository:string;parent:string;base:string;accountId:string;cancelRequest?:string}
 interface HostState {bindings:Map<string,string>;jobs:Map<string,Record>;requests:Map<string,Record>;sources:Map<string,Record>;repos:Map<string,{repository:string;head:string;commits:Set<string>}>}
@@ -116,12 +116,12 @@ export function sharedComputeMethods(ctx:FakeContext){
       if(!route.protection.supported)throw refusedShared(`compute.protection: ${route.protection.reason}`);
       const sourceRepo=stateOf(ctx).repos.get(local.projectId),hostRepo=stateOf(host).repos.get(p.host.projectId);
       if(!sourceRepo||!hostRepo||sourceRepo.repository!==hostRepo.repository||!sourceRepo.commits.has(p.baseCommit)||!hostRepo.commits.has(p.baseCommit))throw refusedShared('compute.repository/baseCommit: expected the same registered repository and a verified common commit');
-      const source={project:local,threadId:p.threadId,address:{coreId:local.ownerCoreId,threadId:p.threadId}},key=JSON.stringify([shared.id,source,p.requestId]),content=JSON.stringify(p),saved=stateOf(host).requests.get(key);
+      const source={project:local,threadId:p.threadId,address:projectAddress(local,p.threadId)},key=JSON.stringify([shared.id,source,p.requestId]),content=JSON.stringify(p),saved=stateOf(host).requests.get(key);
       if(saved){if(saved.content!==content)throw refusedShared('requestId: already used for different compute content');return cloneShared(saved.job);}
       const policy=shared.access[endpoints(host,shared).index].compute;
       if(policy.maxConcurrent!==null&&[...stateOf(host).jobs.values()].filter(r=>r.job.sharedProjectId===shared.id&&!terminal(r.job)).length>=policy.maxConcurrent)throw refusedShared('compute: host contribution is full');
       if(p.claimId)sharedText(p.claimId,'claimId');
-      const resolved=parentRoute(host,shared,p.profileId),child=workflowChild(host,resolved.parent,resolved.route,p.title??p.task.slice(0,120),p.task),thread=host.thread(child),worker={project:p.host,threadId:child,address:{coreId:p.host.ownerCoreId,threadId:child}};
+      const resolved=parentRoute(host,shared,p.profileId),child=workflowChild(host,resolved.parent,resolved.route,p.title??p.task.slice(0,120),p.task),thread=host.thread(child),worker={project:p.host,threadId:child,address:projectAddress(p.host,child)};
       thread.permissionMode=policy.permissionMode;thread.branch=`boite/sub-${child.slice(4,14)}`;thread.cwd=`${host.projects.find(pr=>pr.id===p.host.projectId)!.path}/.boite/worktrees/${child}`;
       const now=Date.now(),record:Record={content,task:p.task,repository:hostRepo.repository,parent:resolved.parent.id,accountId:resolved.route.accountId,base:p.baseCommit,job:{id:`scj_${secureId()}`,revision:1,sharedProjectId:shared.id,requestId:p.requestId,source,host:p.host,worker,grantRevision:shared.access[endpoints(host,shared).index].revision,profileId:p.profileId,providerId:route.providerId,model:route.model,effort:resolved.route.effort,permissionMode:policy.permissionMode,status:'running',claimId:p.claimId??null,result:null,error:null,createdAt:now,updatedAt:now}};
       // Keep a source namespace key and the public job id pointed at one record.

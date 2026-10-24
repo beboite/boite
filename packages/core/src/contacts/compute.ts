@@ -12,7 +12,7 @@ import { SharedComputeJournal, terminalCompute, type ComputeRecord } from './com
 import { computeInput, checkedComputeJob, sharedPermissionSupport, sharedExecutionProtection } from './compute-policy.ts';
 import { computeBase, computeGit, computeRepository } from './compute-git.ts';
 import { gitCommonDirOf } from './git-remote.ts';
-import { computePolicy, sameProject, threadRef } from './project-policy.ts';
+import { computePolicy, sameProject, threadRef, projectAddress } from './project-policy.ts';
 import { fingerprint } from './project-journal.ts';
 import type { SharedPeerContext } from './projects.ts';
 
@@ -155,7 +155,7 @@ export class SharedCompute {
   /** A runner persists this identity before awaiting dispatch, including a lost launch response. */
   identity(p: SharedProjectScope, requestId: string): string {
     const ctx = this.sourceContext(p);
-    return this.jobId(ctx.shared.id, threadRef({project: ctx.local, threadId: p.threadId, address: {coreId: ctx.local.ownerCoreId, threadId: p.threadId}}), text(requestId, 'requestId', 100));
+    return this.jobId(ctx.shared.id, threadRef({project: ctx.local, threadId: p.threadId, address: projectAddress(ctx.local, p.threadId)}), text(requestId, 'requestId', 100));
   }
   start(p: RpcParams<'sharedCompute.start'>, connection?: Connection): Promise<SharedComputeJob> {
     const work = this.startJob(p, connection); this.background(work); return work;
@@ -164,7 +164,7 @@ export class SharedCompute {
     const ctx = this.sourceContext(p, connection);
     const { threadId: _thread, sharedProjectId: _shared, ...raw } = p;
     const input = computeInput(raw);
-    const source = threadRef({ project: ctx.local, threadId: p.threadId, address: { coreId: ctx.local.ownerCoreId, threadId: p.threadId } });
+    const source = threadRef({ project: ctx.local, threadId: p.threadId, address: projectAddress(ctx.local, p.threadId) });
     const repository = computeRepository(this.core, ctx.local.projectId);
     const id = this.jobId(ctx.shared.id, source, input.requestId), hash = fingerprint({input, repository});
     // A source has one request namespace across both routes, even when host/source rows live in this same database.
@@ -297,7 +297,7 @@ export class SharedCompute {
   private async launch(record: ComputeRecord, ctx: SharedPeerContext, parent: ThreadSummary, route: ChildRoute): Promise<SharedComputeJob> {
     try {
       const id = this.core.delegation.createChild({ ...parent, permissionMode: record.job.permissionMode }, route, record.input.title ?? record.input.task.slice(0, 80), workerId => {
-        record.job.worker = { project: ctx.local, threadId: workerId, address: { coreId: ctx.local.ownerCoreId, threadId: workerId } };
+        record.job.worker = { project: ctx.local, threadId: workerId, address: projectAddress(ctx.local, workerId) };
         const worktree = this.core.delegation.worktrees.get(workerId)!;
         this.core.delegation.worktrees.record(workerId, { ...worktree, base: record.input.baseCommit });
         this.journal.put(record);

@@ -7,6 +7,38 @@ const clients:FakeClient[]=[];
 async function sharedPair(options:FakeClientOptions={}){const pair=await createSharedPair(options);clients.push(pair.a,pair.b);return pair;}
 afterEach(()=>{for(const client of clients.splice(0))client.close();});
 
+test('a group member owns its association, public worker address, read consent and revocation', async () => {
+  const {a,b,aid,bid,ap,bp,at} = await sharedPair();
+  const member = new FakeClient({delayMs:0,coreId:'c'.repeat(64)}); clients.push(member); await member.connect();
+  await b.call('group.create', {name:'Shared host group'});
+  await member.call('group.join', {invite:(await b.call('group.invite', {})).invite});
+  const mp=(await member.call('projects.list', {}))[0]!,mt=(await member.call('threads.list', {projectId:mp.id})).find(t=>!t.archived)!;
+  await b.call('contacts.grant', {coreId:aid,projectId:mp.id,machine:member.core!.coreId!});
+  const ref={ownerCoreId:bid,coreId:member.core!.coreId!,projectId:mp.id};
+  expect((await a.call('contacts.get', {})).contacts.find(c=>c.coreId===bid)!.offers.some(o=>JSON.stringify(o.sharedProject)===JSON.stringify(ref))).toBe(true);
+  const offered=await a.call('sharedProjects.offer', {coreId:bid,projectId:ap.id,remote:ref,requestId:'member-offer'});
+  await member.call('sharedProjects.decide', {sharedProjectId:offered.shared.id,accept:true,requestId:'member-accept'});
+  const scope={threadId:at.id,sharedProjectId:offered.shared.id},mscope={...scope,threadId:mt.id};
+  expect((await b.call('sharedProjects.list', {threadId:mt.id})).some(s=>s.shared.id===offered.shared.id)).toBe(false);
+  const target=(await a.call('sharedProjects.threads',scope)).threads.find(t=>t.ref.project.coreId===ref.coreId)!;
+  expect(target.ref.address).toEqual({coreId:bid,threadId:`${target.ref.threadId}~${ref.coreId.slice(0,16)}`});
+  expect(await a.call('sharedProjects.read',{...scope,target:target.ref}).catch(e=>e)).toMatchObject({code:RpcErrorCode.Refused});
+  await b.call('contacts.grant',{coreId:aid,projectId:mp.id,machine:ref.coreId,readThreads:true});
+  expect((await a.call('sharedProjects.read',{...scope,target:target.ref})).contact.sharedThread).toEqual(target.ref);
+  const human=await a.call('contacts.sendHuman',{threadId:at.id,to:target.ref.address,text:'Member human message',requestId:'member-human'});
+  expect((await member.call('collaboration.get',{threadId:target.ref.threadId})).messages.find(l=>l.id===human.id)?.origin).toBe('contact-human');
+  const reverse=await member.call('contacts.sendHuman',{threadId:mt.id,to:{coreId:aid,threadId:at.id},text:'Member reply',requestId:'member-reply'});
+  expect((await a.call('collaboration.get',{threadId:at.id})).messages.find(l=>l.id===reverse.id)?.from.sharedThread?.project).toEqual(ref);
+  for (const side of [a,member]) await side.call('sharedProjects.configure',{sharedProjectId:scope.sharedProjectId,board:true});
+  const add=await a.call('sharedBoard.apply',{...scope,command:{kind:'add',requestId:'member-add',cardId:'member-card',text:'Member work'}});
+  expect((await member.call('sharedBoard.apply',{...mscope,command:{kind:'claim',requestId:'member-claim',cardId:'member-card',expectedRevision:add.revision,worker:target.ref}})).outcome).toBe('applied');
+  await b.call('contacts.revoke',{coreId:aid,projectId:mp.id,machine:ref.coreId});
+  expect((await member.call('sharedProjects.get',mscope)).shared.state).toBe('revoked');
+  expect((await a.call('sharedProjects.get',scope)).shared.state).toBe('revoked');
+  await expect(a.call('collaboration.send',{threadId:at.id,to:target.ref.address,text:'Do not fall back to ordinary contact mail',requestId:'revoked-member-agent'})).rejects.toMatchObject({code:RpcErrorCode.Refused});
+  expect((await b.call('contacts.get',{})).contacts.find(c=>c.coreId===aid)!.grants.some(g=>g.projectId===bp.id&&!g.machine)).toBe(true);
+});
+
 test('colliding ids stay canonical; transcript grants, owner administration and phone/agent rights agree',async()=>{
   const {a,b,as,bs,bid,aid,bp}=await sharedPair();
   const directory=await a.call('sharedProjects.threads',as),remote=directory.threads.find(t=>t.ref.project.coreId===bid)!;

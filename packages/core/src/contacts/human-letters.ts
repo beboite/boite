@@ -3,10 +3,10 @@ import type { AgentAddress, AgentContact, AgentLetter, CoordinationPeer } from '
 import type { Core } from '../core.ts';
 import type { Connection } from '../router.ts';
 import { refused } from '../errors.ts';
-import { sameProject, threadRef } from './project-policy.ts';
+import { sameProject, threadRef, projectAddress } from './project-policy.ts';
 
 export async function outgoingContact(core: Core, from: AgentContact, to: AgentAddress, human: boolean, connection?: Connection): Promise<Partial<AgentLetter>> {
-  const contact = core.contacts.find(to.coreId);
+  const contact = core.contacts.find(to.coreId) ?? core.contacts.members.relayedOf(to.coreId)[0];
   if (human && (!contact || contact.capabilities?.humanLetters !== 1)) throw refused('to.coreId: expected a contact with negotiated humanLetters version 1');
   if (!contact) return {};
   let scope: Partial<AgentLetter> = {};
@@ -17,7 +17,7 @@ export async function outgoingContact(core: Core, from: AgentContact, to: AgentA
       const ctx = core.sharedProjects.scope(p, connection);
       const directory = await core.sharedProjects.threads(p, connection);
       if (!directory.threads.some(t => sameProject(t.ref.project, ctx.remote) && t.ref.address.coreId === to.coreId && t.ref.address.threadId === to.threadId)) continue;
-      scope = { sharedProjectId: shared.id, from: { ...from, sharedThread: { project: ctx.local, threadId: from.threadId, address: { coreId: from.coreId, threadId: from.threadId } } } };
+      scope = { sharedProjectId: shared.id, from: { ...from, sharedThread: { project: ctx.local, threadId: from.threadId, address: projectAddress(ctx.local, from.threadId) } } };
       found = true;
       break;
     }
@@ -30,7 +30,7 @@ export async function outgoingContact(core: Core, from: AgentContact, to: AgentA
 
 /** Runs both at receipt and immediately before provider delivery, so queued mail cannot outlive consent. */
 export function incomingContact(core: Core, letter: AgentLetter, peer?: CoordinationPeer): Partial<AgentLetter> {
-  const contact = peer ? core.contacts.find(peer.coreId) : undefined;
+  const contact = peer ? (core.contacts.find(peer.coreId) ?? core.contacts.members.relayedOf(peer.coreId)[0]) : undefined;
   const human = letter.origin === 'contact-human';
   if (human && (!contact || contact.capabilities?.humanLetters !== 1)) throw refused('letter.origin: contact-human requires negotiated humanLetters support');
   if (!contact) return {};

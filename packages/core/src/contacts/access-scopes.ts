@@ -1,6 +1,7 @@
 import { realpathSync } from 'node:fs';
 import type { SharedProjectActor, SharedThreadRef } from '@boite/contracts';
 import type { Core } from '../core.ts';
+import { projectAddress } from './project-policy.ts';
 import { refused } from '../errors.ts';
 import type { ComputeRecord } from './compute-journal.ts';
 import type { SharedPeerContext } from './projects.ts';
@@ -51,6 +52,6 @@ export function accessBinding(core: Core, threadId: string): AccessBinding | nul
 }
 function boardBinding(core: Core, threadId: string, parent: string, scope: BoardScope): AccessBinding {
   const shared = core.sharedProjects.require(scope.sharedProjectId), {local} = core.sharedProjects.endpoints(shared);
-  return {job: {id: null, sharedProjectId: shared.id, grantRevision: scope.revision, source: {project: local, threadId: parent, address: {coreId: local.ownerCoreId, threadId: parent}}},
+  return {job: {id: null, sharedProjectId: shared.id, grantRevision: scope.revision, source: {project: local, threadId: parent, address: projectAddress(local, parent)}},
     checkoutPath: scope.root, threadId, actor: scope.actor, board: {threadId: parent, cardId: scope.cardId, claimId: scope.claimId}};
 }

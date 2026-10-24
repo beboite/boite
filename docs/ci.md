@@ -61,6 +61,12 @@ dependency is required too.
 | Dependencies, shared builds, other workflows and unknown paths | All checks |
 | Release or manual full run | All checks, except jobs the caller replaces through explicit inputs |
 
+Contacts changes exercise the core/fake contract scenarios plus the real
+three-core `shared-cores.test.ts` and browser `shared-collaboration.test.ts`
+fixtures. A local Linux run verifies path and admission logic but does not
+replace the native Windows process/file checks selected by CI. Fixture-only
+echo execution must not be reported as external-provider sandbox coverage.
+
 A pull request whose selection includes desktop also runs [Bundle growth](#bundle-growth).
 
 The changes job always installs frozen dependencies, runs `bun audit`, local
