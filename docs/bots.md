@@ -73,17 +73,21 @@ its settings.
 
 The desk is a surface of the thread's right panel (`desk`), opened by the
 header's desk button and, the first time this device shows a bot on a wide
-window, by itself. It shows what the bot is doing now (the step its turn is
-on in large type, the time it has run ticking, its last four calls on a slim
-timeline, else what it waits on or its next wake with a countdown), then under
-small sentence-case labels its watched threads as rows (a status dot that
+window, by itself. It keeps what the bot is doing now above three tabs: Work,
+Routines and Memory. The current step and elapsed time stay visible; the
+step count unfolds the last four calls. When idle, the card shows what it
+waits on or its next wake with a countdown. Work opens by default and shows
+its followed threads as rows (a status dot that
 breathes while the thread works or waits on the user, title, time, one meta
 line with state, project, pull request and checks, how long a stalled turn has
 been silent; a needs-you row opens its question with its options to answer in
 place; a row opens its thread, its cross, shown on hover and focus, takes it
-off the desk), its routines as rows with their next time and their actions as
-icons, its memory as a two-line preview with its last pass and AGENTS.md, and
-today's turns, wakes and quiet ones on one line over a slim budget bar.
+off the desk). Routines holds scheduled work and its actions; Memory holds
+the memory preview, its last update and AGENTS.md. A failed memory update
+marks its tab, with the full error inside. Arrow keys, Home and End change
+tabs; switching tabs preserves unfinished forms. Today's spend stays in a
+summary that unfolds the turn counts and budget bar. Reaching the budget
+opens that summary so its warning stays visible.
 
 A new bot needs a name and what it does; its robot, model and projects come
 filled in. It is free to act: its permission mode starts on full access (Auto,

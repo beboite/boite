@@ -62,6 +62,7 @@ export const fr: Translation = {
     desk: 'Bureau', fix: 'Corriger',
     deskPanel: {
       now: 'Maintenant', work: 'Travail', memory: 'Mémoire', today: "Aujourd'hui",
+      following: 'Fils suivis', memoryProblem: 'Échec de la mise à jour de la mémoire',
       stepOne: '1 étape pour l’instant', stepMany: '{count} étapes pour l’instant', thinking: 'Réfléchit',
       waitingHint: 'Répondez dans la conversation et il reprend.',
       nextWake: 'Prochain réveil', nextIn: 'dans {time}', idle: 'Au repos', idleHint: 'Écrivez-lui, ou donnez-lui une routine.',
