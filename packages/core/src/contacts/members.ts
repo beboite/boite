@@ -231,7 +231,8 @@ export class ContactMembers {
       const letter = payload as AgentLetter;
       from = address(letter?.from, 'letter.from');
       if (from.coreId !== member.coreId) throw refused('letter.from: expected a thread of the asking machine');
-      payload = { ...letter, from: { ...letter.from, coreId: this.selfId(), threadId: memberThreadId(member.coreId, from.threadId) } };
+      // The member's name stays here, as in `outward`.
+      payload = { ...letter, from: { ...letter.from, coreId: this.selfId(), threadId: memberThreadId(member.coreId, from.threadId), machine: this.core.info().hostname ?? 'Boite' } };
     } else if (operation === 'receipt') {
       const receipt = payload as { id?: unknown; fromThreadId?: unknown } | null;
       from = { coreId: member.coreId, threadId: text(receipt?.fromThreadId, 'receipt.fromThreadId', 128) };
