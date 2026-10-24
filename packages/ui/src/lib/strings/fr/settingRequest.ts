@@ -48,6 +48,7 @@ export const fr: Translation = {
       memoryProtection: 'Protéger la mémoire disponible',
       reapOrphans: 'Arrêter ce que les agents laissent tourner',
       autoUpdateHarnesses: 'Mettre à jour les agents automatiquement',
+      autoInstallUpdates: 'Installer les mises à jour tout seul quand rien ne tourne',
       listenOnLan: 'Accessible sur le réseau local',
       publicUrl: 'Adresse publique pour les téléphones',
       browserOrigins: 'Origines de navigateur autorisées',

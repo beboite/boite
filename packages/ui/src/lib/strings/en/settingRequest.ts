@@ -47,6 +47,7 @@ export const strings = {
       memoryProtection: 'Protect available memory',
       reapOrphans: 'Stop what agents leave running',
       autoUpdateHarnesses: 'Update agents automatically',
+      autoInstallUpdates: 'Install updates by itself when nothing runs',
       listenOnLan: 'Reachable on the local network',
       publicUrl: 'Public address for phones',
       browserOrigins: 'Allowed browser origins',

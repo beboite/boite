@@ -213,6 +213,9 @@ The client copies (`SYNCED_SETTINGS` in the contracts):
 
 - deleted-history retention, process guards, question mode, short answers,
   tool summaries, automatic compaction and the cache keepalive;
+- **Install updates by itself when nothing runs** (`autoInstallUpdates`), so a
+  server as default machine, which cannot update itself, still carries the
+  choice to every desktop ([updates](updates.md#installing-by-itself));
 - keybindings where the two differ, including unbound commands and restored
   defaults. A failed or canceled copy attempts to restore entries already changed;
 - the brain's Share instructions automatically, instructions, guide and automatic pull switches

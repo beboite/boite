@@ -120,6 +120,7 @@ export const REQUESTABLE_SETTINGS = {
   memoryProtection: { page: 'resources', section: 'limits', sensitive: true },
   reapOrphans: { page: 'resources', section: 'tasks', sensitive: false },
   autoUpdateHarnesses: { page: 'accounts', section: 'agent-updates', sensitive: false },
+  autoInstallUpdates: { page: 'machines', section: 'updates', sensitive: false },
   listenOnLan: { page: 'advanced', section: 'phone', sensitive: true },
   publicUrl: { page: 'advanced', section: 'phone', sensitive: true },
   browserOrigins: { page: 'advanced', section: 'origins', sensitive: true },
@@ -216,6 +217,7 @@ export type SettingRequestParams = { threadId: ThreadId; reason: string } & (
 /** What a missing key means, for the keys the core's defaults leave out. */
 const MISSING: Partial<Record<RequestableSetting, unknown>> = {
   asyncQuestions: true,
+  autoInstallUpdates: false,
   autoResumeLimitedThreads: false,
   deviceStream: false,
   shortAnswers: true,

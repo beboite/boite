@@ -19,7 +19,10 @@ export const SYNCED_SETTINGS = [
   'shortAnswers',
   'toolSummaries',
   'autoCompact',
-  'cacheKeepalive'
+  'cacheKeepalive',
+  // How the user wants Boite kept current, not what one machine can do: a
+  // server as default machine carries it to every desktop of the group.
+  'autoInstallUpdates'
 ] as const satisfies readonly (keyof Settings)[];
 
 export type SyncedSetting = (typeof SYNCED_SETTINGS)[number];
@@ -39,7 +42,8 @@ export const SYNCED_DEFAULTS: { [K in SyncedSetting]-?: Exclude<Settings[K], und
   shortAnswers: true,
   toolSummaries: false,
   autoCompact: null,
-  cacheKeepalive: null
+  cacheKeepalive: null,
+  autoInstallUpdates: false
 };
 
 /** The brain switches that follow. The folder is each machine's own. */
