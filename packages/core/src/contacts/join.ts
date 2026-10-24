@@ -19,6 +19,14 @@ export const CONTACT_JOIN_ROUTE = '/contacts/join';
 export const JOIN_INPUT = 'boite-contact-join\n';
 const JOINED_INPUT = 'boite-contact-joined\n';
 const JOIN_BODY_MAX = 16_384;
+/** How long a guest waits before joining again a host whose Funnel name public DNS does not know yet. */
+export const JOIN_RETRY_MS = 30_000;
+
+/** A name DNS does not know, as Bun's fetch and Node's report it. */
+function notFound(error: unknown): boolean {
+  const code = (value: unknown) => (value as { code?: unknown } | null)?.code;
+  return code(error) === 'ENOTFOUND' || code((error as { cause?: unknown } | null)?.cause) === 'ENOTFOUND';
+}
 
 /** The guest's side: spends the link's token on its host, then keeps the host as a contact and dials it. */
 export async function joinContact(store: ContactStore, core: Core, link: string): Promise<Contact> {
@@ -55,8 +63,12 @@ async function spendInvite(store: ContactStore, core: Core, invite: Invitation, 
       headers: { 'content-type': 'application/json', 'x-boite-peer': self.coreId, 'x-boite-signature': SEALED },
       body: sealed.body,
     });
-  } catch {
-    // An https origin is the inviter's Funnel: no share to accept, the inviter's side is down.
+  } catch (error) {
+    // An https origin is the inviter's Funnel: no share to accept, the inviter's side is down,
+    // or Tailscale has not put its name in public DNS yet. The token is unspent: the same join works later.
+    if (invite.url.startsWith('https:') && notFound(error)) {
+      throw unavailable(`could not find ${invite.machine} at ${invite.url}: Tailscale has not published its address on the internet yet, which takes a few minutes; join again shortly`, { retryAfterMs: JOIN_RETRY_MS });
+    }
     throw unavailable(invite.url.startsWith('https:')
       ? `could not reach ${invite.machine} at ${invite.url}: its Boite or its Tailscale Funnel is off; ask the inviter to check, then join again`
       : `could not reach ${invite.machine} at ${invite.url}: accept its Tailscale share, or ask for an invitation for another network, then join again`);

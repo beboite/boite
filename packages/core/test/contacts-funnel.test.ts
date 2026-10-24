@@ -2,12 +2,13 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { ContactFunnel, funnelPort } from '../src/contacts/funnel.ts';
+import { ContactFunnel, funnelPort, type FunnelTiming } from '../src/contacts/funnel.ts';
+import { funnelProbe, type FunnelProbe } from '../src/contacts/funnel-check.ts';
 import { CONTACT_JOIN_ROUTE } from '../src/contacts/join.ts';
 import { CONTACT_LINK_ROUTE } from '../src/contacts/store.ts';
 import { ROUTE } from '../src/coordination-wire.ts';
 import { strangerAddress } from '../src/server.ts';
-import { removeDir, startTestCore, type TestCore } from './harness.ts';
+import { removeDir, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { rejection, thrown } from './settle.ts';
 
 const FAKE = join(import.meta.dir, 'fixtures', 'fake-tailscale.ts');
@@ -22,7 +23,8 @@ const running = (name = DNS) => ({ BackendState: 'Running', Self: { DNSName: `${
 const writeState = (state: Record<string, unknown>) => writeFileSync(statePath, JSON.stringify({ serve: {}, status: running(), ...state }));
 const readServe = () => (JSON.parse(readFileSync(statePath, 'utf8')) as { serve: { Web?: Record<string, { Handlers: Record<string, { Proxy: string }> }>; AllowFunnel?: Record<string, boolean>; TCP?: Record<string, unknown> } }).serve;
 const calls = () => existsSync(`${statePath}.log`) ? readFileSync(`${statePath}.log`, 'utf8').trim().split('\n').filter(Boolean) : [];
-const funnel = () => new ContactFunnel(harness.core, PATHS, () => [process.execPath, FAKE, statePath]);
+// Never the internet: every check finds the routes reachable unless a test says otherwise.
+const funnel = (probe: FunnelProbe = async () => 'ready', timing?: FunnelTiming) => new ContactFunnel(harness.core, PATHS, () => [process.execPath, FAKE, statePath], probe, timing);
 const target = () => `http://127.0.0.1:${new URL(harness.url).port}`;
 
 beforeEach(async () => {
@@ -160,4 +162,56 @@ test('mounts to an older target left on a port this core no longer uses come dow
   expect(Object.values(readServe().Web![`${DNS}:10000`]!.Handlers).map(handler => handler.Proxy).sort()).toEqual(PATHS.map(path => `${target()}${path}`).sort());
   expect(readServe().Web![`${DNS}:8443`]!.Handlers).toEqual({ '/other': foreign });
   expect(recorded()).toEqual({ targets: [target()] });
+});
+
+test('mounts public DNS does not learn go off and on again once, are checked until the internet reaches them, and leave with their state', async () => {
+  writeState({});
+  const url = `https://${DNS}:8443`;
+  const asked: string[] = [];
+  // Tailscale publishes the name only once the mounts were turned off and on again.
+  const turnedOff = () => calls().some(call => call.startsWith('serve') && call.endsWith('off'));
+  const subject = funnel(async (origin, path) => { asked.push(`${origin}${path}`); return turnedOff() ? 'ready' : 'unpublished'; }, { checkMs: 10, repairAfterMs: 60, giveUpMs: 60_000 });
+  let changes = 0;
+  subject.changed = () => { changes += 1; };
+  await mounted(subject);
+  subject.watch(url);
+  expect(subject.state()).toMatchObject({ url, status: 'checking', checkedAt: null, repaired: false });
+  await waitFor(() => subject.state()?.status === 'unpublished');
+  await waitFor(() => subject.state()?.status === 'ready');
+  expect(subject.state()).toMatchObject({ url, repaired: true });
+  expect(calls().filter(call => call.endsWith('off'))).toHaveLength(PATHS.length);
+  // The routes came back on the same port, to this core.
+  expect(proxies()).toEqual(PATHS.map(path => `${target()}${path}`).sort());
+  expect(readServe().AllowFunnel).toEqual({ [`${DNS}:8443`]: true });
+  expect(new Set(asked)).toEqual(new Set([`${url}${CONTACT_JOIN_ROUTE}`]));
+  // checking, unpublished, checking again after the repair, ready: no event for a check that changed nothing.
+  expect(changes).toBe(4);
+  const checks = asked.length;
+  await new Promise(resolve => setTimeout(resolve, 60));
+  expect(asked).toHaveLength(checks);
+  subject.release();
+  await subject.settled();
+  expect(subject.state()).toBeNull();
+  // A loopback origin, a test's, is never checked.
+  subject.watch('http://127.0.0.1:4000');
+  expect(subject.state()).toBeNull();
+});
+
+test('the internet check reads public DNS, then needs the join route\'s own refusal from a public address', async () => {
+  const answers = new Map<string, { status: number; body: string } | null>([
+    ['192.0.2.1', null],
+    ['192.0.2.2', { status: 403, body: 'x-boite-peer: expected a core id' }],
+  ]);
+  const asked: string[] = [];
+  const probe = (addresses: string[] | null) => funnelProbe(async () => addresses, async (address, host, port, path) => {
+    asked.push(`${address} ${host}:${port}${path}`);
+    return answers.get(address) ?? { status: 404, body: 'not found' };
+  });
+  const origin = `https://${DNS}:8443`;
+  expect(await probe(null)(origin, CONTACT_JOIN_ROUTE)).toBe('unknown');
+  expect(await probe([])(origin, CONTACT_JOIN_ROUTE)).toBe('unpublished');
+  expect(await probe(['192.0.2.1', '192.0.2.2'])(origin, CONTACT_JOIN_ROUTE)).toBe('ready');
+  expect(asked).toEqual([`192.0.2.1 ${DNS}:8443${CONTACT_JOIN_ROUTE}`, `192.0.2.2 ${DNS}:8443${CONTACT_JOIN_ROUTE}`]);
+  // Another server answering on the address is not this core.
+  expect(await probe(['192.0.2.3'])(origin, CONTACT_JOIN_ROUTE)).toBe('unreachable');
 });

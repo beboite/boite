@@ -15,10 +15,18 @@
  * consent; the mounts leave once no contact or invitation needs them
  * (`release`, from `ContactStore.relisten`). The CLI's own output never
  * reaches a client.
+ *
+ * While the mounts are up they are checked from the internet
+ * (`funnel-check.ts`) until a request goes through, every 30 seconds for an
+ * hour at most. Tailscale may leave the name out of public DNS: still
+ * unpublished 10 minutes after it was turned on, Funnel goes off and on again
+ * once, which makes Tailscale publish it.
  */
+import type { ContactFunnelState } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf, unavailable } from '../errors.ts';
 import { defaultCli, normalizeDnsName, runCli, tailscaleUrl, TAILSCALE_DNS_ADMIN, type Run } from '../tailscale.ts';
+import { funnelProbe, type FunnelProbe } from './funnel-check.ts';
 
 /**
  * The loopback targets the mounts may proxy to, kept while they may be up: a
@@ -31,6 +39,10 @@ const STATUS_TIMEOUT_MS = 5_000;
 const FUNNEL_TIMEOUT_MS = 15_000;
 /** The ports Funnel accepts besides 443. */
 export const FUNNEL_PORTS = [8443, 10000] as const;
+
+/** How often the mounts are checked from the internet, when they are turned off and on, and when checks stop. */
+export interface FunnelTiming { checkMs: number; repairAfterMs: number; giveUpMs: number }
+const TIMING: FunnelTiming = { checkMs: 30_000, repairAfterMs: 10 * 60_000, giveUpMs: 60 * 60_000 };
 
 type ServeConfig = {
   TCP?: Record<string, unknown>;
@@ -70,8 +82,21 @@ export class ContactFunnel {
   /** Invitations putting the mounts up right now: no teardown until each saved its token or gave up. */
   private holding = 0;
   private closing: Promise<void> | null = null;
+  /** Where the internet stands with the mounts, kept after the checks stop and cleared when the mounts come down. */
+  private health: ContactFunnelState | null = null;
+  /** The checks in progress: `since` is when the mounts last went up, `started` when checking began. */
+  private watched: { url: string; since: number; started: number; timer: ReturnType<typeof setTimeout> | null } | null = null;
+  private stopped = false;
+  /** Called when `state()` changes. */
+  changed: () => void = () => {};
 
-  constructor(private readonly core: Core, private readonly paths: readonly string[], private readonly cli: Cli = defaultCli) {}
+  constructor(
+    private readonly core: Core,
+    private readonly paths: readonly string[],
+    private readonly cli: Cli = defaultCli,
+    private readonly probe: FunnelProbe = funnelProbe(),
+    private readonly timing: FunnelTiming = TIMING,
+  ) {}
 
   /** The targets the mounts may proxy to, from the journal. */
   private recorded(): string[] {
@@ -115,6 +140,8 @@ export class ContactFunnel {
    */
   release(): void {
     if (this.closing !== null || this.holding > 0 || this.recorded().length === 0) return;
+    this.unwatch();
+    if (this.health !== null) { this.health = null; this.changed(); }
     this.closing = this.close().then(() => {
       if (this.holding === 0) this.core.journal.setSetting(FUNNEL, null);
     }, error => {
@@ -129,16 +156,102 @@ export class ContactFunnel {
   start(wanted: boolean): void {
     if (!wanted) { this.release(); return; }
     const recorded = this.recorded();
-    if (recorded.length === 0 || (recorded.length === 1 && recorded[0] === this.target())) return;
+    if (recorded.length === 0) return;
+    if (recorded.length === 1 && recorded[0] === this.target()) {
+      void this.origin().then(url => { if (url !== null) this.watch(url); }, error => {
+        this.core.log('warn', `contacts: the Tailscale Funnel mounts could not be read: ${messageOf(error)}`, { source: 'contacts' });
+      });
+      return;
+    }
     const unhold = this.hold();
     // `mount` reads `closing` before this assignment: it waits for nothing older.
-    this.closing = this.mount(() => this.open()).then(() => undefined, error => {
+    this.closing = this.mount(() => this.open()).then(url => { this.watch(url); }, error => {
       this.core.log('warn', `contacts: the Tailscale Funnel mounts could not follow this core to ${this.target()}: ${messageOf(error)}`, { source: 'contacts' });
     }).finally(() => { unhold(); this.closing = null; });
   }
 
   /** Resolves once a teardown in flight ended. */
   settled(): Promise<void> { return this.closing ?? Promise.resolve(); }
+
+  /** Where the internet stands with the mounts, null while they are down or were never checked. */
+  state(): ContactFunnelState | null { return this.health === null ? null : { ...this.health }; }
+
+  /** Checks `origin` from the internet until a request goes through. An origin outside https (a test's loopback) is not checked. */
+  watch(origin: string): void {
+    if (this.stopped || !origin.startsWith('https:') || this.watched?.url === origin) return;
+    this.unwatch();
+    const now = Date.now();
+    this.watched = { url: origin, since: now, started: now, timer: null };
+    this.health = { url: origin, status: 'checking', checkedAt: null, repaired: false };
+    this.changed();
+    this.schedule(0);
+  }
+
+  /** The checks end with the core. */
+  stop(): void {
+    this.stopped = true;
+    this.unwatch();
+  }
+
+  private unwatch(): void {
+    if (this.watched?.timer) clearTimeout(this.watched.timer);
+    this.watched = null;
+  }
+
+  private schedule(delay: number): void {
+    const watched = this.watched;
+    if (watched === null) return;
+    watched.timer = setTimeout(() => { watched.timer = null; void this.check(watched); }, delay);
+    watched.timer.unref?.();
+  }
+
+  private async check(watched: NonNullable<ContactFunnel['watched']>): Promise<void> {
+    let status: ContactFunnelState['status'];
+    // The first route is the join, which answers a request naming no peer in its own words.
+    try { status = await this.probe(watched.url, this.paths[0]!); } catch { status = 'unknown'; }
+    if (this.watched !== watched || this.health === null) return;
+    if (status === 'unpublished' && !this.health.repaired && Date.now() - watched.since >= this.timing.repairAfterMs) {
+      const url = await this.repair() ?? this.health.url;
+      if (this.watched !== watched || this.health === null) return;
+      watched.since = Date.now();
+      // Asked again from the next check: what the probe said was about the mounts before.
+      this.health = { url, status: 'checking', checkedAt: this.health.checkedAt, repaired: true };
+      this.changed();
+      this.schedule(this.timing.checkMs);
+      return;
+    }
+    const moved = status !== this.health.status;
+    this.health = { ...this.health, status, checkedAt: Date.now() };
+    if (moved) this.changed();
+    if (status === 'ready' || Date.now() - watched.started >= this.timing.giveUpMs) { this.watched = null; return; }
+    this.schedule(this.timing.checkMs);
+  }
+
+  /** Turns the mounts off and on again, which makes Tailscale publish the name; their origin after, or null when it failed. */
+  private async repair(): Promise<string | null> {
+    if (this.closing !== null) return null;
+    const unhold = this.hold();
+    try {
+      await this.remove([this.target()]);
+      const url = await this.open();
+      this.core.log('info', `contacts: public DNS did not know ${url} yet; Tailscale Funnel was turned off and on again`, { source: 'contacts' });
+      return url;
+    } catch (error) {
+      this.core.log('warn', `contacts: Tailscale Funnel could not be turned off and on again: ${messageOf(error)}`, { source: 'contacts' });
+      return null;
+    } finally {
+      unhold();
+    }
+  }
+
+  /** The origin of the mounts already up for this core, without mounting anything; null when there are none. */
+  private async origin(): Promise<string | null> {
+    const cli = this.cli();
+    if (cli === null) return null;
+    const { dnsName, config } = await this.read(cli);
+    const mounts = funnelPort(config, dnsName, this.paths, [this.target()]);
+    return mounts === null || mounts.missing.length === this.paths.length ? null : `https://${dnsName}:${mounts.port}`;
+  }
 
   /** This core on loopback, where tailscaled sends what Funnel receives. */
   private target(): string {

@@ -14,7 +14,8 @@
    * Tailscale (the link alone), on another tailscale.com tailnet (the link and
    * a share of this machine) or elsewhere (the link names this machine's
    * contact routes on Tailscale Funnel); its expiry and how the share went
-   * show under the row. A tailnet outside tailscale.com (Headscale) can do
+   * show under the row, and for Funnel whether the internet reaches this
+   * machine yet. A tailnet outside tailscale.com (Headscale) can do
    * neither of the last two: they stay off and a line says who invites whom. Join takes the link another owner sent and
    * then shows the eight words to compare with them. A link that shares the
    * inviter through Tailscale, pasted where no API key can accept it, first
@@ -48,6 +49,7 @@
     const fqdn = view.state?.tailscale.fqdn;
     return typeof fqdn === 'string' && !fqdn.endsWith('.ts.net');
   });
+  const funnel = $derived(view.state?.funnel ?? null);
 
   let pasted = $state('');
   const shareStep = $derived(view.state?.tailscale.apiKey === true ? null : inviteShare(pasted));
@@ -112,6 +114,21 @@
         <a href={ADMIN} target="_blank" rel="noreferrer">{labels.invite.openConsole}<ExternalLink size={12} /></a></span>
       </p>
     {/if}
+    <!-- Whether a request from the internet reaches this machine yet, checked by the core while Funnel is up. -->
+    {#if made.via === 'internet' && funnel}
+      {#if funnel.status === 'ready'}
+        <p class="hint reach ok" data-testid="contact-invite-reach" data-status="ready"><Check size={12} strokeWidth={2.25} />{labels.invite.reach.ready}</p>
+      {:else if funnel.status === 'checking' || funnel.status === 'unknown'}
+        <p class="hint" data-testid="contact-invite-reach" data-status={funnel.status}>
+          {funnel.status === 'unknown' ? labels.invite.reach.unknown : funnel.repaired ? labels.invite.reach.repaired : labels.invite.reach.checking}
+        </p>
+      {:else}
+        <p class="manual" data-testid="contact-invite-reach" data-status={funnel.status}>
+          <TriangleAlert size={14} strokeWidth={2} /><span><strong>{labels.invite.reach.wait}</strong>
+          {funnel.status === 'unreachable' ? labels.invite.reach.unreachable : funnel.repaired ? labels.invite.reach.stillUnpublished : labels.invite.reach.unpublished}</span>
+        </p>
+      {/if}
+    {/if}
   </div>
 {/if}
 
@@ -136,6 +153,11 @@
     <FingerprintWords fingerprint={joined.fingerprint} testid="contact-joined-words" />
     <button type="button" class="small done" onclick={() => { view.joined = null; }} data-testid="contact-joined-done">{labels.join.done}</button>
   </div>
+{:else if view.joinWaiting}
+  <p class="under step waiting" data-testid="contact-join-waiting">
+    <span class="hint">{fill(labels.join.waiting, { time: clockTime(view.joinWaiting.until) })}</span>
+    <button type="button" class="ghost small" onclick={() => view.stopJoin()} data-testid="contact-join-stop">{labels.join.stop}</button>
+  </p>
 {:else if shareStep}
   <!-- Stays while the link does, so it is still there after a join that could not reach the inviter. -->
   <p class="under step ui-label-box">
@@ -156,6 +178,8 @@
   .hint { margin: 0; }
   .open { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
   .share { display: inline-flex; align-items: center; gap: 4px; color: var(--color-success); text-decoration: none; }
+  .reach.ok { display: flex; align-items: center; gap: 4px; color: var(--color-success); }
+  .waiting { flex-wrap: wrap; gap: 4px 8px; }
   .manual { display: flex; gap: 8px; margin: 0; padding: 10px 12px; border: 1px solid color-mix(in oklch, var(--color-live) 35%, transparent); border-radius: var(--radius-md); background: color-mix(in oklch, var(--color-live) 10%, transparent); color: var(--color-muted-foreground); font-size: var(--text-sm); overflow-wrap: anywhere; }
   .manual :global(svg) { flex: none; margin-top: 2px; color: var(--color-live); }
   .manual strong { color: var(--color-foreground); font-weight: 600; }
@@ -171,6 +195,6 @@
   @media (max-width: 720px) {
     :global(.settings .page) .switch-row { flex-direction: column; align-items: stretch; gap: 12px; }
     .join, .invite-actions { flex: none; flex-direction: column; }
-    .invite-actions button, .join button, .join input, .line button { min-height: var(--touch-target); }
+    .invite-actions button, .join button, .join input, .line button, .waiting button { min-height: var(--touch-target); }
   }
 </style>
