@@ -84,6 +84,18 @@ export const strings = {
       shared: 'Tailscale share created',
       noShare: 'No share: for someone already on your Tailscale',
       funnel: 'Reachable over the internet through Tailscale Funnel while a contact or an invitation needs it',
+      /** Under a link for another network: whether a request from the internet reaches this machine yet. */
+      reach: {
+        checking: 'Checking that the internet reaches this machine…',
+        ready: 'The internet reaches this machine: the link is ready to send',
+        unknown: 'Public DNS did not answer this machine, so Boite cannot tell yet whether the internet reaches it',
+        wait: 'Wait before sending the link.',
+        unpublished: 'Tailscale has not put this machine\'s address on the internet yet, which usually takes a few minutes. Boite checks every 30 seconds and turns Funnel off and on again after 10 minutes.',
+        repaired: 'Boite turned Funnel off and on again so that Tailscale publishes this machine\'s address, and is checking again…',
+        stillUnpublished: 'Tailscale still has not put this machine\'s address on the internet, even after Funnel was turned off and on again. Restart Tailscale on this machine, then make a new invitation.',
+        unreachable: 'This machine\'s address is on the internet, but requests do not reach Boite. Check that Tailscale is running here.',
+        moved: 'Funnel moved to another port since this link was made, so it no longer reaches this machine. Make a new invitation.'
+      },
       manual: 'Share this machine by hand',
       openConsole: 'Tailscale admin console',
       /** How many links sent from this machine can still join it. */
@@ -98,6 +110,9 @@ export const strings = {
       placeholder: 'boite://contact#',
       submit: 'Join',
       joining: 'Joining',
+      /** The inviter's Funnel address is not in public DNS yet: the same join goes again. */
+      waiting: 'The inviter\'s address is not on the internet yet. Boite joins again every 30 seconds until {time}.',
+      stop: 'Stop',
       acceptShare: 'Accept the Tailscale share',
       acceptShareTip: 'This invitation shares the other machine through Tailscale. Without an API key here, accept the share in your browser first, then join.',
       compare: 'Compare with {name}',

@@ -277,6 +277,23 @@ export interface ContactTailscale {
   /** The policy lines to add when it is `open`, ready to paste. */
   policyFix?: string;
 }
+/**
+ * Where the internet stands with the contact routes on Tailscale Funnel:
+ * `checking` before the first answer, `ready` once a request from the
+ * internet reached this core, `unpublished` while public DNS does not know
+ * the name yet, `unreachable` when the name resolves but the request does not
+ * arrive, `unknown` when no public resolver answered.
+ */
+export type ContactFunnelStatus = 'checking' | 'ready' | 'unpublished' | 'unreachable' | 'unknown';
+/** The contact routes on Tailscale Funnel, checked from the internet while they are up. */
+export interface ContactFunnelState {
+  /** Their public origin, `https://<machine>.<tailnet>.ts.net:<port>`. */
+  url: string;
+  status: ContactFunnelStatus;
+  checkedAt: Timestamp | null;
+  /** Still unpublished long after it was turned on, Funnel was turned off and on again: Tailscale publishes the name then. */
+  repaired: boolean;
+}
 export interface ContactsState {
   self: { coreId: string; machine: string };
   contacts: Contact[];
@@ -292,6 +309,8 @@ export interface ContactsState {
    * share the machine instead.
    */
   internet?: boolean;
+  /** The contact routes on Tailscale Funnel while they are up, null otherwise. Absent from older cores. */
+  funnel?: ContactFunnelState | null;
 }
 export interface CoordinationView {
   self: AgentAddress;
@@ -363,7 +382,12 @@ export interface CoordinationRpcMethods {
    * leaked, joins nothing any more. Contacts already joined stay. Owner only.
    */
   'contacts.cancelInvites': { params: Record<string, never>; result: { cancelled: number } };
-  /** Joins with an invitation: this core dials the host, checks its key and keeps the link open. Owner only. */
+  /**
+   * Joins with an invitation: this core dials the host, checks its key and
+   * keeps the link open. A host on Tailscale Funnel whose name public DNS
+   * does not know yet is refused with `data.retryAfterMs`: the invitation is
+   * unspent and the same call may be made again then. Owner only.
+   */
   'contacts.join': { params: { link: string }; result: Contact };
   /** Rename a contact or mark it trusted. Owner only. */
   'contacts.update': { params: { coreId: string; name?: string; trusted?: boolean }; result: Contact };
