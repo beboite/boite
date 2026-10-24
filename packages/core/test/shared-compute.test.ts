@@ -110,6 +110,38 @@ test('a shared echo route cannot turn scripted text into a host shell command', 
   expect(result.status).toBe('failed');
 }, 30000);
 
+test('only the owner restores the persisted host parent and an unchanged policy keeps job authority', async () => {
+  const {a, b, scope, baseCommit} = await pair();
+  const params = {sharedProjectId: scope.sharedProjectId};
+  expect(await b.client.call('sharedCompute.host', params)).toEqual({threadId: null});
+  const parent = await b.client.call('threads.create', {projectId: b.ref.projectId, providerId: 'echo', accountId: b.accountId, title: 'Explicit host'});
+  const compute = {enabled: true, profiles: ['conversation'], permissionMode: 'default' as const, maxConcurrent: 4};
+  const configured = await b.client.call('sharedProjects.configure', {...params, computeThreadId: parent.id, compute});
+  expect(await b.client.call('sharedCompute.host', params)).toEqual({threadId: parent.id});
+  // No binding from this host is disclosed in the peer view or the other owner's local settings.
+  expect(await a.client.call('sharedCompute.host', params)).toEqual({threadId: null});
+  expect(JSON.stringify(await a.client.call('sharedProjects.get', scope))).not.toContain(parent.id);
+  const {grant} = await b.client.call('pairing.grant', {});
+  const phone = await connect(b.h.url, '', {grant, client: {name: 'pwa', version: 'test'}});
+  const agent = await connect(b.h.url, b.h.core.agents.tokenFor(b.threadId));
+  try {
+    expect(await thrown(phone.call('sharedCompute.host', params))).toThrow('owner only');
+    expect(await thrown(agent.call('sharedCompute.host', params))).toThrow('agent');
+  } finally {phone.close(); agent.close();}
+  const unblock = holdAccountTurns(b.h, b.accountId);
+  try {
+    const job = await a.client.call('sharedCompute.start', {...scope, host: b.ref, profileId: 'conversation', baseCommit, task: 'Keep authority', requestId: 'unchanged-host'});
+    const unchanged = await b.client.call('sharedProjects.configure', {...params, compute});
+    expect(unchanged.shared.access).toEqual(configured.shared.access);
+    expect((await a.client.call('sharedCompute.get', {...scope, jobId: job.id})).status).not.toBe('revoked');
+    expect(b.h.core.threads.require(job.worker!.threadId).parentThreadId).toBe(parent.id);
+    await a.client.call('sharedCompute.cancel', {...scope, jobId: job.id, requestId: 'end-host-fixture'});
+  } finally {unblock();}
+  await b.h.stop();
+  const restarted = await startTestCore({dataDir: b.h.dataDir}); cores.push(restarted);
+  expect(await (await restarted.connect()).call('sharedCompute.host', params)).toEqual({threadId: parent.id});
+}, 30000);
+
 test('content-bound start receipts survive a lost response, concurrent retries and a source restart', async () => {
   const {a, b, scope, baseCommit, enable} = await pair(); await enable(b);
   const p = {...scope, requestId: 'same', host: b.ref, profileId: 'conversation', baseCommit, task: 'one exact job'};

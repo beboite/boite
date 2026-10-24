@@ -132,6 +132,27 @@ test('a paired phone can send and follow existing work while host administration
   expect(el('shared-project-state').textContent).toContain('Access revoked');
 });
 
+test('reopening host settings restores the chosen conversation and unchanged policy preserves running jobs', async () => {
+  const {store, a, b, as, bs, local, base} = await setup();
+  const policy = {enabled: true, profiles: ['conversation'], permissionMode: 'default' as const, maxConcurrent: 4};
+  const configured = await a.call('sharedProjects.configure', {sharedProjectId: as.sharedProjectId, computeThreadId: local.id, compute: policy});
+  const job = await b.call('sharedCompute.start', {...bs, host: configured.local, profileId: 'conversation', task: 'Keep the host authority', baseCommit: base, requestId: 'retained-host'});
+  expect(job.status).toBe('running');
+  expect(as.threadId).not.toBe(local.id);
+  const calls = vi.spyOn(a, 'call');
+  show(SharedProjectDialog, {store, scope: as, onclose() {}}); await settle();
+  await vi.waitFor(() => expect(el('shared-host-thread')?.textContent).toContain('Shared delivery'));
+  expect(calls).toHaveBeenCalledWith('delegation.get', {threadId: local.id});
+  await fill('shared-contribution', '04');
+  expect(calls.mock.calls.filter(([method]) => method === 'sharedProjects.configure')).toEqual([
+    ['sharedProjects.configure', {sharedProjectId: as.sharedProjectId, compute: policy}],
+  ]);
+  const current = await a.call('sharedProjects.get', as);
+  expect(current.shared.access).toEqual(configured.shared.access);
+  expect((await a.call('sharedCompute.list', as)).find(j => j.id === job.id)?.status).toBe('running');
+  expect((await b.call('sharedCompute.list', bs)).find(j => j.id === job.id)?.status).toBe('running');
+});
+
 test('association needs the second owner consent and an open Contacts page can refresh an incoming offer', async () => {
   const {a, b, ap, bp, aid, as, bid} = await setup();
   await a.call('sharedProjects.revoke', {sharedProjectId: as.sharedProjectId, requestId: 'replace'});

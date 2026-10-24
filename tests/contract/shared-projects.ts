@@ -65,6 +65,7 @@ export const SHARED_SCENARIOS:Record<string,Scenario>={
     check((await env.call('sharedAccess.reviewConfig',{sharedProjectId:as.sharedProjectId})).enabled===false,'reviewer default enabled');
     const activity=await env.call('sharedAccess.get',as);check(Array.isArray(activity.events)&&Array.isArray(activity.verdicts),'missing sanitized access page');
     await refused(env.call('sharedAccess.override',{sharedProjectId:as.sharedProjectId,requestId:'execute',override:{path:'.env',actions:['execute'],jobId:null,reason:'Unsafe override',expiresAt:Date.now()+60000}}),RpcErrorCode.InvalidParams);
+    check((await env.call('sharedCompute.host',{sharedProjectId:as.sharedProjectId})).threadId===null,'unconfigured host binding leaked or was invented');
     await refused(env.call('sharedCompute.models',{...as,host:b.ref}));
     await env.call('sharedProjects.subscribe',{...as,enabled:true});
     await env.call('sharedProjects.subscribe',{...as,enabled:false});

@@ -105,6 +105,7 @@ export function sharedComputeMethods(ctx:FakeContext){
     if(!found)throw refusedShared('jobId: expected a captured job in this source/host scope');return {...found,shared};
   }
   return {
+    'sharedCompute.host':async p=>{requireShared(ctx,p.sharedProjectId);return {threadId:stateOf(ctx).bindings.get(p.sharedProjectId)??null};},
     'sharedCompute.models':async p=>{const {shared}=computeSource(ctx,p);return cloneShared(routes(hostFor(ctx,shared,p.host),shared));},
     'sharedCompute.start':async p=>{
       const {shared,local}=computeSource(ctx,p);

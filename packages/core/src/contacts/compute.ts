@@ -95,6 +95,11 @@ export class SharedCompute {
     if (typeof threadId !== 'string') throw refused('compute: the host must choose a local conversation before opting in');
     return threadId;
   }
+  hostBinding(id: string): {threadId: string | null} {
+    this.core.sharedProjects.require(id);
+    const threadId = this.core.journal.getSetting(hostKey(id));
+    return {threadId: typeof threadId === 'string' ? threadId : null};
+  }
   private host(ctx: SharedPeerContext): { parent: ThreadSummary; policy: SharedComputePolicy } {
     this.core.sharedProjects.assertPeer(ctx);
     const { index } = this.core.sharedProjects.endpoints(ctx.shared);
@@ -532,6 +537,8 @@ export class SharedCompute {
 }
 
 export function registerSharedComputeMethods(core: Core): void {
+  // Private host configuration: deliberately absent from device, agent and peer method sets.
+  core.router.register('sharedCompute.host', p => core.sharedCompute.hostBinding(p.sharedProjectId));
   core.router.register('sharedCompute.models', (p, c) => core.sharedCompute.models(p, c.connection));
   core.router.register('sharedCompute.start', (p, c) => core.sharedCompute.start(p, c.connection));
   core.router.register('sharedCompute.list', (p, c) => core.sharedCompute.list(p, c.connection));

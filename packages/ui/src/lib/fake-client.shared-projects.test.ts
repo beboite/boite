@@ -49,7 +49,7 @@ test('colliding ids stay canonical; transcript grants, owner administration and 
   expect((await a.call('sharedProjects.read',{...as,target:remote.ref})).contact.coreId).toBe(bid);
   b.becomes('session');
   expect((await b.call('sharedProjects.get',bs)).shared.state).toBe('active');
-  for(const method of ['sharedAccess.reviewConfig','sharedAccess.overrides','sharedProjects.configure','sharedProjects.revoke','sharedCompute.start'] as const)expect(await b.call(method,{...bs,requestId:'phone'} as never).catch(e=>e)).toMatchObject({code:RpcErrorCode.Refused});
+  for(const method of ['sharedCompute.host','sharedAccess.reviewConfig','sharedAccess.overrides','sharedProjects.configure','sharedProjects.revoke','sharedCompute.start'] as const)expect(await b.call(method,{...bs,requestId:'phone'} as never).catch(e=>e)).toMatchObject({code:RpcErrorCode.Refused});
   a.becomes('agent');expect(await a.call('contacts.sendHuman',{threadId:as.threadId,to:remote.ref.address,text:'impersonation',requestId:'agent'}).catch(e=>e)).toMatchObject({code:RpcErrorCode.Refused});
 });
 
@@ -190,7 +190,7 @@ test('an authenticated agent uses only its own source and cannot confirm a share
   a.becomes('agent');
   expect((await a.call('sharedProjects.threads',as)).threads.length).toBeGreaterThan(0);
   expect(await a.call('sharedProjects.threads',{...as,threadId:other.id}).catch(e=>e)).toMatchObject({code:RpcErrorCode.Refused});
-  for(const method of ['sharedProjects.configure','sharedProjects.revoke','sharedAccess.override','sharedAccess.reviewConfig','contacts.sendHuman'] as const)expect(await a.call(method,{...as} as never).catch(e=>e)).toMatchObject({code:RpcErrorCode.Refused});
+  for(const method of ['sharedCompute.host','sharedProjects.configure','sharedProjects.revoke','sharedAccess.override','sharedAccess.reviewConfig','contacts.sendHuman'] as const)expect(await a.call(method,{...as} as never).catch(e=>e)).toMatchObject({code:RpcErrorCode.Refused});
   const added=await a.call('sharedBoard.apply',{...as,command:{kind:'add',cardId:'agent-card',requestId:'agent-add',text:'Proposed work'}});
   expect(added.card?.createdBy.kind).toBe('agent');
   expect(await a.call('sharedBoard.apply',{...as,command:{kind:'update',cardId:'agent-card',requestId:'agent-confirm',status:'done'}}).catch(e=>e)).toMatchObject({code:RpcErrorCode.Refused});

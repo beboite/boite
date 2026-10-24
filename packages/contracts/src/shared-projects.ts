@@ -249,6 +249,8 @@ export interface SharedProjectsRpcMethods {
   'sharedBoard.apply': { params: SharedProjectScope & { command: SharedBoardCommand }; result: SharedBoardReceipt };
   /** Start this host's reserved worker once, after checking the authority again. Never queues a start offline. */
   'sharedBoard.start': { params: SharedProjectScope & { cardId: string; claimId: string }; result: SharedBoardReceipt };
+  /** Host owner only. Restore the private delegation parent without disclosing it to contacts, devices or agents. */
+  'sharedCompute.host': { params: { sharedProjectId: string }; result: { threadId: ThreadId | null } };
   'sharedCompute.models': { params: SharedProjectScope & { host: SharedProjectRef }; result: SharedComputeRoute[] };
   'sharedCompute.start': { params: SharedProjectScope & SharedComputeStart; result: SharedComputeJob };
   'sharedCompute.list': { params: SharedProjectScope; result: SharedComputeJob[] };

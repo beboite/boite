@@ -572,6 +572,11 @@ Opt-in also names `computeThreadId`, an active host-local parent in this project
 with delegation enabled. Only that parent resolves the offered profiles to
 local accounts. Rebinding, pausing, archiving, changing its route or changing
 the grant fences existing jobs. This parent/account binding stays host-local.
+The owner restores its saved parent through `sharedCompute.host`; it is absent
+from device, agent and contact views. Contribution/profile/mode edits omit
+`computeThreadId` unless the owner explicitly chooses a different parent before
+enabling compute. Saving an unchanged policy keeps the grant revision and
+running jobs' authority.
 ACP and pi shared routes are refused because the current adapters cannot
 attest the offered permission semantics. Claude, Codex and Muse retain their
 existing permission mapping, but also require an actual host protection service;
@@ -837,6 +842,7 @@ to owner-only.
 | `sharedBoard.get/apply/start` | Association + board consent, start uses its local reserved worker | Same; every board action | Own association, add/edit/claim/start; no remove/Done/reopen Done |
 | `sharedCompute.models/list/get/send/cancel` | Host jobs or source scope | Follow/steer/cancel existing jobs, no admission | Own source jobs; no host policy or permission answers |
 | `sharedCompute.start` | Explicit host opt-in and supported protection | Denied | Own source project, current grant and host-approved route |
+| `sharedCompute.host` | Private persisted local host thread, for restoring host settings | Denied | Denied |
 | `sharedAccess.get` | Sanitized scoped activity, including historical revocations | Same | Live own association metadata only |
 | `sharedAccess.overrides/override/revokeOverride` | Host only, exact local paths | Denied | Denied |
 | `sharedAccess.reviewConfig` | Host only, inference account and settings | Denied | Denied |
