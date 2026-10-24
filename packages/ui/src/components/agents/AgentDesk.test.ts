@@ -95,12 +95,32 @@ test('Nova\'s desk shows its live step, every card state in order, answers a que
     flushSync();
     expect(document.activeElement).toBe(work);
     expect(document.querySelector<HTMLElement>('[data-testid=desk-work]')?.hidden).toBe(false);
-    // Hiding usage details never hides the reason automatic wakes stopped.
+    // Cost updates preserve the user's choice to read usage details.
+    const usage = document.querySelector<HTMLDetailsElement>('[data-testid=desk-today]')!;
+    usage.open = true;
+    usage.dispatchEvent(new Event('toggle'));
+    flushSync();
+    view.snapshot = { ...view.snapshot!, status: view.snapshot!.status.map(s => s.agentId === nova.id
+      ? { ...s, today: { ...s.today, costUsd: 1.5 } } : s) };
+    flushSync();
+    expect.soft(usage.open).toBe(true);
+    usage.open = false;
+    usage.dispatchEvent(new Event('toggle'));
+    flushSync();
+    // Reaching the budget reveals the warning once.
     view.snapshot = { ...view.snapshot!, status: view.snapshot!.status.map(s => s.agentId === nova.id
       ? { ...s, today: { ...s.today, costUsd: 3 } } : s) };
     flushSync();
-    expect(document.querySelector<HTMLDetailsElement>('[data-testid=desk-today]')?.open).toBe(true);
-    expect(document.querySelector('[data-testid=desk-today]')?.textContent).toContain('Budget reached: wakes wait until tomorrow.');
+    expect(usage.open).toBe(true);
+    expect(usage.textContent).toContain('Budget reached: wakes wait until tomorrow.');
+    // Dismissing that warning stays respected while more costs arrive.
+    usage.open = false;
+    usage.dispatchEvent(new Event('toggle'));
+    flushSync();
+    view.snapshot = { ...view.snapshot!, status: view.snapshot!.status.map(s => s.agentId === nova.id
+      ? { ...s, today: { ...s.today, costUsd: 3.1 } } : s) };
+    flushSync();
+    expect.soft(usage.open).toBe(false);
   } finally {
     if (desk) await unmount(desk);
     document.body.innerHTML = '';

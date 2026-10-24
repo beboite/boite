@@ -49,6 +49,7 @@ test('the bot desk separates work, routines and memory without overflowing on de
     })()`);
     expect(layout.inside).toBe(true);
     expect(layout.overflow).toBeLessThanOrEqual(0);
+    expect(layout.tabs).toHaveLength(3);
     expect(layout.tabs.every(overflow => overflow <= 0)).toBe(true);
 
     await page.click(`${id('desk-activity')} > summary`);

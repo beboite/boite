@@ -69,6 +69,10 @@
     return () => { live = false; };
   });
   const meter = $derived(budgetMeter(today.costUsd, budget));
+  const budgetReached = $derived(meter?.reached ?? false);
+  let usageOpen = $state(false);
+  // Reveal a newly reached budget without overriding manual toggles on each cost update.
+  $effect(() => { if (budgetReached) usageOpen = true; });
 
   function navigate(event: KeyboardEvent) {
     const index = panes.indexOf(pane);
@@ -214,7 +218,7 @@
       {/if}
     </div>
 
-    <details class="desk-day" open={meter?.reached ?? false} data-testid="desk-today">
+    <details class="desk-day" bind:open={usageOpen} data-testid="desk-today">
       <summary title={t.spent}>
         <span>{t.today}</span>
         <span class="desk-spent">{meter ? fill(t.spentOf, { spent: dollars(today.costUsd), budget: dollars(budget!) }) : `${dollars(today.costUsd)} · ${t.noCap}`}</span>
