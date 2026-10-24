@@ -113,3 +113,47 @@ test('sharing excludes offline machines, paired devices and machines without thi
   await settle();
   expect(menu.textContent).not.toContain('Offline');
 });
+
+test('a machine of the linked machine\'s group shares its projects through it, without the contact linked there', async ({ ready }) => {
+  const a = await ready({ delayMs: 0, coreId: 'machine-a' });
+  const b = await ready({ delayMs: 0, coreId: 'machine-b' });
+  const remote = await b.client.call('projects.add', { path: '/builder-app', name: 'Builder app' });
+  await b.client.call('contacts.remove', { coreId: 'core-chris' });
+  await a.client.call('group.create', { name: 'Home' });
+  await b.client.call('group.join', { invite: (await a.client.call('group.invite', {})).invite });
+  await Promise.all([a.store.loadGroup(), b.store.loadGroup()]);
+  workspace.machines = [
+    { id: 'a', label: 'Desktop', store: a.store },
+    { id: 'b', label: 'Builder', store: b.store }
+  ];
+  workspace.active = a.store;
+  const view = contactsOf(a.store);
+  await view.refresh();
+  const linkedCalls = vi.spyOn(a.client, 'call');
+  const memberCalls = vi.spyOn(b.client, 'call');
+  component = mount(ContactPage, { target: document.body, props: { view, contact: view.state!.contacts[0]!, now: Date.now() } });
+  await settle();
+  button('[data-testid=contact-open-core-chris]').click();
+  await settle();
+  const option = Array.from(document.querySelectorAll<HTMLButtonElement>('[role=option]')).find(row => row.textContent?.includes('Builder app'));
+  expect(option, 'the member\'s projects are offered although the contact is linked to the other machine only').toBeDefined();
+  option!.click();
+  await settle();
+  // The machine the contact is linked to is asked, naming the member that holds the project.
+  expect(linkedCalls).toHaveBeenCalledWith('contacts.grant', { coreId: 'core-chris', projectId: remote.id, machine: 'machine-b' });
+  expect(memberCalls.mock.calls.filter(([method]) => method === 'contacts.grant')).toEqual([]);
+  const row = document.querySelector<HTMLElement>(`[data-testid="contact-grant-${remote.id}"]`)!;
+  expect(row.dataset['machineId']).toBe('b');
+  expect(row.textContent).toContain('Builder app');
+  expect(row.textContent).toContain('Builder');
+  const read = row.querySelector<HTMLInputElement>('input[role=switch]')!;
+  read.checked = true;
+  read.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  expect(linkedCalls).toHaveBeenCalledWith('contacts.grant', { coreId: 'core-chris', projectId: remote.id, readThreads: true, machine: 'machine-b' });
+  vi.spyOn(confirm, 'ask').mockResolvedValue(true);
+  row.querySelector<HTMLButtonElement>(`[data-testid="contact-revoke-${remote.id}"]`)!.click();
+  await settle();
+  expect(linkedCalls).toHaveBeenCalledWith('contacts.revoke', { coreId: 'core-chris', projectId: remote.id, machine: 'machine-b' });
+  expect((await a.client.call('contacts.get', {})).contacts[0]!.grants.some(grant => grant.machine === 'machine-b')).toBe(false);
+});

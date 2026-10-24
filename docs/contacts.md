@@ -150,10 +150,48 @@ contact's `offers`.
 
 **Share a project** reuses the new-thread project search: type a project,
 machine or folder name. Projects are grouped by machine and omit drafts,
-archived projects and existing grants. The menu includes connected owner
-machines linked to this contact's core identity. The shared list names each
-machine; sharing, reading, revoking and opening a board use its own Store,
-even when two machines have the same project ID.
+archived projects and existing grants. The menu lists every connected owner
+machine linked to this contact, and every machine of the same
+[group](groups.md) as one of them. The shared list names the machine that
+holds each project; opening its board uses that machine's Store, even when
+two machines have the same project ID.
+
+### Projects of the other machines of the group
+
+A contact is linked to one machine, yet the owner may open it a project of
+any machine of that machine's group: `contacts.grant` with `machine`, the
+member's core id. The linked machine asks the member for the project
+(`relay.project`), keeps the grant with the member's id and the project's
+name, and announces that name in the contact's offers. Reading, revoking and
+the read switch go through the linked machine too, with the same `machine`.
+A machine linked to the contact itself is asked directly.
+
+The contact never meets the member. The linked machine answers for it
+(`contacts/members.ts`): a directory, a search, a read, a letter or a receipt
+for one of the member's threads is relayed to the member (`relay.in`) with the
+contact's current copy, and the answer comes back under the linked machine's
+core id, the thread id followed by `~` and the first 16 characters of the
+member's core id. The contact sees neither the member's name, its address nor
+its key. A member that does not answer within 3.5 s lists no thread; a letter
+to one of its threads waits and is sent again until it expires.
+
+The member keeps a copy of each contact it was opened to: its name, the
+owner's model tier on the linked machine, what the contact opened in return
+and the grants on the member's own projects. The linked machine pushes it
+(`relay.mirror`) on every grant, revoke, rename, tier, offer or link change,
+and retries every 30 seconds until the member heard it. With that copy the
+member's agents list the contact (`boite threads contacts`), reach the
+threads it opened and write to it; their requests go to the linked machine
+(`relay.out`), which sends them on as its own. A member that loses a grant
+forgets its threads' replies from that project and rejects the letters
+waiting for them, as a revoke does on the linked machine. A copy from a
+machine that left the group reaches nothing. `boite threads ask` works only
+from the linked machine.
+
+Every machine of the group has full control of the others, so a member
+believes what the linked machine says of a contact; a contact still reaches
+only what was opened to it. Both machines run a Boite that knows these
+operations: an older member refuses the grant with "update it".
 
 With the [project board](board.md) on, a contact's page shows each project
 shared with that contact as its board's four counts: to do, in progress, in
@@ -239,7 +277,8 @@ gets on Tailscale later listens there after a restart.
 ## Code and tests
 
 `packages/core/src/contacts/`: `store.ts` (contacts, the link, requests and
-the RPC methods), `invitations.ts` (making an invitation and the origin it
+the RPC methods), `members.ts` (projects of the other machines of the group),
+`invitations.ts` (making an invitation and the origin it
 names), `funnel.ts` (the routes on Tailscale Funnel), `join.ts` (both sides
 of a join), `invite.ts` (the link format), `words.ts`
 (fingerprint words), `tier.ts`, `git-remote.ts` (read from the git config
@@ -247,7 +286,8 @@ files, no process), `concierge.ts` and `tailscale.ts`. `contacts.*` are
 owner-only; agents call `collaboration.contacts` and `collaboration.ask`.
 `packages/core/test/contacts.test.ts` links two cores over loopback, and
 `contacts-parts.test.ts` covers the pieces, the Tailscale client against a
-stubbed `fetch`. `contacts-funnel.test.ts` drives the Funnel mounts through
+stubbed `fetch`. `contacts-group.test.ts` links a contact to one machine of a two-machine
+group and opens it a project of the other. `contacts-funnel.test.ts` drives the Funnel mounts through
 the fake CLI (`test/fixtures/fake-tailscale.ts`), and `magic-dns.test.ts`
 the tailnet name lookup against a resolver on loopback.
 

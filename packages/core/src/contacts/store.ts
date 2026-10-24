@@ -35,7 +35,8 @@ import { checkTailnetName, type ContactCard } from './invite.ts';
 import { createInvite, INVITES, liveInvites, tailnetOrigin } from './invitations.ts';
 import { CONTACT_JOIN_ROUTE, joinContact, joinRequest } from './join.ts';
 import { TailscaleClient } from './tailscale.ts';
-import { attestedTier, checkTier, modelTier, tierAllowed } from './tier.ts';
+import { ContactReach } from './reach.ts';
+import { checkTier } from './tier.ts';
 import { fingerprintWords } from './words.ts';
 import { TextSocket } from '../ws-client.ts';
 
@@ -45,13 +46,10 @@ export const CONTACT_LINK_ROUTE = '/coordination/contact/link';
 const CONTACTS = 'contacts';
 const SETTINGS = 'contacts:settings';
 const REQUESTS = 'contacts:requests';
-const RECENT = 'contacts:recent';
 const MAX_CONTACTS = 32;
 /** Requests waiting at once, per contact and direction. */
 const MAX_PENDING = 32;
 const DECIDED_KEPT = 50;
-/** How long a thread that wrote to a contact may hear back from it, outside the projects opened to it. */
-export const REPLY_WINDOW_MS = 7 * 24 * 3_600_000;
 const SKEW_MS = 60_000;
 const HELLO_INPUT = 'boite-contact-hello\n';
 const TICK_MS = 1000;
@@ -87,6 +85,8 @@ export class ContactStore implements LinkedContacts {
   readonly funnel: ContactFunnel;
   /** Projects of the other machines of the group, opened through this core, and the contacts other members hold (`members.ts`). */
   readonly members: ContactMembers;
+  /** What a contact reaches on this core, and the tiers its traffic takes (`reach.ts`). */
+  readonly reach: ContactReach;
   readonly maxContacts = MAX_CONTACTS;
   /** The origin an invitation gives: this machine's tailnet name. Tests point it at loopback. */
   selfUrl: (share: boolean) => Promise<string> = share => tailnetOrigin(this, this.core, share);
@@ -122,6 +122,7 @@ export class ContactStore implements LinkedContacts {
     this.concierge = new Concierge(core);
     this.funnel = new ContactFunnel(core, [CONTACT_JOIN_ROUTE, CONTACT_LINK_ROUTE, ROUTE]);
     this.members = new ContactMembers(core, this);
+    this.reach = new ContactReach(core, this);
   }
 
   // -- Storage.
@@ -240,82 +241,6 @@ export class ContactStore implements LinkedContacts {
   /** Listens on the tailnet while a contact may dial in: one is linked as guest, or an invitation is out. */
   wantsTailnet(): boolean {
     return this.list().some(contact => contact.role === 'host') || this.liveInvites().length > 0;
-  }
-
-  /** This core's projects opened to the contact: through its own link, or through the member the contact is linked to. */
-  private grantsHere(coreId: string): Pick<ContactGrant, 'projectId' | 'readThreads'>[] {
-    return [...(this.find(coreId)?.grants.filter(grant => !grant.machine) ?? []), ...this.members.relayedOf(coreId).flatMap(entry => entry.grants)];
-  }
-
-  private grantFor(coreId: string, threadId: string): Pick<ContactGrant, 'projectId' | 'readThreads'> | undefined {
-    const projectId = this.core.journal.getThread(threadId)?.projectId;
-    if (!projectId) return undefined;
-    const grants = this.grantsHere(coreId).filter(grant => grant.projectId === projectId);
-    return grants.find(grant => grant.readThreads) ?? grants[0];
-  }
-
-  /** This core's projects opened to this contact. */
-  granted(coreId: string): string[] { return [...new Set(this.grantsHere(coreId).map(grant => grant.projectId))]; }
-
-  /** A contact's letter may reach this thread: its project is opened to the contact, or the thread wrote to it lately. */
-  mayReach(coreId: string, threadId: string): boolean {
-    const thread = this.core.journal.getThread(threadId);
-    if (!thread || thread.archived || !this.isContact(coreId)) return false;
-    if (this.grantFor(coreId, threadId)) return true;
-    const at = this.recent()[threadId]?.[coreId];
-    return typeof at === 'number' && Date.now() - at <= REPLY_WINDOW_MS;
-  }
-
-  mayRead(coreId: string, threadId: string): boolean { return this.grantFor(coreId, threadId)?.readThreads === true; }
-
-  private recent(): Record<string, Record<string, number>> { return (this.core.journal.getSetting(RECENT) as Record<string, Record<string, number>> | undefined) ?? {}; }
-
-  /** This thread wrote to a contact: it may hear back for 7 days. */
-  noteSent(threadId: string, coreId: string): void {
-    const now = Date.now();
-    const recent = this.recent();
-    for (const [thread, contacts] of Object.entries(recent)) {
-      for (const [id, at] of Object.entries(contacts)) if (now - at > REPLY_WINDOW_MS || !this.isContact(id)) delete contacts[id];
-      if (Object.keys(contacts).length === 0) delete recent[thread];
-    }
-    recent[threadId] = { ...recent[threadId], [coreId]: now };
-    this.core.journal.setSetting(RECENT, recent);
-  }
-
-  /** The threads `which` names no longer hear back from this contact. */
-  private forgetReplies(coreId: string, which: (threadId: string) => boolean): void {
-    const recent = this.recent();
-    let changed = false;
-    for (const [thread, contacts] of Object.entries(recent)) {
-      if (!(coreId in contacts) || !which(thread)) continue;
-      delete contacts[coreId];
-      if (Object.keys(contacts).length === 0) delete recent[thread];
-      changed = true;
-    }
-    if (changed) this.core.journal.setSetting(RECENT, recent);
-  }
-
-  /** The tier the owner set for this contact's traffic: on the machine the contact is linked to, when that is another member. */
-  private minTierFor(coreId: string | undefined): ModelTier {
-    const relayed = coreId && !this.has(coreId) ? this.members.relayedOf(coreId)[0] : undefined;
-    return relayed?.minTier ?? this.settings().minTier;
-  }
-
-  /** Refused when this thread's model is below the tier the owner set for contact traffic. */
-  checkSendTier(threadId: string, coreId?: string): void {
-    const thread = this.core.threads.require(threadId);
-    const tier = modelTier(thread.providerId, thread.model);
-    const minTier = this.minTierFor(coreId);
-    if (!tierAllowed(tier, minTier)) {
-      throw refused(`threadId: this thread runs ${thread.providerId} ${thread.model ?? '(default model)'}, tier ${tier}; contacts take tier ${minTier} or better, set in Contacts`, { field: 'threadId', expected: `a thread on a model of tier ${minTier} or better` });
-    }
-  }
-
-  /** Refused when the model a contact's core attests for its agent is below this owner's tier. */
-  checkAttestedTier(agent: string | undefined, coreId?: string): void {
-    const tier = attestedTier(agent);
-    const minTier = this.minTierFor(coreId);
-    if (!tierAllowed(tier, minTier)) throw refused(`from.agent: ${agent ?? 'an unknown model'} is tier ${tier}; this owner takes tier ${minTier} or better from contacts`);
   }
 
   linkOf(coreId: string): Contact['link'] {
@@ -507,7 +432,7 @@ export class ContactStore implements LinkedContacts {
     if (machine !== undefined) this.members.mark([machine]);
     else {
       // Its threads stop hearing back from this contact too; only a later letter of theirs opens that again.
-      this.forgetReplies(contact.coreId, threadId => this.core.journal.getThread(threadId)?.projectId === params.projectId);
+      this.reach.forgetReplies(contact.coreId, threadId => this.core.journal.getThread(threadId)?.projectId === params.projectId);
       this.core.coordination.rejectContactLetters(contact.coreId, 'Project closed to this contact');
     }
     this.flush(contact.coreId);
@@ -517,8 +442,8 @@ export class ContactStore implements LinkedContacts {
   /** A member no longer opens these of its projects to a contact another member holds, or none (`null`). */
   projectsClosed(coreId: string, projectIds: string[] | null): void {
     // The contact's own link to this core keeps its replies.
-    if (projectIds !== null) this.forgetReplies(coreId, threadId => projectIds.includes(this.core.journal.getThread(threadId)?.projectId ?? ''));
-    else if (!this.has(coreId)) this.forgetReplies(coreId, () => true);
+    if (projectIds !== null) this.reach.forgetReplies(coreId, threadId => projectIds.includes(this.core.journal.getThread(threadId)?.projectId ?? ''));
+    else if (!this.has(coreId)) this.reach.forgetReplies(coreId, () => true);
     this.core.coordination.rejectContactLetters(coreId, 'Project closed to this contact');
   }
 
@@ -529,7 +454,7 @@ export class ContactStore implements LinkedContacts {
     this.unlink(coreId);
     this.save(this.list().filter(entry => entry.coreId !== coreId));
     this.saveRequests(this.requests().filter(request => request.coreId !== coreId));
-    this.forgetReplies(coreId, () => true);
+    this.reach.forgetReplies(coreId, () => true);
     // No longer trusted anywhere: pending letters both ways are rejected and the bridge route is dropped.
     this.core.coordination.untrust(coreId, true);
     this.members.mark(holders);
@@ -617,7 +542,7 @@ export class ContactStore implements LinkedContacts {
     if (!config.remote) throw refused('threadId: cross-machine coordination is disabled for this thread', { field: 'threadId' });
     if (config.paused) throw refused('coordination paused by the owner');
     const contact = this.named(params.contact);
-    this.checkSendTier(params.threadId);
+    this.reach.checkSendTier(params.threadId);
     const body = text(params.text, 'text', 4000);
     const requests = this.requests();
     if (requests.filter(request => request.coreId === contact.coreId && request.direction === 'out' && request.status === 'pending').length >= MAX_PENDING) {
@@ -629,7 +554,7 @@ export class ContactStore implements LinkedContacts {
       ...(gitRemote ? { gitRemote } : {}), createdAt: Date.now(), status: 'pending', pendingSend: true,
     };
     this.saveRequests([...requests, request]);
-    this.noteSent(params.threadId, contact.coreId);
+    this.reach.noteSent(params.threadId, contact.coreId);
     this.changed();
     this.flush(contact.coreId);
     return this.requestView(request);
@@ -660,7 +585,7 @@ export class ContactStore implements LinkedContacts {
     const requests = this.requests();
     // A retry of the same ask: the contact's id is only unique among its own requests.
     if (requests.some(request => request.remoteId === ask.id && request.coreId === coreId && request.direction === 'in')) return { id: ask.id };
-    this.checkAttestedTier(from.agent);
+    this.reach.checkAttestedTier(from.agent);
     if (requests.filter(request => request.coreId === coreId && request.direction === 'in' && request.status === 'pending').length >= MAX_PENDING) {
       throw refused(`at most ${MAX_PENDING} of your requests may wait here; wait for the owner to answer`);
     }

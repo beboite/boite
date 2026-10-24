@@ -170,8 +170,8 @@ export class PeerDesk {
       const words = searchWords(((payload as { words?: unknown })?.words as string[] | undefined)?.join?.(' '));
       // Chat is searched only where the owner let the contact read conversations.
       const open = this.side.contactDirectory(peer.coreId);
-      const readable = open.filter(entry => this.core.contacts.mayRead(peer.coreId, entry.threadId));
-      const closed = open.filter(entry => !this.core.contacts.mayRead(peer.coreId, entry.threadId));
+      const readable = open.filter(entry => this.core.contacts.reach.mayRead(peer.coreId, entry.threadId));
+      const closed = open.filter(entry => !this.core.contacts.reach.mayRead(peer.coreId, entry.threadId));
       const local = [...searchContacts(this.core.journal.db, readable, words, true), ...searchContacts(this.core.journal.db, closed, words, false)];
       return (relayed ? local : [...local, ...await members.search(peer.coreId, words)]).slice(0, 100);
     }
@@ -181,7 +181,7 @@ export class PeerDesk {
       if (at) return members.read(peer.coreId, at, { limit, before });
       const entry = this.side.contactDirectory(peer.coreId).find(a => a.threadId === threadId);
       if (!entry) throw refused('read.threadId: not a thread of a project opened to you');
-      if (!this.core.contacts.mayRead(peer.coreId, threadId)) throw refused('read.threadId: this owner has not let you read the conversations of that project (readThreads)');
+      if (!this.core.contacts.reach.mayRead(peer.coreId, threadId)) throw refused('read.threadId: this owner has not let you read the conversations of that project (readThreads)');
       return { contact: entry, ...transcript(this.core.journal.db, threadId, limit, before, id => this.core.journal.streamingMessage(id)) };
     }
     if (operation === 'receipt') {

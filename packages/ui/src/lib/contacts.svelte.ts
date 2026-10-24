@@ -12,6 +12,11 @@ import { strings } from './strings';
 import type { Store } from './store.svelte';
 import { workspace, type Machine } from './workspace.svelte';
 
+/** What `isBusy` names while a grant changes: the project, on the machine that holds it. */
+export function grantKey(coreId: string, projectId: ProjectId, machine?: string): string {
+  return machine ? `grant:${coreId}:${machine}:${projectId}` : `grant:${coreId}:${projectId}`;
+}
+
 export class ContactsView {
   state = $state<ContactsState | null>(null);
   /** The last call that failed, in words; cleared by the next one that succeeds. */
@@ -116,13 +121,14 @@ export class ContactsView {
     if (contact) this.#put(contact);
   }
 
-  async grant(coreId: string, projectId: ProjectId, readThreads?: boolean): Promise<void> {
-    const contact = await this.#run(`grant:${coreId}:${projectId}`, () => this.#connected().call('contacts.grant', { coreId, projectId, ...(readThreads === undefined ? {} : { readThreads }) }));
+  /** `machine`: the core id of the group member that holds the project, when it is not this machine's. */
+  async grant(coreId: string, projectId: ProjectId, readThreads?: boolean, machine?: string): Promise<void> {
+    const contact = await this.#run(grantKey(coreId, projectId, machine), () => this.#connected().call('contacts.grant', { coreId, projectId, ...(readThreads === undefined ? {} : { readThreads }), ...(machine ? { machine } : {}) }));
     if (contact) this.#put(contact);
   }
 
-  async revoke(coreId: string, projectId: ProjectId): Promise<void> {
-    const contact = await this.#run(`grant:${coreId}:${projectId}`, () => this.#connected().call('contacts.revoke', { coreId, projectId }));
+  async revoke(coreId: string, projectId: ProjectId, machine?: string): Promise<void> {
+    const contact = await this.#run(grantKey(coreId, projectId, machine), () => this.#connected().call('contacts.revoke', { coreId, projectId, ...(machine ? { machine } : {}) }));
     if (contact) this.#put(contact);
   }
 
