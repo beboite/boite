@@ -138,6 +138,7 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['devices.input', 'taps, swipes, text and keys on a device open in its own conversation, as adb input would'],
   ['devices.close', 'removing a device from its own panel; powering it off closes it in every conversation, as the emulator\'s own window would'],
   ['questions.ask','a question card on its own thread that it does not wait on; the answer comes back as a message'],
+  ['questions.list', 'read pending question cards on its own thread without creating another card; answers remain the user\'s'],
   ['agent.settings', 'the settings it may ask the user about, with their values and pages; credentials, accounts and browser profiles are not among them'],
   ['settings.request', 'a settings card on its own thread proposing a change or pointing at a page; only the owner applies it, through settings.set'],
   ['agents.settings.read', 'the settings of one of the owner\'s agents a card may propose to change (projects, model, effort, memory pass, subagents, daily budget), so it reads before it proposes; never their brains or conversations'],

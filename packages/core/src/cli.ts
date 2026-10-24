@@ -90,6 +90,7 @@ ${CONTROL_HELP}
                                  arrives later as a message (--multiple);
                                  --open <url> adds an Open button for a page
                                  the user must sign in to, in your browser
+  ask list                      read this thread's pending questions
   settings [key]                 Boite settings you may ask about: value, page,
                                  the name the user's app shows; first, the
                                  language the app speaks; experiments last
@@ -651,6 +652,10 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     ask: async () => {
       // An agent once ran `boite ask help` for this text and drew a card reading "help".
       if (rest.length === 1 && rest[0] === 'help') { print([USAGE], { help: USAGE }); return; }
+      if (rest.length === 1 && rest[0] === 'list') {
+        await controlCommand(client, caller, threadId, { ...parsed, positional: ['questions', threadId] }, print);
+        return;
+      }
       const text = want(0, 'a question');
       const options = rest.slice(1);
       const asked = await client.call('questions.ask', { threadId, text, ...(options.length > 0 ? { options } : {}), ...(parsed.multiple ? { multiple: true } : {}), ...(parsed.open === undefined ? {} : { open: parsed.open }) });

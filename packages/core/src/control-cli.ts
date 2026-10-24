@@ -179,6 +179,7 @@ export async function controlCommand(client: CoreClient, caller: Caller, threadI
   };
   const pendingQuestions = async (target: string | undefined): Promise<QuestionRequest[]> => {
     if (owner) return client.call('questions.list', target === undefined ? {} : { threadId: target });
+    if (target === threadId) return client.call('questions.list', { threadId });
     if (target !== undefined) return (await client.call('resident.thread', { threadId, target })).questions;
     const rows = await client.call('resident.threads', { threadId });
     const details = await Promise.all(rows.filter(row => row.questions > 0).map(row => client.call('resident.thread', { threadId, target: row.id })));
