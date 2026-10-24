@@ -153,8 +153,8 @@ turn outcomes and median turn duration. Host architecture replaces the legacy
 desktop/mobile chart because execution is measured on the host.
 
 The enhanced section ranks subagent calls by model and effort together, alongside
-the model totals. A single text card explains consent, collection dates and
-normalization; individual charts omit repeated descriptions. Overview counters
+the model totals. A shared note and info buttons explain consent, collection dates
+and normalization; individual charts hide repeated descriptions. Overview counters
 come first, then installation breakdowns, providers, model adoption and subagent
 calls, followed by runtime, usage and outcome charts. Phone tiles follow the same
 order in one column.
