@@ -170,6 +170,45 @@ test("an agent asks about its own settings from its thread; a change from its se
   expect(drawn(self, helpers!.id)!.answer).toBeNull();
 });
 
+test('a bot asks to rename itself and to pause, then archive, another bot; the owner applies each card', async () => {
+  const { h, owner, self, worker, prompts, run, profile, cards, drawn } = await setup();
+  const heard = (text: string) => (prompts.get(self) ?? []).some(p => p.includes(text));
+  const { agent: herald } = await owner.call('agents.create', { threadId: worker, name: 'Herald' });
+  const heraldNow = () => h.core.workforce.records.get('profile', herald.id) as AgentProfile;
+  const apply = async (questionId: string) => { await owner.call('agents.settings.apply', { threadId: self, questionId }); await waitFor(() => !cards(self).some(c => c.id === questionId)); };
+
+  // The words are the name as typed, accents and parentheses included; a name another bot holds is refused.
+  expect((await run(['settings', 'bot', 'request', 'name', 'herald', '--why', 'Take its name.'], self)).err).toContain('another bot is named "Herald"');
+  expect((await run(['settings', 'bot', 'request', 'avatar', 'a robot', '--why', 'A new face.'], self)).err).toContain('avatar: expected one or two characters');
+  const renamed = await run(['settings', 'bot', 'request', 'name', 'Gargouille', '(Sécurité)', '--why', 'The user renamed me.'], self);
+  expect(renamed.out).toContain(`change: Ada's name "Ada" -> "Gargouille (Sécurité)"`);
+  const [card] = cards(self);
+  await apply(card!.id);
+  expect(profile().name).toBe('Gargouille (Sécurité)');
+  expect(h.core.journal.getThread(self)!.title).toBe('Gargouille (Sécurité)');
+  await waitFor(() => heard(`applied: Ada's name is now "Gargouille (Sécurité)"`));
+
+  // Long instructions come from a file; the change line and the listing show their start.
+  const manual = join(h.dataDir, 'manual.md');
+  await Bun.write(manual, `Guard the release.\n${'Check every gate. '.repeat(40)}`);
+  expect((await run(['settings', 'bot', 'request', 'instructions', '--instructions-file', manual, '--why', 'My new rules.'], self)).out).toContain('characters)');
+  await apply(cards(self)[0]!.id);
+  expect(profile().instructions).toStartWith('Guard the release.\nCheck every gate.');
+  expect((await run(['settings', 'bot'], self)).out).toMatch(/instructions "Guard the release\.\\nCheck.*… \(\d+ characters\)/);
+
+  // Another bot, by name: paused, then archived. An archive card settles as applied, not closed.
+  expect((await run(['settings', 'bot', 'request', 'status', 'paused', '--bot', 'Herald', '--why', 'The user is away.'], self)).code).toBe(0);
+  await apply(cards(self)[0]!.id);
+  expect(heraldNow().status).toBe('paused');
+  expect((await run(['settings', 'bot', 'status', '--bot', 'Herald'], self)).out).toContain('choices: active, paused, archived');
+  expect((await run(['settings', 'bot', 'request', 'status', 'archived', '--bot', 'Herald', '--why', 'Herald is no longer needed.'], self)).code).toBe(0);
+  const archive = cards(self)[0]!;
+  await apply(archive.id);
+  expect(heraldNow().status).toBe('archived');
+  expect(drawn(self, archive.id)!.answer).toEqual({ optionIds: ['applied'], value: 'archived' });
+  expect(profile().status).toBe('active');
+});
+
 test('an agent whose stored model its provider no longer lists still takes a projects card; a new unlisted model is refused', async () => {
   const { h, owner, worker, notes, agent, run, profile, cards } = await setup();
   // A gateway once listed `echo/echo`; the provider lists only `echo` now.

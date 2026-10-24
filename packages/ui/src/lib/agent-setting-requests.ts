@@ -21,7 +21,7 @@ export function projectName(id: string, names: AgentSettingNames): string {
   return names.projects.find((project) => project.id === id)?.name ?? id;
 }
 
-/** `On`, `30 min`, `Claude Opus 5.5`, `High`, `boite, notes`. */
+/** `On`, `Paused`, `Claude Opus 5.5`, `High`, `boite, notes`; instructions by their length, the card shows their text. */
 export function agentSettingValueText(key: AgentSettingKey, value: unknown, names: AgentSettingNames): string {
   const words = strings.agentSettingRequest;
   if (key === 'projects') {
@@ -30,7 +30,9 @@ export function agentSettingValueText(key: AgentSettingKey, value: unknown, name
   }
   if (key === 'effort' && (value === null || value === undefined)) return words.defaultEffort;
   if (key === 'dailyBudget' && (value === null || value === undefined)) return words.noCap;
-  if (value === null || value === undefined) return words.none;
+  if (value === null || value === undefined || value === '') return words.none;
+  if (key === 'instructions' && typeof value === 'string') return fill(words.characters, { count: value.length.toLocaleString() });
+  if (key === 'status' && typeof value === 'string') return words.statuses[value as keyof typeof words.statuses] ?? value;
   if (typeof value === 'boolean') return value ? words.on : words.off;
   if (key === 'dailyBudget' && typeof value === 'number') return fill(words.dollars, { amount: String(value) });
   if (key === 'model' && typeof value === 'string') {

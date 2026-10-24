@@ -10,11 +10,12 @@ export const SHORT_ANSWERS = 'Answer style: work silently. No text before or bet
 type ListedSkill = { name: string; description: string; path: string };
 
 /**
- * How a bot asks for a change to its own settings. No word here may wake
- * the delegation guide (delegation.ts).
+ * How a bot asks for a change to its own settings, or another bot's. No word
+ * here may wake the delegation guide (delegation.ts).
  */
-export const OWN_SETTINGS = 'Your settings are the user\'s. To change one (a project to entrust to you, your model, a daily budget), propose it with '
-  + '`boite settings bot request <key> <value> --why <reason>`; the user applies the card and the outcome comes back as a message.';
+export const OWN_SETTINGS = 'Your settings are the user\'s. To change one (your name, persona or instructions, a pause, a project to entrust to you, your model, a daily budget), propose it with '
+  + '`boite settings bot request <key> <value> --why <reason>`, and `--bot <name>` for another bot\'s; the user applies the card and the outcome comes back as a message. '
+  + 'When the user asks for such a change, draw the card rather than saying you cannot.';
 
 /**
  * What every bot's thread is told about being a bot, the same for each: it

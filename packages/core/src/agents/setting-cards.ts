@@ -1,6 +1,7 @@
 /**
- * Agent setting cards: a thread, or a persistent agent about itself, asks the
- * user to change one of an agent's settings, such as entrusting it a project.
+ * Agent setting cards: a thread, or a persistent agent about itself or another
+ * bot, asks the user to change one of a bot's settings, such as its name or
+ * a project entrusted to it.
  * The card is a question asked without stopping (threads/cards.ts); Apply is
  * the owner's `agents.settings.apply`, and any change to the agent, from the
  * card or from its settings page, settles the cards it answers. The outcome
@@ -9,7 +10,7 @@
  * contracts/agent-setting-requests.ts, where the in-memory client reads them.
  */
 import {
-  agentSettingAnswerText, agentSettingValue, AGENT_SETTING_KEYS, checkAgentSettingRequest, normalizeAgentSetting, settledAgentSetting,
+  agentSettingAnswerText, agentSettingValue, AGENT_SETTING_KEYS, AGENT_STATUSES, checkAgentSettingRequest, normalizeAgentSetting, settledAgentSetting,
   type AgentProfile, type AgentSettingApplyParams, type AgentSettingAsk, type AgentSettingContext, type AgentSettingReading,
   type AgentSettingRequestParams, type AgentSettingsReading, type AgentSettingsReadParams, type QuestionAnswer, type RequestId,
 } from '@boite/contracts';
@@ -67,6 +68,7 @@ export class AgentSettingCards {
       profile: agent,
       config: this.store.resident.config(agent.id),
       projects: this.core.projects.list().filter(project => project.kind !== 'drafts').map(project => ({ id: project.id, label: project.name })),
+      bots: this.store.records.list('profile').filter(bot => bot.status !== 'archived'),
       model: model => checked(() => {
         const kept = checkModel(provider, accountId, model);
         if (kept === null) throw refused('model: expected a model id');
@@ -89,6 +91,7 @@ export class AgentSettingCards {
     const model = models.find(m => m.id === agent.selection.model);
     const settings = AGENT_SETTING_KEYS.map((key): AgentSettingReading => {
       const value = agentSettingValue(agent, ctx.config, key);
+      if (key === 'status') return { key, value, choices: AGENT_STATUSES.map(status => ({ id: status, label: status })) };
       if (key === 'projects') return { key, value, choices: [...ctx.projects] };
       if (key === 'model') return { key, value, choices: models.filter(m => ctx.model(m.id).ok).map(m => ({ id: m.id, label: m.name })) };
       if (key === 'effort' && model?.effort?.levels.length) return { key, value, choices: model.effort.levels.map(level => ({ id: level.id, label: level.label })) };
@@ -136,6 +139,11 @@ export class AgentSettingCards {
     const save = (next: AgentProfile) => this.store.saveProfile({ id: agent.id, expectedRevision: agent.revision, value: next });
     const configure = (config: AgentSettingContext['config']) => this.store.resident.configure({ agentId: agent.id, expectedRevision: agent.revision, config });
     switch (key) {
+      case 'name':
+      case 'domain':
+      case 'instructions':
+      case 'avatar': return save({ ...agent, [key]: value as string });
+      case 'status': return save({ ...agent, status: value as AgentProfile['status'] });
       case 'projects': return save({ ...agent, projectIds: value as string[] });
       case 'model': {
         const provider = agentProvider(this.core, agent);

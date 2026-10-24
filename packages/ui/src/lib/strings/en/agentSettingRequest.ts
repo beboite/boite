@@ -22,9 +22,17 @@ export const strings = {
     defaultEffort: 'Default',
     dollars: '${amount} a day',
     noCap: 'No cap',
+    characters: '{count} characters',
+    proposedText: 'Proposed text',
+    statuses: { active: 'Active', paused: 'Paused', archived: 'Archived' },
     /** A plain question a bot asked without stopping, shown in its conversation. */
     send: 'Send',
     keys: {
+      name: 'Name',
+      domain: 'Role',
+      instructions: 'Instructions',
+      avatar: 'Picture',
+      status: 'Status',
       projects: 'Projects',
       model: 'Model',
       effort: 'Reasoning effort',

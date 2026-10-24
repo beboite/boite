@@ -400,18 +400,22 @@ of a met goal still reaches the bot. The snapshot carries the list as
 
 ## Asking to change a bot's settings
 
-A bot's settings stay the owner's, but a thread, or the bot about itself,
-can propose a change with a card: `boite settings bot request <key> <value>
---why <reason>`, the same flow as a card about a Boite setting ([CLI](cli.md)).
-The keys are the projects entrusted to it, its model and reasoning effort, the
-memory pass (`autoMemory`), its subagents and its daily budget
-(`dailyBudget`, dollars a day or `null`). The context block tells the bot how
-to ask, so one that needs a project it was not given asks for it instead of
-working around it. The card is asked without stopping and outlives its turn.
+A bot's settings stay the owner's, but a thread, or a bot about itself or
+another bot (`--bot <name>`), can propose a change with a card: `boite settings
+bot request <key> <value> --why <reason>`, the same flow as a card about a
+Boite setting ([CLI](cli.md)). The keys are its name, its role (`domain`), its
+instructions (`--instructions-file <path>` for a long text), its picture
+(`avatar`: one or two characters, a robot code, or `""`), its `status`
+(`active`, `paused` or `archived`), the projects entrusted to it, its model and
+reasoning effort, the memory pass (`autoMemory`), its subagents and its daily
+budget (`dailyBudget`, dollars a day or `null`). A name another bot holds is
+refused. The context block tells the bot how to ask, so one the user asks to
+rename itself draws the card, and one that needs a project it was not given
+asks for it instead of working around it. The card is asked without stopping and outlives its turn.
 Apply (`agents.settings.apply`, owner only) goes through the same checks as the
 bot's settings page, and for projects the owner can untick part of the
 proposal first. Any change to the bot, from the card or from the page,
-settles the cards it answers, and a card whose key no longer exists closes; the
+settles the cards it answers, and a card whose key no longer exists closes, as\ndoes one about a bot archived since, except the card that archived it; the
 asking thread reads the outcome as a message. Code:
 `agents/setting-cards.ts`, shared checks in
 `packages/contracts/src/agent-setting-requests.ts`.
