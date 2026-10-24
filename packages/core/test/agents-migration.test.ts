@@ -5,7 +5,7 @@ import type { Message, ThreadSummary } from '@boite/contracts';
 import { MEMORY_ARCHIVE } from '../src/agents/context.ts';
 import { migrateAgents, migratedDisplay } from '../src/agents/migration.ts';
 import { echoAccount, makeAgent } from './agent-fixture.ts';
-import { echoThread, removeDir, startTestCore, type TestCore } from './harness.ts';
+import { echoThread, removeDir, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 const cores: TestCore[] = [];
 afterEach(async () => { for (const h of cores.splice(0)) await h.stop(); });
@@ -62,6 +62,34 @@ test('an old prompt displays what was asked; a batch of notices displays Project
   expect(migratedDisplay(instructions('Create a compact continuation note for THIS context only. Preserve the objective.'))).toBe('Automatic compaction');
   expect(migratedDisplay('You are here.')).toBeNull();
   expect(migratedDisplay('Hello\nCurrent work: x')).toBeNull();
+});
+
+for (const missing of ['provider', 'account'] as const) test(`a bot whose ${missing} is gone opens for reading and can move to an available model`, async () => {
+  const h = await startTestCore(); cores.push(h);
+  const client = await h.connect();
+  const accountId = echoAccount(h);
+  const selection = { providerId: 'echo', accountId, model: 'echo', effort: null, permissionMode: 'default' } as const;
+  row(h, 'profile', BOTS, { name: 'B.O.T.S', domain: '', instructions: '', avatar: '', status: 'active', projectIds: [],
+    selection: { ...selection, accountId: 'acc_removed', ...(missing === 'provider' ? { providerId: 'antigravity-cli' } : {}) } });
+  const { threadId } = await client.call('agents.open', { agentId: BOTS });
+  const thread = await client.call('threads.get', { threadId });
+  expect(thread).toMatchObject({ title: 'B.O.T.S', status: 'idle', agentSessionId: expect.any(String) });
+  expect((await client.call('agents.open', { agentId: BOTS })).threadId).toBe(threadId);
+  expect(h.core.journal.listTurns(threadId)).toHaveLength(0);
+  expect(h.core.workforce.snapshot().status.find(s => s.agentId === BOTS)?.problem).toBeTruthy();
+  if (missing === 'provider') {
+    const error = await client.call('turns.start', { threadId, prompt: 'Do not run on the missing route' }).catch(error => error);
+    expect(error.message).toContain('account of this conversation was removed');
+    expect(h.core.journal.listTurns(threadId)).toHaveLength(0);
+  }
+  const config = await client.call('agents.runtime.get', { agentId: BOTS });
+  const agent = h.core.workforce.records.get('profile', BOTS);
+  await client.call('agents.runtime.configure', { agentId: BOTS, expectedRevision: agent.revision,
+    config: { ...config, defaultRoute: selection, allowedRoutes: [{ ...selection, id: 'default', name: 'Default' }] } });
+  expect((await client.call('threads.get', { threadId })).providerId).toBe('echo');
+  expect(h.core.workforce.snapshot().status.find(s => s.agentId === BOTS)?.problem).toBeNull();
+  const turn = await client.call('turns.start', { threadId, prompt: 'Hello on the available model' });
+  await waitFor(() => h.core.journal.getTurn(turn.id)?.status === 'done');
 });
 
 test('agents of a hidden-thread core come back as their threads, once, whatever the restarts', async () => {

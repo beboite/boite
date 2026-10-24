@@ -27,6 +27,11 @@ set, except deleting the thread: a bot is archived, and its thread with it.
 `agents.open` returns the thread, and creates it again with a new session
 record when it was lost.
 
+Opening the conversation does not require its saved provider or account to
+still exist. The warning's Fix it button opens Settings, where choosing a new
+default also replaces that missing default's allowed route. Starting a turn
+still requires an available provider and account.
+
 An identity keeps its thread, brain and routines when its provider, account
 or model changes; a route change moves the thread's own selection. Paused,
 the bot gets no wakes and the user can still write to it. Archived, its

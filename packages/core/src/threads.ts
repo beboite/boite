@@ -53,7 +53,7 @@ import { AutoContinues } from './threads/auto-continue.ts';
 import { ThreadTitles } from './threads/retitle.ts';
 import { SideQuestions } from './threads/side-questions.ts';
 import { messagePage, threadSnapshot, type MessagePage } from './threads/snapshot.ts';
-import { agentProvider, checkEffort, checkModel, checkSpeed, checkStoredEffort, checkStoredSpeed, defaultModel } from './threads/selection.ts';
+import { checkEffort, checkModel, checkSpeed, checkStoredEffort, checkStoredSpeed, defaultModel } from './threads/selection.ts';
 import { TurnContexts } from './threads/turn-context.ts';
 import { TurnRunner } from './threads/turn-runner.ts';
 import { markQueuedStopped } from './threads/turn-settlement.ts';
@@ -74,9 +74,9 @@ type CreateParams = RpcParams<'threads.create'>;
 export class ThreadStore {
   /** Internal-only entry: callers supply an already authorized workspace, never a fabricated project. */
   createAgentSession(agent: AgentProfile, sessionId: string, cwd: string, projectId: string | null = null, branch: string | null = null): ThreadSummary {
-    const provider = agentProvider(this.core, agent);
-    const account = this.core.accounts.require(agent.selection.accountId);
-    if (account.providerId !== provider.id) throw refused('agent account belongs to another provider');
+    // Opening its conversation must also work after a provider or account was
+    // removed, so the owner can read it and repair its route in Settings.
+    // Profile saves and turn admission validate the route before it can run.
     const now = Date.now();
     const thread: ThreadSummary = {
       id: newId('thr_'), projectId, agentSessionId: sessionId, title: agent.name, titleSource: 'user',
