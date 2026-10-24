@@ -632,6 +632,7 @@ export class ThreadStore {
     checkStoredEffort(provider, thread.accountId, thread.model, thread.effort);
     checkStoredSpeed(provider, thread.accountId, thread.model, thread.speed ?? null);
     checkAttachments(attachments, provider);
+    this.core.sharedAccess.uploads(threadId, attachments);
 
     if (!operation && !activity && !startedBy) {
       const expanded = this.core.brain.expandPrompt(prompt, this.agentState.commands.get(threadId));

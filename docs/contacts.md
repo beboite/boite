@@ -547,6 +547,12 @@ title, search and compute-result projections withhold credential-like text.
 Content detection is conservative pattern matching, not general data-loss
 prevention for encoded or obfuscated content.
 
+Uploaded prompt/question attachments and history materialization also check
+names and bytes before the core stores or forwards them. Ordinary uploads are
+allowed; secret uploads have no captured host-file identity and are refused.
+Use publication from an exact authorized host source for an override, rather
+than treating an upload or a contact letter as implicit file consent.
+
 Reuse the credential directory/file classifications already in `workdir.ts`
 (`DEVICE_SECRET_DIRS` and `DEVICE_SECRET_FILE`), and extend them for this shared
 scope. They currently guard paired file reads, not arbitrary provider tools or

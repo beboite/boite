@@ -313,11 +313,15 @@ export class TurnContexts {
     let continued = input;
     if (fresh) continued = carry();
     else if (resumePrompt === undefined && !turn.execution?.operation && !turn.execution?.automatic && !nativeCommandPrompt(input.prompt)) {
-      const interrupted = stoppedInput(this.core.journal, threadId, turn.id, input, (part, place) => this.files.of(threadId, part, place));
+      const interrupted = stoppedInput(this.core.journal, threadId, turn.id, input, (part, place) => {
+        this.core.sharedAccess.uploads(threadId, [part]);
+        return this.files.of(threadId, part, place);
+      });
       // The first stopped prompt may never have created a native session or
       // advanced its generation. That fresh start still needs journal history.
       continued = thread.sessionId === null && interrupted !== input ? carry() : interrupted;
     }
+    this.core.sharedAccess.uploads(threadId, continued.attachments);
     const prepared = prepareAttachments(this.core.dataDir, continued, provider);
     const operation = turn.execution?.operation;
     // A compaction or a cache keepalive goes to the agent as its command alone: nothing taken rides on it.
@@ -541,8 +545,14 @@ type TurnInput = Parameters<typeof continuationInput>[3];
  * not every callback of the context.
  */
 function carrier(core: Core, files: FileReferences, threadId: ThreadId, turnId: TurnId | null, input: TurnInput, provider: ProviderDescriptor): () => { prompt: string; attachments: Attachment[] } {
-  const history = (): { prompt: string; attachments: Attachment[] } =>
-    continuationInput(core.journal, threadId, turnId, input, provider, (part, place) => files.of(threadId, part, place));
+  const history = (): { prompt: string; attachments: Attachment[] } => {
+    const result = continuationInput(core.journal, threadId, turnId, input, provider, (part, place) => {
+      core.sharedAccess.uploads(threadId, [part]);
+      return files.of(threadId, part, place);
+    });
+    core.sharedAccess.uploads(threadId, result.attachments);
+    return result;
+  };
   // Read once for a resume, before its note lands: a later fresh start would otherwise carry the note twice.
   const resumedHistory = turnId === null ? history() : null;
   return () => resumedHistory ?? history();

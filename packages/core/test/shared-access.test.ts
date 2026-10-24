@@ -80,6 +80,12 @@ test('a shared board goal and its tracker cannot escape the no-tools boundary', 
     await b.client.call('sharedBoard.start', {...scope, cardId: 'escape', claimId: claim.card!.assignment!.claimId});
     await waitFor(() => b.h.core.journal.lastTurn(b.threadId)?.finishedAt !== null);
     expect(existsSync(marker)).toBe(false);
+    for (const name of ['.env', 'ordinary-upload.txt']) {
+      const attachments = [{kind: 'file' as const, name, mimeType: 'text/plain', data: Buffer.from('TOKEN=uploaded-secret-canary').toString('base64')}];
+      expect(await thrown(b.client.call('turns.start', {threadId: b.threadId, prompt: 'Read attachment', attachments}))).toThrow('shared file policy');
+    }
+    const upload = await b.client.call('turns.start', {threadId: b.threadId, prompt: 'Read attachment', attachments: [{kind: 'file', name: 'ordinary-upload.txt', mimeType: 'text/plain', data: Buffer.from('ordinary upload').toString('base64')}]});
+    await waitFor(() => b.h.core.journal.getTurn(upload.id)?.status === 'done');
     writeFileSync(join(b.path, '.env'), 'TOKEN=board-secret-canary');
     expect(await thrown(b.client.call('files.read', {threadId: b.threadId, path: '.env'}))).toThrow('shared file policy');
     const children = b.h.core.journal.listChildThreads().filter(t => t.parentThreadId === b.threadId && t.id !== b.h.core.sharedCompute.journal.worker(t.id)?.job.worker?.threadId);

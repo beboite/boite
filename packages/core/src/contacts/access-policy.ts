@@ -6,7 +6,7 @@ import type { Connection, RpcContext } from '../router.ts';
 import { invalidParams, refused } from '../errors.ts';
 import { text } from '../coordination-letter.ts';
 import { SharedAccessJournal } from './access-journal.ts';
-import { PolicyPathError, policyFile, policyIdentity, secretText, type PolicyFile } from './file-policy.ts';
+import { PolicyPathError, policyFile, policyIdentity, secretPath, secretText, type PolicyFile } from './file-policy.ts';
 import type { SharedPeerContext } from './projects.ts';
 import { accessBinding, computeBinding, type AccessBinding } from './access-scopes.ts';
 
@@ -90,6 +90,21 @@ export class SharedAccess {
     if (!record) return;
     this.record(this.context(record), 'tool', 'denied', 'unsupported-tool', null, record.job.id);
     throw refused('shared file policy: this tool has no enforceable shared execution boundary');
+  }
+  /** Uploaded bytes have no captured host-file identity. Secret uploads must use authorized source publication. */
+  uploads(threadId: string, files: {name?: string | null; data: string}[]): void {
+    if (!files.length) return;
+    const record = this.bound(threadId);
+    if (!record) return;
+    this.live(record);
+    for (const file of files) {
+      const name = file.name ?? '';
+      const foreign = /[\\/:\x00-\x1f]/.test(name) || /[. ]$/.test(name);
+      const classification = foreign ? 'outside-project' : secretPath(name) ?? secretText(Buffer.from(file.data, 'base64').toString('utf8'));
+      if (!classification) continue;
+      this.record(this.context(record), 'attachment', 'denied', foreign ? 'path-boundary' : 'secret-content', classification, record.job.id);
+      throw refused('shared file policy: secret uploads require publication from an exact authorized host source');
+    }
   }
   private rpc(method: RpcMethodName, params: unknown, ctx: RpcContext): void {
     if (ctx.connection.identity.principal !== 'agent') return;
