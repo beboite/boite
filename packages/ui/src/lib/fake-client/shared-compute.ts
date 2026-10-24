@@ -21,7 +21,7 @@ export function sharedPermission(protocol:Protocol,mode:PermissionMode,providerI
 export function sharedProtection(ctx:FakeContext,protocol:Protocol,providerId?:string,mode?:PermissionMode):SharedExecutionProtection{
   if(mode&&!sharedPermission(protocol,mode,providerId))return {supported:false,reason:`execution.permissionMode: ${providerId??protocol} cannot enforce ${mode}`};
   if(protocol==='echo')return {supported:true,boundary:'no-tools'};
-  if(stateOf(ctx).nativeProtected&&(protocol==='claude-sdk'||protocol==='codex-appserver'||protocol==='pi'||protocol==='acp'&&providerId==='opencode'))return {supported:true,boundary:'isolated-process'};
+  if(stateOf(ctx).nativeProtected&&(protocol==='claude-sdk'||protocol==='codex-appserver'||protocol==='muse'||protocol==='pi'||protocol==='acp'&&providerId==='opencode'))return {supported:true,boundary:'isolated-process'};
   return {supported:false,reason:`${protocol}: protected shared execution is unavailable`};
 }
 export function setSharedRepository(ctx:FakeContext,projectId:string,repository:string,head:string):void{

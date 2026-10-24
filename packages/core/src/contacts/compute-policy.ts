@@ -24,12 +24,12 @@ export function sharedPermissionSupport(protocol: Protocol, mode: PermissionMode
 /** Approval callbacks, cwd and provider sandbox names do not attest selective secret-file isolation. */
 export function sharedExecutionProtection(protocol: Protocol, nativeAvailable = false, providerId?: string): SharedExecutionProtection {
   if (protocol === 'echo') return {supported: true, boundary: 'no-tools'};
-  if (nativeAvailable && (protocol === 'claude-sdk' || protocol === 'codex-appserver' || protocol === 'pi' || protocol === 'acp' && providerId === 'opencode')) return {supported: true, boundary: 'isolated-process'};
+  if (nativeAvailable && (protocol === 'claude-sdk' || protocol === 'codex-appserver' || protocol === 'muse' || protocol === 'pi' || protocol === 'acp' && providerId === 'opencode')) return {supported: true, boundary: 'isolated-process'};
   const reason: Record<Exclude<Protocol, 'echo'>, string> = {
     'claude-sdk': 'Claude protected tools require a supported native host boundary and its userspace helper',
     'codex-appserver': 'Codex protected tools require a supported native host boundary and its userspace helper',
     acp: 'Protected ACP requires verified OpenCode 1.19.3 with its core-owned extension and a native host boundary; generic ACP claims are insufficient',
-    muse: 'Muse 1.3.0 disables session MCP with an empty native toolset and rejects MCP-only toolsets; no verified native-tool gate is available',
+    muse: 'Muse protected execution requires verified native 1.4.13 with mandatory MCP-only admission and a supported native host boundary',
     pi: 'pi protected tools require its native extension and a supported native host boundary; native approvals remain unavailable',
   };
   return {supported: false, reason: reason[protocol]};

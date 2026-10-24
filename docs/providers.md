@@ -1063,12 +1063,12 @@ The forced shared-turn context suppresses native resources while captured host
 tool permissions control the protected tools. An actual host tool-free context
 exposes neither native nor protected tools.
 
-Muse 1.3.0 remains refused. Its MSP session MCP works, but native file tools can
-still read host credentials with its native shell sandbox enabled and native
-shell/writes disabled. An empty native toolset also removes MCP tools;
-a MCP-only toolset is rejected at startup as unknown tool names. Its
-`hook/list` MSP method is unavailable. These exact limitations have native
-loopback fixtures; no replacement agent or weaker permission mode is used.
+Muse 1.4.13 now supplies a verified mandatory MCP-only native registry gate;
+its protected adapter uses the same OS executor and preserves selected native
+account/model/approval semantics. Older Muse 1.3.0 remains refused because its
+native file reads bypass its shell sandbox and its toolsets cannot retain only
+MCP tools. Installed native production regressions cover both cases without
+live inference. The exact release and gate are described under [Muse Code](#muse-code).
 
 - Claude takes a changed mode in place through the SDK's `setPermissionMode`,
   sent before the next prompt and only when the mode moved. Claude can also move
@@ -1379,6 +1379,23 @@ process here goes through `procs.spawnChild`. The driver refuses a host whose
 - The profile sets `MUSE_NO_AUTO_UPDATE=1`, so the launcher never updates what
   Boite pinned, and unsets `META_API_KEY`, so a key in the user's environment
   never replaces the account's login.
+
+Protected shared Muse sessions require native 1.4.13 and MSP fingerprint
+`sha256:7fddaf646dbc317e5fcac0785e135eb04df14fbb0db1863089dfd6da21730e5b`.
+`drivers/muse/protected.ts` writes a private native configuration with only
+`mcp__boite_protected__boite_exec` and `mcp__boite_protected__boite_commit` in
+`run.toolset`. The native registry rejects forged calls to other tools; a
+required MCP failure or unresolved name stops run preparation before inference.
+The native host reads selected auth through its private config root and retains
+its account refresh, model, transport and approval semantics. Only model tool
+commands enter the common offline OS executor. Native discovery sees an empty
+workspace and core-owned HOME/XDG roots, including foreign `CODEX_HOME` and
+Claude/plugin discovery roots. External hooks/MCP/plugins and experimental
+environment overrides are excluded. Native shell and writes are also
+disabled. Protected cold starts create a new private session and use the core's
+captured continuation; ordinary local resume is unchanged. Native 1.3.0 and
+unverified versions/fingerprints remain refused. These guarantees depend on the
+verified native registry gate, not its shell sandbox or a permission callback.
 
 ### pi
 

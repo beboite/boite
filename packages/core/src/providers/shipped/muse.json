@@ -16,11 +16,11 @@
       "install": {
         "format": "binary",
         "arch": "x64",
-        "version": "1.3.0-R3401.1",
-        "url": "https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.3.0-R3401.1&file=muse-x86-windows.exe",
-        "sha256": "e0a7cfef0755a6c7d249ad66a4d3cccdc52671563c8f1ff3a66881cdb11a6bba",
-        "archiveBytes": 415378168,
-        "files": [{ "path": "muse.exe", "bytes": 415378168 }]
+        "version": "1.4.13-R6996.1",
+        "url": "https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.13-R6996.1&file=muse-x86-windows.exe",
+        "sha256": "239c993cedc3768a99103a90b2f7e3d560375036104980e30227ffebf9de0303",
+        "archiveBytes": 419535608,
+        "files": [{ "path": "muse.exe", "bytes": 419535608 }]
       },
       "launch": { "args": ["serve", "--trust-workspace"] },
       "isolation": { "XDG_CONFIG_HOME": "{isolationDir}", "XDG_DATA_HOME": "{isolationDir}", "XDG_STATE_HOME": "{isolationDir}" },

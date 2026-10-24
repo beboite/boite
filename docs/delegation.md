@@ -268,8 +268,9 @@ trusted native account/control stays local; model tools receive a filtered
 project view without account credentials, hooks or ambient host access.
 `boite_commit` publishes validated edits on the captured branch for real Git
 result verification. OpenCode 1.19.3 (default/build or plan) and pi (YOLO/bypass)
-now use their own native extension and the common executor. Muse and other ACP
-implementations remain refused until their adapters implement the boundary. No permission fallback or implicit bypass is introduced.
+now use their own native extension and the common executor. Muse 1.4.13 uses
+its verified mandatory MCP-only native registry and the same executor; older
+Muse versions and other ACP implementations remain refused. No permission fallback or implicit bypass is introduced.
 
 ## Agent commands
 

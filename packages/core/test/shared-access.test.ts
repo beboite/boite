@@ -56,16 +56,21 @@ async function fixture() {
   return {a, b, sharedProjectId, job, worker, agent};
 }
 
-async function nativeHost(b: Awaited<ReturnType<typeof side>>, protocol: 'claude' | 'codex', api: ReturnType<typeof protectedProviderApi>) {
+async function nativeHost(b: Awaited<ReturnType<typeof side>>, protocol: 'claude' | 'codex' | 'muse', api: ReturnType<typeof protectedProviderApi>) {
   const account = await b.client.call('accounts.add', {providerId: protocol, label: 'Synthetic native account'});
   b.h.core.journal.putAccount({...account, status: 'ok'});
   const accountDir = account.isolationDir!;
   if (protocol === 'codex') writeFileSync(join(accountDir, 'config.toml'), `model_provider="fixture"\n[model_providers.fixture]\nname="Synthetic fixture"\nbase_url="${api.url}"\nwire_api="responses"\nrequires_openai_auth=false\n`);
+  if (protocol === 'muse') {
+    mkdirSync(join(accountDir, 'muse'), {recursive: true});
+    writeFileSync(join(accountDir, 'muse/auth.json'), JSON.stringify({schema_version: 1, providers: {meta: {api_key: 'synthetic-fixture-key'}}}));
+    writeFileSync(join(accountDir, 'muse/settings.json'), JSON.stringify({schema_version: 1, model: 'protected-model', endpoint_transport: {base_url: api.url, auth: 'bearer'}, run: {subagent_delegation_mode: 'off', reminder_roster: {agents: []}}}));
+  }
   const provider = b.h.core.providers.require(protocol);
-  const model = protocol === 'claude' ? 'claude-sonnet-5' : 'gpt-6.1-sol';
+  const model = protocol === 'claude' ? 'claude-sonnet-5' : protocol === 'muse' ? 'protected-model' : 'gpt-6.1-sol';
   provider.models = [{id: model, name: 'Synthetic fixture', default: true}];
   for (const profile of Object.values(provider.profiles)) if (profile) {
-    profile.executable = [{kind: 'file', value: Bun.which(protocol) ?? (() => {throw new Error(`Native fixture requires installed ${protocol}`);})()}];
+    profile.executable = [{kind: 'file', value: (protocol === 'muse' ? process.env.BOITE_TEST_MUSE_CLI : Bun.which(protocol)) ?? (() => {throw new Error(`Native fixture requires installed ${protocol}`);})()}];
     profile.isolation = {...profile.isolation, HOME: accountDir, ...(protocol === 'claude' ? {ANTHROPIC_API_KEY: 'synthetic-fixture-key', ANTHROPIC_BASE_URL: api.url,
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_AUTOUPDATER: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1'} : {})};
   }
@@ -73,7 +78,7 @@ async function nativeHost(b: Awaited<ReturnType<typeof side>>, protocol: 'claude
   return account;
 }
 
-test.skipIf(process.platform !== 'linux' || process.env.BOITE_TEST_NATIVE_EXECUTION !== '1').each(['claude', 'codex'] as const)('protected %s remote jobs preserve the host route and return a real consumable commit', async protocol => {
+test.skipIf(process.platform !== 'linux' || process.env.BOITE_TEST_NATIVE_EXECUTION !== '1').each(['claude', 'codex', 'muse'] as const)('protected %s remote jobs preserve the host route and return a real consumable commit', async protocol => {
   const {a, b, sharedProjectId, job, agent} = await fixture(); agent.close();
   await a.client.call('sharedCompute.cancel', {sharedProjectId, threadId: a.threadId, jobId: job.id, requestId: 'cancel-initial'});
   writeFileSync(join(a.path, 'answer.js'), 'export const answer = 41;\n');
@@ -84,8 +89,8 @@ test.skipIf(process.platform !== 'linux' || process.env.BOITE_TEST_NATIVE_EXECUT
   await git(b.h, b.path, 'fetch', a.path, 'main'); await git(b.h, b.path, 'reset', '--hard', 'FETCH_HEAD');
   await git(b.h, b.path, 'config', 'user.name', 'Fixture'); await git(b.h, b.path, 'config', 'user.email', 'fixture@example.invalid');
   const api = protectedProviderApi(protocol, [
-    {name: protocol === 'claude' ? 'mcp__boite_protected__boite_exec' : 'boite_exec', input: {command: '/bin/sh', args: ['-c', `set -eu; test ! -e .git; test -z "\${BOITE_TOKEN:-}"; sed -i 's/41/42/' answer.js; ${process.execPath} build answer.js --outdir dist; ${process.execPath} test answer.test.js`]}},
-    {name: protocol === 'claude' ? 'mcp__boite_protected__boite_commit' : 'boite_commit', input: {message: 'Apply validated fixture edit'}},
+    {name: protocol === 'claude' ? 'mcp__boite_protected__boite_exec' : protocol === 'muse' ? 'mcp__boite_protected.boite_exec' : 'boite_exec', input: {command: '/bin/sh', args: ['-c', `set -eu; test ! -e .git; test -z "\${BOITE_TOKEN:-}"; sed -i 's/41/42/' answer.js; ${process.execPath} build answer.js --outdir dist; ${process.execPath} test answer.test.js`]}},
+    {name: protocol === 'claude' ? 'mcp__boite_protected__boite_commit' : protocol === 'muse' ? 'mcp__boite_protected.boite_commit' : 'boite_commit', input: {message: 'Apply validated fixture edit'}},
   ]);
   try {
     const account = await nativeHost(b, protocol, api);
@@ -111,7 +116,7 @@ test.skipIf(process.platform !== 'linux' || process.env.BOITE_TEST_NATIVE_EXECUT
 
 // Actual provider processes use the same scope preparation as ordinary turns.
 test.skipIf(process.platform !== 'linux' || process.env.BOITE_TEST_NATIVE_EXECUTION !== '1').each([
-  ['claude', 'letter'], ['codex', 'letter'], ['claude', 'board'], ['codex', 'board'],
+  ['claude', 'letter'], ['codex', 'letter'], ['muse', 'letter'], ['claude', 'board'], ['codex', 'board'], ['muse', 'board'],
 ] as const)('protected %s %s scopes retire ordinary warm control, inherit, replace overrides and stop tools', async (protocol, route) => {
   const {a, b, sharedProjectId, job, agent} = await fixture(); agent.close();
   await a.client.call('sharedCompute.cancel', {sharedProjectId, threadId: a.threadId, jobId: job.id, requestId: 'cancel-initial'});
@@ -124,7 +129,7 @@ test.skipIf(process.platform !== 'linux' || process.env.BOITE_TEST_NATIVE_EXECUT
     const ordinary = await b.client.call('turns.start', {threadId: b.threadId, prompt: 'Ordinary host turn'});
     await waitFor(() => b.h.core.journal.getTurn(ordinary.id)?.status === 'done');
     expect(b.h.core.procs.liveCount(b.threadId)).toBeGreaterThan(0);
-    const name = protocol === 'claude' ? 'mcp__boite_protected__boite_exec' : 'boite_exec';
+    const name = protocol === 'claude' ? 'mcp__boite_protected__boite_exec' : protocol === 'muse' ? 'mcp__boite_protected.boite_exec' : 'boite_exec';
     api.enqueue({name, input: {command: '/bin/sh', args: ['-c', 'set -eu; test ! -e .env; test ! -e .git; echo 42 > answer.txt']}});
     if (route === 'letter') {
       await a.client.call('collaboration.send', {threadId: a.threadId, to: {coreId: b.coreId, threadId: b.threadId}, text: 'Edit the ordinary project file with protected tools', requestId: 'native-letter'});
@@ -162,7 +167,7 @@ test.skipIf(process.platform !== 'linux' || process.env.BOITE_TEST_NATIVE_EXECUT
     await b.h.core.sharedAccess.execution.prepare(b.threadId);
     api.enqueue({name, input: {command: '/bin/sh', args: ['-c', 'echo running > tool-active; sleep 30']}});
     const stopped = await b.client.call('turns.start', {threadId: b.threadId, prompt: 'Run the cancellable protected tool'});
-    await waitFor(() => b.h.core.procs.liveCount(b.threadId) > 0, 15000);
+    await waitFor(() => b.h.core.procs.liveCount(b.threadId) > 0, 15000).catch(error => {throw new Error(`Native scope did not start cancellable control: ${JSON.stringify(b.h.core.journal.getTurn(stopped.id))}`, {cause: error});});
     const active = b.h.core.sharedAccess.execution.context(b.threadId)!;
     b.h.core.threads.stopTurn(b.threadId);
     expect(() => active.check()).toThrow();

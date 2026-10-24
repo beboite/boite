@@ -12,7 +12,7 @@ import {sessionKey as museKey} from '../src/drivers/muse/mapping.ts';
 import {sessionKey as acpKey} from '../src/drivers/acp/session.ts';
 import {SessionControls} from '../src/drivers/acp/controls.ts';
 import type {ClientContext, SessionConfigOption} from '@agentclientprotocol/sdk';
-import {createMuseDriver} from '../src/drivers/muse.ts';
+import {protectedMuse} from '../src/drivers/muse/protected.ts';
 import type {TurnContext} from '../src/drivers/types.ts';
 
 let bridge: ReturnType<typeof protectedBridge> | undefined;
@@ -49,11 +49,16 @@ test('only the implemented ACP dialect and native pi automatic permissions can b
   ctx.thread.permissionMode = 'default';
   expect(() => protectedAcp(ctx, () => null, ['acp'])).toThrow('execution.control.env.NODE_OPTIONS');
 });
-test('Muse cannot claim protected native tools from an MSP MCP capability alone', async () => {
-  const driver = createMuseDriver(), ctx = context(); ctx.provider.id = 'muse';
-  expect(sharedExecutionProtection('muse', true, 'muse').supported).toBe(false);
-  expect(await thrown(driver.prepare!(ctx))).toThrow('no verified native-tool gate');
-  driver.shutdown?.();
+test('Muse requires the verified native registry gate and private configuration, never an MSP capability alone', () => {
+  const ctx = context(); ctx.provider.id = 'muse';
+  expect(sharedExecutionProtection('muse', true, 'muse').supported).toBe(true);
+  expect(sharedExecutionProtection('muse', false, 'muse').supported).toBe(false);
+  expect(() => protectedMuse(ctx, () => null, ['serve', '--config', 'run.toolset=null'])).toThrow('execution.muse.launch.args');
+  const session = protectedMuse(ctx, () => null, ['serve'])!;
+  try {
+    expect(() => session.admit({serverInfo: {name: 'muse', version: '1.3.0'}, schema: {version: 1}})).toThrow('expected verified Muse 1.4.13');
+    expect(() => session.admit({serverInfo: {name: 'muse', version: '1.4.13'}, schema: {version: 1, fingerprint: 'unverified'}})).toThrow('MSP fingerprint');
+  } finally {session.close();}
 });
 test('every adapter retires an unprotected warm process and a replaced authority or account', () => {
   for (const key of [piKey, museKey, acpKey]) {

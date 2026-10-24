@@ -78,7 +78,8 @@ export class SharedNativeExecution {
         join(selectedPath('XDG_CONFIG_HOME', join(home, '.config')), 'opencode'),
         join(selectedPath('XDG_DATA_HOME', join(home, '.local', 'share')), 'opencode'),
         ...['OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR'].flatMap(name => environment[name] ? [selectedPath(name, '')] : []),
-      ] : [];
+      ] : protocol === 'muse' ? ['XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME'].map(name =>
+        join(selectedPath(name, join(home, name === 'XDG_CONFIG_HOME' ? '.config' : name === 'XDG_DATA_HOME' ? '.local/share' : '.local/state')), 'muse')) : [];
     return {scope: scopes[0]!, additionalScopes: scopes.slice(1), checkout: binding.checkoutPath,
       route: {providerId: thread.providerId, accountId: thread.accountId, permissionMode: thread.permissionMode, ...(binding.compute ? {profileId: binding.compute.job.profileId} : {})},
       credentialPaths: [...(account.isolationDir ? [account.isolationDir] : []), ...['.claude', '.codex', '.ssh', '.aws', '.config'].map(p => join(homedir(), p)), ...credentialFiles, ...providerCredentials],

@@ -57,13 +57,15 @@ type ApprovalMode = 'allowAll' | 'promptUnmatched' | 'onRequest' | 'denyUnmatche
 export interface InitializeResult {
   museHome?: string;
   schema?: { version?: number; fingerprint?: string };
-  serverInfo?: { version?: string };
+  serverInfo?: { name?: string; version?: string };
 }
 
 /** `Session`, the fields read here. */
 export interface MuseSessionRecord {
   sessionId: string;
   modelId?: string | null;
+  providerId?: string;
+  workspaceRoot?: string;
   approvalMode?: { mode?: string } | null;
 }
 

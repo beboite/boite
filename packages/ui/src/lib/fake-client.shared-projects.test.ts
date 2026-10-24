@@ -113,15 +113,13 @@ test('native capability fixtures retain host mode/account and leave unsupported 
     b.setSharedNativeExecution(false);
     expect((await a.call('sharedCompute.models',{...as,host:remote}))[0]?.protection.supported).toBe(false);
     b.setSharedNativeExecution(true);
-    expect((await a.call('sharedCompute.models',{...as,host:remote}))[0]).toMatchObject({providerId:provider.id,permissionMode:mode,protection:protocol==='muse'?{supported:false}:{supported:true,boundary:'isolated-process'}});
-    if(protocol==='claude-sdk'||protocol==='codex-appserver'||protocol==='pi'||protocol==='acp'&&provider.id==='opencode'){
-      nativeSeen.push(protocol);
-      const job=await a.call('sharedCompute.start',{...as,host:remote,profileId:'conversation',baseCommit:base,requestId:protocol,task:'Synthetic protected native fixture'});
-      expect(job).toMatchObject({providerId:provider.id,permissionMode:mode});
-      expect((await b.call('threads.list',{projectId:bp.id})).find(t=>t.id===job.worker!.threadId)?.accountId).toBe(account.id);
-    }
+    expect((await a.call('sharedCompute.models',{...as,host:remote}))[0]).toMatchObject({providerId:provider.id,permissionMode:mode,protection:{supported:true,boundary:'isolated-process'}});
+    nativeSeen.push(protocol);
+    const job=await a.call('sharedCompute.start',{...as,host:remote,profileId:'conversation',baseCommit:base,requestId:protocol,task:'Synthetic protected native fixture'});
+    expect(job).toMatchObject({providerId:provider.id,permissionMode:mode});
+    expect((await b.call('threads.list',{projectId:bp.id})).find(t=>t.id===job.worker!.threadId)?.accountId).toBe(account.id);
   }
-  expect(nativeSeen).toEqual(['claude-sdk','codex-appserver','acp','pi']);
+  expect(nativeSeen).toEqual(['claude-sdk','codex-appserver','muse','acp','pi']);
 });
 
 test('compute uses the selected host profile, refuses unsafe execution, scopes jobs and revokes results',async()=>{
