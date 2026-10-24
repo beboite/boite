@@ -121,6 +121,7 @@ export function settingsSectionLabel(section: string, providers: readonly Provid
     execution: settings.execution,
     origins: strings.machines.browserOrigins,
     'auto-compact': settings.autoCompact,
+    'device-stream': settings.deviceStream,
   };
   return labels[section] ?? null;
 }
@@ -128,7 +129,7 @@ export function settingsSectionLabel(section: string, providers: readonly Provid
 /** Pages a paired device's Settings leaves out: `OWNER_TABS` in `SettingsShell.svelte`. */
 const OWNER_PAGES: readonly SettingsPage[] = ['accounts', 'plugins', 'resources', 'brain'];
 /** Cards of the shared pages that only the owner's Settings draws there. */
-const OWNER_SECTIONS: readonly string[] = ['worktrees', 'privacy', 'execution', 'origins', 'auto-compact'];
+const OWNER_SECTIONS: readonly string[] = ['worktrees', 'privacy', 'execution', 'origins', 'auto-compact', 'device-stream'];
 /**
  * What a phone browser's Settings (`MobileSettings.svelte`) draws: the pages
  * it opens whole, then the cards it has of the others. Keep it in step with

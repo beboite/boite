@@ -151,14 +151,18 @@ async function baselineRuntime(): Promise<string> {
 const sidecar = RUNTIME_SIDECAR ? await baselineRuntime() : join(coreDist, 'boite-core');
 
 
-/** Every file of the bundle but the Workers, which stay beside the executable where the core looks first. */
+/**
+ * Every file of the bundle but the Workers, which stay beside the executable where the core looks first.
+ * A `.jar` is the scrcpy server the Device panel's live stream pushes (packages/core/vendor/scrcpy).
+ */
 function stageBundle(targetDir: string): void {
   const bundle = join(targetDir, BUNDLE_DIR);
   // Chunk names carry a hash: what an earlier build left would never be loaded, only shipped.
   rmSync(bundle, { recursive: true, force: true });
   mkdirSync(bundle, { recursive: true });
-  const files = readdirSync(coreDist).filter((name) => name.endsWith('.js') && !WORKERS.includes(name));
+  const files = readdirSync(coreDist).filter((name) => (name.endsWith('.js') && !WORKERS.includes(name)) || name.endsWith('.jar'));
   if (!files.includes('main.js')) refuse(`${join(coreDist, 'main.js')} does not exist. Build it first: bun run build:core`);
+  if (!files.some((name) => name.endsWith('.jar'))) refuse(`${coreDist} has no scrcpy server .jar. Build it again: bun run build:core`);
   let bytes = 0;
   for (const name of files) {
     copyFileSync(join(coreDist, name), join(bundle, name));

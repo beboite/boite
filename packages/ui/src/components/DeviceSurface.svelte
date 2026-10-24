@@ -1,9 +1,10 @@
 <script lang="ts">
   import { errorText } from '../lib/errors';
   import { onMount, untrack } from 'svelte';
-  import { Camera, Circle, CornerDownLeft, Delete, EyeOff, Pause, Play, Plus, Power, RefreshCw, RotateCw, Send, Smartphone, Square, Triangle, X } from '@lucide/svelte';
-  import { MOBILE_TEXT_MAX, type MobileDevice, type MobileDeviceFrame, type MobileDeviceInput, type MobileDeviceList, type MobileDeviceSession } from '@boite/contracts';
-  import { deviceKey, devicePaste, hasKeyboard, liveInput } from '../lib/live-input';
+  import { Camera, Circle, Copy, CornerDownLeft, Delete, EyeOff, Pause, Play, Plus, Power, RefreshCw, RotateCw, Send, Smartphone, Square, Triangle, X } from '@lucide/svelte';
+  import { isAdbText, MOBILE_CLIPBOARD_MAX, MOBILE_SCROLL_MAX, MOBILE_TEXT_MAX, type MobileDevice, type MobileDeviceFrame, type MobileDeviceInput, type MobileDeviceList, type MobileDeviceSession } from '@boite/contracts';
+  import { deviceKey, devicePaste, hasKeyboard, liveInput, writeClipboardLater } from '../lib/live-input';
+  import { canDecode, playDeviceStream, streamSize, type StreamFallback, type StreamPicture } from '../lib/device-stream';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
   import { FRAME_INTERVAL, frameMaxWidth, framePoint, frameQuality, nextPollDelay } from '../lib/remote-browser-view';
@@ -13,7 +14,9 @@
    * The core captures their screen; this polls JPEG frames the way the phone's
    * browser view does, so it works the same on the desktop and on a paired phone.
    * No frame is asked for until the user shows the device: a card covers it
-   * and names the machine it runs on.
+   * and names the machine it runs on. With the `deviceStream` setting on, an
+   * Android device plays as live video instead (lib/device-stream.ts), and
+   * touches, the wheel, any text and the clipboard go through its stream.
    */
   let { store, threadId }: { store: Store; threadId: string } = $props();
   let sessions = $state.raw<MobileDeviceSession[]>([]), selected = $state<string | null>(null);
@@ -28,15 +31,21 @@
   // A computer types, pastes and scrolls on the screen itself; the text field below is the phone's.
   const desk = hasKeyboard();
   let viewer = $state<HTMLElement>(), screen = $state<HTMLButtonElement>();
-  // Keyboard and wheel input, sent one at a time in order: each is an adb process on the agent's machine.
+  // Keyboard, wheel and stream touch input, sent one at a time in order: without the stream, each is an adb process on the agent's machine.
   let typed: MobileDeviceInput[] = [], typing: Promise<void> | null = null;
   let wheelY = 0, wheelAt: { x: number; y: number } | null = null, wheelTimer: ReturnType<typeof setTimeout> | undefined;
+  // The live stream: its picture while the canvas plays it, why the panel shows screenshots instead, and the fingers down on it.
+  let canvas = $state<HTMLCanvasElement>(), stream = $state.raw<StreamPicture | null>(null), streamNote = $state(''), notice = $state(''), areaHeight = $state(0), pageHidden = $state(document.hidden);
+  const fingers = new Map<number, number>();
+  let notches = { x: 0, y: 0 }, notchAt: { x: number; y: number } | null = null, notchTimer: ReturnType<typeof setTimeout> | undefined, noticeTimer: ReturnType<typeof setTimeout> | undefined;
   const session = $derived(sessions.find(one => one.deviceId === selected) ?? sessions[0] ?? null);
   const key = $derived(store.threadKey(threadId));
   const revealed = $derived(liveViews.shown('device', key));
   const machine = $derived(machineName(store));
   const showing = $derived(session?.state === 'ready' && revealed ? session : null);
-  const usable = $derived(!!showing && !!frame && frame.deviceId === showing.deviceId && !paused && !busy && store.connection === 'ready');
+  const live = $derived(!!stream && !!showing);
+  const streamDevice = $derived(showing?.platform === 'android' ? showing.deviceId : null);
+  const usable = $derived(!!showing && (live || (!!frame && frame.deviceId === showing.deviceId)) && !paused && !busy && store.connection === 'ready');
 
   function stop() { generation++; clearTimeout(timer); }
   async function decoded(base64: string): Promise<void> {
@@ -46,7 +55,8 @@
   }
   async function poll(run: number): Promise<void> {
     const target = showing;
-    if (!alive || run !== generation || paused || document.hidden || !target) return;
+    // While the live stream plays, no screenshots: its fallback starts them again.
+    if (!alive || run !== generation || paused || document.hidden || !target || stream) return;
     if (pending || busy) { timer = setTimeout(() => void poll(run), 100); return; }
     pending = true; requestedAt = Date.now();
     const client = store.client, started = performance.now();
@@ -115,30 +125,37 @@
     if (!client || !target || !usable) return false;
     return (await act(() => client.call('devices.input', { threadId, deviceId: target.deviceId, input: value }))) !== undefined;
   }
-  /** Characters typed while adb is busy leave together in the next text. */
+  /** Characters typed while adb is busy leave together in the next text; a finger's moves still waiting keep only the latest. */
   function direct(value: MobileDeviceInput) {
     const last = typed.at(-1);
     if (value.kind === 'text' && last?.kind === 'text' && last.text.length + value.text.length <= MOBILE_TEXT_MAX) typed[typed.length - 1] = { kind: 'text', text: last.text + value.text };
+    else if (value.kind === 'touch' && value.action === 'move' && last?.kind === 'touch' && last.action === 'move' && last.pointerId === value.pointerId) typed[typed.length - 1] = value;
     else typed.push(value);
     typing ??= drain().finally(() => { typing = null; });
   }
   async function drain(): Promise<void> {
     while (typed.length) {
       const value = typed.shift()!, client = store.client, target = showing;
-      if (!alive || !client || !target?.input || paused || store.connection !== 'ready') { typed = []; return; }
+      if (!alive || !client || !target?.input || store.connection !== 'ready') { typed = []; return; }
+      // A pause drops what was typed, but a finger lifted still reaches the device, which would otherwise keep it pressed.
+      if (paused && !(value.kind === 'touch' && (value.action === 'up' || value.action === 'cancel'))) continue;
       try { await client.call('devices.input', { threadId, deviceId: target.deviceId, input: value }); error = ''; }
       catch (cause) { typed = []; if (alive) error = errorText(cause); return; }
       finally { if (alive) kick(); }
     }
   }
   function pasted(value: string) {
+    // The stream sets the device's clipboard and pastes it, lines and any character included.
+    if (live) { direct({ kind: 'clipboard', text: value.slice(0, MOBILE_CLIPBOARD_MAX), paste: true }); return; }
     const line = devicePaste(value);
     if (line === null) { error = strings.devicePanel.ascii; return; }
     for (let at = 0; at < line.length; at += MOBILE_TEXT_MAX) direct({ kind: 'text', text: line.slice(at, at + MOBILE_TEXT_MAX) });
   }
-  /** Wheel notches become one swipe from under the pointer, the way a finger would scroll that far. */
+  /** Wheel notches become one swipe from under the pointer, the way a finger would scroll that far; the stream takes the notches themselves. */
   function wheel(event: WheelEvent) {
-    if (event.ctrlKey || !usable || !frame || !showing?.input) return;
+    if (event.ctrlKey || !usable || !showing?.input) return;
+    if (live) { event.preventDefault(); scrolled(event); return; }
+    if (!frame) return;
     event.preventDefault();
     const at = pixel(event, frame);
     if (!at || !picture) return;
@@ -152,6 +169,19 @@
       if (!from || !by) return;
       direct({ kind: 'swipe', from, to: { x: from.x, y: Math.max(0, Math.min(current.height - 1, from.y - by)) }, durationMs: 150 });
     }, 80);
+  }
+  /** A notch is 100 pixels or 3 lines of the browser's wheel; what turns within 40 ms leaves as one scroll. */
+  function scrolled(event: WheelEvent) {
+    const at = streamPoint(event, false);
+    if (!at) return;
+    const notch = event.deltaMode === 1 ? 1 / 3 : event.deltaMode === 2 ? 3 : 1 / 100;
+    notchAt ??= at;
+    notches = { x: notches.x + event.deltaX * notch, y: notches.y + event.deltaY * notch };
+    notchTimer ??= setTimeout(() => {
+      const from = notchAt, by = notches, fit = (n: number) => Math.max(-MOBILE_SCROLL_MAX, Math.min(MOBILE_SCROLL_MAX, Math.round(n * 100) / 100));
+      notchAt = null; notches = { x: 0, y: 0 }; notchTimer = undefined;
+      if (from && (fit(by.x) || fit(by.y))) direct({ kind: 'scroll', ...from, dx: fit(by.x), dy: fit(by.y) });
+    }, 40);
   }
   $effect(() => {
     const node = screen;
@@ -169,6 +199,19 @@
     link.download = `${target.deviceId}-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
     link.click();
   }
+  /** The device's selection, copied (or cut) there and read through the stream. */
+  async function deviceCopy(cut: boolean): Promise<string> {
+    const client = store.client, target = showing;
+    if (!client || !target || !live) return '';
+    const { text } = await client.call('devices.clipboard', { threadId, deviceId: target.deviceId, copy: cut ? 'cut' : 'copy' });
+    notice = text ? strings.devicePanel.copied : strings.devicePanel.copyEmpty;
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => { notice = ''; }, 3000);
+    return text;
+  }
+  const fallbackNote = (reason: StreamFallback) => reason.why === 'off' ? strings.devicePanel.streamOff
+    : reason.why === 'decoder' ? strings.devicePanel.streamDecoder
+    : reason.why === 'failed' ? fill(strings.devicePanel.streamFailed, { reason: reason.reason }).trim() : '';
 
   onMount(() => {
     const client = store.client;
@@ -185,22 +228,25 @@
       sessions = result.sessions;
       if (result.sessions.length === 0) void refresh();
     }, cause => { error = errorText(cause); });
-    const live = liveInput(() => viewer, {
+    const keyboard = liveInput(() => viewer, {
       key(event) {
-        if (!showing?.input || !frame || paused) return false;
-        const sent = deviceKey(event);
+        if (!showing?.input || (!frame && !live) || paused) return false;
+        // The stream types any character; adb only printable ASCII.
+        const sent = deviceKey(event, live);
         if (!sent) return false;
         direct('key' in sent ? { kind: 'key', key: sent.key } : { kind: 'text', text: sent.text });
         return true;
       },
       paste(value) { if (showing?.input) pasted(value); },
+      copy: deviceCopy,
+      failed(reason) { error = reason; },
     });
-    const visibility = () => { if (document.hidden) stop(); else resume(); };
+    const visibility = () => { pageHidden = document.hidden; if (document.hidden) stop(); else resume(); };
     const back = () => { if (!document.hidden && !pending) resume(); };
     document.addEventListener('visibilitychange', visibility);
     for (const name of ['pageshow', 'online', 'focus'] as const) window.addEventListener(name, back);
     return () => {
-      alive = false; stop(); off?.(); live.destroy(); clearTimeout(wheelTimer);
+      alive = false; stop(); off?.(); keyboard.destroy(); clearTimeout(wheelTimer); clearTimeout(notchTimer); clearTimeout(noticeTimer);
       document.removeEventListener('visibilitychange', visibility);
       for (const name of ['pageshow', 'online', 'focus'] as const) window.removeEventListener(name, back);
     };
@@ -216,6 +262,65 @@
       resume();
     });
   });
+  // An Android device shown and not paused plays its live stream; the screenshots above fill in until it does, or when it cannot.
+  $effect(() => {
+    const ready = store.connection === 'ready', client = store.client, deviceId = streamDevice;
+    if (paused || pageHidden || !ready || !client || !deviceId) return;
+    if (!canDecode()) {
+      untrack(() => { streamNote = store.settings?.deviceStream === true ? strings.devicePanel.streamDecoder : ''; });
+      return;
+    }
+    let streamError = '';
+    const player = playDeviceStream({
+      ask: after => client.call('devices.stream', { threadId, deviceId, maxSize: streamSize({ width: areaWidth, height: areaHeight }, window.devicePixelRatio, !desk), ...(after ? { after } : {}) }),
+      canvas: () => canvas,
+      live(picture) { stream = picture; streamNote = ''; stop(); frame = null; },
+      fallback(reason) { stream = null; fingers.clear(); streamNote = fallbackNote(reason); resume(); },
+      error(message) { if (stream) error = streamError = message; },
+      // Only the error the stream reported clears; one from an input stays until the next input.
+      ok() { if (streamError && error === streamError) error = ''; streamError = ''; },
+    });
+    return () => {
+      player.stop();
+      untrack(() => {
+        // Fingers still down are lifted on the device this effect played, before a pause, a hidden page or another device.
+        for (const finger of fingers.values()) void client.call('devices.input', { threadId, deviceId, input: { kind: 'touch', action: 'cancel', x: 0, y: 0, pointerId: finger } }).catch(() => {});
+        fingers.clear();
+        // A pause or a hidden page keeps the last picture on the canvas; anything else goes back to screenshots.
+        if (!paused && !pageHidden) stream = null;
+      });
+    };
+  });
+
+  /** Where a pointer is on the live stream, in the screen's pixels; `clamp` keeps a drag that left the picture at its edge. */
+  function streamPoint(event: MouseEvent, clamp: boolean): { x: number; y: number } | null {
+    const current = stream, box = canvas?.getBoundingClientRect();
+    if (!current || !box || !(box.width > 0 && box.height > 0)) return null;
+    const scale = Math.min(box.width / current.width, box.height / current.height), width = current.width * scale, height = current.height * scale;
+    const x = (event.clientX - box.left - (box.width - width) / 2) / width, y = (event.clientY - box.top - (box.height - height) / 2) / height;
+    if (!clamp && !(x >= 0 && x <= 1 && y >= 0 && y <= 1)) return null;
+    const fit = (n: number, size: number) => Math.round(Math.max(0, Math.min(1, n)) * (size - 1));
+    return { x: fit(x, current.screen.width), y: fit(y, current.screen.height) };
+  }
+  /** A finger on the stream: down, its moves and up reach the device as they happen, so a drag is a real drag. */
+  function touchDown(event: PointerEvent) {
+    if (!usable || !showing?.input || event.button !== 0) return;
+    const at = streamPoint(event, false), used = new Set(fingers.values()), finger = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].find(n => !used.has(n));
+    if (!at || finger === undefined) return;
+    fingers.set(event.pointerId, finger);
+    event.currentTarget instanceof Element && event.currentTarget.setPointerCapture?.(event.pointerId);
+    direct({ kind: 'touch', action: 'down', ...at, pointerId: finger });
+  }
+  function touchMove(event: PointerEvent) {
+    const finger = fingers.get(event.pointerId), at = finger === undefined ? null : streamPoint(event, true);
+    if (finger !== undefined && at) direct({ kind: 'touch', action: 'move', ...at, pointerId: finger });
+  }
+  function touchEnd(event: PointerEvent, action: 'up' | 'cancel') {
+    const finger = fingers.get(event.pointerId);
+    if (finger === undefined) return;
+    fingers.delete(event.pointerId);
+    direct({ kind: 'touch', action, ...(streamPoint(event, true) ?? { x: 0, y: 0 }), pointerId: finger });
+  }
 
   /** Where a touch lands, in the device's own screen pixels: what `devices.input` and the agent use. */
   function pixel(event: MouseEvent, current: MobileDeviceFrame): { x: number; y: number } | null {
@@ -223,11 +328,13 @@
     return at ? { x: Math.round(at.x * (current.width - 1)), y: Math.round(at.y * (current.height - 1)) } : null;
   }
   function down(event: PointerEvent) {
+    if (live) { touchDown(event); return; }
     if (!usable || !frame || !showing?.input || event.button !== 0) return;
     pointer = { x: event.clientX, y: event.clientY, at: performance.now(), frame };
     event.currentTarget instanceof Element && event.currentTarget.setPointerCapture?.(event.pointerId);
   }
   function up(event: PointerEvent) {
+    if (fingers.has(event.pointerId)) { touchEnd(event, 'up'); return; }
     const start = pointer; pointer = undefined;
     if (!start) return;
     const end = pixel(event, start.frame);
@@ -240,7 +347,7 @@
   }
   async function sendText(enter: boolean) {
     const value = text;
-    if (value && !/^[\x20-\x7e]+$/.test(value)) { error = strings.devicePanel.ascii; return; }
+    if (value && !live && !isAdbText(value)) { error = strings.devicePanel.ascii; return; }
     if (value && !await input({ kind: 'text', text: value })) return;
     text = '';
     if (enter) await input({ kind: 'key', key: 'enter' });
@@ -299,7 +406,7 @@
       {/if}
     </div>
   {:else if session}
-    <div class="viewer" bind:this={viewer} bind:clientWidth={areaWidth}>
+    <div class="viewer" bind:this={viewer} bind:clientWidth={areaWidth} bind:clientHeight={areaHeight}>
       {#if session.state === 'booting'}
         <p class="muted center" data-testid="device-starting">{fill(strings.devicePanel.starting, { name: session.name })}</p>
       {:else if !revealed && session.state === 'ready'}
@@ -314,12 +421,17 @@
         </div>
       {:else if session.state === 'failed'}
         <div class="center"><p class="error">{fill(strings.devicePanel.failed, { name: session.name })}</p>{#if session.error}<p class="muted detail">{session.error}</p>{/if}</div>
-      {:else if frame && frame.deviceId === session.deviceId}
-        <button bind:this={screen} type="button" class="screen" class:stale={paused || !!error} class:view-only={!session.input} aria-label={desk && session.input ? strings.devicePanel.interactDesk : strings.devicePanel.interact} disabled={!usable || !session.input}
-          onpointerdown={down} onpointerup={up} onpointercancel={() => { pointer = undefined; }} oncontextmenu={e => e.preventDefault()}>
-          <img bind:this={picture} src={`data:image/jpeg;base64,${frame.base64}`} alt={fill(strings.devicePanel.image, { name: session.name })} draggable="false" data-testid="device-frame" />
+      {:else}
+        {@const still = !live && frame?.deviceId === session.deviceId ? frame : null}
+        <!-- The canvas is there before the stream's first frame, which it draws; screenshots show until then. -->
+        <button bind:this={screen} type="button" class="screen" hidden={!live && !still} class:stale={paused || !!error} class:view-only={!session.input} aria-label={desk && session.input ? strings.devicePanel.interactDesk : strings.devicePanel.interact} disabled={!usable || !session.input}
+          onpointerdown={down} onpointermove={e => { if (fingers.has(e.pointerId)) touchMove(e); }} onpointerup={up}
+          onpointercancel={e => { if (fingers.has(e.pointerId)) touchEnd(e, 'cancel'); else pointer = undefined; }} oncontextmenu={e => e.preventDefault()}>
+          <canvas bind:this={canvas} hidden={!live} data-testid="device-stream">{fill(strings.devicePanel.image, { name: session.name })}</canvas>
+          {#if still}<img bind:this={picture} src={`data:image/jpeg;base64,${still.base64}`} alt={fill(strings.devicePanel.image, { name: session.name })} draggable="false" data-testid="device-frame" />{/if}
         </button>
-      {:else}<p class="muted center">{strings.remoteBrowser.waiting}</p>{/if}
+        {#if !live && !still}<p class="muted center">{strings.remoteBrowser.waiting}</p>{/if}
+      {/if}
     </div>
     {#if showing}
       <footer>
@@ -333,9 +445,11 @@
             {#if !desk}
             <button type="button" class="chip" disabled={!usable} aria-label={strings.devicePanel.enter} title={strings.devicePanel.enter} onclick={() => void input({ kind: 'key', key: 'enter' })}><CornerDownLeft size={15} /></button>
             <button type="button" class="chip" disabled={!usable} aria-label={strings.devicePanel.backspace} title={strings.devicePanel.backspace} onclick={() => void input({ kind: 'key', key: 'backspace' })}><Delete size={15} /></button>
+            {#if live}<button type="button" class="chip" disabled={!usable} aria-label={strings.devicePanel.copy} title={strings.devicePanel.copy} data-testid="device-copy"
+              onclick={() => void writeClipboardLater(deviceCopy(false)).catch(cause => { error = errorText(cause); })}><Copy size={15} /></button>{/if}
             {/if}
           </div>
-          {#if desk}<small data-testid="device-desk-hint">{strings.devicePanel.deskHint}</small>{:else}
+          {#if desk}<small data-testid="device-desk-hint">{live ? strings.devicePanel.deskHintLive : strings.devicePanel.deskHint}</small>{:else}
           <form onsubmit={e => { e.preventDefault(); void sendText(false); }}>
             <input bind:value={text} data-testid="device-text" maxlength="500" enterkeyhint="send" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label={strings.devicePanel.text} placeholder={strings.devicePanel.text} onkeydown={textKey} />
             <button type="submit" class="chip" disabled={!usable || !text} aria-label={strings.devicePanel.send}><Send size={16} /></button>
@@ -343,6 +457,7 @@
           <small>{strings.devicePanel.gesture}</small>
           {/if}
         {:else}<small data-testid="device-view-only">{strings.devicePanel.viewOnly}</small>{/if}
+        {#if notice || streamNote}<p class="muted note" role="status" data-testid="device-stream-note">{notice || streamNote}</p>{/if}
       </footer>
     {/if}
   {/if}
@@ -372,7 +487,9 @@
   .center { margin: auto; padding: 24px; text-align: center; } .center .error { padding: 0; } .detail { margin: 8px 0 0; overflow-wrap: anywhere; }
   .screen { position: relative; flex: 1; height: auto; min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; touch-action: none; cursor: crosshair; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
   .screen:disabled { opacity: 1; } .screen.view-only { cursor: default; } .screen.stale { opacity: .55; }
-  img { position: absolute; inset: 8px; width: calc(100% - 16px); height: calc(100% - 16px); object-fit: contain; pointer-events: none; -webkit-user-select: none; user-select: none; }
+  img, canvas { position: absolute; inset: 8px; width: calc(100% - 16px); height: calc(100% - 16px); object-fit: contain; pointer-events: none; -webkit-user-select: none; user-select: none; }
+  .screen[hidden], canvas[hidden] { display: none; }
+  .note { margin: 0; overflow-wrap: anywhere; }
   footer { padding: 10px 16px max(12px, env(safe-area-inset-bottom)); display: grid; gap: 8px; }
   form { display: flex; gap: 8px; } input { min-width: 0; flex: 1; font-size: 16px; min-height: var(--control); }
   @media (max-width: 720px) { footer small { display: none; } .toolbar, footer, .picker { padding-inline: 12px; } }

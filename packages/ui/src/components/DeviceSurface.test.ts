@@ -182,3 +182,128 @@ test('a computer types, pastes and scrolls on the device screen, with no text fi
     expect(inputs().at(-1)).toEqual({ kind: 'swipe', from: { x: 540, y: 1200 }, to: { x: 540, y: 600 }, durationMs: 150 });
   } finally { vi.unstubAllGlobals(); }
 });
+
+/** A WebCodecs decoder that keeps what it was given and outputs one 72 by 160 frame per chunk. */
+function stubDecoder(supported = true) {
+  const seen = { configs: [] as VideoDecoderConfig[], chunks: [] as { type: string; timestamp: number; head: number[] }[] };
+  class FakeChunk {
+    type: string; timestamp: number; data: Uint8Array;
+    constructor(init: { type: string; timestamp: number; data: Uint8Array }) { this.type = init.type; this.timestamp = init.timestamp; this.data = init.data; }
+  }
+  class FakeDecoder {
+    static isConfigSupported = async (config: VideoDecoderConfig) => ({ supported, config });
+    state = 'unconfigured'; decodeQueueSize = 0;
+    constructor(private init: { output(frame: unknown): void }) {}
+    configure(config: VideoDecoderConfig) { seen.configs.push(config); this.state = 'configured'; }
+    decode(chunk: FakeChunk) {
+      seen.chunks.push({ type: chunk.type, timestamp: chunk.timestamp, head: [...chunk.data.subarray(0, 5)] });
+      queueMicrotask(() => this.init.output({ displayWidth: 72, displayHeight: 160, close() {} }));
+    }
+    reset() { this.state = 'unconfigured'; }
+    close() { this.state = 'closed'; }
+  }
+  vi.stubGlobal('VideoDecoder', FakeDecoder);
+  vi.stubGlobal('EncodedVideoChunk', FakeChunk);
+  return seen;
+}
+const desk = (query: string) => ({ matches: query.startsWith('not all'), addEventListener() {}, removeEventListener() {} });
+async function showPixel() {
+  app = mount(DeviceSurface, { target: document.body, props: { store, threadId: thread } }); await settle();
+  document.querySelector<HTMLButtonElement>('[data-testid=device-open]')!.click(); await settle();
+  await vi.advanceTimersByTimeAsync(FAKE_BOOT_MS + 300); await settle();
+  // Covered: neither a stream nor a frame before Show.
+  expect(vi.mocked(client.call).mock.calls.some(([method]) => method === 'devices.stream' || method === 'devices.frame')).toBe(false);
+  document.querySelector<HTMLButtonElement>('[data-testid=device-show]')!.click(); await settle();
+}
+
+test('with the live stream on, the panel decodes H.264 onto a canvas and drives the phone through the stream', async () => {
+  vi.stubGlobal('matchMedia', desk);
+  const decoded = stubDecoder(), draw = vi.fn(), writeText = vi.fn(async () => {});
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage: draw } as unknown as CanvasRenderingContext2D);
+  vi.stubGlobal('navigator', Object.assign(Object.create(navigator), { clipboard: { writeText } }));
+  vi.useFakeTimers();
+  try {
+    expect(await store.saveSettings({ deviceStream: true })).toBe(true);
+    const calls = vi.spyOn(client, 'call');
+    const inputs = () => calls.mock.calls.filter(([method]) => method === 'devices.input').map(([, params]) => (params as { input: unknown }).input);
+    await showPixel();
+    await vi.advanceTimersByTimeAsync(500); await settle();
+
+    // The canvas replaced the screenshot: one decoder for the fake's codec, fed its key frame (SPS first), then the deltas in order.
+    const canvas = document.querySelector<HTMLCanvasElement>('[data-testid=device-stream]')!;
+    expect(canvas.hidden).toBe(false);
+    expect(document.querySelector('[data-testid=device-frame]')).toBeNull();
+    expect(decoded.configs).toEqual([{ codec: 'avc1.42c01e', optimizeForLatency: true }]);
+    expect(decoded.chunks[0]).toEqual({ type: 'key', timestamp: 100_000, head: [0, 0, 0, 1, 0x67] });
+    expect(decoded.chunks.slice(1, 3).map(chunk => chunk.type)).toEqual(['delta', 'delta']);
+    expect(decoded.chunks.map(chunk => chunk.timestamp)).toEqual(decoded.chunks.map((_, index) => (index + 1) * 100_000));
+    expect([canvas.width, canvas.height]).toEqual([72, 160]);
+    expect(draw).toHaveBeenCalledTimes(decoded.chunks.length);
+    const asks = calls.mock.calls.filter(([method]) => method === 'devices.stream').map(([, params]) => params as { maxSize: number; after?: unknown });
+    expect(asks[0]).not.toHaveProperty('after');
+    expect(asks[1]).toMatchObject({ after: { id: 'fake-Pixel_8_API_35', seq: 1 } });
+    expect(asks.every(ask => ask.maxSize >= 240 && ask.maxSize <= 1920)).toBe(true);
+    // No screenshots while it plays.
+    const frames = () => calls.mock.calls.filter(([method]) => method === 'devices.frame').length;
+    const polled = frames();
+    await vi.advanceTimersByTimeAsync(1000); await settle();
+    expect(frames()).toBe(polled);
+    expect(document.querySelector('[data-testid=device-desk-hint]')!.textContent).toContain('Ctrl+C copies');
+
+    // A drag is a real drag: down, its move and up as touches, in the 1080 by 2400 screen's pixels.
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 270, height: 600, right: 270, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
+    const screen = canvas.parentElement!;
+    screen.dispatchEvent(new PointerEvent('pointerdown', { clientX: 135, clientY: 300, button: 0, pointerId: 7, bubbles: true }));
+    screen.dispatchEvent(new PointerEvent('pointermove', { clientX: 135, clientY: 200, pointerId: 7, bubbles: true }));
+    screen.dispatchEvent(new PointerEvent('pointerup', { clientX: 135, clientY: 100, button: 0, pointerId: 7, bubbles: true }));
+    await vi.advanceTimersByTimeAsync(50); await settle();
+    expect(inputs().slice(-3)).toEqual([
+      { kind: 'touch', action: 'down', x: 540, y: 1200, pointerId: 0 },
+      { kind: 'touch', action: 'move', x: 540, y: 800, pointerId: 0 },
+      { kind: 'touch', action: 'up', x: 540, y: 400, pointerId: 0 },
+    ]);
+    // Three wheel notches down scroll by three, at the pointer.
+    for (let i = 0; i < 3; i++) screen.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, clientX: 135, clientY: 300, bubbles: true, cancelable: true }));
+    await vi.advanceTimersByTimeAsync(100); await settle();
+    expect(inputs().at(-1)).toEqual({ kind: 'scroll', x: 540, y: 1200, dx: 0, dy: 3 });
+    // Any character types, and a paste keeps its lines: the stream sets the device's clipboard and pastes it.
+    const key = (name: string) => { const event = new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }); document.body.dispatchEvent(event); return event.defaultPrevented; };
+    expect(key('é')).toBe(true);
+    const paste = (text: string) => { const event = new Event('paste', { bubbles: true, cancelable: true }); Object.assign(event, { clipboardData: { getData: () => text } }); document.body.dispatchEvent(event); };
+    paste('deux\nlignes 日本');
+    await vi.advanceTimersByTimeAsync(50); await settle();
+    expect(inputs().slice(-2)).toEqual([{ kind: 'text', text: 'é' }, { kind: 'clipboard', text: 'deux\nlignes 日本', paste: true }]);
+    // Ctrl+C copies the device's selection into this computer's clipboard.
+    document.body.dispatchEvent(new Event('copy', { bubbles: true, cancelable: true }));
+    await vi.advanceTimersByTimeAsync(50); await settle();
+    expect(calls).toHaveBeenCalledWith('devices.clipboard', { threadId: thread, deviceId: 'Pixel_8_API_35', copy: 'copy' });
+    expect(writeText).toHaveBeenCalledWith('deux\nlignes 日本');
+    expect(document.querySelector('[data-testid=device-stream-note]')!.textContent).toBe('Copied from the device');
+
+    // Hide stops the stream with the view.
+    document.querySelector<HTMLButtonElement>('[data-testid=device-hide]')!.click(); await settle();
+    const streamed = calls.mock.calls.filter(([method]) => method === 'devices.stream').length;
+    await vi.advanceTimersByTimeAsync(2000); await settle();
+    expect(calls.mock.calls.filter(([method]) => method === 'devices.stream').length).toBe(streamed);
+  } finally { vi.unstubAllGlobals(); }
+});
+
+test('screenshots stay, and say why, while the stream is off or this browser cannot decode it', async () => {
+  vi.stubGlobal('matchMedia', desk);
+  const decoded = stubDecoder(false);
+  vi.spyOn(client, 'call');
+  vi.useFakeTimers();
+  try {
+    await showPixel();
+    await vi.advanceTimersByTimeAsync(500); await settle();
+    expect(document.querySelector<HTMLImageElement>('[data-testid=device-frame]')!.src).toMatch(/^data:image\/jpeg;base64,/);
+    expect(document.querySelector<HTMLCanvasElement>('[data-testid=device-stream]')!.hidden).toBe(true);
+    expect(document.querySelector('[data-testid=device-stream-note]')!.textContent).toContain('the live stream is off in Settings > Experiments');
+    // Turned on, the stream is asked again within its retry, but this browser has no H.264 decoder.
+    expect(await store.saveSettings({ deviceStream: true })).toBe(true);
+    await vi.advanceTimersByTimeAsync(9000); await settle();
+    expect(decoded.configs).toEqual([]);
+    expect(document.querySelector('[data-testid=device-stream-note]')!.textContent).toContain('cannot decode the live video');
+    expect(document.querySelector('[data-testid=device-frame]')).not.toBeNull();
+  } finally { vi.unstubAllGlobals(); }
+});

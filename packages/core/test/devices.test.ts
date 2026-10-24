@@ -173,7 +173,7 @@ describe('the Device panel over RPC', () => {
     await owner.call('devices.input', { threadId, deviceId: 'Pixel_8', input: { kind: 'tap', x: 10, y: 20 } });
     await agent.call('devices.input', { threadId, deviceId: 'Pixel_8', input: { kind: 'key', key: 'back' } });
     await agent.call('devices.input', { threadId, deviceId: 'Pixel_8', input: { kind: 'swipe', from: { x: 50, y: 200 }, to: { x: 50, y: 40 } } });
-    expect(await thrown(agent.call('devices.input', { threadId, deviceId: 'Pixel_8', input: { kind: 'text', text: 'héllo' } }))).toThrow('printable ASCII');
+    expect(await thrown(agent.call('devices.input', { threadId, deviceId: 'Pixel_8', input: { kind: 'text', text: 'héllo' } }))).toThrow('text beyond printable ASCII needs the device\'s live stream');
     expect(await thrown(agent.call('devices.input', { threadId, deviceId: 'Small_Phone', input: { kind: 'tap', x: 1, y: 1 } }))).toThrow('not open');
     expect(sdk.calls()).toEqual(expect.arrayContaining([
       'adb -s emulator-5554 shell input tap 10 20',
