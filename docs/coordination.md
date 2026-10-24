@@ -55,6 +55,11 @@ you set in Communication settings stays until you resume it. Paired devices can 
 only an owner
 connection can change permissions.
 
+A contact's request decision also clears an automatic restart pause before
+delivery. A disconnected `collaboration.wait` client releases its waiter, so
+it cannot consume a later letter or suppress that letter's wake. Stop and
+explicit owner pauses remain in force.
+
 ## Discussions
 
 Agent mail is grouped by discussion: everything a thread exchanged with one
@@ -185,6 +190,12 @@ reaches those threads, or a thread that wrote to the contact in the last 7
 days. A contact never sends `group.sync` or `group.push`, and only a contact
 sends `contact.sync` (the projects opened to the receiver), `contact.ask` and
 `contact.answer` (a request and its decision).
+
+A group member can relay contact discovery, lookups, requests and letters
+through another member's durable virtual mailbox. The initiating core keeps
+the canonical exchange and wakes its own conversation. The gateway uses the
+existing contact link and enforces its permissions; `contact.route` is sealed
+and group-only. See [contacts through your group](contacts.md#contacts-through-your-group).
 
 The inviting core, the host, never dials its guest: the guest keeps a
 WebSocket open at `/coordination/contact/link`, and that socket is the

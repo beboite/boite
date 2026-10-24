@@ -72,7 +72,7 @@ export class PeerDesk {
       this.core.group.backoff.heard(peer.coreId);
       if (rate.count > 120) return new Response('peer rate limit', { status: 429 });
     } catch { return new Response('invalid signed message', { status: 403 }); }
-    const groupOnly = envelope.operation === 'group.sync' || envelope.operation === 'group.push'; // the group's own: sealed, from a member
+    const groupOnly = envelope.operation === 'group.sync' || envelope.operation === 'group.push' || envelope.operation === 'contact.route'; // the group's own: sealed, from a member
     if (this.core.group.removedPeer(peer.coreId) !== null && (groupOnly || !this.side.trusted().some(p => p.coreId === peer.coreId))) {
       return this.signed({ nonce: envelope.nonce, error: 'this machine was removed from the group', gone: true }, 410, sealing);
     }
@@ -84,7 +84,7 @@ export class PeerDesk {
     // Reading an unsigned body cannot hold an update. Admission may have won
     // during that await, so authenticated processing must enter the same gate.
     if (this.side.closed() || this.core.stopping) return new Response('the core is stopping', { status: 503 });
-    return this.core.router.trackRequest(() => {
+    return this.core.router.trackRequest(async () => {
       let result: unknown;
       let error: string | undefined;
       let status = 200;
@@ -93,8 +93,9 @@ export class PeerDesk {
         const currentPeer = this.side.trusted().find(p => p.coreId === peer.coreId);
         if (!currentPeer) throw refused('peer permission revoked');
         if (contact && groupOnly) throw refused('operation: a contact takes no part in this core\'s group');
-        if (!contact && envelope.operation.startsWith('contact.')) throw refused('operation: only a contact sends contact operations');
-        if (envelope.operation === 'directory') result = contact ? this.side.contactDirectory(peer.coreId) : this.side.directory();
+        if (!contact && envelope.operation.startsWith('contact.') && envelope.operation !== 'contact.route') throw refused('operation: only a contact sends contact operations');
+        if (envelope.operation === 'contact.route') result = await this.core.coordination.mailboxes.handle(currentPeer, envelope.payload);
+        else if (envelope.operation === 'directory') result = contact ? this.side.contactDirectory(peer.coreId) : this.side.directory();
         else if (envelope.operation === 'deliver') result = this.side.receive(envelope.payload as AgentLetter, peer);
         else if (envelope.operation === 'search') {
           const words = searchWords(((envelope.payload as { words?: unknown })?.words as string[] | undefined)?.join?.(' '));

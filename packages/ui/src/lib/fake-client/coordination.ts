@@ -1,5 +1,5 @@
 /** Coordination between threads, on this core and on the other fake cores it trusts. */
-import { defaultCoordinationConfig, RpcErrorCode, type AgentAddress, type AgentContact, type AgentLetter, type AgentMatch, type AgentRelation, type CoordinationConfig, type CoordinationPeer, type CoordinationView, type Thread, type ThreadId } from '@boite/contracts';
+import { defaultCoordinationConfig, RpcErrorCode, type AgentAddress, type AgentContact, type AgentLetter, type AgentMatch, type AgentRelation, type Contact, type ContactRequest, type ContactsState, type CoordinationConfig, type CoordinationPeer, type CoordinationView, type Thread, type ThreadId } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { archiveProject } from './project-archive';
 import type { FakeContext, FakeMethods } from './context';
@@ -33,6 +33,84 @@ function trusted(ctx: FakeContext): CoordinationPeer[] {
 }
 export const trusts = (ctx: FakeContext, coreId: string) => trusted(ctx).some(peer => peer.coreId === coreId);
 const reads = (ctx: FakeContext, coreId: string) => trusted(ctx).some(peer => peer.coreId === coreId && peer.readThreads === true);
+
+const contactStates = new WeakMap<FakeContext, { state: () => ContactsState; check: (thread: Thread) => void }>();
+export function registerContactState(ctx: FakeContext, state: () => ContactsState, check: (thread: Thread) => void): void {
+  contactStates.set(ctx, { state, check });
+}
+export const fakeContacts = (ctx: FakeContext) => contactStates.get(ctx)?.state();
+export const checkContactTier = (ctx: FakeContext, thread: Thread) => contactStates.get(ctx)?.check(thread);
+const rejected = (message: string) => new RpcFailure({ code: RpcErrorCode.Refused, message });
+
+function groupStamp(source: FakeContext, gateway: FakeContext): string | null {
+  const roster = source.roster;
+  if (!roster || roster !== gateway.roster) return null;
+  const from = roster.cores.find(core => core.coreId === source.identity.coreId);
+  const via = roster.cores.find(core => core.coreId === gateway.identity.coreId);
+  return from && via ? JSON.stringify([roster.id, from.epoch, via.epoch]) : null;
+}
+
+export function fakeContactRoutes(ctx: FakeContext): { gateway: FakeContext; contact: Contact }[] {
+  const result = (fakeContacts(ctx)?.contacts ?? []).map(contact => ({ gateway: ctx, contact }));
+  for (const member of ctx.roster?.cores ?? []) {
+    const gateway = cores.get(member.coreId);
+    if (!gateway || gateway === ctx || !groupStamp(ctx, gateway)) continue;
+    for (const contact of fakeContacts(gateway)?.contacts ?? []) {
+      if (contact.coreId === ctx.identity.coreId || trusts(ctx, contact.coreId) || result.some(row => row.contact.coreId === contact.coreId)) continue;
+      result.push({ gateway, contact });
+    }
+  }
+  return result;
+}
+
+const routeTo = (source: FakeContext, coreId: string) => fakeContactRoutes(source).find(row => row.contact.coreId === coreId);
+function openedTo(destination: FakeContext, gateway: FakeContext, thread: Thread, read = false): boolean {
+  const grant = fakeContacts(destination)?.contacts.find(contact => contact.coreId === gateway.identity.coreId)?.grants.find(grant => grant.projectId === thread.projectId);
+  return grant !== undefined && (!read || grant.readThreads);
+}
+interface Mailbox { id: string; gateway: FakeContext; source: FakeContext; threadId: string; contactId: string; contactAt: number; stamp: string }
+const mailboxes = new WeakMap<FakeContext, Mailbox[]>();
+const deliveredFrom = new WeakMap<AgentLetter, { source: FakeContext; thread: Thread; canonical: AgentLetter; allowed: () => boolean }>();
+
+function mailbox(source: FakeContext, gateway: FakeContext, threadId: string, contactId: string): Mailbox {
+  const stamp = groupStamp(source, gateway);
+  if (!stamp) throw rejected('route: expected a current member of the same group');
+  const records = mailboxes.get(gateway) ?? [];
+  const contactAt = fakeContacts(gateway)!.contacts.find(contact => contact.coreId === contactId)!.addedAt;
+  const existing = records.find(row => row.source === source && row.threadId === threadId && row.contactId === contactId && row.contactAt === contactAt && row.stamp === stamp);
+  if (existing) return existing;
+  const created = { id: `cmb_${++gateway.seq}`, gateway, source, threadId, contactId, contactAt, stamp };
+  mailboxes.set(gateway, [...records, created]);
+  return created;
+}
+
+export function contactSender(source: FakeContext, gateway: FakeContext, threadId: string, contactId: string): AgentContact {
+  const from = contactOf(source, source.thread(threadId), source.identity.coreId, source.identity.name);
+  return gateway === source ? from : { ...from, coreId: gateway.identity.coreId, threadId: mailbox(source, gateway, threadId, contactId).id };
+}
+
+/** Separate fake clocks must not put a reply before the letter it answers. */
+function nextMailTime(ctx: FakeContext, threadId: string): number {
+  return (ctx.letters.get(threadId) ?? []).reduce((at, letter) => Math.max(at, letter.createdAt + 1), ctx.now());
+}
+
+export function deliverContactAnswer(ctx: FakeContext, request: ContactRequest): void {
+  const thread = ctx.threads.get(request.from.threadId);
+  if (!thread || thread.archived) return;
+  const text = request.status === 'accepted'
+    ? `${request.contact} opened its project ${JSON.stringify(request.project?.name ?? '')} to you.`
+    : `${request.contact} refused your request: ${request.reason ?? 'no reason given'}`;
+  const at = nextMailTime(ctx, thread.id);
+  const letter: AgentLetter = {
+    id: `contact-answer-${request.id}`, origin: 'contact', contact: { coreId: request.coreId, name: request.contact },
+    from: { coreId: request.coreId, threadId: request.id, title: `Answer to your request to ${request.contact}`, machine: request.contact, resources: '', status: 'idle', mode: 'brief' },
+    to: { coreId: ctx.identity.coreId, threadId: thread.id }, toTitle: thread.title,
+    text, replyTo: null, createdAt: at, expiresAt: at + 86_400_000, status: 'received', error: null
+  };
+  ctx.letters.set(thread.id, [...(ctx.letters.get(thread.id) ?? []), letter]);
+  deliverPending(ctx, thread.id);
+  ctx.emit('collaboration.changed', { threadId: thread.id });
+}
 
 export function migratePeer(ctx: FakeContext, coreId: string): void {
   const member = ctx.roster?.cores.find(core => core.coreId === coreId);
@@ -129,6 +207,14 @@ function reachable(ctx: FakeContext, threadId: ThreadId): { contact: AgentContac
       if (!thread.archived && config.mode !== 'off' && config.remote) found.push({ contact: contactOf(target, thread, peer.coreId, peer.name), core: target });
     }
   }
+  if (sourceConfig.remote) for (const { gateway, contact } of fakeContactRoutes(ctx)) {
+    const target = cores.get(contact.coreId);
+    if (!target) continue;
+    for (const thread of target.threads.values()) {
+      const config = coordinationConfig(target, thread.id);
+      if (!thread.archived && config.mode !== 'off' && config.remote && openedTo(target, gateway, thread)) found.push({ contact: contactOf(target, thread, contact.coreId, contact.name), core: target });
+    }
+  }
   return found;
 }
 
@@ -140,16 +226,19 @@ function deliverPending(ctx: FakeContext, threadId: ThreadId): void {
   for (const letter of ctx.letters.get(threadId) ?? []) {
     if (letter.status !== 'received' || letter.to.coreId !== ctx.identity.coreId || letter.to.threadId !== threadId) continue;
     if (letter.expiresAt <= ctx.now()) { letter.status = 'expired'; continue; }
-    const sender = cores.get(letter.from.coreId);
-    const source = sender?.threads.get(letter.from.threadId);
+    if (letter.origin === 'contact') { letter.status = 'delivered'; ctx.emit('collaboration.changed', { threadId }); continue; }
+    const forwarding = deliveredFrom.get(letter);
+    const sender = forwarding?.source ?? cores.get(letter.from.coreId);
+    const source = forwarding?.thread ?? sender?.threads.get(letter.from.threadId);
     if (!sender || !source) continue;
     const sourceConfig = coordinationConfig(sender, source.id);
     if (sourceConfig.mode === 'off') continue;
     const sameProject = sender === ctx && source.projectId === thread.projectId;
     if (!sameProject && !(config.remote && sourceConfig.remote)) continue;
-    if (sender !== ctx && !(trusts(ctx, sender.identity.coreId) && trusts(sender, ctx.identity.coreId))) continue;
+    if (forwarding ? !forwarding.allowed() : sender !== ctx && !(trusts(ctx, sender.identity.coreId) && trusts(sender, ctx.identity.coreId))) continue;
     if (thread.projectId !== null && ctx.projects.find(project => project.id === thread.projectId)?.archived) archiveProject(ctx, thread.projectId, false);
     letter.status = 'delivered';
+    if (forwarding) forwarding.canonical.status = 'delivered';
     sender.emit('collaboration.changed', { threadId: source.id });
     ctx.emit('collaboration.changed', { threadId });
   }
@@ -194,6 +283,7 @@ export function coordinationMethods(ctx: FakeContext) {
           agents.push(contactOf(target, thread, peer.coreId, peer.name));
         }
       }
+      for (const row of reachable(ctx, threadId)) if (!agents.some(agent => agent.coreId === row.contact.coreId && agent.threadId === row.contact.threadId)) agents.push(row.contact);
       return { agents, unavailable };
     },
     'collaboration.send': async (params) => {
@@ -208,17 +298,30 @@ export function coordinationMethods(ctx: FakeContext) {
         return structuredClone(existing);
       }
       if (!params.text.trim() || params.text.length > 4000) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'text: expected 1 to 4000 characters' });
-      const destination = params.to.coreId === ctx.identity.coreId ? ctx : cores.get(params.to.coreId);
-      const target = destination ? destination.threads.get(params.to.threadId) : undefined;
+      let destination = params.to.coreId === ctx.identity.coreId ? ctx : cores.get(params.to.coreId);
+      const box = destination ? mailboxes.get(destination)?.find(row => row.id === params.to.threadId && row.contactId === ctx.identity.coreId) : undefined;
+      const route = routeTo(ctx, params.to.coreId);
+      if (box) {
+        if (groupStamp(box.source, box.gateway) !== box.stamp || !fakeContacts(box.gateway)?.contacts.some(contact => contact.coreId === ctx.identity.coreId && contact.addedAt === box.contactAt)) throw rejected('route: contact or group permission revoked');
+        destination = box.source;
+      }
+      const target = destination ? destination.threads.get(box?.threadId ?? params.to.threadId) : undefined;
       if (!target || target.archived || coordinationConfig(destination!, target.id).mode === 'off') {
         throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'recipient is unavailable for coordination' });
       }
       if (destination === ctx && target.projectId !== source.projectId && !(config.remote && coordinationConfig(ctx, target.id).remote)) {
         throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'both threads must allow coordination across projects' });
       }
-      if (destination !== ctx && (!config.remote || !trusts(ctx, params.to.coreId) || !destination || !trusts(destination, ctx.identity.coreId) || !coordinationConfig(destination, target.id).remote)) {
+      if (destination !== ctx && (!config.remote || !coordinationConfig(destination!, target.id).remote || (!box && !route && (!trusts(ctx, params.to.coreId) || !trusts(destination!, ctx.identity.coreId))))) {
         throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'remote core is not trusted' });
       }
+      if (route || box) {
+        checkContactTier(ctx, source);
+        contactStates.get(route?.gateway ?? box!.gateway)?.check(source);
+        contactStates.get(destination!)?.check(source);
+        if (!box && !openedTo(destination!, route!.gateway, target)) throw rejected('letter.to: not a thread of a project opened to you');
+      }
+      const at = Math.max(nextMailTime(ctx, source.id), nextMailTime(destination!, target.id));
       const letter: AgentLetter = {
         id: params.requestId,
         from: contactOf(ctx, source, ctx.identity.coreId, ctx.identity.name),
@@ -228,14 +331,29 @@ export function coordinationMethods(ctx: FakeContext) {
         toMachine: destination!.identity.name,
         text: params.text.trim(),
         replyTo: params.replyTo ?? null,
-        createdAt: ctx.now(),
-        expiresAt: ctx.now() + 15 * 60_000,
+        createdAt: at,
+        expiresAt: at + 15 * 60_000,
         status: 'received',
         error: null
       };
+      if (route) letter.contact = { coreId: route.contact.coreId, name: route.contact.name };
+      let incoming = letter;
+      let allowed: (() => boolean) | undefined;
+      if (box) {
+        incoming = { ...letter, to: { coreId: box.source.identity.coreId, threadId: target.id }, contact: { coreId: ctx.identity.coreId, name: fakeContacts(box.gateway)!.contacts.find(contact => contact.coreId === ctx.identity.coreId)!.name } };
+        allowed = () => groupStamp(box.source, box.gateway) === box.stamp && !!fakeContacts(box.gateway)?.contacts.some(contact => contact.coreId === ctx.identity.coreId && contact.addedAt === box.contactAt);
+      } else if (route) {
+        const { gateway, contact } = route;
+        const stamp = gateway === ctx ? null : groupStamp(ctx, gateway);
+        const address = gateway === ctx ? letter.from : { ...letter.from, coreId: gateway.identity.coreId, threadId: mailbox(ctx, gateway, source.id, contact.coreId).id };
+        const name = fakeContacts(destination!)!.contacts.find(contact => contact.coreId === gateway.identity.coreId)!.name;
+        incoming = { ...letter, from: address, contact: { coreId: gateway.identity.coreId, name } };
+        allowed = () => (gateway === ctx || groupStamp(ctx, gateway) === stamp) && !!fakeContacts(gateway)?.contacts.some(entry => entry.coreId === contact.coreId && entry.addedAt === contact.addedAt) && openedTo(destination!, gateway, target);
+      }
+      if (allowed) deliveredFrom.set(incoming, { source: ctx, thread: source, canonical: letter, allowed });
       ctx.letters.set(source.id, [...(ctx.letters.get(source.id) ?? []), letter]);
       ctx.emit('collaboration.changed', { threadId: source.id });
-      destination!.letters.set(target.id, [...(destination!.letters.get(target.id) ?? []), letter]);
+      destination!.letters.set(target.id, [...(destination!.letters.get(target.id) ?? []), incoming]);
       destination!.emit('collaboration.changed', { threadId: target.id });
       deliverPending(destination!, target.id);
       return structuredClone(letter);
@@ -246,7 +364,8 @@ export function coordinationMethods(ctx: FakeContext) {
       const matches: AgentMatch[] = [];
       for (const { contact, core } of reachable(ctx, params.threadId)) {
         const fields = { title: contact.title, project: contact.project ?? '', branch: contact.branch ?? '', agent: contact.agent ?? '', resources: contact.resources } as const;
-        const canRead = core === ctx || reads(core, ctx.identity.coreId);
+        const route = routeTo(ctx, core.identity.coreId);
+        const canRead = core === ctx || (route ? openedTo(core, route.gateway, core.thread(contact.threadId), true) : reads(core, ctx.identity.coreId));
         const chat = canRead ? chatOf(core.thread(contact.threadId)).filter(entry => entry.role !== 'system').map(entry => entry.text) : [];
         const matched = new Set<AgentMatch['matched'][number]>();
         const chatWords: string[] = [];
@@ -267,7 +386,8 @@ export function coordinationMethods(ctx: FakeContext) {
     'collaboration.read': async (params) => {
       const found = reachable(ctx, params.threadId).find(entry => entry.contact.coreId === params.target.coreId && entry.contact.threadId === params.target.threadId);
       if (!found) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `target: ${params.target.threadId} is not a contact this thread may reach; see boite threads` });
-      if (found.core !== ctx && !reads(found.core, ctx.identity.coreId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agents on this machine are not allowed to read conversations; enable their access in Machines on the destination' });
+      const route = routeTo(ctx, found.core.identity.coreId);
+      if (found.core !== ctx && !(route ? openedTo(found.core, route.gateway, found.core.thread(found.contact.threadId), true) : reads(found.core, ctx.identity.coreId))) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agents on this machine are not allowed to read conversations; enable their access in Machines on the destination' });
       const limit = params.limit ?? 30;
       const entries = chatOf(found.core.thread(found.contact.threadId)).filter(entry => (params.before === undefined || entry.at < params.before) && (entry.text.length > 0 || entry.tools.length > 0));
       return { contact: found.contact, entries: entries.slice(-limit), more: entries.length > limit };

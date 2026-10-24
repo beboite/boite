@@ -627,6 +627,21 @@ test('a waiting agent takes its answer directly, and the recipient is not woken 
   expect((await h.core.coordination.wait(a, undefined, 0)).letters).toEqual([]);
 });
 
+test('a disconnected inbox waiter leaves the next answer for a provider wake', async () => {
+  const { h, a, b } = await setup();
+  const client = await connect(h.url, h.core.agents.tokenFor(a));
+  const waiting = client.call('collaboration.wait', { threadId: a, from: dest(h, b), timeoutMs: 5000 }).catch(() => null);
+  await waitFor(() => h.core.router.activeRequests === 1);
+  client.close();
+  await waiting;
+  // Let the server observe the socket close before the response arrives.
+  await new Promise(resolve => setTimeout(resolve, 50));
+  const answer = await send(h, b, dest(h, a), 'Deliver this after the waiter left.');
+  await waitFor(() => h.core.coordination.get(a).messages.find(letter => letter.id === answer.id)?.status === 'delivered');
+  expect(h.core.coordination.get(a).wakes).toBe(1);
+  expect(h.core.journal.listTurns(a)).toHaveLength(1);
+});
+
 test('two linked cores search and read each other\'s agents through signed requests', async () => {
   const one = await setup(); const two = await setup();
   const cardA = one.h.core.coordination.identity(), cardB = two.h.core.coordination.identity();

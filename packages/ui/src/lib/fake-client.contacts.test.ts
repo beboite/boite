@@ -23,6 +23,39 @@ async function fake(): Promise<{ client: FakeClient; events: () => number }> {
   return { client, events: () => heard };
 }
 
+test('a group contact keeps both sides of its exchange in the initiating conversation', async () => {
+  const [source, gateway, outside] = ['source', 'gateway', 'outside'].map(name => new FakeClient({ delayMs: 0, coreId: `core-${name}`, coreName: name }));
+  clients.push(source!, gateway!, outside!);
+  await Promise.all(clients.map(client => client.connect()));
+  await source!.call('group.create', { name: 'Work' });
+  await gateway!.call('group.join', { invite: (await source!.call('group.invite', {})).invite });
+  await outside!.call('contacts.join', { link: (await gateway!.call('contacts.invite', { share: false })).link });
+  for (const client of clients) await client.call('contacts.settings', { settings: { minTier: 2 } });
+  await outside!.call('contacts.grant', { coreId: 'core-gateway', projectId: 'p-boite', readThreads: true });
+  expect((await source!.call('collaboration.contacts', { threadId: 't-trace' })).map(contact => contact.coreId)).toContain('core-outside');
+  const target = (await source!.call('collaboration.directory', { threadId: 't-trace' })).agents.find(agent => agent.coreId === 'core-outside' && agent.threadId === 't-trace')!;
+  expect(target).toBeDefined();
+  const sent = await source!.call('collaboration.send', { threadId: 't-trace', to: target, text: 'Which port is free?', requestId: 'routed-question' });
+  const received = (await outside!.call('collaboration.get', { threadId: 't-trace' })).messages.find(letter => letter.id === sent.id)!;
+  expect(received.from.coreId).toBe('core-gateway');
+  expect(received.from.threadId).not.toBe('t-trace');
+  const answer = await outside!.call('collaboration.send', { threadId: 't-trace', to: received.from, text: 'Port 8080 is free.', replyTo: sent.id, requestId: 'routed-answer' });
+  expect(answer.createdAt).toBeGreaterThan(sent.createdAt);
+  const mine = (await source!.call('collaboration.get', { threadId: 't-trace' })).messages;
+  expect(mine.map(letter => letter.id)).toEqual([sent.id, answer.id]);
+  expect(mine[1]).toMatchObject({ from: { coreId: 'core-outside', threadId: 't-trace' }, to: { coreId: 'core-source', threadId: 't-trace' }, status: 'delivered' });
+  expect((await gateway!.call('collaboration.get', { threadId: 't-trace' })).messages).toEqual([]);
+  const asked = await source!.call('collaboration.ask', { threadId: 't-trace', contact: 'outside', text: 'An agent for the notes project' });
+  expect(asked.from.coreId).toBe('core-source');
+  const incoming = (await outside!.call('contacts.get', {})).requests.find(request => request.id === asked.id)!;
+  expect(incoming.from).toMatchObject({ coreId: 'core-gateway', threadId: received.from.threadId });
+  await outside!.call('contacts.decide', { id: incoming.id, accept: true, projectId: 'p-notes' });
+  expect((await source!.call('collaboration.get', { threadId: 't-trace' })).messages.at(-1)).toMatchObject({ origin: 'contact', to: { coreId: 'core-source', threadId: 't-trace' }, status: 'delivered' });
+  expect((await source!.call('collaboration.contacts', { threadId: 't-trace' })).find(contact => contact.coreId === 'core-outside')!.projects).toContain('notes');
+  await outside!.call('contacts.revoke', { coreId: 'core-gateway', projectId: 'p-boite' });
+  await expect(source!.call('collaboration.send', { threadId: 't-trace', to: target, text: 'No longer allowed', requestId: 'routed-revoked' })).rejects.toBeInstanceOf(RpcFailure);
+});
+
 async function refusal(call: Promise<unknown>): Promise<{ code: number; field?: unknown }> {
   try {
     await call;
