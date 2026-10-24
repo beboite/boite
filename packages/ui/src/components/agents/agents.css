@@ -211,13 +211,10 @@ fieldset.card { border: 1px solid var(--color-border); padding: var(--settings-p
 .agent-brain-root ~ .agent-error { margin: 12px 0 0; }
 
 /*
- * The desk: the right panel's surface beside an agent's thread, one calm,
- * dense panel. Now on top as the one raised card, then sections of rows
- * under small sentence-case labels: the threads on its desk, its routines,
- * its memory, its day. Hue says status only; the robot's colour stays on
- * the robot and its ring.
+ * The desk keeps Now above three tabs. Activity and daily usage open on
+ * request; the active pane keeps its forms mounted when another tab opens.
  */
-.agent-desk { display: flex; flex-direction: column; gap: 20px; height: 100%; min-height: 0; overflow-y: auto; box-sizing: border-box; padding: 12px 12px 28px; }
+.agent-desk { display: flex; flex-direction: column; gap: 20px; height: 100%; min-height: 0; overflow-y: auto; box-sizing: border-box; padding: 12px 12px 28px; container-type: inline-size; }
 .agent-desk > * { flex: none; }
 .agent-desk .hint { color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.5; }
 .desk-now { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-e1); }
@@ -228,6 +225,20 @@ fieldset.card { border: 1px solid var(--color-border); padding: var(--settings-p
 .desk-now[data-state='waiting'] .desk-now-line { color: var(--color-live); }
 .desk-now[data-state='error'] .desk-now-line { color: var(--color-danger); }
 .desk-now-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; font-size: var(--text-sm); color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; }
+.desk-activity { border-top: 1px solid var(--color-border); padding-top: 4px; }
+.desk-activity > summary { display: flex; align-items: center; gap: 6px; min-height: var(--control-sm); color: var(--color-muted-foreground); font-size: var(--text-xs); cursor: pointer; list-style: none; }
+.desk-activity > summary:hover { color: var(--color-foreground); }
+.desk-activity > summary::-webkit-details-marker, .desk-day > summary::-webkit-details-marker { display: none; }
+.desk-activity[open] > summary .fold-caret, .desk-day[open] > summary .fold-caret { transform: rotate(90deg); }
+.desk-tabs { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); }
+.desk-tabs > button { flex: 1; min-width: 0; min-height: var(--control); gap: 6px; padding: 4px 6px; border: 0; border-radius: var(--radius-md); background: transparent; color: var(--color-muted-foreground); font-size: var(--text-sm); box-shadow: none; }
+.desk-tabs > button:hover { background: var(--color-hover); color: var(--color-foreground); }
+.desk-tabs > button[aria-selected='true'] { background: var(--color-surface-3); color: var(--color-foreground); box-shadow: var(--shadow-e1); }
+.desk-tabs > button > svg { flex: none; }
+.desk-tab-count { font-size: var(--text-xs); color: var(--color-subtle); font-variant-numeric: tabular-nums; }
+.desk-tabs .desk-tab-alert { color: var(--color-danger); }
+.desk-pane[hidden] { display: none; }
+.desk-pane { outline-offset: 4px; }
 /* The last calls on a slim timeline: a hairline down the marks, the running one spinning, each new one rising in. */
 .desk-steps { list-style: none; margin: 0; padding: 2px 0 0 15px; display: flex; flex-direction: column; gap: 1px; position: relative; }
 .desk-steps::before { content: ''; position: absolute; left: 22px; top: 10px; bottom: 10px; width: 1px; background: var(--color-border); }
@@ -310,12 +321,12 @@ fieldset.card { border: 1px solid var(--color-border); padding: var(--settings-p
 .agent-desk .agent-schedule, .agent-desk .agent-schedule.card { margin: 4px 0 8px; padding: 12px; }
 .agent-desk .agent-field textarea { min-height: 96px; }
 /* Its memory: the last pass on one subtle line, the file as a two-line preview that opens, its ways of working folded under. */
-.desk-memory-pass { display: flex; align-items: center; gap: 6px; margin: 0; padding: 0 2px; font-size: var(--text-xs); color: var(--color-subtle); min-width: 0; }
+.desk-memory-pass { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 0; padding: 0 2px; font-size: var(--text-xs); color: var(--color-subtle); min-width: 0; }
 .desk-memory-pass > svg { flex: none; }
 .desk-memory-pass[data-status='running'] > svg { animation: pulse 1.6s var(--loop-ease-in-out-48) infinite var(--loops); }
 .desk-memory-pass[data-status='error'] { color: var(--color-danger); }
 .desk-memory-pass-when { flex: none; white-space: nowrap; }
-.desk-memory-pass-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-memory-pass-summary { flex-basis: 100%; min-width: 0; padding-left: 18px; overflow-wrap: anywhere; }
 .desk-memory { padding: 4px 2px 0; font-size: var(--text-sm); line-height: 1.5; color: var(--color-foreground); }
 .desk-memory:not(.open) { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .desk-memory .prose { font-size: inherit; }
@@ -333,6 +344,10 @@ fieldset.card { border: 1px solid var(--color-border); padding: var(--settings-p
 .desk-ways > summary code { font-size: var(--text-xs); }
 .desk-ways[open] > summary { color: var(--color-foreground); }
 /* Its day: the counts on one line, the spend at its end, a slim bar for the budget under them. */
+.desk-day { margin-top: auto; border-top: 1px solid var(--color-border); padding-top: 8px; }
+.desk-day > summary { display: flex; align-items: center; gap: 8px; min-height: var(--control); padding: 0 2px; color: var(--color-muted-foreground); font-size: var(--text-xs); cursor: pointer; list-style: none; }
+.desk-day > summary:hover { color: var(--color-foreground); }
+.desk-day[open] .desk-budget { padding-top: 8px; }
 .desk-budget { display: flex; flex-direction: column; gap: 6px; padding: 0 2px; }
 .desk-today-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin: 0; font-size: var(--text-xs); color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; }
 .desk-stat strong { font-size: var(--text-sm); font-weight: 600; color: var(--color-foreground); }
@@ -342,6 +357,9 @@ fieldset.card { border: 1px solid var(--color-border); padding: var(--settings-p
 .desk-budget[data-reached='true'] .desk-meter > span { background: var(--color-danger); }
 .desk-budget-note { margin: 0; font-size: var(--text-xs); color: var(--color-danger); }
 .desk-budget-set { align-self: flex-start; }
+@container (max-width: 310px) {
+  .desk-tabs > button > svg:not(.desk-tab-alert) { display: none; }
+}
 /* Reduced motion stills the desk: no pulse, no spin, no entrance. */
 @media (prefers-reduced-motion: reduce) {
   .desk-dot, .desk-step-mark svg, .desk-card-pr svg, .desk-memory-pass > svg { animation: none !important; }
@@ -351,6 +369,7 @@ html[data-motion='reduced'] :is(.desk-memory-pass > svg, .desk-dot, .desk-step-m
 html[data-motion='reduced'] :is(.desk-now-line, .desk-steps li, .desk-row, .desk-chip) { animation: none; }
 @media (max-width: 720px) {
   .agent-desk { padding: 12px 12px 24px; }
+  .desk-tabs > button, .desk-day > summary, .desk-activity > summary { min-height: var(--control-touch); }
   .desk-card-drop, .desk-routine-actions { opacity: 1; }
   .desk-card-drop { width: var(--control-touch); height: var(--control-touch); margin: -10px -8px -10px -6px; }
   .desk-routine-actions button { width: 32px; height: 32px; }

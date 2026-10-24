@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { Brain, Check, ChevronDown, ChevronRight, LoaderCircle, Pencil, TriangleAlert } from '@lucide/svelte';
+  import { Brain, CalendarClock, Check, ChevronDown, ChevronRight, ListTodo, LoaderCircle, Pencil, TriangleAlert } from '@lucide/svelte';
   import type { AgentBrain, AgentWatch } from '@boite/contracts';
   import { AgentsView, agentOfThread, faceOf, liveState, liveStep, statusOf, waitingOn } from '../../lib/agents.svelte';
   import { budgetMeter, deskOrder, dollars, runningTurn, turnSteps } from '../../lib/agent-desk';
@@ -20,17 +20,12 @@
   import DeskCard from './DeskCard.svelte';
   import './agents.css';
 
-  /**
-   * A persistent agent's desk, the right panel's surface beside its thread:
-   * one calm, dense panel that shows it works. Now on top: its robot in its
-   * ring, the step its running turn is on in large type, the time it has run
-   * ticking and its last calls on a slim timeline; else what it waits on or
-   * when it next wakes. Then the threads on its desk as rows, each answering
-   * its question in place, opening its thread or leaving the desk; its
-   * routines as rows with their next time; its memory as a short preview; its
-   * day as a line of numbers over a slim budget bar.
-   */
+  /** Now stays visible; followed work, routines and memory each have a tab. */
   let { store }: { store: Store } = $props();
+  const deskId = $props.id();
+  const panes = ['work', 'routines', 'memory'] as const;
+  type Pane = typeof panes[number];
+  let pane = $state<Pane>('work');
   const view = AgentsView.of(untrack(() => store));
   onMount(() => { view.start(); return () => view.pause(); });
 
@@ -52,6 +47,7 @@
   // The snapshot carries the open agent's desk only; the Agents page asks for it too, this asks wherever the desk is drawn.
   $effect(() => { const id = agent?.id; if (id) untrack(() => view.showDesk(id)); });
   const watches = $derived<AgentWatch[]>(agent ? deskOrder(view.snapshot?.watches.filter(w => w.agentId === agent.id) ?? []) : []);
+  const routines = $derived(view.snapshot?.routines.filter(r => r.agentId === agent?.id) ?? []);
   const today = $derived(status?.today ?? { turns: 0, wakes: 0, quiet: 0, costUsd: 0 });
 
   /** What the core keeps beside the snapshot: its brain files and its budget, read again when the agent changes. */
@@ -73,6 +69,17 @@
     return () => { live = false; };
   });
   const meter = $derived(budgetMeter(today.costUsd, budget));
+
+  function navigate(event: KeyboardEvent) {
+    const index = panes.indexOf(pane);
+    const next = event.key === 'ArrowRight' ? (index + 1) % panes.length
+      : event.key === 'ArrowLeft' ? (index + panes.length - 1) % panes.length
+      : event.key === 'Home' ? 0 : event.key === 'End' ? panes.length - 1 : null;
+    if (next === null) return;
+    event.preventDefault();
+    pane = panes[next]!;
+    document.getElementById(`${deskId}-tab-${pane}`)?.focus();
+  }
 
   async function answer(watch: AgentWatch, option: string) {
     const question = watch.question;
@@ -103,7 +110,6 @@
             {#key step}<strong class="desk-now-line" data-testid="desk-now-step">{step ?? strings.agents.state.working}</strong>{/key}
             <span class="desk-now-meta">
               {#if since !== null}<Elapsed startedAt={since} finishedAt={null} active />{/if}
-              {#if steps.length}<span>· {steps.length === 1 ? t.stepOne : fill(t.stepMany, { count: String(steps.length) })}</span>{/if}
             </span>
           {:else if standing === 'waiting' || standing === 'queued'}
             <strong class="desk-now-line">{standing === 'queued' ? strings.agents.state.queued : pending ?? strings.agents.state.waiting}</strong>
@@ -123,24 +129,44 @@
         </div>
       </div>
       {#if recent.length}
-        <ol class="desk-steps" data-testid="desk-steps">
-          {#each recent as part (part.toolId)}
-            {@const line = toolLine(part)}
-            <li data-status={part.status}>
-              <span class="desk-step-mark" aria-hidden="true">
-                {#if part.status === 'running'}<LoaderCircle size={12} strokeWidth={1.75} />{:else if part.status === 'error'}<TriangleAlert size={12} strokeWidth={1.75} />{:else}<Check size={12} strokeWidth={1.75} />{/if}
-              </span>
-              <span class="desk-step-text" class:mono={line.mono} title={line.title}>{line.text}</span>
-            </li>
-          {/each}
-        </ol>
+        <details class="desk-activity" data-testid="desk-activity">
+          <summary><ChevronRight size={12} class="fold-caret" />{steps.length === 1 ? t.stepOne : fill(t.stepMany, { count: String(steps.length) })}</summary>
+          <ol class="desk-steps" data-testid="desk-steps">
+            {#each recent as part (part.toolId)}
+              {@const line = toolLine(part)}
+              <li data-status={part.status}>
+                <span class="desk-step-mark" aria-hidden="true">
+                  {#if part.status === 'running'}<LoaderCircle size={12} strokeWidth={1.75} />{:else if part.status === 'error'}<TriangleAlert size={12} strokeWidth={1.75} />{:else}<Check size={12} strokeWidth={1.75} />{/if}
+                </span>
+                <span class="desk-step-text" class:mono={line.mono} title={line.title}>{line.text}</span>
+              </li>
+            {/each}
+          </ol>
+        </details>
       {/if}
     </section>
 
     {#if view.error}<p class="agent-error desk-error" role="alert">{view.error}</p>{/if}
 
-    <section class="desk-section" data-testid="desk-work">
-      <header class="desk-head"><h3>{t.work}</h3>{#if watches.length}<span class="desk-count">{watches.length}</span>{/if}</header>
+    <div class="desk-tabs" role="tablist" tabindex="-1" aria-label={strings.agents.desk} onkeydown={navigate}>
+      {#each panes as tab (tab)}
+        {@const memoryError = tab === 'memory' && status?.memory?.status === 'error'}
+        <button type="button" role="tab" id="{deskId}-tab-{tab}" aria-controls="{deskId}-pane-{tab}"
+          aria-selected={pane === tab} tabindex={pane === tab ? 0 : -1}
+          aria-label={memoryError ? `${t.memory}: ${t.memoryProblem}` : undefined}
+          title={memoryError ? t.memoryProblem : undefined}
+          onclick={() => { pane = tab; }} data-testid="desk-tab-{tab}">
+          {#if tab === 'work'}<ListTodo size={14} strokeWidth={1.75} />{:else if tab === 'routines'}<CalendarClock size={14} strokeWidth={1.75} />{:else}<Brain size={14} strokeWidth={1.75} />{/if}
+          <span>{tab === 'routines' ? strings.agents.planned : t[tab]}</span>
+          {#if tab === 'work' && watches.length}<span class="desk-tab-count">{watches.length}</span>{/if}
+          {#if tab === 'routines' && routines.length}<span class="desk-tab-count">{routines.length}</span>{/if}
+          {#if memoryError}<TriangleAlert size={12} class="desk-tab-alert" aria-hidden="true" />{/if}
+        </button>
+      {/each}
+    </div>
+
+    <div class="desk-section desk-pane" role="tabpanel" id="{deskId}-pane-work" aria-labelledby="{deskId}-tab-work" tabindex="0" hidden={pane !== 'work'} data-testid="desk-work">
+      <header class="desk-head"><h3>{t.following}</h3></header>
       <div class="desk-rows">
         {#each watches as watch (watch.threadId)}
           <DeskCard {watch} {now} project={store.projects.find(p => p.id === watch.projectId) ?? null}
@@ -151,13 +177,13 @@
           <p class="desk-empty">{t.workEmpty}</p>
         {/each}
       </div>
-    </section>
+    </div>
 
-    <section class="desk-section desk-schedule" data-testid="desk-schedule">
+    <div class="desk-section desk-pane desk-schedule" role="tabpanel" id="{deskId}-pane-routines" aria-labelledby="{deskId}-tab-routines" tabindex="0" hidden={pane !== 'routines'} data-testid="desk-schedule">
       <AgentRoutines {view} agentId={agent.id} compact />
-    </section>
+    </div>
 
-    <section class="desk-section" data-testid="desk-memory">
+    <div class="desk-section desk-pane" role="tabpanel" id="{deskId}-pane-memory" aria-labelledby="{deskId}-tab-memory" tabindex="0" hidden={pane !== 'memory'} data-testid="desk-memory">
       <header class="desk-head">
         <h3>{t.memory}</h3>
         {#if store.owner && brain && !editing}<button type="button" class="ghost small icon" title={strings.agents.edit} aria-label={strings.agents.edit} onclick={() => { editing = true; }} data-testid="desk-memory-edit"><Pencil size={13} strokeWidth={1.75} /></button>{/if}
@@ -186,16 +212,19 @@
           {#if brain.instructions.trim()}<div class="desk-memory open"><Prose text={brain.instructions} {store} threadId={thread?.id} /></div>{:else}<p class="desk-empty">{t.waysEmpty}</p>{/if}
         </details>
       {/if}
-    </section>
+    </div>
 
-    <section class="desk-section" data-testid="desk-today">
-      <header class="desk-head"><h3>{t.today}</h3></header>
+    <details class="desk-day" open={meter?.reached ?? false} data-testid="desk-today">
+      <summary title={t.spent}>
+        <span>{t.today}</span>
+        <span class="desk-spent">{meter ? fill(t.spentOf, { spent: dollars(today.costUsd), budget: dollars(budget!) }) : `${dollars(today.costUsd)} · ${t.noCap}`}</span>
+        <ChevronRight size={12} class="fold-caret" />
+      </summary>
       <div class="desk-budget" data-reached={meter?.reached ?? false} data-testid="desk-budget">
         <p class="desk-today-line">
           <span class="desk-stat"><strong>{today.turns}</strong> {t.turns.toLowerCase()}</span>
           <span class="desk-stat"><strong>{today.wakes}</strong> {t.wakes.toLowerCase()}</span>
           <span class="desk-stat"><strong>{today.quiet}</strong> {t.quiet.toLowerCase()}</span>
-          <span class="desk-spent" title={t.spent}>{meter ? fill(t.spentOf, { spent: dollars(today.costUsd), budget: dollars(budget!) }) : `${dollars(today.costUsd)} · ${t.noCap}`}</span>
         </p>
         {#if meter}
           <div class="desk-meter" role="meter" aria-valuemin={0} aria-valuemax={budget!} aria-valuenow={today.costUsd} aria-label={t.spent}><span style:width="{Math.round(meter.ratio * 100)}%"></span></div>
@@ -204,6 +233,6 @@
           <button type="button" class="ghost small desk-budget-set" onclick={() => store.showAgents(agent.id, 'settings')} data-testid="desk-budget-set">{t.setBudget}</button>
         {/if}
       </div>
-    </section>
+    </details>
   {/if}
 </div>
