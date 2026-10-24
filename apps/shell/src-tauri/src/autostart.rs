@@ -38,6 +38,13 @@ pub(crate) fn quiet_restart(directory: &std::path::Path, restarted_after_update:
     restarted_after_update && fresh
 }
 
+/// Whether this shell starts in the tray: the login entry started it, or an
+/// automatic update restarted it. The marker is read, and so cleared, either way.
+pub(crate) fn starts_unasked(args: impl Iterator<Item = std::ffi::OsString>, directory: &std::path::Path, restarted_after_update: bool) -> bool {
+    let quiet = quiet_restart(directory, restarted_after_update);
+    launched_at_login(args, restarted_after_update) || quiet
+}
+
 /// Whether this process is the one the login entry started. A restart after
 /// an update keeps the original arguments, and that one is the user's own
 /// action: its window comes back.
@@ -70,7 +77,7 @@ pub(crate) fn launch_at_login(app: AppHandle, webview: Webview, enabled: Option<
 
 #[cfg(test)]
 mod tests {
-    use super::{launched_at_login, quiet_restart, restarted_by_installer, starts_in_tray, QUIET_RESTART_FILE};
+    use super::{launched_at_login, quiet_restart, restarted_by_installer, starts_in_tray, starts_unasked, QUIET_RESTART_FILE};
 
     fn args(list: &[&str]) -> impl Iterator<Item = std::ffi::OsString> {
         list.iter().map(std::ffi::OsString::from).collect::<Vec<_>>().into_iter()
@@ -100,6 +107,10 @@ mod tests {
         std::fs::write(directory.join(QUIET_RESTART_FILE), "").unwrap();
         assert!(quiet_restart(&directory, true));
         assert!(!quiet_restart(&directory, true), "only the first restart reads it");
+        // A login start clears a marker left by an install that never restarted.
+        std::fs::write(directory.join(QUIET_RESTART_FILE), "").unwrap();
+        assert!(starts_unasked([std::ffi::OsString::from(super::LOGIN_ARG)].into_iter(), &directory, false));
+        assert!(!directory.join(QUIET_RESTART_FILE).exists(), "a login start leaves no marker behind");
         let _ = std::fs::remove_dir_all(&directory);
     }
 }

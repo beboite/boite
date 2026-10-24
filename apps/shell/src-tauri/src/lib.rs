@@ -146,7 +146,7 @@ pub fn run() {
     std::env::remove_var(RESTARTED_AFTER_UPDATE);
     // Started by the login entry: the core starts, the window waits in the tray.
     // An update that installed by itself restarts into the tray, as a login start does.
-    let at_login = autostart::launched_at_login(std::env::args_os(), restarted) || autostart::quiet_restart(&directory, restarted);
+    let at_login = autostart::starts_unasked(std::env::args_os(), &directory, restarted);
     let _instance = match acquire_after_update(&directory, restarted) {
         Ok(Some(file)) => { start_log(instance_started.elapsed()); Some(file) }
         // Another instance already owns this data directory: it shows its
