@@ -87,7 +87,8 @@ describe.skipIf(process.platform !== 'win32')('window capture on Windows', () =>
   let minimized: NativeWindow;
 
   async function find(proc: Subprocess, wanted: (window: NativeWindow) => boolean): Promise<NativeWindow> {
-    const deadline = Date.now() + 10_000;
+    // PowerShell loading WinForms takes seconds on a busy machine or CI runner.
+    const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
       const found = (await capture.list()).find((window) => window.pid === proc.pid && wanted(window));
       if (found !== undefined) return found;
@@ -111,7 +112,7 @@ describe.skipIf(process.platform !== 'win32')('window capture on Windows', () =>
       find(minimizedProcess, (window) => window.title === `${tag}-minimized` && window.minimized),
       find(blueProcess, (window) => window.title === `${tag}-blue`),
     ]);
-  }, 15_000);
+  }, 45_000);
 
   afterAll(() => {
     for (const proc of processes) proc.kill();
