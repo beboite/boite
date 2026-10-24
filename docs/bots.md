@@ -409,7 +409,8 @@ instructions (`--instructions-file <path>` for a long text), its picture
 (`active`, `paused` or `archived`), the projects entrusted to it, its model and
 reasoning effort, the memory pass (`autoMemory`), its subagents and its daily
 budget (`dailyBudget`, dollars a day or `null`). A name another bot holds is
-refused. The context block tells the bot how to ask, so one the user asks to
+refused, when the card is drawn and again when it is applied. The context
+block tells the bot how to ask, so one the user asks to
 rename itself draws the card, and one that needs a project it was not given
 asks for it instead of working around it. The card is asked without stopping and outlives its turn.
 Apply (`agents.settings.apply`, owner only) goes through the same checks as the

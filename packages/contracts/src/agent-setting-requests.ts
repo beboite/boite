@@ -224,9 +224,9 @@ export function checkAgentSettingRequest(params: Pick<AgentSettingRequestParams,
 export function settledAgentSetting(setting: AgentSettingAsk, profile: AgentProfile | null, config: AgentRuntimeConfig | null): QuestionAnswer | 'close' | null {
   // A card asked about a key this core no longer has (`maxRunMinutes`) closes unanswered.
   if (profile === null || !isAgentSettingKey(setting.key)) return 'close';
-  const status = setting.key === 'status';
-  if (!status && (config === null || profile.status === 'archived')) return 'close';
-  const now = status ? profile.status : agentSettingValue(profile, config!, setting.key);
+  const archiving = setting.key === 'status' && setting.value === 'archived';
+  if (!archiving && (config === null || profile.status === 'archived')) return 'close';
+  const now = archiving ? profile.status : agentSettingValue(profile, config!, setting.key);
   if (sameSetting(now, setting.previous)) return null;
   return { optionIds: [sameSetting(now, setting.value) ? 'applied' : 'changed'], value: now };
 }

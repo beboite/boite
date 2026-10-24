@@ -125,8 +125,9 @@ export class AgentSettingCards {
     if (agent.status === 'archived') throw refused(`agents.settings.apply: ${agent.name} is archived`, { field: 'questionId' });
     const ctx = this.context(agent);
     let value = ask.value;
-    if (params.value !== undefined) {
-      const normalized = normalizeAgentSetting(ask.key, params.value, ctx);
+    // A name is checked again: another card may have given it to a bot since this one was drawn.
+    if (params.value !== undefined || ask.key === 'name') {
+      const normalized = normalizeAgentSetting(ask.key, params.value ?? ask.value, ctx);
       if (!normalized.ok) throw refused(normalized.message, { field: 'value', key: ask.key });
       value = normalized.value;
     }

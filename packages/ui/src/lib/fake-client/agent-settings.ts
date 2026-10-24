@@ -185,8 +185,9 @@ export function agentSettingMethods(ctx: FakeContext): Handlers {
       if (!agent) throw refused(`unknown profile ${setting.agentId}`);
       if (agent.status === 'archived') throw refused(`agents.settings.apply: ${agent.name} is archived`, { field: 'questionId' });
       let value = setting.value;
-      if (params.value !== undefined) {
-        const normalized = normalizeAgentSetting(setting.key, params.value, context(ctx, agent));
+      // As the core: a name is checked again, another card may have given it away since.
+      if (params.value !== undefined || setting.key === 'name') {
+        const normalized = normalizeAgentSetting(setting.key, params.value ?? setting.value, context(ctx, agent));
         if (!normalized.ok) throw refused(normalized.message, { field: 'value', key: setting.key });
         value = normalized.value;
       }

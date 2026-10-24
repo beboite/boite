@@ -188,6 +188,19 @@ test('a bot asks to rename itself and to pause, then archive, another bot; the o
   expect(h.core.journal.getThread(self)!.title).toBe('Gargouille (Sécurité)');
   await waitFor(() => heard(`applied: Ada's name is now "Gargouille (Sécurité)"`));
 
+  // Two cards may ask for one free name; once one gives it away, the other cannot apply.
+  await owner.call('turns.start', { threadId: worker, prompt: 'Prepare the release' });
+  await waitFor(() => h.core.journal.listTurns(worker).some(t => t.status === 'done'));
+  expect((await run(['settings', 'bot', 'request', 'name', 'Sentinel', '--bot', 'Herald', '--why', 'A watch name.'], worker)).code).toBe(0);
+  expect((await run(['settings', 'bot', 'request', 'name', 'Sentinel', '--why', 'A watch name.'], self)).code).toBe(0);
+  await owner.call('agents.settings.apply', { threadId: worker, questionId: cards(worker)[0]!.id });
+  expect(heraldNow().name).toBe('Sentinel');
+  const second = cards(self)[0]!;
+  expect(await thrown(owner.call('agents.settings.apply', { threadId: self, questionId: second.id }))).toThrow('another bot is named "Sentinel"');
+  expect(profile().name).toBe('Gargouille (Sécurité)');
+  await owner.call('questions.answer', { threadId: self, questionId: second.id, optionIds: ['refuse'] });
+  await waitFor(() => cards(self).length === 0 && cards(worker).length === 0);
+
   // Long instructions come from a file; the change line and the listing show their start.
   const manual = join(h.dataDir, 'manual.md');
   await Bun.write(manual, `Guard the release.\n${'Check every gate. '.repeat(40)}`);
@@ -196,16 +209,21 @@ test('a bot asks to rename itself and to pause, then archive, another bot; the o
   expect(profile().instructions).toStartWith('Guard the release.\nCheck every gate.');
   expect((await run(['settings', 'bot'], self)).out).toMatch(/instructions "Guard the release\.\\nCheck.*… \(\d+ characters\)/);
 
-  // Another bot, by name: paused, then archived. An archive card settles as applied, not closed.
-  expect((await run(['settings', 'bot', 'request', 'status', 'paused', '--bot', 'Herald', '--why', 'The user is away.'], self)).code).toBe(0);
+  // Another bot, by name: paused, then archived. An archive card settles as applied, not closed;
+  // a card to wake it, drawn from another thread, closes unanswered with it.
+  expect((await run(['settings', 'bot', 'request', 'status', 'paused', '--bot', 'Sentinel', '--why', 'The user is away.'], self)).code).toBe(0);
   await apply(cards(self)[0]!.id);
   expect(heraldNow().status).toBe('paused');
-  expect((await run(['settings', 'bot', 'status', '--bot', 'Herald'], self)).out).toContain('choices: active, paused, archived');
-  expect((await run(['settings', 'bot', 'request', 'status', 'archived', '--bot', 'Herald', '--why', 'Herald is no longer needed.'], self)).code).toBe(0);
+  expect((await run(['settings', 'bot', 'status', '--bot', 'Sentinel'], self)).out).toContain('choices: active, paused, archived');
+  expect((await run(['settings', 'bot', 'request', 'status', 'active', '--bot', 'Sentinel', '--why', 'The user is back.'], worker)).code).toBe(0);
+  const [wake] = cards(worker);
+  expect((await run(['settings', 'bot', 'request', 'status', 'archived', '--bot', 'Sentinel', '--why', 'Sentinel is no longer needed.'], self)).code).toBe(0);
   const archive = cards(self)[0]!;
   await apply(archive.id);
   expect(heraldNow().status).toBe('archived');
   expect(drawn(self, archive.id)!.answer).toEqual({ optionIds: ['applied'], value: 'archived' });
+  await waitFor(() => cards(worker).length === 0);
+  expect(drawn(worker, wake!.id)!.answer).toBeNull();
   expect(profile().status).toBe('active');
 });
 
