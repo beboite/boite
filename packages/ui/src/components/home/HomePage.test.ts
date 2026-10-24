@@ -1,9 +1,12 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
+import { RpcErrorCode } from '@boite/contracts';
 import { confirm } from '../../lib/confirm.svelte';
 import { setExperiment } from '../../lib/experiments';
 import { inviteShare, readInvite } from '../../lib/contact-link';
+import { contactsOf } from '../../lib/contacts.svelte';
 import { FakeClient } from '../../lib/fake-client';
+import { RpcFailure } from '../../lib/rpc-error';
 import { FAKE_CONTACT_INVITE } from '../../lib/fake-client/contacts';
 import { Store, store as primary } from '../../lib/store.svelte';
 import { fill, strings } from '../../lib/strings';
@@ -261,6 +264,36 @@ test('Elsewhere makes a link to this machine on Funnel, without a share; a tailn
   const link = readInvite(one<HTMLInputElement>('contact-invite-link')!.value)!;
   expect([link.u, link.s]).toEqual(['https://boite-pc.tail4f2a.ts.net:8443', null]);
   expect(one('contact-invite')!.textContent).toContain(strings.contacts.invite.funnel);
+  // The core checked the link's origin from the internet: the owner knows it is ready to send.
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invite-reach')?.dataset.status).toBe('ready'); });
+  expect(one('contact-invite-reach')!.textContent).toBe(strings.contacts.invite.reach.ready);
+  for (const component of components.splice(0)) unmount(component);
+  document.body.innerHTML = '';
+
+  // Public DNS does not know the name yet: the owner is told to wait, then what to do once a repair did not help.
+  const waiting = await connect();
+  const waitingCall = waiting.client!.call.bind(waiting.client!);
+  let repaired = false;
+  let moved = false;
+  vi.spyOn(waiting.client!, 'call').mockImplementation(((method: string, params: unknown) => method === 'contacts.get'
+    ? waitingCall('contacts.get', {}).then(state => ({ ...state, funnel: state.funnel && (moved
+      ? { ...state.funnel, url: state.funnel.url.replace(/:\d+$/, ':10000'), status: 'ready', repaired }
+      : { ...state.funnel, status: 'unpublished', repaired }) }))
+    : waitingCall(method as never, params as never)) as typeof waitingCall);
+  waiting.showHome(null);
+  components.push(mount(HomePage, { target: document.body, props: { store: waiting } }));
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invite-internet')).not.toBeNull(); });
+  one<HTMLButtonElement>('contact-invite-internet')!.click();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invite-reach')?.dataset.status).toBe('unpublished'); });
+  expect(one('contact-invite-reach')!.textContent).toContain(strings.contacts.invite.reach.unpublished);
+  repaired = true;
+  await contactsOf(waiting).refresh();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invite-reach')!.textContent).toContain(strings.contacts.invite.reach.stillUnpublished); });
+  // A repair put Funnel on another port: the internet reaches it, but not at the port the link shown names.
+  moved = true;
+  await contactsOf(waiting).refresh();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invite-reach')?.dataset.status).toBe('moved'); });
+  expect(one('contact-invite-reach')!.textContent).toContain(strings.contacts.invite.reach.moved);
   for (const component of components.splice(0)) unmount(component);
   document.body.innerHTML = '';
 
@@ -290,6 +323,40 @@ test('Elsewhere makes a link to this machine on Funnel, without a share; a tailn
   await vi.waitFor(() => { flushSync(); expect(one('contact-invite-create')).not.toBeNull(); });
   expect(one('contact-invite-internet')).toBeNull();
   expect(sent).toEqual([]);
+});
+
+test('a join to an inviter whose address is not on the internet yet goes again by itself, and Stop ends it', async () => {
+  const store = await draw();
+  const call = store.client!.call.bind(store.client!);
+  let refusals = 2;
+  const joins = vi.fn();
+  vi.spyOn(store.client!, 'call').mockImplementation(((method: string, params: unknown) => {
+    if (method !== 'contacts.join') return call(method as never, params as never);
+    joins();
+    if (refusals-- > 0) return Promise.reject(new RpcFailure({ code: RpcErrorCode.Unavailable, message: 'could not find NUNO: Tailscale has not published its address', data: { retryAfterMs: 150 } }));
+    return call(method as never, params as never);
+  }) as typeof call);
+  type(one<HTMLInputElement>('contact-join-link')!, FAKE_CONTACT_INVITE);
+  one<HTMLButtonElement>('contact-join')!.click();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-join-waiting')).not.toBeNull(); });
+  await vi.waitFor(() => { flushSync(); expect(one('contact-joined-words')?.querySelectorAll('li')).toHaveLength(8); });
+  expect(joins).toHaveBeenCalledTimes(3);
+  expect(one('contact-join-waiting')).toBeNull();
+  one<HTMLButtonElement>('contact-joined-done')!.click();
+
+  // Stop: no join goes again after it.
+  refusals = Number.POSITIVE_INFINITY;
+  joins.mockClear();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-join-link')).not.toBeNull(); });
+  type(one<HTMLInputElement>('contact-join-link')!, FAKE_CONTACT_INVITE);
+  one<HTMLButtonElement>('contact-join')!.click();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-join-waiting')).not.toBeNull(); });
+  one<HTMLButtonElement>('contact-join-stop')!.click();
+  flushSync();
+  expect(one('contact-join-waiting')).toBeNull();
+  const made = joins.mock.calls.length;
+  await new Promise(resolve => setTimeout(resolve, 80));
+  expect(joins).toHaveBeenCalledTimes(made);
 });
 
 test('Invite makes a link with its share; a joined link shows the eight words; Configure unfolds the key, the policy and the tier', async () => {

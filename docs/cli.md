@@ -561,6 +561,8 @@ or claimed cards, with the count in the refusal; the user's adds have no limit.
 
 `ask` draws a question card in the thread without stopping the agent: the
 thread does not turn `waiting` and the card stays open after the turn ends.
+`ask list` lists the calling thread's pending questions without creating a
+card, like `questions <thread-id>` for that same thread. `ask help` shows usage.
 A core restart keeps it too: an open card is read back from the journal at
 startup, for as long as events are kept (30 days).
 Each extra argument is an option label; with none the question takes free
@@ -660,6 +662,19 @@ removed closes unanswered. The asking thread reads `applied: <bot>'s <key>
 is now <value>`, `changed: the user set <bot>'s <key> to <value>, not
 <proposed>` or `refused: <bot>'s <key> stays <value>`, projects by name
 (`are` and `stay` for them).
+
+`settings bot create <name>` creates a bot at once, for a thread the user told
+to set one up; no card asks the user. The bot runs on the calling thread's own
+route unless `--model <provider/model>` names another (resolved as `delegate
+spawn --model` does, from every installed model), at its model's default
+effort unless `--effort` names one, with full access like a bot made on the
+Bots page. `--domain <text>` is its role, `--instructions-file <path>` its
+instructions (32,000 characters at most) and `--project a,b` the projects
+entrusted to it, by name or id. A name a live bot already has, any case, is
+refused with that bot's id, as are an unknown model or project. It prints
+`created: <name> (<id>)`, its route, its projects and its conversation, to
+reach it with `boite threads send`; the bot then introduces itself there. The
+MCP tool `boite_bot_create` does the same.
 
 Exit codes: 0, 1 on a refusal or a failure (`error: ...` on stderr), 2 on a
 usage error (the usage text on stderr).

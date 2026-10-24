@@ -90,6 +90,7 @@ ${CONTROL_HELP}
                                  arrives later as a message (--multiple);
                                  --open <url> adds an Open button for a page
                                  the user must sign in to, in your browser
+  ask list                      read this thread's pending questions
   settings [key]                 Boite settings you may ask about: value, page,
                                  the name the user's app shows; first, the
                                  language the app speaks; experiments last
@@ -110,6 +111,11 @@ ${CONTROL_HELP}
                                  a card asking the user to change one, such as
                                  projects +boite -old or a list; the outcome
                                  arrives as a message (applied, changed, refused)
+  settings bot create <name>     create the bot the user asked for, at once,
+                                 on your own route or --model <provider/model>
+                                 (--effort, --project a,b, --domain <text>,
+                                 --instructions-file <path>); prints its id
+                                 and conversation
   task list                      the agent's task list
   task add <text>                add a task (id t1, t2, ...)
   task start|done|remove <id>    move or drop one task
@@ -590,6 +596,27 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       }
       if (action === 'bot') {
         const agent = parsed.bot === undefined ? {} : { agent: parsed.bot };
+        if (rest[1] === 'create') {
+          if (rest.length !== 3) throw new Usage('settings bot create takes one name; quote a name with spaces');
+          const created = await client.call('agents.create', {
+            threadId, name: rest[2]!,
+            ...(parsed.domain === undefined ? {} : { domain: parsed.domain }),
+            ...(parsed.instructionsFile === undefined ? {} : { instructions: readRules(parsed.instructionsFile) }),
+            ...(parsed.model === undefined ? {} : { model: parsed.model }),
+            ...(parsed.effort === undefined ? {} : { effort: parsed.effort }),
+            ...(parsed.project === undefined ? {} : { projects: parsed.project.split(',').map(name => name.trim()).filter(Boolean) }),
+          });
+          const { agent: bot, threadId: conversation } = created;
+          const { selection } = bot;
+          print([
+            `created: ${bot.name} (${bot.id})`,
+            `route: ${selection.providerId}/${selection.model ?? 'default'}${selection.effort === null ? '' : ` (${selection.effort})`}`,
+            ...(bot.projectIds?.length ? [`projects: ${bot.projectIds.join(', ')}`] : []),
+            ...(conversation === null ? [] : [`conversation: ${conversation}; boite threads send ${conversation} <text> writes to it`]),
+            'It introduces itself and schedules what its instructions call for.',
+          ], created);
+          return;
+        }
         if (rest[1] === 'request') {
           if (parsed.why === undefined || parsed.why.trim().length === 0) throw new Usage('settings bot request needs --why <text>, the reason the user reads on the card');
           const key = want(2, `a key: ${AGENT_SETTING_KEYS.join(', ')}`);
@@ -604,7 +631,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
           ], asked);
           return;
         }
-        if (rest.length > 2) throw new Usage('settings bot expects a key or request <key> <value>');
+        if (rest.length > 2) throw new Usage('settings bot expects a key, request <key> <value> or create <name>');
         const read = await client.call('agents.settings.read', { threadId, ...agent });
         const shown = rest[1] === undefined ? read.settings : read.settings.filter(reading => reading.key === rest[1]);
         if (shown.length === 0) throw new Usage(`settings bot: unknown key ${rest[1]}; the keys are ${AGENT_SETTING_KEYS.join(', ')}`);
@@ -625,6 +652,10 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     ask: async () => {
       // An agent once ran `boite ask help` for this text and drew a card reading "help".
       if (rest.length === 1 && rest[0] === 'help') { print([USAGE], { help: USAGE }); return; }
+      if (rest.length === 1 && rest[0] === 'list') {
+        await controlCommand(client, caller, threadId, { ...parsed, positional: ['questions', threadId] }, print);
+        return;
+      }
       const text = want(0, 'a question');
       const options = rest.slice(1);
       const asked = await client.call('questions.ask', { threadId, text, ...(options.length > 0 ? { options } : {}), ...(parsed.multiple ? { multiple: true } : {}), ...(parsed.open === undefined ? {} : { open: parsed.open }) });

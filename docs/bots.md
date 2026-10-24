@@ -27,6 +27,12 @@ set, except deleting the thread: a bot is archived, and its thread with it.
 `agents.open` returns the thread, and creates it again with a new session
 record when it was lost.
 
+Opening the conversation does not require its saved provider or account to
+still exist. The warning's Fix it button opens Settings, where choosing a new
+default also replaces that missing default's allowed route and removes other
+allowed routes whose provider or account is gone. Starting a turn still
+requires an available provider and an account belonging to it.
+
 An identity keeps its thread, brain and routines when its provider, account
 or model changes; a route change moves the thread's own selection. Paused,
 the bot gets no wakes and the user can still write to it. Archived, its
@@ -405,6 +411,16 @@ settles the cards it answers, and a card whose key no longer exists closes; the
 asking thread reads the outcome as a message. Code:
 `agents/setting-cards.ts`, shared checks in
 `packages/contracts/src/agent-setting-requests.ts`.
+
+A thread asked to set up a bot creates it itself, with no card: `boite settings
+bot create <name>`, with its role, instructions, model and projects
+([CLI](cli.md)). `agents.create` makes it exactly as the Bots page does, full
+access, its conversation and its "Just created" first turn included, and
+returns its id and conversation so the thread briefs it with `boite threads
+send`. The owner allowed this on 2026-10-24: a thread asks only when something
+about the bot is unclear. Changing the bot afterwards still goes through a
+card. Code: `agents/create.ts`, shared checks in
+`packages/contracts/src/agent-create.ts`.
 
 ## Routines
 

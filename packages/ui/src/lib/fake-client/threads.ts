@@ -462,7 +462,7 @@ export function threadMethods(ctx: FakeContext) {
     'threads.retitle': async (params) => writeTitle(ctx, ctx.thread(params.threadId)),
     'threads.archive': async (params) => {
       const thread = ctx.thread(params.threadId);
-      if (params.archived !== false && params.onlyIfIdle === true) assertIdleFamily(ctx, thread.id);
+      if (params.archived !== false && params.onlyIfIdle === true) assertIdleFamily(ctx, thread.id, true);
       if (params.archived === false && removing.has(thread.id)) throw refusal('threadId: this conversation is being deleted', { threadId: thread.id, field: 'threadId', expected: 'a conversation not being deleted' });
       if (params.archived === false) dismissMergedPr(ctx, thread.id);
       const was = thread.archived;
@@ -474,6 +474,8 @@ export function threadMethods(ctx: FakeContext) {
         // As the core: archive and Mark done end the thread's pull request watches.
         thread.pullRequestWatches = [];
         cancelFamilySideQuestions(ctx, thread.id);
+        // As the core: a conversation put away stops its runs, a paused one included.
+        if (!thread.parentThreadId) ctx.workflows.stopRoot(thread.id, 'The thread was archived.');
         const family = [...ctx.threads.values()].filter(member => member.id === thread.id || member.parentThreadId === thread.id);
         await Promise.all(family.map(member => putAway(ctx, member)));
         // A restore during the stops keeps processes; new child work keeps its own.
@@ -632,6 +634,9 @@ export function threadMethods(ctx: FakeContext) {
         if (usable && usable.id !== thread.accountId) moveToAccount(ctx, thread, usable);
         const account = ctx.accounts.find((a) => a.id === thread.accountId);
         if (!account) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'accountId: the account of this conversation was removed; choose another account in it first', data: { threadId: thread.id, accountId: thread.accountId, field: 'accountId', expected: 'an existing account' } });
+        if (account.providerId !== provider.id) throw new RpcFailure({ code: RpcErrorCode.Refused,
+          message: `accountId: account ${account.id} belongs to provider ${account.providerId}; expected provider ${provider.id}`,
+          data: { field: 'accountId', accountId: account.id, providerId: account.providerId, expected: provider.id } });
         checkRunnable(provider, account);
       }
       const error = attachmentError(params.attachments ?? [], provider);

@@ -53,6 +53,9 @@ Markdown links, bare URLs, absolute paths, `file:///` links and inline-code file
 paths. Use angle brackets for spaces, such as `<reports/review one.pdf>`, and
 `:line` or `#Lline` for source locations. Files resolve through the message's
 owning thread and machine; preview paths stay inside its working directory.
+To deliver media across machines, publish it with `boite attach` using a path
+on the conversation's machine. A mapped NAS drive on the viewing desktop does
+not give a remote core access to that path.
 A relative path that is not there as written is looked up by its tail
 (`files.locate`, owner only): `core.md` opens `.local/core.md`, the shallowest
 match wins, ignored folders count but `.git`, `.boite` and `node_modules` do

@@ -126,6 +126,26 @@ test('a paired device hears only the device events, as access.ts mayReceiveEvent
 });
 
 
+test('a bot on another provider account refuses a turn before journalling it, as threads.ts', async () => {
+  const { FakeContext } = await import('./fake-client/context');
+  const { seed } = await import('./fake-client/seed');
+  const { threadMethods } = await import('./fake-client/threads');
+  const ctx = new FakeContext({ delayMs: 0 });
+  seed(ctx);
+  const thread = ctx.thread('t-trace');
+  const foreign = ctx.accounts.find(a => a.providerId !== thread.providerId && a.status === 'ok')!;
+  Object.assign(thread, { accountId: foreign.id, agentSessionId: 'agt_session_foreign', status: 'idle' });
+  const before = thread.turns.length;
+  const methods = threadMethods(ctx);
+  try {
+    const refusal = await methods['turns.start']({ threadId: thread.id, prompt: 'Do not use another provider account' }).catch(error => error);
+    expect(refusal).toMatchObject({ code: RpcErrorCode.Refused,
+      message: `accountId: account ${foreign.id} belongs to provider ${foreign.providerId}; expected provider ${thread.providerId}`,
+      data: { field: 'accountId', accountId: foreign.id, providerId: foreign.providerId, expected: thread.providerId } });
+    expect(thread.turns).toHaveLength(before);
+  } finally { await methods['turns.stop']({ threadId: thread.id }); }
+});
+
 test('a provider turned off refuses a turn and reports provider-disabled, as drivers/index.ts and threads/capabilities.ts', async () => {
   const client = await fake();
   const thread = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });

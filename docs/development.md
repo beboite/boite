@@ -291,7 +291,8 @@ with `onlyIfIdle: true` refuses pending work or input in the conversation's
 family before changing it, and its refusal names what is pending and in which
 child. Input counts when a device names it on a family member; a device that
 cannot read its drafts protects every thread from expiry and merged-PR archives,
-never from Mark done. Done reads archived summaries only on expansion,
+never from Mark done. A paused workflow run holds expiry but not Mark done,
+which stops it as archiving does. Done reads archived summaries only on expansion,
 respecting the project and machine filters. A completed conversation opens for
 reading with a Move to Recent button in place of the composer. Reopening keeps
 history without restarting work. Mark done records its own date; automatic archives

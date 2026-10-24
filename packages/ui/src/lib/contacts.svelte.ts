@@ -8,6 +8,7 @@
 import type { Contact, ContactInvite, ContactRequest, ContactSettings, ContactsState, ContactTailscale, ProjectId } from '@boite/contracts';
 import { untrack } from 'svelte';
 import { errorText } from './errors';
+import { RpcFailure } from './rpc-error';
 import { strings } from './strings';
 import type { Store } from './store.svelte';
 import { workspace, type Machine } from './workspace.svelte';
@@ -22,6 +23,8 @@ export class ContactsView {
   invite = $state<ContactInvite | null>(null);
   /** What `contacts.join` answered: the four words stay on screen until the owner closes them. */
   joined = $state<Contact | null>(null);
+  /** A join waiting for the inviter's address to reach the internet, until `until`. */
+  joinWaiting = $state<{ until: number } | null>(null);
   /** Keys of the calls in flight, so a button does not send twice. */
   busy = $state<string[]>([]);
 
@@ -31,6 +34,7 @@ export class ContactsView {
   #client: unknown = null;
   #ready = false;
   #reading = 0;
+  #joinAttempt = 0;
 
   constructor(store: Store) {
     this.store = store;
@@ -181,13 +185,49 @@ export class ContactsView {
   }
 
   async join(link: string): Promise<Contact | null> {
-    const contact = await this.#run('join', () => this.#connected().call('contacts.join', { link }));
-    if (contact) {
-      this.joined = contact;
-      this.#put(contact);
+    const attempt = ++this.#joinAttempt;
+    const until = Date.now() + JOIN_WAIT_MS;
+    for (;;) {
+      let wait = 0;
+      const contact = await this.#run('join', async () => {
+        try { return await this.#connected().call('contacts.join', { link }); } catch (error) {
+          wait = retryAfter(error);
+          throw error;
+        }
+      });
+      const current = attempt === this.#joinAttempt;
+      if (contact) {
+        // A join stopped or replaced while its call was in flight still linked a contact: its words show unless newer ones do.
+        if (current) this.joinWaiting = null;
+        if (current || !this.joined) this.joined = contact;
+        this.#put(contact);
+        return contact;
+      }
+      // The inviter's Funnel name is not in public DNS yet: the invitation is unspent, so the same join goes again.
+      if (!current || wait <= 0 || Date.now() + wait > until) {
+        if (current) this.joinWaiting = null;
+        return null;
+      }
+      this.joinWaiting = { until };
+      await new Promise(resolve => setTimeout(resolve, wait));
+      if (attempt !== this.#joinAttempt) return null;
     }
-    return contact;
   }
+
+  /** Ends a join waiting for the inviter's address. */
+  stopJoin(): void {
+    this.#joinAttempt += 1;
+    this.joinWaiting = null;
+  }
+}
+
+/** A join waits this long at most for the inviter's Funnel name to reach public DNS. */
+const JOIN_WAIT_MS = 15 * 60_000;
+
+/** The delay the core asks before the same join, 0 when it does not. */
+function retryAfter(error: unknown): number {
+  const wait = error instanceof RpcFailure ? (error.data as { retryAfterMs?: unknown } | undefined)?.retryAfterMs : undefined;
+  return typeof wait === 'number' && Number.isFinite(wait) && wait > 0 ? Math.min(wait, 120_000) : 0;
 }
 
 const views = new WeakMap<Store, ContactsView>();

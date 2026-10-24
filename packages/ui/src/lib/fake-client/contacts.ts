@@ -120,7 +120,8 @@ function seed(ctx: FakeContext): ContactsState {
     settings: { minTier: 1 },
     tailscale: tailscale(true),
     invitations: 0,
-    internet: true
+    internet: true,
+    funnel: null
   };
 }
 
@@ -200,6 +201,8 @@ export function contactMethods(ctx: FakeContext) {
       const url = internet ? `https://${fqdn}:8443` : `http://${fqdn}:8777`;
       tokensOf(ctx).add(token);
       state.invitations = tokensOf(ctx).size;
+      // Like the core once its check went through: the internet reaches the routes.
+      if (internet) state.funnel = { url, status: 'ready', checkedAt: ctx.now(), repaired: false };
       changed();
       return {
         link: encodeInvite({ v: 1, c: state.self.coreId, m: state.self.machine, u: url, t: token, e: ctx.now() + INVITE_TTL, s: share.status === 'created' ? share.url : null }),
@@ -213,6 +216,8 @@ export function contactMethods(ctx: FakeContext) {
       const cancelled = tokensOf(ctx).size;
       tokensOf(ctx).clear();
       state.invitations = 0;
+      // Like the core: Funnel comes down once no invitation or contact needs it.
+      if (state.contacts.length === 0) state.funnel = null;
       changed();
       return { cancelled };
     },
