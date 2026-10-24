@@ -74,7 +74,8 @@ export function captureExecutionPolicy(input: ProtectedExecutionInput): Executio
     const credentialAlias = credentials.some(c => {
       try { return lstatSync(c).isFile() && executionIdentity(c) === executionIdentity(real); } catch { return false; }
     });
-    if (!isAbsolute(path) || !s.isFile() || !(s.mode & 0o111) || secretPath(real) || credentialAlias
+    const executable = process.platform === 'win32' ? /\.exe$/i.test(real) : !!(s.mode & 0o111);
+    if (!isAbsolute(path) || !s.isFile() || !executable || secretPath(real) || credentialAlias
       || credentials.some(c => inside(c, real)) || inside(input.checkout, real)) {
       throw new Error('execution.executables: expected an executable toolchain file outside checkout and credentials');
     }

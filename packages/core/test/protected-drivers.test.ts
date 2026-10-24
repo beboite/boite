@@ -13,7 +13,7 @@ let harness: TestCore | undefined;
 let driver: Driver | undefined;
 let api: ReturnType<typeof protectedProviderApi> | undefined;
 afterEach(async () => {driver?.shutdown?.(); driver = undefined; api?.stop(); api = undefined; await harness?.stop(); harness = undefined;});
-const native = process.platform === 'linux' && process.env.BOITE_TEST_NATIVE_EXECUTION === '1';
+const native = ['linux', 'win32'].includes(process.platform) && process.env.BOITE_TEST_NATIVE_EXECUTION === '1';
 
 describe.skipIf(!native)('installed protected provider execution, deterministic local API', () => {
   test.each([['claude', 'yolo'], ['codex', 'yolo'], ['claude', 'default'], ['codex', 'default']] as const)('%s native control executes useful isolated tools and rejects forged host file tools in %s', async (protocol, permissionMode) => {
@@ -30,7 +30,7 @@ describe.skipIf(!native)('installed protected provider execution, deterministic 
     const echoAccount = core.accounts.list().find(a => a.providerId === 'echo')!;
     const base = await client.call('threads.create', {projectId: project.id, providerId: 'echo', accountId: echoAccount.id});
     const provider = core.providers.require(protocol), account = {...echoAccount, id: `${protocol}-synthetic-account`, providerId: protocol, isolationDir: accountDir};
-    for (const profile of Object.values(provider.profiles)) if (profile) profile.executable = [{kind: 'file', value: Bun.which(protocol) ?? (() => {throw new Error(`Native fixture requires installed ${protocol}`);})()}];
+    for (const profile of Object.values(provider.profiles)) if (profile) profile.executable = [{kind: 'file', value: process.env[`BOITE_TEST_${protocol.toUpperCase()}_CLI`] || Bun.which(protocol) || (() => {throw new Error(`Native fixture requires installed ${protocol}`);})()}];
     const thread: ThreadSummary = {...base, providerId: protocol, accountId: account.id, model: protocol === 'claude' ? 'claude-sonnet-5' : 'gpt-6.1-sol', permissionMode, contextMode: null};
     const changed: string[] = [];
     await core.procs.protection.install(thread.id, {scope: {kind: 'letter', id: 'synthetic-letter', associationId: 'synthetic-association', grantRevision: 1},
@@ -60,7 +60,7 @@ describe.skipIf(!native)('installed protected provider execution, deterministic 
       askQuestion: () => {throw new Error('No fixture question');}, requestPermission: () => {approvals++; return Object.assign(Promise.resolve('allow' as const), {requestId: 'synthetic-approval', withdraw() {}});},
       spawn: () => {throw new Error('Native control must use the tracked child route');},
       spawnChild: (cmd, args, opts) => core.procs.spawnChild(core.procs.protection.control(thread.id), cmd, args, {...opts,
-        env: {PATH: '/usr/bin:/bin', HOME: accountDir, LANG: 'C.UTF-8', ...accountEnv}}),
+        env: {PATH: process.env.PATH, SystemRoot: process.env['SystemRoot'], HOME: accountDir, LANG: 'C.UTF-8', ...accountEnv}}),
     };
     driver = protocol === 'claude' ? createClaudeDriver({loadQuery: async () => (await import('@anthropic-ai/claude-agent-sdk')).query}) : createCodexDriver();
     const result = await driver.startTurn(ctx).done;
@@ -73,7 +73,7 @@ describe.skipIf(!native)('installed protected provider execution, deterministic 
     expect(existsSync(alternate)).toBe(false);
     expect(JSON.stringify(api.requests[0])).toContain('boite_exec');
     const wire = JSON.stringify(api.requests);
-    expect(wire.includes('nestedNamespaceDenied')).toBe(true);
+    expect(wire.includes(process.platform === 'win32' ? 'hostProcessDenied' : 'nestedNamespaceDenied')).toBe(true);
     expect(wire.includes('SYNTHETIC_PROTECTED')).toBe(false);
     expect(JSON.stringify(parts)).toContain('Protected fixture completed');
     expect(core.procs.protection.policy(thread.id)?.route).toEqual({providerId: protocol, accountId: account.id, permissionMode});

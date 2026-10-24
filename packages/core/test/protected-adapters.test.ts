@@ -12,7 +12,7 @@ import {startTestCore, type TestCore} from './harness.ts';
 let harness: TestCore | undefined, driver: Driver | undefined;
 let api: ReturnType<typeof protectedProviderApi> | undefined;
 afterEach(async () => {driver?.shutdown?.(); driver = undefined; api?.stop(); api = undefined; await harness?.stop(); harness = undefined;});
-const native = process.platform === 'linux' && process.env.BOITE_TEST_NATIVE_EXECUTION === '1';
+const native = ['linux', 'win32'].includes(process.platform) && process.env.BOITE_TEST_NATIVE_EXECUTION === '1';
 
 describe.skipIf(!native)('native protected extensions', () => {
   test.each(['pi', 'opencode'] as const)('%s useful edits and child tests use the OS capability, forged tools and discovered extensions cannot escape', async protocol => {
@@ -29,7 +29,8 @@ describe.skipIf(!native)('native protected extensions', () => {
     const echoAccount = core.accounts.list().find(a => a.providerId === 'echo')!;
     const base = await client.call('threads.create', {projectId: project.id, providerId: 'echo', accountId: echoAccount.id});
     const provider = core.providers.require(protocol), account = {...echoAccount, id: `${protocol}-synthetic-account`, providerId: protocol, isolationDir: accountDir};
-    for (const profile of Object.values(provider.profiles)) if (profile) profile.executable = [{kind: 'file', value: protocol === 'pi' ? process.env.BOITE_TEST_PI_CLI! : Bun.which('opencode')!}];
+    for (const profile of Object.values(provider.profiles)) if (profile) profile.executable = [{kind: 'file', value: protocol === 'pi' ? process.env.BOITE_TEST_PI_CLI! : process.env.BOITE_TEST_OPENCODE_CLI || Bun.which('opencode')!}];
+    if (protocol === 'pi' && process.platform === 'win32') provider.profiles.windows!.executable = [{kind: 'npm', value: '@earendil-works/pi-coding-agent#pi'}];
     const permissionMode: PermissionMode = protocol === 'pi' ? 'yolo' : 'default';
     const thread: ThreadSummary = {...base, providerId: protocol, accountId: account.id, model: 'fixture/protected-model', permissionMode, contextMode: null};
     await core.procs.protection.install(thread.id, {scope: {kind: 'letter', id: 'synthetic-letter', associationId: 'synthetic-association', grantRevision: 1},
@@ -65,7 +66,7 @@ describe.skipIf(!native)('native protected extensions', () => {
       askQuestion: () => {throw new Error('No question');}, requestPermission: () => {approvals++; return Object.assign(Promise.resolve('allow' as const), {requestId: 'synthetic-approval', withdraw() {}});},
       spawn: () => {throw new Error('Control must use the tracked child route');},
       spawnChild: (cmd, args, opts) => {spawns++; return core.procs.spawnChild(control, cmd, args, {...opts,
-        env: {PATH: '/usr/bin:/bin', HOME: accountDir, LANG: 'C.UTF-8', ...accountEnv, ...opts?.env}});},
+        env: {PATH: process.env.PATH, SystemRoot: process.env['SystemRoot'], HOME: accountDir, LANG: 'C.UTF-8', ...accountEnv, ...opts?.env}});},
       killTree: () => {core.procs.killTree(control); core.procs.killTree(thread.id);},
     };
     driver = protocol === 'pi' ? createPiDriver() : createAcpDriver({loadSdk: () => import('@agentclientprotocol/sdk')});
@@ -80,7 +81,7 @@ describe.skipIf(!native)('native protected extensions', () => {
     expect(existsSync(marker)).toBe(false);
     expect(readFileSync(credential, 'utf8')).toBe('SYNTHETIC_PROTECTED');
     const wire = JSON.stringify(api.requests);
-    expect(wire).toContain('nestedNamespaceDenied'); expect(wire).not.toContain('SYNTHETIC_PROTECTED');
+    expect(wire).toContain(process.platform === 'win32' ? 'hostProcessDenied' : 'nestedNamespaceDenied'); expect(wire).not.toContain('SYNTHETIC_PROTECTED');
     expect(approvals).toBe(protocol === 'pi' ? 0 : 1);
     expect(core.procs.protection.policy(thread.id)?.route).toEqual({providerId: protocol, accountId: account.id, permissionMode});
     expect(api.authorizations.every(value => value.includes('synthetic-fixture-account-key'))).toBe(true);
