@@ -39,15 +39,17 @@ test('the page carries one switch per experiment and a toggle writes the enabled
   expect(grain.closest('label')?.textContent).toContain('Grain theme');
   expect(window.localStorage.getItem(EXPERIMENTS_STORAGE_KEY)).toBeNull();
 
-  const links = query<HTMLInputElement>('[data-testid=experiment-open-chat-links]');
-  expect(links.checked).toBe(false);
-  const linksHelp = links.closest('label')!.querySelector<HTMLButtonElement>('[data-testid=info-tip]')!;
-  linksHelp.click();
+  const sessions = query<HTMLInputElement>('[data-testid=experiment-session-import]');
+  expect(sessions.checked).toBe(false);
+  const sessionsHelp = sessions.closest('label')!.querySelector<HTMLButtonElement>('[data-testid=info-tip]')!;
+  sessionsHelp.click();
   flushSync();
-  expect(document.getElementById(linksHelp.getAttribute('aria-describedby')!)?.textContent).toContain('default app');
-  expect(links.checked).toBe(false);
+  expect(document.getElementById(sessionsHelp.getAttribute('aria-describedby')!)?.textContent).toContain('terminal');
+  expect(sessions.checked).toBe(false);
   // Graduated features have their switch in the page they belong to, not here.
-  expect(document.querySelector('[data-testid=experiment-chat-artifacts]')).toBeNull();
+  for (const id of ['chat-artifacts', 'open-chat-links', 'preview-comments', 'edge-scrollbars', 'press-preload']) {
+    expect(document.querySelector(`[data-testid=experiment-${id}]`)).toBeNull();
+  }
 
   grain.click();
   flushSync();

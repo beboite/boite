@@ -37,7 +37,6 @@ beforeAll(async () => {
   // sets it: every page is told it is driven, as the guard expects to see.
   await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `Object.defineProperty(Navigator.prototype, 'webdriver', { get: () => true, configurable: true });` });
   await page.waitFor('document.querySelector("[data-testid=thread-row]")', 30_000);
-  await page.evaluate(`localStorage.setItem('boite.experiments', '["press-preload"]')`);
   await load();
 }, 90_000);
 

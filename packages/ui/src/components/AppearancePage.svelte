@@ -244,6 +244,13 @@
       <span class="text ui-label">{strings.settings.expandDiffs}</span>
       <input type="checkbox" role="switch" checked={chatPrefs.expandDiffs} data-testid="chat-expand-diffs" onchange={event => setChatPref('expandDiffs', event.currentTarget.checked)} />
     </label>
+    {#if !phone}
+      <label class="switch-row" for="{uid}-edge-scrollbars">
+        <span class="text ui-label-box"><span class="ui-label" id="{uid}-edge-scrollbars-name">{strings.features.edgeScrollbars.title}</span><InfoTip topic={strings.features.edgeScrollbars.title} text={strings.features.edgeScrollbars.hint} /></span>
+        <input id="{uid}-edge-scrollbars" aria-labelledby="{uid}-edge-scrollbars-name" type="checkbox" role="switch" checked={featureOn('edge-scrollbars')} data-testid="setting-edge-scrollbars"
+          onchange={event => setFeature('edge-scrollbars', event.currentTarget.checked)} />
+      </label>
+    {/if}
     {#if phone}
       <label class="switch-row" for="{uid}-chat-artifacts">
         <span class="text ui-label-box"><span class="ui-label" id="{uid}-chat-artifacts-name">{strings.features.chatArtifacts.title}</span><InfoTip topic={strings.features.chatArtifacts.title} text={strings.features.chatArtifacts.hint} /></span>

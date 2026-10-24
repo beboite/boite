@@ -48,7 +48,7 @@ have an inline preview while the switch is on; other types remain
 downloadable. Mutable file editing and viewing belong to the
 [right panel](panel.md).
 
-With the switch on, or the `open-chat-links` experiment, answers recognize
+With the switch on, or Open chat links in their apps, answers recognize
 Markdown links, bare URLs, absolute paths, `file:///` links and inline-code file
 paths. Use angle brackets for spaces, such as `<reports/review one.pdf>`, and
 `:line` or `#Lline` for source locations. Files resolve through the message's
@@ -58,12 +58,31 @@ A relative path that is not there as written is looked up by its tail
 match wins, ignored folders count but `.git`, `.boite` and `node_modules` do
 not, and two matches at the same depth are reported instead of guessed.
 The local desktop's explicit open action follows the rules in
-[Open chat links](experiments.md#open-chat-links).
+[Open chat links in their apps](#open-chat-links-in-their-apps).
 
 Captures: [chat media on desktop](images/chat-media-desktop.png) · [chat media on a phone](images/chat-media-phone.png)
 Remote images are links, so reading an answer does not fetch a tracking image.
 Executable URL schemes are not rendered, and HTML in an answer's text stays
 text. A page runs only as an inline view, below.
+
+## Open chat links in their apps
+
+Settings, General, **Open chat links in their apps** is off by default and
+shown only in the desktop app. A device that had turned on the
+`open-chat-links` experiment keeps it on. It enables the same link parsing as
+Chat files and previews: Markdown file links, bare web URLs, absolute paths,
+`file:///` links and paths inside inline code. Either switch enables this
+parsing; enabling both adds no further link types.
+
+On the owning local desktop, this switch also makes an explicit click open a
+file or folder in its associated application, including Windows shortcuts and
+absolute paths outside the checkout, instead of Boite's preview. On a remote
+machine or phone, links still use the inline preview and its existing owner
+and working-directory checks. They never open a file on the device displaying
+the conversation.
+
+Pages in the integrated browser and agent RPCs cannot invoke the native action.
+Network and device paths are refused before and after path resolution.
 
 ## Inline views
 

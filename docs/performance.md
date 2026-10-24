@@ -258,7 +258,7 @@ browser on the fake core with a simulated 200 ms round trip
 (`?fake=1&rtt=200`), the mouse button held 120 ms, and times the release to
 the thread's messages in hand, each sample on a fresh page with nothing cached.
 On 2026-10-12 in the Linux container, three runs of four samples each: a plain
-click had medians of 222, 230 and 232 ms, and the Load on press experiment 95,
+click had medians of 222, 230 and 232 ms, and Load on press 95,
 96 and 100 ms. The Windows CI job measured medians of 225 and 92 ms the same
 day. The press saved about the 120 ms it was held, up to one round trip. The fake does not delay pushed events or model payload size, and a real
 core adds its own handling time to both paths.
@@ -786,7 +786,7 @@ and 750 kbit/s up (`Network.emulateNetworkConditions`).
 Of the 19 requests after the change, 9 are scripts: the entry, the runtime,
 the `boot` chunk, the catalogue, the phone navigation the boot screen waits
 for outside the shell with a module it shares, the dictation button with its
-recorder, and the interaction experiments; the rest are styles, the two
+recorder, and the pointer interactions; the rest are styles, the two
 fonts, the manifest and the icons. The slow link's runs vary by under 260 ms.
 Without throttling both builds reach ready in 148 to 547 ms on this machine,
 a spread wider than any difference between them, and the idle prefetch starts
