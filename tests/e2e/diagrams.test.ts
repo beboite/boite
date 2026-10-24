@@ -24,7 +24,7 @@ beforeAll(async () => {
 afterAll(async () => { await page?.close(); await server?.close(); }, 60_000);
 
 test('an answer draws its diagrams and formulas, keeps prices as text and shows a broken diagram as code', async () => {
-  const answer = await page.evaluate<{ prices: boolean; error: string; code: string; unsafe: number; katex: number }>(`(() => {
+  const answer = await page.evaluate<{ prices: boolean; error: string; code: string; unsafe: number; math: number }>(`(() => {
     const list = document.body;
     const broken = document.querySelector('${id('diagram-error')}').closest('.md-mermaid');
     return {
@@ -32,14 +32,14 @@ test('an answer draws its diagrams and formulas, keeps prices as text and shows 
       error: broken.querySelector('${id('diagram-error')}').textContent,
       code: broken.querySelector('pre code').textContent,
       unsafe: list.querySelectorAll('.md-diagram-figure script, .md-diagram-figure foreignObject, .md-diagram-figure a, .md-math script').length,
-      katex: list.querySelectorAll('.md-math .katex').length
+      math: list.querySelectorAll('.md-math math').length
     };
   })()`);
   expect(answer.prices).toBe(true);
   expect(answer.error).toBe("This diagram could not be drawn: Parse error on line 3: Expecting 'NODE_STRING', got 'EOF'");
   expect(answer.code).toBe('flowchart LR\n  A --> ');
   expect(answer.unsafe).toBe(0);
-  expect(answer.katex).toBeGreaterThanOrEqual(2);
+  expect(answer.math).toBeGreaterThanOrEqual(2);
 }, 60_000);
 
 test('a theme change recolors a drawn diagram in place, at desktop and phone widths', async () => {
@@ -51,6 +51,8 @@ test('a theme change recolors a drawn diagram in place, at desktop and phone wid
       await page.evaluate(`window.__boiteTest.setTheme('${theme}')`);
       await page.evaluate(`document.querySelector('${id('diagram')}').scrollIntoView({ block: 'start' })`);
       await capture(`${width}-${theme}`);
+      await page.evaluate(`document.querySelector('div.md-math.md-drawn, .md-math[data-display].md-drawn').scrollIntoView({ block: 'center' })`);
+      await capture(`${width}-${theme}-formula`);
     }
   }
   const drawn = await page.evaluate<{ same: boolean; changed: boolean; fits: boolean }>(`(async () => {

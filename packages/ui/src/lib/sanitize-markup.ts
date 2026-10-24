@@ -1,6 +1,6 @@
 /**
  * Markup a library drew from an agent's text (a diagram's SVG, a formula's
- * HTML and MathML), cut down to what drawing needs before it enters the page.
+ * MathML), cut down to what drawing needs before it enters the page.
  * The string is parsed in an inert template, so nothing in it runs or loads
  * while it is checked, and the checked nodes are the ones inserted: nothing is
  * serialized and parsed a second time, where a sanitized tree could change.
@@ -12,13 +12,11 @@
  */
 
 const ELEMENTS = new Set([
-  // HTML, as KaTeX writes it.
-  'span', 'div', 'br', 'strong', 'em', 'b', 'i', 'sub', 'sup', 'small',
   // SVG.
   'svg', 'g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'text', 'tspan',
   'defs', 'marker', 'title', 'desc', 'clippath', 'mask', 'lineargradient', 'radialgradient', 'stop',
   'pattern', 'symbol', 'use',
-  // MathML, KaTeX's accessible copy of a formula.
+  // MathML, as Temml writes a formula.
   'math', 'semantics', 'annotation', 'mrow', 'mi', 'mo', 'mn', 'ms', 'mtext', 'mspace', 'msup', 'msub',
   'msubsup', 'mfrac', 'msqrt', 'mroot', 'mover', 'munder', 'munderover', 'mtable', 'mtr', 'mtd', 'mlabeledtr',
   'mstyle', 'mpadded', 'mphantom', 'menclose', 'merror', 'mmultiscripts', 'mprescripts', 'none'
@@ -41,7 +39,8 @@ const ATTRIBUTES = new Set([
   // MathML.
   'mathvariant', 'encoding', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'minsize', 'maxsize', 'accent',
   'accentunder', 'columnalign', 'rowalign', 'columnspacing', 'rowspacing', 'columnlines', 'rowlines', 'scriptlevel',
-  'displaystyle', 'depth', 'linethickness', 'notation', 'voffset', 'movablelimits', 'symmetric', 'largeop', 'form'
+  'displaystyle', 'depth', 'linethickness', 'notation', 'voffset', 'movablelimits', 'symmetric', 'largeop', 'form',
+  'mathcolor', 'mathbackground', 'mathsize', 'linebreak'
 ]);
 
 /** A value that loads or runs something: an address other than `#id`, a script scheme, an old IE expression. */

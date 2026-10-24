@@ -4,10 +4,10 @@
  * holds one. A block a scroll mounts again is drawn from the cache, in the
  * same frame.
  *
- * Pele and KaTeX are imported in turn, by the first diagram and the first
+ * Pele and Temml are imported in turn, by the first diagram and the first
  * formula. Until then, and whenever drawing fails, the source stays on screen:
  * a diagram Pele cannot read shows its code and one quiet line that says why,
- * a formula KaTeX cannot read keeps its TeX with the reason as its tooltip. A
+ * a formula Temml cannot read keeps its TeX with the reason as its tooltip. A
  * selection copied across a drawing copies its source.
  */
 import { fill, strings } from './strings';
@@ -167,8 +167,8 @@ function button(label: string, testId: string): HTMLButtonElement {
 
 function reason(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
-  // KaTeX and Pele both start with the kind of error the line already says.
-  return text.replace(/^(?:KaTeX parse error|Parse error):\s*/i, '').split('\n')[0]!.trim();
+  // Pele's messages start with the kind of error the line already says.
+  return text.replace(/^Parse error:/i, '').split('\n')[0]!.trim();
 }
 
 /** The colors a drawn diagram takes from the page, written into the picture so it keeps them on its own. */
@@ -185,21 +185,27 @@ export function viewerItem(figure: HTMLElement): MediaItem {
   return { src: URL.createObjectURL(blob), name: `${strings.chat.diagram.label}.svg`, mimeType: 'image/svg+xml', kind: 'image' };
 }
 
-/** Copies `text` the older way, which needs no secure page: a copy command whose event carries the text. */
+/**
+ * Copies `text` the older way, which needs no secure page: the copy command
+ * takes the selection, so a field off screen holds the text, selected. Safari
+ * copies only from a selection, not from a copy event's own data.
+ */
 function copyByCommand(text: string): boolean {
-  const put = (event: ClipboardEvent): void => {
-    event.clipboardData?.setData('text/plain', text);
-    event.preventDefault();
-    // The Markdown node's own copy handler would put the selection back.
-    event.stopPropagation();
-  };
-  document.addEventListener('copy', put, { capture: true });
+  const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const field = document.createElement('textarea');
+  field.className = 'md-copy-field';
+  field.value = text;
+  field.setAttribute('aria-hidden', 'true');
+  document.body.append(field);
+  field.focus({ preventScroll: true });
+  field.setSelectionRange(0, text.length);
   try {
     return document.execCommand?.('copy') ?? false;
   } catch {
     return false;
   } finally {
-    document.removeEventListener('copy', put, { capture: true });
+    field.remove();
+    before?.focus({ preventScroll: true });
   }
 }
 

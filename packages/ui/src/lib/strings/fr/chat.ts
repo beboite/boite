@@ -205,7 +205,7 @@ export const fr: Translation = {
       failed: 'Ce diagramme n’a pas pu être dessiné : {reason}',
       unavailable: 'Le diagramme n’a pas pu être dessiné ici.'
     },
-    /** The tooltip of a formula KaTeX could not read, its source left as written. */
+    /** The tooltip of a formula Temml could not read, its source left as written. */
     formulaFailed: 'Cette formule n’a pas pu être lue : {reason}'
   }
 };

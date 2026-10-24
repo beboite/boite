@@ -239,7 +239,7 @@ export const strings = {
       failed: 'This diagram could not be drawn: {reason}',
       unavailable: 'The diagram could not be drawn here.'
     },
-    /** The tooltip of a formula KaTeX could not read, its source left as written. */
+    /** The tooltip of a formula Temml could not read, its source left as written. */
     formulaFailed: 'This formula could not be read: {reason}'
   }
 } as const;

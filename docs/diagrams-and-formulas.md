@@ -36,13 +36,14 @@ drawn again at once.
 
 Neither library is in the startup bundle, nor is the drawing code: the action,
 about forty lines, imports `lib/rich-markdown-draw.ts` and its styles for the
-first marked block. That module imports `lib/math-render.ts` (KaTeX, its
-stylesheet and its fonts) for the first formula and `lib/diagram-render.ts`
+first marked block. That module imports `lib/math-render.ts` (Temml and its
+small stylesheet) for the first formula and `lib/diagram-render.ts`
 (Pele) for the first diagram. Pele is a
 dependency-free Mermaid renderer whose layout code is split per diagram type,
-so a flowchart loads the flowchart chunk and nothing else. KaTeX's fonts are
-bundled as woff2 only (`boite-katex-woff2` in `packages/ui/vite.config.ts`),
-served from the app like any asset; nothing comes from a CDN. A client that
+so a flowchart loads the flowchart chunk and nothing else. Temml writes
+MathML, which the browser lays out with the system's math font; its one
+9 KB font, for script capitals a system font may lack, is served from the app
+like any asset. Nothing comes from a CDN. A client that
 cannot fetch a chunk shows the source with a line saying the diagram could
 not be drawn there.
 
@@ -54,13 +55,13 @@ diagram only loads its own type.
 ## Sanitizing
 
 Both libraries' output goes through `lib/sanitize-markup.ts` before it enters
-the page. It parses the markup in an inert `<template>`, keeps a list of SVG,
-HTML and MathML elements and attributes, and inserts those checked nodes
+the page. It parses the markup in an inert `<template>`, keeps a list of SVG
+and MathML elements and attributes, and inserts those checked nodes
 rather than serializing them again. It removes scripts, foreign objects and
 images with everything inside them; links give way to their text; `on…`
 handlers, ids and references outside the drawing, and styles with an address
 or a script scheme are dropped. Pele draws with links and images off, and
-KaTeX runs with `trust: false` and bounded sizes and macro expansion.
+Temml runs with `trust: false` and bounded sizes and macro expansion.
 
 ## Look and actions
 
@@ -76,11 +77,11 @@ standalone SVG with the current colors. The bar shows over the corner on hover
 or focus; a touch screen has no hover, so there it sits above the diagram.
 
 A diagram Pele cannot parse shows its code and one muted line with Pele's
-reason and line. A formula KaTeX cannot read keeps its source, underlined,
+reason and line. A formula Temml cannot read keeps its source, underlined,
 with the reason as a tooltip.
 
 Copying a selection that holds a drawn formula or diagram puts the source as
-written on the clipboard: `\(E = mc^2\)` rather than KaTeX's glyphs, and a
+written on the clipboard: `\(E = mc^2\)` rather than the drawn MathML, and a
 diagram as its ```` ```mermaid ```` block.
 
 ## Limits

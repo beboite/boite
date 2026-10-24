@@ -30,7 +30,7 @@ describe('sanitizeMarkup', () => {
   });
 
   test('unwraps a link, keeps MathML and its annotation as text', () => {
-    expect(clean('<a href="https://x.test"><span class="katex">x</span></a>')).toBe('<span class="katex">x</span>');
+    expect(clean('<math><a href="https://x.test"><mi>x</mi></a></math>')).toBe('<math><mi>x</mi></math>');
     expect(clean('<math><semantics><mi>x</mi><annotation encoding="application/x-tex">x</annotation></semantics></math>'))
       .toBe('<math><semantics><mi>x</mi><annotation encoding="application/x-tex">x</annotation></semantics></math>');
   });

@@ -57,15 +57,15 @@ describe('richMarkdown', () => {
     expect(host.querySelector('[data-testid="diagram"]')).toBeNull();
   });
 
-  test('a formula is drawn, and one KaTeX cannot read keeps its source', async () => {
+  test('a formula is drawn, and one Temml cannot read keeps its source', async () => {
     const host = show('Energy \\(E = mc^2\\) and \\(\\frac{a}{\\)');
     const [good, bad] = [...host.querySelectorAll<HTMLElement>('.md-math')];
     await vi.waitFor(() => {
       if (!good!.classList.contains('md-drawn') || !bad!.classList.contains('md-math-failed')) throw new Error('not drawn yet');
     });
-    expect(good!.querySelector('.katex')).not.toBeNull();
+    expect(good!.querySelector('math msup')).not.toBeNull();
     expect(bad!.textContent).toBe('\\(\\frac{a}{\\)');
-    expect(bad!.title).toMatch(/^This formula could not be read: /);
+    expect(bad!.title).toMatch(/^This formula could not be read: Unexpected end of input/);
   });
 
   test('copying a selection gives the formula and the diagram back as written', async () => {
@@ -79,7 +79,7 @@ describe('richMarkdown', () => {
 
     // A selection that starts inside a drawn formula takes the whole formula.
     const inside = document.createRange();
-    inside.setStart(host.querySelector('.katex')!, 0);
+    inside.setStart(host.querySelector('math')!, 0);
     inside.setEndAfter(host.querySelector('p')!.lastChild!);
     expect(selectedSource(inside)).toBe('\\(E = mc^2\\) here.');
   });
@@ -91,19 +91,22 @@ describe('richMarkdown', () => {
       if (!found) throw new Error('not drawn yet');
       return found;
     });
-    // Plain HTTP: no navigator.clipboard, only the copy command and the event it fires.
+    // Plain HTTP: no navigator.clipboard, only the copy command, which copies the selection.
     vi.stubGlobal('navigator', { ...navigator, clipboard: undefined });
-    const clipboard = new Map<string, string>();
+    let selected = '';
     document.execCommand = vi.fn(() => {
-      const event = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent;
-      Object.defineProperty(event, 'clipboardData', { value: { setData: (type: string, value: string) => clipboard.set(type, value) } });
-      host.dispatchEvent(event);
-      return event.defaultPrevented;
+      const field = document.activeElement as HTMLTextAreaElement;
+      selected = field.value.slice(field.selectionStart, field.selectionEnd);
+      return true;
     });
     try {
+      copy.focus();
       copy.click();
-      expect(clipboard.get('text/plain')).toBe('flowchart LR\n  A --> B');
+      expect(selected).toBe('flowchart LR\n  A --> B');
       expect(copy.textContent).toBe('Copied');
+      // The field goes, and focus comes back to the button.
+      expect(document.querySelector('.md-copy-field')).toBeNull();
+      expect(document.activeElement).toBe(copy);
     } finally {
       vi.unstubAllGlobals();
       Reflect.deleteProperty(document, 'execCommand');

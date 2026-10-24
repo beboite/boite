@@ -93,10 +93,20 @@ span.md-math[data-display].md-drawn {
 }
 
 div.md-math:not(.md-drawn) { white-space: pre-wrap; }
-.md-math .katex-display { margin: 0; }
 
 /* The source stays as written, marked as unread; the tooltip says why. */
 .md-math-failed {
   text-decoration: underline dotted var(--color-danger);
   text-underline-offset: 3px;
+}
+
+/* The field a copy without the clipboard API selects, for the length of one command. 16px keeps Safari from zooming. */
+.md-copy-field {
+  position: fixed;
+  top: 0;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  font-size: 16px;
+  opacity: 0;
 }
