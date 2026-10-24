@@ -47,6 +47,7 @@ by the relay can still finish during withdrawal; deletion is not instantaneous.
 | `project_added` | A project is added | None |
 | `thread_spawned` | A conversation is created | `provider` |
 | `turn_finished` | A turn finishes, fails or stops | `provider`, `outcome`, `duration_ms` |
+| `subagent_started` | A delegated child turn starts, enhanced mode only | `provider`, selected public `model`, `effort`, `speed` |
 
 Every event has a random event UUID, timestamp, app version, OS, OS version and
 architecture. The relay adds country and collection mode.
@@ -84,6 +85,15 @@ the same change: until 2026-10-15 it still ran the 2026-09-21 build, which
 filed every enhanced model and the `yolo` permission mode under `other`, even
 from hosts that reported them correctly. Events already stored keep `other`.
 Basic mode strips every enhanced field even from modified clients.
+
+`subagent_started` counts Boite delegated agents and workflow steps when their
+turn actually starts. Follow-up calls, resumes and workflow retries count again;
+queued work cancelled before starting, compactions and cache keepalives do not.
+The model and effort come from the frozen execution snapshot, including inherited
+defaults. The host sends no such event in basic or off mode, and the relay drops
+it from basic batches. Native subagents launched inside a provider are not counted.
+No task, parent ID, thread ID or profile name is sent. Existing events cannot
+reconstruct these calls, so the ranking starts with hosts carrying this change.
 
 These fields measure model adoption, retention among consenting installations,
 turn success/stop rates, queue delay, duration and token volume. They do not
@@ -139,8 +149,15 @@ tests. No analytics SDK loads in the UI or core.
 The PostHog project is `boite`, separate from `boite-legacy`. Its dashboard
 follows the legacy layout with active installations, launches, countries,
 versions, OS, architecture, conversations by provider, enhanced retention,
-turn outcomes and mean turn duration. Host architecture replaces the legacy
+turn outcomes and median turn duration. Host architecture replaces the legacy
 desktop/mobile chart because execution is measured on the host.
+
+The enhanced section ranks subagent calls by model and effort together, alongside
+the model totals. A shared note and info buttons explain consent, collection dates
+and normalization; individual charts hide repeated descriptions. Overview counters
+come first, then installation breakdowns, providers, model adoption and subagent
+calls, followed by runtime, usage and outcome charts. Phone tiles follow the same
+order in one column.
 
 ## Verification
 

@@ -32,6 +32,14 @@ conversation. Enable it in Settings >
 Experiments to reveal its bottom-left launcher, which opens a dedicated
 interface. It adds no conversation panel or mobile navigation tab.
 
+A bot delegates project work with `boite delegate spawn "<brief>" --project <project>`.
+The project must be entrusted to that bot. With one entrusted project, delegation
+uses it automatically; with several or none, an unnamed child stays personal.
+Project workers run in the project's folder and appear in its thread list,
+including Done and Archived, while the bot keeps steering them from Subagents.
+Ordinary conversations keep their helpers under their parent. Memory passes
+stay in the bot's brain folder.
+
 Subagents is one list and nothing else: the conversation's
 [workflow](workflows.md) runs, then the Boite subagents, then the provider's
 own. With nothing handed out it is empty. A run opens its graph in place and a
@@ -404,8 +412,8 @@ files each child owns. `boite delegate spawn --worktree` (and `"worktree":
 true` on a [workflow](workflows.md) step) gives the child a git worktree of its
 own on a new `boite/sub-<id>` branch, in the configured worktree folder. Its
 branch and folder are chosen at spawn and shown in the spawn output; the
-worktree itself is made from the parent's current HEAD just before the child's
-first turn. Uncommitted edits in the parent's checkout are not in it. A
+worktree itself is made from the parent's current HEAD, or the entrusted project's
+HEAD for a bot, just before the child's first turn. Uncommitted edits are not in it. A
 conversation outside a git repository is refused by name.
 
 The child is told to commit its work on that branch. When one of its turns ends
@@ -415,7 +423,7 @@ branch are removed and the result says so; otherwise both are kept and the
 result ends with `Worktree kept: <path> on branch <branch>, N commits beyond
 <base>`, uncommitted changes noted, and the `git merge <branch>` to run.
 Boite does not merge for the parent. A removed worktree is made again, from
-the parent's HEAD of that moment, if the child gets another turn.
+the same source checkout's current HEAD, if the child gets another turn.
 
 While a child works, the parent should do independent work or finish its turn.
 Waiting inside a tool keeps the parent busy and can delay delivery of results.

@@ -62,6 +62,15 @@ export class AutoCompaction {
     this.timers.delete(threadId);
   }
 
+  /** Done lets the final answer finish, but has no further context to prepare. */
+  stopIfDone(threadId: ThreadId): void {
+    const thread = this.core.journal.getThread(threadId);
+    if (!thread?.archived || thread.doneAt == null) return;
+    this.cancel(threadId);
+    if (this.core.journal.runningTurn(threadId)?.execution?.operation === 'compact'
+      || this.threads.progress.get(threadId)?.phase === 'compacting') this.core.scheduler.stop(threadId);
+  }
+
   close(): void {
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();

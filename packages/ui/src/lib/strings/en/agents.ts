@@ -60,6 +60,7 @@ export const strings = {
     desk: 'Desk', fix: 'Fix it',
     deskPanel: {
       now: 'Now', work: 'Work', memory: 'Memory', today: 'Today',
+      following: 'Followed threads', memoryProblem: 'Memory update failed',
       stepOne: '1 step so far', stepMany: '{count} steps so far', thinking: 'Thinking',
       waitingHint: 'Answer in the conversation and it carries on.',
       nextWake: 'Next wake', nextIn: 'in {time}', idle: 'Resting', idleHint: 'Write to it, or give it a routine.',

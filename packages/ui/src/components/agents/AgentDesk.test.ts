@@ -22,16 +22,19 @@ test('Nova\'s desk shows its live step, every card state in order, answers a que
     await vi.waitFor(() => expect(chips()).toHaveLength(5));
     flushSync();
 
+    // The overview keeps followed work visible and gives secondary content its own tab.
+    expect(document.querySelector('[data-testid=desk-tab-work]')?.getAttribute('aria-selected')).toBe('true');
+    expect(document.querySelector<HTMLElement>('[data-testid=desk-schedule]')?.hidden).toBe(true);
+    expect(document.querySelector<HTMLElement>('[data-testid=desk-memory]')?.hidden).toBe(true);
+    expect(document.querySelector<HTMLDetailsElement>('[data-testid=desk-activity]')?.open).toBe(false);
+    expect(document.querySelector<HTMLDetailsElement>('[data-testid=desk-today]')?.open).toBe(false);
+
     // Now: the step its turn is on, live, and the calls so far on the rail.
     expect(document.querySelector('[data-testid=desk-now]')?.getAttribute('data-state')).toBe('working');
     expect(document.querySelector('[data-testid=desk-now-step]')?.textContent).toBe('Run the UI tests');
     expect(document.querySelector('[data-testid=desk-now]')?.textContent).toContain('4 steps so far');
     expect(document.querySelectorAll('[data-testid=desk-steps] li')).toHaveLength(4);
     expect(document.querySelector('[data-testid=desk-steps] li:last-child')?.getAttribute('data-status')).toBe('running');
-    // Run now waits while Nova works: the core refuses a second turn in flight.
-    const run = document.querySelector<HTMLButtonElement>('[data-testid=routine-run]')!;
-    expect(run.disabled).toBe(true);
-    expect(run.title).toBe('It is at work: run it again once its turn ends');
 
     // Work: what needs the user first, then the silent turn, the work, the open pull request with failing checks, the merged one.
     expect(chips()).toEqual(['Needs you', 'Stalled', 'Working', 'PR open', 'Merged']);
@@ -52,11 +55,72 @@ test('Nova\'s desk shows its live step, every card state in order, answers a que
     await vi.waitFor(() => expect(card('Release notes 2.0.4')).toBeUndefined());
     expect(view.snapshot!.watches.some(w => w.title === 'Release notes 2.0.4')).toBe(false);
 
-    // Its memory, rendered, and the day against its budget.
+    // Arrow keys move both focus and selection; Home returns to the overview.
+    const work = document.querySelector<HTMLButtonElement>('[data-testid=desk-tab-work]')!;
+    work.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    flushSync();
+    expect(document.activeElement?.getAttribute('data-testid')).toBe('desk-tab-routines');
+    expect(document.querySelector<HTMLElement>('[data-testid=desk-schedule]')?.hidden).toBe(false);
+    // Run now waits while Nova works: the core refuses a second turn in flight.
+    const run = document.querySelector<HTMLButtonElement>('[data-testid=routine-run]')!;
+    expect(run.disabled).toBe(true);
+    expect(run.title).toBe('It is at work: run it again once its turn ends');
+    expect(document.querySelector('[data-testid=desk-schedule]')?.textContent).toContain('Release check');
+
+    // Returning to a tab preserves a routine draft rather than losing typed work.
+    document.querySelector<HTMLButtonElement>('[data-testid=routine-add]')!.click();
+    flushSync();
+    const prompt = document.querySelector<HTMLTextAreaElement>('[data-testid=desk-schedule] textarea')!;
+    prompt.value = 'Check the next release';
+    prompt.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector<HTMLButtonElement>('[data-testid=desk-tab-memory]')!.click();
+    flushSync();
+    expect(document.querySelector<HTMLElement>('[data-testid=desk-work]')?.hidden).toBe(true);
+    expect(document.querySelector<HTMLElement>('[data-testid=desk-memory]')?.hidden).toBe(false);
+
+    // Its memory is rendered on demand, and its day still meters the same budget.
     await vi.waitFor(() => expect(document.querySelector('[data-testid=desk-memory-text]')?.textContent).toContain('The login fix ships in it'));
     expect(document.querySelector('[data-testid=desk-memory-pass]')?.textContent).toMatch(/Updated 37 min\. ago\s*·\s*PR #482 fails its e2e redirect test/);
-    await vi.waitFor(() => expect(document.querySelector('[data-testid=desk-budget]')?.textContent).toContain('$1.35 of $2.00'));
-    expect(document.querySelector('[data-testid=desk-schedule]')?.textContent).toContain('Release check');
+    await vi.waitFor(() => expect(document.querySelector('[data-testid=desk-today]')?.textContent).toContain('$1.35 of $2.00'));
+    // A new snapshot flags a failed background memory update on its tab.
+    view.snapshot = { ...view.snapshot!, status: view.snapshot!.status.map(s => s.agentId === nova.id
+      ? { ...s, memory: { ...s.memory!, status: 'error', summary: 'The rewritten memory ran past 8000 characters; it was kept as it is.' } } : s) };
+    flushSync();
+    expect(document.querySelector('[data-testid=desk-tab-memory]')?.getAttribute('aria-label')).toBe('Memory: Memory update failed');
+    expect(document.querySelector('[data-testid=desk-memory-pass]')?.textContent).toContain('8000 characters');
+    document.querySelector<HTMLButtonElement>('[data-testid=desk-tab-routines]')!.click();
+    flushSync();
+    expect(document.querySelector<HTMLTextAreaElement>('[data-testid=desk-schedule] textarea')?.value).toBe('Check the next release');
+    document.querySelector<HTMLButtonElement>('[data-testid=desk-tab-routines]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    flushSync();
+    expect(document.activeElement).toBe(work);
+    expect(document.querySelector<HTMLElement>('[data-testid=desk-work]')?.hidden).toBe(false);
+    // Cost updates preserve the user's choice to read usage details.
+    const usage = document.querySelector<HTMLDetailsElement>('[data-testid=desk-today]')!;
+    usage.open = true;
+    usage.dispatchEvent(new Event('toggle'));
+    flushSync();
+    view.snapshot = { ...view.snapshot!, status: view.snapshot!.status.map(s => s.agentId === nova.id
+      ? { ...s, today: { ...s.today, costUsd: 1.5 } } : s) };
+    flushSync();
+    expect.soft(usage.open).toBe(true);
+    usage.open = false;
+    usage.dispatchEvent(new Event('toggle'));
+    flushSync();
+    // Reaching the budget reveals the warning once.
+    view.snapshot = { ...view.snapshot!, status: view.snapshot!.status.map(s => s.agentId === nova.id
+      ? { ...s, today: { ...s.today, costUsd: 3 } } : s) };
+    flushSync();
+    expect(usage.open).toBe(true);
+    expect(usage.textContent).toContain('Budget reached: wakes wait until tomorrow.');
+    // Dismissing that warning stays respected while more costs arrive.
+    usage.open = false;
+    usage.dispatchEvent(new Event('toggle'));
+    flushSync();
+    view.snapshot = { ...view.snapshot!, status: view.snapshot!.status.map(s => s.agentId === nova.id
+      ? { ...s, today: { ...s.today, costUsd: 3.1 } } : s) };
+    flushSync();
+    expect.soft(usage.open).toBe(false);
   } finally {
     if (desk) await unmount(desk);
     document.body.innerHTML = '';

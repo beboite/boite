@@ -122,6 +122,7 @@ export class ContactStore implements LinkedContacts {
     this.tailscale = new TailscaleClient(core.dataDir);
     this.concierge = new Concierge(core);
     this.funnel = new ContactFunnel(core, [CONTACT_JOIN_ROUTE, CONTACT_LINK_ROUTE, ROUTE]);
+    this.funnel.changed = () => this.changed();
     this.members = new ContactMembers(core, this);
     this.reach = new ContactReach(core, this);
     // A member that leaves the group takes the contacts it relayed out of `peers()`.
@@ -256,12 +257,10 @@ export class ContactStore implements LinkedContacts {
   noteSent(threadId: string, coreId: string): void { this.reach.noteSent(threadId, coreId); }
   checkSendTier(threadId: string, coreId?: string): void { this.reach.checkSendTier(threadId, coreId); }
   checkAttestedTier(agent: string | undefined, coreId?: string): void { this.reach.checkAttestedTier(agent, coreId); }
-
   linkOf(coreId: string): Contact['link'] {
     const contact = this.find(coreId);
     return contact ? this.linkState(contact) : this.members.relayedOf(coreId).some(entry => entry.link === 'connected') ? 'connected' : 'offline';
   }
-
   private linkState(contact: StoredContact): Contact['link'] {
     if (contact.role === 'host') return this.hosted.has(contact.coreId) ? 'connected' : 'offline';
     return this.dialed.get(contact.coreId)?.state ?? (this.started && !this.closed ? 'connecting' : 'offline');
@@ -305,6 +304,7 @@ export class ContactStore implements LinkedContacts {
       tailscale: await this.tailscaleState(),
       invitations: this.liveInvites().length,
       internet: true,
+      funnel: this.funnel.state(),
     };
   }
 
@@ -882,6 +882,7 @@ export class ContactStore implements LinkedContacts {
   beginClose(): void {
     if (this.closed) return;
     this.closed = true;
+    this.funnel.stop();
     if (this.timer !== null) clearInterval(this.timer);
     this.timer = null;
     for (const { socket } of this.dialed.values()) socket?.close(1001, 'core stopping');

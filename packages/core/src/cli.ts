@@ -90,6 +90,7 @@ ${CONTROL_HELP}
                                  arrives later as a message (--multiple);
                                  --open <url> adds an Open button for a page
                                  the user must sign in to, in your browser
+  ask list                      read this thread's pending questions
   settings [key]                 Boite settings you may ask about: value, page,
                                  the name the user's app shows; first, the
                                  language the app speaks; experiments last
@@ -104,12 +105,20 @@ ${CONTROL_HELP}
                                  for what is not one value: a provider login,
                                  a pairing (pages: ${SETTINGS_PAGES.join(', ')})
   settings bot [key]             a bot's settings a card may change:
-                                 ${AGENT_SETTING_KEYS.join(', ')}
+                                 ${AGENT_SETTING_KEYS.slice(0, 5).join(', ')},
+                                 ${AGENT_SETTING_KEYS.slice(5).join(', ')}
                                  (--bot <name>; yours in your own conversation)
   settings bot request <key> <value> --why <text>
-                                 a card asking the user to change one, such as
-                                 projects +boite -old or a list; the outcome
+                                 a card asking the user to change one, for you
+                                 or --bot <name>: name Ada, status paused,
+                                 projects +boite -old, instructions with
+                                 --instructions-file <path>; the outcome
                                  arrives as a message (applied, changed, refused)
+  settings bot create <name>     create the bot the user asked for, at once,
+                                 on your own route or --model <provider/model>
+                                 (--effort, --project a,b, --domain <text>,
+                                 --instructions-file <path>); prints its id
+                                 and conversation
   task list                      the agent's task list
   task add <text>                add a task (id t1, t2, ...)
   task start|done|remove <id>    move or drop one task
@@ -143,10 +152,11 @@ ${CONTROL_HELP}
                                  comes back as a message (--model <provider/model>,
                                  --effort <level>, --speed <tier>, --title <title>,
                                  --profile <id>, --worktree for a git worktree of
-                                 its own branched from your HEAD instead of your
-                                 checkout, and a context mode: --context
+                                 its own from your checkout's HEAD (the project's
+                                 for a bot), and a context mode: --context
                                  light|neutral, --keep|--drop <parts>, --tools
                                  <Tool,...>, --rules <text>|--rules-file <path>)
+                                 --project <p> places a bot's child in an entrusted project
   delegate list                  every subagent and workflow: state, model, time
   delegate send <thread-id> <text>
                                  steer or reuse a subagent, or ask the parent;
@@ -284,11 +294,13 @@ export function settingValue(raw: string): unknown {
 }
 
 /**
- * A bot setting as typed: `projects` takes `+name -name` edits or a list
- * (`a,b`, `a b` or JSON), the other keys a value as `settingValue` reads it.
+ * A bot setting as typed: the text keys take the words as they are, so a
+ * name such as `007` stays text; `projects` takes `+name -name` edits or a
+ * list (`a,b`, `a b` or JSON), the other keys a value as `settingValue` reads it.
  */
 export function agentSettingArg(key: string, tokens: string[]): unknown {
   const raw = tokens.join(' ').trim();
+  if (['name', 'domain', 'instructions', 'avatar', 'status'].includes(key)) return raw;
   if (key !== 'projects') return settingValue(raw);
   if (raw.startsWith('[') || raw.startsWith('{')) return settingValue(raw);
   const items = raw.split(/[\s,]+/).filter(item => item.length > 0);
@@ -296,6 +308,11 @@ export function agentSettingArg(key: string, tokens: string[]): unknown {
   if (edits.length === 0) return items;
   if (edits.length !== items.length) throw new Usage('settings bot request projects takes +name -name edits or a list, not both');
   return { add: edits.filter(item => item.startsWith('+')).map(item => item.slice(1)), remove: edits.filter(item => item.startsWith('-')).map(item => item.slice(1)) };
+}
+
+/** A bot's instructions run to thousands of characters: a listing shows their start; one key or --json gives them whole. */
+function clipped(text: string, max = 160): string {
+  return text.length > max ? `${text.slice(0, max - 1)}… (${text.length} characters)` : text;
 }
 
 /** `resources#limits` into a page and a card. */
@@ -419,6 +436,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     delegate: async () => {
       if (rest[0] === undefined) throw new Usage(`delegate needs ${DELEGATE_ACTIONS}`);
       await delegateCommand(client, threadId, rest, {
+        ...(parsed.project === undefined ? {} : { project: parsed.project }),
         ...(parsed.requestId === undefined ? {} : { requestId: parsed.requestId }), ...(parsed.timeout === undefined ? {} : { timeout: parsed.timeout }),
         ...(parsed.title === undefined ? {} : { title: parsed.title }), ...(parsed.model === undefined ? {} : { model: parsed.model }),
         ...(parsed.effort === undefined ? {} : { effort: parsed.effort }), ...(parsed.speed === undefined ? {} : { speed: parsed.speed }), ...(parsed.profile === undefined ? {} : { profile: parsed.profile }),
@@ -590,25 +608,51 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       }
       if (action === 'bot') {
         const agent = parsed.bot === undefined ? {} : { agent: parsed.bot };
+        if (rest[1] === 'create') {
+          if (rest.length !== 3) throw new Usage('settings bot create takes one name; quote a name with spaces');
+          const created = await client.call('agents.create', {
+            threadId, name: rest[2]!,
+            ...(parsed.domain === undefined ? {} : { domain: parsed.domain }),
+            ...(parsed.instructionsFile === undefined ? {} : { instructions: readRules(parsed.instructionsFile) }),
+            ...(parsed.model === undefined ? {} : { model: parsed.model }),
+            ...(parsed.effort === undefined ? {} : { effort: parsed.effort }),
+            ...(parsed.project === undefined ? {} : { projects: parsed.project.split(',').map(name => name.trim()).filter(Boolean) }),
+          });
+          const { agent: bot, threadId: conversation } = created;
+          const { selection } = bot;
+          print([
+            `created: ${bot.name} (${bot.id})`,
+            `route: ${selection.providerId}/${selection.model ?? 'default'}${selection.effort === null ? '' : ` (${selection.effort})`}`,
+            ...(bot.projectIds?.length ? [`projects: ${bot.projectIds.join(', ')}`] : []),
+            ...(conversation === null ? [] : [`conversation: ${conversation}; boite threads send ${conversation} <text> writes to it`]),
+            'It introduces itself and schedules what its instructions call for.',
+          ], created);
+          return;
+        }
         if (rest[1] === 'request') {
           if (parsed.why === undefined || parsed.why.trim().length === 0) throw new Usage('settings bot request needs --why <text>, the reason the user reads on the card');
           const key = want(2, `a key: ${AGENT_SETTING_KEYS.join(', ')}`);
-          if (rest.length < 4) throw new Usage('settings bot request needs a value after the key');
-          const asked = await client.call('agents.settings.request', { threadId, reason: parsed.why, key, value: agentSettingArg(key, rest.slice(3)), ...agent });
+          const fromFile = key === 'instructions' && parsed.instructionsFile !== undefined;
+          if (fromFile ? rest.length > 3 : rest.length < 4) throw new Usage(fromFile ? 'settings bot request instructions takes the text or --instructions-file <path>, not both' : 'settings bot request needs a value after the key');
+          const value = fromFile ? readRules(parsed.instructionsFile!) : agentSettingArg(key, rest.slice(3));
+          const asked = await client.call('agents.settings.request', { threadId, reason: parsed.why, key, value, ...agent });
           const setting = asked.setting;
           print([
             `requested: ${asked.questionId}`,
-            `change: ${setting.agentName}'s ${setting.key} ${JSON.stringify(setting.previous)} -> ${JSON.stringify(setting.value)}`,
+            `change: ${setting.agentName}'s ${setting.key} ${clipped(JSON.stringify(setting.previous))} -> ${clipped(JSON.stringify(setting.value))}`,
             'card: Apply, or the user changes it in the bot\'s settings',
             'Keep working. The outcome arrives as a message quoting your reason; without one, nothing changed.',
           ], asked);
           return;
         }
-        if (rest.length > 2) throw new Usage('settings bot expects a key or request <key> <value>');
+        if (rest.length > 2) throw new Usage('settings bot expects a key, request <key> <value> or create <name>');
         const read = await client.call('agents.settings.read', { threadId, ...agent });
         const shown = rest[1] === undefined ? read.settings : read.settings.filter(reading => reading.key === rest[1]);
         if (shown.length === 0) throw new Usage(`settings bot: unknown key ${rest[1]}; the keys are ${AGENT_SETTING_KEYS.join(', ')}`);
-        const named = (reading: (typeof shown)[number], value: unknown): string => JSON.stringify(reading.key === 'projects' && Array.isArray(value) ? value.map(id => reading.choices?.find(choice => choice.id === id)?.label ?? id) : value ?? null);
+        const named = (reading: (typeof shown)[number], value: unknown): string => {
+          const text = JSON.stringify(reading.key === 'projects' && Array.isArray(value) ? value.map(id => reading.choices?.find(choice => choice.id === id)?.label ?? id) : value ?? null);
+          return rest[1] === undefined ? clipped(text) : text;
+        };
         print([
           `bot: ${read.agentName} (${read.agentId})`,
           ...shown.map(reading => `${reading.key} ${named(reading, reading.value)}${reading.choices?.length ? `\n    choices: ${reading.choices.map(choice => choice.label === choice.id ? choice.id : `${choice.label} (${choice.id})`).join(', ')}` : ''}`),
@@ -625,6 +669,10 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     ask: async () => {
       // An agent once ran `boite ask help` for this text and drew a card reading "help".
       if (rest.length === 1 && rest[0] === 'help') { print([USAGE], { help: USAGE }); return; }
+      if (rest.length === 1 && rest[0] === 'list') {
+        await controlCommand(client, caller, threadId, { ...parsed, positional: ['questions', threadId] }, print);
+        return;
+      }
       const text = want(0, 'a question');
       const options = rest.slice(1);
       const asked = await client.call('questions.ask', { threadId, text, ...(options.length > 0 ? { options } : {}), ...(parsed.multiple ? { multiple: true } : {}), ...(parsed.open === undefined ? {} : { open: parsed.open }) });

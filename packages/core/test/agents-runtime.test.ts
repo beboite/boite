@@ -44,7 +44,7 @@ test('a bot\'s Boite guide is the thread guide less the project-bound commands, 
     expect(thread).toContain(projectBound);
     expect(bot).not.toContain(projectBound);
   }
-  for (const own of ['[quiet]', 'boite bot remember', 'boite bot schedule', 'boite bot watch|unwatch', 'boite settings bot request', '--open <url>']) expect(BOT_GUIDE).toContain(own);
+  for (const own of ['[quiet]', 'boite bot remember', 'boite bot schedule', 'boite bot watch|unwatch', 'boite settings bot request', '--open <url>', 'boite thread send <id> <text>', 'boite answer <id> <ask-id> <option-or-text>']) expect(BOT_GUIDE).toContain(own);
 
   // The test core starts with the Boite guide off; a bot first meets it on.
   await client.call('brain.configure', { path: null, enabled: false, boiteGuide: true });

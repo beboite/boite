@@ -196,8 +196,12 @@ Simulators and Android emulators or phones on the machine that runs the core,
 and why a platform is missing. `open` boots one, shows it in the user's Device
 panel, waits until it is ready and prints the `adb -s <serial>` or
 `xcrun simctl` prefix that drives it. `screenshot`, `tap`, `swipe`, `type`,
-`key` and `close [--shutdown]` act on it. Details and limits are in
-[devices.md](devices.md).
+`key` and `close [--shutdown]` act on it. While the user's Device panel plays
+the device's live stream (the `deviceStream` setting), `tap`, `swipe`, `type`
+and `key` go through scrcpy and `type` accepts any text; `screenshot` stays
+an `adb screencap` PNG. With a phone plugged in and the setting off, `list`
+ends with one line that gives the `boite settings request deviceStream true`
+command. Details and limits are in [devices.md](devices.md).
 
 ## Pull requests linked to a conversation
 
@@ -561,6 +565,8 @@ or claimed cards, with the count in the refusal; the user's adds have no limit.
 
 `ask` draws a question card in the thread without stopping the agent: the
 thread does not turn `waiting` and the card stays open after the turn ends.
+`ask list` lists the calling thread's pending questions without creating a
+card, like `questions <thread-id>` for that same thread. `ask help` shows usage.
 A core restart keeps it too: an open card is read back from the journal at
 startup, for as long as events are kept (30 days).
 Each extra argument is an option label; with none the question takes free
@@ -640,15 +646,20 @@ one value, a provider login (`accounts#provider-claude`) or a device to add
 `opened: the user opened Settings at <page>`; Dismiss sends `dismissed`. The
 MCP tools `boite_settings` and `boite_settings_request` do the same.
 
-`settings bot [key]` reads a bot's settings a card may change:
-`projects` (those entrusted to it), `model`, `effort`, `autoMemory` (the memory
-pass), `subagents` and `dailyBudget` (dollars a day, or `null` for none). It prints the bot's name, each value
-and, for projects, models and efforts, the choices. `--bot <name or id>`
+`settings bot [key]` reads a bot's settings a card may change: `name`,
+`domain` (its role), `instructions`, `avatar`, `status` (`active`, `paused`,
+`archived`), `projects` (those entrusted to it), `model`, `effort`,
+`autoMemory` (the memory pass), `subagents` and `dailyBudget` (dollars a day,
+or `null` for none). It prints the bot's name, each value and, for status,
+projects, models and efforts, the choices; the listing cuts long instructions
+to their start, one key or `--json` prints them whole. `--bot <name or id>`
 names the bot; in a bot's own conversation it defaults to that bot.
-`settings bot request <key> <value> --why <text>` draws the card. `projects`
-takes `+name -name` edits or a whole list (`Notes,Other`, or JSON), resolved
-by name or id and stored as ids; the other keys read their value as `settings
-request` does. The refusals are the same, plus an unknown or ambiguous bot
+`settings bot request <key> <value> --why <text>` draws the card. `name`,
+`domain`, `instructions`, `avatar` and `status` take the words as typed
+(`name Gargouille (Sécurité)`), and `instructions --instructions-file <path>`
+reads a file; `projects` takes `+name -name` edits or a whole list
+(`Notes,Other`, or JSON), resolved by name or id and stored as ids; the other
+keys read their value as `settings request` does. The refusals are the same, plus an unknown or ambiguous bot
 (the refusal lists them) and a model the bot's policy does not allow.
 
 The card names the bot and the change; for projects, each project added or
@@ -660,6 +671,19 @@ removed closes unanswered. The asking thread reads `applied: <bot>'s <key>
 is now <value>`, `changed: the user set <bot>'s <key> to <value>, not
 <proposed>` or `refused: <bot>'s <key> stays <value>`, projects by name
 (`are` and `stay` for them).
+
+`settings bot create <name>` creates a bot at once, for a thread the user told
+to set one up; no card asks the user. The bot runs on the calling thread's own
+route unless `--model <provider/model>` names another (resolved as `delegate
+spawn --model` does, from every installed model), at its model's default
+effort unless `--effort` names one, with full access like a bot made on the
+Bots page. `--domain <text>` is its role, `--instructions-file <path>` its
+instructions (32,000 characters at most) and `--project a,b` the projects
+entrusted to it, by name or id. A name a live bot already has, any case, is
+refused with that bot's id, as are an unknown model or project. It prints
+`created: <name> (<id>)`, its route, its projects and its conversation, to
+reach it with `boite threads send`; the bot then introduces itself there. The
+MCP tool `boite_bot_create` does the same.
 
 Exit codes: 0, 1 on a refusal or a failure (`error: ...` on stderr), 2 on a
 usage error (the usage text on stderr).

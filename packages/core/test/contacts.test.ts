@@ -14,7 +14,7 @@ import { Refusals, REFUSALS_PER_MINUTE } from '../src/server/refusals.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { Driver } from '../src/drivers/types.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
-import { thrown } from './settle.ts';
+import { rejection, thrown } from './settle.ts';
 
 const cores: TestCore[] = [];
 let restore: (() => void) | undefined;
@@ -531,6 +531,30 @@ test('an invitation for another network names the contact routes on Funnel, shar
   expect((await hostClient.call('contacts.get', {})).invitations).toBe(0);
   await waitFor(() => closed === 2);
   expect(await thrown(hostClient.call('contacts.invite', { internet: 'yes' as never }))).toThrow('internet: expected true or false');
+}, 30000);
+
+test('a join to a Funnel name public DNS does not know yet says to wait and leaves the invitation unspent; a host that does not answer is down', async () => {
+  const host = await startTestCore();
+  const guest = await startTestCore();
+  cores.push(host, guest);
+  host.core.contacts.internetUrl = async () => 'https://desk.tail0000.ts.net:8443';
+  // Never the internet: the host's own check is recorded, not run.
+  const watched: string[] = [];
+  (host.core.contacts.funnel as unknown as { watch: (url: string) => void }).watch = url => { watched.push(url); };
+  (host.core.contacts.funnel as unknown as { close: () => Promise<void> }).close = async () => {};
+  const invite = await host.core.contacts.invite(true, true);
+  expect(watched).toEqual(['https://desk.tail0000.ts.net:8443']);
+  const original = globalThis.fetch;
+  restore = () => { globalThis.fetch = original; };
+  let failure: Error = Object.assign(new TypeError('getaddrinfo ENOTFOUND desk.tail0000.ts.net'), { code: 'ENOTFOUND' });
+  globalThis.fetch = (async () => { throw failure; }) as unknown as typeof fetch;
+  const { reason } = await rejection(guest.core.contacts.join(invite.link));
+  expect(String((reason as Error).message)).toContain('has not published its address on the internet yet');
+  expect(reason).toMatchObject({ data: { retryAfterMs: 30_000 } });
+  expect(host.core.contacts.liveInvites()).toHaveLength(1);
+  expect(guest.core.contacts.list()).toHaveLength(0);
+  failure = new TypeError('Unable to connect. Is the computer able to access the url?');
+  expect(await thrown(guest.core.contacts.join(invite.link))).toThrow('its Boite or its Tailscale Funnel is off');
 }, 30000);
 
 test('two invitations for another network at once: the refused one never takes down the mounts the other saved', async () => {

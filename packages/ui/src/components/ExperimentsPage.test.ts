@@ -118,3 +118,22 @@ test('the reviewed goals switch shows its checklist model only while it is on', 
   await tick();
   expect(document.querySelector('[data-testid=goal2-tracker]')).toBeNull();
 });
+
+test('the owner turns the live device stream on; a paired device does not see the switch', async () => {
+  const saved: unknown[] = [];
+  const store = { owner: true, settings: { deviceStream: false }, providers: [], accountsOf: () => [], modelsOf: () => [], saveSettings: async (patch: unknown) => { saved.push(patch); return true; } } as unknown as Store;
+  running = mount(ExperimentsPage, { target: document.body, props: { store } });
+  flushSync();
+  await tick();
+  const toggle = query<HTMLInputElement>('[data-testid=device-stream-on]');
+  expect(toggle.checked).toBe(false);
+  toggle.click();
+  flushSync();
+  await tick();
+  expect(saved).toEqual([{ deviceStream: true }]);
+  unmount(running);
+  running = mount(ExperimentsPage, { target: document.body, props: { store: { ...store, owner: false } as unknown as Store } });
+  flushSync();
+  await tick();
+  expect(document.querySelector('[data-testid=device-stream-settings]')).toBeNull();
+});

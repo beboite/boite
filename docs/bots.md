@@ -73,17 +73,21 @@ its settings.
 
 The desk is a surface of the thread's right panel (`desk`), opened by the
 header's desk button and, the first time this device shows a bot on a wide
-window, by itself. It shows what the bot is doing now (the step its turn is
-on in large type, the time it has run ticking, its last four calls on a slim
-timeline, else what it waits on or its next wake with a countdown), then under
-small sentence-case labels its watched threads as rows (a status dot that
+window, by itself. It keeps what the bot is doing now above three tabs: Work,
+Routines and Memory. The current step and elapsed time stay visible; the
+step count unfolds the last four calls. When idle, the card shows what it
+waits on or its next wake with a countdown. Work opens by default and shows
+its followed threads as rows (a status dot that
 breathes while the thread works or waits on the user, title, time, one meta
 line with state, project, pull request and checks, how long a stalled turn has
 been silent; a needs-you row opens its question with its options to answer in
 place; a row opens its thread, its cross, shown on hover and focus, takes it
-off the desk), its routines as rows with their next time and their actions as
-icons, its memory as a two-line preview with its last pass and AGENTS.md, and
-today's turns, wakes and quiet ones on one line over a slim budget bar.
+off the desk). Routines holds scheduled work and its actions; Memory holds
+the memory preview, its last update and AGENTS.md. A failed memory update
+marks its tab, with the full error inside. Arrow keys, Home and End change
+tabs; switching tabs preserves unfinished forms. Today's spend stays in a
+summary that unfolds the turn counts and budget bar. Reaching the budget
+opens that summary so its warning stays visible.
 
 A new bot needs a name and what it does; its robot, model and projects come
 filled in. It is free to act: its permission mode starts on full access (Auto,
@@ -396,21 +400,37 @@ of a met goal still reaches the bot. The snapshot carries the list as
 
 ## Asking to change a bot's settings
 
-A bot's settings stay the owner's, but a thread, or the bot about itself,
-can propose a change with a card: `boite settings bot request <key> <value>
---why <reason>`, the same flow as a card about a Boite setting ([CLI](cli.md)).
-The keys are the projects entrusted to it, its model and reasoning effort, the
-memory pass (`autoMemory`), its subagents and its daily budget
-(`dailyBudget`, dollars a day or `null`). The context block tells the bot how
-to ask, so one that needs a project it was not given asks for it instead of
-working around it. The card is asked without stopping and outlives its turn.
+A bot's settings stay the owner's, but a thread, or a bot about itself or
+another bot (`--bot <name>`), can propose a change with a card: `boite settings
+bot request <key> <value> --why <reason>`, the same flow as a card about a
+Boite setting ([CLI](cli.md)). The keys are its name, its role (`domain`), its
+instructions (`--instructions-file <path>` for a long text), its picture
+(`avatar`: one or two characters, a robot code, or `""`), its `status`
+(`active`, `paused` or `archived`), the projects entrusted to it, its model and
+reasoning effort, the memory pass (`autoMemory`), its subagents and its daily
+budget (`dailyBudget`, dollars a day or `null`). A name another bot holds is
+refused, when the card is drawn and again when it is applied. The context
+block tells the bot how to ask, so one the user asks to
+rename itself draws the card, and one that needs a project it was not given
+asks for it instead of working around it. The card is asked without stopping and outlives its turn.
 Apply (`agents.settings.apply`, owner only) goes through the same checks as the
 bot's settings page, and for projects the owner can untick part of the
 proposal first. Any change to the bot, from the card or from the page,
-settles the cards it answers, and a card whose key no longer exists closes; the
+settles the cards it answers, and a card whose key no longer exists closes, as
+does one about a bot archived since, except the card that archived it; the
 asking thread reads the outcome as a message. Code:
 `agents/setting-cards.ts`, shared checks in
 `packages/contracts/src/agent-setting-requests.ts`.
+
+A thread asked to set up a bot creates it itself, with no card: `boite settings
+bot create <name>`, with its role, instructions, model and projects
+([CLI](cli.md)). `agents.create` makes it exactly as the Bots page does, full
+access, its conversation and its "Just created" first turn included, and
+returns its id and conversation so the thread briefs it with `boite threads
+send`. The owner allowed this on 2026-10-24: a thread asks only when something
+about the bot is unclear. Changing the bot afterwards still goes through a
+card. Code: `agents/create.ts`, shared checks in
+`packages/contracts/src/agent-create.ts`.
 
 ## Routines
 

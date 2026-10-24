@@ -27,6 +27,8 @@
   let entries = $derived(status?.entries.filter(entry => entry.kind === selected) ?? []);
   let folderName = $derived(status?.config.path?.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? '');
   let autoPull = $derived(status?.config.autoPull ?? { onStartup: false, intervalMinutes: 0 });
+  let blockedLinks = $derived(status?.links?.some(link => link.state === 'blocked') ?? false);
+  let windowsPermission = $derived(status?.links?.some(link => link.remedy === 'windows-developer-mode') ?? false);
   const failure = (cause: unknown) => cause instanceof RpcFailure && cause.code === RpcErrorCode.MethodNotFound ? t.missing : errorText(cause);
 
   $effect(() => {
@@ -62,17 +64,17 @@
     });
   });
 
-  async function run(action: 'save' | 'refresh' | 'sync' | 'disconnect' | 'toggle' | 'auto' | 'global' | 'guide', policy?: BrainConfig['autoPull']) {
+  async function run(action: 'save' | 'refresh' | 'sync' | 'disconnect' | 'toggle' | 'auto' | 'global' | 'guide' | 'retry-links', policy?: BrainConfig['autoPull']) {
     const client = store.client;
     if (!client || busy) return;
     const current = revision;
     busy = true; error = '';
     try {
-      const next = action === 'save' || action === 'disconnect' || action === 'toggle' || action === 'auto' || action === 'global' || action === 'guide'
+      const next = action === 'save' || action === 'disconnect' || action === 'toggle' || action === 'auto' || action === 'global' || action === 'guide' || action === 'retry-links'
         ? await client.call('brain.configure', {
           ...status?.config,
           path: action === 'disconnect' ? null : action === 'save' ? path.trim() : status!.config.path,
-          enabled: action === 'disconnect' ? false : action === 'toggle' ? !status!.config.enabled : status?.config.path ? status.config.enabled : true,
+          enabled: action === 'disconnect' ? false : action === 'toggle' ? !status!.config.enabled : action === 'retry-links' ? status!.config.enabled : status?.config.path ? status.config.enabled : true,
           ...(policy ? { autoPull: policy } : {}),
           ...(action === 'global' ? { globalInstructions: !status!.config.globalInstructions } : {}),
           ...(action === 'guide' ? { boiteGuide: status!.config.boiteGuide === false } : {}),
@@ -123,10 +125,28 @@
   }
 </script>
 
+{#snippet linkHelp()}
+  {#if blockedLinks}
+    <div class="link-help" role="alert" data-testid="brain-link-help">
+      <p>{windowsPermission ? t.windowsPermission : t.linkFailure}</p>
+      {#if windowsPermission}
+        <ol>
+          <li>{t.windowsOpen} <code>ms-settings:developers</code></li>
+          <li>{t.windowsEnable}</li>
+          <li>{t.windowsRetry}</li>
+        </ol>
+        <p>{t.windowsAdmin}</p>
+      {/if}
+      <button disabled={busy} onclick={() => void run('retry-links')} data-testid="brain-link-retry"><RefreshCw size={14} /><span class="ui-label">{strings.common.retry}</span></button>
+    </div>
+  {/if}
+{/snippet}
+
 <div class="page" data-testid="brain-page" aria-busy={busy}>
   <header><div><h1 class="ui-label-box"><span class="ui-label">{t.heading}</span><InfoTip topic={t.heading} text={t.description} /></h1></div></header>
   {#if error}<p class="error" role="alert" data-testid="brain-error">{error}</p>{/if}
   {#if status && !status.config.path}
+    {@render linkHelp()}
     {#each status.links ?? [] as link (link.path)}
       {#if link.error}<p class="error" role="alert">{link.error}</p>{/if}
     {/each}
@@ -151,12 +171,19 @@
       </div>
       <div class="global-instructions">
         <label class="sharing"><input type="checkbox" role="switch" checked={status.config.globalInstructions ?? false} disabled={busy || !status.config.enabled} data-testid="brain-global" onchange={event => { event.currentTarget.checked = status!.config.globalInstructions ?? false; void run('global'); }} /><span class="ui-label">{t.globalInstructions}</span><SyncMark {store} key="brain:globalInstructions" /></label>
+        {@render linkHelp()}
         {#if status.links?.length}
           <details class="global-links" data-testid="brain-links" open={status.links.some(link => link.state === 'blocked')}>
             <summary>{t.globalDetails}<span>{status.links.filter(link => link.state !== 'blocked').length}/{status.links.length}</span></summary>
             <p>{t.globalHint}</p>
             {#each status.links as link (link.path)}
-              <div class="link-row"><span>{link.name}</span><span class:error={link.state === 'blocked'}>{t[link.state]}</span><code>{link.path}</code>{#if link.error}<p class="error">{link.error}</p>{/if}</div>
+              <div class="link-row"><span>{link.name}</span><span class:error={link.state === 'blocked'}>{t[link.state]}</span><code>{link.path}</code>
+                {#if link.error}
+                  {#if link.remedy === 'windows-developer-mode'}
+                    <details class="link-error"><summary>{t.linkErrorDetails}</summary><p class="error">{link.error}</p></details>
+                  {:else}<p class="error">{link.error}</p>{/if}
+                {/if}
+              </div>
             {/each}
           </details>
         {/if}
@@ -245,10 +272,15 @@
   .global-instructions, .boite-guide { padding: 16px 24px; border-top: 1px solid var(--color-border); }
   .boite-guide p { margin: 8px 0 0; }
   .global-links { margin-top: 12px; font-size: var(--text-sm); }
+  .link-help { margin-top: 12px; padding: 12px; border: 1px solid var(--color-border); border-radius: var(--radius-md); font-size: var(--text-sm); }
+  .link-help p { margin: 0 0 8px; }
+  .link-help ol { margin: 8px 0; padding-left: 20px; }
+  .link-help li { margin: 4px 0; }
+  .link-help code { display: inline; overflow-wrap: anywhere; }
   .global-links summary { display: flex; gap: 10px; align-items: center; cursor: pointer; color: var(--color-muted-foreground); }
   .global-links summary span { font-variant-numeric: tabular-nums; }
   .link-row { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; padding: 12px 0; border-top: 1px solid var(--color-border); }
-  .link-row code, .link-row p { grid-column: 1 / -1; margin: 0; }
+  .link-row code, .link-row p, .link-row .link-error { grid-column: 1 / -1; margin: 0; }
   .link-row > span:nth-child(2):not(.error) { color: var(--color-muted-foreground); }
   .automation { display: grid; gap: 14px; padding: 20px 24px; border-top: 1px solid var(--color-border); }
   .automation h3 { margin: 0; font-size: var(--text-sm); font-weight: 500; color: var(--color-muted-foreground); }

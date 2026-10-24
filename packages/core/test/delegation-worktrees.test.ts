@@ -6,6 +6,7 @@ import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
+import { makeAgent } from './agent-fixture.ts';
 
 const cores: TestCore[] = [];
 const restores: (() => void)[] = [];
@@ -96,6 +97,28 @@ test('a child that commits keeps its worktree, and its result names the branch t
   expect(branchExists(s.repo, branch)).toBe(true);
   // The main checkout is untouched: the work waits on the branch.
   expect(existsSync(join(s.repo, 'fix.txt'))).toBe(false);
+}, 90_000);
+
+test('a bot child worktree branches from its entrusted project HEAD, including after a follow-up', async () => {
+  const s = await setup();
+  const projectId = s.h.core.threads.require(s.threadId).projectId!;
+  const { agent, threadId } = await makeAgent(s.h, s.client, { projectIds: [projectId] });
+  await s.client.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: agent.revision, config: {
+    defaultRoute: agent.selection, allowedRoutes: [{ id: 'main', name: 'Main', ...agent.selection, model: 'echo' }],
+    subagents: { ...DEFAULT_DELEGATION_CONFIG, enabled: true }, autoMemory: false, dailyBudgetUsd: null,
+  } });
+  const results = () => s.h.core.delegation.get(threadId).messages.filter(letter => letter.origin === 'result');
+  git(s.repo, 'commit', '-q', '--allow-empty', '-m', 'project work');
+  const head = git(s.repo, 'rev-parse', 'HEAD');
+  const child = await s.client.call('delegation.spawn', { threadId, task: 'Inspect the project', worktree: true, requestId: 'bot-reader' });
+  expect(child.thread).toMatchObject({ projectId, parentThreadId: threadId, cwd: child.worktree!.path, branch: child.worktree!.branch });
+  await waitFor(() => results().length === 1, SLOW_GIT_MS);
+  expect(results()[0]!.text).toContain(`worked in ${child.worktree!.path}`);
+  expect(s.h.core.delegation.worktrees.get(child.thread.id)).toMatchObject({ state: 'removed', base: head });
+  git(s.repo, 'commit', '-q', '--allow-empty', '-m', 'updated project work');
+  await s.client.call('delegation.send', { threadId, toThreadId: child.thread.id, text: 'Inspect again', requestId: 'bot-follow-up' });
+  await waitFor(() => results().length === 2, SLOW_GIT_MS);
+  expect(s.h.core.delegation.worktrees.get(child.thread.id)).toMatchObject({ state: 'removed', base: git(s.repo, 'rev-parse', 'HEAD') });
 }, 90_000);
 
 test('worktree is refused outside a git repository, and a plan step checks its worktree field', async () => {

@@ -1,6 +1,19 @@
 import { expect, test } from 'vitest';
 import { FakeClient } from './fake-client';
 
+test('Windows instruction link failures stay actionable until permissions change and the owner retries', async () => {
+  const client = new FakeClient({ delayMs: 0, brainLinkPermission: true });
+  try {
+    await client.connect();
+    const config = { path: 'C:/brain', enabled: true, globalInstructions: true };
+    const failed = await client.call('brain.configure', config);
+    expect(failed.links?.every(link => link.state === 'blocked' && link.remedy === 'windows-developer-mode')).toBe(true);
+    expect((await client.call('brain.status', {})).links).toEqual(failed.links);
+    client.setBrainLinkPermission(false);
+    expect((await client.call('brain.configure', config)).links?.every(link => link.state === 'linked' && !link.remedy)).toBe(true);
+  } finally { client.close(); }
+});
+
 test('the fake exposes manual skills independently of sharing until the folder is disconnected', async () => {
   const client = new FakeClient({ delayMs: 0 });
   try {

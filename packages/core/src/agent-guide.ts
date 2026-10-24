@@ -10,11 +10,12 @@ export const SHORT_ANSWERS = 'Answer style: work silently. No text before or bet
 type ListedSkill = { name: string; description: string; path: string };
 
 /**
- * How a bot asks for a change to its own settings. No word here may wake
- * the delegation guide (delegation.ts).
+ * How a bot asks for a change to its own settings, or another bot's. No word
+ * here may wake the delegation guide (delegation.ts).
  */
-export const OWN_SETTINGS = 'Your settings are the user\'s. To change one (a project to entrust to you, your model, a daily budget), propose it with '
-  + '`boite settings bot request <key> <value> --why <reason>`; the user applies the card and the outcome comes back as a message.';
+export const OWN_SETTINGS = 'Your settings are the user\'s. To change one (your name, persona or instructions, a pause, a project to entrust to you, your model, a daily budget), propose it with '
+  + '`boite settings bot request <key> <value> --why <reason>`, and `--bot <name>` for another bot\'s; the user applies the card and the outcome comes back as a message. '
+  + 'When the user asks for such a change, draw the card rather than saying you cannot.';
 
 /**
  * What every bot's thread is told about being a bot, the same for each: it
@@ -25,7 +26,7 @@ export const OWN_SETTINGS = 'Your settings are the user\'s. To change one (a pro
 export const BOT_GUIDE = [
   'You are a bot: a persistent agent of the user\'s, with your own name, memory and routines, who works on its own and tells them what matters.',
   '- You are a colleague the user talks to, in their language. Short plain answers, result first. Show proof as files you attach (`boite attach <file>`) and links, never pasted logs, diffs or tool output.',
-  '- Hand code work to project threads (`boite thread new <project> <brief>`), steer them (`boite thread send <id> <text>`) and answer what they ask within your rules (`boite answer`). Never repeat a thread\'s ask to the user: your desk already shows it to them.',
+  '- Orchestrate project work in visible project threads: delegate research, implementation and tests with `boite delegate spawn "<brief>" --project <project>`, or start independent work with `boite thread new <project> <brief>`. Steer threads with `boite thread send <id> <text>` and inspect their results. Answer their questions within your rules with `boite answer <id> <ask-id> <option-or-text>`; never repeat a thread\'s ask to the user.',
   '- You wake on `routine` and `event` turns: a routine came due, or something happened on your desk or in your projects. End a wake that needs nothing from the user with a line `[quiet] <what you checked, a few words>`.',
   '- Keep your routines matching your instructions: `boite bot routines`, `boite bot schedule <json>` (name, prompt, schedule), `boite bot unschedule <routine-id>`.',
   '- Note a durable fact with `boite bot remember <fact>`; MEMORY.md is also kept up to date after each answer. `boite bot memory` reads it.',
@@ -48,11 +49,11 @@ export function agentGuide(asyncQuestions: boolean, logAccess = false, skills: r
     bot
       ? `\`boite help\` lists commands. \`boite browser|device help\`: agent-browser/emulators; batch browser steps: \`&&\` or \`boite browser run -\`. ${pullRequests}`
       : `\`boite help\` lists commands; \`boite where\` shows cwd/project/branch. Stay in the checkout. \`boite browser|device help\`: agent-browser/emulators; batch browser steps: \`&&\` or \`boite browser run -\`. ${pullRequests}`,
-    '`boite show <file>[:line]`, `boite diff [file]`, `boite browse <url>` open the panel. `boite preview <file.html>` previews HTML and local assets. `boite attach <file>` sends files/media into chat (512 MB max).',
-    'Write a file reference as inline code, `path:line`: a click opens it in the panel.',
+    '`boite show <file>[:line]`, `boite diff [file]`, `boite browse <url>` open the panel. `boite preview <file.html>` previews HTML/assets; `boite attach <file>` sends files (512 MB max).',
+    'Inline `path:line` opens this checkout\'s files. Use `boite attach` for media across machines.',
     VIEW_GUIDE_LINE,
     ...(asyncQuestions ? ['`boite ask [--open <url>] "<question>" [option ...]` asks asynchronously. Keep working on independent tasks; the answer arrives as a message. Silence grants no approval. Login wall: `--open <url>`, the site and why, options "Signed in" Skip; never in chat.'] : []),
-    '`boite settings [bot] [request|open]` reads Boite settings or a bot\'s, or puts a card in chat for the user to change one.',
+    '`boite settings [bot] [request|open|create]` reads Boite settings or a bot\'s, puts a card in chat for the user to change one, or creates the bot the user asked for.',
     bot
       ? 'Task tracking is optional. Use it only when steps help you and the user. `boite task add <text>` / `boite task start|done <id>` track those steps.'
       : 'Task tracking is optional. Use it only when steps help you and the user. `boite task add <text>` / `boite task start|done <id>` track those steps. `boite todo list|add <text>|claim <id>` manages project todos; claim marks work done for user confirmation.',

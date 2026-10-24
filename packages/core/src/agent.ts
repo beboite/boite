@@ -217,6 +217,8 @@ export function registerAgentMethods(core: Core): void {
   core.router.register('devices.open', (params, { connection }) => core.devices.open(params, connection));
   core.router.register('devices.frame', (params, { connection }) => core.devices.frame(params, connection));
   core.router.register('devices.input', (params, { connection }) => core.devices.input(params, connection));
+  core.router.register('devices.stream', (params, { connection }) => core.devices.stream(params, connection));
+  core.router.register('devices.clipboard', (params, { connection }) => core.devices.clipboard(params, connection));
   core.router.register('devices.screenshot', (params, { connection }) => core.devices.screenshot(params, connection));
   core.router.register('devices.close', (params, { connection }) => core.devices.close(params, connection));
   core.router.register('browser.remoteWatch', (params, { connection }) => core.browser.remoteWatch(params, connection));

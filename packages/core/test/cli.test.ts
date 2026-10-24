@@ -57,6 +57,21 @@ afterEach(async () => {
   await harness.stop();
 });
 
+test('delegate spawn --project reaches the core from a bot looking after several projects', async () => {
+  const client = await harness.connect();
+  const projects = await client.call('projects.list', {});
+  const project = projects[0]!;
+  const otherPath = join(harness.dataDir, 'other-project');
+  mkdirSync(otherPath);
+  const second = await client.call('projects.add', { path: otherPath, name: 'Other' });
+  const bot = await makeAgent(harness, client, { projectIds: [project.id, second.id] });
+  threadId = bot.threadId;
+  await client.call('delegation.configure', { threadId, config: { enabled: true, paused: false, profiles: [], anyModel: true } });
+  const run = await boite(['delegate', 'spawn', 'Inspect the project', '--project', project.name, '--json']);
+  expect([run.err, run.code]).toEqual(['', 0]);
+  expect(JSON.parse(run.out).thread).toMatchObject({ projectId: project.id, cwd: project.path, parentThreadId: threadId });
+});
+
 test('splits a trailing line off a path and leaves a drive letter alone', () => {
   expect(splitLine('src/a.ts:12')).toEqual({ path: 'src/a.ts', line: 12 });
   expect(splitLine('C:\\x\\a.ts')).toEqual({ path: 'C:\\x\\a.ts', line: undefined });
@@ -447,6 +462,32 @@ test('ask draws a card that does not stop the agent, and the answer comes back a
   expect(prompts).toEqual(['hello', '> Deploy now?\n\nlater\nafter lunch']);
   const card = harness.core.journal.listMessages(threadId).flatMap((m) => m.parts).find((p) => p.type === 'question');
   expect(card).toMatchObject({ async: true, answer: { optionIds: ['2'], text: 'after lunch' } });
+});
+
+test('ask list reads its own pending questions without publishing a question named list', async () => {
+  const client = await harness.connect();
+  const empty = await boite(['ask', 'list', '--json']);
+  expect(empty).toEqual({ code: 0, out: '[]\n', err: '' });
+  const finished = client.next('turn.finished', turn => turn.threadId === threadId, 10000);
+  await client.call('turns.start', { threadId, prompt: 'hello' });
+  await finished;
+  const asked = await boite(['ask', 'Which trailer?', 'New', 'Old', '--json']);
+  expect(asked.code).toBe(0);
+  const { questionId } = JSON.parse(asked.out) as { questionId: string };
+  const before = harness.core.journal.listMessages(threadId);
+
+  const listed = await boite(['ask', 'list', '--json']);
+  expect(listed.err).toBe('');
+  expect(listed.code).toBe(0);
+  expect(JSON.parse(listed.out)).toMatchObject([{ id: questionId, text: 'Which trailer?' }]);
+  expect(await client.call('questions.list', { threadId })).toHaveLength(1);
+  expect(harness.core.journal.listMessages(threadId)).toEqual(before);
+
+  // An ordinary thread can inspect its own cards without a bot's entrusted projects.
+  const own = await boite(['questions', threadId]);
+  expect(own.code).toBe(0);
+  expect(own.out).toContain(`question ${questionId}`);
+  expect(own.out).toContain('option 1: New');
 });
 
 test('skipping async questions neither steers running work nor starts a later turn', async () => {

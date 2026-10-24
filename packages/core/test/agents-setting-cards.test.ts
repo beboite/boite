@@ -170,6 +170,63 @@ test("an agent asks about its own settings from its thread; a change from its se
   expect(drawn(self, helpers!.id)!.answer).toBeNull();
 });
 
+test('a bot asks to rename itself and to pause, then archive, another bot; the owner applies each card', async () => {
+  const { h, owner, self, worker, prompts, run, profile, cards, drawn } = await setup();
+  const heard = (text: string) => (prompts.get(self) ?? []).some(p => p.includes(text));
+  const { agent: herald } = await owner.call('agents.create', { threadId: worker, name: 'Herald' });
+  const heraldNow = () => h.core.workforce.records.get('profile', herald.id) as AgentProfile;
+  const apply = async (questionId: string) => { await owner.call('agents.settings.apply', { threadId: self, questionId }); await waitFor(() => !cards(self).some(c => c.id === questionId)); };
+
+  // The words are the name as typed, accents and parentheses included; a name another bot holds is refused.
+  expect((await run(['settings', 'bot', 'request', 'name', 'herald', '--why', 'Take its name.'], self)).err).toContain('another bot is named "Herald"');
+  expect((await run(['settings', 'bot', 'request', 'avatar', 'a robot', '--why', 'A new face.'], self)).err).toContain('avatar: expected one or two characters');
+  const renamed = await run(['settings', 'bot', 'request', 'name', 'Gargouille', '(Sécurité)', '--why', 'The user renamed me.'], self);
+  expect(renamed.out).toContain(`change: Ada's name "Ada" -> "Gargouille (Sécurité)"`);
+  const [card] = cards(self);
+  await apply(card!.id);
+  expect(profile().name).toBe('Gargouille (Sécurité)');
+  expect(h.core.journal.getThread(self)!.title).toBe('Gargouille (Sécurité)');
+  await waitFor(() => heard(`applied: Ada's name is now "Gargouille (Sécurité)"`));
+
+  // Two cards may ask for one free name; once one gives it away, the other cannot apply.
+  await owner.call('turns.start', { threadId: worker, prompt: 'Prepare the release' });
+  await waitFor(() => h.core.journal.listTurns(worker).some(t => t.status === 'done'));
+  expect((await run(['settings', 'bot', 'request', 'name', 'Sentinel', '--bot', 'Herald', '--why', 'A watch name.'], worker)).code).toBe(0);
+  expect((await run(['settings', 'bot', 'request', 'name', 'Sentinel', '--why', 'A watch name.'], self)).code).toBe(0);
+  await owner.call('agents.settings.apply', { threadId: worker, questionId: cards(worker)[0]!.id });
+  expect(heraldNow().name).toBe('Sentinel');
+  const second = cards(self)[0]!;
+  expect(await thrown(owner.call('agents.settings.apply', { threadId: self, questionId: second.id }))).toThrow('another bot is named "Sentinel"');
+  expect(profile().name).toBe('Gargouille (Sécurité)');
+  await owner.call('questions.answer', { threadId: self, questionId: second.id, optionIds: ['refuse'] });
+  await waitFor(() => cards(self).length === 0 && cards(worker).length === 0);
+
+  // Long instructions come from a file; the change line and the listing show their start.
+  const manual = join(h.dataDir, 'manual.md');
+  await Bun.write(manual, `Guard the release.\n${'Check every gate. '.repeat(40)}`);
+  expect((await run(['settings', 'bot', 'request', 'instructions', '--instructions-file', manual, '--why', 'My new rules.'], self)).out).toContain('characters)');
+  await apply(cards(self)[0]!.id);
+  expect(profile().instructions).toStartWith('Guard the release.\nCheck every gate.');
+  expect((await run(['settings', 'bot'], self)).out).toMatch(/instructions "Guard the release\.\\nCheck.*… \(\d+ characters\)/);
+
+  // Another bot, by name: paused, then archived. An archive card settles as applied, not closed;
+  // a card to wake it, drawn from another thread, closes unanswered with it.
+  expect((await run(['settings', 'bot', 'request', 'status', 'paused', '--bot', 'Sentinel', '--why', 'The user is away.'], self)).code).toBe(0);
+  await apply(cards(self)[0]!.id);
+  expect(heraldNow().status).toBe('paused');
+  expect((await run(['settings', 'bot', 'status', '--bot', 'Sentinel'], self)).out).toContain('choices: active, paused, archived');
+  expect((await run(['settings', 'bot', 'request', 'status', 'active', '--bot', 'Sentinel', '--why', 'The user is back.'], worker)).code).toBe(0);
+  const [wake] = cards(worker);
+  expect((await run(['settings', 'bot', 'request', 'status', 'archived', '--bot', 'Sentinel', '--why', 'Sentinel is no longer needed.'], self)).code).toBe(0);
+  const archive = cards(self)[0]!;
+  await apply(archive.id);
+  expect(heraldNow().status).toBe('archived');
+  expect(drawn(self, archive.id)!.answer).toEqual({ optionIds: ['applied'], value: 'archived' });
+  await waitFor(() => cards(worker).length === 0);
+  expect(drawn(worker, wake!.id)!.answer).toBeNull();
+  expect(profile().status).toBe('active');
+});
+
 test('an agent whose stored model its provider no longer lists still takes a projects card; a new unlisted model is refused', async () => {
   const { h, owner, worker, notes, agent, run, profile, cards } = await setup();
   // A gateway once listed `echo/echo`; the provider lists only `echo` now.
@@ -188,4 +245,33 @@ test('an agent whose stored model its provider no longer lists still takes a pro
   // Choosing a model is still checked.
   expect(await thrown(owner.call('agents.profile.save', { id: agent.id, expectedRevision: profile().revision, value: { ...profile(), selection: { ...profile().selection, model: 'echo/other' } } })))
     .toThrow('the provider does not offer this model');
+});
+
+test('a discussion creates the bot the user asked for, without a card, and reads its conversation', async () => {
+  const { h, owner, prompts, worker, notes, run } = await setup();
+  const bots = () => h.core.workforce.records.list('profile').map(p => p.name);
+  const manual = join(h.dataDir, 'manual.md');
+  await Bun.write(manual, 'Write the release notes.');
+
+  // A taken name, an unknown project or model is refused and creates nothing.
+  expect((await run(['settings', 'bot', 'create', 'ada'], worker)).err).toContain('a bot named "Ada" already exists');
+  expect((await run(['settings', 'bot', 'create', 'Herald', '--project', 'Nowhere'], worker)).err).toContain('no project "Nowhere"');
+  expect((await run(['settings', 'bot', 'create', 'Herald', '--model', 'gpt-nothing'], worker)).err).toContain('no installed model matches "gpt-nothing"');
+  expect(bots()).not.toContain('Herald');
+
+  const created = await run(['settings', 'bot', 'create', 'Herald', '--project', 'Notes', '--domain', 'release communication', '--instructions-file', manual], worker);
+  expect(created.err).toBe('');
+  const bot = h.core.workforce.records.list('profile').find(p => p.name === 'Herald')!;
+  // The thread's own route, with full access as the Bots page creates a bot; no card asked the user.
+  expect(bot).toMatchObject({ status: 'active', domain: 'release communication', instructions: 'Write the release notes.', projectIds: [notes.id], selection: { providerId: 'echo', effort: null, permissionMode: 'bypassPermissions' } });
+  expect(h.core.threads.listQuestions(worker)).toHaveLength(0);
+  const botThread = h.core.workforce.sessionOf(bot.id)!.threadId;
+  expect(created.out).toContain(`created: Herald (${bot.id})`);
+  expect(created.out).toContain(`boite threads send ${botThread} <text>`);
+  // Its first turn introduces it, as a bot made on the Bots page.
+  await waitFor(() => (prompts.get(botThread) ?? []).length > 0);
+  expect((await run(['settings', 'bot', 'create', 'herald'], worker)).err).toContain('a bot named "Herald" already exists');
+
+  // The owner may call it too.
+  expect((await owner.call('agents.create', { threadId: worker, name: 'Scout' })).agent.name).toBe('Scout');
 });

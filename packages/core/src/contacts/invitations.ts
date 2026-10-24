@@ -60,6 +60,8 @@ export async function createInvite(store: ContactStore, core: Core, share: unkno
     store.relisten();
     store.arm();
     const link = encodeInvite({ ...store.card(), url, token, share: shared.status === 'created' ? shared.url : null, expiresAt });
+    // The owner sees whether the internet reaches the link's origin before sending it.
+    if (internet) store.funnel.watch(url);
     store.changed();
     return { link, expiresAt, share: shared, via: internet ? 'internet' : 'tailnet' };
   } finally {

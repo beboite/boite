@@ -22,8 +22,11 @@ const DEFAULT_BRAIN_ROOT = '/agent-workspaces';
 /** The last line of a wake that needed nothing from the user, as the core reads it. */
 const QUIET = /^\[quiet\]/i;
 
-/** Agent setting cards live with the threads' questions: `fake-client/agent-settings.ts` answers them. */
-export type AgentSettingMethod = Extract<keyof AgentsRpcMethods, `agents.settings.${string}`>;
+/**
+ * Agent setting cards live with the threads' questions, and a thread creating a
+ * bot resolves its route like a subagent's: `fake-client/agent-settings.ts` answers them.
+ */
+export type AgentSettingMethod = Extract<keyof AgentsRpcMethods, `agents.settings.${string}` | 'agents.create'>;
 type AgentHandlers = {
   [M in Exclude<keyof AgentsRpcMethods, AgentSettingMethod>]: (params: RpcParams<M>) => RpcResult<M>;
 };
@@ -105,6 +108,10 @@ export class FakeAgents {
 
   // What the rest of the fake core asks.
 
+  /** An agent's own thread, as the core's `sessionOf`: what `agents.create` returns. */
+  conversationOf(agentId: string): string | null { return this.threadOf(agentId); }
+  /** `agents.create`: the bot and its first turn, as `agents.profile.save` makes them. */
+  create(value: RpcParams<'agents.profile.save'>['value']): AgentProfile { return this.saveProfile({ value }, true); }
   /** The core keeps a project an agent looks after only through its own records, none of which the fake keeps. */
   referencesProject(_projectId: string): boolean { return false; }
   /** An agent's profile as stored, or null once removed: what an agent setting card reads. */
@@ -117,10 +124,10 @@ export class FakeAgents {
   /** The agent whose own thread this is, as the core's `resident.ownerOf`. */
   ownerOf(threadId: string): string | null { return [...this.sessions.values()].find(s => s.threadId === threadId)?.agentId ?? null; }
   /** An applied agent setting card, written as the agent's settings would. */
-  writeSetting(agentId: string, change: { selection?: AgentSelection; projectIds?: string[]; config?: AgentRuntimeConfig }): AgentProfile {
+  writeSetting(agentId: string, change: { profile?: Partial<Pick<AgentProfile, 'name' | 'domain' | 'instructions' | 'avatar' | 'status'>>; selection?: AgentSelection; projectIds?: string[]; config?: AgentRuntimeConfig }): AgentProfile {
     const agent = this.profile(agentId);
     if (change.config) this.configs.set(agentId, structuredClone(change.config));
-    return this.saveProfile({ id: agent.id, expectedRevision: agent.revision, value: { ...agent, ...(change.selection ? { selection: change.selection } : {}), ...(change.projectIds ? { projectIds: change.projectIds } : {}) } }, false);
+    return this.saveProfile({ id: agent.id, expectedRevision: agent.revision, value: { ...agent, ...change.profile, ...(change.selection ? { selection: change.selection } : {}), ...(change.projectIds ? { projectIds: change.projectIds } : {}) } }, false);
   }
   close(): void {}
   open(): void {}

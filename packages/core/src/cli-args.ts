@@ -25,7 +25,7 @@ export interface Parsed {
   before?: number;
   limit?: number;
   level?: 'debug' | 'info' | 'warn' | 'error';
-  /** `threads --project`: one project by id, name or folder. */
+  /** `threads --project` or `delegate spawn --project`: one project by id, name or folder. */
   project?: string;
   /** `threads --archived`: the archived threads instead. */
   archived: boolean;
@@ -35,6 +35,10 @@ export interface Parsed {
   why?: string;
   /** `settings bot --bot <name>`: the bot, by name or id; omitted, the one whose conversation this is. */
   bot?: string;
+  /** `settings bot create --domain <text>`: what the new bot looks after, in a line. */
+  domain?: string;
+  /** `settings bot create --instructions-file <path>`: its instructions, read from a file. */
+  instructionsFile?: string;
   /** Another core's address; its token comes from BOITE_TOKEN, never the command line. */
   core?: string;
   /** `--context`, `--keep`, `--drop`, `--tools`, `--rules`, `--rules-file`, as typed: `contextRequest` reads them. */
@@ -82,6 +86,8 @@ export function parse(argv: string[]): Parsed {
     else if (arg === '--why') parsed.why = next();
     // `--agent` is the old spelling, still read.
     else if (arg === '--bot' || arg === '--agent') parsed.bot = next();
+    else if (arg === '--domain') parsed.domain = next();
+    else if (arg === '--instructions-file') parsed.instructionsFile = next();
     else if (arg === '--core') parsed.core = next();
     else if (arg === '--limit') {
       const value = number(arg, next());

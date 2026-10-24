@@ -108,3 +108,54 @@ test('a persistent agent\'s card stands in its conversation', async () => {
   await page.click(`${card} [data-testid="agent-setting-refuse"]`);
   await page.waitFor(`!document.querySelector('${card}')`);
 }, 60000);
+
+test('a bot asks to change its name, picture and instructions; Apply renames it', async () => {
+  await page.navigate(`http://127.0.0.1:${port}/?fake=1&agents=1`);
+  await page.send('Emulation.setDeviceMetricsOverride', DESKTOP);
+  await page.waitFor(`document.querySelector('[data-testid="view-agents"]')`);
+  const agent = await page.evaluate<string>(`(async () => {
+    const store = window.__boiteTest.workspace.active;
+    const snapshot = await store.client.call('agents.snapshot', {});
+    const mira = snapshot.profiles.find(p => p.name === 'Mira');
+    const threadId = snapshot.sessions.find(s => s.agentId === mira.id).threadId;
+    const ask = (key, value, reason) => store.client.call('agents.settings.request', { threadId, key, value, reason });
+    await ask('name', 'Gargouille (Sécurité)', 'You asked me to take this name.');
+    await ask('avatar', 'bot:b.3.1.4.2', 'A face that matches the new name.');
+    await ask('instructions', 'Watch the security of every project.\\nReport each finding with its proof.\\n\\nNever push a fix without asking.', 'My role changed with my name.');
+    store.showAgents(mira.id);
+    return mira.id;
+  })()`);
+  // The three cards wait in the dock, one page each.
+  const card = (key: string) => `[data-testid="activity-question"] [data-testid="agent-setting-card"][data-state="pending"][data-key="${key}"]`;
+  const shows = (key: string) => `document.querySelector('${card(key)}')?.getBoundingClientRect().width > 0`;
+  await page.waitFor(shows('name'));
+  await capture('identity-name-desktop.png');
+  await page.click('[data-testid="activity-question-next"]');
+  await page.waitFor(shows('avatar'));
+  await capture('identity-avatar-desktop.png');
+  await page.click('[data-testid="activity-question-next"]');
+  await page.waitFor(shows('instructions'));
+  expect(await page.text(`${card('instructions')} [data-testid="agent-setting-text"]`)).toContain('Never push a fix without asking.');
+  await capture('identity-instructions-desktop.png');
+
+  await page.send('Emulation.setDeviceMetricsOverride', PHONE);
+  await page.waitFor(`document.querySelector('[data-testid="agent-entry-${agent}"]')?.getBoundingClientRect().width > 0 || ${shows('instructions')}`);
+  await page.evaluate(`${shows('instructions')} || document.querySelector('[data-testid="agent-entry-${agent}"]').click()`);
+  await page.waitFor(shows('instructions'));
+  // A desk the wide layout opened beside the chat covers it on a phone.
+  await page.evaluate(`document.querySelector('[data-testid="panel-close"]')?.click()`);
+  await page.waitFor(`!document.querySelector('[data-testid="panel-close"]')?.getBoundingClientRect().width`);
+  expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  expect(await page.evaluate(`(() => { const box = document.querySelector('${card('instructions')}').getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth; })()`)).toBe(true);
+  await capture('identity-instructions-phone.png');
+  await page.click('[data-testid="activity-question-prev"]');
+  await page.waitFor(shows('avatar'));
+  await capture('identity-avatar-phone.png');
+  await page.send('Emulation.setDeviceMetricsOverride', DESKTOP);
+
+  await page.click('[data-testid="activity-question-prev"]');
+  await page.waitFor(`document.querySelector('${card('name')} [data-testid="agent-setting-apply"]')?.getBoundingClientRect().width > 0`);
+  await page.click(`${card('name')} [data-testid="agent-setting-apply"]`);
+  await page.waitFor(`document.querySelector('[data-testid="agent-setting-card"][data-outcome="applied"][data-key="name"]')`);
+  expect(await page.evaluate(`window.__boiteTest.workspace.active.client.call('agents.snapshot', {}).then(s => s.profiles.find(p => p.id === ${JSON.stringify(agent)}).name)`)).toBe('Gargouille (Sécurité)');
+}, 60000);

@@ -387,7 +387,10 @@ export class ThreadStore {
       if (thread.projectId !== null) this.core.projects.announce(thread.projectId);
       return saved;
     })());
-    if (archivedThread) this.core.fileTickets.forgetUnder(thread.cwd);
+    if (archivedThread) {
+      this.autoCompact.stopIfDone(thread.id);
+      this.core.fileTickets.forgetUnder(thread.cwd);
+    }
     return archivedThread;
   }
 
@@ -444,7 +447,8 @@ export class ThreadStore {
       // Archiving an archived thread again keeps its time: nothing new was put away.
       const archivedAt = archived ? (thread.archived ? thread.archivedAt ?? null : Date.now()) : null;
       const saved = this.save({ ...thread, archived, doneAt, archivedAt }, 'thread.archived');
-      if (thread.archived !== archived && !thread.parentThreadId && thread.projectId !== null) this.core.projects.announce(thread.projectId);
+      const projectThread = !thread.parentThreadId || this.core.journal.getThread(thread.parentThreadId)?.agentSessionId;
+      if ((thread.archived !== archived || (thread.doneAt ?? null) !== doneAt) && projectThread && thread.projectId !== null) this.core.projects.announce(thread.projectId);
       return saved;
     })());
     // A removal waits for the same stops itself before it hides the family.

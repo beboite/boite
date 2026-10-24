@@ -195,6 +195,19 @@ test('fake validates proof and protects busy, viewed, pending input and paused w
   expect(await client.sweepMergedPrArchives()).toBe(1);
 });
 
+test('fake badge detection stops a compaction when the conversation reaches Done', async () => {
+  const { thread } = await fixture();
+  const first = await client.call('turns.start', { threadId: thread.id, prompt: 'Remember the change.' });
+  await expect.poll(async () => (await client.call('threads.get', { threadId: thread.id })).turns.find(row => row.id === first.id)?.status).toBe('done');
+  const turn = await client.call('threads.compact', { threadId: thread.id });
+  await client.call('threads.pullRequest', { threadId: thread.id });
+  await vi.waitFor(async () => {
+    const saved = await client.call('threads.get', { threadId: thread.id });
+    expect(saved).toMatchObject({ archived: true, status: 'idle', doneAt: expect.any(Number) });
+    expect(saved.turns.find(row => row.id === turn.id)?.status).toBe('stopped');
+  });
+});
+
 test('fake stale policy, restore and checkout evidence cannot hide conversation', async () => {
   const { project, thread, proof } = await fixture();
   proof.beforeValidate = async () => { await client.call('projects.setAutoArchiveMergedPr', { projectId: project.id, enabled: false }); };

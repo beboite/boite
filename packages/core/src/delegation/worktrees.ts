@@ -10,9 +10,9 @@ const KEY = 'delegation-worktree:';
 /**
  * The git worktrees of delegated children. A child's branch and folder are
  * chosen when it is created, and the worktree itself is made from the
- * parent's HEAD just before a turn runs in it, so spawning and launching a
- * workflow step stay synchronous. When a turn ends, a worktree with no commit
- * beyond its base and no change goes with its branch; any other is kept for
+ * parent's HEAD (or the project's for a bot) just before a turn runs in it,
+ * so spawning and launching a workflow step stay synchronous. When a turn ends,
+ * a worktree with no commit beyond its base and no change goes with its branch; any other is kept for
  * the parent to merge. Records live in the settings table under the child.
  */
 export class ChildWorktrees {
@@ -35,7 +35,7 @@ export class ChildWorktrees {
    * The branch and folder of a new child; nothing is made on disk yet. Refused
    * by name when the parent's project is not a git repository.
    */
-  plan(parent: ThreadSummary, childId: ThreadId): DelegationWorktree {
+  plan(parent: Pick<ThreadSummary, 'projectId'>, childId: ThreadId): DelegationWorktree {
     if (parent.projectId === null) throw refused('worktree: this conversation has no project; a worktree needs a git repository', { field: 'worktree', expected: 'a conversation in a git project' });
     const project = this.core.projects.require(parent.projectId);
     if (project.kind === 'drafts' || !existsSync(join(project.path, '.git'))) {
@@ -86,7 +86,7 @@ export class ChildWorktrees {
         await this.core.worktrees.ensure(threadId, project, record.branch, record.path);
         return this.mark(threadId, { ...record, state: 'active' });
       }
-      const base = this.core.sharedCompute?.journal.worker(threadId)?.input.baseCommit ?? await this.core.worktrees.head(threadId, parent.cwd);
+      const base = this.core.sharedCompute?.journal.worker(threadId)?.input.baseCommit ?? await this.core.worktrees.head(threadId, parent.projectId === thread.projectId ? parent.cwd : project.path);
       await this.core.worktrees.add(threadId, project, record.branch, record.path, undefined, base);
       this.mark(threadId, { branch: record.branch, path: record.path, base, state: 'active' });
     } catch (error) {
