@@ -24,6 +24,9 @@ export function brainMethods(ctx: FakeContext) {
           ['Claude Code', '.claude/CLAUDE.md'], ['Codex', '.codex/AGENTS.md'], ['OpenCode', '.config/opencode/AGENTS.md'],
           ['pi', '.pi/agent/AGENTS.md'], ['Grok', '.grok/AGENTS.md'], ['Gemini / Antigravity', '.gemini/GEMINI.md'], ['Muse', '.config/muse/AGENTS.md'],
         ].map(([name, path]) => ({ name: name!, path: `/home/user/${path}`, state: 'linked' as const, error: null })) : [];
+        if (ctx.brainLinkPermission) ctx.brain.links = ctx.brain.links.map(link => ({
+          ...link, state: 'blocked', error: `EPERM: symlink at ${link.path}`, remedy: 'windows-developer-mode',
+        }));
         ctx.brain.entries = config.path ? [
           { kind: 'instructions', name: 'AGENTS.md', path: 'AGENTS.md', description: '', error: null },
           { kind: 'skill', name: 'code-review', path: 'skills/code-review/SKILL.md', description: 'Review changes and check the affected behavior.', error: null },

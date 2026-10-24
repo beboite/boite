@@ -177,6 +177,10 @@ export class FakeClient implements ObservableClient {
     this.#ctx.bus.principal = principal;
   }
 
+  setBrainLinkPermission(denied: boolean): void {
+    this.#ctx.brainLinkPermission = denied;
+  }
+
   /** Test fixture: no provider turn is started. */
   holdAfterRestart(threadId: ThreadId, prompt: string) {
     return holdAfterRestart(this.#ctx, threadId, prompt);

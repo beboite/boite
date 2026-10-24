@@ -95,6 +95,8 @@ export interface FakeClientOptions {
   delayMs?: number;
   /** Exhausted quotas with banked resets and credits for visual checks. */
   quotaExtras?: boolean;
+  /** Simulate Windows refusing global instruction symlinks. */
+  brainLinkPermission?: boolean;
   /**
    * Characters per streamed delta, like the echo driver's 16, so a per-delta
    * cost shows. Unset streams an answer in five deltas; `?fake=1&stream=tokens` sets 16.
@@ -298,6 +300,7 @@ export class FakeContext {
   readonly longCopies: number;
   readonly heavy: boolean;
   readonly quotaExtras: boolean;
+  brainLinkPermission: boolean;
   /**
    * Two agents behind their newest release, one by each route, so the notices
    * have a subject (`provider-installs.ts`).
@@ -306,6 +309,7 @@ export class FakeContext {
 
   constructor(options: FakeClientOptions = {}) {
     this.quotaExtras = options.quotaExtras ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('quotaExtras') === '1');
+    this.brainLinkPermission = options.brainLinkPermission ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('brainLinkPermission') === '1');
     this.bus = new FakeBus(options.principal ?? 'owner');
     this.agents = new FakeAgents(revision => {
       this.emit('agents.changed', { revision });

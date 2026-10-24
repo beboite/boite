@@ -115,6 +115,56 @@ test('a refused symlink restores the original file and reports the failure', () 
   } finally { mock.mockRestore(); }
 });
 
+test('Windows symlink permission failures offer recovery, preserve files and retry without toggling sharing', () => {
+  links = new BrainLinks({ get: () => owned, set: next => { owned = next; } }, { home, env: {} }, 'win32');
+  const path = join(home, '.codex', 'AGENTS.md'); mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, 'Original');
+  const mock = spyOn(fs, 'symlinkSync').mockImplementation(() => {
+    throw Object.assign(new Error('A required privilege is not held'), { code: 'EPERM' });
+  });
+  try {
+    const result = links.apply(brain);
+    expect(result.every(link => link.state === 'blocked' && link.remedy === 'windows-developer-mode')).toBe(true);
+    expect(links.status(brain)).toEqual(result);
+    expect(readFileSync(path, 'utf8')).toBe('Original');
+    expect(owned).toEqual([]);
+  } finally { mock.mockRestore(); }
+  expect(links.apply(brain).every(link => link.state === 'linked' && !link.remedy)).toBe(true);
+  links.apply(null);
+  expect(readFileSync(path, 'utf8')).toBe('Original');
+});
+
+test('Windows folder permission errors do not suggest enabling Developer Mode', () => {
+  links = new BrainLinks({ get: () => owned, set: next => { owned = next; } }, { home, env: {} }, 'win32');
+  const mock = spyOn(fs, 'mkdirSync').mockImplementation(() => {
+    throw Object.assign(new Error('Folder is not writable'), { code: 'EPERM' });
+  });
+  try {
+    expect(links.apply(brain).every(link => link.state === 'blocked' && !link.remedy && link.error?.includes('not writable'))).toBe(true);
+    expect(owned).toEqual([]);
+  } finally { mock.mockRestore(); }
+});
+
+test('a Windows refusal while restoring an original symlink keeps its backup and recovery steps after disconnect', () => {
+  links = new BrainLinks({ get: () => owned, set: next => { owned = next; } }, { home, env: {} }, 'win32');
+  const path = join(home, '.codex', 'AGENTS.md'); mkdirSync(dirname(path), { recursive: true });
+  symlinkSync('missing.md', path, 'file');
+  links.apply(brain);
+  const backup = owned.find(link => link.path === path)!.backup!;
+  const mock = spyOn(fs, 'symlinkSync').mockImplementation(() => {
+    throw Object.assign(new Error('A required privilege is not held'), { code: 'EPERM' });
+  });
+  try {
+    expect(links.apply(null)).toEqual([expect.objectContaining({ path, state: 'blocked', remedy: 'windows-developer-mode' })]);
+    expect(links.status(null)[0]?.error).toContain('required privilege');
+    expect(readlinkSync(backup)).toBe('missing.md');
+    expect(owned).toHaveLength(1);
+  } finally { mock.mockRestore(); }
+  expect(links.apply(null)).toEqual([]);
+  expect(readlinkSync(path)).toBe('missing.md');
+  expect(owned).toEqual([]);
+});
+
 test('a failed install keeps its backup tracked when another writer occupies the destination', () => {
   const path = join(home, '.codex', 'AGENTS.md'); mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, 'Original');
