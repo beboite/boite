@@ -233,6 +233,16 @@ fn is_agent_label(label: &str) -> bool {
     label.strip_prefix(LABEL_PREFIX).is_some_and(crate::browser_control::is_agent_surface)
 }
 
+/// Whether a webview plays no sound: an agent surface and every popup its
+/// pages open. Nobody listens to the pages an agent drives, often out of sight,
+/// and their sound reached the user's headset (2026-10-25). The pages the user
+/// browses keep theirs. A label's kind never changes, so neither does this.
+/// Only WebView2 applies it: an agent drives a surface through WebView2's
+/// devtools channel alone, so off Windows no agent surface plays anything.
+pub(crate) fn muted(label: &str) -> bool {
+    is_agent_label(label) || popups::popup_surface(label).is_some_and(crate::browser_control::is_agent_surface)
+}
+
 /// The viewport an agent surface works in before the UI ever measured a slot for it.
 const AGENT_SIZE: (f64, f64) = (1280.0, 800.0);
 
@@ -759,9 +769,9 @@ pub async fn browser_create(
     }
     #[cfg(windows)]
     {
-        if let Err(error) = crate::platform::browser_page::surface(&view).await {
+        if let Err(error) = crate::platform::browser_page::surface(&view, muted(&label)).await {
             let _ = view.close();
-            return Err(format!("the browser surface {id:?} could not be cleared of the app's scripts: {error}"));
+            return Err(format!("the browser surface {id:?} could not be prepared: {error}"));
         }
         if let Err(error) = crate::platform::browser_diagnostics::attach(view.clone(), id.clone()).await {
             crate::platform::browser_diagnostics::remove(&id); let _ = view.close(); return Err(error);
@@ -976,7 +986,19 @@ pub async fn browser_destroy(app: AppHandle, webview: Webview, id: String) -> Re
 
 #[cfg(test)]
 mod tests {
-    use super::{checked_url, label_of, profile_of, read_selection, webview2_profile, Placement, Profile, SurfaceRect, Surfaces, LABEL_PREFIX, MAIN_LABEL, MAX_SELECTION_CALLBACK_BYTES, PICKS};
+    use super::{checked_url, label_of, muted, profile_of, read_selection, webview2_profile, Placement, Profile, SurfaceRect, Surfaces, LABEL_PREFIX, MAIN_LABEL, MAX_SELECTION_CALLBACK_BYTES, PICKS};
+
+    /// A page an agent opened played its sound in the user's headset
+    /// (2026-10-25): its surface and its popups start muted, the user's do not.
+    #[test]
+    fn agent_surfaces_and_their_popups_are_muted_and_the_users_pages_are_not() {
+        assert!(muted(&label_of("agent-1").unwrap()));
+        assert!(muted("boite-popup:4:agent-1"));
+        assert!(!muted(&label_of("t1").unwrap()));
+        assert!(!muted(&label_of("browser:agent-1").unwrap()));
+        assert!(!muted("boite-popup:5:t1"));
+        assert!(!muted(MAIN_LABEL));
+    }
 
     #[test]
     fn an_agent_surface_out_of_sight_stays_shown_off_screen_at_its_last_size() {
