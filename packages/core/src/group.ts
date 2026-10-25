@@ -25,7 +25,6 @@ import { randomUUID, verify } from 'node:crypto';
 import { migrateGroupPeer } from './coordination-group.ts';
 import type { KeyObject } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { hostname } from 'node:os';
 import { join as joinPath } from 'node:path';
 import { GRANT_TTL_MS, GROUP_MAX_CORES, GROUP_TICKET_TTL_MS, PAIRING_ROLES } from '@boite/contracts';
 import { deviceAdmitInput, deviceHelloInput, type CoordinationPeer, type DeviceHello, type DeviceInvite, type Group, type GroupDevice, type GroupInvite, type GroupTicket, type PairingRole, type Principal } from '@boite/contracts';
@@ -44,7 +43,7 @@ import { DEVICES_MAX, GroupClients } from './group/clients.ts';
 import { askToJoin, JOIN_SIGNING_PREFIX, type JoinReply } from './group/join.ts';
 import { SyncBackoff } from './group/backoff.ts';
 import { newId, newToken } from './ids.ts';
-import { currentOs } from './paths.ts';
+import { currentOs, machineName } from './paths.ts';
 import { principalOf as principalOfRole, type ClientIdentity, type Identity } from './sessions.ts';
 
 const SETTING = 'group';
@@ -312,7 +311,7 @@ export class GroupStore {
     const { box } = this.box();
     return {
       coreId,
-      name: (hostname() || 'Boite').slice(0, 100),
+      name: (machineName() || 'Boite').slice(0, 100),
       publicKey,
       box,
       boxSig: this.core.coordination.signature(boxSigningInput(coreId, box)).toString('base64'),

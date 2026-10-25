@@ -65,7 +65,7 @@ Everything lives in `~/.boite-server`: `config.json`, the supervisor's
 | `pair [--owner]` | A one-time link for a phone or browser, or with `--owner` for a desktop app. |
 | `update [--check] [--force] [--bundle <zip>]` | The newest release of the channel. |
 | `agents` | Installs or updates Claude Code. |
-| `config [<key> <value>]` | `channel stable\|nightly`, `host lan\|tailscale\|local`, `port <n>`, `autostart on\|off`. |
+| `config [<key> <value>]` | `channel stable\|nightly`, `host lan\|tailscale\|local`, `port <n>`, `autostart on\|off`, `name <text>`. |
 | `logs [<lines>]` | The end of `core.log`. |
 | `uninstall [--purge]` | `--purge` also deletes `data/`. |
 
@@ -76,6 +76,14 @@ with `ok` and, when false, `error`.
 Wi-Fi and Tailscale addresses both answer; `tailscale` on the tailnet address
 alone, waiting until the phone joins it; `local` on this phone only. A change
 to `host` or `port` applies on the next start.
+
+`name` is what the other machines of a group and every client call the phone.
+Android gives every app the host name `localhost`, and the name set in the
+phone's own settings is out of Termux's reach, so without one the core goes by
+the maker and model from `getprop` (`OnePlus GM1913`). `boite-server` passes it
+to the core as `BOITE_MACHINE_NAME`; `config name ""` returns to the maker and
+model. A change applies on the next start, and the group's roster then carries
+it to the other machines.
 
 ## Releases and updates
 
