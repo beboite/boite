@@ -1046,6 +1046,10 @@ Muse 1.4.13 proves its mandatory native-tool gate, useful execution,
 job/letter/board transitions and actual Git consumption on Linux; 1.3.0 remains
 refused. Muse Windows, native macOS and live inference remain unverified.
 Windows evidence comes from its own native lane, independently of Linux.
+The full native Windows result currently comes from NT 10.0.26200 with a MinGW
+helper. Server 2025 NT 10.0.26100 still refuses native descendants with EPERM
+after an SDK clang build; its required Windows check remains red. This confirmed
+platform defect blocks Windows readiness despite the successful 26200 fixtures.
 
 ### Native Windows tool execution
 

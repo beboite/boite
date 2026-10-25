@@ -6,14 +6,14 @@ import {Bus} from '../src/bus.ts';
 import {Journal} from '../src/journal.ts';
 import {ProcRegistry} from '../src/procs.ts';
 
-const [output] = process.argv.slice(2);
+const [output, selectedCompiler] = process.argv.slice(2);
 if (!output || !isAbsolute(output)) throw new Error('usage: bun packages/core/bin/install-windows-sandbox.ts <absolute protected-tool.exe path>');
 const scratch = mkdtempSync(join(tmpdir(), 'boite-build-windows-protected-'));
 const journal = new Journal(join(scratch, 'journal.db')), procs = new ProcRegistry(journal, new Bus());
 try {
   const source = join(import.meta.dir, '../src/platform/windows/protected-tool.c');
-  const compiler = process.platform === 'win32' ? Bun.which('clang') || Bun.which('gcc')
-    || ['C:\\mingw64\\bin\\gcc.exe', 'C:\\ProgramData\\mingw64\\mingw64\\bin\\gcc.exe'].find(existsSync) : Bun.which('x86_64-w64-mingw32-gcc');
+  const compiler = selectedCompiler || (process.platform === 'win32' ? Bun.which('clang') || Bun.which('gcc')
+    || ['C:\\mingw64\\bin\\gcc.exe', 'C:\\ProgramData\\mingw64\\mingw64\\bin\\gcc.exe'].find(existsSync) : Bun.which('x86_64-w64-mingw32-gcc'));
   if (!compiler) throw new Error('execution.windows.compiler: install a Windows SDK clang or MinGW compiler before building the userspace helper');
   const local = join(scratch, 'protected-tool.c'), built = join(scratch, 'protected-tool.exe');
   writeFileSync(local, readFileSync(source));
@@ -24,5 +24,5 @@ try {
   const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.proc.stdout).text(), new Response(child.proc.stderr).text()]);
   if (code) throw new Error(`execution.windows.compiler: native helper build failed (${code}): ${stdout}${stderr}`);
   mkdirSync(dirname(output), {recursive: true}); copyFileSync(built, output);
-  console.log(`boite-windows-protected 1; native helper built: ${output}`);
+  console.log(`boite-windows-protected 1; compiler: ${compiler}; native helper built: ${output}`);
 } finally {await procs.killAll(); await procs.close(); journal.close(); rmSync(scratch, {recursive: true, force: true});}

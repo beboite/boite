@@ -194,6 +194,8 @@ jobs:
         shell: pwsh
         run: |
           bun packages/core/bin/install-windows-sandbox.ts "$env:RUNNER_TEMP\protected-tool.exe"
+          bun packages/core/bin/install-windows-sandbox.ts "$env:RUNNER_TEMP\protected-tool-mingw.exe" 'C:\mingw64\bin\gcc.exe'
+          Get-FileHash "$env:RUNNER_TEMP\protected-tool*.exe" -Algorithm SHA256 | Format-List
           "BOITE_WINDOWS_SANDBOX_PATH=$env:RUNNER_TEMP\protected-tool.exe" >> $env:GITHUB_ENV
       - name: Native Windows protected tools
         if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
@@ -201,7 +203,23 @@ jobs:
           BOITE_TEST_NATIVE_EXECUTION: '1'
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
-        run: bun test packages/core/test/protected-windows.test.ts --timeout 120000
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($helper in @('protected-tool.exe', 'protected-tool-mingw.exe')) {
+            Write-Host "Native fixture helper: $helper"
+            $env:BOITE_WINDOWS_SANDBOX_PATH = "$env:RUNNER_TEMP\$helper"
+            bun test packages/core/test/protected-windows.test.ts --timeout 120000
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+          }
+          if ($failed) { exit 1 }
+      - name: Preserve native helper comparison
+        if: always() && runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: protected-windows-helper-comparison
+          path: ${{ runner.temp }}/protected-tool*.exe
+          retention-days: 3
       - name: Prepare synthetic native providers
         if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
         run: bun packages/core/test/fixtures/prepare-native-providers.ts

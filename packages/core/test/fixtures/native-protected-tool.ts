@@ -12,6 +12,8 @@ if (process.platform === 'win32') {
     CreateProcessW: {args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.i32, FFIType.u32, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32},
     TerminateProcess: {args: [FFIType.ptr, FFIType.u32], returns: FFIType.i32},
     GetLastError: {args: [], returns: FFIType.u32},
+    WaitForSingleObject: {args: [FFIType.ptr, FFIType.u32], returns: FFIType.u32},
+    GetExitCodeProcess: {args: [FFIType.ptr, FFIType.ptr], returns: FFIType.i32},
   });
   const advapi = dlopen('advapi32.dll', {
     OpenProcessToken: {args: [FFIType.i64, FFIType.u32, FFIType.ptr], returns: FFIType.i32},
@@ -45,7 +47,27 @@ if (process.platform === 'win32') {
 try {console.log(fs.readFileSync(${JSON.stringify(outside)}, 'utf8'))} catch {}
 try {fs.readFileSync(p.join(p.dirname(p.dirname(process.execPath)),'ambient-probe'));console.log('ambient-readable')} catch {}
 console.log('child-checked');`], {encoding: 'utf8'});
-  if (child.status !== 0 || !child.stdout?.includes('child-checked')) throw new Error(`Native child probe failed: ${child.error ?? child.stderr}`);
+  if (child.status !== 0 || !child.stdout?.includes('child-checked')) {
+    // Keep native failure evidence: libuv maps several distinct Win32 stages to
+    // EPERM, so compare direct creation with inherited, ignored and piped stdio.
+    for (const stdio of ['inherit', 'ignore', 'pipe'] as const) {
+      const result = spawnSync(process.execPath, ['-e', 'process.exit(0)'], {stdio});
+      console.error(JSON.stringify({probe: 'stdio', stdio, status: result.status, error: result.error?.message}));
+    }
+    const rawLine = Buffer.from(`"${process.execPath}" -e "process.exit(0)"\0`, 'utf16le');
+    processInfo.fill(0);
+    const created = kernel.symbols.CreateProcessW(null, ptr(rawLine), null, null, 0, 0x08000000, null, null, ptr(startup), ptr(processInfo));
+    const creationError = kernel.symbols.GetLastError();
+    let status: number | null = null;
+    if (created) {
+      const root = Number(processInfo.readBigUInt64LE()) as Pointer, thread = Number(processInfo.readBigUInt64LE(8)) as Pointer;
+      if (kernel.symbols.WaitForSingleObject(root, 3000) !== 0) kernel.symbols.TerminateProcess(root, 125);
+      const exit = Buffer.alloc(4); kernel.symbols.GetExitCodeProcess(root, ptr(exit)); status = exit.readUInt32LE();
+      kernel.symbols.CloseHandle(thread); kernel.symbols.CloseHandle(root);
+    }
+    console.error(JSON.stringify({probe: 'CreateProcessW', created, creationError, status}));
+    throw new Error(`Native child probe failed: ${child.error ?? child.stderr}`);
+  }
   if (child.stdout?.includes('SYNTHETIC_PROTECTED')) exposed.push('child');
   if (child.stdout?.includes('ambient-readable')) exposed.push('child-ambient-grant');
   if (Object.values(process.env).some(value => value?.includes('SYNTHETIC_PROTECTED'))) exposed.push('environment');
