@@ -13,6 +13,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { AGENT_ENV, AGENT_SETTING_KEYS, SETTINGS_PAGES, VIEW_HELP } from '@boite/contracts';
 import { VIEW_EXAMPLE } from './view-example.ts';
+import { viewCheckCommand } from './view-cli.ts';
 import type { AgentTask, GitChange, PanelSurface, SettingsReading, Todo } from '@boite/contracts';
 import { connect } from './client.ts';
 import type { CoreClient } from './client.ts';
@@ -78,6 +79,9 @@ ${CONTROL_HELP}
                                  line ![title](file.html) places it
                                  (--title <text>); view help has the rules
                                  and the app's look, view example a full page
+  view check <file.html>         check at desktop and phone widths without
+                                 publishing; save PNGs in the cwd
+                                 (--script <checks.js>, --scheme dark|light)
   preview <file.html>             open a local HTML artifact with its assets
   preview-close <file.html>       stop serving a local HTML preview
   open trace|tasks|changes|files|workflow [dir|run-id]
@@ -586,6 +590,11 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     view: async () => {
       if (rest[0] === 'help' || rest[0] === undefined) { print([VIEW_HELP], { help: VIEW_HELP }); return; }
       if (rest[0] === 'example') { print([VIEW_EXAMPLE], { example: VIEW_EXAMPLE }); return; }
+      if (rest[0] === 'check') {
+        const result = await viewCheckCommand(rest.slice(1), io.cwd, client, threadId);
+        print(result.lines, result.value);
+        return result.code;
+      }
       const result = await client.call('artifacts.view', { threadId, path: absolute(io.cwd, want(0, 'an HTML file')), ...(parsed.title === undefined ? {} : { title: parsed.title }) });
       const view = result.message.parts[0]?.type === 'artifact' ? result.message.parts[0].view : undefined;
       const source = view?.source ?? rest[0]!;

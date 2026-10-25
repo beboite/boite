@@ -438,6 +438,12 @@ test('fake inline views store the page with its bootstrap and open only for a vi
   });
   try {
     await client.call('files.write', { threadId: 't-trace', path: 'orbit.html', text: '<title>Orbit</title><svg viewBox="0 0 10 10"></svg>' });
+    const before = (await client.call('threads.get', { threadId: 't-trace' })).messages;
+    const draft = await client.call('artifacts.viewCheck', { threadId: 't-trace', path: 'orbit.html', script: 'throw new Error("never run outside an isolated browser")' });
+    expect(draft).toMatchObject({ checked: false, captures: [] });
+    expect(draft.errors.join(' ')).toContain('no available browser');
+    expect((await client.call('threads.get', { threadId: 't-trace' })).messages).toEqual(before);
+    expect(createObjectURL).not.toHaveBeenCalled();
     const { message, checked } = await client.call('artifacts.view', { threadId: 't-trace', path: 'orbit.html' });
     expect(checked).toBe(false);
     const part = message.parts[0]!;
