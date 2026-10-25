@@ -125,7 +125,13 @@ export class GroupBotHost {
     // The store that builds this host is not `core.workforce` yet: the rows are read once it is.
     this.startup = setTimeout(() => {
       this.startup = null;
-      if (!this.closed && this.allowed()) for (const coreId of this.coreIds()) this.hello(coreId);
+      // A core that crashed while starting closed its journal without closing this host.
+      if (this.closed || core.journal.isClosed()) return;
+      try {
+        if (this.allowed()) for (const coreId of this.coreIds()) this.hello(coreId);
+      } catch (error) {
+        core.log('warn', `group bot startup: ${messageOf(error)}`);
+      }
     }, 0);
   }
 
@@ -417,7 +423,7 @@ export class GroupBotHost {
 
   /** Sends what waits for a machine; it stays until that machine took it, and is tried again later when it is away. */
   async flush(coreId: string): Promise<void> {
-    if (this.closed || this.sending.has(coreId) || !this.allowed()) return;
+    if (this.closed || this.core.journal.isClosed() || this.sending.has(coreId) || !this.allowed()) return;
     const events = batchOf(this.outbox(coreId));
     if (events.length === 0) return;
     const peer = this.member(coreId);

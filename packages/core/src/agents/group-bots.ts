@@ -63,7 +63,7 @@ export class GroupBots {
 
   constructor(private readonly core: Core, private readonly store: AgentStore) {
     // The leases go once the core is up: a restart may follow a grant that never reached its machine.
-    this.start = setTimeout(() => { for (const coreId of this.machines()) this.schedule(coreId, 0); }, 2_000);
+    this.start = setTimeout(() => { if (!core.journal.isClosed()) for (const coreId of this.machines()) this.schedule(coreId, 0); }, 2_000);
     this.start.unref?.();
   }
 
@@ -265,6 +265,7 @@ export class GroupBots {
   }
 
   private async syncOnce(coreId: string): Promise<void> {
+    if (this.core.journal.isClosed()) return;
     const peer = this.member(coreId);
     if (peer === null) return;
     const v = this.next();
