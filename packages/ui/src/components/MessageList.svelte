@@ -529,7 +529,7 @@
     const box = viewport;
     if (!box) return;
     const height = box.scrollHeight;
-    const resized = height !== scrolledHeight;
+    const resized = height !== scrolledHeight, shrank = height < scrolledHeight;
     scrolledHeight = height;
     // The browser keeping the text in place as a row above grows moves the list down, never nearer its bottom.
     const distance = height - box.scrollTop - box.clientHeight, closer = distance < scrolledGap - 1; scrolledGap = distance;
@@ -547,8 +547,8 @@
       if (distance > 1) return;
       endGlide(false);
     }
-    // A busy phone delivers the touchstart after its scroll: a rise off the bottom is the reader too.
-    if (rose && pinned && distance > 1) leftBottom = true;
+    // A busy phone can deliver touchstart after its scroll; content growth alone cannot clamp it upward.
+    if (rose && pinned && distance > 1 && !shrank && !relaid) leftBottom = true;
     // Scrolled down into the tolerance, the reader is back: a streaming answer keeps moving the very bottom. Moved down
     // as far from it, by a row growing above after a small notch up, the list took it back and bounced each notch.
     if (descended && closer && atBottom(box)) leftBottom = false;
