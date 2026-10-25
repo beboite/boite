@@ -14,6 +14,7 @@
   import { longPress } from '../lib/long-press';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { fullPath } from '../lib/chat-links';
+  import { writeClipboardLater } from '../lib/live-input';
   import type { Message } from '@boite/contracts';
   import { answerPieces, viewAt, viewPart, type AnswerPiece } from '../lib/inline-view';
   import InlineView from './InlineView.svelte';
@@ -82,8 +83,9 @@
       else void copyText(located(written).then(path => fullPath(path, store?.threads.find(item => item.id === threadId)?.cwd)));
     });
   }
+  /** The path is looked up after the pick: the write starts within the gesture, which Safari's clipboard requires. */
   async function copyText(text: string | Promise<string>): Promise<void> {
-    try { await navigator.clipboard.writeText(await text); } catch (reason) { store?.reportError(reason, 'minor'); }
+    try { await writeClipboardLater(Promise.resolve(text)); } catch (reason) { store?.reportError(reason, 'minor'); }
   }
   /**
    * The path a file link names in its thread. An agent often writes a file by

@@ -9,6 +9,10 @@ test('a copied file path is whole, resolved and in the separators of its system'
   expect(fullPath('../../../x', '/a')).toBe('/x');
   expect(fullPath('/etc/hosts', 'C:/project')).toBe('/etc/hosts');
   expect(fullPath('../notes.md', undefined)).toBe('../notes.md');
+  expect(fullPath('notes.md', '\\\\server\\share\\project')).toBe('\\\\server\\share\\project\\notes.md');
+  expect(fullPath('../..', '\\\\server\\share\\project')).toBe('\\\\server\\share\\');
+  expect(fullPath('..', '/a')).toBe('/');
+  expect(fullPath('..', 'C:/project')).toBe('C:\\');
 });
 
 test('rich markdown supports local paths, spaces, line numbers, file URIs and balanced URL parentheses', () => {

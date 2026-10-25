@@ -48,19 +48,18 @@ export function chatLink(raw: string): ChatLink | null {
  * all into `/`.
  */
 export function fullPath(path: string, cwd: string | null | undefined): string {
-  const whole = !cwd || /^(?:[a-z]:)?[\\/]/i.test(path) ? path : `${cwd}/${path}`;
+  const whole = (!cwd || /^(?:[a-z]:)?[\\/]/i.test(path) ? path : `${cwd}/${path}`).replaceAll('\\', '/');
+  // The root stays whole: a share's `//server/share`, a drive's `C:/` or `/`. Nothing climbs above it.
+  const root = /^\/\/[^/]+\/[^/]+\/?|^[a-z]:\/?|^\//i.exec(whole)?.[0] ?? '';
   const parts: string[] = [];
-  for (const part of whole.replaceAll('\\', '/').replace(/\/{2,}/g, '/').split('/')) {
-    if (part === '.') continue;
-    const last = parts.at(-1);
-    // The root (`''` before a leading `/`, or `E:`) has no parent to climb to.
-    const root = parts.length === 1 && (last === '' || /^[a-z]:$/i.test(last!));
-    if (part === '..' && root) continue;
-    if (part === '..' && last !== undefined && last !== '..') { parts.pop(); continue; }
-    parts.push(part);
+  for (const part of whole.slice(root.length).split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..' && parts.length > 0 && parts.at(-1) !== '..') parts.pop();
+    else if (part !== '..' || !root) parts.push(part);
   }
-  const joined = parts.join('/');
-  return /^[a-z]:\//i.test(joined) || cwd?.includes('\\') ? joined.replaceAll('/', '\\') : joined;
+  const base = root && !root.endsWith('/') ? `${root}/` : root;
+  const joined = base + parts.join('/') + (parts.length > 0 && whole.endsWith('/') ? '/' : '') || '.';
+  return /^(?:\/\/|[a-z]:\/)/i.test(joined) || cwd?.includes('\\') ? joined.replaceAll('/', '\\') : joined;
 }
 
 // Ratios and dates can have path separators without naming a file.
