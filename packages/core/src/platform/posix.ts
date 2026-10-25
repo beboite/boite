@@ -5,6 +5,7 @@ import type { ProcessPlatform } from './types.ts';
 import { linuxServerUpdates } from './linux-server-update.ts';
 import { findTailscaleCli } from './tailscale.ts';
 import { LinuxExecutionBoundary } from './linux-protected.ts';
+import { linuxGpus, linuxOsLabel, linuxVolumes, macosOsLabel, macosVolumes } from './posix-machine.ts';
 
 /**
  * Why this machine cannot capture windows, or null on an X11 session. Pure,
@@ -55,6 +56,10 @@ export function createPosixPlatform(
     finishResources: () => load?.finishResources?.(),
     // macOS `freemem()` leaves out inactive and purgeable pages, far below what the system can hand out.
     machineMemory: () => os === 'linux' ? linuxMachineMemory() : { totalBytes: totalmem(), availableBytes: null },
+    machineVolumes: () => os === 'linux' ? linuxVolumes() : macosVolumes(),
+    // macOS has no GPU reader here: IOKit's performance statistics are private API.
+    ...(os === 'linux' ? { machineGpus: linuxGpus } : {}),
+    osLabel: () => os === 'linux' ? linuxOsLabel() : macosOsLabel(),
     ...(cgroups !== null ? { cgroupMemory: (pid: number) => cgroups.read(pid) } : {}),
     pidAdded: (threadId, pid) => {
       load?.add(threadId, pid);

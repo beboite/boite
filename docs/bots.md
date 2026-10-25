@@ -411,6 +411,9 @@ newer one. The bot's machine sends it again whenever the bot's projects or
 desk change, and with no project of that machine left it sends an empty one,
 which ends the bot's access there. The other machine keeps only the projects
 of the lease that are still there, open and not drafts.
+A send includes its intended watch before the request leaves, so a concurrent
+lease sync cannot erase it while the answer is in flight. A rejected send drops
+that intent; a successful one keeps the thread on the bot's desk.
 
 **What the bot may do there** is what it may do in a project of its own
 machine, and no more: list and read the threads with their questions, write

@@ -1,9 +1,9 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import WindowList from './WindowList.svelte';
-  import MobileMenu from './MobileMenu.svelte';
+  import MobileTabs from './MobileTabs.svelte';
   import ThreadHeader from './ThreadHeader.svelte';
-  import { Activity, ArrowLeft, ArrowUpDown, ChevronDown, Ellipsis, Folder, FolderPlus, MessageSquare, Plus, Radar, Search, X } from '@lucide/svelte';
+  import { Activity, Archive, ArrowLeft, ArrowUpDown, ChevronDown, Ellipsis, Folder, FolderOpen, FolderPlus, MessageSquare, Pin, PinOff, Plus, Search, Radar, X } from '@lucide/svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import MobileConnect from './MobileConnect.svelte';
   import type { Store } from '../lib/store.svelte';
@@ -18,6 +18,11 @@
   import type { ThreadSummary } from '@boite/contracts';
   import Menu from './Menu.svelte';
   import ThreadState from './ThreadState.svelte';
+  import ThreadPicture from './ThreadPicture.svelte';
+  import WhipButton from './WhipButton.svelte';
+  import { experimentOn } from '../lib/experiments.svelte';
+  import { mobileChrome } from '../lib/mobile-chrome.svelte';
+  import { closeSwipedRow, swipeRow } from '../lib/swipe-row';
   import ThreadPullRequest from './ThreadPullRequest.svelte';
   import ThreadHeadline from './ThreadHeadline.svelte';
   import DisplayOptions from './DisplayOptions.svelte';
@@ -37,7 +42,7 @@
   import { minuteClock } from '../lib/clock.svelte';
   import { contactsShown } from '../lib/contacts-rail.svelte';
 
-  let { store, recover = false, screen = $bindable('chat') }: { store: Store; recover?: boolean; screen: 'chat' | 'threads' | 'activity' } = $props();
+  let { store, recover = false, screen = $bindable('chat'), tabbed = $bindable(false) }: { store: Store; recover?: boolean; screen: 'chat' | 'threads' | 'activity'; tabbed?: boolean } = $props();
   const narrow = new MediaQuery('(max-width: 720px)');
   // The contacts under the projects, loaded with their experiment; a desktop window shows them in the column on the right.
   let SidebarContacts = $state<typeof import('./home/SidebarContacts.svelte').default>();
@@ -50,6 +55,11 @@
   let search = $state('');
   const query = $derived(search.trim().toLocaleLowerCase());
   const chatting = $derived(screen === 'chat' && !recover && store.page === 'chat');
+  /** The bottom bar: on every list and page, the recovery screen too, not in a conversation nor in one a page opened. Only a phone's width draws it. */
+  $effect.pre(() => { tabbed = !chatting && !(store.page === 'agents' && mobileChrome.detail); });
+  /** What the header names: the page, or the list on screen. */
+  const title = $derived(store.page === 'settings' ? strings.settings.heading : store.page === 'agents' ? strings.agents.heading : store.page === 'home' ? strings.contacts.heading
+    : recover ? 'Boite' : screen === 'activity' ? strings.mobile.activity : strings.mobile.threads);
   let scrollRoot = $state<HTMLElement>();
   const scrollPositions = new Map<string, number>();
   const measuredRows = new Map<string, Map<string, number>>();
@@ -191,31 +201,30 @@
   {#if chatting && narrow.current}
     <div class="chat-heading">{#key store}<ThreadHeader {store} />{/key}</div>
   {:else}
+  <!-- The machine over the page's name; the places themselves are the bottom bar's. -->
   <div class="identity brand">
-    {#if screen === 'threads' && store.page === 'chat'}
-      <span class="machine">{place}</span>
-      <Menu items={projects} onpick={pickProject} label={strings.mobile.project} placement="bottom" variant="text" testid="mobile-project">
-        <span class="ui-label">{store.draftInDrafts && !store.openThread ? strings.drafts.name : project ? projectName(project) : strings.mobile.project}</span><ChevronDown size={14} />
-      </Menu>
-    {:else}
-      <strong>{store.page === 'settings' ? strings.settings.heading : store.page === 'agents' ? strings.agents.heading : store.page === 'home' ? strings.contacts.heading : screen === 'activity' ? strings.mobile.activity : 'Boite'}</strong>
-      <button class="ghost connection" data-testid="mobile-connection" onclick={() => store.showSettings('machines')}><span class="dot" class:ready={store.connection === 'ready'}></span><span class="ui-label">{place}</span><ChevronDown size={12} /></button>
-    {/if}
+    <button class="ghost connection" data-testid="mobile-connection" onclick={() => store.showSettings('machines')}><span class="dot" class:ready={store.connection === 'ready'}></span><span class="ui-label">{place}</span><ChevronDown size={12} /></button>
+    <strong data-testid="mobile-title">{title}</strong>
   </div>
   {/if}
-  <!-- The Agents page has its own + for a new agent: one + per screen. -->
-  {#if !recover && !chatting && store.page !== 'agents'}<button class="ghost icon new" data-testid="mobile-new" aria-label={strings.sidebar.newThread} disabled={draftOwner.connection !== 'ready'} onclick={newThread}><Plus size={21} /></button>{/if}
-  <!-- A conversation's header holds its title's menu only: the navigation is one Back away. -->
-  {#if !chatting}<MobileMenu {store} {place} waiting={waiting.length} {screen} navigate={show} />{/if}
+  <!-- The project the bar's + starts in, by its picture: the sheet names them all, and adds one. -->
+  {#if !recover && screen === 'threads' && store.page === 'chat'}
+    <Menu items={projects} onpick={pickProject} label={project ? `${strings.mobile.project} · ${projectName(project)}` : strings.mobile.project} placement="bottom" variant="ghost" testid="mobile-project">{#if project}<ProjectTile {project} {store} size={24} />{:else}<FolderOpen size={20} />{/if}</Menu>
+  {/if}
+  {#if !recover && !chatting && experimentOn('whip')}<WhipButton mobile />{/if}
   {#if narrow.current && ContactRequestNotice && contactsShown(store)}<ContactRequestNotice {store} />{/if}
 </header>
+
+{#if tabbed}
+  <MobileTabs {store} {screen} waiting={waiting.length} navigate={show} onnew={() => void newThread()} newDisabled={draftOwner.connection !== 'ready'} />
+{/if}
 
 {#snippet contacts()}
   {#if SidebarContacts && contactsShown(store)}<div class="contacts-slot"><SidebarContacts {store} {machines} /></div>{/if}
 {/snippet}
 
 {#if narrow.current && store.page === 'chat' && (screen !== 'chat' || recover)}
-  <section class="mobile-list" class:recent={inRecent} bind:this={scrollRoot} onscroll={() => { if (scrollRoot) scrollPositions.set(listKey, scrollRoot.scrollTop); }} data-testid="mobile-list" aria-label={screen === 'activity' ? strings.mobile.activity : strings.mobile.threads}>
+  <section class="mobile-list" class:recent={inRecent} class:tabbed bind:this={scrollRoot} onscroll={() => { if (scrollRoot) scrollPositions.set(listKey, scrollRoot.scrollTop); }} data-testid="mobile-list" aria-label={screen === 'activity' ? strings.mobile.activity : strings.mobile.threads}>
     {#if recover && narrow.current}
       <MobileConnect {store} onpaired={() => show('threads')} />
     {:else}
@@ -237,14 +246,27 @@
         </div>
       {/if}
     </div>
-    {#snippet threadRow(row: typeof rows[number])}
+    {#snippet threadRow(row: typeof rows[number], grouped = false)}
+      {@const items = rowItems(row.machine.store, row.thread)}
+      {@const pin = items.find(item => item.id === 'pin')}
+      {@const archive = items.find(item => item.id === 'archive')}
       <div class="row" data-thread-id={row.thread.id} data-machine-id={row.machine.id}>
-        <button class="ghost thread" class:offline={row.machine.store.connection !== 'ready'} data-testid="mobile-thread-{row.thread.id}" onclick={() => { show('chat'); void workspace.select(row.machine.store, row.thread.id); }}>
-          <span class="summary"><ThreadHeadline owner={row.machine.store} thread={row.thread} wrap /><span class="detail" title={row.thread.branch ?? undefined}>{[projectName(row.project), several ? row.machine.label : null, row.thread.branch].filter(Boolean).join(' · ')}</span></span>
-          <ThreadState thread={row.thread} {now} subagents={row.machine.store.subagents(row.thread.id)} away={row.machine.store.connection !== 'ready'} />
-        </button>
-        <ThreadPullRequest owner={row.machine.store} thread={row.thread} />
-        <Menu items={rowItems(row.machine.store, row.thread)} onpick={(action) => rowAction(row.machine.store, row.thread, action, row.machine.id)} label={strings.sidebar.threadMenu} placement="bottom" variant="ghost" testid="mobile-thread-menu-{row.thread.id}"><Ellipsis size={18} /></Menu>
+        <!-- Under the row, for a finger that slides it left; the row's menu offers the same to everyone else. -->
+        {#if pin || archive}
+          <div class="swipe-actions" data-swipe-actions aria-hidden="true">
+            {#if pin}<button type="button" class="swipe pin" tabindex="-1" data-testid="mobile-swipe-pin-{row.thread.id}" onclick={() => { closeSwipedRow(); rowAction(row.machine.store, row.thread, 'pin', row.machine.id); }}>{#if row.thread.pinned}<PinOff size={18} />{:else}<Pin size={18} />{/if}<span class="ui-label">{pin.label}</span></button>{/if}
+            {#if archive}<button type="button" class="swipe archive" tabindex="-1" data-testid="mobile-swipe-archive-{row.thread.id}" onclick={() => { closeSwipedRow(); rowAction(row.machine.store, row.thread, 'archive', row.machine.id); }}><Archive size={18} /><span class="ui-label">{archive.label}</span></button>{/if}
+          </div>
+        {/if}
+        <div class="row-body" use:swipeRow>
+          <button class="ghost thread" class:offline={row.machine.store.connection !== 'ready'} data-testid="mobile-thread-{row.thread.id}" onclick={() => { show('chat'); void workspace.select(row.machine.store, row.thread.id); }}>
+            <span class="tile"><ThreadPicture owner={row.machine.store} thread={row.thread} size={18} /></span>
+            <span class="summary"><ThreadHeadline owner={row.machine.store} thread={row.thread} wrap picture={false} /><span class="detail" title={row.thread.branch ?? undefined}>{[grouped ? null : projectName(row.project), several ? row.machine.label : null, row.thread.branch].filter(Boolean).join(' · ')}</span></span>
+            <ThreadState thread={row.thread} {now} subagents={row.machine.store.subagents(row.thread.id)} away={row.machine.store.connection !== 'ready'} />
+          </button>
+          <ThreadPullRequest owner={row.machine.store} thread={row.thread} />
+          <Menu items={items} onpick={(action) => rowAction(row.machine.store, row.thread, action, row.machine.id)} label={strings.sidebar.threadMenu} placement="bottom" variant="ghost" testid="mobile-thread-menu-{row.thread.id}"><Ellipsis size={18} /></Menu>
+        </div>
       </div>
     {/snippet}
     {#if screen === 'threads' && workspace.view === 'projects'}
@@ -275,13 +297,13 @@
           </div>
           {#if !query}{#each drafts as draft (draft.id)}<DraftRow owner={group.machine.store} entry={draft} onopen={() => show('chat')} />{/each}{/if}
           <WindowList items={attentionRows} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements(projectKey(group))}>
-            {#snippet row(entry)}{@render threadRow(entry)}{/snippet}
+            {#snippet row(entry)}{@render threadRow(entry, true)}{/snippet}
           </WindowList>
           <div id="{controls}-working" hidden={!workingOpen || !!query || workingRows.length === 0} data-testid="project-working">
             {#if workingOpen && !query && workingRows.length > 0}
               <GroupLabel kind="working" count={workingRows.length} />
               <WindowList items={workingRows} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements(`${projectKey(group)}:working`)}>
-                {#snippet row(entry)}{@render threadRow(entry)}{/snippet}
+                {#snippet row(entry)}{@render threadRow(entry, true)}{/snippet}
               </WindowList>
             {/if}
           </div>
@@ -373,18 +395,18 @@
     .back { position: relative; flex: none; }
     .waiting-mark { position: absolute; top: 9px; right: 8px; width: 8px; height: 8px; border-radius: var(--radius-full); background: var(--color-live); box-shadow: 0 0 0 2px var(--color-background); }
     .home { flex: none; padding: 0; }
-    .brand strong { display: block; font-size: var(--text-md); font-weight: 600; letter-spacing: -0.3px; }
-    .connection { display: flex; gap: 5px; height: auto; min-height: var(--touch-target); max-width: 100%; padding: 0; font-size: var(--text-xs); color: var(--color-muted-foreground); }
+    /* The page's name, under the machine it reads. */
+    .brand strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-lg); font-weight: 600; letter-spacing: -0.4px; line-height: 1.15; }
+    /* A finger-sized target without growing the header: the line reaches into the header's padding. */
+    .connection { position: relative; z-index: 1; display: flex; gap: 5px; height: auto; min-height: var(--touch-target); min-width: var(--touch-target); max-width: 100%; margin: -14px 0 -12px; padding: 0; font-size: var(--text-xs); font-weight: 500; color: var(--color-muted-foreground); }
     .connection > span:not(.dot) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--color-muted-foreground); }
     .dot.ready { background: var(--color-success); }
-    .new { background: var(--color-surface-2); border: 1px solid var(--color-edge); border-radius: var(--radius-lg); }
-    .identity { min-width: 0; flex: 1; }
-    .machine { display: block; font-size: var(--text-xs); color: var(--color-muted-foreground); padding-left: 4px; }
-    .identity :global(.trigger) { max-width: 100%; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
-    /* A finger-sized target without growing the header: the padding reaches over the machine line and the header's own padding. */
-    .identity :global(.trigger) { min-height: var(--touch-target); margin-block: -13px -6px; }
+    .identity { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; flex: 1; }
+    .mobile-header > :global(.menu) { flex: none; }
     .mobile-list { display: block; position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; background: var(--color-background); padding: 8px max(16px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+    /* The bottom bar owns the home indicator's inset. */
+    .mobile-list.tabbed { padding-bottom: 20px; }
     .list-heading { padding: 8px 0 14px; }
     p { font-size: var(--text-sm); }
     .project-group { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); margin-bottom: 12px; overflow: hidden; }
@@ -393,10 +415,22 @@
     .project-heading span { display: block; font-size: var(--text-xs); font-weight: 400; color: var(--color-muted-foreground); }
     /* A whole touch target that eats the heading's padding rather than making it taller. */
     .project-heading .project-actions { flex: none; margin: -8px -8px -8px 0; color: var(--color-muted-foreground); }
-    .row { display: flex; align-items: center; border-bottom: 1px solid var(--color-border); padding-right: 4px; }
+    .row { position: relative; display: block; overflow: hidden; border-bottom: 1px solid var(--color-border); }
     .row:last-child { border-bottom: 0; }
-    .row :global(.menu) { flex: none; }
-    .thread { display: flex; flex: 1; min-width: 0; gap: 10px; align-items: center; min-height: 68px; height: auto; text-align: left; border-radius: var(--radius-md); padding: 12px; color: var(--color-foreground); }
+    /* What a slide uncovers: pin, then archive at the edge, as mail apps lay them. */
+    .swipe-actions { position: absolute; inset: 0 0 0 auto; display: flex; }
+    .swipe { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; width: 76px; height: 100%; padding: 0 6px; border: 0; border-radius: 0; font-size: 11px; font-weight: 500; }
+    .swipe .ui-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .swipe.pin { background: var(--color-surface-3); color: var(--color-foreground); }
+    .swipe.archive { background: var(--color-accent); color: var(--color-accent-ink); }
+    .row-body { position: relative; display: flex; align-items: center; padding-right: 4px; touch-action: pan-y; transform: translateX(var(--swipe, 0px)); transition: transform var(--dur-3) var(--ease-out-quint); background: var(--color-background); }
+    .project-group .row-body { background: var(--color-surface); }
+    .row-body:global(.dragging) { transition: none; }
+    .row-body :global(.menu) { flex: none; }
+    .thread { display: flex; flex: 1; min-width: 0; gap: 12px; align-items: center; min-height: 68px; height: auto; text-align: left; border-radius: var(--radius-md); padding: 12px 8px 12px 12px; color: var(--color-foreground); }
+    /* Who runs the thread, as a contact's picture leads a message app's row. */
+    .tile { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: var(--radius-md); border: 1px solid var(--color-border); background: var(--color-surface-2); }
+    .thread.offline .tile { opacity: 0.55; }
     .summary { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px; }
     /* Its machine dropped: the row still opens, to read what is held and queue a prompt. */
     .thread.offline .summary { opacity: 0.55; }

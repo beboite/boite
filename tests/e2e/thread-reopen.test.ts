@@ -107,6 +107,10 @@ function reveal(id: string, options: { top?: boolean; near?: string } = {}): str
  * Brings the reader within the 400 px trigger of the top, waits for the page
  * above to land and be measured, and answers how far the row that was first on
  * the page moved on screen. Main moved it 850 px at 1280x900 on 2026-10-13.
+ * Up to 1 px counts as still: the list puts its anchor back only past 1 px
+ * (`pullOlder`, `restoreAnchor`), and rows of fractional height leave a
+ * residue the whole-pixel scroll cannot take (0.78 px on a 390x844 CI phone
+ * on 2026-10-25).
  */
 function landingDrift(): string {
   return `(async () => {
@@ -128,7 +132,7 @@ function landingDrift(): string {
     for (let wait = 0; wait < 300 && ${STORE}.openThread.messages.length === count; wait += 1) await settle(50);
     await settle(800);
     const after = top(head);
-    return ${STORE}.openThread.messages.length > count && Number.isFinite(after) ? Math.round(after - before) || 0 : 'no page landed under ' + head;
+    return ${STORE}.openThread.messages.length > count && Number.isFinite(after) ? (Math.abs(after - before) <= 1 ? 0 : Math.round(after - before)) : 'no page landed under ' + head;
   })()`;
 }
 

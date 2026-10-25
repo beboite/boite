@@ -1,7 +1,9 @@
 import type { ProcessPlatform } from '../types.ts';
-import { totalmem } from 'node:os';
+import { totalmem, version } from 'node:os';
 import { resolveMemoryLimits } from '../../memory-limits.ts';
 import { machineMemory } from './memory.ts';
+import { machineVolumes } from './volumes.ts';
+import { readGpus, releaseGpus } from './gpu.ts';
 import * as jobs from './jobs.ts';
 import * as guard from './guard.ts';
 import { findTailscaleCli } from '../tailscale.ts';
@@ -19,6 +21,7 @@ export const platform: ProcessPlatform = {
     guard.retainGuard(protections);
   },
   async release() {
+    releaseGpus();
     await Promise.all([jobs.releaseJobs(), guard.releaseGuard()]);
   },
   capability: jobs.jobsCapability,
@@ -48,6 +51,9 @@ export const platform: ProcessPlatform = {
   },
   sample: jobs.sampleThreadJob,
   machineMemory,
+  machineVolumes,
+  machineGpus: readGpus,
+  osLabel: () => version() || null,
   pidAdded: (threadId, pid, guarded) => { if (guarded) guard.guardPidAdded(threadId, pid); },
   pidRemoved: (threadId, pid, guarded) => { if (guarded) guard.guardPidRemoved(threadId, pid); },
   warm() {
