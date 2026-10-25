@@ -10,6 +10,8 @@
   import { dateTime } from '../../lib/schedule';
   import { relativeTime } from '../../lib/format';
   import type { Store } from '../../lib/store.svelte';
+  import { GroupLinks } from '../../lib/group-links.svelte';
+  import { workspace } from '../../lib/workspace.svelte';
   import { fill, strings } from '../../lib/strings';
   import { toolLine } from '../../lib/tool-groups';
   import Elapsed from '../Elapsed.svelte';
@@ -98,7 +100,16 @@
     } catch (error) { view.error = errorText(error); }
   }
   async function drop(watch: AgentWatch) {
-    await view.call('agents.watch', { agentId: watch.agentId, watchThreadId: watch.threadId, watched: false });
+    await view.call('agents.watch', { agentId: watch.agentId, watchThreadId: watch.threadId, watched: false, ...(watch.machine ? { machine: watch.machine } : {}) });
+  }
+  /** A thread of another machine of the group opens there, when this client reaches that machine. */
+  function remoteOf(watch: AgentWatch) {
+    return watch.coreId === undefined ? undefined : workspace.machines.find(machine => GroupLinks.coreOf(machine) === watch.coreId);
+  }
+  function open(watch: AgentWatch) {
+    if (watch.coreId === undefined) { void store.open(watch.threadId); return; }
+    const machine = remoteOf(watch);
+    if (machine) void workspace.select(machine.store, watch.threadId);
   }
 </script>
 
@@ -172,9 +183,9 @@
     <div class="desk-section desk-pane" role="tabpanel" id="{deskId}-pane-work" aria-labelledby="{deskId}-tab-work" tabindex="0" hidden={pane !== 'work'} data-testid="desk-work">
       <header class="desk-head"><h3>{t.following}</h3></header>
       <div class="desk-rows">
-        {#each watches as watch (watch.threadId)}
-          <DeskCard {watch} {now} project={store.projects.find(p => p.id === watch.projectId) ?? null}
-            onopen={() => void store.open(watch.threadId)}
+        {#each watches as watch (`${watch.coreId ?? ''}/${watch.threadId}`)}
+          <DeskCard {watch} {now} project={watch.coreId === undefined ? store.projects.find(p => p.id === watch.projectId) ?? null : null}
+            onopen={watch.coreId === undefined || remoteOf(watch) ? () => open(watch) : undefined}
             ondrop={store.owner ? () => void drop(watch) : undefined}
             onanswer={option => answer(watch, option)} />
         {:else}

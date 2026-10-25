@@ -143,6 +143,14 @@ export interface AgentWatch {
   pullRequest: AgentWatchPullRequest | null;
   /** The pending question when `state` is `needs-you` on a question, answerable from the desk. */
   question: { id: string; text: string; options: string[] } | null;
+  /**
+   * A thread of another machine of the group: its core id and its name as
+   * `--machine` takes it. The row is the one that machine last sent.
+   */
+  coreId?: string;
+  machine?: string;
+  /** Why that machine did not answer the last time it was asked; its events arrive once it is back. */
+  unreachable?: string;
 }
 /** How an agent stands, for its row, header and desk. */
 export interface AgentStatus {
@@ -233,7 +241,7 @@ export interface AgentsRpcMethods {
   /** Runs a routine now, as a turn on the agent's thread. Refused while that thread has a turn in flight. */
   'agents.routine.run': { params: { routineId: string; requestId: string }; result: { turnId: string } };
   /** Puts a thread on the agent's desk or takes it off. From the agent's thread or the owner. */
-  'agents.watch': { params: { threadId?: string; agentId?: string; watchThreadId: string; watched: boolean }; result: AgentWatch | null };
+  'agents.watch': { params: { threadId?: string; agentId?: string; watchThreadId: string; watched: boolean; machine?: string }; result: AgentWatch | null };
   'agents.limits.set': { params: AgentsSnapshot['limits']; result: AgentsSnapshot['limits'] };
   /**
    * Hands an ordinary thread to an agent, or takes it back with `agentId: null`.

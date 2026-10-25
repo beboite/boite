@@ -138,6 +138,11 @@ export interface ProjectThreadRow {
   pullRequest: ThreadSummary['pullRequest'] | null;
   updatedAt: Timestamp;
   lastCompletedAt: Timestamp | null;
+  /**
+   * The machine of the group the thread is on, as `--machine` names it, when
+   * it is not this one: a bot reaches it as `<machine>/<id>`.
+   */
+  machine?: string;
 }
 export interface ProjectThreadDetail {
   thread: ProjectThreadRow;
@@ -151,11 +156,16 @@ export interface ProjectThreadDetail {
  * Deleting threads and deciding tool permissions stay the owner's.
  */
 export type ResidentThreadAction = 'archive' | 'done' | 'unarchive' | 'stop' | 'rename' | 'move';
-/** The calling agent and the projects the owner entrusted to it. Empty when this thread is not such an agent's. */
+/**
+ * The calling agent and the projects the owner entrusted to it. Empty when
+ * this thread is not such an agent's. A project of another machine of the
+ * group has `machine` set, an id of `<core-id>/<project-id>`, a name of
+ * `<machine>/<name>` and no path.
+ */
 export interface ResidentView {
   agentId: string | null;
   name: string | null;
-  projects: { id: ProjectId; name: string; path: string }[];
+  projects: { id: ProjectId; name: string; path: string; machine?: string }[];
 }
 /** Public contact card. No owner token or private signing key crosses a core. */
 export interface CoordinationPeer {
@@ -350,20 +360,30 @@ export interface CoordinationRpcMethods {
    * The calling persistent agent and the projects entrusted to it. The
    * `resident.*` methods name the agent's own direct conversation as
    * `threadId`; the core holds them to the projects of its profile.
+   * `machine` names another machine of the group (name or core id prefix):
+   * the call goes there over the group's sealed link, and that machine
+   * answers only while its own `groupBots` setting is on. One that does not
+   * answer fails as unavailable, never as an empty list.
    */
   'resident.view': { params: { threadId: ThreadId }; result: ResidentView };
   /** The threads of its projects, the most recently active first. `project` narrows to one (id, name or folder). */
-  'resident.threads': { params: { threadId: ThreadId; project?: string; archived?: boolean }; result: ProjectThreadRow[] };
+  'resident.threads': { params: { threadId: ThreadId; project?: string; archived?: boolean; machine?: string }; result: ProjectThreadRow[] };
   /** One thread of its projects, with its pending questions, permissions and last answer. */
-  'resident.thread': { params: { threadId: ThreadId; target: ThreadId }; result: ProjectThreadDetail };
+  'resident.thread': { params: { threadId: ThreadId; target: ThreadId; machine?: string }; result: ProjectThreadDetail };
   /**
    * Act on a thread of its projects: `rename` takes `title`, `move` takes
    * `project` (another project entrusted to it). Every action leaves a system
    * line in the target's timeline naming the agent.
    */
-  'resident.act': { params: { threadId: ThreadId; target: ThreadId; action: ResidentThreadAction; title?: string; project?: string }; result: { thread: ProjectThreadRow } };
+  'resident.act': { params: { threadId: ThreadId; target: ThreadId; action: ResidentThreadAction; title?: string; project?: string; machine?: string }; result: { thread: ProjectThreadRow } };
   /** Answer or skip a pending question of a thread of its projects, marked as the agent's in that timeline. */
-  'resident.answer': { params: { threadId: ThreadId; target: ThreadId; questionId: RequestId; optionIds: string[]; text?: string; skip?: boolean }; result: { ok: true } };
+  'resident.answer': { params: { threadId: ThreadId; target: ThreadId; questionId: RequestId; optionIds: string[]; text?: string; skip?: boolean; machine?: string }; result: { ok: true } };
+  /**
+   * A message to a thread of its projects on another machine of the group,
+   * marked there as the bot's, never as the user's. A thread here takes
+   * `collaboration.send`. `requestId` makes a retry deliver it once.
+   */
+  'resident.send': { params: { threadId: ThreadId; machine: string; target: ThreadId; text: string; requestId: string }; result: { id: string; status: 'received' } };
   'collaboration.identity': { params: Record<string, never>; result: CoordinationPeer };
   'collaboration.peers': { params: Record<string, never>; result: CoordinationPeer[] };
   'collaboration.check': { params: { coreId: string }; result: { ok: true } };

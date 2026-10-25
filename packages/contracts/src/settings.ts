@@ -173,6 +173,15 @@ export interface Settings {
    */
   groupThreads?: boolean;
   /**
+   * The bots of the other machines of this machine's group may look after the
+   * projects here their owner entrusted to them: list their threads, read and
+   * steer them, answer their questions, archive, stop or rename them, and hear
+   * their events. Never delete them, decide tool permissions or change this
+   * machine's settings. Turned off, every such access ends at once. Each
+   * machine decides for itself. Missing reads as off.
+   */
+  groupBots?: boolean;
+  /**
    * While this machine follows its group's settings home, what it keeps for
    * itself (`SyncKey`): each entry was changed here and the copy skips it.
    * Missing or empty: everything synced follows. Clients write it; the core

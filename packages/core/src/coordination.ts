@@ -534,21 +534,24 @@ export class Coordination {
       if (!same(known.from, from) || !same(known.to, target) || known.text !== letter.text || known.replyTo !== letter.replyTo) throw refused('message id already used for different content');
     }
     const existing = this.find(letter.id, 'in');
-    if (existing) {
-      if (!same(existing.from, from) || !same(existing.to, target) || existing.text !== letter.text || existing.replyTo !== letter.replyTo) throw refused('message id already used for different content');
-      return existing;
-    }
+    if (existing) return existing;
     if (!Number.isSafeInteger(letter.createdAt) || !Number.isSafeInteger(letter.expiresAt) || letter.createdAt > Date.now() + 60_000 || letter.expiresAt <= Date.now() || letter.expiresAt > letter.createdAt + (resident || routed && letter.origin === 'contact' ? RESIDENT_LETTER_TTL_MS : LETTER_TTL_MS)) throw refused('message expired or timestamps invalid');
     const origin = resident ? 'resident' as const : routed && letter.origin === 'contact' ? 'contact' as const : undefined;
     const accepted: AgentLetter = { ...(origin ? { origin } : {}), id: letter.id, from, to: this.self(target.threadId), toTitle: target.title, toProject: target.project, toMachine: target.machine, text: text(letter.text, 'letter.text'), replyTo: letter.replyTo === null ? null : text(letter.replyTo, 'letter.replyTo', 100), createdAt: Date.now(), expiresAt: letter.expiresAt, status: 'received', error: null,
       // The name this owner gave the contact, never the sender's word.
       ...(contact ? { contact: { coreId: contact.coreId, name: contact.name } } : {}) };
-    this.core.journal.append({ type: 'coordination.received', threadId: target.threadId, version: 1, payload: accepted }, () => this.put(accepted, 'in', target.threadId));
-    this.core.threads.runner.noteMail(target.threadId, accepted.createdAt);
-    this.resumeForAgent(target.threadId);
-    this.update(accepted, 'received');
-    if (!this.handToWaiter(accepted)) this.kick(target.threadId);
-    return this.find(accepted.id, 'in') ?? accepted;
+    return this.acceptLetter(accepted);
+  }
+  /** Keeps a letter this core wrote or checked itself, once by its id, then hands it to a thread waiting for it or wakes its thread. */
+  acceptLetter(letter: AgentLetter): AgentLetter {
+    const threadId = letter.to.threadId, known = this.find(letter.id, 'in');
+    if (known) return known;
+    this.core.journal.append({ type: 'coordination.received', threadId, version: 1, payload: letter }, () => this.put(letter, 'in', threadId));
+    this.core.threads.runner.noteMail(threadId, letter.createdAt);
+    this.resumeForAgent(threadId);
+    this.update(letter, 'received');
+    if (!this.handToWaiter(letter)) this.kick(threadId);
+    return this.find(letter.id, 'in') ?? letter;
   }
   private rows(where: string, ...params: (string | number)[]): Row[] { return this.core.journal.db.query(`SELECT data, fingerprint FROM coordination_letters WHERE ${where}`).all(...params) as Row[]; }
   private find(id: string, direction: string): AgentLetter | null {
@@ -568,10 +571,11 @@ export class Coordination {
   }
   private changed(threadId: string): void { this.core.bus.emit('collaboration.changed', { threadId }); }
 
-  /** Letters an agent wrote to threads it no longer looks after go nowhere. */
-  residentRevoked(agentThreadId: string): void {
+  /** Letters a bot wrote to threads it no longer looks after go nowhere: this bot thread's, or with none those of other machines' bots (`agents/group-host.ts`). */
+  residentRevoked(agentThreadId?: string, reason = 'The project is no longer entrusted to this bot'): void {
     const pending = this.rows("status IN ('queued', 'received') AND json_extract(data, '$.origin') = 'resident'").map(row => JSON.parse(row.data) as AgentLetter);
-    for (const letter of pending.filter(l => l.from.threadId === agentThreadId && this.core.workforce.projects.over(agentThreadId, l.to.threadId) === null)) this.update(letter, 'rejected', 'The project is no longer entrusted to this bot');
+    const self = this.self('').coreId;
+    for (const letter of pending.filter(l => (agentThreadId === undefined ? l.from.coreId !== self : l.from.threadId === agentThreadId) && this.core.workforce.projects.mayReceive(l, l.from.coreId === self) === false)) this.update(letter, 'rejected', reason);
   }
 
   /**
@@ -591,11 +595,7 @@ export class Coordination {
     const from: AgentContact = { coreId: request.coreId, threadId: request.id, title: `Answer to your request to ${name}`.slice(0, 200), machine: name, resources: '', status: 'idle', mode: 'brief' };
     const letter: AgentLetter = { origin: 'contact', contact: { coreId: request.coreId, name }, id: randomUUID(), from, to: this.self(threadId), toTitle: thread.title.slice(0, 200), toProject: projectName(this.core, threadId),
       toMachine: this.core.info().hostname ?? 'Boite', text: body.slice(0, 4000), replyTo: null, createdAt: now, expiresAt: now + RESIDENT_LETTER_TTL_MS, status: 'received', error: null };
-    this.core.journal.append({ type: 'coordination.received', threadId, version: 1, payload: letter }, () => this.put(letter, 'in', threadId));
-    this.core.threads.runner.noteMail(threadId, now);
-    this.resumeForAgent(threadId);
-    this.update(letter, 'received');
-    if (!this.handToWaiter(letter)) this.kick(threadId);
+    this.acceptLetter(letter);
   }
 
   /** A project closed to a contact: its letters waiting for threads it no longer reaches go nowhere. */

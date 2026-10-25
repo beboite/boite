@@ -45,6 +45,12 @@ export interface AgentSettingAsk {
   value: unknown;
   /** The value when the card was asked. It settles once the setting leaves it. */
   previous: unknown;
+  /**
+   * For `projects`, the names of the projects of other machines the card
+   * names (`<core-id>/<project-id>` to `<machine>/<name>`), as the asking
+   * core knew them: the client lists only its own machine's projects.
+   */
+  labels?: Record<string, string>;
 }
 
 /** One choice a setting offers, as `agents.settings.read` lists it. */
@@ -81,7 +87,11 @@ type Checked<T> = { ok: true; value: T } | { ok: false; message: string };
 export interface AgentSettingContext {
   profile: AgentProfile;
   config: AgentRuntimeConfig;
-  /** The projects an agent may be entrusted: not drafts. */
+  /**
+   * The projects an agent may be entrusted: not drafts. Those of the other
+   * machines of the group come as `<core-id>/<project-id>`, labelled
+   * `<machine>/<name>`.
+   */
   projects: readonly AgentSettingChoice[];
   /** The bots not archived: a name is taken while another of them holds it. */
   bots: readonly Pick<AgentProfile, 'id' | 'name'>[];
@@ -209,8 +219,10 @@ export function checkAgentSettingRequest(params: Pick<AgentSettingRequestParams,
   const previous = agentSettingValue(ctx.profile, ctx.config, key);
   if (sameSetting(normalized.value, previous)) return { ok: false, message: `${ctx.profile.name}'s ${key} is already ${capped(JSON.stringify(previous))}`, data: { field: 'value', key } };
   if (open.some(card => card.agentId === ctx.profile.id && card.key === key)) return { ok: false, message: `a card asking about ${ctx.profile.name}'s ${key} is already open in this thread`, data: { field: 'key', key } };
+  const remote = key === 'projects' ? [...new Set([...(normalized.value as string[]), ...(previous as string[])])].filter(id => id.includes('/')) : [];
+  const labels = Object.fromEntries(remote.map(id => [id, ctx.projects.find(project => project.id === id)?.label ?? id]));
   return {
-    ok: true, reason, setting: { agentId: ctx.profile.id, agentName: ctx.profile.name, key, value: normalized.value, previous },
+    ok: true, reason, setting: { agentId: ctx.profile.id, agentName: ctx.profile.name, key, value: normalized.value, previous, ...(remote.length ? { labels } : {}) },
     // Applied is never an answer: the core says it when the value moves.
     options: [{ id: 'refuse', label: 'Refuse' }],
   };

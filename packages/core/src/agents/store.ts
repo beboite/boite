@@ -12,6 +12,8 @@ import { AgentEntrustments } from './entrust.ts';
 import { ResidentAgents } from './resident.ts';
 import { AgentRoutines } from './routines.ts';
 import { AgentProjects } from './projects.ts';
+import { GroupBots, remoteGrant } from './group-bots.ts';
+import { GroupBotHost } from './group-host.ts';
 import { AgentSettingCards, registerAgentSettingMethods } from './setting-cards.ts';
 import { MemoryKeeper } from './memory.ts';
 import { agentContextIf, deskPullRequest, deskState, linkedPullRequests } from './context.ts';
@@ -49,6 +51,10 @@ export class AgentStore {
   readonly records: AgentsRepository;
   readonly entrusted: AgentEntrustments;
   readonly projects: AgentProjects;
+  /** Its bots on projects of the other machines of the group (group-bots.ts). */
+  readonly group: GroupBots;
+  /** The bots of the other machines of the group on this machine's projects (group-host.ts). */
+  readonly groupHost: GroupBotHost;
   readonly memory: MemoryKeeper;
   readonly settingCards: AgentSettingCards;
   /**
@@ -67,7 +73,7 @@ export class AgentStore {
     migrateAgents(core, this);
     for (const session of this.records.list('session')) this.threads.set(session.threadId, session.agentId);
     this.entrusted = new AgentEntrustments(core, this);
-    this.projects = new AgentProjects(core, this); this.memory = new MemoryKeeper(core, this); this.settingCards = new AgentSettingCards(core, this);
+    this.projects = new AgentProjects(core, this); this.group = new GroupBots(core, this); this.groupHost = new GroupBotHost(core); this.memory = new MemoryKeeper(core, this); this.settingCards = new AgentSettingCards(core, this);
     // The status of an agent follows its thread: a step, a card, a title, an answer.
     this.off = core.bus.onAny((name, payload) => {
       if (core.journal.isClosed() || this.threads.size === 0) return;
@@ -79,7 +85,7 @@ export class AgentStore {
     });
   }
   close(): void {
-    this.off(); this.projects.close(); this.memory.close(); this.settingCards.close();
+    this.off(); this.projects.close(); this.group.close(); this.groupHost.close(); this.memory.close(); this.settingCards.close();
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
   }
@@ -205,6 +211,14 @@ export class AgentStore {
     const effort = kept && previous.selection.effort === v.selection.effort ? v.selection.effort : checkEffort(provider, account.id, model, v.selection.effort);
     const projectIds = ids(v.projectIds ?? [], 'projectIds', 50);
     for (const id of projectIds) {
+      // A project of another machine of the group: that machine checks it at every request, and while it turned groupBots on.
+      const grant = remoteGrant(id);
+      if (grant !== null) {
+        if (!this.core.group.peers().some(peer => peer.coreId === grant.coreId) && !(previous?.projectIds ?? []).includes(id)) {
+          throw refused(`projectIds: ${id} names no machine of this group; a project of another machine is <core-id>/<project-id>`, { field: 'projectIds' });
+        }
+        continue;
+      }
       const project = this.core.projects.require(id);
       if (project.kind === 'drafts') throw refused('projectIds: drafts are the user\'s scratch space and cannot be entrusted to a bot');
     }
@@ -215,6 +229,7 @@ export class AgentStore {
       selection: { providerId: provider.id, accountId: account.id, model, effort, permissionMode: oneOf(v.selection.permissionMode, 'permissionMode', ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'yolo', 'dontAsk']) },
     };
     const saved = previous === null ? this.records.create('profile', value) : this.records.update('profile', previous.id, integer(params.expectedRevision, 'expectedRevision', 1, Number.MAX_SAFE_INTEGER), value);
+    this.group.profileChanged(previous, saved);
     if (previous === null) {
       this.createThread(saved, null);
       this.wakeSoon(saved, 'intro', 'Just created', INTRO_PROMPT);
@@ -296,9 +311,11 @@ export class AgentStore {
 
   // -- the desk ---------------------------------------------------------------
 
-  watch(params: RpcParams<'agents.watch'>): AgentWatch | null {
+  watch(params: RpcParams<'agents.watch'>): AgentWatch | null | Promise<AgentWatch | null> {
     object(params, 'params');
     const agent = this.named(params, 'agents.watch');
+    // A thread of another machine of the group: that machine checks it is one of the bot's projects there.
+    if (params.machine !== undefined) return this.group.watch(agent, text(params.machine, 'machine', 200), text(params.watchThreadId, 'watchThreadId', 160), params.watched === true);
     const target = this.core.threads.require(text(params.watchThreadId, 'watchThreadId', 160));
     if (target.agentSessionId || target.parentThreadId) throw refused('agents.watch.watchThreadId: expected a top-level conversation, not an agent\'s thread or a subagent', { field: 'watchThreadId' });
     if (!params.watched) {
@@ -314,11 +331,12 @@ export class AgentStore {
     return this.watchesOf(agent.id).find(w => w.threadId === target.id) ?? null;
   }
 
-  /** The desk rows of an agent, from the threads themselves: its threads and their pull requests in one read each. */
+  /** The desk rows of an agent, from the threads themselves: its threads and their pull requests in one read each, then those of other machines as they last sent them. */
   private watchesOf(agentId: string): AgentWatch[] {
     const watches = this.projects.watchesOf(agentId);
     const linked = linkedPullRequests(this.core, watches.map(w => w.threadId));
-    return watches.map(({ threadId, origin, since, thread }) => {
+    const agent = this.records.find('profile', agentId);
+    return [...watches.map(({ threadId, origin, since, thread }) => {
       const state = deskState(this.core, thread);
       const ask = this.core.threads.listQuestions(thread.id)[0];
       return {
@@ -328,8 +346,8 @@ export class AgentStore {
         lastActivityAt: Math.max(thread.updatedAt, this.projects.lastHeard(thread.id) ?? 0),
         pullRequest: deskPullRequest(this.core, thread, linked.get(thread.id) ?? null),
         question: ask ? { id: ask.id, text: ask.text, options: ask.options.map(o => o.label) } : null,
-      };
-    });
+      } satisfies AgentWatch;
+    }), ...(agent ? this.group.desk(agent) : [])];
   }
 
   // -- status -----------------------------------------------------------------

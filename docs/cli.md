@@ -539,6 +539,16 @@ propose the switch to the user with boite settings request groupThreads true
 group can ask: a contact or a paired device has no such operation. From a
 terminal, `--machine` is refused; `--core` reaches the other machine instead.
 
+In a bot's thread, `threads`, `thread show|send|done|archive|unarchive|rename|stop|move`,
+`questions` and `answer` also reach the projects of another machine of the
+group entrusted to the bot ([bots](bots.md#projects-of-the-other-machines-of-the-group)).
+Their threads are `<machine>/<thread-id>`, their rows end with
+`machine=<name>`, and `--project <machine>/<name>` narrows the list to one of
+them. A machine whose `groupBots` switch is off, or that does not answer, adds
+an `unavailable: <machine> ...` line saying which, and a command on one of its
+threads is refused with the same reason. The owner's own terminal does not
+take `<machine>/<thread-id>`.
+
 `projects` prints one row per project: its id, name and folder, `(this
 thread)` on the caller's own, `no-git` on a folder `--worktree` cannot use and
 `drafts` on the drafts project. Archived projects are left out, although
@@ -643,7 +653,7 @@ when a card on that key is already open in the thread, and for an experiment
 when the value is not true or false or no app has reported yet.
 
 `--machine <name>` asks about another machine of the group, for the settings
-that machine holds about the others: `groupThreads` only. The card reads the
+that machine holds about the others: `groupThreads` and `groupBots`. The card reads the
 value there, names the machine, and its switch changes that machine's setting
 when this window is connected to it with full control; otherwise it says to
 change it from that machine. It settles when that machine reports the change to
@@ -695,7 +705,10 @@ names the bot; in a bot's own conversation it defaults to that bot.
 `domain`, `instructions`, `avatar` and `status` take the words as typed
 (`name Gargouille (Sécurité)`), and `instructions --instructions-file <path>`
 reads a file; `projects` takes `+name -name` edits or a whole list
-(`Notes,Other`, or JSON), resolved by name or id and stored as ids; the other
+(`Notes,Other`, or JSON), resolved by name or id and stored as ids; a project
+of another machine of the group is `<machine>/<name>` (`+skoll/Hearthfall`),
+offered once that machine lets bots in (`groupBots`) and stored as
+`<core-id>/<project-id>`; the other
 keys read their value as `settings request` does. The refusals are the same, plus an unknown or ambiguous bot
 (the refusal lists them) and a model the bot's policy does not allow.
 
