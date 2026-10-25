@@ -1,11 +1,10 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
   import { Bot, MessagesSquare } from '@lucide/svelte';
   import { experimentOn } from '../lib/experiments.svelte';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
-  import { agentDirectory } from '../lib/agent-directory.svelte';
+  import { followAgentDirectories } from '../lib/agent-directory.svelte';
   import { agentsAtWork, workingThreads, type WorkCount } from '../lib/work-counts';
 
   /**
@@ -23,17 +22,7 @@
   const agents = $derived(on ? agentsAtWork(stores) : { count: 0, waiting: false });
 
   // Every machine's agents snapshot stays loaded while the switch is drawn, so the Agents count is current from either side.
-  $effect(() => {
-    if (!on) return;
-    const directories = stores.map(agentDirectory);
-    const releases = untrack(() => directories.map(directory => directory.watch()));
-    return () => { for (const release of releases) release(); };
-  });
-  $effect(() => {
-    if (!on) return;
-    // A reconnection is a new client: each directory follows its own.
-    for (const owner of stores) { void owner.client; untrack(() => agentDirectory(owner).refresh()); }
-  });
+  followAgentDirectories(() => stores, () => on);
 </script>
 
 <!-- The number is the rows the list draws; delegated agents under them follow apart, behind a robot, so 2 rows and 6 agents never read as 8 threads. -->

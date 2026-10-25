@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, expect, onTestFinished, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
@@ -36,6 +36,24 @@ test('Activity carries the count of conversations waiting on the user, capped so
   app = mount(MobileTabs, { target: document.body, props: { store, screen: 'threads', waiting: 140, navigate: () => {}, onnew: () => {} } }); await settle();
   expect(tab('mobile-activity-waiting')!.textContent).toBe('99+');
   expect(tab('mobile-activity')!.getAttribute('aria-label')).toContain('140');
+});
+
+test('Bots carries the count of bots at work, in the waiting colour once one asks the user', async () => {
+  setExperiment('resident-agents', true);
+  onTestFinished(() => setExperiment('resident-agents', false));
+  const { agentDirectory } = await import('../lib/agent-directory.svelte');
+  app = mount(MobileTabs, { target: document.body, props: { store, screen: 'threads', waiting: 0, navigate: () => {}, onnew: () => {} } }); await settle();
+  const rest = { status: 'idle', openQuestions: 0, backgroundWork: null, unread: false } as const;
+  store.threads = store.threads.map(thread => ({ ...thread, ...rest, ...(thread.id === 't-trace' ? { agentSessionId: 'session-1' } : {}) }));
+  agentDirectory(store).snapshot = { profiles: [{ id: 'agent-1', name: 'Mira', status: 'active' }], sessions: [{ id: 'session-1', agentId: 'agent-1' }], work: [], runs: [], entrusted: [] } as never;
+  await settle();
+  expect(tab('mobile-agents-at-work')).toBeNull();
+  store.threads = store.threads.map(thread => thread.id === 't-trace' ? { ...thread, status: 'running' } : thread); await settle();
+  expect(tab('mobile-agents-at-work')!.textContent).toBe('1');
+  expect(tab('mobile-agents-at-work')!.dataset.waiting).toBe('false');
+  store.threads = store.threads.map(thread => thread.id === 't-trace' ? { ...thread, status: 'idle', openQuestions: 1 } : thread); await settle();
+  expect(tab('mobile-agents-at-work')!.dataset.waiting).toBe('true');
+  expect(tab('mobile-agents')!.getAttribute('aria-label')).toBe('Bots, 1 at work, something needs you');
 });
 
 test('a paired device, which may call no contacts method, is offered no way into Contacts; the owner is', async () => {
