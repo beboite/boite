@@ -56,8 +56,8 @@ export class GroupBots {
   private readonly reach = new Map<string, Reach>();
   private readonly timers = new Map<string, { timer: ReturnType<typeof setTimeout>; at: number }>();
   private readonly attempts = new Map<string, number>();
-  private readonly syncing = new Set<string>();
-  private readonly again = new Set<string>();
+  private readonly running = new Map<string, Promise<void>>();
+  private readonly queued = new Map<string, Promise<void>>();
   private version = Date.now();
   private readonly start: ReturnType<typeof setTimeout>;
 
@@ -245,15 +245,30 @@ export class GroupBots {
    * Sends a machine every lease of this machine's bots there, whole: a bot
    * left out lost its projects there. The answer names its projects and how
    * the followed threads stand. A machine away is asked again later.
+   * A call during a sync waits for one more after it, which carries what
+   * changed meanwhile: a card reading the names reads them fresh.
    */
-  async sync(coreId: string): Promise<void> {
-    if (this.closed) return;
-    if (this.syncing.has(coreId)) { this.again.add(coreId); return; }
+  sync(coreId: string): Promise<void> {
+    if (this.closed) return Promise.resolve();
+    const running = this.running.get(coreId);
+    if (running === undefined) {
+      const run = this.syncOnce(coreId).finally(() => this.running.delete(coreId));
+      this.running.set(coreId, run);
+      return run;
+    }
+    let queued = this.queued.get(coreId);
+    if (queued === undefined) {
+      queued = running.catch(() => undefined).then(() => { this.queued.delete(coreId); return this.sync(coreId); });
+      this.queued.set(coreId, queued);
+    }
+    return queued;
+  }
+
+  private async syncOnce(coreId: string): Promise<void> {
     const peer = this.member(coreId);
     if (peer === null) return;
     const v = this.next();
     const leases = this.store.records.list('profile').flatMap(agent => { const lease = this.leaseOf(agent, coreId, v); return lease ? [lease] : []; });
-    this.syncing.add(coreId);
     try {
       const answer = await within(this.core.coordination.request(peer, 'bot.lease', { v, leases }), REQUEST_MS, peer.name) as { projects?: unknown; rows?: unknown };
       this.attempts.delete(coreId);
@@ -275,9 +290,6 @@ export class GroupBots {
         this.schedule(coreId, RETRY_MS[Math.min(attempt, RETRY_MS.length - 1)]!);
       }
       throw error;
-    } finally {
-      this.syncing.delete(coreId);
-      if (this.again.delete(coreId)) this.schedule(coreId, 0);
     }
   }
 

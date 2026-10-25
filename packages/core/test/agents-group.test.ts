@@ -97,8 +97,8 @@ test('a bot sees, drives and hears a thread of a project another machine entrust
   // The entrusted project's thread, named by its machine; Accounts was not entrusted, so its thread stays out.
   expect(listed.out.trim().split('\n')).toEqual([`${ref} idle "Letter" project="Notes" machine=${machine}`]);
   expect((await cli(['threads', '--project', `${machine}/notes`])).out.trim()).toBe(`${ref} idle "Letter" project="Notes" machine=${machine}`);
-  // The machine part is taken as --machine takes it: a core id prefix names it too.
-  expect((await cli(['threads', '--project', `${pcId.slice(0, 8)}/Notes`])).out.trim()).toBe(`${ref} idle "Letter" project="Notes" machine=${machine}`);
+  // The machine part is taken as --machine takes it: a shorter core id prefix names it too.
+  expect((await cli(['threads', '--project', `${pcId.slice(0, 6)}/Notes`])).out.trim()).toBe(`${ref} idle "Letter" project="Notes" machine=${machine}`);
   expect((await cli(['thread', 'show', ref])).out).toStartWith(`${ref} idle "Letter"`);
   expect((await cli(['thread', 'show', `${machine}/${ledger}`])).err).toContain(`${ledger} is not a thread of the projects`);
 
@@ -214,13 +214,23 @@ test('a machine that does not answer is named unreachable, and its events reach 
   const again = await startTestCore({ dataDir: pc.dataDir });
   cores.push(again);
   await waitFor(() => desk.core.workforce.group.desk(agent())[0]?.unreachable === undefined, 5_000);
-  expect(again.core.workforce.groupHost.outbox(deskId)).toEqual([]);
+  // The mark clears as the event lands; pc empties its outbox once the request returns.
+  await waitFor(() => again.core.workforce.groupHost.outbox(deskId).length === 0);
 }, 30_000);
 
 test('a setting card offers the projects of the other machines by machine, and the owner applying it entrusts one', async () => {
   answering();
-  const { owner, pc, pcOwner, pcId, deskId, notes, accounts, letter, grant, self, cli, agent, machine } = await setup(false);
+  const { desk, owner, pc, pcOwner, pcId, deskId, notes, accounts, letter, grant, self, cli, agent, machine } = await setup(false);
   await pcOwner.call('settings.set', { groupBots: true });
+  // A sync already on its way when the card reads the names: the read waits for it rather than reading none.
+  const real = desk.core.coordination.request.bind(desk.core.coordination);
+  let slow = true;
+  desk.core.coordination.request = (async (to: CoordinationPeer, operation: string, payload: unknown) => {
+    if (slow && operation === 'bot.lease') { slow = false; await Bun.sleep(300); }
+    return real(to, operation as never, payload);
+  }) as typeof real;
+  restores.push(() => { desk.core.coordination.request = real; });
+  void desk.core.workforce.group.sync(pcId).catch(() => undefined);
   const read = await cli(['settings', 'bot', 'projects']);
   expect([read.code, read.err]).toEqual([0, '']);
   expect(read.out).toContain(`${machine}/Notes (${grant})`);
