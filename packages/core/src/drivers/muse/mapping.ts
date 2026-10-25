@@ -64,6 +64,35 @@ export function museExecutable(provider: ProviderDescriptor): string {
   );
 }
 
+/**
+ * The first release known to take `-c run.reminder_roster`. Older hosts refuse
+ * `-c` (1.3.0) or an unknown key, and either refusal stops the host at launch.
+ */
+const EMPTY_ROSTER_SINCE = [1, 4, 13];
+
+/**
+ * Settings for the `muse serve` host. An empty reminder roster stops the
+ * skill, goal and verify reminder agents: each one is a second call to the
+ * thread's model at every step, and the blocking ones hold the turn open after
+ * the answer. A two-step turn took 24.6 s with them and 15.5 s without.
+ * Applied only to a Muse executable whose `.muse-version` beside it names a
+ * release that has the setting.
+ */
+export function museHostArgs(executable: string): string[] {
+  if (!basename(executable).toLowerCase().startsWith('muse')) return [];
+  let version = '';
+  try {
+    version = readFileSync(join(dirname(executable), '.muse-version'), 'utf8').trim();
+  } catch {
+    return [];
+  }
+  const parts = /^(\d+)\.(\d+)\.(\d+)/.exec(version)?.slice(1).map(Number);
+  if (parts === undefined) return [];
+  const index = parts.findIndex((part, i) => part !== EMPTY_ROSTER_SINCE[i]);
+  const supported = index === -1 || parts[index]! > EMPTY_ROSTER_SINCE[index]!;
+  return supported ? ['-c', 'run.reminder_roster={}'] : [];
+}
+
 /** The model this turn asks for, or null for the agent's own. */
 export function modelOf(ctx: SessionContext): string | null {
   const model = ctx.thread.model;

@@ -665,7 +665,7 @@ is the deterministic fake the tests and the bench run on, loaded only under
 | Antigravity | `acp` | Managed `agy_acp_server` for the host OS |
 | Grok | `acp` | `grok [permission flags] agent [approval flag] stdio` |
 | Codex | `codex-appserver` | `codex app-server` |
-| Muse Code | `muse` | `muse serve --trust-workspace [mode flags]` |
+| Muse Code | `muse` | `muse serve --trust-workspace [-c run.reminder_roster={}] [mode flags]` |
 | pi | `pi` | Package bin through Node or `pi --mode rpc` |
 | Echo | `echo` | In-process fixture |
 
@@ -1348,6 +1348,12 @@ process here goes through `procs.spawnChild`. The driver refuses a host whose
 - The profile sets `MUSE_NO_AUTO_UPDATE=1`, so the launcher never updates what
   Boite pinned, and unsets `META_API_KEY`, so a key in the user's environment
   never replaces the account's login.
+- From Muse 1.4.13, read from `.muse-version` beside a `muse` executable, the
+  host starts with `-c run.reminder_roster={}`. Muse's skill, goal and verify
+  reminder agents each call the thread's model again at every step, and the
+  blocking ones hold the turn open after the answer: a two-step turn through
+  Douane took 24.6 s with them and 15.5 s without (2026-10-25, two runs each).
+  Older hosts refuse `-c`, so they start as before.
 
 ### pi
 
