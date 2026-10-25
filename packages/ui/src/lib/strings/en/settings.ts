@@ -110,7 +110,10 @@ export const strings = {
     zoomReset: 'Back to 100%',
     zoomFailed: 'The zoom did not change: {error}',
     experiments: {
-      intro: 'These are unfinished and can change or disappear.'
+      intro: 'These are unfinished and can change or disappear.',
+      follow: 'Same as the computer',
+      followHint: 'This device turns on what the Boite desktop app has on, and changes when it does. Flipping a switch below keeps the switches as this device\'s own.',
+      followNone: 'No desktop app has told this computer its experiments yet: this device keeps its own until one does.'
     },
     cacheKeepalive: 'Keep the prompt cache warm',
     cacheKeepaliveHint: 'While a conversation waits on its agents or workflows, Boite sends a one-word turn shortly before the provider drops its cached prompt, so their result is read at the cached price. Each ping counts as usage. A ping that misses the cache ends the pings.',

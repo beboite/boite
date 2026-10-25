@@ -108,7 +108,7 @@
           <button class="ghost row" data-testid="mobile-settings-privacy" onclick={() => { privacy = true; }}>
             <Lock size={20} /><span class="ui-label">{strings.mobile.settingsPrivacy}</span><ChevronRight size={18} />
           </button>
-          <!-- Experiments are kept per device: Bots on the computer leaves the phone's tab bar without them until the phone turns its own on. -->
+          <!-- The phone follows the desktop app's experiments until it flips one here, and can follow it again from this page. -->
           <button class="ghost row" data-testid="settings-tab-experiments" onclick={() => store.showSettings('experiments')}>
             <FlaskConical size={20} /><span class="ui-label">{strings.settings.tabs.experiments}</span><ChevronRight size={18} />
           </button>
