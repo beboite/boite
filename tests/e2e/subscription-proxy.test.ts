@@ -110,7 +110,10 @@ test('disabled mode retains the native glance; Douane brings its quota bars and 
 
   // Limits shows Douane's own entries, grouped by provider, instead of its dashboard.
   await openLimitsTab(page);
-  await page.waitFor('document.querySelectorAll("[data-testid=gateway-quotas]").length === 3');
+  await page.waitFor('document.querySelectorAll("[data-testid=gateway-quotas]").length === 4');
+  expect(await page.evaluate('Array.from(document.querySelectorAll("[data-testid=gateway-quotas]"), group => group.dataset.provider)')).toEqual(['claude', 'codex', 'antigravity', 'meta']);
+  expect(await page.text('[data-testid=gateway-quotas][data-provider=meta]')).toContain('Muse Code subscription');
+  expect(await page.evaluate('document.querySelectorAll("[data-testid=gateway-quotas][data-provider=meta] [role=meter]").length')).toBe(0);
   await expectNoNativeOpenCode();
   expect(await page.evaluate('document.querySelector("iframe[data-browser-id]") === null')).toBe(true);
   expect(await page.text('[data-testid=gateway-quotas][data-provider=antigravity]')).toContain('Antigravity · 10 accounts');
@@ -124,7 +127,7 @@ test('disabled mode retains the native glance; Douane brings its quota bars and 
 
   await page.click('[data-testid="nav-settings"]');
   await openLimitsTab(page);
-  await page.waitFor('document.querySelectorAll("[data-testid=gateway-quotas]").length === 3');
+  await page.waitFor('document.querySelectorAll("[data-testid=gateway-quotas]").length === 4');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await page.waitFor('document.querySelector("[data-testid=mobile-settings-detail] [data-testid=gateway-quotas]")');
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
@@ -227,7 +230,7 @@ test('a paired phone switches the gateway the owner saved, on and off, from Limi
     expect(await phone.evaluate('document.querySelector("[data-testid=subscription-proxy-settings]") === null')).toBe(true);
     await shot('boite-gateway-switch-off-phone.png');
     await phone.click(input);
-    await phone.waitFor('document.querySelectorAll("[data-testid=gateway-quotas]").length === 3');
+    await phone.waitFor('document.querySelectorAll("[data-testid=gateway-quotas]").length === 4');
     expect(await phone.evaluate(`document.querySelector(${JSON.stringify(input)}).checked`)).toBe(true);
     expect(await phone.evaluate('document.querySelector("[data-testid=gateway-switch-error]") === null')).toBe(true);
     expect(await phone.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);

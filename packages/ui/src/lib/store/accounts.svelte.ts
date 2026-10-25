@@ -7,7 +7,8 @@ import type {
   ProviderRejected,
   ProviderSummary,
   RpcEvents,
-  SubscriptionProxy
+  SubscriptionProxy,
+  SubscriptionProxyQuotas
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import type { LoginState } from '../store.svelte';
@@ -64,8 +65,28 @@ export class Accounts {
   logins = $state<Record<string, LoginState>>({});
   loginRevision = 0;
   loginChanges = new Map<string, number>();
+  proxyQuotas = $state.raw<SubscriptionProxyQuotas | null>(null);
+  private proxyQuotaRevision = 0;
 
   constructor(private readonly ctx: StoreContext) {}
+
+  acceptProxyQuotas(quotas: SubscriptionProxyQuotas): void {
+    this.proxyQuotaRevision++;
+    this.proxyQuotas = quotas;
+  }
+
+  /** Discover native subscriptions beside the settings read, without holding the first screen. */
+  async readProxyQuotas(client: NonNullable<StoreContext['client']>): Promise<void> {
+    const proxy = this.ctx.store.settings?.subscriptionProxy;
+    if (!proxy?.enabled || proxy.kind !== 'douane') { this.proxyQuotas = null; return; }
+    const revision = this.proxyQuotaRevision;
+    const generation = this.ctx.clientGeneration;
+    try {
+      const quotas = await client.call('subscriptionProxy.quotas', {});
+      if (this.ctx.currentClient(client, generation) && revision === this.proxyQuotaRevision
+        && JSON.stringify(proxy) === JSON.stringify(this.ctx.store.settings?.subscriptionProxy)) this.acceptProxyQuotas(quotas);
+    } catch { /* An older core keeps native authentication when it cannot announce the Meta subscription. */ }
+  }
 
   /**
    * The gateway a provider's requests go through while the subscription proxy
@@ -73,7 +94,7 @@ export class Accounts {
    * settings and protocols, so a phone shows the same account as the PC.
    */
   gatewayOf(providerId: ProviderId): AccountGateway | null {
-    const proxy = subscriptionProxyOf(this.ctx.store.settings, this.providerOf(providerId));
+    const proxy = subscriptionProxyOf(this.ctx.store.settings, this.providerOf(providerId), this.proxyQuotas);
     return proxy ? { kind: proxy.kind, name: subscriptionProxyName(proxy.kind), origin: subscriptionProxyOrigin(proxy) } : null;
   }
 
