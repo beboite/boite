@@ -564,8 +564,14 @@ intermediary process handle, while their source handles remain live until the
 handoff acknowledgement. No table search, PID reopening or remote close occurs.
 Before acknowledgement it validates creation identity, thread ownership,
 image file ID, native parent, private job, noninheritance and exact process/thread
-DACLs. The original controller token setup and boundary checks still precede
-map assignment/resume.
+DACLs. Windows maps GENERIC_ALL in the created process/thread DACL; compare
+against the expected object-specific PROCESS_ALL_ACCESS/THREAD_ALL_ACCESS
+mask, without changing the descriptor passed to CreateProcess. Both ACLs
+must otherwise retain the exact header, ACE count/order/type, inheritance
+flags, trustees and rights; missing/additional bits or malformed extents
+refuse handoff. DACL protection must remain set. Log raw equality, the object
+mapping and the exact comparison result. The original controller token
+setup and boundary checks still precede map assignment/resume.
 
 RELEASED requires the intermediary to close its two target handles, job/stdout/
 stdin/stderr duplicates and attribute resources; only its control channel and
@@ -583,10 +589,15 @@ wait has an independent 30-second lifetime. Each I/O cancellation gets a 1-secon
 drain; an undrained heap-backed buffer/OVERLAPPED remains alive until process
 exit and makes the trial fatal. Cleanup uses only captured intermediary and
 owned target-job handles. Parent and successful-child I/O event acquisition/
-closure counts must match. Five native faults (nonce, descriptor extent, short
-frame, premature exit, stall) must reject before any target instruction or map
-assignment and reconcile cleanup. Portable tests exercise invalid identities,
-missing/wrong owner membership, nesting refusal, transfer/closure evidence and
+closure counts must match. Five native protocol faults (nonce, descriptor
+extent, short frame, premature exit, stall) and two comparison-only rights
+faults (process/thread) must reject before any target instruction or map
+assignment and reconcile cleanup. The rights faults change only an expected
+comparison mask; no security descriptor or object is modified. The same
+serialized ACL comparator runs in a portable C regression with 18 cases,
+including mapped rights, missing/additional authority, changed trustees,
+inheritance, ACE order/type and invalid extents. Portable tests also exercise
+invalid identities, missing/wrong owner membership, nesting refusal, transfer/closure evidence and
 actual barrier release. The aggregate diagnostic test/launcher watchdogs allow
 150/170 seconds for the additional cases; existing per-target/process/map
 deadlines and all required production suites are unchanged.
@@ -595,6 +606,14 @@ No native result is established for this pair. Releasing only after an exited
 target creator would correlate the fixture's retention with that lifetime,
 without identifying an internal owner. An invalid protocol/identity/topology/
 closure makes the comparison unusable; no production admission follows.
+
+The first native attempt at 687b341f did not establish this comparison. The
+SDK rejected five deprecated string copies under -Werror; MinGW rejected both
+arms with ERROR_INVALID_ACL before root membership or handoff. Its seven
+creator-phase proofs and five protocol faults passed, and all 705 registry
+references closed. The GENERIC_ALL mapping regression fails against the old
+raw byte comparison and passes after normalization; a corrected SDK/native
+run remains required. Prior retention and NUL failures stay open.
 
 ## Gates still required
 

@@ -49,7 +49,7 @@ try {
   const hashes = writeSource(output); manifest.sourceHashes = hashes;
   if (ownership) for (const file of ['jobs.ts', 'jobs-worker.ts', 'preload.ts', 'provenance.json'])
     hashes[`ownership-source/${file}`] = sha256(readFileSync(join(ownership.directory, file)));
-  for (const file of ['generate.ts', 'run.ts', 'routing.test.ts', 'environment.ts', 'capture.ts', 'gates.md', 'target-topology.ts', 'target-topology.test.ts', 'target-topology-export.txt',
+  for (const file of ['generate.ts', 'run.ts', 'routing.test.ts', 'environment.ts', 'capture.ts', 'gates.md', 'target-topology.ts', 'target-topology.test.ts', 'target-topology-export.txt', 'target-acl.test.ts', 'target-acl-cases.c',
     'ownership-generate.ts', 'ownership-ledger.ts', 'ownership-trace.ts', 'ownership-summary.ts']) {
     hashes[file] = sha256(readFileSync(join(import.meta.dir, file)));
   }

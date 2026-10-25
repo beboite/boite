@@ -1,6 +1,7 @@
 /* Target creation only moves to this trusted intermediary. Map creation,
  * token setup, confinement verification, assignment and resume stay outside.
  * In particular the intermediary has NO extra job and never resumes a target. */
+#include "target-acl.h"
 enum { TC_REQUEST = 1, TC_READY, TC_HANDOFF, TC_RELEASED, TC_EXIT, TC_DONE };
 typedef struct {
   DWORD version, bytes, phase, error, helper, creator, pid, tid, closed, io_acquired, io_closed;
@@ -94,13 +95,33 @@ static DWORD tc_parent(HANDLE process, DWORD pid, DWORD parent) {
   NTSTATUS status = query ? query(process, (PROCESSINFOCLASS)0, &info, sizeof(info), &used) : (NTSTATUS)0xc0000002;
   return status != 0 || used != sizeof(info) || info.pid != pid || info.parent != parent ? ERROR_INVALID_DATA : 0;
 }
-static DWORD tc_security(HANDLE object, PSECURITY_DESCRIPTOR expected) {
+static DWORD tc_security(HANDLE object, PSECURITY_DESCRIPTOR expected, DWORD all_access,
+    const wchar_t *role, BOOL fault) {
   PACL wanted = NULL, actual = NULL; BOOL present = FALSE, defaulted = FALSE;
-  if (!GetSecurityDescriptorDacl(expected, &present, &wanted, &defaulted) || !present || !wanted) return ERROR_INVALID_ACL;
+  if (!GetSecurityDescriptorDacl(expected, &present, &wanted, &defaulted) || !present || !wanted || !IsValidAcl(wanted)) return ERROR_INVALID_ACL;
   PSECURITY_DESCRIPTOR observed = NULL;
   DWORD error = GetSecurityInfo(object, SE_KERNEL_OBJECT, DACL_SECURITY_INFORMATION, NULL, NULL, &actual, NULL, &observed);
-  if (!error && (!actual || !IsValidAcl(actual) || actual->AclSize != wanted->AclSize || memcmp(actual, wanted, wanted->AclSize)))
-    error = ERROR_INVALID_ACL;
+  SECURITY_DESCRIPTOR_CONTROL wanted_control = 0, actual_control = 0; DWORD revision = 0;
+  if (!error && (!GetSecurityDescriptorControl(expected, &wanted_control, &revision) ||
+      !GetSecurityDescriptorControl(observed, &actual_control, &revision))) error = GetLastError();
+  BOOL valid = actual && IsValidAcl(actual);
+  BOOL raw_equal = valid && wanted->AclSize == actual->AclSize && !memcmp(wanted, actual, wanted->AclSize);
+  BOOL protected_equal = (wanted_control & SE_DACL_PROTECTED) && (actual_control & SE_DACL_PROTECTED);
+  // Faults alter only the comparison's expected rights, never either object.
+  BOOL exact = !error && valid && protected_equal && target_acl_matches(wanted, wanted->AclSize,
+    actual, actual->AclSize, fault ? all_access & ~DELETE : all_access);
+  if (!error && !exact) error = ERROR_INVALID_ACL;
+  fwprintf(stderr, L"target-creator-security role=%ls mapping=0x%08lx raw-equal=%d exact=%d protected=%d fault=%d error=%lu expected-bytes=%u actual-bytes=%u expected-aces=%u actual-aces=%u\n",
+    role, all_access, raw_equal, exact, protected_equal, fault, error,
+    wanted->AclSize, valid ? actual->AclSize : 0, wanted->AceCount, valid ? actual->AceCount : 0);
+  if (valid) for (DWORD i = 0; i < wanted->AceCount && i < actual->AceCount; i++) {
+    PVOID w = NULL, a = NULL;
+    if (GetAce(wanted, i, &w) && GetAce(actual, i, &a) &&
+        ((ACE_HEADER *)w)->AceSize >= 8 && ((ACE_HEADER *)a)->AceSize >= 8)
+      fwprintf(stderr, L"target-creator-ace role=%ls index=%lu expected-mask=0x%08lx actual-mask=0x%08lx\n",
+        role, i, ((ACCESS_ALLOWED_ACE *)w)->Mask, ((ACCESS_ALLOWED_ACE *)a)->Mask);
+  }
+  fflush(stderr);
   if (observed) LocalFree(observed);
   return error;
 }
@@ -373,8 +394,11 @@ static DWORD target_creator_start(const wchar_t *profile, const wchar_t *image, 
   packet->app_bytes = GetLengthSid(app); packet->capability_bytes = GetLengthSid(capability);
   if (!creator_security(security, packet->security_bytes) || packet->app_bytes > SECURITY_MAX_SID_SIZE ||
       packet->capability_bytes > SECURITY_MAX_SID_SIZE) {error = ERROR_INVALID_SECURITY_DESCR; goto end;}
-  wcscpy(packet->profile, profile); wcscpy(packet->image, image); wcscpy(packet->line, line);
-  wcscpy(packet->cwd, cwd); wcscpy(packet->desktop, desktop);
+  memcpy(packet->profile, profile, (wcslen(profile) + 1) * sizeof(*profile));
+  memcpy(packet->image, image, (wcslen(image) + 1) * sizeof(*image));
+  memcpy(packet->line, line, (wcslen(line) + 1) * sizeof(*line));
+  memcpy(packet->cwd, cwd, (wcslen(cwd) + 1) * sizeof(*cwd));
+  memcpy(packet->desktop, desktop, (wcslen(desktop) + 1) * sizeof(*desktop));
   memcpy(packet->security, security, packet->security_bytes); memcpy(packet->app, app, packet->app_bytes);
   memcpy(packet->capability, capability, packet->capability_bytes);
   /* Caller-only pipe ACL, independent from the target's descriptor. */
@@ -408,7 +432,8 @@ static DWORD target_creator_start(const wchar_t *profile, const wchar_t *image, 
   }
   DWORD fault_length = GetEnvironmentVariableW(L"BOITE_DIAGNOSTIC_TARGET_CREATOR_FAULT", fault, 16);
   if (fault_length >= 16 || (fault_length && wcscmp(fault, L"nonce") && wcscmp(fault, L"descriptor") &&
-      wcscmp(fault, L"frame") && wcscmp(fault, L"exit") && wcscmp(fault, L"stall"))) {error = ERROR_INVALID_PARAMETER; goto end;}
+      wcscmp(fault, L"frame") && wcscmp(fault, L"exit") && wcscmp(fault, L"stall") &&
+      wcscmp(fault, L"process-acl") && wcscmp(fault, L"thread-acl"))) {error = ERROR_INVALID_PARAMETER; goto end;}
   swprintf(parent, 16, L"%lu", GetCurrentProcessId());
   wchar_t *argv[] = {self, L"create-target", texts[0], texts[1], texts[2], texts[3], texts[4], parent, nonce, fault};
   creator_line = command_line(10, argv); if (!creator_line) {error = ERROR_NOT_ENOUGH_MEMORY; goto end;}
@@ -453,8 +478,8 @@ static DWORD target_creator_start(const wchar_t *profile, const wchar_t *image, 
       !GetHandleInformation(root->hProcess, &process_flags) || !GetHandleInformation(root->hThread, &thread_flags) ||
       process_flags || thread_flags)) error = ERROR_INVALID_DATA;
   if (!error) error = tc_parent(root->hProcess, response.pid, tc_identity.creator);
-  if (!error) error = tc_security(root->hProcess, security);
-  if (!error) error = tc_security(root->hThread, security);
+  if (!error) error = tc_security(root->hProcess, security, PROCESS_ALL_ACCESS, L"process", !wcscmp(fault, L"process-acl"));
+  if (!error) error = tc_security(root->hThread, security, THREAD_ALL_ACCESS, L"thread", !wcscmp(fault, L"thread-acl"));
   if (!error) {tc_identity.pid = response.pid; tc_identity.tid = response.tid; tc_identity.process_created = created;}
   /* The target image is independently matched before accepting either handle. */
   wchar_t root_image[4096]; DWORD root_length = 4096; HANDLE images[2] = {INVALID_HANDLE_VALUE, INVALID_HANDLE_VALUE};

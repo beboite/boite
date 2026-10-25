@@ -441,6 +441,8 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
           expect(Number(creator)).toBeGreaterThan(0); expect(creator).not.toBe(root); expect(creator).not.toBe(String(result.pid));
           const released = result.err.match(new RegExp(`target-creator-released pid=${creator} root=${root} created=\\d+ sources-closed=6 known-target-anchors=0 control-only=1 target-inherit=3 controller-flags=0 image=1 security=1 child-io-acquired=(\\d+) child-io-closed=(\\d+)`));
           expect(Number(released?.[1])).toBeGreaterThan(0); expect(released?.[2]).toBe(released?.[1]);
+          for (const role of ['process', 'thread']) expect(result.err).toMatch(new RegExp(
+            `target-creator-security role=${role} mapping=0x[0-9a-f]+ raw-equal=[01] exact=1 protected=1 fault=0 error=0`));
           const closed = result.err.match(new RegExp(`target-creator-exit pid=${creator} created=${identity?.[2]} mode=${selected} released=1 forced=0 exit=0 handles-closed=1 io-acquired=(\\d+) io-closed=(\\d+) retained=0 connect-acquired=(\\d+) connect-closed=(\\d+) error=0`));
           expect(Number(closed?.[1])).toBeGreaterThan(0); expect(closed?.[2]).toBe(closed?.[1]);
           expect(closed?.[3]).toBe('1'); expect(closed?.[4]).toBe(closed?.[3]);
@@ -497,7 +499,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
         creatorFaultCleanup.push(checks.every(Boolean)); save();
       }
       const targetJob = jobs[10]!;
-      for (const fault of ['nonce', 'descriptor', 'frame', 'exit', 'stall']) {
+      for (const fault of ['nonce', 'descriptor', 'frame', 'exit', 'stall', 'process-acl', 'thread-acl']) {
         const result = await execute(`target-creator-fault-${fault}`, ['target-exited-run', targetJob.profile, targetJob.project,
           join(targetJob.runtime, 'inspect.exe'), 'inspect', '0', targetJob.marker], targetJob.home,
         {PATH: `${targetJob.runtime};${process.env.SystemRoot}\\System32`, BOITE_DIAGNOSTIC_TARGET_CREATOR_FAULT: fault});
@@ -513,6 +515,8 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
           expect(result.err).toMatch(/^target-creator-failure-map path=.+ open=0xc0000034 absent=1 closed=1 error=0\r?$/m);
           expect(result.err).toMatch(/caller snapshot=after .* unchanged=1/);
           if (fault === 'stall') expect(result.err).toContain('target-creator-io cancelled=1 cancel-error=0 drained=1');
+          if (fault.endsWith('-acl')) expect(result.err).toMatch(new RegExp(
+            `target-creator-security role=${fault.slice(0, -4)} mapping=0x[0-9a-f]+ raw-equal=[01] exact=0 protected=1 fault=1 error=1336`));
         })];
         const name = result.err.match(/^target-creator-failure-map path=(.+) open=0xc0000034 /m)?.[1];
         checks.push(verify(`target CREATOR ${fault} exact absent name`, () => expect(name).toMatch(new RegExp(
@@ -546,7 +550,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     const nativeCleanup = launched.length > 0 && launched.length === tasks.length &&
       launched.every(step => cleanupConfirmed.get(step.id) === true) &&
       creatorFaultCleanup.length === 5 && creatorFaultCleanup.every(Boolean) &&
-      targetCreatorFaultCleanup.length === 5 && targetCreatorFaultCleanup.every(Boolean);
+      targetCreatorFaultCleanup.length === 7 && targetCreatorFaultCleanup.every(Boolean);
     if (nativeCleanup) {
       try { rmSync(state, {recursive: true, force: true}); } catch (error) { failures.push(`state cleanup: ${error}`); }
     }

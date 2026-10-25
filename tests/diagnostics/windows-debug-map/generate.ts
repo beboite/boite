@@ -120,7 +120,7 @@ export function writeSource(output: string): Record<string, string> {
   const source = generate(original);
   writeFileSync(join(output, 'debug-map.c'), source);
   const hashes: Record<string, string> = {'protected-tool.c': sha256(original), 'debug-map.c': sha256(source)};
-  for (const file of ['routing.h', 'inspect.h', 'ownership.h', 'identity.h', 'startup-site.h', 'startup-site.json', 'roundtrip.h', 'setter.h', 'creator.h', 'target-creator.h']) {
+  for (const file of ['routing.h', 'inspect.h', 'ownership.h', 'identity.h', 'startup-site.h', 'startup-site.json', 'roundtrip.h', 'setter.h', 'creator.h', 'target-creator.h', 'target-acl.h']) {
     const bytes = readFileSync(join(import.meta.dir, file));
     writeFileSync(join(output, file), bytes);
     hashes[file] = sha256(bytes);
