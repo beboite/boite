@@ -225,14 +225,14 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
           verify(`${job.label} generation ${depth} exit`, () => expect(result.out)
             .toContain(`${marker}.generation-${depth} inspect-exit=0 child-exit=0 forced=0`));
           verify(`${job.label} generation ${depth} application exception`, () => expect(result.out)
-            .toContain(`${marker}.generation-${depth} application-break-forwarded=1 handler-removed=1`));
+            .toContain(`${marker}.generation-${depth} application-exception-forwarded=1 handler-removed=1`));
         }
         verify(`${job.label} distinct marker`, () => expect(result.out).not.toContain(jobs[index === 0 ? 2 : 1]!.marker));
         for (const pid of [...targets, ...auxiliary.map(match => match[1]!)]) {
           verify(`${job.label} process ${pid} loader breakpoint`, () => expect(result.err).toMatch(new RegExp(
             `debug-exception pid=${pid} code=0x80000003 first=1 .*consumed=1 .*native-identity=1 in-native=1 native-rva=0x11ee1d continuation=0x00010002`)));
-          if (targets.includes(pid)) verify(`${job.label} process ${pid} application breakpoint forwarded`, () => expect(result.err).toMatch(new RegExp(
-            `debug-exception pid=${pid} code=0x80000003 first=1 .*consumed=0 .*continuation=0x80010001 parameters=2 payload=0x626f6974 owner=${pid}(?:\\r?\\n|$)`)));
+          if (targets.includes(pid)) verify(`${job.label} process ${pid} application exception forwarded`, () => expect(result.err).toMatch(new RegExp(
+            `debug-exception pid=${pid} code=0xe0424f49 first=1 .*consumed=0 .*continuation=0x80010001 parameters=2 payload=0x626f6974 owner=${pid}(?:\\r?\\n|$)`)));
         }
         // Exactly three target generations plus one file-identified, confined
         // console helper. Neither an unknown image nor extra helpers can pass.

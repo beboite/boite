@@ -117,13 +117,18 @@ record actual/main thread IDs, verified-native-image membership and RVA for
 future exact symbol lookup. Metadata alone do not authorize an exception.
 Unknown startup breakpoints remain fatal; unexpected/application exceptions
 retain `DBG_EXCEPTION_NOT_HANDLED`. Each of the three target generations also
-raises a continuable application breakpoint with `RaiseException` after startup.
+raises a continuable application exception with `RaiseException` after startup,
+using the customer-defined code `0xe0424f49` rather than a breakpoint code.
 Its vectored handler requires the owned marker and PID, must run exactly once
 and be removed; the host must log those two parameters with consumed=0 and
 DBG_EXCEPTION_NOT_HANDLED. The handler does not change any context.
 The 8a3660ad native run showed the previous raw INT3 fixture repeating at
 DbgBreakPoint: continuing unchanged resumes at the trapping instruction.
 That fixture could not demonstrate handling without a context change.
+The ec43df09 Server run compiled with both compilers, but software-raised
+EXCEPTION_BREAKPOINT was followed by first- and second-chance access violations
+one byte before its exception address. The application code avoids breakpoint
+instruction-pointer semantics; no supplied context or instruction is modified.
 This scenario verifies a continuable software exception; unhandled traps
 remain a separate required gate. Unknown startup exceptions retain failure termination
 and drain. Creation/exiting thread and process events are also recorded.

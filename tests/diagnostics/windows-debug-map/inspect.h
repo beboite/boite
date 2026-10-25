@@ -50,9 +50,10 @@ static int cleanup_profile(const wchar_t *name) {
 }
 
 static volatile LONG application_pending, application_handled;
+#define APPLICATION_EXCEPTION_CODE ((DWORD)0xe0424f49UL)
 #define APPLICATION_EXCEPTION_MARKER ((ULONG_PTR)0x626f6974)
 static LONG CALLBACK application_exception(EXCEPTION_POINTERS *exception) {
-  if (application_pending && exception->ExceptionRecord->ExceptionCode == EXCEPTION_BREAKPOINT &&
+  if (application_pending && exception->ExceptionRecord->ExceptionCode == APPLICATION_EXCEPTION_CODE &&
       !(exception->ExceptionRecord->ExceptionFlags & EXCEPTION_NONCONTINUABLE) &&
       exception->ExceptionRecord->NumberParameters == 2 &&
       exception->ExceptionRecord->ExceptionInformation[0] == APPLICATION_EXCEPTION_MARKER &&
@@ -125,17 +126,17 @@ static int inspect(int count, wchar_t **args) {
   }
   fwprintf(stdout, L"%ls host-debug-control=%d known=%d\n", label, control, debug_known); fflush(stdout);
   if (forward_check) {
-    /* A continuable application exception must reach our handler after the
-     * distinct pinned loader site. An INT3 cannot resume unchanged at its own
-     * address; RaiseException returns normally without changing any context. */
+    /* Use an application-defined code: Windows gives breakpoint exceptions
+     * special instruction-pointer semantics, including when raised in software.
+     * Our handler must return without changing the supplied context. */
     ULONG_PTR arguments[2] = {APPLICATION_EXCEPTION_MARKER, GetCurrentProcessId()};
     PVOID handler = AddVectoredExceptionHandler(1, application_exception);
     if (!handler) return 125;
     application_pending = 1;
-    RaiseException(EXCEPTION_BREAKPOINT, 0, 2, arguments);
+    RaiseException(APPLICATION_EXCEPTION_CODE, 0, 2, arguments);
     application_pending = 0;
     BOOL removed = RemoveVectoredExceptionHandler(handler) != 0;
-    fwprintf(stdout, L"%ls application-break-forwarded=%ld handler-removed=%d\n", label, application_handled, removed); fflush(stdout);
+    fwprintf(stdout, L"%ls application-exception-forwarded=%ld handler-removed=%d\n", label, application_handled, removed); fflush(stdout);
     if (application_handled != 1 || !removed) return 125;
   }
   if (depth == 0) {
