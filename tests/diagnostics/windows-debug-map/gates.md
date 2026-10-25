@@ -715,7 +715,9 @@ the new arm also requires both names absent after the empty transition.
 Absence while the helper is gone and this job remains populated would exclude
 job emptiness as necessary in this fixture. Persistence until the last member
 exits does not identify a unique internal owner. productionAccepted=false.
-No SDK or native Windows result is established for this new arm.
+SDK and MinGW runs at 4ebe6410 and f8add2ae validate this control: both names
+are absent while the unchanged job still has two active processes. The
+replacement name was retained before helper exit. No internal owner is known.
 
 ## Matched DIRECT execution-thread lifetime pair
 
@@ -765,8 +767,40 @@ baseline, actual phase times and presence separately. Retention through return,
 release at normal return and release only after known thread-handle close are
 distinct outcomes. Thread termination includes USER32/CRT/TLS rundown; this
 pair cannot identify their individual roles or an internal kernel owner.
-No native/SDK proof exists for these new arms. productionAccepted=false and
+At f8add2ae both arms validate under SDK and MinGW. Each reproduces retention
+with the worker live and keeps the map through normal thread return, join and
+successful closure of the known thread handle. All four exact names are absent
+after helper completion and registry closures. Worker termination is therefore
+insufficient at these measured times; helper termination and external process
+reference closure are not yet separated. productionAccepted=false and
 CAUSE_CONFIRMED=no remain unconditional.
+
+## f8add2ae native evidence and ignored PID reuse
+
+Run 40243791436 / job 121321816191 executes the pinned source under Windows
+10.0.26100 and Bun 1.4.3. All 45 manifest and nine provenance hashes match.
+Process reference ledgers balance936/936 (SDK) and944/944 (MinGW), with no
+incomplete ledger or failed closure. The ordinary pipe probes remain accepted;
+they do not qualify LPAC/Bun or production execution.
+
+All 42 preceding fatal failure labels remain per compiler, with six additional
+THREAD cleanup failures. SDK adds one incomplete nonce-fault trial, totaling49
+versus48 under MinGW. Its captured creator never reaches the topology proof or
+exchange; original launch error1460 remains distinct from abort cleanup1067.
+The suspended target and exact-name absence cannot replace missing fault proof.
+Original production protected tests remain0/7 per compiler at NUL error5.
+
+The launcher closes the SDK nonce creator's newly captured handle immediately
+without tracking it; the harness tracks the same exact incarnation. These logs
+do not identify the launcher guard branch. A separate deterministic regression
+reproduces a real PID-only ignored-cache bug: a missing old exit packet prevents
+a replacement from being traced or terminated through its captured owner.
+The registry now reclassifies each newly captured start instead of inheriting
+that ignored bit. Duplicate tracked starts and late exits retain their existing
+ownership checks. The generated diagnostic logs ignored-pid-reclassification
+without additional native reads or rights, and pins the reviewed registry hash.
+Native confirmation of this correction remains pending; no timeout, topology,
+map-cleanup or production acceptance assertion is relaxed.
 
 ## Gates still required
 

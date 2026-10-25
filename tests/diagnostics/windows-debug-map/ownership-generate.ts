@@ -6,7 +6,7 @@ import {mock} from 'bun:test';
 
 export const jobsPath = resolve(import.meta.dir, '../../../packages/core/src/platform/windows/jobs.ts');
 export const workerPath = join(dirname(jobsPath), 'jobs-worker.ts');
-export const jobsHash = '5d46f45b2e4e253745623f84402e969b00dc2731db84383c84051b92175af08a';
+export const jobsHash = 'c9662cdf4a9ef2a2bb4171f3e8f030a4f69bf9bba3664163d2c144ca3a8a4945';
 export const workerHash = '965d53bd9dc181b6db14db8f172250e1981efe27288aaa782bf3821c6896b541';
 const runtime = pathToFileURL(join(import.meta.dir, 'ownership-trace.ts')).href;
 const ledger = pathToFileURL(join(import.meta.dir, 'ownership-ledger.ts')).href;
@@ -41,6 +41,9 @@ export function instrumentJobs(source: string, generatedWorker: string): string 
     "  tracked.set(pid, { threadId, handle, peakMemoryBytes: 0, identity });\n" +
     "  ownershipTrace.stage(handle, 'tracked', {threadId, pid, capturedIdentity: identity});\n" +
     "  ownershipMembership(pid);");
+  source = once(source, '  ignored.delete(pid);\n  const exe = imageNameOf(api, handle);',
+    "  if (ignored.has(pid)) ownershipTrace.event({event: 'ignored-pid-reclassification', threadId, pid, handle});\n" +
+    '  ignored.delete(pid);\n  const exe = imageNameOf(api, handle);');
   source = once(source, 'function onJobPacket(message: number, key: number, pid: number, handle = 0): void {',
     "function onJobPacket(message: number, key: number, pid: number, handle = 0): void {\n" +
     "  ownershipTrace.event({event: 'job-packet', message, key, pid, handle});");

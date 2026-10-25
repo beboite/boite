@@ -727,7 +727,7 @@ function listJobPids(api: Native, job: number): Set<number> | null {
  */
 function onProcessStarted(threadId: string, pid: number, opened = 0): void {
   const api = ensureNative();
-  if (pid <= 0 || tracked.has(pid) || ignored.has(pid) || api === null) {
+  if (pid <= 0 || tracked.has(pid) || api === null) {
     if (opened !== 0) api?.close(opened);
     return;
   }
@@ -747,6 +747,9 @@ function onProcessStarted(threadId: string, pid: number, opened = 0): void {
     sink?.started(threadId, pid, { exe: 'unknown', commandLine: null, parentPid: null });
     return;
   }
+  // A new start can reuse an ignored PID whose exit packet never arrived.
+  // Classify its captured handle again; the earlier process owned no handle here.
+  ignored.delete(pid);
   const exe = imageNameOf(api, handle);
   const commandLine = commandLineOf(api, handle);
   // A console host stays out of the trace, and so does its exit.
