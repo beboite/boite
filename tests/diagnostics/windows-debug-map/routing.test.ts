@@ -207,15 +207,27 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
             expect(result.err).toMatch(new RegExp(`debug-image pid=${pid} tid=\\d+ handle-tid=\\d+ thread-owner=${pid} root=[01] role=target identity=1 .*error=0`));
             expect(result.err).toMatch(new RegExp(`debug-event-boundary pid=${pid} tid=\\d+ verified=1 error=0`));
           }
+          for (let depth = 1; depth < 3; depth++) {
+            expect(result.err).toMatch(new RegExp(`debug-parent pid=${targets[depth]} query=0x00000000 bytes=48 known=1 reported-pid=${targets[depth]} parent=${targets[depth - 1]}(?:\\r?\\n|$)`));
+          }
         });
         const auxiliary = [...result.err.matchAll(/debug-image pid=(\d+) tid=\d+ handle-tid=\d+ thread-owner=\d+ root=0 role=auxiliary identity=1 .*error=0/g)];
-        verify(`${job.label} exact console auxiliary`, () => {
-          expect(auxiliary).toHaveLength(1);
-          expect(targets).not.toContain(auxiliary[0]![1]!);
+        verify(`${job.label} one exact console auxiliary per target`, () => {
+          expect(auxiliary).toHaveLength(3);
+          expect(new Set(auxiliary.map(match => match[1]!)).size).toBe(3);
           expect(result.err).not.toContain('role=unknown');
           expect(result.err).toContain('debug-file label=trusted-conhost');
-          expect(result.err).toMatch(new RegExp(`debug-event-boundary pid=${auxiliary[0]![1]} tid=\\d+ verified=1 error=0`));
-          expect(result.err).toContain('target-count=3 auxiliary-count=1 error=0');
+          const parents: string[] = [];
+          for (const match of auxiliary) {
+            const pid = match[1]!;
+            expect(targets).not.toContain(pid);
+            expect(result.err).toMatch(new RegExp(`debug-event-boundary pid=${pid} tid=\\d+ verified=1 error=0`));
+            const parent = result.err.match(new RegExp(`debug-parent pid=${pid} query=0x00000000 bytes=48 known=1 reported-pid=${pid} parent=(\\d+)(?:\\r?\\n|$)`));
+            expect(parent).not.toBeNull();
+            parents.push(parent![1]!);
+          }
+          expect(new Set(parents)).toEqual(new Set(targets));
+          expect(result.err).toContain('target-count=3 auxiliary-count=3 error=0');
         });
         verify(`${job.label} pinned native startup rule`, () => expect(result.err)
           .toContain('debug-startup-rule pinned=1 site-rva=0x0011ee1d symbol=LdrpDoDebuggerBreak+0x35 code-bytes=62'));
@@ -234,13 +246,13 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
           if (targets.includes(pid)) verify(`${job.label} process ${pid} application exception forwarded`, () => expect(result.err).toMatch(new RegExp(
             `debug-exception pid=${pid} code=0xe0424f49 first=1 .*consumed=0 .*continuation=0x80010001 parameters=2 payload=0x626f6974 owner=${pid}(?:\\r?\\n|$)`)));
         }
-        // Exactly three target generations plus one file-identified, confined
-        // console helper. Neither an unknown image nor extra helpers can pass.
-        verify(`${job.label} mapped processes`, () => expect(result.err.match(/private-map pid=\d+ set=0x00000000/g)).toHaveLength(4));
-        verify(`${job.label} loader breakpoints`, () => expect(result.err.match(/debug-exception .*consumed=1/g)).toHaveLength(4));
-        verify(`${job.label} process exit events`, () => expect(result.err.match(/debug-exit pid=\d+ status=0 active=\d+/g)).toHaveLength(4));
-        verify(`${job.label} normal drain`, () => expect(result.err).toContain('debug-drain cleanup=0 captured=4 remaining=0 error=0'));
-        verify(`${job.label} cleanup drain`, () => expect(result.err).toContain('debug-drain cleanup=1 captured=4 remaining=0 error=0'));
+        // Three target generations, each with its own file-identified, confined
+        // console helper. Unknown images and a second helper per target fail.
+        verify(`${job.label} mapped processes`, () => expect(result.err.match(/private-map pid=\d+ set=0x00000000/g)).toHaveLength(6));
+        verify(`${job.label} loader breakpoints`, () => expect(result.err.match(/debug-exception .*consumed=1/g)).toHaveLength(6));
+        verify(`${job.label} process exit events`, () => expect(result.err.match(/debug-exit pid=\d+ status=0 active=\d+/g)).toHaveLength(6));
+        verify(`${job.label} normal drain`, () => expect(result.err).toContain('debug-drain cleanup=0 captured=6 remaining=0 error=0'));
+        verify(`${job.label} cleanup drain`, () => expect(result.err).toContain('debug-drain cleanup=1 captured=6 remaining=0 error=0'));
       }
       report.routingObserved = failures.length === debugStart;
     }

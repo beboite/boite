@@ -101,12 +101,17 @@ opened read-only from GetSystemDirectoryW. Record `target`, `auxiliary`, or fata
 image base and start address. A basename alone never classifies an auxiliary.
 All captured processes still require the full LPAC/job boundary before mapping
 and continuation. Three unique inspector PIDs must match three exact target
-identities, plus exactly one identified console auxiliary. The hidden root uses
-CREATE_NEW_CONSOLE; ordinary children use CREATE_NO_WINDOW. More than three
-targets or one auxiliary is rejected before mapping/continuation. Tests require
-exactly four mapped processes, consumed startup exceptions and normal exits;
-each PID must have its own verified boundary and exact startup site. The
-auxiliary cannot satisfy any of the three marker/exit generation assertions.
+identities, each with one identified console auxiliary. The hidden root uses
+CREATE_NEW_CONSOLE; ordinary children use CREATE_NO_WINDOW, which also produces
+a separate conhost on the observed Server image. Bind the root's native parent
+to this helper, each later target to a live captured target with no previous
+target child, and each auxiliary to a live captured target with no previous
+console helper. Unknown, exited, auxiliary or self parents are rejected. At most
+three targets and three auxiliaries enter mapping/continuation. Tests require
+the exact three-generation parent chain, one distinct auxiliary parent per
+target, and six mapped processes, consumed startup exceptions and normal exits;
+each PID must have its own verified boundary and exact startup site. No
+auxiliary can satisfy any of the three marker/exit generation assertions.
 After a normal root exit, continue its exit event and allow five seconds for
 the console helper's orderly exit; a timeout still terminates the job, drains
 and fails. An abnormal root exit keeps the original immediate termination path.
@@ -114,12 +119,17 @@ and fails. An abnormal root exit keeps the original immediate termination path.
 The 6aadedd5 Server run forwards the custom application exception once at each
 MinGW root, then refuses a second exact conhost image before mapping it. SDK
 stops earlier with error 13, without enough event information to attribute it.
+The e3cf335f run identifies SDK's event as UNLOAD_DLL_DEBUG_EVENT (7), and
+MinGW's second conhost has the second exact inspector as native parent, with
+the full LPAC/job boundary independently verified before the old count refusal.
 Record ProcessBasicInformation only through each captured event process handle,
-including query status, returned size, process and parent IDs; a known parent
-requires the expected size and matching process ID. Never open that parent PID
-or use it to authorize an auxiliary. Verify LPAC/job state before the existing
-count rule, so a refused auxiliary has independent boundary evidence. The
-three-target/one-auxiliary limit and unknown-image rejection stay unchanged.
+including query status, returned size, process and parent IDs; require success,
+the exact expected size, matching process ID and a DWORD-sized parent. Never
+open that parent PID. Parent association supplements file identity and LPAC/job
+verification; it cannot replace them. A second auxiliary for the same target
+still fails, rather than merely increasing a global count bound.
+Handle ordinary DLL unload events on captured live processes, logging their
+base; unloading the verified ntdll remains fatal before that base can be reused.
 Log the first fatal event kind/PID/TID/error before termination and the native
 error/type of RIP_EVENT; RIP and unknown event kinds still fail and drain.
 

@@ -11,7 +11,10 @@ typedef struct {
   union { ULONGLONG *Uint64; } Values;
 } ROUTE_ATTRIBUTE;
 typedef struct { USHORT Version, Reserved; ULONG Count; ROUTE_ATTRIBUTE *Attributes; } ROUTE_ATTRIBUTES;
-typedef struct { DWORD pid, main_tid; uintptr_t initial, native_base; BOOL consumed, exited, auxiliary; } ROUTE_RECORD;
+typedef struct {
+  DWORD pid, main_tid, parent; uintptr_t initial, native_base;
+  BOOL consumed, exited, auxiliary, child_seen, console_seen;
+} ROUTE_RECORD;
 static HANDLE probe_map, probe_link;
 static wchar_t probe_name[256];
 static BOOL debug_mode;
@@ -264,14 +267,24 @@ static DWORD debug_loop(DWORD root, HANDLE job, PSID app, PSID capability, DWORD
           if (!DuplicateHandle(GetCurrentProcess(), event.u.CreateProcessInfo.hProcess, GetCurrentProcess(), &limited,
               PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SET_INFORMATION, FALSE, 0)) error = GetLastError();
           else {
-            error = event_image(&event, root, &record->auxiliary);
+            error = event_image(&event, root, &record->auxiliary, &record->parent);
             BOOL boundary = !error && lowbox_verify(limited, job, app, capability);
             if (!error && !boundary) error = ERROR_ACCESS_DENIED;
             if (!error) {
-              if (record->auxiliary) { if (++auxiliary_captured > 1) error = ERROR_INVALID_DATA; }
-              else if (++target_captured > 3) error = ERROR_INVALID_DATA;
-              fwprintf(stderr, L"debug-role pid=%lu target-count=%d auxiliary-count=%d error=%lu\n",
-                event.dwProcessId, target_captured, auxiliary_captured, error);
+              ROUTE_RECORD *parent = NULL;
+              for (int i = 0; i < captured; i++) if (records[i].pid == record->parent) parent = &records[i];
+              if (event.dwProcessId == root) {
+                if (record->auxiliary || record->parent != GetCurrentProcessId()) error = ERROR_INVALID_DATA;
+              } else if (!parent || parent == record || parent->exited || parent->auxiliary) error = ERROR_INVALID_DATA;
+              if (!error && record->auxiliary) {
+                if (parent->console_seen || auxiliary_captured >= 3) error = ERROR_INVALID_DATA;
+                else { parent->console_seen = TRUE; auxiliary_captured++; }
+              } else if (!error) {
+                if (target_captured >= 3 || (parent && parent->child_seen)) error = ERROR_INVALID_DATA;
+                else { if (parent) parent->child_seen = TRUE; target_captured++; }
+              }
+              fwprintf(stderr, L"debug-role pid=%lu target-count=%d auxiliary-count=%d error=%lu parent=%lu\n",
+                event.dwProcessId, target_captured, auxiliary_captured, error, record->parent);
             }
             fwprintf(stderr, L"debug-event-boundary pid=%lu tid=%lu verified=%d error=%lu\n", event.dwProcessId, event.dwThreadId, boundary, error);
             if (!error) error = map_apply(limited);
@@ -305,6 +318,14 @@ static DWORD debug_loop(DWORD root, HANDLE job, PSID app, PSID capability, DWORD
           }
           if (!CloseHandle(file) && !error) error = GetLastError();
         }
+        break;
+      }
+      case UNLOAD_DLL_DEBUG_EVENT: {
+        BOOL native = record && record->native_base &&
+          (uintptr_t)event.u.UnloadDll.lpBaseOfDll == record->native_base;
+        fwprintf(stderr, L"debug-unload pid=%lu tid=%lu base=%p trusted-native=%d\n",
+          event.dwProcessId, event.dwThreadId, event.u.UnloadDll.lpBaseOfDll, native);
+        if (!stopping && (!record || record->exited || native)) error = ERROR_INVALID_DATA;
         break;
       }
       case EXCEPTION_DEBUG_EVENT: {

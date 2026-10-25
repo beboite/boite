@@ -41,7 +41,7 @@ static DWORD prepare_target(const wchar_t *path) {
   console_known = !error; return error;
 }
 
-static DWORD event_image(const DEBUG_EVENT *event, DWORD root, BOOL *auxiliary) {
+static DWORD event_image(const DEBUG_EVENT *event, DWORD root, BOOL *auxiliary, DWORD *parent) {
   const CREATE_PROCESS_DEBUG_INFO *created = &event->u.CreateProcessInfo;
   BY_HANDLE_FILE_INFORMATION image, process_image;
   DWORD error = file_identity(L"create-image", event->dwProcessId, created->hFile, &image);
@@ -60,9 +60,9 @@ static DWORD event_image(const DEBUG_EVENT *event, DWORD root, BOOL *auxiliary) 
   *auxiliary = !error && console_known && same_file(&image, &console_file);
   if (!error && !target && !*auxiliary) error = ERROR_INVALID_DATA;
   DWORD tid = GetThreadId(created->hThread), owner = GetProcessIdOfThread(created->hThread);
-  /* Read only the process supplied by this owned creation event. A parent PID
-   * is attribution data, not authority to query that other process or admit an
-   * additional auxiliary. The current role/count/boundary rules still decide. */
+  /* Read only the process supplied by this owned creation event. Its parent
+   * must bind to an already captured target; never open that other PID.
+   * File identity, LPAC/job checks and per-parent role limits remain required. */
   struct {
     NTSTATUS exit_status; PVOID peb; ULONG_PTR affinity; LONG priority;
     ULONG_PTR pid, parent;
@@ -74,6 +74,8 @@ static DWORD event_image(const DEBUG_EVENT *event, DWORD root, BOOL *auxiliary) 
   fwprintf(stderr, L"debug-parent pid=%lu query=0x%08lx bytes=%lu known=%d reported-pid=%llu parent=%llu\n",
     event->dwProcessId, (unsigned long)lineage, used, parent_known,
     (unsigned long long)basic.pid, (unsigned long long)basic.parent);
+  if (!error && (!parent_known || basic.parent > MAXDWORD)) error = lineage < 0 ? (DWORD)lineage : ERROR_INVALID_DATA;
+  *parent = !error ? (DWORD)basic.parent : 0;
   if (!error && (tid != event->dwThreadId || owner != event->dwProcessId ||
       GetProcessId(created->hProcess) != event->dwProcessId || (event->dwProcessId == root && !target))) error = ERROR_INVALID_DATA;
   fwprintf(stderr, L"debug-image pid=%lu tid=%lu handle-tid=%lu thread-owner=%lu root=%d role=%ls identity=%d base=%p start=%p error=%lu\n",
