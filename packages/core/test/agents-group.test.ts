@@ -82,7 +82,7 @@ async function setup(entrusted = true) {
 
 test('a bot sees, drives and hears a thread of a project another machine entrusted to it, until that machine takes its permission back', async () => {
   const prompts = answering();
-  const { desk, pc, pcOwner, pcId, deskId, letter, ledger, cli, facts, agent, machine, ref } = await setup();
+  const { desk, pc, pcOwner, pcId, deskId, letter, ledger, self, cli, facts, agent, machine, ref } = await setup();
 
   // Off by default on the machine that holds the project: the bot is told how to ask for it, and sees nothing there.
   const closed = await cli(['threads']);
@@ -92,6 +92,10 @@ test('a bot sees, drives and hears a thread of a project another machine entrust
   expect(closed.out).not.toContain(letter);
 
   await pcOwner.call('settings.set', { groupBots: true });
+  // Invalid targets fail as targets, without contaminating the lease shared by concurrent requests.
+  for (const target of ['', 'x'.repeat(129)]) {
+    expect(await thrown(desk.core.workforce.group.send({ threadId: self, machine, target, text: 'Invalid target', requestId: `invalid-${target.length}` }))).toThrow('bot.send.target');
+  }
   const listed = await cli(['threads']);
   expect([listed.code, listed.err]).toEqual([0, '']);
   // The entrusted project's thread, named by its machine; Accounts was not entrusted, so its thread stays out.
