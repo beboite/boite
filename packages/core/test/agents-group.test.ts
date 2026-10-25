@@ -21,7 +21,7 @@ const restores: (() => unknown)[] = [];
 afterEach(async () => { for (const h of cores.splice(0)) await h.stop(); for (const restore of restores.splice(0)) await restore(); });
 
 /** An echo driver that records every prompt, answers with its folder's name and keeps quiet on events. */
-function answering(): Map<string, string[]> {
+function answering(wait?: (ctx: TurnContext) => Promise<void>): Map<string, string[]> {
   const prompts = new Map<string, string[]>();
   restores.push(setDriver('echo', { protocol: 'echo', startTurn(ctx: TurnContext) {
     prompts.set(ctx.thread.id, [...(prompts.get(ctx.thread.id) ?? []), ctx.prompt]);
@@ -29,7 +29,7 @@ function answering(): Map<string, string[]> {
     ctx.emit.part(id, 0, { type: 'text', text: ctx.prompt.includes(EVENT_HEADER) ? '[quiet] read the events' : `Done in ${basename(ctx.thread.cwd)}` });
     ctx.emit.complete(id, 'complete');
     const result: TurnResult = { status: 'done', sessionId: `session:${ctx.thread.id}`, usage: null };
-    return { done: Promise.resolve(result), stop() {} };
+    return { done: wait ? wait(ctx).then(() => result) : Promise.resolve(result), stop() {} };
   } }));
   return prompts;
 }
@@ -101,6 +101,11 @@ test('a bot sees, drives and hears a thread of a project another machine entrust
   expect((await cli(['threads', '--project', `${pcId.slice(0, 6)}/Notes`])).out.trim()).toBe(`${ref} idle "Letter" project="Notes" machine=${machine}`);
   expect((await cli(['thread', 'show', ref])).out).toStartWith(`${ref} idle "Letter"`);
   expect((await cli(['thread', 'show', `${machine}/${ledger}`])).err).toContain(`${ledger} is not a thread of the projects`);
+  // A rejected send must not leave its provisional watch in later leases.
+  const denied = await cli(['thread', 'send', `${machine}/${ledger}`, 'Outside the grant']);
+  expect(denied.err).toContain(`${ledger} is not a thread of the projects`);
+  await desk.core.workforce.group.sync(pcId);
+  expect(pc.core.workforce.groupHost.leases(deskId)[agent().id]!.watched).toEqual([]);
 
   await cli(['thread', 'rename', ref, 'Letter to the bank']);
   expect(pc.core.threads.require(letter).title).toBe('Letter to the bank');
@@ -168,8 +173,22 @@ test('a bot sees, drives and hears a thread of a project another machine entrust
 }, 30_000);
 
 test('a machine that does not answer is named unreachable, and its events reach the bot once it answers again', async () => {
-  answering();
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  answering(ctx => ctx.prompt.includes('Draft it') ? held : Promise.resolve());
+  restores.push(() => release());
   const { desk, pc, pcOwner, pcId, deskId, letter, cli, facts, agent, machine, ref } = await setup();
+  // A lease sync may finish while the send's answer is still on its way back.
+  const deskRequest = desk.core.coordination.request.bind(desk.core.coordination);
+  desk.core.coordination.request = (async (to: CoordinationPeer, operation: string, payload: unknown) => {
+    const result = await deskRequest(to, operation as never, payload);
+    if (operation === 'bot.send') {
+      await desk.core.workforce.group.sync(pcId);
+      release();
+    }
+    return result;
+  }) as typeof deskRequest;
+  restores.push(() => { desk.core.coordination.request = deskRequest; });
   await pcOwner.call('settings.set', { groupBots: true });
   await cli(['thread', 'send', ref, 'Draft it', '--request-id', 'draft-1']);
   const turnFacts = () => facts().filter(fact => fact.key.startsWith(`remote:${pcId}:turn:`));

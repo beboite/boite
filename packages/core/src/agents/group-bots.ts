@@ -58,6 +58,8 @@ export class GroupBots {
   private readonly attempts = new Map<string, number>();
   private readonly running = new Map<string, Promise<void>>();
   private readonly queued = new Map<string, Promise<void>>();
+  /** Sends whose answers have not arrived yet: lease syncs already carry their watches. */
+  private readonly sending = new Set<{ agentId: string; coreId: string; threadId: ThreadId }>();
   private version = Date.now();
   private readonly start: ReturnType<typeof setTimeout>;
 
@@ -99,7 +101,8 @@ export class GroupBots {
     if (!threadId || projectIds.length === 0) return null;
     // A follow is kept as `<core-id>/<thread-id>`.
     const watched = Object.keys(this.follows(agent.id)).flatMap(key => { const pair = remoteGrant(key); return pair?.coreId === coreId ? [pair.projectId] : []; });
-    return { agentId: agent.id, threadId, name: agent.name, projectIds, watched: watched.slice(-200), v };
+    const pending = [...this.sending].filter(send => send.agentId === agent.id && send.coreId === coreId).map(send => send.threadId);
+    return { agentId: agent.id, threadId, name: agent.name, projectIds, watched: [...new Set([...watched, ...pending])].slice(-200), v };
   }
 
   /** The owner entrusted or took back projects of other machines, or archived the bot: those machines hear it now. */
@@ -416,10 +419,24 @@ export class GroupBots {
     const agent = this.store.projects.botOf(params.threadId);
     // The same request sends the same letter: that machine takes it once.
     const id = `gb-${createHash('sha256').update(`${agent?.id ?? params.threadId}\n${params.requestId}`).digest('hex').slice(0, 40)}`;
-    const { agent: bot, peer, result } = await this.ask(params.threadId, params.machine, 'resident.send', 'bot.send', { target: params.target, text: params.text, id });
-    const row = rowOf((result as { thread?: unknown } | null)?.thread);
-    if (row !== null) this.follow(bot.id, peer, row);
-    return { id, status: 'received' };
+    // The follow becomes visible with the answer, but a newer lease must not erase
+    // the host's watch while that answer is still in flight.
+    const pending = agent !== null && typeof params.machine === 'string' && params.machine.trim() && typeof params.target === 'string'
+      ? { agentId: agent.id, coreId: memberNamed(this.core, params.machine, 'resident.send').coreId, threadId: params.target }
+      : null;
+    if (pending) this.sending.add(pending);
+    try {
+      const { agent: bot, peer, result } = await this.ask(params.threadId, params.machine, 'resident.send', 'bot.send', { target: params.target, text: params.text, id });
+      const row = rowOf((result as { thread?: unknown } | null)?.thread);
+      if (row !== null) this.follow(bot.id, peer, row);
+      return { id, status: 'received' };
+    } finally {
+      if (pending) {
+        this.sending.delete(pending);
+        // A rejected send leaves no pending watch on the other machine.
+        if (this.follows(pending.agentId)[`${pending.coreId}/${pending.threadId}`] === undefined) this.schedule(pending.coreId, 0);
+      }
+    }
   }
 
   /** `boite bot watch <machine>/<id>`: that machine checks the thread is one of the bot's projects there first. */
