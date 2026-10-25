@@ -107,16 +107,20 @@ test('configure, inspect, synchronize and disconnect a brain at desktop and phon
   expect(await page.evaluate(`document.querySelector('${id('brain-enabled-help-text')}').textContent`)).toContain('Manual /skill commands stay available');
   expect(await page.evaluate(`document.querySelector('${id('brain-enabled')}').checked`)).toBe(false);
   await capture('brain-manual-desktop.png');
+  const desktopDepth = await page.evaluate<number>('history.state?.boiteDepth ?? 0');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   expect(await page.evaluate('document.documentElement.scrollWidth <= 390')).toBe(true);
   await capture('brain-manual-phone.png');
   await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1100, deviceScaleFactor: 1, mobile: false });
+  // Unmounting the phone detail pops history asynchronously; let it land before the locale reload.
+  await page.waitFor(`document.querySelector('${id('settings-tab-brain')}') && (history.state?.boiteDepth ?? 0) === ${desktopDepth}`);
   await page.click(id('brain-enabled'));
   await page.waitFor(`document.querySelector('${id('brain-enabled')}')?.checked === true && document.querySelector('${id('brain-page')}')?.getAttribute('aria-busy') === 'false'`);
   expect(await page.evaluate(`document.querySelector('${id('brain-links')}').textContent`)).toContain('7/7');
-  await page.evaluate(`localStorage.setItem('boite.locale', 'fr'); location.reload()`);
+  await page.evaluate(`localStorage.setItem('boite.locale', 'fr')`);
+  await page.reload();
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
   await page.click(id('nav-settings'));
   await page.click(id('settings-tab-brain'));

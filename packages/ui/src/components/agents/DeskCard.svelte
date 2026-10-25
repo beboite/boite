@@ -12,13 +12,16 @@
    * and one meta line with how it stands, its project and its pull request
    * with its checks. A thread that asks the user opens its question under
    * the line with the options, answered here. The row opens its thread; the
-   * cross, shown on hover and focus, takes it off the desk.
+   * cross, shown on hover and focus, takes it off the desk. A thread of
+   * another machine of the group names that machine, says when it cannot be
+   * reached, and opens only where this client reaches that machine.
    */
   let { watch, project, now, onopen, ondrop, onanswer }: {
     watch: AgentWatch;
     project: Project | null;
     now: number;
-    onopen: () => void;
+    /** Absent for a thread of a machine this client does not reach. */
+    onopen?: () => void;
     /** Absent for a device that may not change the desk. */
     ondrop?: () => void;
     /** Absent for a device that may not answer. */
@@ -38,7 +41,7 @@
 </script>
 
 <article class="desk-row" data-state={standing} data-tone={tone} data-testid="desk-card" data-thread={watch.threadId}>
-  <button type="button" class="desk-card-open" onclick={onopen} aria-label={fill(t.open, { title: watch.title })} title={fill(t.open, { title: watch.title })}></button>
+  {#if onopen}<button type="button" class="desk-card-open" onclick={onopen} aria-label={fill(t.open, { title: watch.title })} title={fill(t.open, { title: watch.title })}></button>{/if}
   <span class="desk-dot" data-tone={tone} title={t.origin[watch.origin]} aria-hidden="true"></span>
   <div class="desk-row-text">
     <div class="desk-row-head">
@@ -52,6 +55,8 @@
       {#key standing}<span class="desk-chip" data-tone={tone} data-testid="desk-chip">{t.state[standing]}</span>{/key}
       {#if standing === 'stalled' && watch.stalledSince !== null}<span class="desk-card-silent">{fill(t.silent, { time: workedTime(now - watch.stalledSince) })}</span>{/if}
       {#if project}<span class="desk-card-project">{project.name}</span>{/if}
+      {#if watch.machine}<span class="desk-card-machine" data-testid="desk-card-machine">{watch.machine}</span>{/if}
+      {#if watch.unreachable}<span class="desk-card-unreachable" title={watch.unreachable} data-testid="desk-card-unreachable">{t.unreachable}</span>{/if}
       {#if pr}
         <span class="desk-card-pr" data-pr={pr.state} data-checks={pr.checks ?? 'none'} data-testid="desk-card-pr">
           <span class="desk-pr-badge">

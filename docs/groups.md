@@ -145,6 +145,11 @@ whatever network carries it: the roster, agents' messages and the join
 request are unreadable on the path, a plain LAN and the owner's app relay
 included ([sealing](#sealing)). A member refuses a readable roster, and
 refuses any readable request from a machine it trusts through the group alone.
+A bot of one member looking after projects of another
+([bots](bots.md#projects-of-the-other-machines-of-the-group)) uses these
+same sealed requests: no key or token of either machine is copied to the
+other, and the member holding the projects lets bots in only while its own
+`groupBots` switch is on.
 
 What a client says to a core is not sealed. That link is as private as its
 transport: WireGuard on a tailnet, TLS on an HTTPS address. A core that listens

@@ -22,6 +22,7 @@
   import AgentMessagesSurface from './AgentMessagesSurface.svelte';
   import ChangesSurface from './ChangesSurface.svelte';
   import DeviceSurface from './DeviceSurface.svelte';
+  import WindowSurface from './WindowSurface.svelte';
   import FileSurface from './FileSurface.svelte';
   import FilesSurface from './FilesSurface.svelte';
   import Menu from './Menu.svelte';
@@ -488,6 +489,10 @@
     {:else if active?.kind === 'device'}
       {#if store.openThread}
         {#key store.threadKey(store.openThread.id)}<DeviceSurface {store} threadId={store.openThread.id} />{/key}
+      {/if}
+    {:else if active?.kind === 'window'}
+      {#if store.openThread}
+        {#key store.threadKey(store.openThread.id)}<WindowSurface {store} threadId={store.openThread.id} />{/key}
       {/if}
     {:else if active?.kind === 'tasks'}
       <TasksSurface {store} />

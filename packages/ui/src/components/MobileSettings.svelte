@@ -1,6 +1,6 @@
 <script lang="ts">
   import TelemetrySettings from './TelemetrySettings.svelte';
-  import { ArchiveRestore, ArrowLeft, Bell, ChevronRight, Coins, Gauge, KeyRound, Lock, Monitor, Palette, Mic } from '@lucide/svelte';
+  import { AppWindow, ArchiveRestore, ArrowLeft, Bell, ChevronRight, Coins, Gauge, KeyRound, Lock, Monitor, Palette, Mic } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
@@ -19,6 +19,8 @@
   import BrainPage from './BrainPage.svelte';
   import ArchivedThreads from './ArchivedThreads.svelte';
   import WorktreesCard from './WorktreesCard.svelte';
+  import WindowAllowlistCard from './WindowAllowlistCard.svelte';
+  import WindowExclusionsCard from './WindowExclusionsCard.svelte';
   import SecretsCard from './SecretsCard.svelte';
   import BrowserProfilesCard from './BrowserProfilesCard.svelte';
   import AutoCompactSettings from './AutoCompactSettings.svelte';
@@ -41,18 +43,21 @@
    */
   let archivePage = $derived(store.settingsTab === 'general' && store.settingsSection?.id === 'archived');
   let worktreesPage = $derived(store.owner && store.settingsTab === 'general' && store.settingsSection?.id === 'worktrees');
+  /** Both window cards on one page: the allowed apps and the ones never captured. */
+  let windowsPage = $derived(store.owner && store.settingsTab === 'general' && (store.settingsSection?.id === 'windows' || store.settingsSection?.id === 'window-exclusions'));
   /** The keys kept per project: a paired phone sees them too. */
   let secretsPage = $derived(store.settingsTab === 'general' && store.settingsSection?.id === 'secrets');
   let browserProfilesPage = $derived(store.owner && store.settingsTab === 'general' && store.settingsSection?.id === 'browser-profiles');
   /** The one card of the desktop's Advanced page that is about conversations, not about the machine. */
   let compactPage = $derived(store.owner && store.settingsTab === 'advanced' && store.settingsSection?.id === 'auto-compact');
   let page = $derived((store.owner && (store.settingsTab === 'brain' || store.settingsTab === 'resources' || store.settingsTab === 'diagnostics')) || store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice' || store.settingsTab === 'usage' || store.settingsTab === 'limits' || store.settingsTab === 'task-manager' || store.settingsTab === 'experiments'
-    ? store.settingsTab : phone ? 'phone' : privacy ? 'privacy' : archivePage ? 'archived' : worktreesPage ? 'worktrees' : secretsPage ? 'secrets' : browserProfilesPage ? 'browser-profiles' : compactPage ? 'auto-compact' : 'home');
+    ? store.settingsTab : phone ? 'phone' : privacy ? 'privacy' : archivePage ? 'archived' : worktreesPage ? 'worktrees' : windowsPage ? 'windows' : secretsPage ? 'secrets' : browserProfilesPage ? 'browser-profiles' : compactPage ? 'auto-compact' : 'home');
   let machine = $derived(workspace.machines.find(machine => machine.store === store));
   let title = $derived(page === 'brain' ? strings.brain.heading : page === 'phone' ? strings.mobile.settingsPhone
     : page === 'privacy' ? strings.mobile.settingsPrivacy
     : page === 'archived' ? strings.settings.archived.heading
     : page === 'worktrees' ? strings.settings.worktrees.heading
+    : page === 'windows' ? strings.windows.settings.allowedHeading
     : page === 'secrets' ? strings.secrets.heading
     : page === 'browser-profiles' ? strings.browserProfiles.heading
     : page === 'auto-compact' ? strings.settings.autoCompact
@@ -123,6 +128,11 @@
               <Monitor size={20} /><span class="ui-label">{strings.browserProfiles.heading}</span><ChevronRight size={18} />
             </button>
           {/if}
+          {#if store.owner}
+            <button class="ghost row" data-testid="mobile-settings-windows" onclick={() => store.showSettings('general', 'windows')}>
+              <AppWindow size={20} /><span class="ui-label">{strings.windows.settings.allowedHeading}</span><ChevronRight size={18} />
+            </button>
+          {/if}
           <button class="ghost row" data-testid="mobile-settings-archived" onclick={() => store.showSettings('general', 'archived')}>
             <ArchiveRestore size={20} /><span class="ui-label">{strings.settings.archived.heading}</span><ChevronRight size={18} />
           </button>
@@ -138,7 +148,7 @@
       <h1>{#if page === 'limits'}<QuotaMachineScope store={target} fallback={title} />{:else}{title}{/if}{#if info}<InfoTip topic={title} text={info} testid="mobile-settings-info" />{/if}</h1>
     </header>
     <div class="detail" data-testid="mobile-settings-detail">
-      {#if bar && ['brain', 'voice', 'limits', 'resources', 'diagnostics', 'worktrees', 'secrets', 'auto-compact', 'archived'].includes(page)}<div class="bar">{@render bar()}</div>{/if}
+      {#if bar && ['brain', 'voice', 'limits', 'resources', 'diagnostics', 'worktrees', 'windows', 'secrets', 'auto-compact', 'archived'].includes(page)}<div class="bar">{@render bar()}</div>{/if}
       {#key target}
       {#if quota}
         <div class="tabs" role="tablist" aria-label={strings.usage.heading} data-testid="mobile-usage-tabs">
@@ -176,6 +186,8 @@
         <DiagnosticsPage store={target} {onopenthread} />
       {:else if page === 'worktrees'}
         <div class="page"><WorktreesCard store={target} /></div>
+      {:else if page === 'windows'}
+        <div class="page"><WindowAllowlistCard store={target} /><WindowExclusionsCard store={target} /></div>
       {:else if page === 'secrets'}
         <div class="page secrets-page"><SecretsCard store={target} /></div>
       {:else if page === 'browser-profiles'}

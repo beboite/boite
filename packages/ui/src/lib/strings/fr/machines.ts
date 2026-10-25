@@ -36,6 +36,8 @@ export const fr: Translation = {
     you: '{machine} (vous)', youTag: '(vous)',
     groupThreads: 'Conversations des autres machines',
     groupThreadsHint: "Les agents des autres machines du groupe peuvent lancer des conversations sur cette machine, dans ses projets, avec leur propre agent (boite thread new --machine). Désactivé par défaut.",
+    groupBots: 'Bots des autres machines',
+    groupBotsHint: "Un bot d'une autre machine du groupe peut s'occuper des projets de cette machine que leur propriétaire lui a confiés : lister, lire et piloter leurs conversations et répondre à leurs questions. Il ne peut ni gérer les autorisations d'outils, ni supprimer des conversations, ni modifier les réglages de cette machine. Désactiver ce réglage coupe immédiatement son accès. Désactivé par défaut.",
     pick: 'Machine dont ce sont les réglages',
     home: 'Machine par défaut', homeNone: 'Aucune', homeBadge: 'Par défaut',
     homeHint: 'Les autres machines suivent ses réglages : conversations, ressources, clavier et options du brain. Un réglage changé sur une autre machine y reste et prend une étoile.',

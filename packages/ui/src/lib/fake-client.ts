@@ -61,6 +61,7 @@ import { todoMethods } from './fake-client/todos';
 import { workdirMethods } from './fake-client/workdir';
 import { browserMethods } from './fake-client/browser';
 import { devicesMethods } from './fake-client/devices';
+import { seedWindowsDemo, windowsMethods } from './fake-client/windows';
 import { pullRequestMethods } from './fake-client/pull-requests';
 import { worktreeMethods } from './fake-client/worktrees';
 import { serverUpdateMethods } from './fake-client/server-update';
@@ -124,6 +125,7 @@ export class FakeClient implements ObservableClient {
         { ...watch(498), paused: { reason: 'rate-limit', until: at + 240_000, message: 'API rate limit exceeded' }, seen: { checkedAt: at - 300_000, head: '2f257f4', base: 'main', checks: { total: 26, running: 0, failed: 0 }, conflicting: true } },
       ];
     }
+    if (options.windowsDemo) seedWindowsDemo(ctx);
     if (options.uninstalled) {
       ctx.providers = ctx.providers.filter(provider => provider.id !== 'echo').map(provider => ({
         ...provider, available: false, executable: null,
@@ -488,6 +490,7 @@ export class FakeClient implements ObservableClient {
       ...workdirMethods(ctx, () => methods),
       ...browserMethods(ctx),
       ...devicesMethods(ctx),
+      ...windowsMethods(ctx),
       ...pullRequestMethods(ctx),
       ...worktreeMethods(ctx),
       // The one owner connection is this client: the event comes back to it, as the core's reaches each owner.

@@ -18,6 +18,7 @@ import {
   mapUsage,
   modelOf,
   museExecutable,
+  museHostArgs,
   optionsOf,
   questionTextOf,
   tasksOf,
@@ -351,7 +352,8 @@ export class MuseSession {
     this.contextSink = ctx.context;
     const executable = museExecutable(ctx.provider);
     const posture = MODE_POSTURE[ctx.thread.permissionMode];
-    const child = ctx.spawnChild(executable, [...(profileFor(ctx.provider)?.launch?.args ?? []), ...posture.flags], {
+    const args = [...(profileFor(ctx.provider)?.launch?.args ?? []), ...museHostArgs(executable), ...posture.flags];
+    const child = ctx.spawnChild(executable, args, {
       cwd: ctx.thread.cwd,
       env: agentEnv(ctx.provider, ctx.accountEnv),
     });

@@ -24,6 +24,7 @@ import { DELEGATE_ACTIONS, delegateCommand } from './delegate-cli.ts';
 import { browserCommand, BROWSER_HELP } from './browser-cli.ts';
 import { browserRun } from './browser-run.ts';
 import { deviceCommand } from './device-cli.ts';
+import { WINDOW_REQUEST_TIMEOUT_MS, windowCommand } from './window-cli.ts';
 import { secretCommand } from './secret-cli.ts';
 import { agentsCommand, AgentsUsage, WAIT_MAX_S } from './agents-cli.ts';
 import type { RpcParams } from '@boite/contracts';
@@ -64,6 +65,8 @@ ${CONTROL_HELP}
   browser help                   inspect, test and capture the built-in browser
   device help                    open an iOS Simulator or Android emulator in the
                                  user's Device panel, capture and drive it
+  window help                    capture a desktop window (Unity, a game) as a PNG
+                                 or a contact sheet, or show it in the Window panel
   pr list|refresh                this conversation's linked pull requests
   pr link|unlink <url>           attach or remove a PR link; does not change GitHub
   pr watch [<url|number>]        wake this thread when the PR's checks fail or
@@ -109,7 +112,7 @@ ${CONTROL_HELP}
                                  the outcome arrives as a message (applied,
                                  changed or refused); --machine <name> asks
                                  about another machine of the group
-                                 (groupThreads)
+                                 (groupThreads, groupBots)
   settings open <page>[#<card>] --why <text>
                                  a card with a button to that Settings page,
                                  for what is not one value: a provider login,
@@ -121,7 +124,9 @@ ${CONTROL_HELP}
   settings bot request <key> <value> --why <text>
                                  a card asking the user to change one, for you
                                  or --bot <name>: name Ada, status paused,
-                                 projects +boite -old, instructions with
+                                 projects +boite -old (+<machine>/<name> for a
+                                 project of another machine of the group),
+                                 instructions with
                                  --instructions-file <path>; the outcome
                                  arrives as a message (applied, changed, refused)
   settings bot create <name>     create the bot the user asked for, at once,
@@ -155,7 +160,8 @@ ${CONTROL_HELP}
   bot schedule <json>            name, prompt, schedule; optional id and enabled
   bot unschedule <routine-id>    remove one routine
   bot watch|unwatch <thread-id>  put a thread of its projects on its desk, or
-                                 take one off
+                                 take one off; <machine>/<thread-id> for a
+                                 project another machine entrusted to it
   --request-id <id>              reuse to retry threads send|reply or delegate spawn|send
   delegate models                models, reasoning levels and speeds a subagent can use
   delegate spawn <brief>         start a subagent on one bounded job; its result
@@ -418,6 +424,10 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     },
     device: async () => {
       const result = await deviceCommand(rest, io, client, threadId, parsed.timeout);
+      print(result.lines, result.value);
+    },
+    window: async () => {
+      const result = await windowCommand(rest, io, client, threadId);
       print(result.lines, result.value);
     },
     secret: async () => {
@@ -777,9 +787,12 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     const target = targetOf(parsed, io.env);
     try {
       // An agent waiting for an answer holds its call up to five minutes; a secret card or command up to an hour.
+      // A window capture may wait ten minutes for the owner's consent.
       const waits = parsed.positional[0] === 'threads' && (parsed.wait || parsed.positional[1] === 'wait');
-      const secretWait = parsed.positional[0] === 'secret' ? { requestTimeoutMs: 3_660_000 } : {};
-      client = await connect(target.url, target.token, { client: { name: 'cli', version: CORE_VERSION }, ...(waits ? { requestTimeoutMs: (WAIT_MAX_S + 30) * 1000 } : {}), ...secretWait });
+      const requestTimeoutMs = waits ? (WAIT_MAX_S + 30) * 1000
+        : parsed.positional[0] === 'secret' ? 3_660_000
+        : parsed.positional[0] === 'window' ? WINDOW_REQUEST_TIMEOUT_MS : undefined;
+      client = await connect(target.url, target.token, { client: { name: 'cli', version: CORE_VERSION }, ...(requestTimeoutMs === undefined ? {} : { requestTimeoutMs }) });
     } catch (error) {
       throw new Error(`no core answers at ${target.url}: ${(error as Error).message}`);
     }

@@ -57,6 +57,7 @@ export const strings = {
       autoResumeLimitedThreads: 'Resume threads after a usage limit',
       deviceStream: 'Live device stream',
       groupThreads: 'Let the other machines start threads here',
+      groupBots: 'Let the bots of the other machines look after projects here',
     },
     /** What 0 means for the settings where it is not a number. */
     zero: {

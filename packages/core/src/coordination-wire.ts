@@ -13,7 +13,12 @@ export type Operation = 'directory' | 'deliver' | 'receipt' | 'search' | 'read' 
   /** Between members of a group, for a contact one of them is linked to (`contacts/members.ts`). */
   | 'relay.project' | 'relay.mirror' | 'relay.in' | 'relay.out'
   /** Between members of a group: a thread one starts on another, and the setting that lets it (`threads/group-spawn.ts`). */
-  | 'thread.start' | 'setting.read' | 'setting.changed';
+  | 'thread.start' | 'setting.read' | 'setting.changed'
+  /** Between members of a group: a bot of one looks after projects of another, which hears it while its `groupBots` is on (`agents/group-host.ts`). */
+  | BotOperation;
+/** What a bot's core asks the machine whose projects it looks after, and the events that machine sends back. */
+export const BOT_OPERATIONS = ['bot.lease', 'bot.threads', 'bot.thread', 'bot.act', 'bot.answer', 'bot.send', 'bot.event'] as const;
+export type BotOperation = (typeof BOT_OPERATIONS)[number];
 /** A request as signed: who asks whom, when, once, for what. */
 export type Envelope = { from: string; to: string; at: number; nonce: string; operation: Operation; payload: unknown };
 export const MAX_BODY = 262_144;

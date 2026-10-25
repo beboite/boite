@@ -97,6 +97,7 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 | Subagents | one     | the thread's workflow runs and subagents in one list, a run's graph, a subagent's conversation, see [delegation.md](delegation.md) and [workflows.md](workflows.md) |
 | Trace    | one      | the thread's processes, see [trace.md](trace.md)                              |
 | Device   | one      | the simulators and emulators open in the thread, covered until Show, see [devices.md](devices.md) |
+| Window   | one      | the desktop window an agent watches with `boite window watch`, read-only and covered until Show, see [windows.md](windows.md) |
 
 The launcher and the new-surface menu offer one Browser card, and `boite
 browse <url>` opens its page as a new tab of that same browser. Only `boite
