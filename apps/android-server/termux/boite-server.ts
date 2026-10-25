@@ -10,11 +10,11 @@
  * Server app drives these commands through Termux's RUN_COMMAND intent and
  * reads their `--json` answers. docs/android-server.md.
  */
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess, type SpawnSyncReturns } from 'node:child_process';
 import { createHash, createPublicKey, verify, type KeyObject } from 'node:crypto';
 import {
-  chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, readlinkSync,
-  realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync, writeSync,
+  chmodSync, closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, readlinkSync,
+  realpathSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync, writeSync,
 } from 'node:fs';
 import { networkInterfaces, type NetworkInterfaceInfo } from 'node:os';
 import { posix } from 'node:path';
@@ -196,6 +196,15 @@ function record(pid: number): Recorded {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/** Signals a recorded process; one that exited after `alive` saw it is already where the signal would put it. */
+function signal(pid: number, name: NodeJS.Signals): void {
+  try {
+    process.kill(pid, name);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+  }
+}
+
 /** Termux's wake lock keeps the CPU and Wi-Fi up with the screen off, and its service in the foreground. */
 function wakeLock(on: boolean): void {
   spawnSync(join(PREFIX, 'bin', on ? 'termux-wake-lock' : 'termux-wake-unlock'), [], { stdio: 'ignore', timeout: 15_000 });
@@ -269,10 +278,25 @@ export function offerOf(manifest: unknown, version: string): Offer {
   return { version, url, signature: payload.signature };
 }
 
+/** Release pages read before giving up: the nightlies can push a stable release past the first hundred. */
+const RELEASE_PAGES = 10;
+
+/**
+ * `pickRelease` over GitHub's release list, newest first, one page of 100 after another until one matches.
+ * Not `releases/latest`: a stable `-beta.` release is published as a prerelease (release.yml), which it never returns.
+ */
+export async function newestRelease(channel: Channel, page: (n: number) => Promise<unknown>): Promise<string | null> {
+  for (let n = 1; n <= RELEASE_PAGES; n++) {
+    const releases = await page(n);
+    if (!Array.isArray(releases)) throw new Error('the GitHub release list is not an array');
+    const version = pickRelease(releases, channel);
+    if (version || releases.length < 100) return version;
+  }
+  return null;
+}
+
 async function findOffer(channel: Channel): Promise<Offer> {
-  const releases = await fetchJson(`https://api.github.com/repos/${REPOSITORY}/releases?per_page=100`);
-  if (!Array.isArray(releases)) throw new Error('the GitHub release list is not an array');
-  const version = pickRelease(releases, channel);
+  const version = await newestRelease(channel, (n) => fetchJson(`https://api.github.com/repos/${REPOSITORY}/releases?per_page=100&page=${n}`));
   if (!version) {
     throw new Error(channel === 'stable'
       ? 'no stable release carries the Android server yet: choose the nightly channel (boite-server config channel nightly)'
@@ -357,13 +381,18 @@ export function checkEntries(names: string[]): void {
   }
 }
 
+/** Why a command failed: its stderr, or, when it never started (no `unzip` on PATH), the spawn error. */
+function failure(result: SpawnSyncReturns<string>): string {
+  return result.stderr?.trim() || result.error?.message || `exit status ${result.status}`;
+}
+
 function unzip(file: string, directory: string): void {
   const listing = spawnSync('unzip', ['-Z1', file], { encoding: 'utf8' });
-  if (listing.status !== 0) throw new Error(`unzip could not read ${file}: ${listing.stderr.trim()}`);
+  if (listing.status !== 0) throw new Error(`unzip could not read ${file}: ${failure(listing)}`);
   checkEntries(listing.stdout.split('\n').filter(Boolean));
   rmSync(directory, { recursive: true, force: true });
   const result = spawnSync('unzip', ['-q', file, '-d', directory], { encoding: 'utf8' });
-  if (result.status !== 0) throw new Error(`unzip failed on ${file}: ${result.stderr.trim()}`);
+  if (result.status !== 0) throw new Error(`unzip failed on ${file}: ${failure(result)}`);
 }
 
 /** The Bun build for Android a release asks for, downloaded once and checked against the release's digest. */
@@ -714,9 +743,15 @@ async function supervise(): Promise<void> {
   process.exit(0);
 }
 
-function rotateLog(): void {
+/**
+ * Moves a log past `max` bytes to `<log>.1`. Copied then emptied, not renamed: the supervisor and the core
+ * keep writing through the append-mode descriptor `start` opened, which then writes at the new end.
+ */
+export function rotateLog(file = PATHS.log, max = MAX_LOG_BYTES): void {
   try {
-    if (statSync(PATHS.log).size > MAX_LOG_BYTES) renameSync(PATHS.log, `${PATHS.log}.1`);
+    if (statSync(file).size <= max) return;
+    copyFileSync(file, `${file}.1`);
+    truncateSync(file, 0);
   } catch { /* No log yet. */ }
 }
 
@@ -774,10 +809,10 @@ async function stopServer(): Promise<void> {
   // The supervisor stops its core; a core whose supervisor was killed is stopped directly.
   const first = alive(state.supervisor) ? state.supervisor : alive(state.core) ? state.core : null;
   if (first) {
-    process.kill(first.pid, 'SIGTERM');
+    signal(first.pid, 'SIGTERM');
     const deadline = Date.now() + STOP_GRACE_MS + 15_000;
     while (Date.now() < deadline && (alive(state.supervisor) || alive(state.core))) await sleep(250);
-    for (const left of [state.core, state.supervisor]) if (alive(left)) process.kill(left.pid, 'SIGKILL');
+    for (const left of [state.core, state.supervisor]) if (alive(left)) signal(left.pid, 'SIGKILL');
   }
   writeJson(PATHS.state, {});
   wakeLock(false);
@@ -886,8 +921,8 @@ async function pair(args: Args): Promise<{ ok: true; url: string; urls: string[]
   const result = spawnSync(join(PATHS.bin, 'bun'), [join(release.dir, 'core', 'main.js'), 'pair', ...(role === 'owner' ? ['--owner'] : [])], {
     encoding: 'utf8', env: coreEnv(release), timeout: 30_000,
   });
-  const url = result.stdout.trim();
-  if (result.status !== 0 || !url) throw new Error((result.stderr || 'the core gave no pairing link').trim().replace(/^boite-core pair: /, ''));
+  const url = (result.stdout ?? '').trim();
+  if (result.status !== 0 || !url) throw new Error((result.stderr || result.error?.message || 'the core gave no pairing link').trim().replace(/^boite-core pair: /, ''));
   const config = readConfig();
   const urls = pairingLinks(url, reachableAt(config.host, readState().core?.port ?? config.port));
   return { ok: true, url: urls[0]!, urls, role, expiresAt: /until (\S+)/.exec(result.stderr)?.[1] ?? null };

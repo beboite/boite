@@ -164,8 +164,13 @@ class ServerModel(private val context: Context, private val scope: CoroutineScop
     }
 
     fun uninstall(purge: Boolean) = act("uninstall", 150_000, *(if (purge) arrayOf("uninstall", "--purge") else arrayOf("uninstall"))) {
+        // A reinstall starts from nothing: no offer, link, logs or message from the removed server.
         status = null
         phase = Phase.Setup(null)
+        available = null
+        pairing = null
+        logs = null
+        notice = null
     }
 }
 

@@ -1,12 +1,12 @@
 import { expect, test } from 'bun:test';
 import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { verifyPayload } from '../../../packages/core/src/server-update/release.ts';
 import {
-  bindAddress, bundleName, checkEntries, GLIBC_INTERPRETER, loaderLink, offerOf, pairingLinks, parseConfig, patchInterpreter, pickRelease,
-  reachableAt, startTimeOf, tailscaleAddress, TARGET, UPDATE_PUBLIC_KEY, verifyFile, withSetting, type Interfaces,
+  bindAddress, bundleName, checkEntries, GLIBC_INTERPRETER, loaderLink, newestRelease, offerOf, pairingLinks, parseConfig, patchInterpreter, pickRelease,
+  reachableAt, rotateLog, startTimeOf, tailscaleAddress, TARGET, UPDATE_PUBLIC_KEY, verifyFile, withSetting, type Interfaces,
 } from './boite-server.ts';
 
 const temporary = () => mkdtempSync(join(tmpdir(), 'boite-android-server-'));
@@ -47,7 +47,7 @@ test('a bundle installs only with a signature the core would accept for the same
   }
 });
 
-test('an update comes from the channel\'s newest release that carries the Android bundle, from this repository', () => {
+test('an update comes from the channel\'s newest release that carries the Android bundle, from this repository', async () => {
   const release = (version: string, assets = [bundleName(version)], draft = false) => ({ tag_name: `v${version}`, draft, assets: assets.map((name) => ({ name })) });
   const releases = [
     release('2.0.0-nightly.20261025.1'),
@@ -61,6 +61,15 @@ test('an update comes from the channel\'s newest release that carries the Androi
   expect(pickRelease(releases, 'nightly')).toBe('2.0.0-nightly.20261101.2');
   expect(pickRelease([release('2.0.0-nightly.20261025.1')], 'stable')).toBeNull();
 
+  // A hundred nightlies push the stable release onto the second page; a short page is the last one.
+  const pages = [Array.from({ length: 100 }, (_, i) => release(`2.0.0-nightly.20261101.${i + 1}`)), [release('2.0.0-beta.1')]];
+  const read: number[] = [];
+  const page = async (n: number) => { read.push(n); return pages[n - 1] ?? []; };
+  expect(await newestRelease('stable', page)).toBe('2.0.0-beta.1');
+  expect(await newestRelease('nightly', page)).toBe('2.0.0-nightly.20261101.100');
+  expect(read).toEqual([1, 2, 1]);
+  expect(await newestRelease('stable', async () => [release('2.0.0-nightly.20261025.1')])).toBeNull();
+
   const manifest = (url: string, version = '2.0.0') => ({ version, platforms: { [TARGET]: { url, signature: 'c2ln' } } });
   for (const owner of ['mtsu-dev', 'beboite']) {
     const url = `https://github.com/${owner}/boite/releases/download/v2.0.0/${bundleName('2.0.0')}`;
@@ -69,6 +78,23 @@ test('an update comes from the channel\'s newest release that carries the Androi
   expect(() => offerOf(manifest(`https://github.com/someone/boite/releases/download/v2.0.0/${bundleName('2.0.0')}`), '2.0.0')).toThrow(TARGET);
   expect(() => offerOf(manifest(`https://github.com/beboite/boite/releases/download/v1.9.0/${bundleName('1.9.0')}`), '2.0.0')).toThrow(TARGET);
   expect(() => offerOf(manifest('', '2.0.1'), '2.0.0')).toThrow('names version "2.0.1"');
+});
+
+test('a rotated log keeps receiving what the running supervisor writes', () => {
+  const dir = temporary();
+  try {
+    const log = join(dir, 'core.log');
+    // The descriptor `start` hands the supervisor, and the core after it.
+    const inherited = openSync(log, 'a');
+    writeSync(inherited, 'before\n'.repeat(4));
+    rotateLog(log, 10);
+    writeSync(inherited, 'after\n');
+    closeSync(inherited);
+    expect(readFileSync(log, 'utf8')).toBe('after\n');
+    expect(readFileSync(`${log}.1`, 'utf8')).toBe('before\n'.repeat(4));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('an archive entry that would land outside its release directory stops the update', () => {
