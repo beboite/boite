@@ -203,6 +203,20 @@ an `adb screencap` PNG. With a phone plugged in and the setting off, `list`
 ends with one line that gives the `boite settings request deviceStream true`
 command. Details and limits are in [devices.md](devices.md).
 
+## Desktop windows
+
+`boite window help` lists the commands. `boite window list` shows the desktop
+windows of the machine that runs the core: id, process, PID, size, and whether
+a window is minimized or excluded; a title only for an app the project allows.
+`screenshot <target>` writes one PNG, `clip <target> --seconds <s>` one
+labelled contact sheet (at most 10 s at 4 fps), and `watch <target>` shows the
+window in the user's Window panel; `close` empties it. A target is `--id`,
+`--process` or `--title`; several matches are refused with the candidates.
+The answer gives the path, the size, the tokens the picture costs to read and
+the window id. An app the project has not allowed waits up to 10 minutes for
+the owner's consent card, so window requests time out after 11 minutes. Details
+and limits are in [windows.md](windows.md).
+
 ## Pull requests linked to a conversation
 
 `boite pr link <url>` verifies a GitHub pull request and saves its link in the

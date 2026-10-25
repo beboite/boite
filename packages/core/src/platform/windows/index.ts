@@ -12,6 +12,8 @@ export const platform: ProcessPlatform = {
   protectedExecution: new WindowsExecutionBoundary(),
   tailscaleCli: () => findTailscaleCli('windows'),
   firewall: { query: firewallQuery, allow: firewallAllow },
+  // bun:ffi and the WinRT capture objects load with the first `boite window`, never at startup.
+  windowCapture: async () => (await import('./window-capture.ts')).loadWindowCapture(),
   retain(events, protections) {
     jobs.retainJobs(events);
     guard.retainGuard(protections);

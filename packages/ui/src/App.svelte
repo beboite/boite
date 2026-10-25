@@ -5,6 +5,7 @@
   import { shellStarting, takeNotificationTarget } from './lib/endpoint';
   import { watchAgentBrowser } from './lib/agent-browser-watch';
   import { watchDevices } from './lib/device-watch';
+  import { watchWindows } from './lib/window-watch';
   import { browserProfiles } from './lib/browser-profiles.svelte';
   import UndoToast from './components/UndoToast.svelte';
   import NotificationCard from './components/NotificationCard.svelte';
@@ -91,11 +92,12 @@
     void store.connection;
     if (threadId && store.client?.state === 'ready') return watchAgentBrowser(store, threadId);
   });
-  // A simulator or emulator the agent opens shows up in the panel, here and on a phone (docs/devices.md).
+  // A simulator or emulator the agent opens shows up in the panel, here and on a phone (docs/devices.md); so does a desktop window it watches.
   $effect(() => {
     const threadId = store.openThread?.id;
     void store.connection;
-    if (threadId && store.client?.state === 'ready') return watchDevices(store, threadId);
+    const stops = threadId && store.client?.state === 'ready' ? [watchDevices(store, threadId), watchWindows(store, threadId)] : [];
+    return () => stops.forEach((stop) => stop());
   });
   const narrow = new MediaQuery('(max-width: 720px)');
   let appRoot = $state<HTMLDivElement | undefined>(undefined);

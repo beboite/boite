@@ -7,6 +7,22 @@ import { findTailscaleCli } from './tailscale.ts';
 import { LinuxExecutionBoundary } from './linux-protected.ts';
 
 /**
+ * Why this machine cannot capture windows, or null on an X11 session. Pure,
+ * so the test reads every case without touching the real environment.
+ */
+export function windowCaptureRefusal(os: 'linux' | 'macos', env: Record<string, string | undefined>): string | null {
+  if (os === 'macos') return 'window capture on macOS needs ScreenCaptureKit, which Boite does not drive yet';
+  const portal = 'a Wayland compositor gives one app no other app\'s window except through the desktop portal\'s own picker';
+  if (env.XDG_SESSION_TYPE === 'wayland' || env.WAYLAND_DISPLAY) {
+    return env.DISPLAY
+      ? `this is a Wayland session: ${portal}, and XWayland on ${env.DISPLAY} shows only X11 apps; an X11 session works`
+      : `this is a Wayland session: ${portal}; an X11 session works`;
+  }
+  if (!env.DISPLAY) return 'no display: DISPLAY is not set, as on a server or in a container, so there is no desktop to capture';
+  return null;
+}
+
+/**
  * Linux and macOS currently track direct children through the registry. Linux
  * also samples descendants and reads start times from procfs. macOS supplies resident
  * memory through libproc when the platform entry loads its native backend.
@@ -20,6 +36,12 @@ export function createPosixPlatform(
     ...(os === 'linux' ? {protectedExecution: new LinuxExecutionBoundary()} : {}),
     ...(os === 'linux' ? { serverUpdates: linuxServerUpdates() } : {}),
     tailscaleCli: () => findTailscaleCli(os),
+    // libX11 loads with the first `boite window` on an X11 session, never at startup.
+    windowCapture: async () => {
+      const refusal = windowCaptureRefusal(os, process.env);
+      if (refusal !== null) return { unavailable: refusal };
+      return (await import('./x11-window-capture.ts')).loadX11WindowCapture();
+    },
     retain() {},
     release: async () => { load?.watchResources?.(false); await load?.closeResources?.(); },
     capability: () => ({ os, mode: 'poll', note: 'direct children only; Job Objects are Windows-only' }),

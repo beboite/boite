@@ -3,12 +3,14 @@ import type { WorkflowsRpcMethods, WorkflowsRpcEvents } from './workflows';
 import type { BrowserRpcMethods, BrowserRpcEvents, BrowserProfile } from './browser';
 import type { PullRequestsRpcMethods, PullRequestsRpcEvents, PullRequestWatch } from './pull-requests';
 import type { MobileDevicesRpcMethods, MobileDevicesRpcEvents } from './mobile-devices';
+import type { WindowsRpcMethods, WindowsRpcEvents } from './windows';
 import type { CoreLogContext, CoreLogLevel, CoreLogRecord, CoreLogsQuery, DiagnosticsRpcMethods } from './diagnostics';
 export * from './diagnostics';
 export * from './pull-requests';
 export * from './browser';
 export * from './browser-remote';
 export * from './mobile-devices';
+export * from './windows';
 export * from './agents';
 export * from './workflows';
 export * from './workflow-plan';
@@ -112,6 +114,7 @@ export interface RpcMethods extends
   BrowserRpcMethods,
   PullRequestsRpcMethods,
   MobileDevicesRpcMethods,
+  WindowsRpcMethods,
   DiagnosticsRpcMethods,
   ProvidersRpcMethods,
   AccountsRpcMethods,
@@ -156,6 +159,7 @@ export interface RpcEvents extends
   BrowserRpcEvents,
   PullRequestsRpcEvents,
   MobileDevicesRpcEvents,
+  WindowsRpcEvents,
   ProvidersRpcEvents,
   AccountsRpcEvents,
   PluginsRpcEvents,

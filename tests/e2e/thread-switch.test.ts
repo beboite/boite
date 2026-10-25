@@ -63,15 +63,24 @@ test('production desktop and phone restore cached reading before a slow core rep
     for (const phone of [false, true, true, false]) {
       phase = `saving ${phoneView ? 'phone' : 'desktop'} reading before switching to ${phone ? 'phone' : 'desktop'}`;
       await page.evaluate(frames);
-      await page.evaluate(`(async () => {
+      await page.evaluate(`(() => {
         const box = document.querySelector('${timeline}');
         box.dispatchEvent(new WheelEvent('wheel', { deltaY: -800 }));
         box.scrollTop = box.scrollHeight / 2;
         box.dispatchEvent(new Event('scroll'));
-        await ${frames}; await ${frames};
+      })()`);
+      // The virtual window can still contain only offscreen rows while its measurements settle.
+      // Save a visible, stable row rather than mistaking the first row below the viewport for the reader's anchor.
+      await page.waitFor(`(async () => {
+        const box = document.querySelector('${timeline}');
         const top = box.getBoundingClientRect().top;
         const node = [...box.querySelectorAll('[data-mid]')].find(node => node.getBoundingClientRect().bottom > top);
-        globalThis.readingProof = { id: node.dataset.mid, offset: node.getBoundingClientRect().top - top };
+        if (!node || node.getBoundingClientRect().top >= box.getBoundingClientRect().bottom) return false;
+        const reading = { id: node.dataset.mid, offset: node.getBoundingClientRect().top - top };
+        await ${frames};
+        if (!node.isConnected || Math.abs(node.getBoundingClientRect().top - box.getBoundingClientRect().top - reading.offset) > 1) return false;
+        globalThis.readingProof = reading;
+        return true;
       })()`);
       await open(other.id, phoneView);
       await page.waitFor('document.querySelector(\'[data-mid="other-message"]\')');

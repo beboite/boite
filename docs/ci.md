@@ -173,7 +173,12 @@ desktop leg took 14.0 minutes and the Apple Silicon one 8.1 (nightly run
 37234148865, the longest job of that run).
 
 Core changes run the full core suite on Windows, Linux x64/ARM64 and macOS
-ARM64 in every mode, and on Intel macOS outside PRs. Linux desktop packages build on Ubuntu 22.04,
+ARM64 in every mode, and on Intel macOS outside PRs. The two Linux core jobs
+then install `xvfb` and `libxcomposite1` with apt and run
+`packages/core/test/window-capture-x11.test.ts` alone under `xvfb-run` at
+1280x1024x24: the X11 backend of `boite window` lists, captures and fails on
+windows the test itself creates, through Composite and without it. The suite
+before it has no `DISPLAY` and skips that file. Linux desktop packages build on Ubuntu 22.04,
 setting a glibc 2.35 floor. Portable jobs run Rust tests and installed smoke
 checks against Debian, extracted AppImage and macOS application bundles.
 These verify startup, UI serving, authenticated RPC and a fixture echo turn
