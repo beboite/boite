@@ -29,7 +29,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   save();
   const harness = await startTestCore({dataDir: join(state, 'core-data')});
   const procs = harness.core.procs;
-  const jobs = ['RED', 'A', 'B', 'DIRECT', 'SCOPE'].map(label => {
+  const jobs = ['RED', 'A', 'B', 'DIRECT', 'SCOPE', 'QUIET'].map(label => {
     const root = join(state, label), project = join(root, 'project'), runtime = join(root, 'runtime'), home = join(root, 'home');
     const marker = `TASK_ROUTE_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
     return {label, root, project, runtime, home, marker, profile: `boite.debug.route.${crypto.randomUUID().replaceAll('-', '')}`};
@@ -47,7 +47,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     writeFileSync(join(output!, `${id}.log`), `pid=${result.pid} exit=${result.code} timedOut=${result.timedOut}\n${result.out}${result.err}`);
     console.log(`${id}: ${JSON.stringify(result)}`); save(); return result;
   }
-  function run(job: typeof jobs[number], debug: boolean, mode?: 'direct-run' | 'setter-run') {
+  function run(job: typeof jobs[number], debug: boolean, mode?: 'direct-run' | 'setter-run' | 'quiet-run') {
     const promise = execute(`lpac-${job.label}`, [mode ?? (debug ? 'debug-run' : 'run'), job.profile, job.project,
       join(job.runtime, 'inspect.exe'), 'inspect', '0', job.marker, ...(debug ? ['forward-check'] : [])], job.home,
       {PATH: `${job.runtime};${process.env.SystemRoot}\\System32`});
@@ -105,7 +105,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
         expect(Number(checkpoint?.[2])).toBeGreaterThan(0);
         const targets = checkpoint?.[3]?.split(',') ?? [];
         const inspected = [...result.out.matchAll(/^inspect-start=\S+ pid=(\d+)\r?$/gm)].map(match => match[1]!);
-        expect(new Set(targets)).toEqual(new Set(['RED', 'DIRECT', 'SCOPE'].includes(label) ? inspected.slice(0, 1) : inspected));
+        expect(new Set(targets)).toEqual(new Set(['RED', 'DIRECT', 'SCOPE', 'QUIET'].includes(label) ? inspected.slice(0, 1) : inspected));
         expect(result.err.indexOf('ownership-checkpoint ')).toBeGreaterThan(result.err.indexOf('cleanup map-eventual-open='));
         expect(result.err).toMatch(/cleanup checkpoint-map-open=0x[\da-f]+ absent=[01] closed=1 error=0 wall-ms=\d+/);
       }),
@@ -116,12 +116,23 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     for (let index = 0; index < 3; index++) checks.push(
       verify(`${label} stream cleanup ${index}`, () => expect(result.err)
         .toContain(`stream-cleanup index=${index} success=1 error=0`)));
-    for (const object of ['root-thread', 'root-process', 'job', 'map-before-link-close', 'link', 'map']) checks.push(
+    const observations = result.err.match(/^owned-observers enabled=([01]) object-queries=(\d+) handle-snapshots=(\d+)\r?$/m);
+    checks.push(verify(`${label} ownership observation selection`, () => {
+      expect(observations?.[1]).toBe(label === 'QUIET' ? '0' : '1');
+      if (label === 'QUIET') {
+        expect(observations?.[2]).toBe('0'); expect(observations?.[3]).toBe('0');
+        expect(result.err).not.toMatch(/^cleanup object=|^map-owned |^map-lifetime /m);
+      } else {
+        expect(Number(observations?.[2])).toBeGreaterThan(0);
+        expect(Number(observations?.[3])).toBeGreaterThan(0);
+      }
+    }));
+    for (const object of label === 'QUIET' ? [] : ['root-thread', 'root-process', 'job', 'map-before-link-close', 'link', 'map']) checks.push(
       verify(`${label} ${object} counts`, () => expect(result.err).toMatch(new RegExp(
         `cleanup object=${object} handle=\\S+ query=0x00000000 attributes=0x[0-9a-f]+ granted=0x[0-9a-f]+ handles=\\d+ pointers=\\d+`))));
     for (const object of ['root-thread', 'root-process', 'job', 'link', 'map']) checks.push(
       verify(`${label} ${object} closure`, () => expect(result.err).toContain(`cleanup close=${object} closed=1 error=0`)));
-    for (const phase of ['after-create subject=directory', 'after-create subject=link', 'before-assign subject=process', 'after-assign subject=process', 'before-close subject=map']) checks.push(
+    for (const phase of label === 'QUIET' ? [] : ['after-create subject=directory', 'after-create subject=link', 'before-assign subject=process', 'after-assign subject=process', 'before-close subject=map']) checks.push(
       verify(`${label} map lifetime ${phase}`, () => expect(result.err).toMatch(new RegExp(
         `map-lifetime phase=${phase} pid=${result.pid} query=0x00000000 matches=[1-9]\\d* error=0\\r?\\n`))));
     if (label === 'RED') {
@@ -276,14 +287,14 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
       }
       report.routingObserved = failures.length === debugStart;
     }
-    // Matched root-only controls isolate assignment caller from RED's A/B/A
-    // roundtrip. Each keeps its creator/helper alive through the fatal gates.
+    // Matched root-only controls isolate assignment caller and optional queries
+    // from RED's A/B/A roundtrip. Helpers stay alive through the fatal gates.
     // These observations cannot make a failed original RED/A/B gate pass.
     if (report.redSafetyPassed === true) {
-      for (const [index, mode] of ['direct-run', 'setter-run'].entries()) {
+      for (const [index, mode] of (['direct-run', 'setter-run', 'quiet-run'] as const).entries()) {
         const job = jobs[index + 3]!;
         writeFileSync(join(job.project, 'release'), 'synthetic');
-        const result = await run(job, false, mode as 'direct-run' | 'setter-run');
+        const result = await run(job, false, mode);
         report[job.label.toLowerCase()] = result;
         completed(job.label, result, 1); boundary(job.label, result, job.marker);
         for (let depth = 0; depth < 3; depth++) verify(`${job.label} generation ${depth} routing`, () => expect(result.out)
@@ -299,7 +310,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
             expect(result.err).toMatch(/setter-transfer target=\d+ created=\d+ parent-closed=2 error=0 process-access=0x00101200 map-access=0x00000003/);
             expect(result.err).toContain('setter-cleanup handles=3 closed=3 error=0');
           });
-        } else verify('DIRECT in-helper assignment', () => expect(result.err).not.toContain('setter-assignment '));
+        } else verify(`${job.label} in-helper assignment`, () => expect(result.err).not.toContain('setter-assignment '));
         cleanup(job.label, result); await observeAfterExit(job.label, result);
         const afterScope = await execute(`ordinary-after-${job.label.toLowerCase()}`, ['observe', state]);
         observer(`after ${job.label}`, afterScope, before);

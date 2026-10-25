@@ -8,7 +8,7 @@ typedef struct {
 typedef struct { ULONG_PTR count, reserved; ROUTE_HANDLE_ENTRY entries[1]; } ROUTE_HANDLE_SNAPSHOT;
 
 static DWORD map_lifetime(const wchar_t *phase, const wchar_t *subject) {
-  if (!probe_map) return 0;
+  if (!observe_owned_handles || !probe_map) return 0;
   typedef NTSTATUS (NTAPI *compare_objects_fn)(HANDLE, HANDLE);
   query_process_fn query = (query_process_fn)(void *)nt_api("NtQueryInformationProcess");
   compare_objects_fn compare = (compare_objects_fn)(void *)nt_api("NtCompareObjects");
@@ -18,6 +18,7 @@ static DWORD map_lifetime(const wchar_t *phase, const wchar_t *subject) {
   for (;;) {
     snapshot = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, capacity);
     if (!snapshot) return ERROR_NOT_ENOUGH_MEMORY;
+    handle_snapshot_queries++;
     status = query(GetCurrentProcess(), (PROCESSINFOCLASS)51, snapshot, capacity, &used);
     if (status != (NTSTATUS)0xc0000004) break;
     HeapFree(GetProcessHeap(), 0, snapshot); snapshot = NULL;

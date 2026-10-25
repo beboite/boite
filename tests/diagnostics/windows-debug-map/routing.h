@@ -19,6 +19,9 @@ static HANDLE probe_map, probe_link;
 static wchar_t probe_name[256];
 static DWORD probe_root_pid;
 static BOOL debug_mode;
+/* QUIET differs from DIRECT only in these optional ownership observations. */
+static BOOL observe_owned_handles = TRUE;
+static unsigned int object_count_queries, handle_snapshot_queries;
 /* 0 retains the original RED roundtrip, 1 omits it as a control, 2 also moves
  * assignment into a trusted child that exits before the target resumes. */
 static int assignment_scope;
@@ -33,9 +36,11 @@ static FARPROC nt_api(const char *name) { return GetProcAddress(GetModuleHandleW
 /* Read-only snapshots through our live handle. Counts alone do not identify
  * which kernel component owns a remaining reference. */
 static DWORD object_counts(const wchar_t *label, HANDLE object) {
+  if (!observe_owned_handles) return 0;
   struct { ULONG attributes, granted, handles, pointers; ULONG reserved[10]; } info;
   ZeroMemory(&info, sizeof(info)); ULONG used = 0;
   query_object_fn query = (query_object_fn)(void *)nt_api("NtQueryObject");
+  object_count_queries++;
   NTSTATUS status = query ? query(object, (OBJECT_INFORMATION_CLASS)0, &info, sizeof(info), &used) : (NTSTATUS)0xc0000002;
   fwprintf(stderr, L"cleanup object=%ls handle=%p query=0x%08lx attributes=0x%08lx granted=0x%08lx handles=%lu pointers=%lu\n",
     label, object, (unsigned long)status, info.attributes, info.granted, info.handles, info.pointers);

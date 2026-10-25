@@ -66,12 +66,16 @@ export function generate(source: string): string {
     '  else if (count > 1 && !wcscmp(args[1], L"inspect")) result = inspect(count, args);\n' +
     '  else if (count > 1 && !wcscmp(args[1], L"assign-map")) result = setter_entry(count, args);\n' +
     '  else if (count > 4 && (!wcscmp(args[1], L"run") || !wcscmp(args[1], L"debug-run") ||\n' +
-    '      !wcscmp(args[1], L"direct-run") || !wcscmp(args[1], L"setter-run"))) {\n' +
+    '      !wcscmp(args[1], L"direct-run") || !wcscmp(args[1], L"setter-run") || !wcscmp(args[1], L"quiet-run"))) {\n' +
     '    debug_mode = !wcscmp(args[1], L"debug-run");\n' +
-    '    assignment_scope = !wcscmp(args[1], L"setter-run") ? 2 : !wcscmp(args[1], L"direct-run") ? 1 : 0;\n' +
+    '    observe_owned_handles = wcscmp(args[1], L"quiet-run") != 0;\n' +
+    '    assignment_scope = !wcscmp(args[1], L"setter-run") ? 2 :\n' +
+    '      (!wcscmp(args[1], L"direct-run") || !observe_owned_handles) ? 1 : 0;\n' +
     '    DWORD before = caller_snapshot(args[3], FALSE);\n' +
     '    if (!before) result = launch(count, args);\n' +
     '    DWORD after = caller_snapshot(args[3], TRUE);\n' +
+    '    fwprintf(stderr, L"owned-observers enabled=%d object-queries=%u handle-snapshots=%u\\n",\n' +
+    '      observe_owned_handles, object_count_queries, handle_snapshot_queries); fflush(stderr);\n' +
     '    if (before || after) result = failure(L"routing.caller-state", before ? before : after);\n  }');
   if (source.includes('INFINITE')) throw new Error('diagnostic retains an unbounded wait');
   return source;

@@ -236,13 +236,34 @@ gates. The setter exits normally, and its two captured registry handles close
 This excludes those captured setter handles at that checkpoint; early setter
 exit alone does not cure this fixture. It does not identify the kernel owner.
 
-The next diagnostic captures the existing SetProcessWindowStation, CloseDesktop,
+The diagnostic captures the existing SetProcessWindowStation, CloseDesktop,
 CloseWindowStation and three stream CloseHandle return values once in their
 original order. Failure codes are saved immediately, before logging, and remain
 fatal. No new USER32 call is made before creation, so thread-desktop initialization
 is not perturbed. In particular, this experiment neither adds SetThreadDesktop
 nor changes cleanup to make a map disappear. A failed desktop close would show
 an incomplete teardown, without proving its relationship to map retention.
+
+The c8fd2bf4 Server run reports success for all three stream closures, station
+restoration, desktop closure and station closure in every SDK/MinGW case. The
+maps still persist immediately, after 2000 ms and at the later checkpoint.
+Failed returns from these cleanup calls therefore do not explain that run.
+
+QUIET matches DIRECT's root-only assignment without the A/B/A roundtrip. Only
+the optional ObjectBasicInformation counts and ProcessHandleInformation snapshot
+observations are disabled, including their NtCompareObjects calls. Counters
+require zero such queries for QUIET and nonzero queries for every original case.
+Object identity queries needed by the boundary and caller observations remain.
+Registry tracing, caller/ambient equality, marker routing, job confinement,
+normal descendant exits, successful owned-handle/stream/window closure, immediate
+and eventual map absence, checkpoint and independent post-exit observation all
+remain mandatory. RED/A/B/DIRECT/SCOPE retain their count/snapshot assertions.
+
+A changed outcome between DIRECT and QUIET would implicate this group of
+optional observations, without identifying an individual API or kernel owner.
+Equal retention would exclude removing that group alone as a remedy here.
+The original failures remain fatal regardless of the control's result. Native
+SDK/MinGW execution is required; this control grants no production admission.
 
 After the exact spawned helper has exited and its capture reached EOF, a new
 registry-owned helper opens only the recorded `boite.route.<helper-pid>` name
