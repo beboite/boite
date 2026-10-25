@@ -17,6 +17,7 @@ typedef struct {
 } ROUTE_RECORD;
 static HANDLE probe_map, probe_link;
 static wchar_t probe_name[256];
+static DWORD probe_root_pid;
 static BOOL debug_mode;
 static ROUTE_RECORD records[32];
 static int captured, active;
@@ -119,6 +120,7 @@ static DWORD map_prepare(HANDLE process, PSECURITY_DESCRIPTOR security, const wc
   create_directory_fn create = (create_directory_fn)(void *)nt_api("NtCreateDirectoryObjectEx");
   create_link_fn link = (create_link_fn)(void *)nt_api("NtCreateSymbolicLinkObject");
   if (!create || !link) return ERROR_PROC_NOT_FOUND;
+  probe_root_pid = GetProcessId(process);
   if (debug_mode) { DWORD error = prepare_target(image); if (error) return error; }
   DWORD session = 0;
   if (!ProcessIdToSessionId(GetCurrentProcessId(), &session)) return GetLastError();
@@ -147,6 +149,34 @@ static DWORD map_prepare(HANDLE process, PSECURITY_DESCRIPTOR security, const wc
   if (debug_mode) return 0;
   DWORD error = map_apply(process);
   return error ? error : map_roundtrip(process, security);
+}
+
+static ULONGLONG ownership_wall_ms(void) {
+  FILETIME time; ULARGE_INTEGER value; GetSystemTimeAsFileTime(&time);
+  value.LowPart = time.dwLowDateTime; value.HighPart = time.dwHighDateTime;
+  return (value.QuadPart - 116444736000000000ULL) / 10000ULL;
+}
+
+/* Observe only after preserving both original absence results. No flush,
+ * reassignment, borrowed-handle closure or new process access occurs here. */
+static DWORD map_checkpoint(open_directory_fn open, POBJECT_ATTRIBUTES attributes) {
+  wchar_t enabled[2];
+  if (GetEnvironmentVariableW(L"BOITE_DEBUG_MAP_OWNERSHIP", enabled, 2) != 1 || enabled[0] != L'1') return 0;
+  fwprintf(stderr, L"ownership-checkpoint helper=%lu wall-ms=%llu targets=", GetCurrentProcessId(), ownership_wall_ms());
+  if (!debug_mode) fwprintf(stderr, L"%lu", probe_root_pid);
+  else {
+    unsigned int emitted = 0;
+    for (int i = 0; i < captured; i++) if (!records[i].auxiliary && records[i].consumed)
+      fwprintf(stderr, L"%ls%lu", emitted++ ? L"," : L"", records[i].pid);
+  }
+  fputws(L" hold-ms=3000\n", stderr); fflush(stderr);
+  Sleep(3000); /* At most 5 seconds; original fatal cleanup status remains set. */
+  HANDLE observer = NULL; NTSTATUS status = open(&observer, 1, attributes);
+  DWORD error = 0; BOOL closed = TRUE;
+  if (observer) {closed = CloseHandle(observer); if (!closed) error = GetLastError();}
+  fwprintf(stderr, L"cleanup checkpoint-map-open=0x%08lx absent=%d closed=%d error=%lu wall-ms=%llu path=%ls\n",
+    (unsigned long)status, status == (NTSTATUS)0xc0000034, closed, error, ownership_wall_ms(), probe_name); fflush(stderr);
+  return error ? error : status < 0 && status != (NTSTATUS)0xc0000034 ? (DWORD)status : 0;
 }
 
 static DWORD map_close(void) {
@@ -184,6 +214,7 @@ static DWORD map_close(void) {
     (unsigned long)status, status == (NTSTATUS)0xc0000034, (unsigned long long)(GetTickCount64() - started), attempts);
   fflush(stderr);
   if (status != (NTSTATUS)0xc0000034 && !error) error = ERROR_INVALID_DATA;
+  DWORD checkpoint = map_checkpoint(open, &attributes); if (checkpoint && !error) error = checkpoint;
   return error;
 }
 

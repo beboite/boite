@@ -4,12 +4,16 @@ import {tmpdir, release} from 'node:os';
 import {join} from 'node:path';
 import {capture, type Captured} from './capture.ts';
 import {selectedEnvironment} from './environment.ts';
+import {verifyOwnershipPlatform} from './ownership-generate.ts';
 
 const native = process.platform === 'win32' && process.env.BOITE_TEST_DEBUG_MAP === '1';
 
 test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC debugger marker routing', async () => {
   const helper = process.env.BOITE_DEBUG_MAP_HELPER, output = process.env.BOITE_DEBUG_MAP_OUTPUT;
   if (!helper || !output) throw new Error('diagnostic requires BOITE_DEBUG_MAP_HELPER and BOITE_DEBUG_MAP_OUTPUT');
+  if (process.env.BOITE_DEBUG_MAP_OWNERSHIP !== '1') throw new Error('diagnostic requires both registry ownership traces');
+  await verifyOwnershipPlatform();
+  const {ownershipTrace} = await import('./ownership-trace.ts');
   // Do this before importing/constructing the real core. Installed accounts and
   // live provider probes are outside this fixture even on an opted-in runner.
   for (const key of Object.keys(process.env)) {
@@ -37,7 +41,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   async function execute(id: string, args: string[], home = state, extra: Record<string, string | undefined> = {}) {
     const child = procs.spawnPiped(id, helper!, args, {cwd: state, agentRoot: false,
       env: selectedEnvironment({HOME: home, USERPROFILE: home, APPDATA: home, LOCALAPPDATA: home,
-        TEMP: home, TMP: home, ...extra})});
+        TEMP: home, TMP: home, BOITE_DEBUG_MAP_OWNERSHIP: '1', ...extra})});
     const result = await capture(procs, id, child, 40000);
     steps.push({id, ...result});
     writeFileSync(join(output!, `${id}.log`), `pid=${result.pid} exit=${result.code} timedOut=${result.timedOut}\n${result.out}${result.err}`);
@@ -95,6 +99,16 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
       verify(`${label} immediate map absence`, () => expect(result.err).toContain('cleanup map-open=0xc0000034 absent=1')),
       verify(`${label} eventual map absence`, () => expect(result.err)
         .toMatch(/cleanup map-eventual-open=0xc0000034 absent=1 elapsed-ms=\d+ attempts=\d+ limit-ms=2000/)),
+      verify(`${label} retention checkpoint`, () => {
+        const checkpoint = result.err.match(/^ownership-checkpoint helper=(\d+) wall-ms=(\d+) targets=([\d,]+) hold-ms=3000\r?$/m);
+        expect(checkpoint?.[1]).toBe(String(result.pid));
+        expect(Number(checkpoint?.[2])).toBeGreaterThan(0);
+        const targets = checkpoint?.[3]?.split(',') ?? [];
+        const inspected = [...result.out.matchAll(/^inspect-start=\S+ pid=(\d+)\r?$/gm)].map(match => match[1]!);
+        expect(new Set(targets)).toEqual(new Set(label === 'RED' ? inspected.slice(0, 1) : inspected));
+        expect(result.err.indexOf('ownership-checkpoint ')).toBeGreaterThan(result.err.indexOf('cleanup map-eventual-open='));
+        expect(result.err).toMatch(/cleanup checkpoint-map-open=0x[\da-f]+ absent=[01] closed=1 error=0 wall-ms=\d+/);
+      }),
     ];
     for (const object of ['root-thread', 'root-process', 'job', 'map-before-link-close', 'link', 'map']) checks.push(
       verify(`${label} ${object} counts`, () => expect(result.err).toMatch(new RegExp(
@@ -271,6 +285,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
       } catch (error) { failures.push(`profile ${job.label}: ${error}`); }
     }
     try { await harness.stop(); } catch (error) { failures.push(`core cleanup: ${error}`); }
+    ownershipTrace.stop();
     // Do not erase state whose native job/object cleanup has not been confirmed.
     const launched = steps.filter(step => step.id.startsWith('lpac-'));
     const nativeCleanup = launched.length > 0 && launched.length === tasks.length &&

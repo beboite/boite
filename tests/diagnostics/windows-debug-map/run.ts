@@ -4,6 +4,8 @@ import {isAbsolute, join} from 'node:path';
 import {capture, type Captured} from './capture.ts';
 import {selectedEnvironment} from './environment.ts';
 import {sha256, sourceHash, sourcePath, writeSource} from './generate.ts';
+import {installOwnership, prepareOwnership, ownershipTestArgs, verifyOwnershipPlatform} from './ownership-generate.ts';
+import {summarizeOwnership} from './ownership-summary.ts';
 
 const [output, mode] = process.argv.slice(2);
 if (!output || !isAbsolute(output) || (mode && mode !== '--compile-only')) {
@@ -28,15 +30,27 @@ if (!compileOnly && !enabled) {
 }
 
 // All compiler/test processes use the real process registry and ProcessPlatform.
+// Redirect the canonical Windows module before either owner imports core code.
+const ownership = enabled && !compileOnly ? prepareOwnership(join(output, 'ownership-source')) : undefined;
+if (ownership) {
+  process.env.BOITE_DEBUG_MAP_OWNERSHIP = '1'; process.env.BOITE_TEST_DEBUG_MAP = '1';
+  process.env.BOITE_DEBUG_MAP_OWNER = 'launcher';
+  if (!await installOwnership(ownership.jobs)) throw new Error('launcher ownership interception not installed');
+  manifest.ownership = ownership;
+}
+const trace = ownership ? (await import('./ownership-trace.ts')).ownershipTrace : undefined;
 const {Journal} = await import('../../../packages/core/src/journal.ts');
 const {Bus} = await import('../../../packages/core/src/bus.ts');
 const {ProcRegistry} = await import('../../../packages/core/src/procs.ts');
 const scratch = mkdtempSync(join(tmpdir(), 'boite-debug-map-build-'));
-const journal = new Journal(join(scratch, 'journal.db')), procs = new ProcRegistry(journal, new Bus());
+let procs: InstanceType<typeof ProcRegistry> | undefined;
 let exitCode = 0;
 try {
   const hashes = writeSource(output); manifest.sourceHashes = hashes;
-  for (const file of ['generate.ts', 'run.ts', 'routing.test.ts', 'environment.ts', 'capture.ts', 'gates.md']) {
+  if (ownership) for (const file of ['jobs.ts', 'jobs-worker.ts', 'preload.ts', 'provenance.json'])
+    hashes[`ownership-source/${file}`] = sha256(readFileSync(join(ownership.directory, file)));
+  for (const file of ['generate.ts', 'run.ts', 'routing.test.ts', 'environment.ts', 'capture.ts', 'gates.md',
+    'ownership-generate.ts', 'ownership-ledger.ts', 'ownership-trace.ts', 'ownership-summary.ts']) {
     hashes[file] = sha256(readFileSync(join(import.meta.dir, file)));
   }
   writeFileSync(join(output, 'sha256.json'), JSON.stringify(hashes, null, 2) + '\n'); save();
@@ -44,6 +58,7 @@ try {
     ? [{name: 'sdk', path: Bun.which('clang')}, {name: 'mingw', path: 'C:\\mingw64\\bin\\gcc.exe'}]
     : [{name: 'mingw-cross', path: Bun.which('x86_64-w64-mingw32-gcc')}];
   async function execute(id: string, executable: string, args: string[], env = selectedEnvironment()) {
+    if (!procs) throw new Error('compiler registry not initialized');
     const child = procs.spawnPiped(id, executable, args, {cwd: output, env, agentRoot: false});
     const result = await capture(procs, id, child, id.startsWith('compile') ? 90000 : 110000);
     writeFileSync(join(output!, `${id}.log`), `pid=${result.pid} exit=${result.code} timedOut=${result.timedOut}\n${result.out}${result.err}`);
@@ -52,9 +67,17 @@ try {
   }
   for (const compiler of compilers) {
     const entry: Record<string, unknown> = {compiler: compiler.path, name: compiler.name}; results.push(entry);
+    const directory = join(output, compiler.name); mkdirSync(directory);
+    const traceDirectory = join(directory, 'ownership');
+    if (trace) {
+      process.env.BOITE_DEBUG_MAP_TRACE = traceDirectory;
+      trace.start(traceDirectory);
+      await verifyOwnershipPlatform();
+    }
+    const journal = new Journal(join(scratch, `${compiler.name}.db`));
+    procs = new ProcRegistry(journal, new Bus());
     try {
       if (!compiler.path || !existsSync(compiler.path)) throw new Error(`compiler unavailable: ${compiler.name}`);
-      const directory = join(output, compiler.name); mkdirSync(directory);
       const helper = join(directory, 'debug-map.exe');
       const sdk = process.platform === 'win32' && /clang/i.test(compiler.path);
       const args = ['-O2', '-Wall', '-Wextra', '-Werror', join(output, 'debug-map.c'), '-o', helper,
@@ -65,8 +88,9 @@ try {
       hashes[`${compiler.name}/debug-map.exe`] = sha256(readFileSync(helper));
       if (!compileOnly) {
         const tested: Captured = await execute(`native-${compiler.name}`, process.execPath,
-          ['test', join(import.meta.dir, 'routing.test.ts'), '--timeout', '90000'], selectedEnvironment({
+          ownershipTestArgs(ownership!.preload, join(import.meta.dir, 'routing.test.ts')), selectedEnvironment({
             BOITE_TEST_DEBUG_MAP: '1', BOITE_DEBUG_MAP_HELPER: helper, BOITE_DEBUG_MAP_OUTPUT: directory,
+            BOITE_DEBUG_MAP_OWNERSHIP: '1', BOITE_DEBUG_MAP_OWNER: 'harness', BOITE_DEBUG_MAP_TRACE: traceDirectory,
             HOME: scratch, USERPROFILE: scratch, APPDATA: scratch, LOCALAPPDATA: scratch,
           }));
         entry.native = tested;
@@ -75,11 +99,21 @@ try {
         else if (JSON.parse(readFileSync(join(directory, 'results.json'), 'utf8')).initialGatePassed !== true) exitCode = 1;
       }
     } catch (error) { entry.error = String(error); exitCode = 1; }
+    finally {
+      try {await procs.killAll(); await procs.close(); journal.close();}
+      catch (error) {entry.cleanupError = String(error); exitCode = 1;}
+      procs = undefined; trace?.stop();
+      if (ownership) {
+        const summary = summarizeOwnership(traceDirectory); entry.ownership = summary;
+        writeFileSync(join(traceDirectory, 'summary.json'), JSON.stringify(summary, null, 2) + '\n');
+        if (!summary.complete) exitCode = 1;
+      }
+    }
     save(); writeFileSync(join(output, 'sha256.json'), JSON.stringify(hashes, null, 2) + '\n');
   }
 } catch (error) { manifest.error = String(error); exitCode = 1; }
 finally {
-  try { await procs.killAll(); await procs.close(); journal.close(); rmSync(scratch, {recursive: true, force: true}); }
+  try { if (procs) {await procs.killAll(); await procs.close();} trace?.stop(); rmSync(scratch, {recursive: true, force: true}); }
   catch (error) { manifest.cleanupError = String(error); exitCode = 1; }
   manifest.buildStateExists = existsSync(scratch); manifest.exitCode = exitCode; save();
 }

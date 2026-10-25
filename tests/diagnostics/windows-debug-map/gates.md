@@ -204,6 +204,51 @@ Native waits, inspector child waits and outer registry captures have diagnostic
 deadlines. This bounds the experiment, not product or workflow concurrency.
 Forced termination is recorded as failure; it is not graceful-cleanup proof.
 
+## Registry ownership trace
+
+The opted-in native launcher generates separate instrumented copies of the
+current Windows `jobs.ts` and `jobs-worker.ts` under `ownership-source/` before
+importing the core. Both original SHA256 hashes are pinned; checked single-match
+substitutions preserve native calls, branches and ownership decisions. Relative
+imports resolve to the original source files; only the worker entry points at
+the generated worker. `sha256.json` includes the actual relative artifact paths
+for both generated modules, preload and provenance. Compile-only runs do not
+install interception or require a native harness, even on opted-in Windows.
+
+A test-only Bun preload redirects the canonical jobs module before either the
+launcher registry or the native test harness imports core code. Both owners
+verify this interception; a missing owner or incomplete trace fails the trace
+summary. The native child uses `bun test --preload <file> <test>`: putting the
+preload flag before `test` selects a package script on the tested Bun version.
+The isolated two-owner test exercises that actual command and checks the
+canonical module and `ProcessPlatform.attach` together.
+Each compiler has a separate `ownership/` trace directory. A registry
+and its worker record separate owner PID/thread files with monotonic sequence,
+monotonic nanoseconds and common wall-clock milliseconds. Worker acquisitions,
+send/post/receive stages, captured PID/creation identity, tracked records,
+STILL_ACTIVE deferrals and original closure results retain distinct handle
+generations. Pending transfers are separate from records retained by the main
+thread. The final summary reconciles transfers and successful closures by their
+generation identity, never by a reused numeric handle alone.
+
+Only already-acquired or explicitly transferred process handles are observed.
+The original CloseHandle executes once and its return/error are captured before
+telemetry. Reads and file writes preserve the original thread's GetLastError.
+There is no new process open, duplication, foreign table query, flush, release
+policy or tracker disablement. Undecodable identity, missing transfer, failed
+closure or missing owner shutdown makes the evidence incomplete. A failed-close
+value is not queried again. Snapshots run every 250 ms while an owner is active,
+with a 180-second diagnostic ceiling; hitting it marks evidence incomplete.
+Timers stop and individual append operations retain no open file descriptor.
+
+After the unchanged immediate and 2-second map-absence gates, an owned helper
+emits `ownership-checkpoint` with helper PID, exact verified target PIDs and
+wall-clock time. It remains alive for 3000 ms, then separately logs a read-only
+`checkpoint-map-open` of its exact recorded directory name and closes that
+observer. This later observation never replaces either gate or clears its
+fatal error. The trace changes no production behavior and does not establish a
+retention owner until fresh Server results correlate those observations.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:
