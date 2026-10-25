@@ -14,7 +14,7 @@ admission and never changes the required two-compiler protected suites.
 The `windows-debug-map-diagnostic` artifact expires after three days. It includes
 kernel version, compiler commands, generated source, input/helper SHA256 hashes,
 complete native stdout/stderr, per-compiler structured results and cleanup logs.
-The generated helper also includes `identity.h`, `ownership.h`, `roundtrip.h`, `setter.h`,
+The generated helper also includes `identity.h`, `ownership.h`, `roundtrip.h`, `setter.h`, `creator.h`,
 `startup-site.h` and `startup-site.json`; their hashes are part of the manifest.
 
 On Linux, `bun .../run.ts <absolute-artifact-directory> --compile-only` verifies
@@ -358,6 +358,61 @@ wall-clock time. It remains alive for 3000 ms, then separately logs a read-only
 observer. This later observation never replaces either gate or clears its
 fatal error. The trace changes no production behavior and does not establish a
 retention owner until fresh Server results correlate those observations.
+
+## Matched creation-context experiment
+
+The 25f4d364 Server run verifies all 26 manifest hashes. REOPEN retains its map
+at immediate, 2000-ms and additional 3000-ms checkpoints under SDK and MinGW,
+despite verified 2-to-1 local-handle handoff before assignment. Both compilers
+have exactly 22 failures, limited to the seven cases' exit/immediate/eventual
+gates and retained synthetic state. All 84 stream/window cleanup calls succeed;
+318/318 and 321/321 captured registry handles close. All eight owned names per
+compiler are absent after helper exit. Reopening alone does not cure retention;
+this does not identify a creator, setter or kernel owner.
+
+CREATOR matches REOPEN's root-only execution, names, marker destination, explicit
+self-relative descriptor, creation calls/flags and opened-anchor access. Only
+creation moves into a temporary trusted child. The parent holds the exact image
+file against replacement, verifies the captured child's file ID, PID/creation
+time, session and membership of a separate kill-on-close job before resume.
+Its handle list contains just one preconnected overlapped pipe endpoint. The
+parent closes its transfer endpoint before resume; no target, token, map, job,
+thread or stdio handle is passed to the creator. The pipe admits the existing
+caller user only and rejects remote clients; no host ACL or map is changed.
+
+A versioned, exactly sized request binds the nonce and captured process identity
+to the precomputed directory, NT destination and bounded descriptor bytes.
+RtlValidRelativeSecurityDescriptor validates offsets against the received byte
+extent before use. The child creates directory/link without OPENIF and holds
+both anchors through READY. The parent opens only the exact directory and its
+relative NUL link, validates names, rights, attributes, noninheritability and
+destination, then sends HANDOFF. RELEASED follows successful closure of both
+creation anchors; only then does EXIT allow child exit. Exit 0, known resource
+closures and unchanged caller observations precede the helper's single map
+assignment and the original target resume. Every original control and fatal
+cleanup gate remains required. The creator's PID, creation time and exit wall
+time supplement both registry traces; exit alone proves no process-object
+destruction. Reconcile those captured handles at the later map checkpoint.
+
+Connection, message reads/writes and process waits are bounded. A timed-out I/O
+cancels only its exact OVERLAPPED operation. Its event/buffer remain alive until
+completion; an undrained cancellation remains fatal and retains its backing
+memory until process exit, with io-retained=1, rather than returning a dangling
+buffer. Only the captured creator or its job can be terminated on failure; the
+existing failure path terminates the still-suspended target's owned job.
+Every acquired I/O event must close, including on rejected protocol exchanges.
+Five additional native probes require rejection before target execution for a
+wrong nonce, truncated descriptor, truncated message, early exit and stalled
+reply. Each checks successful owned-handle cleanup and exact-name absence both
+before and after helper exit. None can substitute for CREATOR's normal
+routing/cleanup proof.
+
+If REOPEN retains and CREATOR releases, only the changed creation/handoff context
+is implicated. Creator lifetime would still need the otherwise identical arm
+kept alive with both creation anchors already closed before target resume, then
+observed after its exit while the outer helper remains alive. If both retain,
+early creator exit does not resolve this fixture. Cross compilation and static
+review establish no native result or production admission for this control.
 
 ## Gates still required
 

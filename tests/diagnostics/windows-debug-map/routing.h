@@ -23,6 +23,8 @@ static BOOL debug_mode;
 static BOOL observe_owned_handles = TRUE;
 /* REOPEN matches DIRECT after replacing creation handles with verified opens. */
 static BOOL reopen_owned_map;
+static BOOL external_map_creator;
+static DWORD creator_prepare(PSECURITY_DESCRIPTOR security, const wchar_t *target, const wchar_t *root);
 static unsigned int object_count_queries, handle_snapshot_queries;
 /* 0 retains the original RED roundtrip, 1 omits it as a control, 2 also moves
  * assignment into a trusted child that exits before the target resumes. */
@@ -214,6 +216,14 @@ static DWORD map_prepare(HANDLE process, PSECURITY_DESCRIPTOR security, const wc
   OBJECT_ATTRIBUTES attributes; ZeroMemory(&attributes, sizeof(attributes));
   attributes.Length = sizeof(attributes); attributes.ObjectName = &name;
   attributes.Attributes = 0x40; attributes.SecurityDescriptor = security;
+  if (external_map_creator) {
+    wchar_t drive[3] = {root[0], L':', 0}, device[4096], target[8192];
+    if (!QueryDosDeviceW(drive, device, 4096)) return GetLastError();
+    int length = swprintf(target, 8192, L"%ls%ls\\null-map-marker", device, root + 2);
+    if (length < 0 || length >= 8192) return ERROR_INSUFFICIENT_BUFFER;
+    DWORD error = creator_prepare(security, target, root);
+    return error ? error : map_apply(process);
+  }
   NTSTATUS status = create(&probe_map, 0xf000f, &attributes, NULL, 0);
   fwprintf(stderr, L"private-map path=%ls create=0x%08lx\n", probe_name, (unsigned long)status);
   if (status < 0) return (DWORD)status;

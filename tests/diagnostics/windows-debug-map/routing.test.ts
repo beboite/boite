@@ -29,7 +29,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   save();
   const harness = await startTestCore({dataDir: join(state, 'core-data')});
   const procs = harness.core.procs;
-  const jobs = ['RED', 'A', 'B', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN'].map(label => {
+  const jobs = ['RED', 'A', 'B', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR'].map(label => {
     const root = join(state, label), project = join(root, 'project'), runtime = join(root, 'runtime'), home = join(root, 'home');
     const marker = `TASK_ROUTE_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
     return {label, root, project, runtime, home, marker, profile: `boite.debug.route.${crypto.randomUUID().replaceAll('-', '')}`};
@@ -37,6 +37,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   const tasks: Promise<Captured>[] = [];
   const profileCleanup: Captured[] = [];
   const cleanupConfirmed = new Map<string, boolean>();
+  const creatorFaultCleanup: boolean[] = [];
   const afterExit: Record<string, unknown>[] = []; report.mapAfterHelperExit = afterExit;
   async function execute(id: string, args: string[], home = state, extra: Record<string, string | undefined> = {}) {
     const child = procs.spawnPiped(id, helper!, args, {cwd: state, agentRoot: false,
@@ -47,7 +48,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     writeFileSync(join(output!, `${id}.log`), `pid=${result.pid} exit=${result.code} timedOut=${result.timedOut}\n${result.out}${result.err}`);
     console.log(`${id}: ${JSON.stringify(result)}`); save(); return result;
   }
-  function run(job: typeof jobs[number], debug: boolean, mode?: 'direct-run' | 'setter-run' | 'quiet-run' | 'reopen-run') {
+  function run(job: typeof jobs[number], debug: boolean, mode?: 'direct-run' | 'setter-run' | 'quiet-run' | 'reopen-run' | 'creator-run') {
     const promise = execute(`lpac-${job.label}`, [mode ?? (debug ? 'debug-run' : 'run'), job.profile, job.project,
       join(job.runtime, 'inspect.exe'), 'inspect', '0', job.marker, ...(debug ? ['forward-check'] : [])], job.home,
       {PATH: `${job.runtime};${process.env.SystemRoot}\\System32`});
@@ -105,7 +106,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
         expect(Number(checkpoint?.[2])).toBeGreaterThan(0);
         const targets = checkpoint?.[3]?.split(',') ?? [];
         const inspected = [...result.out.matchAll(/^inspect-start=\S+ pid=(\d+)\r?$/gm)].map(match => match[1]!);
-        expect(new Set(targets)).toEqual(new Set(['RED', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN'].includes(label) ? inspected.slice(0, 1) : inspected));
+        expect(new Set(targets)).toEqual(new Set(['RED', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR'].includes(label) ? inspected.slice(0, 1) : inspected));
         expect(result.err.indexOf('ownership-checkpoint ')).toBeGreaterThan(result.err.indexOf('cleanup map-eventual-open='));
         expect(result.err).toMatch(/cleanup checkpoint-map-open=0x[\da-f]+ absent=[01] closed=1 error=0 wall-ms=\d+/);
       }),
@@ -132,7 +133,11 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
         `cleanup object=${object} handle=\\S+ query=0x00000000 attributes=0x[0-9a-f]+ granted=0x[0-9a-f]+ handles=\\d+ pointers=\\d+`))));
     for (const object of ['root-thread', 'root-process', 'job', 'link', 'map']) checks.push(
       verify(`${label} ${object} closure`, () => expect(result.err).toContain(`cleanup close=${object} closed=1 error=0`)));
-    for (const phase of label === 'QUIET' ? [] : ['after-create subject=directory', 'after-create subject=link', 'before-assign subject=process', 'after-assign subject=process', 'before-close subject=map']) checks.push(
+    for (const phase of label === 'QUIET' ? [] : [
+      ...(label === 'CREATOR' ? ['after-open subject=directory-link', 'after-creator-exit subject=directory-link']
+        : ['after-create subject=directory', 'after-create subject=link']),
+      'before-assign subject=process', 'after-assign subject=process', 'before-close subject=map',
+    ]) checks.push(
       verify(`${label} map lifetime ${phase}`, () => expect(result.err).toMatch(new RegExp(
         `map-lifetime phase=${phase} pid=${result.pid} query=0x00000000 matches=[1-9]\\d* error=0\\r?\\n`))));
     if (label === 'RED') {
@@ -291,7 +296,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     // from RED's A/B/A roundtrip. Helpers stay alive through the fatal gates.
     // These observations cannot make a failed original RED/A/B gate pass.
     if (report.redSafetyPassed === true) {
-      for (const [index, mode] of (['direct-run', 'setter-run', 'quiet-run', 'reopen-run'] as const).entries()) {
+      for (const [index, mode] of (['direct-run', 'setter-run', 'quiet-run', 'reopen-run', 'creator-run'] as const).entries()) {
         const job = jobs[index + 3]!;
         writeFileSync(join(job.project, 'release'), 'synthetic');
         const result = await run(job, false, mode);
@@ -329,10 +334,65 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
           expect(result.err.match(/private-map pid=\d+ set=0x00000000/g)).toHaveLength(1);
           expect(result.err).not.toContain('map-swap ');
         });
+        if (mode === 'creator-run') verify('CREATOR continuous handoff and clean exit before assignment', () => {
+          const identity = result.err.match(/creator-identity pid=(\d+) created=(\d+) image=1 session=\d+ member=1 inherited=1 parent-transfer-closed=1 fault=none/);
+          const pid = identity?.[1];
+          expect(Number(pid)).toBeGreaterThan(0); expect(pid).not.toBe(String(result.pid));
+          expect(result.out).not.toContain(`pid=${pid}\r\n`);
+          expect(result.err).toContain(`creator-ready pid=${pid} anchors=2 nonce=1 security-bytes=`);
+          for (const [object, access] of [['directory', '000f000f'], ['link', '000f0001']])
+            expect(result.err).toContain(`creator-open object=${object} name=1 granted=0x${access} attributes=0x00000000 flags=0`);
+          expect(result.err).toContain('creator-open link-target=1');
+          expect(result.err).toContain(`creator-released pid=${pid} anchors=0 nonce=1`);
+          expect(result.err).toMatch(new RegExp(`creator-exit pid=${pid} created=${identity?.[2]} wall-ms=\\d+ exit=0x00000000`));
+          expect(result.err).toContain(`creator-cleanup pid=${pid} member=1 resumed=1 released=1 wait=0 exit=0x00000000 forced=0 handles=5 closed=5 io-retained=0 error=0`);
+          const events = result.err.match(/creator-io-cleanup acquired=(\d+) closed=(\d+) retained=0/);
+          expect(Number(events?.[1])).toBeGreaterThan(0); expect(events?.[2]).toBe(events?.[1]);
+          expect(result.err).toContain('creator-caller unchanged=1 error=0');
+          const opened = result.err.indexOf('creator-open link-target=1');
+          const released = result.err.indexOf('creator-released ');
+          const exited = result.err.indexOf('creator-exit ');
+          const closed = result.err.indexOf('creator-cleanup ');
+          const assigned = result.err.indexOf('private-map pid=');
+          expect(opened).toBeGreaterThan(result.err.indexOf('creator-ready '));
+          expect(released).toBeGreaterThan(opened); expect(exited).toBeGreaterThan(released);
+          expect(closed).toBeGreaterThan(exited); expect(assigned).toBeGreaterThan(closed);
+          expect(result.err.match(/private-map pid=\d+ set=0x00000000/g)).toHaveLength(1);
+          expect(result.err).not.toContain('creator-io ');
+        });
         cleanup(job.label, result); await observeAfterExit(job.label, result);
         const afterScope = await execute(`ordinary-after-${job.label.toLowerCase()}`, ['observe', state]);
         observer(`after ${job.label}`, afterScope, before);
         save();
+      }
+      // Each failure must leave the target suspended, reap only the captured
+      // creator/job and remove the unassigned exact object name. These probes
+      // cannot substitute for any successful CREATOR or original routing gate.
+      const job = jobs[7]!;
+      for (const fault of ['nonce', 'descriptor', 'frame', 'exit', 'stall']) {
+        const result = await execute(`creator-fault-${fault}`, ['creator-run', job.profile, job.project,
+          join(job.runtime, 'inspect.exe'), 'inspect', '0', job.marker], job.home,
+        {PATH: `${job.runtime};${process.env.SystemRoot}\\System32`, BOITE_DIAGNOSTIC_CREATOR_FAULT: fault});
+        const checks = [completed(`CREATOR ${fault} rejects`, result, 125), verify(`CREATOR ${fault} no target execution`, () => {
+          expect(result.out).not.toContain('inspect-start=');
+          expect(result.err).not.toContain('private-map pid=');
+          expect(result.err).toContain('cleanup job-active=0');
+          expect(result.err).toMatch(/creator-cleanup pid=\d+ member=1 resumed=1 released=0 .*handles=5 closed=5 io-retained=0 error=[1-9]\d*/);
+          const events = result.err.match(/creator-io-cleanup acquired=(\d+) closed=(\d+) retained=0/);
+          expect(Number(events?.[1])).toBeGreaterThan(0); expect(events?.[2]).toBe(events?.[1]);
+          expect(result.err).toContain('creator-failure-map open=0xc0000034 absent=1 closed=1 error=0');
+          expect(result.err).toMatch(/caller snapshot=after .* unchanged=1/);
+          if (fault === 'stall') expect(result.err).toContain('creator-io cancelled=1 cancel-error=0 drained=1');
+        })];
+        const name = result.err.match(/^creator-attempt path=(.+)\r?$/m)?.[1]?.replace(/\r$/, '');
+        checks.push(verify(`CREATOR ${fault} exact name`, () => expect(name).toMatch(new RegExp(
+          `^\\\\(?:Sessions\\\\\\d+\\\\)?BaseNamedObjects\\\\boite\\.route\\.${result.pid}$`))));
+        if (name && !result.timedOut && result.code !== null) {
+          const observed = await execute(`map-after-fault-${fault}`, ['observe-map', name]);
+          checks.push(completed(`CREATOR ${fault} observer`, observed), verify(`CREATOR ${fault} map absent`, () =>
+            expect(observed.out).toBe(`map-after-helper-exit path=${name} open=0xc0000034 absent=1 closed=1 error=0\r\n`)));
+        } else checks.push(false);
+        creatorFaultCleanup.push(checks.every(Boolean)); save();
       }
     }
   } catch (error) { failures.push(String(error)); }
@@ -354,11 +414,12 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     // Do not erase state whose native job/object cleanup has not been confirmed.
     const launched = steps.filter(step => step.id.startsWith('lpac-'));
     const nativeCleanup = launched.length > 0 && launched.length === tasks.length &&
-      launched.every(step => cleanupConfirmed.get(step.id) === true);
+      launched.every(step => cleanupConfirmed.get(step.id) === true) &&
+      creatorFaultCleanup.length === 5 && creatorFaultCleanup.every(Boolean);
     if (nativeCleanup) {
       try { rmSync(state, {recursive: true, force: true}); } catch (error) { failures.push(`state cleanup: ${error}`); }
     }
-    report.cleanup = {nativeConfirmed: nativeCleanup, profiles: profileCleanup, stateExists: existsSync(state)};
+    report.cleanup = {nativeConfirmed: nativeCleanup, profiles: profileCleanup, creatorFaultCleanup, stateExists: existsSync(state)};
     if (existsSync(state)) failures.push('synthetic state retained: native cleanup not proved or removal failed');
     report.initialGatePassed = report.redPassed === true && report.routingObserved === true && failures.length === 0;
     save(); console.log(`DIAGNOSTIC initialGatePassed=${report.initialGatePassed} productionAccepted=false`);
