@@ -116,6 +116,9 @@ function landingDrift(): string {
     // By row id: the window drops and draws the row again while the page lands.
     const top = (id) => timeline.querySelector('[data-mid="' + id + '"]')?.getBoundingClientRect().top - timeline.getBoundingClientRect().top;
     let head = '', before = 0;
+    const rect = (selector) => { const r = document.querySelector(selector)?.getBoundingClientRect(); return r ? [r.top, r.height] : null; };
+    const shape = () => ({ scrollTop: timeline.scrollTop, scrollHeight: timeline.scrollHeight, timeline: rect('[data-testid=timeline]'), header: rect('[data-testid=mobile-header]'), composer: rect('[data-testid=composer]'), place: rect('[data-testid=thread-place]'), rows: [...timeline.querySelectorAll('[data-mid]')].slice(0, 4).map((n) => [n.dataset.mid, n.getBoundingClientRect().top, n.getBoundingClientRect().height]) });
+    window.__shape0 = null;
     // Up as a reader scrolls, until the step that sends the page: its first drawn row is the one held.
     for (let step = 0; step < 400 && !${STORE}.loadingOlder && !${STORE}.loadingRange && ${STORE}.openThread.messages.length === count; step += 1) {
       timeline.scrollTop = Math.max(0, timeline.scrollTop - 200);
@@ -123,12 +126,16 @@ function landingDrift(): string {
       // A screen of rows still being read has no row to follow yet.
       head = timeline.querySelector('[data-mid]')?.dataset.mid ?? head;
       before = head ? top(head) : before;
+      window.__shape0 = shape();
       await settle(60);
     }
     for (let wait = 0; wait < 300 && ${STORE}.openThread.messages.length === count; wait += 1) await settle(50);
     await settle(800);
     const after = top(head);
-    return ${STORE}.openThread.messages.length > count && Number.isFinite(after) ? Math.round(after - before) || 0 : 'no page landed under ' + head;
+    const drift = ${STORE}.openThread.messages.length > count && Number.isFinite(after) ? Math.round(after - before) || 0 : 'no page landed under ' + head;
+    // DIAGNOSTIC (temporary): what moved when the page landed.
+    if (drift !== 0) return JSON.stringify({ drift, before, after, head, shape0: window.__shape0, shape1: shape(), keyboard: document.documentElement.dataset.keyboard, app: document.querySelector('.app')?.className });
+    return drift;
   })()`;
 }
 
@@ -180,7 +187,9 @@ for (const phone of [true, false]) {
       await page.screenshot(join(artifacts, `thread-reopen-picture-${name}.png`));
 
       // Pages hold about one screen: the next one above lands under a reader whose text stays put.
-      expect(await page.evaluate<number | string>(landingDrift(), 30_000)).toBe(0);
+      const drift = await page.evaluate<number | string>(landingDrift(), 30_000);
+      if (drift !== 0) console.log(`landing drift on ${name}: ${drift}`);
+      expect(drift).toBe(0);
 
       // Far up, the reader stops on one message and leaves. Sixteen other visits push this one
       // out of the reading cache, which a light thread now fits; the place read is kept for 32.
