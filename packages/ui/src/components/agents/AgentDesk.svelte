@@ -90,12 +90,15 @@
   async function answer(watch: AgentWatch, option: string) {
     const question = watch.question;
     if (!question) return;
+    // A question of another machine is answered through that machine's store, and only when this client reaches it.
+    const owning = watch.coreId === undefined ? store : remoteOf(watch)?.store;
+    if (!owning) return;
     // The desk names options by their label; the card the store holds names their ids.
-    const held = store.pendingQuestions.find(q => q.id === question.id);
+    const held = owning.pendingQuestions.find(q => q.id === question.id);
     const picked = held?.options.find(o => o.label === option);
     try {
-      if (picked) await store.answerQuestion(watch.threadId, question.id, [picked.id]);
-      else await store.answerQuestion(watch.threadId, question.id, [], option);
+      if (picked) await owning.answerQuestion(watch.threadId, question.id, [picked.id]);
+      else await owning.answerQuestion(watch.threadId, question.id, [], option);
       await view.refresh();
     } catch (error) { view.error = errorText(error); }
   }
@@ -187,7 +190,7 @@
           <DeskCard {watch} {now} project={watch.coreId === undefined ? store.projects.find(p => p.id === watch.projectId) ?? null : null}
             onopen={watch.coreId === undefined || remoteOf(watch) ? () => open(watch) : undefined}
             ondrop={store.owner ? () => void drop(watch) : undefined}
-            onanswer={option => answer(watch, option)} />
+            onanswer={watch.coreId === undefined || remoteOf(watch) ? option => answer(watch, option) : undefined} />
         {:else}
           <p class="desk-empty">{t.workEmpty}</p>
         {/each}

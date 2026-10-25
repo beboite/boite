@@ -258,7 +258,7 @@ export class GroupBots {
         const projects = answer.projects.filter((p): p is { id: string; name: string } => typeof p?.id === 'string' && typeof p?.name === 'string').slice(0, 500).map(p => ({ id: p.id.slice(0, 128), name: p.name.slice(0, 200) }));
         this.core.journal.setSetting(`${NAMES}${coreId}`, { projects, at: Date.now() });
       }
-      if (Array.isArray(answer?.rows)) for (const row of answer.rows.slice(0, 500)) if (isRow(row)) this.seen(coreId, row);
+      if (Array.isArray(answer?.rows)) for (const entry of answer.rows.slice(0, 500)) { const row = rowOf(entry); if (row !== null) this.seen(coreId, row); }
     } catch (error) {
       this.reached(coreId, describe(peer, error));
       // A machine that refused tells this one when its owner changes its mind (`setting.changed`).
@@ -305,8 +305,8 @@ export class GroupBots {
 
   /** One event of a member: the desk row follows, and the bot hears it while the project is still entrusted to it. */
   private heard(peer: CoordinationPeer, event: BotEvent): void {
-    if (typeof event?.agentId !== 'string' || typeof event.key !== 'string' || !isRow(event.row)) return;
-    const row = event.row;
+    const row = rowOf(event?.row);
+    if (typeof event?.agentId !== 'string' || typeof event.key !== 'string' || event.key.length > 512 || row === null) return;
     this.seen(peer.coreId, row);
     if (event.kind === 'row') return;
     const agent = this.store.records.find('profile', event.agentId);
@@ -360,23 +360,24 @@ export class GroupBots {
 
   async threads(params: RpcParams<'resident.threads'>): Promise<ProjectThreadRow[]> {
     const { peer, result } = await this.ask(params.threadId, params.machine!, 'resident.threads', 'bot.threads', { ...(params.project === undefined ? {} : { project: params.project }), archived: params.archived === true });
-    return (Array.isArray(result) ? result.filter(isRow) : []).map(row => this.withMachine(peer, row));
+    return (Array.isArray(result) ? result.flatMap(entry => rowOf(entry) ?? []) : []).map(row => this.withMachine(peer, row));
   }
 
   async detail(params: RpcParams<'resident.thread'>): Promise<ProjectThreadDetail> {
     const { peer, result } = await this.ask(params.threadId, params.machine!, 'resident.thread', 'bot.thread', { target: params.target });
     const detail = result as ProjectThreadDetail;
-    if (!isRow(detail?.thread)) throw unavailable(`${peer.name} sent no thread`, { field: 'machine' });
-    this.seen(peer.coreId, detail.thread);
-    return { ...detail, thread: this.withMachine(peer, detail.thread) };
+    const row = rowOf(detail?.thread);
+    if (row === null) throw unavailable(`${peer.name} sent no thread`, { field: 'machine' });
+    this.seen(peer.coreId, row);
+    return { ...detail, thread: this.withMachine(peer, row) };
   }
 
   async act(params: RpcParams<'resident.act'>): Promise<{ thread: ProjectThreadRow }> {
     const { peer, result } = await this.ask(params.threadId, params.machine!, 'resident.act', 'bot.act', {
       target: params.target, action: params.action, ...(params.title === undefined ? {} : { title: params.title }), ...(params.project === undefined ? {} : { project: params.project }),
     });
-    const row = (result as { thread?: unknown } | null)?.thread;
-    if (!isRow(row)) throw unavailable(`${peer.name} sent no thread`, { field: 'machine' });
+    const row = rowOf((result as { thread?: unknown } | null)?.thread);
+    if (row === null) throw unavailable(`${peer.name} sent no thread`, { field: 'machine' });
     this.seen(peer.coreId, row);
     return { thread: this.withMachine(peer, row) };
   }
@@ -396,8 +397,8 @@ export class GroupBots {
     // The same request sends the same letter: that machine takes it once.
     const id = `gb-${createHash('sha256').update(`${agent?.id ?? params.threadId}\n${params.requestId}`).digest('hex').slice(0, 40)}`;
     const { agent: bot, peer, result } = await this.ask(params.threadId, params.machine, 'resident.send', 'bot.send', { target: params.target, text: params.text, id });
-    const row = (result as { thread?: unknown } | null)?.thread;
-    if (isRow(row)) this.follow(bot.id, peer, row);
+    const row = rowOf((result as { thread?: unknown } | null)?.thread);
+    if (row !== null) this.follow(bot.id, peer, row);
     return { id, status: 'received' };
   }
 
@@ -408,8 +409,8 @@ export class GroupBots {
     const session = this.store.sessionOf(agent.id);
     if (!session) throw refused(`agents.watch: ${agent.name} has no thread yet`, { field: 'agentId' });
     const { result } = await this.ask(session.threadId, machine, 'agents.watch', 'bot.thread', { target: threadId });
-    const row = (result as ProjectThreadDetail | null)?.thread;
-    if (!isRow(row)) throw unavailable(`${peer.name} sent no thread`, { field: 'machine' });
+    const row = rowOf((result as ProjectThreadDetail | null)?.thread);
+    if (row === null) throw unavailable(`${peer.name} sent no thread`, { field: 'machine' });
     this.follow(agent.id, peer, row);
     return this.desk(agent).find(watch => watch.coreId === peer.coreId && watch.threadId === row.id) ?? null;
   }
@@ -419,17 +420,38 @@ export class GroupBots {
     if (known) { this.follow(agent.id, peer, known.row); return; }
     try {
       const { result } = await this.ask(this.store.sessionOf(agent.id)!.threadId, machineArg(this.core, peer), 'resident.answer', 'bot.thread', { target: threadId });
-      const row = (result as ProjectThreadDetail | null)?.thread;
-      if (isRow(row)) this.follow(agent.id, peer, row);
+      const row = rowOf((result as ProjectThreadDetail | null)?.thread);
+      if (row !== null) this.follow(agent.id, peer, row);
     } catch { /* The answer went; the desk catches up with the next event. */ }
   }
 }
 
 function cut(text: string): string { return text.length > TEXT_MAX ? `${text.slice(0, TEXT_MAX - 20)}\n[Truncated.]` : text; }
 
-function isRow(value: unknown): value is ProjectThreadRow {
-  const row = value as Partial<ProjectThreadRow> | null;
-  return typeof row?.id === 'string' && typeof row.title === 'string' && typeof row.status === 'string' && typeof row.archived === 'boolean' && typeof row.updatedAt === 'number';
+const short = (value: unknown, max: number): string | null => (typeof value === 'string' && value.length > 0 && value.length <= max ? value : null);
+const capped = (value: unknown, max: number): string | null => (typeof value === 'string' ? value.slice(0, max) : null);
+const count = (value: unknown): number => (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? Math.min(value, 10_000) : 0);
+
+/**
+ * A row as another machine sent it, bounded before it is kept: ids that do
+ * not fit are refused, titles and names are cut, so a desk stays small.
+ */
+function rowOf(value: unknown): ProjectThreadRow | null {
+  const raw = value as Record<string, unknown> | null;
+  const id = short(raw?.id, 128);
+  const status = short(raw?.status, 32);
+  if (raw === null || id === null || status === null || typeof raw.title !== 'string' || typeof raw.archived !== 'boolean' || typeof raw.updatedAt !== 'number') return null;
+  const projectId = raw.projectId === null ? null : short(raw.projectId, 128);
+  if (projectId === null && raw.projectId !== null) return null;
+  const pull = raw.pullRequest as Record<string, unknown> | null | undefined;
+  const url = short(pull?.url, 2_048);
+  const state = pull?.state;
+  return {
+    id, title: raw.title.slice(0, 300), projectId, project: capped(raw.project, 200), status: status as ProjectThreadRow['status'], archived: raw.archived,
+    ...(raw.done === true ? { done: true as const } : {}), branch: capped(raw.branch, 300), questions: count(raw.questions), permissions: count(raw.permissions),
+    pullRequest: url !== null && typeof pull?.number === 'number' && (state === 'OPEN' || state === 'CLOSED' || state === 'MERGED') ? { number: pull.number, url, state } : null,
+    updatedAt: raw.updatedAt, lastCompletedAt: typeof raw.lastCompletedAt === 'number' ? raw.lastCompletedAt : null,
+  };
 }
 
 /** How a desk row stands, from the row that machine sent. */

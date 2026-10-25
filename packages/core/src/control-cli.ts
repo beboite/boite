@@ -64,6 +64,23 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+const fold = (name: string): string => name.trim().replace(/\s+/g, '-').toLowerCase();
+
+/**
+ * Whether `query` names a project of another machine as `<machine>/<name>`.
+ * The machine part is taken as `--machine` takes it: spaces and dashes alike,
+ * any case, or a prefix of at least six hex digits of its core id.
+ */
+function awayNamed(entry: { id: string; name: string; machine?: string }, query: string): boolean {
+  const slash = query.indexOf('/');
+  if (slash <= 0 || entry.machine === undefined) return false;
+  const machine = query.slice(0, slash).trim();
+  const name = query.slice(slash + 1).trim().toLowerCase();
+  const coreId = entry.id.slice(0, entry.id.indexOf('/'));
+  const projectName = (entry.name.startsWith(`${entry.machine}/`) ? entry.name.slice(entry.machine.length + 1) : entry.name).toLowerCase();
+  return name === projectName && (fold(machine) === fold(entry.machine) || (/^[0-9a-f]{6,}$/.test(machine) && coreId.startsWith(machine)));
+}
+
 export function isControlCommand(parsed: Parsed): boolean {
   const [command, action] = parsed.positional;
   if (command === 'thread') {
@@ -161,7 +178,7 @@ async function botRows(client: CoreClient, threadId: string, watches: AgentWatch
   const view = await client.call('resident.view', { threadId });
   const local = view.projects.filter(entry => entry.machine === undefined);
   // A project of another machine is named by its `<machine>/<name>` or its id.
-  const away = project === undefined ? undefined : view.projects.find(entry => entry.machine !== undefined && (entry.id === project || entry.name.toLowerCase() === project.toLowerCase()));
+  const away = project === undefined ? undefined : view.projects.find(entry => entry.machine !== undefined && (entry.id === project || awayNamed(entry, project)));
   const projectId = project === undefined || away ? undefined : projectOf(await client.call('agent.projects', { threadId }), project).id;
   const entrusted = local.length > 0 && away === undefined && (projectId === undefined || local.some(entry => entry.id === projectId));
   const here = entrusted ? await client.call('resident.threads', { threadId, ...(projectId === undefined ? {} : { project: projectId }), ...(archived ? { archived: true } : {}) }) : [];
@@ -241,8 +258,13 @@ export async function controlCommand(client: CoreClient, caller: Caller, threadI
     const machines = [...new Set(view.projects.flatMap(entry => entry.machine === undefined ? [] : [entry.machine]))];
     const unavailable: string[] = [];
     const remote = await Promise.all(machines.map(machine => client.call('resident.threads', { threadId, machine }).catch((error: unknown) => { unavailable.push(messageOf(error)); return []; })));
-    const details = await Promise.all([...local, ...remote.flat()].filter(pending).map(row => client.call('resident.thread', { threadId, target: row.id, ...machineOf(row.machine) })));
-    return { details, unavailable };
+    // A machine that stops answering between the two calls is named; a local thread gone meanwhile is skipped.
+    const found = await Promise.all([...local, ...remote.flat()].filter(pending).map(row => client.call('resident.thread', { threadId, target: row.id, ...machineOf(row.machine) })
+      .catch((error: unknown) => {
+        if (row.machine !== undefined) unavailable.push(messageOf(error));
+        return null;
+      })));
+    return { details: found.filter((detail): detail is ProjectThreadDetail => detail !== null), unavailable: [...new Set(unavailable)] };
   };
   const pendingQuestions = async (value: string | undefined): Promise<{ items: QuestionRequest[]; unavailable: string[] }> => {
     if (owner) return { items: await client.call('questions.list', value === undefined ? {} : { threadId: here(value) }), unavailable: [] };
@@ -314,8 +336,10 @@ export async function controlCommand(client: CoreClient, caller: Caller, threadI
           const detail = { thread: ownerRow(thread, projects, questions, permissions), questions, permissions, lastAnswer: answer && answer.length > 4000 ? `${answer.slice(0, 3900)}\n[Truncated.]` : answer };
           print([threadLine(detail.thread), `cwd: ${thread.cwd}`, ...questions.flatMap(questionLines), ...permissions.map(permissionLine), `last answer: ${detail.lastAnswer ?? '(none)'}`], detail);
         } else {
-          const detail = await client.call('resident.thread', { threadId, target, ...remote });
-          print([threadLine(detail.thread), ...named(machine, detail.questions).flatMap(questionLines), ...named(machine, detail.permissions).map(permissionLine), `last answer: ${detail.lastAnswer ?? '(none)'}`], detail);
+          const found = await client.call('resident.thread', { threadId, target, ...remote });
+          // The JSON carries the same `<machine>/<thread-id>` the text prints, so `boite answer` takes either.
+          const detail = { ...found, questions: named(machine, found.questions), permissions: named(machine, found.permissions) };
+          print([threadLine(detail.thread), ...detail.questions.flatMap(questionLines), ...detail.permissions.map(permissionLine), `last answer: ${detail.lastAnswer ?? '(none)'}`], detail);
         }
         return;
       }

@@ -91,6 +91,8 @@ test('a bot sees, drives and hears a thread of a project another machine entrust
   // The entrusted project's thread, named by its machine; Accounts was not entrusted, so its thread stays out.
   expect(listed.out.trim().split('\n')).toEqual([`${ref} idle "Letter" project="Notes" machine=${machine}`]);
   expect((await cli(['threads', '--project', `${machine}/notes`])).out.trim()).toBe(`${ref} idle "Letter" project="Notes" machine=${machine}`);
+  // The machine part is taken as --machine takes it: a core id prefix names it too.
+  expect((await cli(['threads', '--project', `${pcId.slice(0, 8)}/Notes`])).out.trim()).toBe(`${ref} idle "Letter" project="Notes" machine=${machine}`);
   expect((await cli(['thread', 'show', ref])).out).toStartWith(`${ref} idle "Letter"`);
   expect((await cli(['thread', 'show', `${machine}/${ledger}`])).err).toContain(`${ledger} is not a thread of the projects`);
 
@@ -107,13 +109,29 @@ test('a bot sees, drives and hears a thread of a project another machine entrust
   // The thread it wrote to is on its desk, with the machine it is on.
   expect(desk.core.workforce.group.desk(agent())).toMatchObject([{ threadId: letter, coreId: pcId, machine, state: 'idle' }]);
   expect(pc.core.workforce.groupHost.leases(deskId)[agent().id]!.watched).toEqual([letter]);
+  // A row from that machine is bounded before the desk keeps it: a long title is cut, an id that does not fit is dropped.
+  const pcPeer = desk.core.group.peers().find(member => member.coreId === pcId)! as CoordinationPeer;
+  const row = pc.core.workforce.projects.row(pc.core.threads.require(letter));
+  await desk.core.workforce.group.peer(pcPeer, 'bot.event', { events: [
+    { agentId: agent().id, key: 'row:long', kind: 'row', row: { ...row, title: 'x'.repeat(5_000) } },
+    { agentId: agent().id, key: 'row:huge', kind: 'row', row: { ...row, id: 'y'.repeat(5_000) } },
+  ] });
+  expect(desk.core.workforce.group.desk(agent()).map(watch => [watch.threadId, watch.title.length])).toEqual([[letter, 300]]);
+  await desk.core.workforce.group.peer(pcPeer, 'bot.event', { events: [{ agentId: agent().id, key: 'row:back', kind: 'row', row }] });
 
   // A question there reaches it, and it answers with the id the list prints.
+  const peer = pc.core.group.peers().find(member => member.coreId === deskId)! as CoordinationPeer;
+  const lease = pc.core.workforce.groupHost.leases(deskId)[agent().id]!;
   const asker = await connect(pc.url, pc.core.agents.tokenFor(letter));
   try {
     const { questionId } = await asker.call('questions.ask', { threadId: letter, text: 'Send it now?', options: ['Yes', 'No'] });
     await waitFor(() => facts().some(fact => fact.key === `remote:${pcId}:ask:${questionId}`));
     expect((await cli(['questions'])).out).toContain(`question ${questionId} (${ref}, one option, or text): Send it now?`);
+    // The JSON names the thread as the text does, so `boite answer` takes the id either prints.
+    expect(JSON.parse((await cli(['thread', 'show', ref, '--json'])).out).questions).toMatchObject([{ id: questionId, threadId: ref }]);
+    // The machine holding the thread bounds what an answer carries before the question sees it.
+    expect(await thrown(pc.core.workforce.groupHost.handle(peer, 'bot.answer', { lease, target: letter, questionId, optionIds: [{}] }))).toThrow('bot.answer.optionIds[0]');
+    expect(await thrown(pc.core.workforce.groupHost.handle(peer, 'bot.answer', { lease, target: letter, questionId, optionIds: [], text: 'x'.repeat(12_001) }))).toThrow('bot.answer.text');
     const answered = await cli(['answer', ref, questionId, 'Yes']);
     expect([answered.code, answered.err]).toEqual([0, '']);
     expect(pc.core.threads.listQuestions(letter)).toEqual([]);
@@ -122,8 +140,6 @@ test('a bot sees, drives and hears a thread of a project another machine entrust
   // Deleting and permissions stay the owner's, on the bot's side and on the machine that holds the thread.
   expect((await cli(['thread', 'remove', ref])).err).toContain("deleting a thread is the owner's");
   expect((await cli(['allow', ref, 'perm_x'])).err).toContain("deciding a tool permission is the owner's");
-  const peer = pc.core.group.peers().find(member => member.coreId === deskId)! as CoordinationPeer;
-  const lease = pc.core.workforce.groupHost.leases(deskId)[agent().id]!;
   expect(await thrown(pc.core.workforce.groupHost.handle(peer, 'bot.act', { lease, target: letter, action: 'remove' }))).toThrow("deleting a thread stays the owner's");
   expect(pc.core.journal.getThread(letter)).not.toBeNull();
 

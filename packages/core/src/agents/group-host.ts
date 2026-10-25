@@ -64,7 +64,11 @@ const textOf = (value: unknown, field: string, max: number): string => {
   if (typeof value !== 'string' || value.length === 0 || value.length > max) throw invalidParams(`${field}: expected 1 to ${max} characters`);
   return value;
 };
-
+/** The options a bot picked: the question itself then checks they are its own. */
+const optionIdsOf = (value: unknown): string[] => {
+  if (!Array.isArray(value) || value.length > 64) throw invalidParams('bot.answer.optionIds: expected at most 64 option ids');
+  return value.map((id, index) => textOf(id, `bot.answer.optionIds[${index}]`, 128));
+};
 /** A lease as the bot's core sent it, checked field by field. */
 export function checkLease(value: unknown, field = 'lease'): BotLease {
   const raw = (value ?? {}) as Record<string, unknown>;
@@ -245,8 +249,8 @@ export class GroupBotHost {
         const target = this.target(peer, lease, raw.target, 'bot.answer');
         return this.core.workforce.projects.answerAs(this.steward(peer, lease), target, {
           questionId: textOf(raw.questionId, 'bot.answer.questionId', 128),
-          optionIds: raw.optionIds as string[],
-          ...(typeof raw.text === 'string' ? { text: raw.text } : {}),
+          optionIds: optionIdsOf(raw.optionIds),
+          ...(raw.text === undefined || raw.text === '' ? {} : { text: textOf(raw.text, 'bot.answer.text', 12_000) }),
           ...(raw.skip === true ? { skip: true } : {}),
         }, 'bot.answer');
       }
