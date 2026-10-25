@@ -3,9 +3,9 @@ import { REPORT_ISSUE_SKILL } from './builtin-skills.ts';
 
 /**
  * Sent before every normal turn while Settings > General > Short answers is on.
- * Agent harnesses ask for an opening line and progress notes; this asks for none.
+ * Keep intermediate text brief and leave the full result in the final reply.
  */
-export const SHORT_ANSWERS = 'Answer style: work silently. No text before or between tool calls: no plan, progress note or "now I will". Write once, when the work is done, or earlier only when you need the user\'s decision or hands. Result first, in short plain sentences; no preamble, recap, filler, hedging or courtesy lines. Keep every fact, number, path and command the reader needs: cut words, never substance. A list for parallel items, a table for a comparison.';
+export const SHORT_ANSWERS = 'Answer style: reduce text before or between tool calls. Make the final reply self-contained with the result and everything the user needs to know. Result first, in short plain sentences; no preamble, filler, hedging or courtesy lines. Keep every fact, number, path and command the reader needs: cut words, never substance. A list for parallel items, a table for a comparison.';
 
 type ListedSkill = { name: string; description: string; path: string };
 
