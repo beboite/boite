@@ -6,6 +6,7 @@ import {selectedEnvironment} from './environment.ts';
 import {sha256, sourceHash, sourcePath, writeSource} from './generate.ts';
 import {installOwnership, prepareOwnership, ownershipTestArgs, verifyOwnershipPlatform} from './ownership-generate.ts';
 import {summarizeOwnership} from './ownership-summary.ts';
+import {acceptsNullMessageProbe} from './null-message.ts';
 
 const [output, mode] = process.argv.slice(2);
 if (!output || !isAbsolute(output) || (mode && mode !== '--compile-only')) {
@@ -47,10 +48,13 @@ let procs: InstanceType<typeof ProcRegistry> | undefined;
 let exitCode = 0;
 try {
   const hashes = writeSource(output); manifest.sourceHashes = hashes;
+  const nullSource = readFileSync(join(import.meta.dir, 'null-message.c'));
+  writeFileSync(join(output, 'null-message.c'), nullSource);
+  hashes['null-message.c'] = sha256(nullSource);
   if (ownership) for (const file of ['jobs.ts', 'jobs-worker.ts', 'preload.ts', 'provenance.json'])
     hashes[`ownership-source/${file}`] = sha256(readFileSync(join(ownership.directory, file)));
   for (const file of ['generate.ts', 'run.ts', 'routing.test.ts', 'environment.ts', 'capture.ts', 'gates.md', 'target-topology.ts', 'target-topology.test.ts', 'target-topology-export.txt', 'target-acl.test.ts', 'target-acl-cases.c',
-    'ownership-generate.ts', 'ownership-ledger.ts', 'ownership-trace.ts', 'ownership-summary.ts']) {
+    'ownership-generate.ts', 'ownership-ledger.ts', 'ownership-trace.ts', 'ownership-summary.ts', 'null-message.ts', 'null-message.test.ts']) {
     hashes[file] = sha256(readFileSync(join(import.meta.dir, file)));
   }
   writeFileSync(join(output, 'sha256.json'), JSON.stringify(hashes, null, 2) + '\n'); save();
@@ -60,7 +64,7 @@ try {
   async function execute(id: string, executable: string, args: string[], env = selectedEnvironment()) {
     if (!procs) throw new Error('compiler registry not initialized');
     const child = procs.spawnPiped(id, executable, args, {cwd: output, env, agentRoot: false});
-    const result = await capture(procs, id, child, id.startsWith('compile') ? 90000 : 170000);
+    const result = await capture(procs, id, child, id.startsWith('compile') ? 90000 : id.startsWith('null-message-') ? 20000 : 170000);
     writeFileSync(join(output!, `${id}.log`), `pid=${result.pid} exit=${result.code} timedOut=${result.timedOut}\n${result.out}${result.err}`);
     console.log(`${id}: pid=${result.pid} exit=${result.code} timedOut=${result.timedOut}\n${result.out}${result.err}`);
     return result;
@@ -97,6 +101,27 @@ try {
         if (tested.code !== 0 || tested.timedOut) exitCode = 1;
         if (!existsSync(join(directory, 'results.json'))) { entry.missingNativeResults = true; exitCode = 1; }
         else if (JSON.parse(readFileSync(join(directory, 'results.json'), 'utf8')).initialGatePassed !== true) exitCode = 1;
+      }
+      // Independent ordinary-process semantics. This neither replaces any map
+      // assertion nor changes the required protected-tools production suites.
+      // A failed semantic probe must not skip the next compiler's map tests.
+      const nullProbe: Record<string, unknown> = {productionAccepted: false}; entry.nullMessageProbe = nullProbe;
+      const nullExecutable = join(directory, 'null-message.exe');
+      const nullArgs = ['-O2', '-Wall', '-Wextra', '-Werror', join(output, 'null-message.c'), '-o', nullExecutable,
+        ...(sdk ? [] : ['-static'])];
+      nullProbe.command = [compiler.path, ...nullArgs];
+      const nullCompiled = await execute(`compile-null-${compiler.name}`, compiler.path, nullArgs);
+      nullProbe.compile = nullCompiled;
+      if (nullCompiled.code !== 0 || nullCompiled.timedOut) exitCode = 1;
+      else {
+        hashes[`${compiler.name}/null-message.exe`] = sha256(readFileSync(nullExecutable));
+        if (!compileOnly) {
+          const tested = await execute(`null-message-${compiler.name}`, nullExecutable, [], selectedEnvironment({
+            HOME: scratch, USERPROFILE: scratch, APPDATA: scratch, LOCALAPPDATA: scratch,
+          }));
+          nullProbe.native = tested; nullProbe.ordinarySemanticsAccepted = acceptsNullMessageProbe(tested);
+          if (!nullProbe.ordinarySemanticsAccepted) exitCode = 1;
+        }
       }
     } catch (error) { entry.error = String(error); exitCode = 1; }
     finally {

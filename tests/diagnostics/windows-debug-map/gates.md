@@ -602,18 +602,56 @@ actual barrier release. The aggregate diagnostic test/launcher watchdogs allow
 150/170 seconds for the additional cases; existing per-target/process/map
 deadlines and all required production suites are unchanged.
 
-No native result is established for this pair. Releasing only after an exited
-target creator would correlate the fixture's retention with that lifetime,
-without identifying an internal owner. An invalid protocol/identity/topology/
-closure makes the comparison unusable; no production admission follows.
+Releasing only after an exited target creator would correlate the fixture's
+retention with that lifetime, without identifying an internal owner. An invalid
+protocol/identity/topology/closure makes the comparison unusable; no production
+admission follows.
 
 The first native attempt at 687b341f did not establish this comparison. The
 SDK rejected five deprecated string copies under -Werror; MinGW rejected both
 arms with ERROR_INVALID_ACL before root membership or handoff. Its seven
 creator-phase proofs and five protocol faults passed, and all 705 registry
 references closed. The GENERIC_ALL mapping regression fails against the old
-raw byte comparison and passes after normalization; a corrected SDK/native
-run remains required. Prior retention and NUL failures stay open.
+raw byte comparison and passes after normalization.
+
+The corrected bebaad5f run compiles under both SDK and MinGW. Both TARGET arms
+complete exact process/thread ACL checks, the three membership/closure phases,
+handoff, root-only marker routing and creator exit 0. All seven target faults
+reject before target execution and map assignment. Registry process references
+reconcile 783/783 (SDK) and 785/785 (MinGW). Both arms retain their replacement
+at immediate/checkpoint/final observations; TARGET-WAITING also retains it after
+creator exit and registry closure. All 16 observed names per compiler are absent
+after outer-helper exit. Each compiler records 38 fatal diagnostic failures,
+including the earlier controls. Early target-creator exit does not release the
+replacement in this fixture. The owning reference and cause remain unknown;
+this does not isolate helper lifetime from ancestor-job lifetime. Required
+production suites still fail all seven cases per compiler on NUL access error 5.
+
+## Independent ordinary pipe semantics
+
+The same opt-in launcher also compiles `null-message.c` separately with both
+strict compiler configurations and launches it through the real ProcRegistry.
+It creates one private message pipe, leaves the client's default byte-read
+mode unchanged, sends zero-length messages separated by FlushFileBuffers,
+and drains incoming writes independently. Acceptance requires 32 successful
+zero-byte reads, 32 zero writes/flushes and 32 discarded 64-KiB writes
+(2,097,152 bytes), three joined workers, nine closed fixture handles and
+balanced per-operation I/O events. No pipe handle closes before workers join;
+undecidable cancellation keeps its buffer/event alive until process termination.
+A 15-second process watchdog and 20-second registry capture bound the trial.
+
+`pre-read-flush-pending=1` records only that the first flush completion event
+was still unsignaled during a 50-ms wait before client reads. Scheduling can
+affect that observation; it does not establish a general bounded-queue claim.
+Results and source/helper hashes remain separate in the diagnostic artifact.
+Only a successful process exit and complete exact record can set
+`ordinarySemanticsAccepted`; `productionAccepted` stays false. Compilation
+alone sets neither semantic nor production acceptance. Map and required native
+suite failures remain fatal regardless of this probe's result.
+
+This is an ordinary one-connection experiment. It does not establish LPAC pipe
+access, peer denial, reopen/concurrent/read-only/write-only behavior, standard
+stream modes, descendant routing or production cancellation/resource bounds.
 
 ## Gates still required
 
