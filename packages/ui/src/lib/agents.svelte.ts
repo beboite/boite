@@ -2,7 +2,8 @@ import { errorText } from './errors';
 import { RpcErrorCode, type AgentProfile, type AgentStatus, type AgentsSnapshot, type RpcParams, type RpcResult, type AgentsRpcMethods, type ThreadSummary } from '@boite/contracts';
 import { RpcFailure } from './rpc-error';
 import type { Store } from './store.svelte';
-import { strings } from './strings';
+import { fill, strings } from './strings';
+import { describeTool, type ToolFamily } from './tool-summary';
 import { experimentOn } from './experiments.svelte';
 import { noteUpkeep } from './agent-upkeep';
 import { agentDirectory } from './agent-directory.svelte';
@@ -51,20 +52,72 @@ export function agentRows(snapshot: AgentsSnapshot | null): AgentRowData[] {
   }).sort((a, b) => b.at - a.at || a.profile.name.localeCompare(b.profile.name));
 }
 
-/** The robot's face for a state: it squishes while it works and hops while it waits on the user. */
-export function faceOf(state: AgentStatus['state'] | undefined): 'running' | 'waiting' | 'idle' {
-  return state === 'working' || state === 'queued' ? 'running' : state === 'waiting' ? 'waiting' : 'idle';
+/**
+ * How an agent stands, as the ring around its robot says it: at work, waiting
+ * for a slot, needing the user, failed, with answers not read yet, resting,
+ * or asleep (paused: nothing wakes it).
+ */
+export type AgentMood = 'working' | 'queued' | 'waiting' | 'error' | 'unread' | 'idle' | 'asleep';
+
+/** The ring of a state (`liveState`), with answers not read yet over a rest. */
+export function moodOf(state: AgentStatus['state'], unread = 0): AgentMood {
+  if (state === 'paused') return 'asleep';
+  if (state === 'archived') return 'idle';
+  return state === 'idle' && unread > 0 ? 'unread' : state;
+}
+
+/** What kind of step an agent is on, for the glyph beside it: a tool's family, a pause, or a phase of its turn. */
+export type ActivityKind = ToolFamily | 'sleep' | 'thinking' | 'compacting' | 'starting' | 'retrying' | 'provider' | 'writing';
+
+/** A tool's name alone, the way some drivers report the running call ("Bash"), with no word on what it does. */
+const BARE_TOOL = /^[A-Za-z][\w.-]*$/;
+/** The core's activity for a call with no title: `<tool>: <what it is about>`. */
+const NAMED_STEP = /^([A-Za-z][\w.-]*): (.+)$/;
+
+/** The first word of a call's title, when no tool name comes with it: "Run the tests", "Read App.svelte". */
+const VERBS: Record<string, ToolFamily> = {
+  run: 'command', ran: 'command', runs: 'command', running: 'command', execute: 'command', install: 'command', build: 'command', test: 'command', start: 'command',
+  read: 'read', reads: 'read', reading: 'read', view: 'read', open: 'read',
+  edit: 'edit', edits: 'edit', editing: 'edit', update: 'edit', fix: 'edit', change: 'edit', apply: 'edit',
+  write: 'write', writes: 'write', create: 'write', add: 'write',
+  search: 'search', find: 'search', list: 'search', grep: 'search', look: 'search', check: 'search',
+  fetch: 'fetch', download: 'fetch', browse: 'fetch',
+};
+
+function kindOfTool(name: string): ActivityKind {
+  if (/^(sleep|wait)/i.test(name)) return 'sleep';
+  const family = describeTool(name, {}).family;
+  return family === 'other' ? VERBS[name.toLowerCase()] ?? 'other' : family;
 }
 
 /**
- * What the agent is doing this second, in a few words: the step its running
- * turn is on, read from its thread's row when this client follows it (live),
- * else from the snapshot.
+ * What the agent is doing this second, as words and a kind: the step its
+ * running turn is on. Its thread's row, live when this client follows it,
+ * gives the phase; the snapshot gives the call's title (`AgentStatus.activity`)
+ * that a bare tool name lacks, so a row reads "Run the UI tests" rather than
+ * "Bash". Null when neither says anything.
  */
+export function liveActivity(status: AgentStatus | null, thread: ThreadSummary | null | undefined): { kind: ActivityKind; text: string } | null {
+  const labels = strings.agents.activity;
+  const progress = thread?.status === 'running' ? thread.progress ?? null : null;
+  if (progress && progress.phase !== 'tool') {
+    const kind = ({ thinking: 'thinking', compacting: 'compacting', starting: 'starting', retrying: 'retrying', waiting: 'provider', working: 'writing' } as const)[progress.phase];
+    return { kind, text: labels[kind] };
+  }
+  const activity = status?.activity?.trim() || null;
+  const named = activity ? NAMED_STEP.exec(activity) : null;
+  const detail = progress?.detail?.trim() || null;
+  const bare = detail !== null && BARE_TOOL.test(detail);
+  const tool = bare ? detail : named?.[1] ?? null;
+  const kind = tool ? kindOfTool(tool) : kindOfTool((detail ?? activity ?? '').split(/\s/)[0] ?? '');
+  const text = (detail && !bare ? detail : null) ?? (named ? named[2]! : activity) ?? (tool ? fill(labels.tool[kind as keyof typeof labels.tool] ?? labels.tool.other, { tool }) : null);
+  if (text) return { kind, text };
+  return progress ? { kind: 'other', text: labels.tool.unnamed } : null;
+}
+
+/** What the agent is doing this second, in a few words (`liveActivity`). */
 export function liveStep(status: AgentStatus | null, thread: ThreadSummary | null | undefined): string | null {
-  const progress = thread?.progress;
-  if (thread?.status === 'running' && progress?.phase === 'tool' && progress.detail) return progress.detail;
-  return status?.activity ?? null;
+  return liveActivity(status, thread)?.text ?? null;
 }
 
 /** What the agent's thread waits on: the question it asked, else the permission it needs. */
