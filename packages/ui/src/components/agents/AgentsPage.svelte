@@ -5,6 +5,7 @@
   import { AgentsView, agentOfThread, agentRows, agentsFilter, firstDeskVisit, lastOpenedAgent, openAgent, rememberAgent, statusOf, type AgentFocus } from '../../lib/agents.svelte';
   import { agentDirectory } from '../../lib/agent-directory.svelte';
   import { mobileOverlay } from '../../lib/mobile-history';
+  import { mobileChrome } from '../../lib/mobile-chrome.svelte';
   import type { AgentPane } from '../../lib/store/layout.svelte';
   import type { Store } from '../../lib/store.svelte';
   import { fill, strings } from '../../lib/strings';
@@ -144,6 +145,12 @@
   });
   // On a phone every level past the list holds one history entry: Back steps out of it.
   $effect(() => { if (narrow.current && detail) return mobileOverlay(back); });
+  // An agent's page on a phone is pushed over the list, as a thread is: the bottom bar steps aside.
+  $effect(() => {
+    if (!narrow.current || !detail) return;
+    mobileChrome.detail = true;
+    return () => { mobileChrome.detail = false; };
+  });
 
   function open(machine: Machine, agentId: string) {
     // Read now: the page, and the row's values with it, is drawn again for the other machine.

@@ -161,6 +161,10 @@ Limits and the tray offer connection. Monitoring switches are under Tracked
 accounts in Limits; the tray has no switch. [Accounts](accounts.md) owns login
 and isolation.
 
+Reset times show a weekday for the next seven local calendar dates. More distant
+resets and dates before today show a day and month, adding the year when it
+differs from the current one. Every limits view keeps the device's preferred clock format.
+
 Each monitored, signed-in account has its own row or card, with its label and
 provider logo, including accounts labelled `Default`. Rename under Tracked
 accounts changes the label, including default CLI accounts. Save commits it;

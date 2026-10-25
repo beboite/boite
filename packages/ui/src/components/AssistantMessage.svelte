@@ -26,6 +26,7 @@
   import MemoryRow from './MemoryRow.svelte';
   import KeepaliveMarker from './KeepaliveMarker.svelte';
   import ErrorCard from './ErrorCard.svelte';
+  import WindowCard from './WindowCardLoader.svelte';
   import { keepaliveRun } from '../lib/message-order';
   import { AgentsView, agentOfThread } from '../lib/agents.svelte';
 
@@ -215,6 +216,10 @@
           <span class="text">{part.message.trim() ? fill(strings.chat.hookSays, { label, message: part.message.trim() }) : label}</span>
           <span class="event">{part.event}</span>
         </p>
+      {:else if part.type === 'window_capture'}
+        <WindowCard {part} />
+      {:else if part.type === 'window_consent'}
+        <WindowCard {store} threadId={message.threadId} agent={agentName ?? (execution ? providerName(store, execution.providerId) : strings.windows.consent.anAgent)} {part} />
       {:else if part.type === 'error'}
         {@const account = store.owner ? signedOut : null}
         <ErrorCard message={part.message} reconnect={account ? () => store.openConnect(account.providerId, account.id) : undefined} />

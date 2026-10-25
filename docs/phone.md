@@ -311,17 +311,28 @@ link scanned or pasted in the app asks nothing either: the owner just showed it.
 
 ## The app on the phone
 
-The browser uses mobile navigation under 720 px. Conversations lists threads
-across connected machines; Activity puts waiting requests first, followed by
-running and queued turns; the header names the screen. A phone has no
-right-click, so the actions a desktop finds there open from a tap: the
-conversation's title in its header lists Browser, files and tools (the right
-panel), pin, rename, find in this thread, Subagents when the thread has some,
-archive and delete, and the `...` button of a row in the list offers the same
-actions a thread keeps on a phone, with Mark done in the list. A new title by
-the agent, moving to a project, the path, coordination and the terminal stay on
-the desktop. A draft's header shows its "New thread" label. Settings is the
-third destination.
+The browser uses mobile navigation under 720 px. A bar along the bottom edge
+(`MobileTabs.svelte`) holds the places: Conversations, Activity, a filled +
+that starts a thread, Agents and Contacts when they are on, and Settings.
+Activity's tab counts the conversations waiting for you. Conversations lists
+threads across connected machines; Activity puts waiting requests first,
+followed by running and queued turns. Each list's header shows the machine,
+which opens its connection settings, over the screen's name, and the project
+the + starts in, whose sheet also adds a project. A conversation, an agent's
+page and an open keyboard hide the bar; the conversation's header shows its
+title over its project, and its machine once there are two.
+
+Each row in the list leads with who runs the thread, the agent's picture or the
+provider's logo. A finger that slides a row left uncovers Pin and Archive
+(`lib/swipe-row.ts`); a vertical drag stays the list's scroll and one row is
+open at a time. A phone has no right-click, so the actions a desktop finds
+there open from a tap: the conversation's title in its header lists Browser,
+files and tools (the right panel), pin, rename, find in this thread, Subagents
+when the thread has some, archive and delete, and the `...` button of a row in
+the list offers the same actions a thread keeps on a phone, with Mark done in
+the list. A new title by the agent, moving to a project, the path,
+coordination and the terminal stay on the desktop. A draft's header shows its
+"New thread" label.
 
 Under a conversation, the copy, edit and retry buttons show under the last
 prompt and the last answer; any other message shows its row when tapped, until
@@ -340,7 +351,7 @@ no list behind it, and Back from there leaves the app as before.
 
 Every button on the chat, the list, the panel and Appearance registers a tap
 19 px from its centre on either axis, and `--touch-target` is 44 px. Some controls
-keep a small look and get a larger hit box, such as the project name in the
+keep a small look and get a larger hit box, such as the machine's name in the
 header, a panel tab's icon, which closes the tab, and the accent dots. Under a
 finger, the outline rail beside the conversation gives each prompt a 44 px row
 and scrolls, and the text starts past the rail. A switch sits in a label that

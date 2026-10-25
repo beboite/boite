@@ -167,6 +167,12 @@ export interface Settings {
    */
   deviceStream?: boolean;
   /**
+   * Apps `boite window` never captures, beside `WINDOW_CAPTURE_EXCLUDED`:
+   * executable names (`Signal.exe`) or full paths, matched without case
+   * (docs/windows.md). Missing reads as none.
+   */
+  windowCaptureExclusions?: string[];
+  /**
    * Agents on the other machines of this machine's group may start threads
    * here (`boite thread new --machine`), in its projects, as their own agent
    * would from this machine. Each machine decides for itself. Missing reads as off.

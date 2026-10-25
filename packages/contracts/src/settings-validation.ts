@@ -189,6 +189,13 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
     }
     next.syncOverrides = [...new Set(keys as string[])];
   }
+  if (patch.windowCaptureExclusions !== undefined) {
+    const apps: unknown = patch.windowCaptureExclusions;
+    if (!Array.isArray(apps) || apps.length > 100 || apps.some((app) => typeof app !== 'string' || !app.trim() || app.length > 300 || /\p{Cc}/u.test(app))) {
+      return { ok: false, field: 'windowCaptureExclusions', message: 'windowCaptureExclusions must list at most 100 executable names or paths of 1 to 300 characters' };
+    }
+    next.windowCaptureExclusions = [...new Set((apps as string[]).map((app) => app.trim()))];
+  }
   if (patch.worktreeStorage !== undefined) {
     const storage = patch.worktreeStorage;
     if (!storage || typeof storage !== 'object' || !['project', 'shared'].includes(storage.mode)) {
