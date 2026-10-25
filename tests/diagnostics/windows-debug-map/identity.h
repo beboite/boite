@@ -60,6 +60,20 @@ static DWORD event_image(const DEBUG_EVENT *event, DWORD root, BOOL *auxiliary) 
   *auxiliary = !error && console_known && same_file(&image, &console_file);
   if (!error && !target && !*auxiliary) error = ERROR_INVALID_DATA;
   DWORD tid = GetThreadId(created->hThread), owner = GetProcessIdOfThread(created->hThread);
+  /* Read only the process supplied by this owned creation event. A parent PID
+   * is attribution data, not authority to query that other process or admit an
+   * additional auxiliary. The current role/count/boundary rules still decide. */
+  struct {
+    NTSTATUS exit_status; PVOID peb; ULONG_PTR affinity; LONG priority;
+    ULONG_PTR pid, parent;
+  } basic;
+  ZeroMemory(&basic, sizeof(basic)); ULONG used = 0;
+  query_process_fn query = (query_process_fn)(void *)nt_api("NtQueryInformationProcess");
+  NTSTATUS lineage = query ? query(created->hProcess, (PROCESSINFOCLASS)0, &basic, sizeof(basic), &used) : (NTSTATUS)0xc0000002;
+  BOOL parent_known = lineage >= 0 && used == sizeof(basic) && basic.pid == event->dwProcessId;
+  fwprintf(stderr, L"debug-parent pid=%lu query=0x%08lx bytes=%lu known=%d reported-pid=%llu parent=%llu\n",
+    event->dwProcessId, (unsigned long)lineage, used, parent_known,
+    (unsigned long long)basic.pid, (unsigned long long)basic.parent);
   if (!error && (tid != event->dwThreadId || owner != event->dwProcessId ||
       GetProcessId(created->hProcess) != event->dwProcessId || (event->dwProcessId == root && !target))) error = ERROR_INVALID_DATA;
   fwprintf(stderr, L"debug-image pid=%lu tid=%lu handle-tid=%lu thread-owner=%lu root=%d role=%ls identity=%d base=%p start=%p error=%lu\n",

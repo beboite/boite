@@ -265,14 +265,15 @@ static DWORD debug_loop(DWORD root, HANDLE job, PSID app, PSID capability, DWORD
               PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SET_INFORMATION, FALSE, 0)) error = GetLastError();
           else {
             error = event_image(&event, root, &record->auxiliary);
+            BOOL boundary = !error && lowbox_verify(limited, job, app, capability);
+            if (!error && !boundary) error = ERROR_ACCESS_DENIED;
             if (!error) {
               if (record->auxiliary) { if (++auxiliary_captured > 1) error = ERROR_INVALID_DATA; }
               else if (++target_captured > 3) error = ERROR_INVALID_DATA;
               fwprintf(stderr, L"debug-role pid=%lu target-count=%d auxiliary-count=%d error=%lu\n",
                 event.dwProcessId, target_captured, auxiliary_captured, error);
             }
-            if (!error && !lowbox_verify(limited, job, app, capability)) error = ERROR_ACCESS_DENIED;
-            fwprintf(stderr, L"debug-event-boundary pid=%lu tid=%lu verified=%d error=%lu\n", event.dwProcessId, event.dwThreadId, !error, error);
+            fwprintf(stderr, L"debug-event-boundary pid=%lu tid=%lu verified=%d error=%lu\n", event.dwProcessId, event.dwThreadId, boundary, error);
             if (!error) error = map_apply(limited);
             DWORD closed = close_owned(L"debug-limited-process", &limited); if (closed && !error) error = closed;
           }
@@ -355,9 +356,18 @@ static DWORD debug_loop(DWORD root, HANDLE job, PSID app, PSID capability, DWORD
           event.dwProcessId, event.dwThreadId, record ? record->main_tid : 0, event.u.ExitThread.dwExitCode);
         break;
       case OUTPUT_DEBUG_STRING_EVENT: break;
+      case RIP_EVENT:
+        fwprintf(stderr, L"debug-rip pid=%lu tid=%lu native-error=%lu type=%lu\n",
+          event.dwProcessId, event.dwThreadId, event.u.RipInfo.dwError, event.u.RipInfo.dwType);
+        error = ERROR_INVALID_DATA;
+        break;
       default: error = ERROR_INVALID_DATA; break;
     }
-    if (error && !stopping) { stopping = TRUE; deadline = GetTickCount64() + 5000; TerminateJobObject(job, 125); }
+    if (error && !stopping) {
+      fwprintf(stderr, L"debug-event-failure pid=%lu tid=%lu kind=%lu error=%lu\n",
+        event.dwProcessId, event.dwThreadId, event.dwDebugEventCode, error);
+      stopping = TRUE; deadline = GetTickCount64() + 5000; TerminateJobObject(job, 125);
+    }
     if (!ContinueDebugEvent(event.dwProcessId, event.dwThreadId, continuation)) { if (!error) error = GetLastError(); break; }
     fflush(stderr);
     if ((stopping || root_exited) && !active && captured) {

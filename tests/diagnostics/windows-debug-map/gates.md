@@ -111,6 +111,18 @@ After a normal root exit, continue its exit event and allow five seconds for
 the console helper's orderly exit; a timeout still terminates the job, drains
 and fails. An abnormal root exit keeps the original immediate termination path.
 
+The 6aadedd5 Server run forwards the custom application exception once at each
+MinGW root, then refuses a second exact conhost image before mapping it. SDK
+stops earlier with error 13, without enough event information to attribute it.
+Record ProcessBasicInformation only through each captured event process handle,
+including query status, returned size, process and parent IDs; a known parent
+requires the expected size and matching process ID. Never open that parent PID
+or use it to authorize an auxiliary. Verify LPAC/job state before the existing
+count rule, so a refused auxiliary has independent boundary evidence. The
+three-target/one-auxiliary limit and unknown-image rejection stay unchanged.
+Log the first fatal event kind/PID/TID/error before termination and the native
+error/type of RIP_EVENT; RIP and unknown event kinds still fail and drain.
+
 Record matching ntdll file identity, local PE machine/timestamp/image size,
 export RVA and the local RSDS PDB name/GUID/age key when present. At exceptions,
 record actual/main thread IDs, verified-native-image membership and RVA for
