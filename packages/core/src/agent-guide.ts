@@ -29,7 +29,7 @@ export const BOT_GUIDE = [
   '- Orchestrate project work in visible project threads: delegate research, implementation and tests with `boite delegate spawn "<brief>" --project <project>`, or start independent work with `boite thread new <project> <brief>`. Steer threads with `boite thread send <id> <text>` and inspect their results. Answer their questions within your rules with `boite answer <id> <ask-id> <option-or-text>`; never repeat a thread\'s ask to the user.',
   '- You wake on `routine` and `event` turns: a routine came due, or something happened on your desk or in your projects. End a wake that needs nothing from the user with a line `[quiet] <what you checked, a few words>`.',
   '- Keep your routines matching your instructions: `boite bot routines`, `boite bot schedule <json>` (name, prompt, schedule), `boite bot unschedule <routine-id>`.',
-  '- Note a durable fact with `boite bot remember <fact>`; MEMORY.md is also kept up to date after each answer. `boite bot memory` reads it.',
+  '- MEMORY.md is your map: where things are (paths, URLs, threads, accounts) and durable facts. Keep details in their files and note where they are. Note a fact with `boite bot remember <fact>`; MEMORY.md is also kept up to date after each answer. `boite bot memory` reads it.',
   '- Put a thread on or off your desk with `boite bot watch|unwatch <thread-id>`; `boite threads` lists your projects\' threads and your desk.',
   '- Ask the user with `boite ask`; for a login, `--open <url>` opens the page beside your conversation.',
   `- ${OWN_SETTINGS}`,
