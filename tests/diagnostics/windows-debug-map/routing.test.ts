@@ -32,6 +32,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   });
   const tasks: Promise<Captured>[] = [];
   const profileCleanup: Captured[] = [];
+  const cleanupConfirmed = new Map<string, boolean>();
   async function execute(id: string, args: string[], home = state, extra: Record<string, string | undefined> = {}) {
     const child = procs.spawnPiped(id, helper!, args, {cwd: state, agentRoot: false,
       env: selectedEnvironment({HOME: home, USERPROFILE: home, APPDATA: home, LOCALAPPDATA: home,
@@ -47,13 +48,60 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
       {PATH: `${job.runtime};${process.env.SystemRoot}\\System32`});
     tasks.push(promise); void promise.catch(() => {}); return promise;
   }
-  function check(result: Captured) { expect(result.timedOut).toBe(false); expect(result.code, result.err).toBe(0); }
-  function boundary(result: Captured) {
-    expect(result.err).toContain('job=1 nonbreakaway=1 package/capability=1 lpac=1');
-    expect(result.err).toMatch(/caller snapshot=after .* unchanged=1/);
-    expect(result.err).toContain('cleanup job-active=0');
-    expect(result.err).toContain('cleanup map-open=0xc0000034 absent=1');
-    expect(result.out).not.toContain('host-debug-control=1');
+  // Every failed assertion stays in the initial gate even if observation continues.
+  function verify(label: string, assertion: () => void): boolean {
+    try { assertion(); return true; }
+    catch (error) { failures.push(`${label}: ${error}`); return false; }
+  }
+  function completed(label: string, result: Captured, expected = 0): boolean {
+    return [verify(`${label} deadline`, () => expect(result.timedOut).toBe(false)),
+      verify(`${label} exit`, () => expect(result.code, result.err).toBe(expected))].every(Boolean);
+  }
+  function observer(label: string, result: Captured, before?: Captured): boolean {
+    return [completed(label, result),
+      verify(`${label} output`, () => expect(result.out).toMatch(/^observer NUL=.+ drive=.+ map=.+\r?\n$/)),
+      verify(`${label} ambient unchanged`, () => {if (before) expect(result.out).toBe(before.out);})].every(Boolean);
+  }
+  function boundary(label: string, result: Captured, marker: string): boolean {
+    const checks = [
+      verify(`${label} finished`, () => {expect(result.timedOut).toBe(false); expect(result.code).not.toBeNull();}),
+      verify(`${label} lowbox`, () => expect(result.err).toContain('job=1 nonbreakaway=1 package/capability=1 lpac=1')),
+      verify(`${label} caller before`, () => expect(result.err).toMatch(/caller snapshot=before .* unchanged=1/)),
+      verify(`${label} caller after`, () => expect(result.err).toMatch(/caller snapshot=after .* unchanged=1/)),
+      verify(`${label} caller equality`, () => expect(result.err.match(/^caller snapshot=after (.+)\r?$/m)?.[1])
+        .toBe(result.err.match(/^caller snapshot=before (.+)\r?$/m)?.[1])),
+      verify(`${label} owned processes gone`, () => expect(result.err).toContain('cleanup job-active=0')),
+      verify(`${label} no debugger control`, () => expect(result.out).not.toContain('host-debug-control=1')),
+    ];
+    for (let depth = 0; depth < 3; depth++) {
+      const generation = `${marker}.generation-${depth}`;
+      checks.push(
+        verify(`${label} generation ${depth} boundary`, () => expect(result.out).toContain(`${generation} appcontainer=1 in-job=1 routing=`)),
+        verify(`${label} generation ${depth} ambient`, () => expect(result.out).toContain(`${generation} ambient-denial=5`)),
+        verify(`${label} generation ${depth} debugger`, () => expect(result.out).toContain(`${generation} host-debug-control=0 known=1`)),
+        verify(`${label} generation ${depth} normal exit`, () => expect(result.out)
+          .toMatch(new RegExp(`${marker}\\.generation-${depth} inspect-exit=[01] child-exit=[01] forced=0\\r?\\n`))),
+      );
+      if (depth < 2) checks.push(verify(`${label} generation ${depth} child`, () => expect(result.out)
+        .toMatch(new RegExp(`${marker}\\.generation-${depth} child-created=1 pid=\\d+ error=0\\r?\\n`))));
+    }
+    for (const object of ['root-thread', 'root-process', 'job']) checks.push(
+      verify(`${label} ${object} closed`, () => expect(result.err).toContain(`cleanup close=${object} closed=1 error=0`)));
+    return checks.every(Boolean);
+  }
+  function cleanup(label: string, result: Captured) {
+    const checks = [
+      verify(`${label} immediate map absence`, () => expect(result.err).toContain('cleanup map-open=0xc0000034 absent=1')),
+      verify(`${label} eventual map absence`, () => expect(result.err)
+        .toMatch(/cleanup map-eventual-open=0xc0000034 absent=1 elapsed-ms=\d+ attempts=\d+ limit-ms=2000/)),
+    ];
+    for (const object of ['root-thread', 'root-process', 'job', 'map-before-link-close', 'link', 'map']) checks.push(
+      verify(`${label} ${object} counts`, () => expect(result.err).toMatch(new RegExp(
+        `cleanup object=${object} handle=\\S+ query=0x00000000 attributes=0x[0-9a-f]+ granted=0x[0-9a-f]+ handles=\\d+ pointers=\\d+`))));
+    for (const object of ['root-thread', 'root-process', 'job', 'link', 'map']) checks.push(
+      verify(`${label} ${object} closure`, () => expect(result.err).toContain(`cleanup close=${object} closed=1 error=0`)));
+    cleanupConfirmed.set(`lpac-${label}`, !result.timedOut && result.code !== null &&
+      result.err.includes('cleanup job-active=0') && checks.every(Boolean));
   }
   try {
     for (const job of jobs) {
@@ -61,67 +109,93 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
       copyFileSync(helper, join(job.runtime, 'inspect.exe'));
       writeFileSync(join(job.project, 'null-map-marker'), job.marker);
     }
-    const before = await execute('ordinary-before', ['observe', state]); check(before);
-    for (const job of jobs) check(await execute(`setup-${job.label}`, ['setup', job.profile, job.root, job.project, job.runtime, job.home]));
+    const before = await execute('ordinary-before', ['observe', state]);
+    if (!observer('before', before)) throw new Error('ordinary baseline unavailable; no protected task launched');
+    for (const job of jobs) {
+      const setup = await execute(`setup-${job.label}`, ['setup', job.profile, job.root, job.project, job.runtime, job.home]);
+      const valid = [completed(`setup ${job.label}`, setup),
+        verify(`setup ${job.label} output`, () => expect(setup.out).toBe('protected-native-prepared'))].every(Boolean);
+      if (!valid) throw new Error(`setup ${job.label} failed; no protected task launched`);
+    }
     writeFileSync(join(jobs[0]!.project, 'release'), 'synthetic');
+    const redStart = failures.length;
     const red = await run(jobs[0]!, false); report.red = red;
-    expect(red.timedOut).toBe(false); expect(red.code).toBe(1); boundary(red);
-    expect(red.out).toContain(`${jobs[0]!.marker}.generation-0 appcontainer=1 in-job=1 routing=1`);
-    expect(red.out).toContain(`${jobs[0]!.marker}.generation-1 appcontainer=1 in-job=1 routing=0`);
-    for (let depth = 0; depth < 3; depth++) {
-      expect(red.out).toContain(`${jobs[0]!.marker}.generation-${depth} ambient-denial=5`);
-      expect(red.out).toContain(`${jobs[0]!.marker}.generation-${depth} host-debug-control=0 known=1`);
-    }
-    const pending = jobs.slice(1).map(job => run(job, true));
-    try {
-      await waitFor(() => jobs.slice(1).every(job => existsSync(join(job.project, 'ready'))), 5000);
-      report.overlap = true;
-      const during = await execute('ordinary-during', ['observe', state]); check(during);
-      expect(during.out).toBe(before.out);
-    } finally {
-      for (const job of jobs.slice(1)) writeFileSync(join(job.project, 'release'), 'synthetic');
-    }
-    const results = await Promise.all(pending); report.debug = results;
-    const after = await execute('ordinary-after', ['observe', state]); check(after); expect(after.out).toBe(before.out);
-    expect(report.overlap).toBe(true);
-    for (const [index, result] of results.entries()) {
-      check(result); boundary(result);
-      const marker = jobs[index + 1]!.marker;
-      for (let depth = 0; depth < 3; depth++) {
-        expect(result.out).toContain(`${marker}.generation-${depth} appcontainer=1 in-job=1 routing=1`);
-        expect(result.out).toContain(`${marker}.generation-${depth} ambient-denial=5`);
-        expect(result.out).toContain(`${marker}.generation-${depth} host-debug-control=0 known=1`);
+    completed('RED', red, 1);
+    const redSafe = boundary('RED', red, jobs[0]!.marker);
+    cleanup('RED', red);
+    for (let depth = 0; depth < 3; depth++) verify(`RED generation ${depth} routing`, () => expect(red.out)
+      .toContain(`${jobs[0]!.marker}.generation-${depth} appcontainer=1 in-job=1 routing=${depth === 0 ? 1 : 0}`));
+    const between = await execute('ordinary-after-red', ['observe', state]);
+    const ambientSafe = observer('after RED', between, before);
+    report.redPassed = failures.length === redStart;
+    report.redSafetyPassed = redSafe && ambientSafe;
+    save();
+    // RED exit/routing/map-absence failures remain fatal to acceptance. A/B may
+    // still observe its independent mechanism after the boundary, caller/ambient
+    // state and absence of owned processes have separately been established.
+    if (report.redSafetyPassed !== true) {
+      report.debugSkipped = 'RED process/caller/ambient safety prerequisites not established';
+      failures.push(String(report.debugSkipped));
+    } else {
+      const debugStart = failures.length;
+      report.debugStarted = true; save();
+      const pending = jobs.slice(1).map(job => run(job, true));
+      try {
+        await waitFor(() => jobs.slice(1).every(job => existsSync(join(job.project, 'ready'))), 5000);
+        report.overlap = true;
+        const during = await execute('ordinary-during', ['observe', state]); observer('during', during, before);
+      } catch (error) { failures.push(`independent overlap/observer: ${error}`); }
+      finally {
+        for (const job of jobs.slice(1)) writeFileSync(join(job.project, 'release'), 'synthetic');
       }
-      expect(result.out).not.toContain(jobs[index === 0 ? 2 : 1]!.marker);
-      expect(result.err.match(/private-map pid=\d+ set=0x00000000/g)).toHaveLength(3);
-      expect(result.err.match(/debug-exception .*consumed=1/g)).toHaveLength(3);
-      expect(result.err).toContain('debug-drain cleanup=0 captured=3 remaining=0 error=0');
-      expect(result.err).toContain('debug-drain cleanup=1 captured=3 remaining=0 error=0');
+      const results = await Promise.allSettled(pending); report.debug = results;
+      const after = await execute('ordinary-after', ['observe', state]); observer('after', after, before);
+      verify('independent overlap', () => expect(report.overlap).toBe(true));
+      for (const [index, settled] of results.entries()) {
+        const job = jobs[index + 1]!;
+        if (settled.status === 'rejected') {failures.push(`${job.label} capture: ${settled.reason}`); continue;}
+        const result = settled.value, marker = job.marker;
+        completed(job.label, result); boundary(job.label, result, marker); cleanup(job.label, result);
+        for (let depth = 0; depth < 3; depth++) {
+          verify(`${job.label} generation ${depth} routing`, () => expect(result.out)
+            .toContain(`${marker}.generation-${depth} appcontainer=1 in-job=1 routing=1`));
+          verify(`${job.label} generation ${depth} exit`, () => expect(result.out)
+            .toContain(`${marker}.generation-${depth} inspect-exit=0 child-exit=0 forced=0`));
+        }
+        verify(`${job.label} distinct marker`, () => expect(result.out).not.toContain(jobs[index === 0 ? 2 : 1]!.marker));
+        verify(`${job.label} mapped processes`, () => expect(result.err.match(/private-map pid=\d+ set=0x00000000/g)).toHaveLength(3));
+        verify(`${job.label} loader breakpoints`, () => expect(result.err.match(/debug-exception .*consumed=1/g)).toHaveLength(3));
+        verify(`${job.label} process exit events`, () => expect(result.err.match(/debug-exit pid=\d+ status=0 active=\d+/g)).toHaveLength(3));
+        verify(`${job.label} normal drain`, () => expect(result.err).toContain('debug-drain cleanup=0 captured=3 remaining=0 error=0'));
+        verify(`${job.label} cleanup drain`, () => expect(result.err).toContain('debug-drain cleanup=1 captured=3 remaining=0 error=0'));
+      }
+      report.routingObserved = failures.length === debugStart;
     }
-    report.routingObserved = true;
   } catch (error) { failures.push(String(error)); }
   finally {
-    await Promise.allSettled(tasks);
+    const settled = await Promise.allSettled(tasks);
+    for (const result of settled) if (result.status === 'rejected') failures.push(`task capture: ${result.reason}`);
     // Stop only processes belonging to this fresh harness, including on a failed assertion.
-    await procs.killAll();
+    try { await procs.killAll(); } catch (error) { failures.push(`process cleanup: ${error}`); }
     for (const job of jobs) {
-      try { profileCleanup.push(await execute(`cleanup-${job.label}`, ['cleanup', job.profile])); }
-      catch (error) { failures.push(`profile ${job.label}: ${error}`); }
+      try {
+        const result = await execute(`cleanup-${job.label}`, ['cleanup', job.profile]); profileCleanup.push(result);
+        completed(`profile ${job.label}`, result);
+        for (const operation of ['delete', 'recreate', 'final-delete']) verify(`profile ${job.label} ${operation}`, () => expect(result.out)
+          .toContain(`profile ${operation}=0x00000000`));
+      } catch (error) { failures.push(`profile ${job.label}: ${error}`); }
     }
     try { await harness.stop(); } catch (error) { failures.push(`core cleanup: ${error}`); }
-    for (const result of profileCleanup) {
-      if (result.code !== 0 || result.timedOut) failures.push(`profile cleanup failed: pid=${result.pid} code=${result.code}`);
-    }
     // Do not erase state whose native job/object cleanup has not been confirmed.
     const launched = steps.filter(step => step.id.startsWith('lpac-'));
-    const nativeCleanup = launched.every(step => !step.timedOut && step.err.includes('cleanup job-active=0') &&
-      step.err.includes('cleanup map-open=0xc0000034 absent=1'));
+    const nativeCleanup = launched.length > 0 && launched.length === tasks.length &&
+      launched.every(step => cleanupConfirmed.get(step.id) === true);
     if (nativeCleanup) {
       try { rmSync(state, {recursive: true, force: true}); } catch (error) { failures.push(`state cleanup: ${error}`); }
     }
     report.cleanup = {nativeConfirmed: nativeCleanup, profiles: profileCleanup, stateExists: existsSync(state)};
     if (existsSync(state)) failures.push('synthetic state retained: native cleanup not proved or removal failed');
-    report.initialGatePassed = report.routingObserved === true && failures.length === 0;
+    report.initialGatePassed = report.redPassed === true && report.routingObserved === true && failures.length === 0;
     save(); console.log(`DIAGNOSTIC initialGatePassed=${report.initialGatePassed} productionAccepted=false`);
   }
   expect(failures, JSON.stringify(report)).toEqual([]);

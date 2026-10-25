@@ -91,7 +91,7 @@ static int inspect(int count, wchar_t **args) {
       Sleep(10);
     }
   }
-  int child_code = 0;
+  int child_code = 0; BOOL forced = FALSE;
   if (depth < 2) {
     wchar_t image[4096], next[16]; DWORD image_length = GetModuleFileNameW(NULL, image, 4096);
     if (!image_length || image_length >= 4096) return 125;
@@ -108,6 +108,7 @@ static int inspect(int count, wchar_t **args) {
     if (created) {
       DWORD result = 125;
       if (WaitForSingleObject(child.hProcess, 10000) != WAIT_OBJECT_0) {
+        forced = TRUE;
         TerminateProcess(child.hProcess, 125); WaitForSingleObject(child.hProcess, 1000);
       }
       if (!GetExitCodeProcess(child.hProcess, &result) || result == STILL_ACTIVE) result = 125;
@@ -115,5 +116,7 @@ static int inspect(int count, wchar_t **args) {
     } else child_code = 125;
     free(line);
   }
-  return routed && is_app == 1 && in_job && denial == ERROR_ACCESS_DENIED && !control && !child_code ? 0 : 1;
+  int result = routed && is_app == 1 && in_job && denial == ERROR_ACCESS_DENIED && !control && !child_code && !forced ? 0 : 1;
+  fwprintf(stdout, L"%ls inspect-exit=%d child-exit=%d forced=%d\n", label, result, child_code, forced); fflush(stdout);
+  return result;
 }

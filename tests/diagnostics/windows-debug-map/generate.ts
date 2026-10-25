@@ -34,8 +34,14 @@ export function generate(source: string): string {
     '      if (drain && !error) error = drain;\n    }\n    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting;');
   source = once(source, '      if (!accounting.ActiveProcesses) break;',
     '      if (!accounting.ActiveProcesses) { fputws(L"cleanup job-active=0\\n", stderr); break; }');
+  // Keep the production cleanup order. Observe our own returned handles only;
+  // debug-event process/thread handles still belong to Windows.
+  for (const [field, label] of [['child.hThread', 'root-thread'], ['child.hProcess', 'root-process'], ['job', 'job']]) {
+    source = once(source, `  if (${field}) CloseHandle(${field});`,
+      `  { DWORD cleanup = close_owned(L"${label}", &${field}); if (cleanup && !error) { error = cleanup; stage = L"routing.cleanup.${label}"; } }`);
+  }
   source = once(source, '  for (DWORD i = 0; i < group_count; i++)',
-    '  { DWORD cleanup = map_close(); if (cleanup && !error) error = cleanup; }\n  for (DWORD i = 0; i < group_count; i++)');
+    '  { DWORD cleanup = map_close(); if (cleanup && !error) { error = cleanup; stage = L"routing.cleanup.map"; } }\n  for (DWORD i = 0; i < group_count; i++)');
   source = once(source, '  else if (count > 1 && !wcscmp(args[1], L"run")) result = launch(count, args);',
     '  else if (count == 3 && !wcscmp(args[1], L"observe")) result = observe(args[2]);\n' +
     '  else if (count == 3 && !wcscmp(args[1], L"cleanup")) result = cleanup_profile(args[2]);\n' +

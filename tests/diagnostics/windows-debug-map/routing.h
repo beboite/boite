@@ -20,6 +20,27 @@ static int captured, active;
 
 static FARPROC nt_api(const char *name) { return GetProcAddress(GetModuleHandleW(L"ntdll.dll"), name); }
 
+/* Read-only snapshots through our live handle. Counts alone do not identify
+ * which kernel component owns a remaining reference. */
+static DWORD object_counts(const wchar_t *label, HANDLE object) {
+  struct { ULONG attributes, granted, handles, pointers; ULONG reserved[10]; } info;
+  ZeroMemory(&info, sizeof(info)); ULONG used = 0;
+  query_object_fn query = (query_object_fn)(void *)nt_api("NtQueryObject");
+  NTSTATUS status = query ? query(object, (OBJECT_INFORMATION_CLASS)0, &info, sizeof(info), &used) : (NTSTATUS)0xc0000002;
+  fwprintf(stderr, L"cleanup object=%ls handle=%p query=0x%08lx attributes=0x%08lx granted=0x%08lx handles=%lu pointers=%lu\n",
+    label, object, (unsigned long)status, info.attributes, info.granted, info.handles, info.pointers);
+  fflush(stderr); return status < 0 ? (DWORD)status : 0;
+}
+
+static DWORD close_owned(const wchar_t *label, HANDLE *object) {
+  if (!*object) return 0;
+  DWORD observed = object_counts(label, *object);
+  BOOL closed = CloseHandle(*object); DWORD error = closed ? 0 : GetLastError();
+  fwprintf(stderr, L"cleanup close=%ls closed=%d error=%lu\n", label, closed, error); fflush(stderr);
+  if (closed) *object = NULL;
+  return error ? error : observed;
+}
+
 static DWORD object_name(HANDLE object, wchar_t *out, size_t length) {
   BYTE buffer[8192]; ULONG used = 0;
   query_object_fn query = (query_object_fn)(void *)nt_api("NtQueryObject");
@@ -106,18 +127,38 @@ static DWORD map_prepare(HANDLE process, PSECURITY_DESCRIPTOR security, const wc
 }
 
 static DWORD map_close(void) {
-  if (probe_link) { CloseHandle(probe_link); probe_link = NULL; }
-  if (!probe_map) return 0;
-  CloseHandle(probe_map); probe_map = NULL;
+  DWORD error = probe_map ? object_counts(L"map-before-link-close", probe_map) : 0;
+  DWORD closed = close_owned(L"link", &probe_link); if (closed && !error) error = closed;
+  if (!probe_map) return error;
+  closed = close_owned(L"map", &probe_map); if (closed && !error) error = closed;
   open_directory_fn open = (open_directory_fn)(void *)nt_api("NtOpenDirectoryObject");
   if (!open) return ERROR_PROC_NOT_FOUND;
   UNICODE_STRING name = {(USHORT)(wcslen(probe_name) * 2), (USHORT)sizeof(probe_name), probe_name};
   OBJECT_ATTRIBUTES attributes; ZeroMemory(&attributes, sizeof(attributes));
   attributes.Length = sizeof(attributes); attributes.ObjectName = &name; attributes.Attributes = 0x40;
+  ULONGLONG started = GetTickCount64(), deadline = started + 2000;
   HANDLE remaining = NULL; NTSTATUS status = open(&remaining, 1, &attributes);
-  if (remaining) CloseHandle(remaining);
+  if (remaining) { closed = close_owned(L"map-immediate-observer", &remaining); if (closed && !error) error = closed; }
+  /* Preserve the original immediate-absence gate, even if rundown later ends.
+   * Close every observer before sleeping so the poll holds no reference. */
   fwprintf(stderr, L"cleanup map-open=0x%08lx absent=%d\n", (unsigned long)status, status == (NTSTATUS)0xc0000034);
-  return status == (NTSTATUS)0xc0000034 ? 0 : ERROR_INVALID_DATA;
+  if (status != (NTSTATUS)0xc0000034 && !error) error = ERROR_INVALID_DATA;
+  unsigned int attempts = 1;
+  while (status >= 0 && !remaining && GetTickCount64() < deadline) {
+    Sleep(20); attempts++;
+    status = open(&remaining, 1, &attributes);
+    /* No repeated count queries: only the immediate observer is sampled. */
+    if (remaining) {
+      BOOL ok = CloseHandle(remaining);
+      if (!ok) { if (!error) error = GetLastError(); break; }
+      remaining = NULL;
+    }
+  }
+  fwprintf(stderr, L"cleanup map-eventual-open=0x%08lx absent=%d elapsed-ms=%llu attempts=%u limit-ms=2000\n",
+    (unsigned long)status, status == (NTSTATUS)0xc0000034, (unsigned long long)(GetTickCount64() - started), attempts);
+  fflush(stderr);
+  if (status != (NTSTATUS)0xc0000034 && !error) error = ERROR_INVALID_DATA;
+  return error;
 }
 
 static BOOL lowbox_verify(HANDLE process, HANDLE job, PSID expected, PSID capability) {
