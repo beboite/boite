@@ -145,6 +145,13 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['devices.screenshot', 'one PNG of a device open in its own conversation'],
   ['devices.input', 'taps, swipes, text and keys on a device open in its own conversation, as adb input would, or through the live stream a viewer keeps up'],
   ['devices.close', 'removing a device from its own panel; powering it off closes it in every conversation, as the emulator\'s own window would'],
+  ['windows.list', 'the desktop windows of this machine with their process, size and state; a title only for an app its project allows, since another title can name a document or an account'],
+  ['windows.screenshot', 'one PNG of a window of an app its project allows or the owner allows on a card, written inside its own folder, project or temporary folder; excluded apps never, and the capture shows in its timeline'],
+  ['windows.clip', 'a contact sheet of a few seconds of such a window, on the same terms as windows.screenshot'],
+  ['windows.watch', 'showing such a window in its own conversation\'s Window panel; nothing is captured until the person watching presses Show'],
+  ['windows.close', 'emptying its own conversation\'s Window panel'],
+  // windows.frame stays with the owner and paired devices: the stream is for the person watching, a screenshot gives
+  // the agent the window. windows.consent, windows.allowlist and windows.revoke are the owner's: the agent asks, never answers.
   // devices.stream and devices.clipboard stay with the owner and paired devices: the video is for the person
   // watching, a screenshot already gives the agent the screen, and the device's clipboard can hold what that person copied.
   ['questions.ask','a question card on its own thread that it does not wait on; the answer comes back as a message'],

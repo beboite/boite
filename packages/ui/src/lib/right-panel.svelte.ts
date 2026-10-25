@@ -23,7 +23,7 @@ import { CONTACTS_RAIL_WIDTH, contactsRail } from './contacts-rail.svelte';
  * agent's desk, beside its own thread: what it does now, its work, routines,
  * memory and day.
  */
-export type SurfaceKind = 'desk' | 'agents' | 'messages' | 'trace' | 'browser' | 'agent-browser' | 'changes' | 'files' | 'file' | 'tasks' | 'device';
+export type SurfaceKind = 'desk' | 'agents' | 'messages' | 'trace' | 'browser' | 'agent-browser' | 'changes' | 'files' | 'file' | 'tasks' | 'device' | 'window';
 
 /** Every kind a stored layout may name, and what `parse` checks a blob against. */
 export const SURFACE_KINDS: readonly SurfaceKind[] = [
@@ -37,14 +37,15 @@ export const SURFACE_KINDS: readonly SurfaceKind[] = [
   'files',
   'file',
   'tasks',
-  'device'
+  'device',
+  'window'
 ];
 
 /**
  * The kinds that get one tab and no more: asking for them again brings the tab
  * that exists forward. A browser page and a file are the two that multiply.
  */
-const SINGLETON_KINDS: readonly SurfaceKind[] = ['desk', 'agents', 'messages', 'trace', 'agent-browser', 'changes', 'files', 'tasks', 'device'];
+const SINGLETON_KINDS: readonly SurfaceKind[] = ['desk', 'agents', 'messages', 'trace', 'agent-browser', 'changes', 'files', 'tasks', 'device', 'window'];
 
 export interface Surface {
   id: string;
