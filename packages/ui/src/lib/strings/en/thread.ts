@@ -22,8 +22,6 @@ export const strings = {
     contextTokens: 'tokens',
     contextRemaining: (tokens: string) => `${tokens} tokens available`,
     contextRemainingCompact: (tokens: string) => `${tokens} tokens before auto-compaction`,
-    contextFree: 'Available',
-    contextBeforeCompact: 'Before auto-compaction',
     contextAutoCompact: 'Auto-compaction threshold.',
     contextAutoCompactWindow: (window: string) => `Auto-compaction threshold. The model supports ${window} tokens.`,
     contextNoBreakdown: 'This agent does not report a breakdown.',

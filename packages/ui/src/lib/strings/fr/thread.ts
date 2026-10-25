@@ -24,8 +24,6 @@ export const fr: Translation = {
     contextTokens: 'tokens',
     contextRemaining: (tokens: string) => `${tokens} tokens disponibles`,
     contextRemainingCompact: (tokens: string) => `${tokens} tokens avant compaction automatique`,
-    contextFree: 'Disponible',
-    contextBeforeCompact: 'Avant compaction automatique',
     contextAutoCompact: 'Seuil de compaction automatique.',
     contextAutoCompactWindow: (window: string) => `Seuil de compaction automatique. Le modèle accepte ${window} tokens.`,
     contextNoBreakdown: 'Cet agent ne détaille pas sa consommation.',
