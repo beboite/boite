@@ -103,7 +103,9 @@ again when invoked.
 ## Automatic compaction
 
 `Settings.autoCompact` is `{ tokens, moments }` or null, set by the owner under
-Settings, Advanced, or on a phone under Settings, Automatic compaction. Null is
+Settings, Advanced. A phone connected as owner can open the same card through
+a settings link or an agent's settings card; it has no row in the phone's
+settings list ([phone settings](phone.md#settings-on-a-phone)). Null is
 the default: each agent keeps its own compaction behaviour.
 
 `tokens` is an independent limit, between 1000 and 10 000 000, or null to leave

@@ -466,6 +466,19 @@ agent's `--version`, and an agent's own updater can open a console window.
 
 ## Release notes
 
+The release and nightly workflows pass their downloaded artifact directories to
+`scripts/ci/changelog.ts`. The generated notes start with direct download links
+grouped by platform: Windows x64, macOS Apple Silicon/Intel, Linux x64/ARM64,
+and Android when its APKs are attached. Linux rows offer Debian/Ubuntu packages
+and AppImages. A separate headless-server table links the Linux and Termux
+archives. Signatures, the updater's macOS archives and `latest.json` stay out
+of these tables.
+
+Links use the exact attached filenames and the release tag, so a reused Android
+APK keeps its independent app version. An absent artifact never gets a link.
+Nightly notes open with an instability warning and a reminder to back up data.
+The tables precede the optional announcement and automatic changelog.
+
 Release notes come from Git commits, including commits without a pull request.
 Each subject links to its commit, and a comparison link opens the complete diff.
 Each line ends with its author and its `Co-authored-by` trailers: a GitHub
@@ -483,7 +496,8 @@ unrelated branches never become the baseline. The first release includes the
 repository's history.
 
 The manual release and nightly forms accept an optional `announcement`. It
-appears above the generated changelog. Leave it empty for fully automatic notes.
-You can also edit the release draft before publishing. Retrying an existing
-draft refreshes its artifacts and preserves manually edited notes; it refuses
-to replace a published release or a tag pointing at another commit.
+appears below the downloads and above the generated changelog. Leave it empty
+for fully automatic notes. Retrying an existing draft refreshes its artifacts
+and generated notes, including download links; put an announcement in the input
+to retain it on retries. The workflow refuses to replace a published release
+or a tag pointing at another commit.

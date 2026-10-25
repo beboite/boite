@@ -145,9 +145,11 @@ the last of them closes. On Windows that session is InPrivate in a WebView2
 profile of its own, `boite_private`, rather than InPrivate on the default
 profile, so it shares none of the default profile's sign-ins.
 
-The profiles belong to the desktop that shows the browser: they are stored in
-the settings of the core its shell started, and a phone has no Browser surface
-to choose them. Deleting a profile closes its tabs in every conversation and
+These native webview profiles belong to the desktop that shows the browser:
+they are stored in the settings of the core its shell started. A phone watches
+the conversation machine's agent browser instead
+([processes and profiles](browser.md#processes-and-profiles)).
+Deleting a profile closes its tabs in every conversation and
 erases what it kept. On Windows each profile is a WebView2 profile of the
 shell's single browser process (`src/platform/webview_profiles.rs`): the
 debugging port is unchanged, and WebView2 removes a deleted profile's folder

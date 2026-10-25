@@ -643,8 +643,12 @@ Boite Legacy's separate `ghcr.io/beboite/boite-server` package.
 
 ## Automatic changelog
 
-[Release notes](releasing.md#release-notes) cover commit ranges, grouping,
-announcements and draft retries.
+`release.yml` and `nightly.yml` generate a download table from the artifacts
+they will attach, before the automatic changelog. It links each system and
+architecture directly to its installer. The nightly includes its independently
+versioned Android APKs and opens with an instability warning. Draft retries
+refresh the notes along with the artifacts. [Release notes](releasing.md#release-notes)
+cover the tables, commit ranges, grouping and announcements.
 
 ## Repository presentation
 
