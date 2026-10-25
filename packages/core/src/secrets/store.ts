@@ -36,6 +36,8 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>;
   /** The `ask` calls waiting on the card; when the last one's socket closes, nobody would get the ref, so the card closes. */
   waiters: number;
+  /** A value is being stored for this card; a second answer meanwhile is refused. */
+  answering?: boolean;
   done: Promise<AskResult>;
   resolve: (result: AskResult) => void;
 }
@@ -256,6 +258,7 @@ export class SecretStore {
     if (pending === undefined || pending.request.threadId !== params.threadId) {
       throw notFound('this secret card was already answered or closed', { requestId: params.requestId, field: 'requestId', expected: 'an open card' });
     }
+    if (pending.answering) throw notFound('this secret card is already being answered', { requestId: params.requestId, field: 'requestId', expected: 'an open card' });
     if ('declined' in params && params.declined === true) {
       this.#settle(pending, 'declined', null, false);
       return { ok: true };
@@ -271,48 +274,42 @@ export class SecretStore {
     if (typeof raw !== 'string') throw refused('value: expected text', { field: 'value', expected: 'a string' });
     // The JS string the socket decoded cannot be wiped; the bytes made from it are, once stored.
     const value = encoder.encode(raw);
+    // Held from here to the end, so two answers racing on one card store one value.
+    pending.answering = true;
     try {
       if (value.length === 0 || value.length > SECRET_MAX_BYTES) throw refused(`value: expected 1 to ${SECRET_MAX_BYTES} bytes`, { field: 'value', expected: `1..${SECRET_MAX_BYTES} bytes` });
       const thread = this.core.threads.require(request.threadId);
       if (keep && thread.projectId === null) throw refused('keep: this conversation has no project to keep the key for', { field: 'keep', expected: false });
       const vault = await this.vault();
-      // The card may have closed while the vault opened.
-      if (this.#pending.get(request.id) !== pending) throw notFound('this secret card was already answered or closed', { requestId: request.id });
-      const ref = keep ? await this.#keep(vault, thread.projectId!, request.name, value) : await this.#transit(vault, thread.id, thread.projectId, request.name, value);
+      // The card may close while the vault opens or stores; then the stored value is erased.
+      const live = (): boolean => this.#pending.get(request.id) === pending;
+      if (!live()) throw notFound('this secret card was already answered or closed', { requestId: request.id });
+      const ref = keep ? await this.#keep(vault, thread.projectId!, request.name, value, live) : await this.#transit(vault, thread.id, thread.projectId, request.name, value, live);
       this.#settle(pending, 'saved', ref, keep);
       return { ok: true };
     } finally {
+      pending.answering = false;
       value.fill(0);
     }
   }
 
-  async #transit(vault: SecretVault, threadId: ThreadId, projectId: ProjectId | null, name: string, value: Uint8Array): Promise<string> {
+  async #transit(vault: SecretVault, threadId: ThreadId, projectId: ProjectId | null, name: string, value: Uint8Array, live: () => boolean): Promise<string> {
     const createdAt = this.now();
     const entry: TransitEntry = { id: newId('sec_'), threadId, projectId, name, createdAt, expiresAt: createdAt + SECRET_TRANSIT_TTL_MS };
     // The index line first: a crash between the two leaves a line the sweep clears, never a value nobody knows of.
     this.index.update(data => { data.transit.push(entry); });
-    try {
-      await vault.put(entry.id, value);
-    } catch (error) {
-      this.index.update(data => { data.transit = data.transit.filter(item => item.id !== entry.id); });
-      throw refused(`the ${vault.kind} vault did not store the value: ${error instanceof Error ? error.message : 'unknown error'}`, { storage: vault.kind });
-    }
+    await this.#put(vault, entry.id, value, live, () => this.index.update(data => { data.transit = data.transit.filter(item => item.id !== entry.id); }));
     this.masks.add(threadScope(threadId), `transit:${entry.id}`, name, value);
     this.#arm();
     return `secret:${entry.id}`;
   }
 
-  async #keep(vault: SecretVault, projectId: ProjectId, name: string, value: Uint8Array): Promise<string> {
+  async #keep(vault: SecretVault, projectId: ProjectId, name: string, value: Uint8Array, live: () => boolean): Promise<string> {
     const previous = this.index.kept(projectId, name);
     const now = this.now();
     const entry: KeptEntry = { id: newId('key_'), projectId, name, createdAt: now, lastUsedAt: null };
     this.index.update(data => { data.kept.push(entry); });
-    try {
-      await vault.put(entry.id, value);
-    } catch (error) {
-      this.index.update(data => { data.kept = data.kept.filter(item => item.id !== entry.id); });
-      throw refused(`the ${vault.kind} vault did not store the value: ${error instanceof Error ? error.message : 'unknown error'}`, { storage: vault.kind });
-    }
+    await this.#put(vault, entry.id, value, live, () => this.index.update(data => { data.kept = data.kept.filter(item => item.id !== entry.id); }));
     if (previous) {
       await vault.delete(previous.id).catch(error => this.#warn(`could not erase the replaced key ${name}`, error));
       this.index.update(data => { data.kept = data.kept.filter(item => item.id !== previous.id); });
@@ -321,6 +318,24 @@ export class SecretStore {
     this.#changed(projectId);
     if (this.#sweeper === null) this.#arm();
     return projectSecretRef(name);
+  }
+
+  /**
+   * Stores the value under the index line written just before. A failed put
+   * takes the line back; so does a card that closed meanwhile, after erasing
+   * the value, so a replaced key stays as it was.
+   */
+  async #put(vault: SecretVault, id: string, value: Uint8Array, live: () => boolean, unlist: () => void): Promise<void> {
+    try {
+      await vault.put(id, value);
+    } catch (error) {
+      unlist();
+      throw refused(`the ${vault.kind} vault did not store the value: ${error instanceof Error ? error.message : 'unknown error'}`, { storage: vault.kind });
+    }
+    if (live()) return;
+    await vault.delete(id).catch(error => this.#warn('could not erase a value stored for a closed card', error));
+    unlist();
+    throw notFound('this secret card closed while the value was stored', { field: 'requestId', expected: 'an open card' });
   }
 
   #changed(projectId: ProjectId): void {

@@ -103,9 +103,10 @@ export async function secretCommand(args: string[], io: CliIo, client: CoreClien
     const result = await client.call('secrets.use', { threadId, ref, use: { action, ...(as === undefined ? {} : { as }), command, args: commandArgs, cwd: io.cwd, env } });
     if (result.action === 'write') return { lines: useLines(result), value: result };
     const notes = [...(result.truncated ? ['boite secret: output cut at 1 MB per stream'] : []), ...(result.timedOut ? ['boite secret: the command was stopped at its deadline'] : [])];
+    // A command stopped at its deadline exits 124 like timeout(1), whatever its signal gave.
     return {
       lines: [], value: result,
-      output: { stdout: result.stdout, stderr: result.stderr + (notes.length ? `${notes.join('\n')}\n` : ''), exitCode: result.exitCode ?? (result.timedOut ? 124 : 1) },
+      output: { stdout: result.stdout, stderr: result.stderr + (notes.length ? `${notes.join('\n')}\n` : ''), exitCode: result.timedOut ? 124 : result.exitCode ?? 1 },
     };
   }
   throw new Usage(`boite secret: unknown action ${action}; expected list, ask, write, run or pipe`);

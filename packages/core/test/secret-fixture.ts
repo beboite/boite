@@ -10,12 +10,15 @@ export class SpyVault extends MemoryVault {
   override readonly persistent: boolean;
   readonly given: Uint8Array[] = [];
   readonly taken: Uint8Array[] = [];
+  /** While set, a put waits on it: a test closes the card mid-store. */
+  hold: Promise<void> | null = null;
   constructor(persistent = false) {
     super();
     this.persistent = persistent;
   }
   override async put(id: string, value: Uint8Array): Promise<void> {
     this.given.push(value);
+    await this.hold;
     await super.put(id, value);
   }
   override async take(id: string): Promise<Uint8Array | null> {

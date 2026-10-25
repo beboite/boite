@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { secretMask } from '@boite/contracts';
 import { parse } from '../src/cli-args.ts';
 import { runCli } from '../src/cli.ts';
+import type { CoreClient } from '../src/client.ts';
 import { openSecretVault } from '../src/platform/secret-vault.ts';
+import { secretCommand } from '../src/secret-cli.ts';
 import { encryptedLink } from '../src/server.ts';
 import { removeDir, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { holdTurn, leaks, saveSecret, secretValue } from './secret-fixture.ts';
@@ -120,6 +122,10 @@ test('run stops the command and what it started at the deadline: a child of its 
   const pid = Number(readFileSync(join(root, 'grandchild.pid'), 'utf8'));
   const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
   await waitFor(() => !alive(), 10_000);
+  // `boite secret run` exits 124 for it, like timeout(1), whatever code the stop left.
+  const client = { call: () => Promise.resolve({ ...ran, exitCode: 143 }) } as unknown as CoreClient;
+  const cli = await secretCommand(['run', ref, '--as', 'API_KEY', '--', bun], { out: () => undefined, err: () => undefined, env: {}, cwd: root }, client, threadId);
+  expect(cli.output).toMatchObject({ exitCode: 124, stderr: expect.stringContaining('stopped at its deadline') });
 }, 30_000);
 
 test('an agent that reads the env file back gets the value masked in its conversation, though it reached its provider', async () => {

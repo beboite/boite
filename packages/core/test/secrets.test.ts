@@ -92,6 +92,24 @@ test('a decline stores nothing, and a card closes as cancelled when its turn sto
   expect(await thrown(owner.call('secrets.answer', { threadId, requestId: stopped.requestId, value: secretValue(), keep: false }))).toThrow('already answered or closed');
   expect(vault.given).toHaveLength(0);
   expect(h.core.threads.get(threadId).status).not.toBe('waiting');
+
+  // Two answers racing on a replace card store one value; a turn stopped while it is stored erases it, and the kept key stays.
+  await holdTurn(h, owner, threadId);
+  await saveSecret(h, owner, threadId, 'API_KEY', secretValue(), true);
+  const [kept] = h.core.secrets.index.data.kept;
+  const replacing = await openCard(h, owner, threadId, 'API_KEY', { replace: true });
+  let release = (): void => undefined;
+  vault.hold = new Promise<void>(resolve => { release = resolve; });
+  const first = thrown(owner.call('secrets.answer', { threadId, requestId: replacing.requestId, value: secretValue(), keep: true }));
+  await waitFor(() => vault.given.length === 2);
+  expect(await thrown(owner.call('secrets.answer', { threadId, requestId: replacing.requestId, value: secretValue(), keep: true }))).toThrow('already being answered');
+  await stopTurn(h, owner, threadId);
+  release();
+  expect(await first).toThrow('closed while the value was stored');
+  expect(await replacing.asked).toMatchObject({ outcome: 'cancelled', ref: null });
+  expect(vault.given).toHaveLength(2);
+  expect(h.core.secrets.index.data.kept).toEqual([kept!]);
+  expect(await vault.ids()).toEqual([kept!.id]);
 });
 
 test('a copy is refused from another conversation or project without being used up, then erased at 24 hours and on archive', async () => {
