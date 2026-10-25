@@ -317,7 +317,9 @@ link scanned or pasted in the app asks nothing either: the owner just showed it.
 The browser uses mobile navigation under 720 px. A bar along the bottom edge
 (`MobileTabs.svelte`) holds the places: Conversations, Activity, a filled +
 that starts a thread, Agents and Contacts when they are on, and Settings.
-Activity's tab counts the conversations waiting for you. Conversations lists
+Activity's tab counts the conversations waiting for you; Bots counts the bots
+at work on every machine, as the desktop's switch does, in the waiting colour
+once one needs you. Conversations lists
 threads across connected machines; Activity puts waiting requests first,
 followed by running and queued turns. Each list's header shows the machine,
 which opens its connection settings, over the screen's name, and the project

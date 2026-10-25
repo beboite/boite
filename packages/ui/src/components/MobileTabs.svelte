@@ -4,6 +4,9 @@
   import { fill, strings } from '../lib/strings';
   import { experimentOn } from '../lib/experiments.svelte';
   import { contactsShown } from '../lib/contacts-rail.svelte';
+  import { workspace } from '../lib/workspace.svelte';
+  import { followAgentDirectories } from '../lib/agent-directory.svelte';
+  import { agentsAtWork } from '../lib/work-counts';
 
   /**
    * The phone's places, along the bottom edge where a thumb rests: the lists
@@ -21,6 +24,12 @@
   } = $props();
   const current = $derived(store.page === 'settings' ? 'settings' : store.page === 'agents' ? 'agents' : store.page === 'home' ? 'contacts' : screen === 'activity' ? 'activity' : 'threads');
   const page = (place: string) => current === place ? 'page' as const : undefined;
+
+  /** The bots at work on every machine, as the desktop's switch counts them: the waiting colour once one needs the user. */
+  const bots = $derived(experimentOn('resident-agents'));
+  const stores = $derived(workspace.machines.length ? workspace.machines.map(machine => machine.store) : [store]);
+  const atWork = $derived(bots ? agentsAtWork(stores) : { count: 0, waiting: false });
+  followAgentDirectories(() => stores, () => bots);
 </script>
 
 <nav class="mobile-tabs" data-testid="mobile-tabs" aria-label={strings.mobile.navigation}>
@@ -33,9 +42,9 @@
   <button type="button" class="tab new" data-testid="mobile-new" aria-label={strings.sidebar.newThread} title={strings.sidebar.newThread} disabled={newDisabled} onclick={onnew}>
     <span class="glyph"><Plus size={22} /></span>
   </button>
-  {#if experimentOn('resident-agents')}
-    <button type="button" class="tab" data-testid="mobile-agents" data-preload-view="agents" aria-current={page('agents')} onclick={() => store.showAgents()}>
-      <span class="glyph"><Bot size={20} /></span><span class="name ui-label">{strings.agents.heading}</span>
+  {#if bots}
+    <button type="button" class="tab" data-testid="mobile-agents" data-preload-view="agents" aria-current={page('agents')} aria-label={atWork.count ? `${strings.agents.heading}, ${fill(atWork.waiting ? strings.sidebar.surfaceWaiting : strings.sidebar.surfaceWorking, { count: String(atWork.count) })}` : undefined} onclick={() => store.showAgents()}>
+      <span class="glyph"><Bot size={20} />{#if atWork.count}<span class="badge" class:working={!atWork.waiting} data-testid="mobile-agents-at-work" data-waiting={atWork.waiting}>{atWork.count > 99 ? '99+' : atWork.count}</span>{/if}</span><span class="name ui-label">{strings.agents.heading}</span>
     </button>
   {/if}
   {#if contactsShown(store)}
@@ -82,5 +91,7 @@
       border-radius: var(--radius-full); background: var(--color-live); color: var(--color-accent-ink);
       box-shadow: 0 0 0 2px var(--color-background); font-size: 10px; font-weight: 700; line-height: 17px; text-align: center;
     }
+    /* Bots at work and none asking: the accent, as the desktop's switch draws it. */
+    .badge.working { background: var(--color-accent); }
   }
 </style>

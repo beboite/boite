@@ -1,4 +1,5 @@
 import { threadActive, type AgentEntrustment, type AgentProfile, type AgentsSnapshot, type ThreadSummary } from '@boite/contracts';
+import { untrack } from 'svelte';
 import { experimentOn } from './experiments.svelte';
 import type { Store } from './store.svelte';
 import { noteUpkeep } from './agent-upkeep';
@@ -208,4 +209,23 @@ export function agentDirectory(store: Store): AgentDirectory {
   let directory = directories.get(store);
   if (!directory) { directory = new AgentDirectory(store); directories.set(store, directory); }
   return directory;
+}
+
+/**
+ * Keeps every machine's agents snapshot loaded while the caller is drawn and
+ * `on` holds, so a count of the agents at work is current: the sidebar's
+ * switch and the phone's Bots tab. Called while a component initialises.
+ */
+export function followAgentDirectories(stores: () => readonly Store[], on: () => boolean): void {
+  $effect(() => {
+    if (!on()) return;
+    const directories = stores().map(agentDirectory);
+    const releases = untrack(() => directories.map(directory => directory.watch()));
+    return () => { for (const release of releases) release(); };
+  });
+  $effect(() => {
+    if (!on()) return;
+    // A reconnection is a new client: each directory follows its own.
+    for (const owner of stores()) { void owner.client; untrack(() => agentDirectory(owner).refresh()); }
+  });
 }
