@@ -96,8 +96,8 @@
   .detail-line { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: var(--text-xs); color: var(--color-muted-foreground); }
   .glyph { display: inline-flex; flex: none; }
   .detail { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  /* An answer not read yet reads like an unread message: in the foreground. */
-  .unread .detail { color: var(--color-foreground); font-weight: 500; }
+  /* An answer not read yet reads like an unread message, in the foreground; a state's own colour wins over it. */
+  .unread[data-tone='idle'] .detail { color: var(--color-foreground); font-weight: 500; }
   /* Hue says status: work in the accent, its glyph breathing; the user's turn in the live colour; a failure in danger. */
   [data-tone='working'] .detail-line { color: var(--color-accent); }
   [data-tone='working'] .detail { font-weight: 500; }

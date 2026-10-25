@@ -317,6 +317,9 @@
   /* On a screen, shades light up like the eyes they cover. */
   .lit .shades { fill: var(--robot-led); opacity: 0.9; }
   .lit .glint { stroke: var(--robot-screen); }
+  /* Glasses and a monocle on a screen: their rims and bridge lit too, not dark on dark. */
+  .lit .lens { stroke: var(--robot-led); }
+  .lit .stroke-ink-fixed { stroke: var(--robot-led); }
   .glint { stroke: var(--robot-shine); stroke-linecap: round; opacity: 0.7; }
   .bandage { fill: var(--robot-bandage); }
   .bandage.pad { fill: var(--robot-bandage-pad); }
