@@ -44,6 +44,9 @@ export function instrumentJobs(source: string, generatedWorker: string): string 
   source = once(source, 'function onJobPacket(message: number, key: number, pid: number, handle = 0): void {',
     "function onJobPacket(message: number, key: number, pid: number, handle = 0): void {\n" +
     "  ownershipTrace.event({event: 'job-packet', message, key, pid, handle});");
+  source = once(source, '  api.close(entry.handle);\n  sink?.exited(threadId, pid, exit);',
+    "  ownershipTrace.event({event: 'owned-exit', pid, created: entry.identity?.incarnation ?? null, exitCode: exit.exitCode});\n" +
+    '  api.close(entry.handle);\n  sink?.exited(threadId, pid, exit);');
   source = imports(source, jobsPath);
   return `import {ownershipTrace, ownershipWorkerOptions} from ${JSON.stringify(runtime)};\n` + source +
     '\nexport const ownershipTraceInstalled = true;\n' +
@@ -110,7 +113,7 @@ export async function verifyOwnershipPlatform(): Promise<void> {
 }
 
 /** Resolve only the installed hash-pinned diagnostic copy, never a new owner. */
-export async function ownedMembershipReader(): Promise<(pid: number) => Omit<import('./target-topology.ts').Membership, 'owner' | 'role'> | null> {
+export async function ownedMembershipReader(): Promise<(pid: number) => Omit<import('./target-topology.ts').Membership, 'role'> | null> {
   const canonical = await import(pathToFileURL(jobsPath).href);
   if (canonical.ownershipTraceInstalled !== true || typeof canonical.ownershipMembership !== 'function')
     throw new Error('owned membership diagnostic export unavailable');
@@ -120,4 +123,11 @@ export async function ownedMembershipReader(): Promise<(pid: number) => Omit<imp
 export function ownershipTestArgs(preload: string, file: string): string[] {
   // Bun resolves a package script if --preload precedes the test subcommand.
   return ['test', '--preload', preload, file, '--timeout', '90000'];
+}
+
+export async function ownedJobReader(): Promise<(threadId: string) => import('./helper-job.ts').JobAccounting | null> {
+  const canonical = await import(pathToFileURL(jobsPath).href);
+  if (canonical.ownershipTraceInstalled !== true || typeof canonical.ownershipJobAccounting !== 'function')
+    throw new Error('owned job accounting diagnostic export unavailable');
+  return canonical.ownershipJobAccounting;
 }

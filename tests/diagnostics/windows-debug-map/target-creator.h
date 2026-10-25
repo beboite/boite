@@ -2,7 +2,7 @@
  * token setup, confinement verification, assignment and resume stay outside.
  * In particular the intermediary has NO extra job and never resumes a target. */
 #include "target-acl.h"
-enum { TC_REQUEST = 1, TC_READY, TC_HANDOFF, TC_RELEASED, TC_EXIT, TC_DONE };
+enum { TC_REQUEST = 1, TC_READY, TC_HANDOFF, TC_RELEASED, TC_EXIT, TC_DONE, TC_HOLD, TC_HELD };
 typedef struct {
   DWORD version, bytes, phase, error, helper, creator, pid, tid, closed, io_acquired, io_closed;
   ULONGLONG creator_created, process_created, process, thread;
@@ -11,14 +11,14 @@ typedef struct {
 typedef struct {
   TC_FRAME frame;
   DWORD security_bytes, app_bytes, capability_bytes;
-  ULONGLONG inherited[5];
+  ULONGLONG inherited[5], helper_created;
   wchar_t profile[256], image[4096], line[32768], cwd[4096], desktop[256];
   BYTE security[2048], app[SECURITY_MAX_SID_SIZE], capability[SECURITY_MAX_SID_SIZE];
 } TC_PACKET;
 typedef struct {OVERLAPPED operation; BYTE buffer[sizeof(TC_PACKET)];} TC_IO;
 static TC_IO *tc_pending;
 static unsigned int tc_io_acquired, tc_io_closed;
-static int target_creator_mode; /* 1 exited, 2 waiting; otherwise original code. */
+static int target_creator_mode; /* 1 exited, 2 waiting, 3 helper exited; otherwise original code. */
 static HANDLE tc_pipe, tc_process, tc_thread;
 static TC_FRAME tc_identity;
 static ULONGLONG tc_deadline;
@@ -150,7 +150,7 @@ static DWORD tc_barrier(const wchar_t *phase, const PROCESS_INFORMATION *root) {
   else memcpy(root_text, "null", 5);
   int bytes = snprintf(text, sizeof(text), "{\"version\":1,\"phase\":\"%ls\",\"nonce\":\"%ls\",\"waiting\":%s,"
     "\"helper\":{\"pid\":%lu,\"created\":\"%llu\"},\"creator\":{\"pid\":%lu,\"created\":\"%llu\"},\"root\":%s}\n",
-    phase, nonce, target_creator_mode == 2 ? "true" : "false", GetCurrentProcessId(), (unsigned long long)helper_created, tc_identity.creator,
+    phase, nonce, target_creator_mode >= 2 ? "true" : "false", GetCurrentProcessId(), (unsigned long long)helper_created, tc_identity.creator,
     (unsigned long long)tc_identity.creator_created, root_text);
   if (bytes <= 0 || bytes >= (int)sizeof(text)) return ERROR_INSUFFICIENT_BUFFER;
   HANDLE file = CreateFileW(request, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -178,6 +178,8 @@ static DWORD tc_barrier(const wchar_t *phase, const PROCESS_INFORMATION *root) {
   }
   return error ? error : ERROR_TIMEOUT;
 }
+#include "helper-job.h"
+
 /* Exact pinned image identity and unchanged caller token/session, using only
  * captured process handles. No PID reopening and no privilege changes. */
 static DWORD tc_verify_creator(HANDLE process, DWORD pid, const wchar_t *image, HANDLE target_job) {
@@ -288,6 +290,9 @@ static int target_creator_entry(int count, wchar_t **args) {
   if (!CreateProcessW(request->image, request->line, &security, &security, TRUE,
       EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT,
       NULL, request->cwd, &startup.StartupInfo, &root)) {error = GetLastError(); goto done;}
+  expected.pid = root.dwProcessId; expected.tid = root.dwThreadId;
+  error = tc_times(root.hProcess, &expected.process_created); if (error) goto done;
+  ULONGLONG helper_created = request->helper_created;
   TC_FRAME response = expected; response.bytes = sizeof(response); response.phase = TC_READY;
   response.pid = root.dwProcessId; response.tid = root.dwThreadId;
   response.process = (ULONGLONG)(uintptr_t)root.hProcess; response.thread = (ULONGLONG)(uintptr_t)root.hThread;
@@ -310,6 +315,9 @@ static int target_creator_entry(int count, wchar_t **args) {
   /* Only the control channel and its bounded overlapped event survive among
    * our known resources. No root, map, token, stdio or job anchor. */
   error = tc_exchange(inherited[0], NULL, &response, sizeof(response), FALSE, lifetime); if (error) goto done;
+  if (tc_frame(&response, &expected, TC_HOLD, sizeof(response))) {
+    error = hj_child(&inherited[0], &response, &expected, helper_created, lifetime); goto done;
+  }
   if (!tc_frame(&response, &expected, TC_EXIT, sizeof(response))) {error = ERROR_INVALID_DATA; goto done;}
   response = expected; response.bytes = sizeof(response); response.phase = TC_DONE; response.closed = 6;
   response.io_acquired = tc_io_acquired + 1; response.io_closed = tc_io_closed + 1;
@@ -390,6 +398,7 @@ static DWORD target_creator_start(const wchar_t *profile, const wchar_t *image, 
   DWORD length = GetModuleFileNameW(NULL, self, 4096);
   if (!length || length >= 4096 || wcslen(profile) >= 256 || wcslen(image) >= 4096 || wcslen(line) >= 32768 ||
       wcslen(cwd) >= 4096 || wcslen(desktop) >= 256) {error = ERROR_INSUFFICIENT_BUFFER; goto end;}
+  error = tc_times(GetCurrentProcess(), &packet->helper_created); if (error) goto end;
   packet->security_bytes = GetSecurityDescriptorLength(security);
   packet->app_bytes = GetLengthSid(app); packet->capability_bytes = GetLengthSid(capability);
   if (!creator_security(security, packet->security_bytes) || packet->app_bytes > SECURITY_MAX_SID_SIZE ||
@@ -531,7 +540,7 @@ static DWORD target_creator_absence(void) {
 
 static DWORD target_creator_before_resume(DWORD root) {
   if (!target_creator_mode) return 0;
-  BOOL waiting = target_creator_mode == 2;
+  BOOL waiting = target_creator_mode >= 2;
   BOOL live = tc_process && WaitForSingleObject(tc_process, 0) == WAIT_TIMEOUT && creator_remaining(tc_deadline);
   if (!tc_released || root != tc_identity.pid || (waiting ? !live : tc_process || tc_thread || tc_pipe)) return ERROR_INVALID_DATA;
   fwprintf(stderr, L"target-creator-root-resume root=%lu creator=%lu mode=%d creator-live=%d\n",

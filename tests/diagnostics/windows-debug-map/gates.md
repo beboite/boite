@@ -675,6 +675,48 @@ This is an ordinary one-connection experiment. It does not establish LPAC pipe
 access, peer denial, reopen/concurrent/read-only/write-only behavior, standard
 stream modes, descendant routing or production cancellation/resource bounds.
 
+## Helper exit with the original thread job populated
+
+TARGET-HELPER-EXITED adds one matched TARGET-WAITING arm. It retains the same
+creator and ancestor jobs, target JOB_LIST, LPAC/descriptor/marker checks and
+RETIRE-NAMED cleanup. There is no added process/job, job assignment, breakaway,
+parent substitution, changed access mask, PID reopening or foreign handle query.
+All existing arms and fatal immediate/checkpoint/final absence gates remain.
+
+After final cleanup the helper negotiates HOLD/HELD over its existing pipe.
+The creator closes its only remaining inherited pipe, with all seven inherited
+and target anchors closed and its I/O events balanced, then publishes a private
+nonce-bound file containing the three captured identities and a deadline.
+The helper verifies that file and closes its own creator/pipe references before
+exiting with its real result. The creator's original 30-second lifetime remains;
+the file hold independently expires within three seconds of this handoff,
+strictly before three seconds after helper exit. Transport faults abort through
+only captured owners and cannot count as normal-exit evidence.
+
+The harness awaits the captured helper's exit plus EOF and both registry
+process-reference closures. Around each original/replacement name observation,
+it requires the captured creator incarnation live in the same owned thread-job
+handle/key and ancestor memberships, accounting ActiveProcesses >= 1, matching
+launcher registry membership, and no earlier ACTIVE_PROCESS_ZERO for those
+keys. Accounting reads use only the generated diagnostic registry's existing
+job handle and preserve last error. No populated job is closed or terminated
+to manufacture an empty transition.
+
+The harness releases the exact file frame only after both populated
+observations, before the three-second deadline. A five-second external budget
+covers release, normal creator exit 0 witnessed by both registries' original
+exit reads, all reference closures, ActiveProcesses=0 on the same job and both
+empty observations. Each observer has a remaining-budget capture deadline;
+failed capture cleanup may drain separately but cannot validate the trial.
+Protocol validity, accounting/ordering/closure rows and present/absent statuses
+are recorded separately in results.json. Existing map failures stay fatal;
+the new arm also requires both names absent after the empty transition.
+
+Absence while the helper is gone and this job remains populated would exclude
+job emptiness as necessary in this fixture. Persistence until the last member
+exits does not identify a unique internal owner. productionAccepted=false.
+No SDK or native Windows result is established for this new arm.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:

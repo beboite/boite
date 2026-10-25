@@ -25,10 +25,26 @@ export function ownershipMembership(pid: number) {
     return membershipApi!.symbols.IsProcessInJob(asPointer(entry!.handle), asPointer(handle), ptr(value))
       ? value[0]! : null;
   }
-  const proof = {pid, created: identity.incarnation, threadId: entry.threadId,
-    threadJob: String(job.handle), globalJob: String(globalJob), nestingRefused,
+  const proof = {owner: ownershipTrace.owner, pid, created: identity.incarnation, threadId: entry.threadId,
+    threadJob: String(job.handle), jobKey: job.key, globalJob: String(globalJob), nestingRefused,
     threadMember: member(job.handle), globalMember: member(globalJob)};
   ownershipTrace.event({event: 'owned-membership', ...proof});
   return proof;
   } finally {membershipApi.symbols.SetLastError(savedError);}
+}
+
+// Read only the exact job reference that the registry already owns. This also
+// works after its last process handle was closed; no job is opened or duplicated.
+export function ownershipJobAccounting(threadId: string) {
+  const job = threadJobs.get(threadId);
+  if (!job || !native) return null;
+  const saved = native.lastError();
+  membershipApi ??= loadMembershipApi();
+  try {
+    const buffer = new Uint8Array(ACCOUNTING_SIZE);
+    if (!native.queryJobInfo(job.handle, CLASS_BASIC_AND_IO_ACCOUNTING, buffer)) return null;
+    const result = {owner: ownershipTrace.owner, threadId, threadJob: String(job.handle), jobKey: job.key,
+      globalJob: String(globalJob), nestingRefused, active: new DataView(buffer.buffer).getUint32(OFF_ACTIVE_PROCESSES, true), wallMs: Date.now()};
+    ownershipTrace.event({event: 'owned-job-accounting', ...result}); return result;
+  } finally {membershipApi.symbols.SetLastError(saved);}
 }

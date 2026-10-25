@@ -4,8 +4,9 @@ import {tmpdir, release} from 'node:os';
 import {join} from 'node:path';
 import {capture, type Captured} from './capture.ts';
 import {selectedEnvironment} from './environment.ts';
-import {verifyOwnershipPlatform, ownedMembershipReader} from './ownership-generate.ts';
+import {verifyOwnershipPlatform, ownedMembershipReader, ownedJobReader} from './ownership-generate.ts';
 import {serveTopology} from './target-topology.ts';
+import {observeHelperJob, type RootProof} from './helper-job.ts';
 
 const native = process.platform === 'win32' && process.env.BOITE_TEST_DEBUG_MAP === '1';
 
@@ -31,9 +32,11 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   const harness = await startTestCore({dataDir: join(state, 'core-data')});
   const procs = harness.core.procs;
   const readMembership = await ownedMembershipReader();
+  const readJob = await ownedJobReader();
+  const helperJobControls: Record<string, unknown>[] = []; report.helperJobControls = helperJobControls;
   const controls = join(state, 'target-creator-control'); mkdirSync(controls);
   const topologyProofs: unknown[] = []; report.targetCreatorTopology = topologyProofs;
-  const jobs = ['RED', 'A', 'B', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING'].map(label => {
+  const jobs = ['RED', 'A', 'B', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED'].map(label => {
     const root = join(state, label), project = join(root, 'project'), runtime = join(root, 'runtime'), home = join(root, 'home');
     const marker = `TASK_ROUTE_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
     return {label, root, project, runtime, home, marker, profile: `boite.debug.route.${crypto.randomUUID().replaceAll('-', '')}`};
@@ -44,24 +47,45 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   const creatorFaultCleanup: boolean[] = [];
   const targetCreatorFaultCleanup: boolean[] = [];
   const afterExit: Record<string, unknown>[] = []; report.mapAfterHelperExit = afterExit;
-  async function execute(id: string, args: string[], home = state, extra: Record<string, string | undefined> = {}) {
-    const targetCreator = args[0] === 'target-exited-run' || args[0] === 'target-waiting-run';
-    const prefix = join(controls, crypto.randomUUID());
+  async function execute(id: string, args: string[], home = state, extra: Record<string, string | undefined> = {}, milliseconds?: number) {
+    const helperExited = args[0] === 'target-helper-exited-run';
+    const targetCreator = helperExited || args[0] === 'target-exited-run' || args[0] === 'target-waiting-run';
+    const prefix = join(controls, crypto.randomUUID()), topologyStart = topologyProofs.length;
     const child = procs.spawnPiped(id, helper!, args, {cwd: state, agentRoot: false,
       env: selectedEnvironment({HOME: home, USERPROFILE: home, APPDATA: home, LOCALAPPDATA: home,
         TEMP: home, TMP: home, BOITE_DEBUG_MAP_OWNERSHIP: '1',
         ...(targetCreator ? {BOITE_TARGET_CREATOR_BARRIER: prefix} : {}), ...extra})});
     let stopped = false;
     const topology = targetCreator ? serveTopology(prefix, child.record.pid, process.env.BOITE_DEBUG_MAP_TRACE!,
-      readMembership, () => stopped, topologyProofs).catch(error => {failures.push(`${id} topology: ${error}`);}) : undefined;
+      readMembership, () => stopped, topologyProofs, helperExited).catch(error => {failures.push(`${id} topology: ${error}`);}) : undefined;
     let result: Captured;
-    try {result = await capture(procs, id, child, targetCreator ? 45000 : 40000);}
+    try {result = await capture(procs, id, child, milliseconds ?? (targetCreator ? 45000 : 40000));}
     finally {stopped = true; await topology;}
+    if (helperExited) {
+      const record: Record<string, unknown> = {}; helperJobControls.push(record);
+      try {
+        if (!/helper-job-parked creator=\d+ pipe=0 process=0 thread=0 child-closed=7 io-acquired=(\d+) io-closed=\1 error=0/.test(result.err))
+          throw new Error('helper-job missing successful pipe/anchor handoff');
+        for (const object of ['root-thread', 'root-process', 'job', 'link', 'map', 'retire-named-map'])
+          if (!result.err.includes(`cleanup close=${object} closed=1`)) throw new Error(`helper-job ${object} closure missing`);
+        if (!result.err.includes('cleanup job-active=0')) throw new Error('helper-job private target job not empty');
+        await observeHelperJob({prefix, helper: result, roots: topologyProofs.slice(topologyStart) as RootProof[], trace: process.env.BOITE_DEBUG_MAP_TRACE!,
+          live: readMembership, job: readJob, record,
+          observe: (path, phase, index, limit) => execute(`helper-job-${phase}-${index}`, ['observe-map', path], state, {}, limit)});
+        for (const row of record.empty as {observation: {absent: boolean}}[])
+          if (!row.observation.absent) failures.push('TARGET-HELPER-EXITED empty map absence');
+      } catch (error) {
+        record.protocolValid = false; record.error = String(error); failures.push(`TARGET-HELPER-EXITED protocol: ${error}`);
+        // Failure cleanup uses only the already-captured registry owner. Forced
+        // cleanup cannot establish any populated/empty success evidence.
+        procs.killTree(id);
+      }
+    }
     steps.push({id, ...result});
     writeFileSync(join(output!, `${id}.log`), `pid=${result.pid} exit=${result.code} timedOut=${result.timedOut}\n${result.out}${result.err}`);
     console.log(`${id}: ${JSON.stringify(result)}`); save(); return result;
   }
-  function run(job: typeof jobs[number], debug: boolean, mode?: 'direct-run' | 'setter-run' | 'quiet-run' | 'reopen-run' | 'creator-run' | 'retire-run' | 'retire-named-run' | 'target-exited-run' | 'target-waiting-run') {
+  function run(job: typeof jobs[number], debug: boolean, mode?: 'direct-run' | 'setter-run' | 'quiet-run' | 'reopen-run' | 'creator-run' | 'retire-run' | 'retire-named-run' | 'target-exited-run' | 'target-waiting-run' | 'target-helper-exited-run') {
     const promise = execute(`lpac-${job.label}`, [mode ?? (debug ? 'debug-run' : 'run'), job.profile, job.project,
       join(job.runtime, 'inspect.exe'), 'inspect', '0', job.marker, ...(debug ? ['forward-check'] : [])], job.home,
       {PATH: `${job.runtime};${process.env.SystemRoot}\\System32`});
@@ -130,12 +154,12 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
         expect(Number(checkpoint?.[2])).toBeGreaterThan(0);
         const targets = checkpoint?.[3]?.split(',') ?? [];
         const inspected = [...result.out.matchAll(/^inspect-start=\S+ pid=(\d+)\r?$/gm)].map(match => match[1]!);
-        expect(new Set(targets)).toEqual(new Set(['RED', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING'].includes(label) ? inspected.slice(0, 1) : inspected));
+        expect(new Set(targets)).toEqual(new Set(['RED', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED'].includes(label) ? inspected.slice(0, 1) : inspected));
         expect(result.err.indexOf('ownership-checkpoint ')).toBeGreaterThan(result.err.indexOf('cleanup map-eventual-open='));
         expect(result.err).toMatch(/cleanup checkpoint-map-open=0x[\da-f]+ absent=[01] closed=1 error=0 wall-ms=\d+/);
       }),
     ];
-    if (['RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING'].includes(label)) {
+    if (['RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED'].includes(label)) {
       for (const phase of ['immediate', 'checkpoint', 'final']) checks.push(
         verify(`${label} replacement absence ${phase}`, () => expect(result.err)
           .toContain(`cleanup retired-open phase=${phase} status=0xc0000034 absent=1 closed=1 error=0`)));
@@ -206,7 +230,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     for (const match of result.err.matchAll(/^map-retire named path=(.+) create=0x00000000\r?$/gm))
       names.push({kind: 'retired', path: match[1]!.replace(/\r$/, '')});
     if (!verify(`${label} owned map name`, () => {
-      expect(names).toHaveLength(['RED', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING'].includes(label) ? 2 : 1);
+      expect(names).toHaveLength(['RED', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED'].includes(label) ? 2 : 1);
       expect(new Set(names.map(name => name.kind)).size).toBe(names.length);
       for (const name of names) expect(name.path).toMatch(new RegExp(
         `^\\\\(?:Sessions\\\\\\d+\\\\)?BaseNamedObjects\\\\boite\\.route\\.${result.pid}${name.kind === 'swap' ? '\\.swap' : name.kind === 'retired' ? '\\.retired' : ''}$`));
@@ -352,7 +376,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     // from RED's A/B/A roundtrip. Helpers stay alive through the fatal gates.
     // These observations cannot make a failed original RED/A/B gate pass.
     if (report.redSafetyPassed === true) {
-      for (const [index, mode] of (['direct-run', 'setter-run', 'quiet-run', 'reopen-run', 'creator-run', 'retire-run', 'retire-named-run', 'target-exited-run', 'target-waiting-run'] as const).entries()) {
+      for (const [index, mode] of (['direct-run', 'setter-run', 'quiet-run', 'reopen-run', 'creator-run', 'retire-run', 'retire-named-run', 'target-exited-run', 'target-waiting-run', 'target-helper-exited-run'] as const).entries()) {
         const job = jobs[index + 3]!;
         writeFileSync(join(job.project, 'release'), 'synthetic');
         const result = await run(job, false, mode);
@@ -417,7 +441,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
           expect(result.err).not.toContain('creator-io ');
         });
         verify(`${job.label} retirement selection`, () => {
-          if (!['retire-run', 'retire-named-run', 'target-exited-run', 'target-waiting-run'].includes(mode)) {expect(result.err).not.toContain('map-retire '); return;}
+          if (!['retire-run', 'retire-named-run', 'target-exited-run', 'target-waiting-run', 'target-helper-exited-run'].includes(mode)) {expect(result.err).not.toContain('map-retire '); return;}
           const target = result.out.match(/^inspect-start=\S+\.generation-0 pid=(\d+)\r?$/m)?.[1];
           expect(Number(target)).toBeGreaterThan(0);
           expect(result.err).toContain(`map-retire ready pid=${target} signaled=1 job-active=0 exit=1`);
@@ -464,7 +488,31 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
           expect(result.err.match(/private-map pid=\d+ set=0x00000000/g)).toHaveLength(1);
           expect(result.err).not.toContain('creator-ready '); expect(result.err).not.toContain('target-creator-io ');
         });
-        cleanup(job.label, result); await observeAfterExit(job.label, result);
+        if (mode === 'target-helper-exited-run') verify('TARGET-HELPER-EXITED handoff and protocol', () => {
+          const frame = helperJobControls.at(-1)?.frame as {creator?: {pid: number}; root?: {pid: number}} | undefined;
+          expect(helperJobControls.at(-1)?.protocolValid).toBe(true);
+          const creator = frame?.creator?.pid, root = frame?.root?.pid;
+          expect(Number(creator)).toBeGreaterThan(0); expect(Number(root)).toBeGreaterThan(0);
+          expect(creator).not.toBe(root); expect(creator).not.toBe(result.pid);
+          expect(result.err).toMatch(new RegExp(`target-creator-start pid=${creator} created=\\d+ inherited=5 parent-copies-closed=5 image=1 token=1 private-job=0 extra-job=0 mode=3`));
+          const released = result.err.match(new RegExp(`target-creator-released pid=${creator} root=${root} created=\\d+ sources-closed=6 known-target-anchors=0 control-only=1 target-inherit=3 controller-flags=0 image=1 security=1 child-io-acquired=(\\d+) child-io-closed=(\\d+)`));
+          expect(Number(released?.[1])).toBeGreaterThan(0); expect(released?.[2]).toBe(released?.[1]);
+          for (const role of ['process', 'thread']) expect(result.err).toMatch(new RegExp(
+            `target-creator-security role=${role} mapping=0x[0-9a-f]+ raw-equal=[01] exact=1 protected=1 fault=0 error=0`));
+          for (const phase of ['creator', 'root']) expect(result.err).toContain(
+            `target-creator-topology phase=${phase} helper=${result.pid} creator=${creator} root=${phase === 'creator' ? 0 : root} nonce=1 proved=1 error=0`);
+          const assigned = result.err.indexOf('private-map pid='), resumed = result.err.indexOf('target-creator-root-resume ');
+          expect(assigned).toBeGreaterThan(result.err.indexOf('target-creator-released '));
+          expect(resumed).toBeGreaterThan(assigned);
+          expect(result.err.match(/private-map pid=\d+ set=0x00000000/g)).toHaveLength(1);
+          expect(result.err).not.toContain('creator-ready '); expect(result.err).not.toContain('target-creator-io ');
+          expect(result.err).toContain(`target-creator-root-resume root=${frame?.root?.pid} creator=${frame?.creator?.pid} mode=3 creator-live=1`);
+          const parked = result.err.match(/helper-job-parked creator=\d+ pipe=0 process=0 thread=0 child-closed=7 io-acquired=(\d+) io-closed=(\d+) error=0/);
+          expect(Number(parked?.[1])).toBeGreaterThan(0); expect(parked?.[1]).toBe(parked?.[2]);
+          expect(result.err.indexOf('helper-job-parked ')).toBeGreaterThan(result.err.indexOf('cleanup retired-open phase=final '));
+        });
+        cleanup(job.label, result);
+        if (mode !== 'target-helper-exited-run') await observeAfterExit(job.label, result);
         const afterScope = await execute(`ordinary-after-${job.label.toLowerCase()}`, ['observe', state]);
         observer(`after ${job.label}`, afterScope, before);
         save();

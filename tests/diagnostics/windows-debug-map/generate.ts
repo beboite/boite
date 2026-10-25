@@ -84,11 +84,11 @@ export function generate(source: string): string {
     '  else if (count > 4 && (!wcscmp(args[1], L"run") || !wcscmp(args[1], L"debug-run") ||\n' +
     '      !wcscmp(args[1], L"direct-run") || !wcscmp(args[1], L"setter-run") || !wcscmp(args[1], L"quiet-run") ||\n' +
     '      !wcscmp(args[1], L"reopen-run") || !wcscmp(args[1], L"creator-run") || !wcscmp(args[1], L"retire-run") || !wcscmp(args[1], L"retire-named-run") ||\n' +
-    '      !wcscmp(args[1], L"target-exited-run") || !wcscmp(args[1], L"target-waiting-run"))) {\n' +
+    '      !wcscmp(args[1], L"target-exited-run") || !wcscmp(args[1], L"target-waiting-run") || !wcscmp(args[1], L"target-helper-exited-run"))) {\n' +
     '    debug_mode = !wcscmp(args[1], L"debug-run");\n' +
     '    reopen_owned_map = !wcscmp(args[1], L"reopen-run");\n' +
     '    external_map_creator = !wcscmp(args[1], L"creator-run");\n' +
-    '    target_creator_mode = !wcscmp(args[1], L"target-exited-run") ? 1 : !wcscmp(args[1], L"target-waiting-run") ? 2 : 0;\n' +
+    '    target_creator_mode = !wcscmp(args[1], L"target-exited-run") ? 1 : !wcscmp(args[1], L"target-waiting-run") ? 2 : !wcscmp(args[1], L"target-helper-exited-run") ? 3 : 0;\n' +
     '    retire_named_map = !wcscmp(args[1], L"retire-named-run") || target_creator_mode;\n' +
     '    retire_owned_map = !wcscmp(args[1], L"retire-run") || retire_named_map;\n' +
     '    observe_owned_handles = wcscmp(args[1], L"quiet-run") != 0;\n' +
@@ -102,7 +102,8 @@ export function generate(source: string): string {
     '    if (before || after) result = failure(L"routing.caller-state", before ? before : after);\n' +
     '    DWORD final_map = retired_absence(L"final");\n' +
     '    if (final_map) result = failure(L"routing.cleanup.final-map", final_map);\n' +
-    '    DWORD creator_exit = target_creator_finish(FALSE);\n' +
+    '    DWORD creator_exit = target_creator_mode == 3 ? hj_parent() : target_creator_finish(FALSE);\n' +
+    '    if (creator_exit && target_creator_mode == 3) target_creator_finish(TRUE);\n' +
     '    if (creator_exit) result = failure(L"routing.cleanup.target-creator", creator_exit);\n' +
     '    if (target_creator_mode == 2 && tc_released) {\n' +
     '      DWORD creator_closed = creator_exit ? creator_exit : tc_barrier(L"closed", NULL);\n' +
@@ -120,7 +121,7 @@ export function writeSource(output: string): Record<string, string> {
   const source = generate(original);
   writeFileSync(join(output, 'debug-map.c'), source);
   const hashes: Record<string, string> = {'protected-tool.c': sha256(original), 'debug-map.c': sha256(source)};
-  for (const file of ['routing.h', 'inspect.h', 'ownership.h', 'identity.h', 'startup-site.h', 'startup-site.json', 'roundtrip.h', 'setter.h', 'creator.h', 'target-creator.h', 'target-acl.h']) {
+  for (const file of ['routing.h', 'inspect.h', 'ownership.h', 'identity.h', 'startup-site.h', 'startup-site.json', 'roundtrip.h', 'setter.h', 'creator.h', 'target-creator.h', 'target-acl.h', 'helper-job.h']) {
     const bytes = readFileSync(join(import.meta.dir, file));
     writeFileSync(join(output, file), bytes);
     hashes[file] = sha256(bytes);

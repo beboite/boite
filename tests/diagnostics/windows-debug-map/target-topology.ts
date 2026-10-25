@@ -8,7 +8,7 @@ export interface TopologyRequest {
 }
 export interface Membership extends ProcessIdentity {
   owner: string; role: string; threadId: string; threadJob: string; globalJob: string;
-  nestingRefused: boolean; threadMember: number | null; globalMember: number | null;
+  nestingRefused: boolean; jobKey?: number; threadMember: number | null; globalMember: number | null;
 }
 function identity(value: unknown): value is ProcessIdentity {
   const p = value as ProcessIdentity | null;
@@ -46,8 +46,8 @@ export function proveTopology(request: TopologyRequest, rows: Membership[]): Mem
   }
   return accepted;
 }
-interface LedgerRow {event: string; owner: string; role: string; pid?: number; incarnation?: string; id?: string; success?: boolean; transfer?: {id: string}}
-function traceRows(directory: string): (LedgerRow & Partial<Membership>)[] {
+export interface LedgerRow {event: string; owner: string; role: string; pid?: number; incarnation?: string; id?: string; success?: boolean; transfer?: {id: string}}
+export function traceRows(directory: string): (LedgerRow & Partial<Membership>)[] {
   return readdirSync(directory).filter(f => /^(launcher|harness)-.*\.jsonl$/.test(f)).flatMap(file => {
     const data = readFileSync(join(directory, file), 'utf8');
     // An append in progress can leave the last line incomplete. Never discard
@@ -71,10 +71,10 @@ export function creatorReferencesClosed(process: ProcessIdentity, rows: LedgerRo
 }
 export async function serveTopology(prefix: string, helperPid: number, trace: string,
     current: (pid: number) => Omit<Membership, 'owner' | 'role'> | null,
-    stopped: () => boolean, proofs: unknown[]): Promise<void> {
+    stopped: () => boolean, proofs: unknown[], deferClosure = false): Promise<void> {
   let previous: TopologyRequest | undefined;
   let previousProof: Membership[] = [];
-  for (const phase of ['creator', 'root', 'closed'] as const) {
+  for (const phase of (deferClosure ? ['creator', 'root'] : ['creator', 'root', 'closed']) as TopologyRequest['phase'][]) {
     // Waiting mode executes the existing target/cleanup/final gates before
     // requesting closure. The creator's independent 30s deadline still rules.
     const deadline = Date.now() + (phase === 'closed' ? 35000 : 7000);
@@ -98,7 +98,7 @@ export async function serveTopology(prefix: string, helperPid: number, trace: st
             (phase === 'closed' && JSON.stringify(request.root) !== JSON.stringify(previous.root)))) throw new Error('topology phase identity changed');
         const live = [request.helper, request.creator, ...(request.root ? [request.root] : [])].map(p => current(p.pid));
         const rows: Membership[] = live.filter((r): r is NonNullable<typeof r> => !!r)
-          .map(r => ({...r, owner: 'current-harness', role: 'harness-main'}));
+          .map(r => ({...r, owner: (r as Membership).owner ?? 'current-harness', role: 'harness-main'}));
         const records = traceRows(trace);
         const proof = records.some(r => r.event === 'incomplete') ? null : phase === 'closed'
           ? creatorReferencesClosed(request.creator, records) && live[1] === null && live[0]?.created === request.helper.created &&
