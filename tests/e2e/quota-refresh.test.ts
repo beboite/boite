@@ -396,13 +396,24 @@ test('the same popup shares priorities across the app, tray and phone through th
   const client = await harness.connect();
   let tray: BrowserPage | undefined;
   try {
+    // Use the browser's local calendar, so these stay distant and nearby on any run date.
+    const resets = await page.evaluate<{ at: number; label: string }[]>(`[28, 1].map(days => {
+      const now = new Date();
+      const date = new Date(now);
+      date.setDate(date.getDate() + days);
+      date.setHours(20, 55, 0, 0);
+      const options = days === 1 ? { weekday: 'long' } : {
+        month: 'short', day: 'numeric', ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}),
+      };
+      return { at: date.getTime(), label: new Intl.DateTimeFormat('en', options).format(date) };
+    })`);
     const names = ['Personal', 'Work', 'Research', 'Studio', 'Travel'];
     const accounts = [];
     for (const label of names) accounts.push(await client.call('accounts.add', { providerId: 'echo', label, useDefaultLocation: false }));
     const rows: AccountQuota[] = accounts.map((account, index) => ({
       accountId: account.id, providerId: index === 1 ? 'codex' : 'claude', providerName: index === 1 ? 'Codex' : 'Claude', label: 'Cached profile',
       enabled: true, status: 'ready', checkedAt: Date.now(), error: null,
-      windows: [{ id: 'week', label: 'Weekly', usedPercent: index === 1 ? 100 : 25, resetsAt: new Date(2026, 9, 7, 20, 55).getTime() }],
+      windows: [{ id: index === 0 ? 'month' : 'week', label: index === 0 ? 'Monthly' : 'Weekly', usedPercent: index === 1 ? 100 : 25, resetsAt: resets[index === 0 ? 0 : 1]!.at }],
       ...(index === 1 ? { credits: { kind: 'balance' as const, enabled: true, remaining: 42.5, limit: null, unlimited: false } } : {}),
     }));
     // Keep real accounts, persistence, events and transports. Only provider readings are scripted, without live logins.
@@ -431,7 +442,9 @@ test('the same popup shares priorities across the app, tray and phone through th
       expect(await browser.evaluate(`document.querySelector('${panel} footer button').textContent`)).toBe('Limits page');
       expect(await browser.evaluate(`document.querySelector('[data-account-id="${accounts[1]!.id}"] .paid').textContent`)).toContain('Using credits');
       expect(await browser.evaluate(`getComputedStyle(document.querySelector('[data-account-id="${accounts[0]!.id}"] .track')).height`)).toBe('7px');
-      expect(await browser.evaluate(`document.querySelector('[data-account-id="${accounts[0]!.id}"] .reset').textContent`)).toMatch(/^Wednesday /);
+      for (const [index, reset] of resets.entries()) {
+        expect(await browser.text(`[data-account-id="${accounts[index]!.id}"] .reset`)).toStartWith(`${reset.label} `);
+      }
       expect(await browser.evaluate(`document.querySelectorAll('${panel} .reorder').length`)).toBe(0);
       // Five profiles fit in the usual popup without scrolling to reach the last one.
       expect(await browser.evaluate(`(() => {
@@ -515,6 +528,9 @@ test('the same popup shares priorities across the app, tray and phone through th
     await page.click('[data-testid="sidebar-toggle"]');
     await page.click('[data-testid="nav-limits"]');
     await page.waitFor(`document.querySelectorAll('[data-testid="quota-provider"]').length === 5`);
+    for (const [index, reset] of resets.entries()) {
+      expect(await page.text(`[data-account-id="${accounts[index]!.id}"] .reset`)).toStartWith(`${reset.label} `);
+    }
     await page.waitFor(`document.querySelector('[data-account-id="${accounts[1]!.id}"] [data-testid="quota-reorder"]')?.disabled === false`);
     const touch = await page.evaluate<{ from: { x: number; y: number }; to: { x: number; y: number } }>(`(async () => {
       // The phone sheet animates and its ResizeObserver places it after the rows appear.
