@@ -202,3 +202,25 @@ test('waiting keeps channel changes disabled and cancellation restores the downl
     expect(await disabled('app-update-nightly')).toBe(false);
   }
 }, 30_000);
+
+test('installing by itself is this computer\'s switch on the updates card, saved on its core, in both languages', async () => {
+  await updates('ready', true);
+  // The fixture stands in for the desktop app: the core it shows is the one its shell started.
+  await page.evaluate('globalThis.__boiteTest.workspace.active.localCore = true');
+  await page.waitFor(`document.querySelector('${id('app-update-auto-switch')}')`);
+  expect(await page.evaluate<boolean>(`document.querySelector('${id('app-update-auto-switch')}').checked`)).toBe(false);
+  expect(await page.text(id('app-update-auto'))).toContain('Install updates by itself when nothing runs');
+  await page.click(id('app-update-auto-switch'));
+  await page.waitFor('globalThis.__boiteTest.workspace.active.settings?.autoInstallUpdates === true');
+  await page.evaluate(`document.querySelector('${id('app-updates-card')}').scrollIntoView({ block: 'start' })`);
+  await capture('auto-install-desktop');
+
+  await pickLocale('fr');
+  await width(390);
+  await page.waitFor(`document.querySelector('${id('app-update-auto')}')?.getBoundingClientRect().width > 0`);
+  expect(await page.text(id('app-update-auto'))).toContain('Installer les mises à jour tout seul quand rien ne tourne');
+  expect(await page.evaluate<boolean>(`document.querySelector('${id('app-update-auto-switch')}').checked`)).toBe(true);
+  await page.evaluate(`document.querySelector('${id('app-updates-card')}').scrollIntoView({ block: 'start' })`);
+  await capture('auto-install-phone-fr');
+  expect(page.errors()).toEqual([]);
+}, 60_000);

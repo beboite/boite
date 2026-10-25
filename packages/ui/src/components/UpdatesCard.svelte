@@ -6,6 +6,7 @@
   import { listedName, workspace } from '../lib/workspace.svelte';
   import { bytes, time } from '../lib/format';
   import { fill, strings } from '../lib/strings';
+  import InfoTip from './InfoTip.svelte';
 
   /**
    * Boite's updates in one card, nothing folded: the version this app runs
@@ -20,6 +21,7 @@
   /** No stable release is published yet: the channel opens with the first one. */
   const RELEASE_PUBLISHED = false;
 
+  const uid = $props.id();
   let checking = $state(false);
   const app = $derived(native ? updater.snapshot : null);
   const supported = $derived(app?.supported === true);
@@ -40,6 +42,13 @@
   const appStartable = $derived(supported && ['available', 'ready', 'error'].includes(app!.phase) && app!.version !== null);
   const canUpdate = $derived(!busy && (restarts ? !updateEverything.localBusy : appStartable || othersStartable));
   const connected = $derived(workspace.machines.some((machine) => machine.store.connection === 'ready'));
+  /** The core this window's shell started: `autoInstallUpdates` is its setting. */
+  const local = $derived(workspace.machines.find((machine) => machine.store.localCore)?.store);
+  const autoShown = $derived(supported && local?.owner === true && local.settings !== null && local.settings !== undefined);
+
+  async function toggleAuto(input: HTMLInputElement) {
+    if (!local || !await local.saveSettings({ autoInstallUpdates: input.checked })) input.checked = local?.settings?.autoInstallUpdates === true;
+  }
 
   function status(): string {
     if (!app) return strings.serverUpdate.current;
@@ -143,6 +152,14 @@
       <span style:width={progress === null ? '40%' : `${progress}%`}></span>
     </div>
   {/if}
+  {#if autoShown}
+    <label class="auto" for="{uid}-auto-install" data-testid="app-update-auto">
+      <span class="ui-label-box"><span class="ui-label">{strings.appUpdate.autoInstall}</span><InfoTip topic={strings.appUpdate.autoInstall} text={strings.appUpdate.autoInstallHint} /></span>
+      <input id="{uid}-auto-install" type="checkbox" role="switch" data-testid="app-update-auto-switch"
+        checked={local!.settings?.autoInstallUpdates === true} disabled={local!.connection !== 'ready'}
+        onchange={(event) => void toggleAuto(event.currentTarget)} />
+    </label>
+  {/if}
   {#each failures as machine (machine.id)}
     <p class="failure" role="alert" data-testid="updates-failure">
       <span>{listedName(machine)}: {machine.store.serverUpdater.error}</span>
@@ -198,6 +215,9 @@
   .others :global(svg) { flex: none; }
   .where { color: var(--color-foreground); font-weight: 500; }
   .note { color: var(--color-subtle); font-size: var(--text-xs); }
+  .auto { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
+  .auto > span { display: inline-flex; align-items: center; }
+  .auto input { flex: 0 0 40px; width: 40px; }
   .note.error { color: var(--color-danger); }
   .cancel { margin-left: auto; }
   .failure { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; color: var(--color-danger); font-size: var(--text-sm); overflow-wrap: anywhere; }
@@ -209,5 +229,6 @@
     .actions { width: 100%; }
     .actions button { flex: 1; min-height: var(--touch-target); }
     .channel button { min-height: var(--touch-target); }
+    .auto { min-height: var(--touch-target); }
   }
 </style>

@@ -12,6 +12,8 @@ after a restart confirmation. Each machine's row below says in one word where
 its updates stand (Up to date, Update available, Updating, Update failed).
 Agent versions, with their own update and skip controls and the automatic
 update switch, are on each machine's Providers page ([agent updates](agent-updates.md)).
+Under them, **Install updates by itself when nothing runs** lets the app
+install a release without a click ([installing by itself](#installing-by-itself)).
 
 ## Update everything
 
@@ -105,6 +107,47 @@ Only Windows PCs get the row and the button: a .deb asks for the administrator
 password through `pkexec` and the macOS installer can ask too, with nobody at
 that machine to answer. A core without `features.desktopUpdates` in its hello
 shows no desktop row, as before.
+
+## Installing by itself
+
+**Install updates by itself when nothing runs** (FR "Installer les mises à
+jour tout seul quand rien ne tourne"), the `autoInstallUpdates` setting of the
+core this window's shell started, is off by default. The switch sits on the
+updates card of an installed desktop app; a browser has no updater and no
+switch. An agent proposes it with `boite settings request autoInstallUpdates
+true`, whose card flips it in the chat.
+
+When it is on, each automatic check (eight seconds after start, then every six
+hours) that finds a release downloads it at once, then asks the shell to
+install it quietly (`app_update_install_quietly`). The shell installs only
+when both hold:
+
+- the main window is not on screen: hidden in the tray. A window on screen may
+  be in use even with nothing running, and its restart would take it away. It
+  is checked again right before the core is asked, so a window restored from
+  the tray while the install waited calls it off;
+- the core grants `POST /shutdown-if-idle`, asked once: no turn, queued
+  execution, RPC, peer request, tracked process or provider background work.
+  The handoff that ends running turns, which Update uses, is never asked.
+
+Otherwise the release stays downloaded and ready, offered as before,
+and the next check tries again without downloading it a second time. An
+admitted install says Installing, then runs the quiet installer as a clicked
+one does. Before it runs, the shell leaves `update-quiet-restart` in its data
+directory; the shell the installer starts reads and deletes it and comes back
+in the tray, as a login start does, with no window and no focus taken. A file
+older than 15 minutes counts for nothing.
+
+It never touches the agents: their updates keep their own automatic switch
+(`autoUpdateHarnesses`, [agent updates](agent-updates.md)). Update all, by
+contrast, does cover them: it starts every agent's update before Boite's own.
+
+The setting follows the group's default machine (`SYNCED_SETTINGS`): it is how
+the owner wants Boite kept current, not something one machine can or cannot
+do. A Docker server cannot update itself, but as the default machine its
+value still reaches every desktop of the group, set once there from a settings
+card of one of its threads. A desktop that turns it off from its own window
+keeps its own value ([synchronization](machines.md#automatic-settings-synchronization)).
 
 ## Boite and Boite Nightly
 
