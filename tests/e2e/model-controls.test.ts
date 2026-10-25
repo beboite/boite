@@ -21,7 +21,7 @@ async function resetPicker() {
   }
   if (await page.evaluate(`matchMedia('(max-width: 720px)').matches && !!document.querySelector('[data-testid=mobile-back]')`)) {
     await page.click('[data-testid=mobile-back]');
-    await page.waitFor(`document.querySelector('[data-testid=mobile-menu]')`);
+    await page.waitFor(`document.querySelector('[data-testid=mobile-tabs]')`);
   }
   await page.waitFor(`!history.state?.boiteOverlay`);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
