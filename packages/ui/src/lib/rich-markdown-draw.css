@@ -1,0 +1,112 @@
+/* Drawn diagrams and formulas of rendered Markdown (lib/rich-markdown-draw.ts).
+   Global, because reasoning draws its Markdown outside Prose; loaded with the drawing code. */
+
+/* Pele colors every diagram with these variables: a theme or accent change
+   recolors a drawn diagram without drawing it again. */
+.md-mermaid {
+  --pele-bg: var(--color-code-background);
+  --pele-fg: var(--color-foreground);
+  --pele-muted: var(--color-muted-foreground);
+  --pele-line: var(--color-muted-foreground);
+  --pele-surface: var(--color-surface-3);
+  --pele-surface-alt: color-mix(in oklch, var(--color-surface-3) 50%, var(--color-code-background));
+  --pele-border: var(--color-edge);
+  --pele-accent: var(--color-accent);
+  --pele-critical: var(--color-danger);
+  --pele-error: var(--color-danger);
+  --pele-font: var(--font-sans);
+  --pele-font-mono: var(--font-mono);
+  --pele-radius: var(--radius-sm);
+  --pele-series-1: var(--series-1);
+  --pele-series-2: var(--series-2);
+  --pele-series-3: var(--series-3);
+  --pele-series-4: var(--series-4);
+  --pele-series-5: var(--series-5);
+  --pele-series-6: var(--series-6);
+  --pele-series-7: var(--series-7);
+  --pele-series-8: var(--series-8);
+  position: relative;
+  margin: 6px 0 10px;
+  font-family: var(--font-sans);
+  white-space: normal;
+}
+
+/* A code well's twin. A diagram wider than the column shrinks to fit it
+   (Pele's own max-width), and scrolls inside itself past what a layout allows. */
+.md-diagram-figure {
+  display: flex;
+  justify-content: center;
+  padding: 14px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-code-background);
+}
+
+.md-diagram-figure svg { display: block; flex: none; max-width: 100%; height: auto; }
+.md-mermaid > pre { margin: 0; }
+.md-mermaid[data-view='diagram'] > pre,
+.md-mermaid[data-view='code'] > .md-diagram-figure { display: none; }
+
+/* Over the top right corner, for a pointer or the keyboard. */
+.md-diagram-bar {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--color-code-background);
+  opacity: 0;
+  transition: opacity var(--dur-2) var(--ease-out-quint);
+}
+
+.md-mermaid:hover > .md-diagram-bar,
+.md-mermaid:focus-within > .md-diagram-bar { opacity: 1; }
+/* A touch screen has no hover to reveal it: the bar sits above the diagram rather than over it. */
+@media (hover: none) {
+  .md-diagram-bar { position: static; justify-content: flex-end; margin-bottom: 4px; padding: 0; background: none; opacity: 1; }
+}
+
+.md-diagram-error {
+  margin: 4px 0 0;
+  color: var(--color-muted-foreground);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  white-space: normal;
+}
+
+.md-math { white-space: normal; }
+
+/* A display formula is a block of its own that scrolls sideways rather than widen the column. */
+div.md-math,
+span.md-math[data-display].md-drawn {
+  display: block;
+  max-width: 100%;
+  margin: 6px 0 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+}
+
+div.md-math:not(.md-drawn) { white-space: pre-wrap; }
+
+/* The source stays as written, marked as unread; the tooltip says why. */
+.md-math-failed {
+  text-decoration: underline dotted var(--color-danger);
+  text-underline-offset: 3px;
+}
+
+/* The field a copy without the clipboard API selects, for the length of one command. 16px keeps Safari from zooming. */
+.md-copy-field {
+  position: fixed;
+  top: 0;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  font-size: 16px;
+  opacity: 0;
+}

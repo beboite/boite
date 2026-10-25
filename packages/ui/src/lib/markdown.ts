@@ -5,6 +5,12 @@ import { BracketLinks, richInline, codeLinkHtml, threadAddress, threadLinkHtml }
  * strikethrough, links. Everything is escaped first, so the output is safe to
  * put in the page. No images: a `data:` picture arrives as a tool document,
  * and an answer never fetches a remote one.
+ *
+ * A closed ```` ```mermaid ```` block and math between `$$…$$`, `\[…\]`,
+ * `\(…\)` or in a ```` ```math ```` block become marked elements that still
+ * show their source (`md-mermaid`, `md-math`); `lib/rich-markdown.ts` draws
+ * them once they are in the page. A single `$` is never math: prices and
+ * `$PATH` stay text.
  */
 
 function escape(text: string): string {
@@ -26,9 +32,23 @@ function inline(text: string, rich = false): string {
     const link = rich ? codeLinkHtml(value) : threadAddress(value) ? threadLinkHtml(value, value) : null;
     code.push(`<code>${link ?? escape(value)}</code>`);
     return `${lead}${marker}${code.length - 1}${marker}`;
+  }).replace(INLINE_MATH, (source: string, display?: string, bracket?: string, paren?: string) => {
+    // Math is found after code spans are set aside, so a formula in `code` stays code.
+    const tex = (display ?? bracket ?? paren ?? '').trim();
+    if (!tex || tex.includes('\0')) return source;
+    code.push(mathHtml('span', tex, source, paren === undefined));
+    return `${marker}${code.length - 1}${marker}`;
   });
   // Format around opaque spans, then restore them without parsing their contents.
   return (rich ? richInline(protectedText, inlineFormatting) : inlineFormatting(protectedText)).split(marker).map((part, index) => index % 2 ? code[Number(part)]! : part).join('');
+}
+
+/** `$$…$$` and `\[…\]` (display) or `\(…\)` (inline) on one line. One `$` is a price, not math. */
+const INLINE_MATH = /\$\$(.+?)\$\$|\\\[(.+?)\\\]|\\\((.+?)\\\)/g;
+
+/** A formula as its source, marked for `lib/rich-markdown.ts`: `source` is what a copy gives back. */
+function mathHtml(tag: 'span' | 'div', tex: string, source: string, display: boolean): string {
+  return `<${tag} class="md-math"${display ? ' data-display' : ''} data-tex="${escape(tex)}" data-source="${escape(source)}">${escape(source)}</${tag}>`;
 }
 
 function inlineFormatting(text: string): string {
@@ -184,6 +204,14 @@ export function renderMarkdown(source: string, rich = false): string {
       continue;
     }
 
+    const math = readDisplayMath(lines, index);
+    if (math) {
+      flushAll();
+      html.push(math.html);
+      index = math.end;
+      continue;
+    }
+
     if (RULE.test(line)) {
       flushAll();
       html.push('<hr>');
@@ -243,8 +271,38 @@ function readFence(lines: string[], start: number): Block | null {
   const code: string[] = [];
   let end = start + 1;
   while (end < lines.length && !FENCE.test(lines[end] ?? '')) code.push(lines[end++] ?? '');
+  const source = code.join('\n');
+  // Only a closed block is drawn: one still being written stays code.
+  const closed = end < lines.length;
+  const kind = fence[1]?.toLowerCase();
+  if (closed && kind === 'math' && source.trim()) {
+    return { html: mathHtml('div', source.trim(), lines.slice(start, end + 1).join('\n'), true), end };
+  }
   const language = fence[1] ? ` data-language="${escape(fence[1])}"` : '';
-  return { html: `<pre${language}><code>${escape(code.join('\n'))}</code></pre>`, end };
+  const pre = `<pre${language}><code>${escape(source)}</code></pre>`;
+  if (closed && kind === 'mermaid' && source.trim()) return { html: `<div class="md-mermaid" data-source="${escape(source)}">${pre}</div>`, end };
+  return { html: pre, end };
+}
+
+/**
+ * A formula on lines of its own: `$$` or `\[` opens it at the start of a
+ * line and its closing mark ends a line, the same one or a later one. With no
+ * closing mark, the lines stay text.
+ */
+function readDisplayMath(lines: string[], start: number): Block | null {
+  const first = (lines[start] ?? '').trim();
+  const close = first.startsWith('$$') ? '$$' : first.startsWith('\\[') ? '\\]' : null;
+  if (!close) return null;
+  for (let end = start; end < lines.length; end++) {
+    const line = (lines[end] ?? '').trim();
+    if (!line.endsWith(close) || (end === start && line.length < 4)) continue;
+    const source = lines.slice(start, end + 1).map(text => text.trim()).join('\n');
+    const tex = source.slice(2, -2).trim();
+    // `$$a$$ and $$b$$` on one line is two formulas in a paragraph, not one from `a` to `b`.
+    if (!tex || tex.includes(close === '$$' ? '$$' : '\\]')) return null;
+    return { html: mathHtml('div', tex, source, true), end };
+  }
+  return null;
 }
 
 function readQuote(lines: string[], start: number, rich: boolean): Block | null {

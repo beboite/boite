@@ -98,3 +98,47 @@ test('a thread address links to the thread, not to a file', () => {
   expect(renderMarkdown('[open it](boite/thr_tkw9n9qt4100rvq2jmg1)', true))
     .toBe('<p><a href="#thread" data-thread-address="boite/thr_tkw9n9qt4100rvq2jmg1">open it</a></p>');
 });
+
+describe('diagrams and formulas', () => {
+  test('a single dollar is a price or a variable, never math', () => {
+    for (const text of ['between 5 $ and 10 $', 'costs $5 to $10', 'echo $PATH and $HOME', 'a $x$ b']) {
+      expect(renderMarkdown(text)).not.toContain('md-math');
+    }
+  });
+
+  test('formulas: inline, display on one line, display on lines of their own, and a math block', () => {
+    expect(renderMarkdown('mass \\(E = mc^2\\) here')).toBe(
+      '<p>mass <span class="md-math" data-tex="E = mc^2" data-source="\\(E = mc^2\\)">\\(E = mc^2\\)</span> here</p>'
+    );
+    expect(renderMarkdown('so $$a*b*c$$ and \\[x\\]')).toBe(
+      '<p>so <span class="md-math" data-display data-tex="a*b*c" data-source="$$a*b*c$$">$$a*b*c$$</span> and <span class="md-math" data-display data-tex="x" data-source="\\[x\\]">\\[x\\]</span></p>'
+    );
+    expect(renderMarkdown('Text\n$$\n\\frac{a}{b} < 1\n$$\nafter')).toBe(
+      '<p>Text</p><div class="md-math" data-display data-tex="\\frac{a}{b} &lt; 1" data-source="$$\n\\frac{a}{b} &lt; 1\n$$">$$\n\\frac{a}{b} &lt; 1\n$$</div><p>after</p>'
+    );
+    expect(renderMarkdown('\\[\n x^2 \n\\]')).toContain('<div class="md-math" data-display data-tex="x^2"');
+    expect(renderMarkdown('```math\n\\sum_i i\n```')).toBe(
+      '<div class="md-math" data-display data-tex="\\sum_i i" data-source="```math\n\\sum_i i\n```">```math\n\\sum_i i\n```</div>'
+    );
+  });
+
+  test('math in code stays code', () => {
+    expect(renderMarkdown('`$$x$$` and `\\(y\\)`')).toBe('<p><code>$$x$$</code> and <code>\\(y\\)</code></p>');
+    expect(renderMarkdown('```\n$$x$$\n```')).toBe('<pre><code>$$x$$</code></pre>');
+    expect(renderMarkdown('```tex\n\\[x\\]\n```')).not.toContain('md-math');
+  });
+
+  test('a formula with no closing mark stays text', () => {
+    expect(renderMarkdown('$$\nx^2 +')).toBe('<p>$$\nx^2 +</p>');
+    expect(renderMarkdown('open \\( and never closed')).not.toContain('md-math');
+    expect(renderMarkdown('```math\nx^2')).toBe('<pre data-language="math"><code>x^2</code></pre>');
+  });
+
+  test('a closed mermaid block is marked with its source; one still being written stays code', () => {
+    expect(renderMarkdown('```mermaid\nflowchart LR\n  A["<b>x</b>"] --> B\n```')).toBe(
+      '<div class="md-mermaid" data-source="flowchart LR\n  A[&quot;&lt;b&gt;x&lt;/b&gt;&quot;] --&gt; B"><pre data-language="mermaid"><code>flowchart LR\n  A[&quot;&lt;b&gt;x&lt;/b&gt;&quot;] --&gt; B</code></pre></div>'
+    );
+    expect(renderMarkdown('```mermaid\nflowchart LR\n  A --> B')).toBe('<pre data-language="mermaid"><code>flowchart LR\n  A --&gt; B</code></pre>');
+    expect(renderMarkdown('```mermaid\n```')).toBe('<pre data-language="mermaid"><code></code></pre>');
+  });
+});
