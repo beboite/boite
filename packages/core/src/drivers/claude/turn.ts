@@ -75,6 +75,8 @@ export class ClaudeTurn {
   private textIndex: number | null = null;
   private thinkingIndex: number | null = null;
   private apiMessageId = '';
+  /** Parts of the current API attempt, until a message_delta confirms its completion. */
+  private attemptStart: number | null = null;
   private readonly tools = new Map<string, ToolEntry>();
   private readonly textBlocks = new Map<number, number>();
   private readonly thinkingBlocks = new Map<number, number>();
@@ -246,6 +248,7 @@ export class ClaudeTurn {
    * the turn, drawn as a quiet line; the CLI writes nothing else for it.
    */
   private handleSystem(message: Extract<SDKMessage, { type: 'system' }>): void {
+    if (message.subtype === 'api_retry') this.discardAttempt();
     if (message.subtype === 'commands_changed') this.ctx.commands(commandsOf(message.commands));
     if (message.subtype === 'informational' && message.prevent_continuation === true) {
       this.part(this.takeIndex(), hookEndPart(message.content));
@@ -264,6 +267,10 @@ export class ClaudeTurn {
   private handleStream(event: StreamEvent): void {
     switch (event.type) {
       case 'message_start':
+        // Give each request its own parts so a retry can replace just its failed attempt.
+        this.textIndex = null;
+        this.thinkingIndex = null;
+        this.attemptStart = this.nextIndex;
         this.requestAt = Date.now();
         this.apiMessageId = event.message?.id ?? '';
         this.streamedText = '';
@@ -320,9 +327,25 @@ export class ClaudeTurn {
         this.streamContent('text', event.index, event.delta.text ?? '');
         break;
       }
+      case 'message_delta':
+        // The CLI also synthesizes message_stop when a stream is interrupted.
+        if (event.delta?.stop_reason) this.attemptStart = null;
+        break;
       default:
         break;
     }
+  }
+
+  /** An interrupted response is replaced on retry; earlier requests and tools remain. */
+  private discardAttempt(): void {
+    const start = this.attemptStart;
+    if (start === null) return;
+    for (let index = start; index < this.nextIndex; index += 1) this.part(index, { type: 'text', text: '' });
+    for (const [id, tool] of this.tools) if (tool.index >= start) this.tools.delete(id);
+    this.nextIndex = start;
+    this.textIndex = null;
+    this.thinkingIndex = null;
+    this.attemptStart = null;
   }
 
   private streamContent(kind: 'text' | 'thinking', blockIndex: number | undefined, text: string): void {
