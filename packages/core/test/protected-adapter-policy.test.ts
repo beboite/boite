@@ -129,3 +129,47 @@ test('protected ACP rejects absent, refused and falsely acknowledged native mode
   refused = false;
   expect(await thrown(controls.applyMode(ctx))).toThrow('did not confirm plan');
 });
+
+test('protected ACP confirms the selected model before fresh and warm prompts', async () => {
+  const ctx = context(); ctx.thread.model = 'fixture/selected'; ctx.thread.effort = null;
+  const option = (currentValue: string): SessionConfigOption => ({type: 'select', id: 'model', name: 'Model', category: 'model', currentValue,
+    options: ['fixture/selected', 'fixture/default'].map(value => ({value, name: value}))});
+  let answer: unknown = {}, refusal = false, requests = 0;
+  const controls = new SessionControls(() => ({sessionId: 'synthetic-session', agent: {async request() {
+    requests++;
+    if (refusal) throw new Error('synthetic model refusal');
+    return answer;
+  }} as unknown as ClientContext}));
+  expect(await thrown(controls.applyConfig(ctx))).toThrow('execution.acp.model');
+  controls.noteSession(null, [option('fixture/default')], {});
+  controls.noteOwnModel([option('fixture/default')]);
+  ctx.thread.model = 'fixture/missing';
+  expect(await thrown(controls.applyConfig(ctx))).toThrow('execution.acp.model');
+  ctx.thread.model = 'fixture/selected'; refusal = true;
+  expect(await thrown(controls.applyConfig(ctx))).toThrow('native agent refused');
+  refusal = false;
+  expect(await thrown(controls.applyConfig(ctx))).toThrow('did not confirm');
+  answer = {configOptions: [option('fixture/default')]};
+  expect(await thrown(controls.applyConfig(ctx))).toThrow('did not confirm');
+  answer = {configOptions: [option('fixture/selected')]};
+  await controls.applyConfig(ctx);
+  const admitted = requests;
+  await controls.applyConfig(ctx); expect(requests).toBe(admitted);
+  controls.noteOptionUpdate([option('fixture/default')]);
+  await controls.applyConfig(ctx); expect(requests).toBe(admitted + 1);
+  controls.noteOptionUpdate([option('fixture/default')]); refusal = true;
+  expect(await thrown(controls.applyConfig(ctx))).toThrow('native agent refused');
+  refusal = false; ctx.thread.model = 'default';
+  answer = {configOptions: [option('fixture/default')]};
+  await controls.applyConfig(ctx);
+});
+
+test('native-default selection stays explicit and ordinary ACP model preferences stay permissive', async () => {
+  const ctx = context(); ctx.thread.model = 'default'; ctx.thread.effort = null;
+  const controls = new SessionControls(() => ({agent: {async request() {throw new Error('native default must not select a model');}} as unknown as ClientContext, sessionId: 'synthetic-session'}));
+  await controls.applyConfig(ctx);
+  ctx.protectedExecution = undefined; ctx.thread.model = 'fixture/unavailable';
+  controls.noteSession(null, [{type: 'select', id: 'model', name: 'Model', category: 'model', currentValue: 'fixture/default',
+    options: [{value: 'fixture/unavailable', name: 'Unavailable'}]}], {});
+  await controls.applyConfig(ctx);
+});

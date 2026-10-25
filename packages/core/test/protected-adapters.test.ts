@@ -112,6 +112,16 @@ describe.skipIf(!native)('native protected extensions', () => {
     expect(disabledRequests.length).toBeGreaterThan(0);
     expect(disabledRequests.every(request => !request.tools?.length)).toBe(true);
     expect(readFileSync(join(root, 'answer.js'), 'utf8')).toContain('return 41');
+    if (protocol === 'opencode') {
+      // A warm protected process must not keep the native default when the
+      // captured host selection disappears from the live model catalogue.
+      const before = api.requests.length;
+      const missing = {...ctx, thread: {...ctx.thread, model: 'fixture/unoffered-model'}, protectedExecution: disabled};
+      const refused = await driver.startTurn(missing).done;
+      expect(refused).toMatchObject({status: 'error'});
+      expect(api.requests).toHaveLength(before);
+      expect(refused.error).toContain('execution.acp.model');
+    }
     await core.procs.protection.revoke(thread.id);
     const before = api.requests.length;
     expect(await driver.startTurn(warm).done).toMatchObject({status: 'error'});

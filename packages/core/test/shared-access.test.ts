@@ -133,6 +133,25 @@ test.skipIf(!nativePlatforms.includes(process.platform) || process.env.BOITE_TES
   } finally {api.stop();}
 }, 60000);
 
+test.skipIf(!nativePlatforms.includes(process.platform) || process.env.BOITE_TEST_NATIVE_EXECUTION !== '1')('protected opencode remote jobs refuse an unavailable host model before any API call', async () => {
+  const {a, b, sharedProjectId, job, agent} = await fixture(); agent.close();
+  await a.client.call('sharedCompute.cancel', {sharedProjectId, threadId: a.threadId, jobId: job.id, requestId: 'cancel-initial'});
+  const api = protectedProviderApi('claude', [], body => !(body as {tools?: unknown[]}).tools?.length);
+  try {
+    await nativeHost(b, 'opencode', api);
+    const model = 'fixture/unoffered-model';
+    b.h.core.providers.require('opencode').models = [{id: model, name: 'Unavailable native model', default: true}];
+    await b.client.call('threads.update', {threadId: b.threadId, model});
+    await b.client.call('sharedProjects.configure', {sharedProjectId, computeThreadId: b.threadId,
+      compute: {enabled: true, profiles: ['conversation'], permissionMode: 'default', maxConcurrent: null}});
+    const started = await a.client.call('sharedCompute.start', {sharedProjectId, threadId: a.threadId, requestId: 'missing-model',
+      host: b.ref, profileId: 'conversation', baseCommit: await git(a.h, a.path, 'rev-parse', 'HEAD'), task: 'Run using the host-selected model.'});
+    await waitFor(() => ['done', 'failed'].includes(b.h.core.sharedCompute.journal.get(started.id, 'host')!.job.status), 30000);
+    expect(b.h.core.sharedCompute.journal.get(started.id, 'host')!.job).toMatchObject({status: 'failed', model});
+    expect(api.requests).toHaveLength(0);
+  } finally {api.stop();}
+}, 60000);
+
 // Actual provider processes use the same scope preparation as ordinary turns.
 test.skipIf(!nativePlatforms.includes(process.platform) || process.env.BOITE_TEST_NATIVE_EXECUTION !== '1').each(nativeProviders.flatMap(protocol => (['letter', 'board'] as const).map(route => [protocol, route] as const)))('protected %s %s scopes retire ordinary warm control, inherit, replace overrides and stop tools', async (protocol, route) => {
   const {a, b, sharedProjectId, job, agent} = await fixture(); agent.close();

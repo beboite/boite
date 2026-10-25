@@ -146,18 +146,17 @@ export class SessionControls {
 
   /**
    * `config_option_update`: the options as the agent says they now stand.
-   * Only the mode is taken from it, for an agent whose modes are a config
+   * Mode and model values are taken from it, for an agent whose modes are a config
    * option and that left one on its own: without it the kept value would still
    * say `plan`, nothing would be sent, and the next turn would run in the
-   * agent's mode instead of the thread's. The model and the effort keep what
-   * Boite's own calls were answered.
+   * agent's mode instead of the thread's. A changed model invalidates the
+   * previous admission before the next protected prompt.
    */
   noteOptionUpdate(options: SessionConfigOption[]): void {
-    const mode = categoryOption(options, 'mode');
-    // Only an option the session already listed is refreshed: one that appears
-    // here first would make a session with no options look as if it had some.
-    if (mode === null || !this.configOptions.some((entry) => entry.id === mode.id)) return;
-    this.configOptions = this.configOptions.map((entry) => (entry.id === mode.id ? mode : entry));
+    this.configOptions = this.configOptions.map(entry => {
+      if (entry.category !== 'mode' && entry.category !== 'model') return entry;
+      return options.find(option => option.id === entry.id && option.category === entry.category) ?? entry;
+    });
   }
 
   /** `current_mode_update`: a mode change the agent announced on its own. */
@@ -334,10 +333,10 @@ export class SessionControls {
     // answers `session/set_config_option` with method-not-found: nothing goes
     // out.
     if (isGrok(ctx.provider)) return;
-    if (this.configOptions.length === 0) return;
+    if (this.configOptions.length === 0 && !ctx.protectedExecution) return;
     const model = ctx.thread.model;
     const effort = ctx.thread.effort;
-    if (model !== this.appliedModel) {
+    if (model !== this.appliedModel || ctx.protectedExecution) {
       // Back to the agent's own model on a session moved off it: that model
       // has to be asked for, or the session stays on the last one.
       const wanted = model === AGENT_OWN_MODEL && this.appliedModel !== undefined && this.ownModel !== null ? this.ownModel : model;
@@ -346,6 +345,8 @@ export class SessionControls {
         // what the answer now reports decides whether the effort goes again.
         if (this.appliedModel !== model) this.appliedEffort = undefined;
         this.appliedModel = model;
+      } else if (ctx.protectedExecution) {
+        throw new Error(`execution.acp.model: native agent offers no confirmed model ${wanted}`);
       }
     }
     if (effort !== this.appliedEffort && (await this.setOption(ctx, 'thought_level', effort))) {
@@ -381,6 +382,7 @@ export class SessionControls {
     wanted: string | null,
   ): Promise<boolean> {
     const { agent, sessionId } = this.target();
+    const strictModel = !!ctx.protectedExecution && category === 'model';
     if (agent === null || sessionId === null) return false;
     // No effort set: an agent that lists `default` among its levels (OpenCode
     // 2) is put back on it, since it keeps the last level it was asked for.
@@ -398,7 +400,7 @@ export class SessionControls {
     // Already the value this session last reported: nothing to send.
     if (this.ownOptions && listed?.type === 'select' && String(listed.currentValue) === wanted) return true;
     const refusal = `${category}\0${wanted}`;
-    if (this.refused.has(refusal)) return false;
+    if (!strictModel && this.refused.has(refusal)) return false;
     const option = listed ?? this.injectedModelOption(ctx, category, wanted);
     if (option === undefined) {
       if (!this.configWarned) {
@@ -423,6 +425,12 @@ export class SessionControls {
         });
         // The answer carries the options as they now stand, current values included.
         const options = (answer as { configOptions?: SessionConfigOption[] | null }).configOptions ?? null;
+        if (strictModel) {
+          const confirmed = categoryOption(options ?? [], 'model');
+          if (confirmed?.type !== 'select' || confirmed.currentValue !== wanted) {
+            throw new Error(`execution.acp.model: native agent did not confirm ${wanted}`);
+          }
+        }
         if (options !== null && options.length > 0) {
           this.configOptions = options;
           this.ownOptions = true;
@@ -431,6 +439,7 @@ export class SessionControls {
       } catch (error) {
         const wait = waits[attempt];
         if (wait === undefined) {
+          if (strictModel) throw new Error(`execution.acp.model: native agent refused ${wanted}: ${messageOf(error)}`);
           ctx.log('warn', `acp: the agent refused the ${category} ${wanted}: ${messageOf(error)}`);
           this.refused.add(refusal);
           return false;

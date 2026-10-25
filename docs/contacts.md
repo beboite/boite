@@ -1003,6 +1003,27 @@ The named suites exercise behavior on fresh journals and deterministic fixtures.
 Core fixtures use real RPC sockets and signed/sealed peer transport. Browser
 fixtures use the in-memory client and prove presentation, not OS isolation.
 An unavailable requirement is recorded explicitly rather than counted as passed.
+Native results below apply to these observed hosts and modes, rather than every
+platform a provider can launch on.
+
+| Native host | Claude / SDK | Codex / app-server | OpenCode / ACP | pi / RPC | Muse / MSP |
+| --- | --- | --- | --- | --- | --- |
+| Linux x64, Bun 1.4.3, bubblewrap 0.13.1 | Tools, jobs/Git, board, letters | Same | Same; explicit unavailable model refused before API | Same | Same, verified 1.4.13 only |
+| Windows x64 NT 10.0.26200, Bun 1.4.3 | Tools, jobs/Git, board, letters | Same | Same; explicit unavailable model refused before API | Same | Not attested |
+| Hosted Server 2025 NT 10.0.26100 | Native NUL prerequisite refuses admission | Same | Same | Same | Not attested |
+| Linux arm64 | Backend source exists; native execution not attested | Same | Same | Same | Same |
+| macOS | No protected backend; refused | Same | Same | Same | Same |
+
+Native fixtures exercise Claude 2.1.310 and Codex 0.164.0 in default and YOLO,
+OpenCode 1.19.3 in default/build, pi 1.4.0 in YOLO, and Muse 1.4.13 in default
+and YOLO on Linux. OpenCode also admits plan with deterministic mode-admission
+coverage; a complete native plan scenario is not attested. pi admits only YOLO
+or bypassPermissions. Muse pins its MSP fingerprint and refuses legacy 1.3;
+other versions remain unsupported. Echo/default is tool-free orchestration.
+Control clients retain the selected host account and necessary API/auth transport;
+only model-facing tools enter OS containment. No live inference, Meta-login
+refresh, real quota, nine concurrent native jobs, physical phone or real
+Tailscale/Funnel acceptance is implied by these fixtures.
 
 | Required outcome | Executable evidence | Coverage and current limit |
 | --- | --- | --- |
@@ -1036,8 +1057,12 @@ contribution preserved its binding, grant revision and running jobs at both ends
 The desktop and phone captures were opened. These remain deterministic
 protocol/UI fixtures, not native-provider isolation proof.
 
-The overall release gate remains incomplete pending the independent combined
-integration/security review. Claude/Codex/OpenCode/pi now have native Linux and
+The independent combined native review found an OpenCode model-selection defect
+and the Server 2025 admission blocker. Protected ACP now requires confirmed model
+selection before fresh and warm prompts. Native regressions cover refusal before
+any API request, including a complete remotely hosted job. Server compatibility
+and current-head CI/review clearance remain required release gates.
+Claude/Codex/OpenCode/pi now have native Linux and
 Windows driver/control/tool fixtures proving useful edits/build/tests, forged
 tool denial, account/mode retention, associated letters/board goals, warm
 transitions, protected stop/overrides and real Git result consumption. These run

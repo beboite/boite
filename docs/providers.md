@@ -1047,6 +1047,12 @@ selection, including normalized JSONC and custom configuration files. Only SDKs
 bundled by this native version may load; external SDK imports, legacy TOML and
 remote-configuration credentials are refused explicitly. User plugins, MCP,
 commands and project configuration cannot follow the protected session.
+An explicit protected model must appear in the native catalogue or the selected
+account's injected provider and be confirmed by ACP before a prompt. Missing,
+refused or unconfirmed selections stop the turn without API traffic. Warm
+turns recheck the current native model, including announced drift; choosing
+the native default remains a separate selection. Ordinary local ACP keeps its
+existing best-effort model preference.
 
 pi 1.4.0 uses its own extension API: builtins, discovered extensions, MCP, skills,
 prompts and project context are disabled, and a core extension registers only
