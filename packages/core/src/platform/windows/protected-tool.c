@@ -245,9 +245,9 @@ static int launch(int count, wchar_t **args) {
   stage = L"launch.token";
   if (!OpenProcessToken(child.hProcess, TOKEN_QUERY | TOKEN_ADJUST_DEFAULT, &child_token)) {error = GetLastError(); goto end;}
   BOOL checked = GetTokenInformation(child_token, TokenIsAppContainer, &is_container, sizeof(is_container), &returned);
-  /* Server lowbox tokens can retain a host-only default DACL. A pipe created
-   * with that DACL cannot be reopened by its own restricted token. Set only
-   * this suspended job token's default, so new private IPC admits its package;
+  /* A pipe with a host-only default DACL cannot be reopened by its own
+   * restricted token. Set only this suspended job token's default, so new
+   * private IPC admits its package;
    * no ambient application-package or host object grant is restored. */
   PACL default_acl = NULL; BOOL present = FALSE, defaulted = FALSE;
   if (checked && is_container) {
@@ -299,13 +299,37 @@ static int probe(const wchar_t *path) {
   HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
   if (file != INVALID_HANDLE_VALUE) {CloseHandle(file); return failure(L"probe.ambient-grant", ERROR_ACCESS_DENIED);}
   if (GetLastError() != ERROR_ACCESS_DENIED) return failure(L"probe.ambient-path", GetLastError());
+  /* Native child runtimes open NUL even for piped stdio (ignored stdin).
+   * Some Server kernels omit LPAC access on this existing system device. No
+   * job-local ACL/token default can grant access to an existing host device;
+   * refuse admission before a prompt instead of failing a later model tool. */
+  file = CreateFileW(L"NUL", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+    NULL, OPEN_EXISTING, 0, NULL);
+  if (file == INVALID_HANDLE_VALUE) return failure(L"probe.null-device", GetLastError());
+  CloseHandle(file);
   fputws(VERSION, stdout); return 0;
+}
+
+/* Read-only diagnostic for the platform prerequisite, never edits its ACL. */
+static int diagnose_null(void) {
+  HANDLE file = CreateFileW(L"NUL", READ_CONTROL, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+  if (file == INVALID_HANDLE_VALUE) return failure(L"null-device.open-security", GetLastError());
+  PSECURITY_DESCRIPTOR descriptor = NULL; LPWSTR text = NULL;
+  DWORD error = GetSecurityInfo(file, SE_KERNEL_OBJECT, DACL_SECURITY_INFORMATION, NULL, NULL, NULL, NULL, &descriptor);
+  if (!error && !ConvertSecurityDescriptorToStringSecurityDescriptorW(descriptor, SDDL_REVISION_1,
+      DACL_SECURITY_INFORMATION, &text, NULL)) error = GetLastError();
+  if (!error) fwprintf(stdout, L"NUL DACL: %ls\n", text);
+  if (text) LocalFree(text);
+  if (descriptor) LocalFree(descriptor);
+  CloseHandle(file);
+  return error ? failure(L"null-device.security", error) : 0;
 }
 
 int main(void) {
   int count = 0; wchar_t **args = CommandLineToArgvW(GetCommandLineW(), &count);
   int result = 125;
   if (count == 2 && !wcscmp(args[1], L"--version")) {fputws(VERSION, stdout); result = 0;}
+  else if (count == 2 && !wcscmp(args[1], L"--diagnose-null")) result = diagnose_null();
   else if (count == 3 && !wcscmp(args[1], L"--probe")) result = probe(args[2]);
   else if (count > 1 && !wcscmp(args[1], L"setup")) result = setup(count, args);
   else if (count > 1 && !wcscmp(args[1], L"run")) result = launch(count, args);

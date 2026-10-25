@@ -193,9 +193,11 @@ jobs:
         if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
         shell: pwsh
         run: |
+          Write-Host "Native Windows kernel: $([Environment]::OSVersion.Version)"
           bun packages/core/bin/install-windows-sandbox.ts "$env:RUNNER_TEMP\protected-tool.exe"
           bun packages/core/bin/install-windows-sandbox.ts "$env:RUNNER_TEMP\protected-tool-mingw.exe" 'C:\mingw64\bin\gcc.exe'
           Get-FileHash "$env:RUNNER_TEMP\protected-tool*.exe" -Algorithm SHA256 | Format-List
+          & "$env:RUNNER_TEMP\protected-tool.exe" --diagnose-null
           "BOITE_WINDOWS_SANDBOX_PATH=$env:RUNNER_TEMP\protected-tool.exe" >> $env:GITHUB_ENV
       - name: Native Windows protected tools
         if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'

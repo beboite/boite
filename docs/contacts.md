@@ -1046,10 +1046,13 @@ Muse 1.4.13 proves its mandatory native-tool gate, useful execution,
 job/letter/board transitions and actual Git consumption on Linux; 1.3.0 remains
 refused. Muse Windows, native macOS and live inference remain unverified.
 Windows evidence comes from its own native lane, independently of Linux.
-The full native Windows result currently comes from NT 10.0.26200 with a MinGW
-helper. Server 2025 NT 10.0.26100 still refuses native descendants with EPERM
-after an SDK clang build; its required Windows check remains red. This confirmed
-platform defect blocks Windows readiness despite the successful 26200 fixtures.
+The full native Windows result currently comes from NT 10.0.26200. Exact SDK
+clang and MinGW helper bytes from CI both pass there. On Server 2025 NT
+10.0.26100, the existing NUL device denies LPAC read/write with native error 5;
+private pipes and direct child creation succeed. Both compilers reproduce this
+failure. Admission now checks NUL access before any model tool. The Server CI
+lane remains red, so Windows readiness remains incomplete; the 26200 result does
+not attest Server 2025 compatibility. No host device ACL is changed.
 
 ### Native Windows tool execution
 
@@ -1108,6 +1111,13 @@ Nothing compiles or downloads at core startup. Missing helpers or unsupported
 Windows kernel attributes fail closed before a model tool runs. The launcher
 creates and releases its own window station and desktop, including in a
 noninteractive session; it does not alter a host station or desktop ACL.
+It also sets a package-specific default DACL on the suspended job token for new
+private IPC objects. Admission requires the existing NUL device to admit LPAC
+read/write, because native child runtimes open it for ignored standard streams.
+`protected-tool.exe --diagnose-null` prints that device's existing DACL without
+changing it. Server 2025 build 26100 currently fails this prerequisite; build
+26200 passes the complete native fixture. The backend uses the actual access
+probe, rather than assuming a particular version is sufficient.
 The native Windows CI lane runs inside the existing Windows core check, including protection
 changes on a draft PR. It uses synthetic directories/accounts and deterministic
 local provider APIs. Its fixture checks useful builds/tests, secret paths,
