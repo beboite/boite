@@ -11,6 +11,7 @@
   import PermissionCard from './PermissionCard.svelte';
   import PlanCard from './PlanCard.svelte';
   import QuestionCard from './QuestionCard.svelte';
+  import SecretCard from './SecretCard.svelte';
   import { openQuestionPage } from '../lib/question-page';
   import SettingRequestCard from './SettingRequestCardLoader.svelte';
   import AgentSettingCard from './AgentSettingCardLoader.svelte';
@@ -191,6 +192,8 @@
           page={part.open?.url}
           onopen={() => openQuestionPage(store, message.threadId, part.questionId)}
         />
+      {:else if part.type === 'secret_request'}
+        <SecretCard {store} threadId={message.threadId} {part} />
       {:else if part.type === 'compaction'}
         <div class="compaction" data-testid="compaction-part" data-trigger={part.trigger}>
           <span class="rule"></span>

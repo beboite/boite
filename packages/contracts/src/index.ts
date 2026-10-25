@@ -36,6 +36,7 @@ import type { ProjectsRpcEvents, ProjectsRpcMethods } from './projects';
 import type { ProvidersRpcEvents, ProvidersRpcMethods } from './providers';
 import type { QuestionsRpcEvents, QuestionsRpcMethods } from './questions';
 import type { SchedulerRpcEvents, SchedulerRpcMethods } from './scheduler';
+import type { SecretsRpcEvents, SecretsRpcMethods } from './secrets';
 import type { SettingsRpcEvents, SettingsRpcMethods } from './settings';
 import type { SpeechRpcMethods } from './speech';
 import type { SubscriptionProxyRpcEvents, SubscriptionProxyRpcMethods } from './subscription-proxy';
@@ -56,6 +57,7 @@ export * from './turns';
 export * from './messages';
 export * from './permissions';
 export * from './questions';
+export * from './secrets';
 export * from './trace';
 export * from './scheduler';
 export * from './settings';
@@ -119,6 +121,7 @@ export interface RpcMethods extends
   MessagesRpcMethods,
   PermissionsRpcMethods,
   QuestionsRpcMethods,
+  SecretsRpcMethods,
   TraceRpcMethods,
   SchedulerRpcMethods,
   SettingsRpcMethods,
@@ -159,6 +162,7 @@ export interface RpcEvents extends
   MessagesRpcEvents,
   PermissionsRpcEvents,
   QuestionsRpcEvents,
+  SecretsRpcEvents,
   TraceRpcEvents,
   SchedulerRpcEvents,
   SettingsRpcEvents,

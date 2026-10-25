@@ -121,6 +121,10 @@ export class PushStore {
         const text = requestExcerpt(request);
         const kind = requestKind(request);
         this.notify(request.threadId, text ? { body: text, kind } : { body: 'Needs your answer', label: 'needsYou', kind }, `request-${request.id}`, true);
+      } else if (name === 'secret.requested') {
+        // Only that the user is needed: the push service is a third party, and a value never comes this way.
+        const request = payload as RpcEvents['secret.requested'];
+        this.notify(request.threadId, { body: 'Needs your answer', label: 'needsYou', kind: 'questions' }, `request-${request.id}`, true);
       } else if (name === 'turn.finished') {
         const turn = payload as RpcEvents['turn.finished'];
         if (this.closed || this.core.journal.isClosed() || (turn.status !== 'done' && turn.status !== 'error') || !this.reachable()) return;

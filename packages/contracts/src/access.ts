@@ -153,6 +153,10 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'questions.openPage', // The address a pending question of the subscribed conversation carries, rechecked by the core.
   // Paired phones can dismiss the same question cards as the owner's chat.
   'questions.skip',
+  // A secret card answered from the phone, and the project's kept keys listed and deleted there. The core
+  // refuses an answer or a deletion over a link that is not encrypted (core secrets/rpc.ts): the value or
+  // the decision must not cross a LAN in clear. The list carries names and dates, never a value.
+  'secrets.answer', 'secrets.list', 'secrets.delete',
   // A phone says its own language and experiments, so the agent reads the screen the user reads; nothing the core trusts.
   'client.preferences',
   // Read-only Changes and Files panels on the phone: the thread's own changes and files.
@@ -206,6 +210,7 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   'turn.toolCompleted',
   'message.started', 'message.delta', 'message.part', 'message.completed', 'message.truncated',
   'permission.requested', 'permission.resolved', 'question.asked', 'question.answered',
+  'secret.requested', 'secret.resolved', 'secrets.changed', // Names, reasons and refs, never a value.
   'scheduler.updated', 'accounts.updated', 'accounts.removed',
   'quotas.updated', 'quotas.progress', 'subscriptionProxy.quotasUpdated', // What quotas.list and subscriptionProxy.quotas answer.
   'quotas.alerted', // One window of a row quotas.list already answers the device.

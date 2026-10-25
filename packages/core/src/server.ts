@@ -12,6 +12,8 @@ import { messageOf } from './errors.ts';
 import { JOIN_ROUTE } from './group.ts';
 import { CONTACT_JOIN_ROUTE, CONTACT_LINK_ROUTE, type ContactSocketData } from './contacts/store.ts';
 import { LAZY_MCP_ROUTE } from './mcp/lazy.ts';
+import { tailnetAddress } from './group/addresses.ts';
+import { encryptedLink, isLoopbackAddress, isLoopbackHost, RELAYED_LINK_HEADER } from './server/peer.ts';
 import { parseRelayPath, RelayHub, type RelaySocketData } from './group/relay.ts';
 import type { Connection } from './router.ts';
 import type { EventFrames, SocketData } from './server/connection.ts';
@@ -24,6 +26,7 @@ import { FrameQueue } from './server/frame-queue.ts';
 import { Refusals } from './server/refusals.ts';
 import { ticketedFile, viewPage } from './server/tickets.ts';
 export { ServerConnection } from './server/connection.ts';
+export { encryptedLink, isLoopbackAddress, isLoopbackHost } from './server/peer.ts';
 
 const DEFAULT_HELLO_TIMEOUT_MS = 5000;
 /** A hello is a few hundred bytes; nothing larger is parsed from a socket nobody has authenticated. */
@@ -139,24 +142,6 @@ function servedOrigin(core: Core, origin: string | null, host: string | null): v
   } catch {
     // Not an origin: nothing learned.
   }
-}
-
-/**
- * The name the client dialled, from its `Host` header. A tunnel or a reverse
- * proxy on this machine connects from 127.0.0.1 too, so the peer address says
- * nothing; the name it forwards is the public one.
- */
-export function isLoopbackHost(header: string | null): boolean {
-  if (header === null) return false;
-  const name = header.trim().toLowerCase().replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
-  return name === '127.0.0.1' || name === 'localhost' || name === '::1';
-}
-
-/** The peer address `Server.requestIP` gives, IPv4-mapped IPv6 included. */
-export function isLoopbackAddress(address: string | null): boolean {
-  if (address === null) return false;
-  const bare = address.toLowerCase().replace(/^::ffff:/, '');
-  return bare === '::1' || /^127\.\d+\.\d+\.\d+$/.test(bare);
 }
 
 /**
@@ -569,7 +554,8 @@ export function startServer(options: ServerOptions): RunningServer {
             core.log('warn', `refused a relayed websocket: ${refusal}`, { source: 'connections', event: 'connection.preauth-refused' });
             return new Response('too many connections waiting for hello', { status: 503 });
           }
-          const pipe = relays.pipe(relayed.coreId, peer, !isLoopbackHost(request.headers.get('host')));
+          const encrypted = encryptedLink(self.requestIP(request)?.address ?? null, request.headers.get('host'), origin, request.headers.get(RELAYED_LINK_HEADER), tailnetAddress() !== null);
+          const pipe = relays.pipe(relayed.coreId, peer, !isLoopbackHost(request.headers.get('host')), encrypted);
           if (self.upgrade(request, { data: { relay: pipe } })) return undefined;
           pipe.close(1000);
           return new Response('expected a websocket upgrade', { status: 400 });
@@ -592,6 +578,7 @@ export function startServer(options: ServerOptions): RunningServer {
         // this machine is served there, and the others of its group accept that origin from now on. Learned
         // before any hello, so a phone's first page, which holds no key yet, already opens the way to the others.
         const connection = new ServerConnection(core, !isLoopbackHost(request.headers.get('host')));
+        connection.encrypted = encryptedLink(self.requestIP(request)?.address ?? null, request.headers.get('host'), origin, request.headers.get(RELAYED_LINK_HEADER), tailnetAddress() !== null);
         if (self.upgrade(request, { data: { connection, peer } })) {
           // A page of this machine, at an origin it trusts itself and that names the host the socket asked for:
           // this machine is served there, and the others of its group accept that origin from now on. Learned at

@@ -1,5 +1,4 @@
-import { spawn as spawnNodeChild } from 'node:child_process';
-import type { ChildProcessByStdio } from 'node:child_process';
+import { spawn as spawnNodeChild, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
 import type { AgentResourceSnapshot, ProcessRecord, Settings, ThreadId, ThreadLoad, TraceCapability, Turn } from '@boite/contracts';
 import type { Bus } from './bus.ts';
@@ -58,6 +57,7 @@ export interface SpawnedPipedProcess {
   record: ProcessRecord;
   proc: PipedChildProcess;
   exited: Promise<number>;
+  stop: () => void;
 }
 
 export interface TerminalSpawnOptions {
@@ -120,6 +120,7 @@ export interface ProcRegistryOptions {
  */
 export class ProcRegistry {
   readonly memory: MemoryGuard;
+  mask = (_threadId: ThreadId, text: string): string => text; // secrets: a shell can expand `boite secret run`'s variable into a traced command line
   private readonly unassigned = new Set<number>();
   private readonly startups = new Map<ThreadId, { pid: number; timer: ReturnType<typeof setTimeout> }>();
   private readonly exitTimers = new Map<number, ReturnType<typeof setTimeout>>();
@@ -349,12 +350,10 @@ export class ProcRegistry {
       },
     });
 
-    const exited = proc.exited.then((code) => {
-      this.onExit(threadId, record.pid, code, undefined, record);
-      return code;
-    });
-
-    return { record, proc, exited };
+    const exited = proc.exited.then((code) => { this.onExit(threadId, record.pid, code, undefined, record); return code; });
+    // This child and what it started, leaving the thread's other processes: on Windows `proc.kill` reaches no grandchild.
+    const stop = (): void => { const tree = this.platform.terminateUnassigned(proc.pid); this.trackStop(tree instanceof Promise ? tree.then(() => killBunChild(proc), () => killBunChild(proc)) : killBunChild(proc)); };
+    return { record, proc, exited, stop };
   }
 
   /**
@@ -501,6 +500,7 @@ export class ProcRegistry {
   }
 
   private track(threadId: ThreadId, record: ProcessRecord, control: Omit<Entry, 'record' | 'identity'>, identity: ProcessIdentity): void {
+    if (record.commandLine !== null) record.commandLine = this.mask(threadId, record.commandLine);
     const forgetting = this.forgetTimers.get(threadId);
     if (forgetting !== undefined) {
       clearTimeout(forgetting);

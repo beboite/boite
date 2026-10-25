@@ -24,6 +24,7 @@ import { DELEGATE_ACTIONS, delegateCommand } from './delegate-cli.ts';
 import { browserCommand, BROWSER_HELP } from './browser-cli.ts';
 import { browserRun } from './browser-run.ts';
 import { deviceCommand } from './device-cli.ts';
+import { secretCommand } from './secret-cli.ts';
 import { agentsCommand, AgentsUsage, WAIT_MAX_S } from './agents-cli.ts';
 import type { RpcParams } from '@boite/contracts';
 import { contextRequest, parse, requiredText, Usage, type Parsed } from './cli-args.ts';
@@ -94,6 +95,10 @@ ${CONTROL_HELP}
                                  --open <url> adds an Open button for a page
                                  the user must sign in to, in your browser
   ask list                      read this thread's pending questions
+  secret list                    keys kept for this project, by name only
+  secret ask <NAME> --why <text> ask the user for a key on a card; prints
+                                 saved secret:<ref>, declined, cancelled or timed_out
+  secret write|run|pipe <ref>    use it without seeing it; boite secret help
   settings [key]                 Boite settings you may ask about: value, page,
                                  the name the user's app shows; first, the
                                  language the app speaks; experiments last
@@ -358,7 +363,7 @@ function changeRow(change: GitChange): string {
 
 type Printer = (lines: string[], value: unknown) => void;
 
-async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: string, print: Printer, caller: Caller): Promise<void> {
+async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: string, print: Printer, caller: Caller): Promise<void | number> {
   const [command, ...rest] = parsed.positional;
   if (isControlCommand(parsed)) {
     await controlCommand(client, caller, threadId, parsed, print);
@@ -378,7 +383,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
   const agentCaller = Boolean(io.env[AGENT_ENV.coreUrl] && io.env[AGENT_ENV.token] && io.env[AGENT_ENV.threadId]);
   /** `--rules-file`, read from where the command runs. */
   const readRules = (path: string): string => readFileSync(absolute(io.cwd, path), 'utf8');
-  const commands: Record<string, () => Promise<void>> = {
+  const commands: Record<string, () => Promise<void | number>> = {
     'journal-check': async () => {
       if (rest.length !== 0 && rest.length !== 2) throw new Usage('journal-check expects no arguments or a cursor table and rowid');
       const cursor = rest.length ? { table: rest[0] as import('@boite/contracts').JournalInspectionTable, afterRowid: Number(rest[1]) } : null;
@@ -414,6 +419,13 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     device: async () => {
       const result = await deviceCommand(rest, io, client, threadId, parsed.timeout);
       print(result.lines, result.value);
+    },
+    secret: async () => {
+      const result = await secretCommand(rest, io, client, threadId);
+      if (result.output === undefined || parsed.json) { print(result.lines, result.value); return result.output?.exitCode; }
+      if (result.output.stdout) io.out(result.output.stdout);
+      if (result.output.stderr) io.err(result.output.stderr);
+      return result.output.exitCode;
     },
     // `boite --limit 5 logs` parsed them as globals: they come first, so the command's own flags still win.
     // A global `--level` yields to the command's own `--min-level`, which it would otherwise override.
@@ -734,7 +746,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
   };
   const handler = command !== undefined && Object.hasOwn(commands, command) ? commands[command] : undefined;
   if (handler === undefined) throw new Usage(`unknown command ${command}`);
-  await handler();
+  return handler();
 }
 
 /** The exit code: 0, 1 on a refusal or a failure, 2 on a usage error. */
@@ -764,9 +776,10 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     }
     const target = targetOf(parsed, io.env);
     try {
-      // An agent waiting for an answer holds its call up to five minutes.
+      // An agent waiting for an answer holds its call up to five minutes; a secret card or command up to an hour.
       const waits = parsed.positional[0] === 'threads' && (parsed.wait || parsed.positional[1] === 'wait');
-      client = await connect(target.url, target.token, { client: { name: 'cli', version: CORE_VERSION }, ...(waits ? { requestTimeoutMs: (WAIT_MAX_S + 30) * 1000 } : {}) });
+      const secretWait = parsed.positional[0] === 'secret' ? { requestTimeoutMs: 3_660_000 } : {};
+      client = await connect(target.url, target.token, { client: { name: 'cli', version: CORE_VERSION }, ...(waits ? { requestTimeoutMs: (WAIT_MAX_S + 30) * 1000 } : {}), ...secretWait });
     } catch (error) {
       throw new Error(`no core answers at ${target.url}: ${(error as Error).message}`);
     }
@@ -776,7 +789,8 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
       await runBoiteMcp(client, target.threadId, io.err, () => connect(target.url, target.token, { client: { name: 'mcp-wait', version: CORE_VERSION }, requestTimeoutMs: 3_605_000 }));
     } else {
       const caller: Caller = io.env[AGENT_ENV.coreUrl] && io.env[AGENT_ENV.token] && io.env[AGENT_ENV.threadId] ? 'agent' : 'owner';
-      await run(parsed, io, client, target.threadId, print, caller);
+      const code = await run(parsed, io, client, target.threadId, print, caller);
+      if (typeof code === 'number') return code;
     }
     return 0;
   } catch (error) {

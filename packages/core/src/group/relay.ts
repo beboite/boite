@@ -33,6 +33,7 @@ import type { Core } from '../core.ts';
 import { messageOf } from '../errors.ts';
 import { TextSocket } from '../ws-client.ts';
 import { OUTBOUND_CONGESTION_TIMEOUT_MS, OUTBOUND_MAX_BUFFERED_BYTES } from '../server/connection.ts';
+import { RELAYED_LINK_HEADER } from '../server/peer.ts';
 import { ticketAddresses } from './addresses.ts';
 
 /** One address of the other member gets this long to open before the next is tried. */
@@ -162,10 +163,12 @@ export class RelayHub implements RelaySink {
   /**
    * A pipe for a socket the server is about to upgrade; `peer` is the address its hello wait counts under, as for the server's own.
    * `remote` when the client asked for a host that is not loopback: its frames are deflated, as a direct remote socket's are.
+   * `encrypted` when nobody reads the client's hop to this machine (`encryptedLink`): the other member is told, and a secret is
+   * answered there only over a link encrypted end to end.
    */
-  pipe(coreId: string, peer: string | null, remote = false): RelayPipe {
+  pipe(coreId: string, peer: string | null, remote = false, encrypted = false): RelayPipe {
     this.arm();
-    const pipe = new RelayPipe(this.core, this, coreId, peer, this.authenticate, this.bounds, remote);
+    const pipe = new RelayPipe(this.core, this, coreId, peer, this.authenticate, this.bounds, remote, encrypted);
     this.pipes.add(pipe);
     return pipe;
   }
@@ -238,6 +241,7 @@ export class RelayPipe {
     private readonly authenticate: RelayAuthenticator,
     private readonly bounds: RelayBounds,
     readonly remote = false,
+    readonly encrypted = false,
   ) {}
 
   attach(socket: ServerWebSocket<RelaySocketData>): void {
@@ -371,7 +375,8 @@ export class RelayPipe {
     for (const target of targets) {
       if (this.closed) return null;
       // The other core deflates what it sends a client that is not on its loopback: offered, as Bun's client did.
-      const opened = await TextSocket.connect(`${target.replace(/^http/, 'ws')}${RPC_PATH}`, DIAL_MS, { deflate: true }).catch(() => null);
+      const headers = { [RELAYED_LINK_HEADER]: this.encrypted ? 'encrypted' : 'plain' };
+      const opened = await TextSocket.connect(`${target.replace(/^http/, 'ws')}${RPC_PATH}`, DIAL_MS, { deflate: true, headers }).catch(() => null);
       if (opened !== null) {
         this.core.group.reached(this.coreId, target);
         return opened;
