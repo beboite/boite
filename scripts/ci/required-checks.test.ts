@@ -165,7 +165,15 @@ test('protection changes run the native fixture inside the existing Windows core
   expect(helper.run).toContain('$env:GITHUB_ENV');
   expect(windows.steps.indexOf(helper)).toBeLessThan(windows.steps.indexOf(native));
   expect(native.env).toMatchObject({ BOITE_TEST_NATIVE_EXECUTION: '1', TEMP: '${{ runner.temp }}', TMP: '${{ runner.temp }}' });
-  expect(native.run).toBe('bun test packages/core/test/protected-windows.test.ts --timeout 120000');
+  expect(native.run).toBe(`$failed = $false
+foreach ($helper in @('protected-tool.exe', 'protected-tool-mingw.exe')) {
+  Write-Host "Native fixture helper: $helper"
+  $env:BOITE_WINDOWS_SANDBOX_PATH = "$env:RUNNER_TEMP\\$helper"
+  bun test packages/core/test/protected-windows.test.ts --timeout 120000
+  if ($LASTEXITCODE -ne 0) { $failed = $true }
+}
+if ($failed) { exit 1 }
+`);
   expect(windows.steps.some(step => step.run === 'bun run --cwd packages/core test')).toBe(true);
 });
 

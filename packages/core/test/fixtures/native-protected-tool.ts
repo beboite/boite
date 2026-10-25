@@ -50,6 +50,14 @@ console.log('child-checked');`], {encoding: 'utf8'});
   if (child.status !== 0 || !child.stdout?.includes('child-checked')) {
     // Keep native failure evidence: libuv maps several distinct Win32 stages to
     // EPERM, so compare direct creation with inherited, ignored and piped stdio.
+    for (const access of [1, 2, 8, 0xb]) {
+      heldToken.fill(0);
+      const allowed = advapi.symbols.OpenProcessToken(-1n, access, ptr(heldToken));
+      const error = kernel.symbols.GetLastError();
+      console.error(JSON.stringify({probe: 'self-token', access, allowed, error}));
+      const captured = Number(heldToken.readBigUInt64LE()) as Pointer;
+      if (allowed) kernel.symbols.CloseHandle(captured);
+    }
     for (const stdio of ['inherit', 'ignore', 'pipe'] as const) {
       const result = spawnSync(process.execPath, ['-e', 'process.exit(0)'], {stdio});
       console.error(JSON.stringify({probe: 'stdio', stdio, status: result.status, error: result.error?.message}));
