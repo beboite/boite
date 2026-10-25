@@ -131,6 +131,8 @@ and assertions when making the suite faster.
   session reuse, queued turns and compaction.
 - [Phone](docs/phone.md), [Android app](docs/android.md) and [server](docs/server.md):
   pairing, the APK and deployment.
+- [Android server](docs/android-server.md): the core and agents on a phone in
+  Termux, driven by the Boite Server app.
 - [Machines](docs/machines.md): connections, browser origins and thread views.
 - [Groups](docs/groups.md): the roster of one owner's machines, invitations, tickets and the
   addresses a member gives.

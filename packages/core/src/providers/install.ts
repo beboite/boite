@@ -2,7 +2,7 @@ import { lstatSync, readdirSync, realpathSync, rmSync, statfsSync, statSync } fr
 import { isAbsolute, join, relative } from 'node:path';
 import type { ProviderId, ProviderInstall, ProviderInstallState } from '@boite/contracts';
 import { newId } from '../ids.ts';
-import { agentsDirPath, providerAgentDir } from '../paths.ts';
+import { agentsDirPath, currentOs, providerAgentDir } from '../paths.ts';
 import { messageOf, refused } from '../errors.ts';
 import { forgetWhich } from './which.ts';
 import {
@@ -218,7 +218,7 @@ export class InstallManager {
     let current: string;
     try { current = realpathSync(this.currentDir(providerId)); }
     catch { return; }
-    const same = (a: string, b: string): boolean => (process.platform === 'linux' ? a === b : a.toLowerCase() === b.toLowerCase());
+    const same = (a: string, b: string): boolean => (currentOs() === 'linux' ? a === b : a.toLowerCase() === b.toLowerCase());
     const remove = (path: string): void => {
       try { rmSync(path, { recursive: true, force: true }); }
       catch (error) { this.#log('warn', `${path} could not be removed yet (${messageOf(error)}); the next prune tries again`); }

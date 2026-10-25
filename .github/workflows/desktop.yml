@@ -365,6 +365,11 @@ jobs:
           file=$(bun scripts/ci/server-bundle.ts "$RUNNER_TEMP/desktop-bundles")
           version=$(bun -e 'console.log(require("./package.json").version)')
           bun run --cwd apps/shell tauri signer sign --password '' --app-version "$version" "$file"
+          # The Android server ships the core's scripts, the same on every runner: one bundle, from x64.
+          if [ "$PORTABLE_ID" = linux-x64 ]; then
+            file=$(bun scripts/ci/android-server-bundle.ts "$RUNNER_TEMP/desktop-bundles")
+            bun run --cwd apps/shell tauri signer sign --password '' --app-version "$version" "$file"
+          fi
       - name: Diagnose Linux packaging failures
         if: failure() && runner.os == 'Linux'
         run: |
