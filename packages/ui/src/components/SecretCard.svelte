@@ -28,7 +28,8 @@
   /** What is typed, held only until Save sends it. */
   let value = $state('');
   /** Starts ticked when the card replaces the kept key; unticking saves a one-off copy instead. */
-  let keep = $derived(part.replace === true);
+  let keepChoice = $state<{ requestId: string; checked: boolean } | null>(null);
+  const keep = $derived(keepChoice?.requestId === part.requestId ? keepChoice.checked : part.replace === true);
   let busy = $state(false);
   let error = $state<string | null>(null);
   /** Whether this connection may carry a value (`secrets.list`); null until it answers. */
@@ -167,7 +168,7 @@
       {#if project}
         <div class="keep-row">
           <label class="keep">
-            <input type="checkbox" data-testid="secret-keep" bind:checked={keep} disabled={plain || busy} />
+            <input type="checkbox" data-testid="secret-keep" bind:checked={() => keep, (checked) => keepChoice = { requestId: part.requestId, checked }} disabled={plain || busy} />
             <span>{s.keep}</span>
           </label>
           <InfoTip text={part.replace ? `${s.keepHint} ${s.keepReplaceHint}` : s.keepHint} topic={s.keep} />

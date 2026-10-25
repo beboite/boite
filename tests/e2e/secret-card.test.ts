@@ -87,7 +87,7 @@ test('an agent asks for a key: the card takes it masked, keeps it for the projec
   // Open, with the box unticked: a one-off copy unless the user keeps it.
   await ask({});
   await page.waitFor(`document.querySelector('${PENDING} [data-testid="secret-keep"]')?.checked === false`);
-  expect(await page.evaluate(`document.querySelector('${PENDING}')?.closest('[data-testid="thread-activity"]') !== null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${PENDING}')?.closest('[data-testid="thread-activity"]') != null`)).toBe(true);
   expect((await page.text('[data-testid="activity-question-toggle"]')).trim()).toBe('OPENAI_API_KEY');
   await bothWidths(PENDING, 'open-unchecked');
   await staysDocked();

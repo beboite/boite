@@ -160,13 +160,19 @@ test('a pending secret stays in the question dock and leaves only a link in the 
   expect(query('[data-testid=secret-docked]').querySelector('input')).toBeNull();
 });
 
-test('new requests keep the current secret and its input; the timeline link reopens its place in the pager', async () => {
-  const { client, store, part } = await asked();
+test.each([false, true])('new requests keep the current secret, input and storage choice (replace=%s); the timeline link reopens its place in the pager', async (replace) => {
+  const { client, store, part } = await asked({}, { replace });
   type(SECRET);
+  const keep = query<HTMLInputElement>('[data-testid=secret-keep]');
+  expect(keep.checked).toBe(replace);
+  keep.click();
+  await settle();
+  expect(keep.checked).toBe(!replace);
   const second = client.call('secrets.ask', { threadId: 't-trace', name: 'DEPLOY_TOKEN', reason: 'Deploy the preview.' });
   second.catch(() => undefined);
   await settle();
   expect(query<HTMLInputElement>('[data-testid=activity-question]:not([hidden]) [data-testid=secret-field]').value).toBe(SECRET);
+  expect(keep.checked).toBe(!replace);
   expect(query('[data-testid=activity-question-index]').textContent).toBe('1 of 2');
   query<HTMLButtonElement>('[data-testid=activity-question-next]').click();
   await settle();
@@ -178,6 +184,7 @@ test('new requests keep the current secret and its input; the timeline link reop
   expect(query('[data-testid=activity-question-toggle]').getAttribute('aria-expanded')).toBe('true');
   expect(query('[data-testid=activity-question]:not([hidden])').getAttribute('data-question')).toBe(part().requestId);
   expect(query<HTMLInputElement>('[data-testid=activity-question]:not([hidden]) [data-testid=secret-field]').value).toBe(SECRET);
+  expect(keep.checked).toBe(!replace);
   expect(JSON.stringify(store.composerStates)).not.toContain(SECRET);
 });
 
