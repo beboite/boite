@@ -228,6 +228,15 @@ test('host contribution and authenticated source boundaries reject arbitrary pat
       expect(await thrown(a.client.call('sharedCompute.start', {...p, ...extra} as typeof p))).toThrow('compute.');
     expect(await thrown(a.client.call('sharedCompute.start', {...p, baseCommit: '--help'}))).toThrow('baseCommit');
     expect(await thrown(a.client.call('sharedCompute.start', {...p, host: {...b.ref, projectId: 'other'}}))).toThrow('host');
+    // The source knows this commit; the host must diagnose its own missing object.
+    await git(a.h, a.path, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'source-only base');
+    const sourceOnlyBase = await git(a.h, a.path, 'rev-parse', 'HEAD');
+    const missing = await a.client.call('sharedCompute.start', {...p, requestId: 'missing-base', baseCommit: sourceOnlyBase});
+    expect(missing.status).toBe('failed');
+    expect(missing.error).not.toContain(b.path);
+    const gitFailure = (await b.h.core.logs.query({source: 'git', threadId: missing.worker!.threadId})).find(log => log.event === 'git.failed');
+    expect(gitFailure?.data?.subcommand).toBe('rev-parse');
+    expect(gitFailure?.data?.stderr).toBeString();
     const job = await a.client.call('sharedCompute.start', p);
     expect(await thrown(a.client.call('sharedCompute.start', {...p, requestId: 'second'}))).toThrow('contribution is full');
     const agent = await connect(a.h.url, a.h.core.agents.tokenFor(a.threadId));
@@ -291,6 +300,10 @@ test('the existing workflow runner distributes four local and five remote jobs w
   const run = await a.client.call('workflows.start', {threadId: a.threadId, plan, requestId: 'workflow-nine'});
   await waitFor(() => ['done', 'failed'].includes(a.h.core.workflows.get(a.threadId, run.id).status), 15000);
   const result = await a.client.call('workflows.get', {threadId: a.threadId, runId: run.id});
+  if (result.error) for (const {h, coreId} of [a, b]) {
+    console.error('Shared workflow host diagnostics', {coreId, logs: await h.core.logs.query({limit: 40, minLevel: 'debug'}),
+      jobs: h.core.sharedCompute.journal.all(scope.sharedProjectId).filter(r => r.role === 'host' && r.job.status === 'failed').map(r => ({job: r.job.id, error: r.job.error, worktree: r.job.worker && h.core.delegation.worktrees.get(r.job.worker.threadId)}))});
+  }
   expect(result.error).toBeNull(); expect(result.status).toBe('done');
   expect(result.nodes.flatMap(n => n.instances).filter(i => i.compute?.host.coreId === b.coreId)).toHaveLength(5);
   expect(result.nodes.flatMap(n => n.instances).filter(i => i.compute?.host.coreId === a.coreId)).toHaveLength(4);
@@ -466,7 +479,13 @@ test('a workflow retry fences its previous shared job and accepts only the repla
   const plan: WorkflowPlan = {name: 'Retry shared job', steps: [{id: 'remote', task: 'successful replacement', compute: {sharedProjectId: scope.sharedProjectId, host: b.ref, profileId: 'conversation', baseCommit}}]};
   const run = await a.client.call('workflows.start', {threadId: a.threadId, plan, requestId: 'retry-shared'});
   await waitFor(() => a.h.core.workflows.get(a.threadId, run.id).status === 'failed');
-  const first = a.h.core.workflows.get(a.threadId, run.id).nodes[0]!.instances[0]!.compute!;
+  const rejected = a.h.core.workflows.get(a.threadId, run.id);
+  expect(rejected.error).not.toContain('fixture fails one admission');
+  const failure = (await b.h.core.logs.query({source: 'shared-compute'})).find(log => log.event === 'shared-compute.admission.failed');
+  expect(failure?.message).toContain('fixture fails one admission');
+  expect((await a.h.core.logs.query({source: 'shared-compute'}))).toHaveLength(0);
+  const first = rejected.nodes[0]!.instances[0]!.compute!;
+  expect(failure?.threadId).toBe(first.worker!.threadId);
   await a.client.call('workflows.control', {threadId: a.threadId, runId: run.id, action: 'retry', stepId: 'remote'});
   await waitFor(() => ['done', 'failed'].includes(a.h.core.workflows.get(a.threadId, run.id).status));
   const last = a.h.core.workflows.get(a.threadId, run.id);

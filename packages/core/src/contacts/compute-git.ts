@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { refused } from '../errors.ts';
 import { gitRemoteOf } from './git-remote.ts';
+import { logGit } from '../git/git-log.ts';
 
 /** Fixed argv only; caller data is restricted to full object ids or core-captured refs. */
 export async function computeGit(core: Core, threadId: string, cwd: string, args: string[]): Promise<string> {
@@ -27,6 +28,7 @@ async function rawGit(core: Core, threadId: string, cwd: string, args: string[],
   core.sharedCompute?.assertGit(threadId);
   const scope = core.procs.protection.policy(threadId) ? core.procs.protection.control(threadId) : threadId;
   const spawned = core.procs.spawn(scope, 'git', ['--no-pager', '--no-optional-locks', ...args], { cwd });
+  const started = performance.now();
   let timer: ReturnType<typeof setTimeout> | undefined;
   // Bound process output at the reader, rather than collecting arbitrary repo/config errors.
   const read = async (stream: ReadableStream<Uint8Array> | null): Promise<string> => {
@@ -39,8 +41,11 @@ async function rawGit(core: Core, threadId: string, cwd: string, args: string[],
   };
   try {
     timer = setTimeout(() => { spawned.proc.kill(); }, 15000);
-    const [out, , code] = await Promise.all([read(spawned.proc.stdout), read(spawned.proc.stderr), spawned.exited]);
-    if (code !== 0) throw refused(`compute.git: ${args[0]} could not verify the captured repository or commit`);
+    const [out, err, code] = await Promise.all([read(spawned.proc.stdout), read(spawned.proc.stderr), spawned.exited]);
+    if (code !== 0) {
+      try {logGit(core, threadId, args, code, performance.now() - started, err);} catch { /* Diagnostics must not replace the admission failure. */ }
+      throw refused(`compute.git: ${args[0]} could not verify the captured repository or commit`);
+    }
     return trim ? out.trim() : out;
   } finally { clearTimeout(timer); }
 }
