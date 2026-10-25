@@ -1359,14 +1359,6 @@ process here goes through `procs.spawnChild`. The driver refuses a host whose
     tool, then answer ok>"`, alternated with and without
     `-c 'run.reminder_roster={}'`, took 24.1 s and 25.1 s with the reminders and
     14.8 s and 16.3 s without.
-  - `context_compaction.provider_context_limit_tokens=200000` with the soft
-    threshold at 0.6 and the hard one at 0.85 makes Muse compact in the
-    background from 120k tokens and before a step at 170k. At the model's 1M
-    window it never compacted: on 2026-10-25 one turn of 75 model calls on
-    muse-wonder-full-1.0-contributor reached 245k tokens, with steps of 5 to
-    8 s under 100k and 17 to 48 s above 150k (`duration_ms` and
-    `estimated_prompt_tokens` of its `session.jsonl`). The context meter shows
-    the 200k window the host reports.
 
 ### pi
 

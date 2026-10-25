@@ -736,18 +736,13 @@ describe('muse wire helpers', () => {
     }
   });
 
-  test("the host runs without reminder agents and with an early compaction only on a release that has the settings", () => {
+  test("the host runs without reminder agents only on a release that has the setting", () => {
     const dir = mkdtempSync(join(tmpdir(), 'muse-install-'));
     try {
       const binary = join(dir, 'muse');
       // No version record: the host keeps its own reminders.
       expect(museHostArgs(binary)).toEqual([]);
-      const off = [
-        '-c', 'run.reminder_roster={}',
-        '-c', 'context_compaction.provider_context_limit_tokens=200000',
-        '-c', 'context_compaction.soft_threshold=0.6',
-        '-c', 'context_compaction.hard_threshold=0.85',
-      ];
+      const off = ['-c', 'run.reminder_roster={}'];
       for (const [version, args] of [
         ['1.3.0-R3401.1', []],
         ['1.4.12', []],
