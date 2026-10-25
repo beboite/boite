@@ -1344,6 +1344,37 @@ test('fake retention keeps indefinite deletions and applies a shorter saved dela
   await expect(client.call('threads.restore', { threadId: 't-trace' })).rejects.toMatchObject({ code: RpcErrorCode.NotFound });
 });
 
+test('the fake token limit compacts independently of idle moments without simulating a prompt cache', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  const threadId = 't-trace';
+  const finished: Turn[] = [];
+  client.on('turn.finished', turn => { if (turn.threadId === threadId) finished.push(turn); });
+  const run = async (prompt: string) => {
+    const count = finished.length;
+    await client.call('turns.start', { threadId, prompt });
+    await vi.waitFor(() => expect(finished.length).toBeGreaterThan(count));
+    await new Promise(resolve => setTimeout(resolve, FAKE_AUTO_COMPACT_SETTLE_MS + 100));
+  };
+  const compactions = () => finished.filter(turn => turn.execution?.operation === 'compact');
+
+  await client.call('settings.set', { autoCompact: { tokens: null, moments: ['cache-expiry'] } });
+  await run('no fake cache');
+  expect(compactions()).toHaveLength(0);
+
+  await client.call('settings.set', { autoCompact: { tokens: 10_000_000, moments: ['cache-expiry'] } });
+  await run('below the limit');
+  expect(compactions()).toHaveLength(0);
+
+  await client.call('settings.set', { autoCompact: { tokens: 1_000, moments: ['cache-expiry'] } });
+  const preTokens = (await client.call('threads.get', { threadId })).context!.tokens;
+  await run('reached the independent limit');
+  expect(compactions()).toHaveLength(1);
+  expect(compactions()[0]).toMatchObject({ status: 'done', execution: { automatic: true } });
+  const thread = await client.call('threads.get', { threadId });
+  expect(thread.context!.tokens).toBeLessThan(preTokens);
+  expect(thread.messages.at(-1)?.parts.at(-1)).toMatchObject({ type: 'compaction', trigger: 'auto' });
+});
+
 test('the fake core compacts by itself at the end of a turn once the threshold is reached', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
   const threadId = 't-trace';
@@ -1383,6 +1414,15 @@ test('the fake core compacts by itself at the end of a turn once the threshold i
   await new Promise(resolve => setTimeout(resolve, FAKE_AUTO_COMPACT_SETTLE_MS + 100));
   await client.connect();
   expect(await count()).toBe(1);
+
+  // With no token limit, opting into turn-end still compacts a small conversation.
+  await client.call('settings.set', { autoCompact: { tokens: null, moments: ['turn-end'] } });
+  const unlimited = finished('compact');
+  done = finished();
+  await client.call('turns.start', { threadId, prompt: 'fifth' });
+  await done;
+  expect((await unlimited).execution?.automatic).toBe(true);
+  expect(await count()).toBe(2);
 });
 
 test('fake /btw admission, duplicate refusal and cancellation match the core without changing history', async ({ createClient }) => {
