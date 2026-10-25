@@ -8,7 +8,7 @@ async function refused(call:Promise<unknown>,code:number=RpcErrorCode.Refused){
   const e=failure as {code?:number;rpc?:{code:number}}|undefined;
   check((e?.rpc?.code??e?.code)===code,`expected ${code}, got ${String(failure)}`);
 }
-async function until(test:()=>Promise<boolean>){const end=Date.now()+5000;while(!await test()){check(Date.now()<end,'contact contract timed out');await new Promise(r=>setTimeout(r,10));}}
+async function until(test:()=>Promise<boolean>,reason='contact contract timed out'){const end=Date.now()+5000;while(!await test()){check(Date.now()<end,reason);await new Promise(r=>setTimeout(r,10));}}
 async function source(env:ContractEnv){
   const account=(await env.call('accounts.list',{})).find(a=>a.providerId==='echo')!;
   const project=await env.call('projects.add',{path:await env.newFolder(),name:'Shared contract'});
@@ -48,10 +48,21 @@ export const SHARED_SCENARIOS:Record<string,Scenario>={
     const todo=(await peer.call('todos.list',{threadId:b.thread.id})).find(t=>t.shared?.sharedProjectId===as.sharedProjectId&&t.id===command.cardId);
     check(todo?.text===command.text,'shared card missing from the existing board');
     await peer.call('todos.update',{threadId:b.thread.id,todoId:command.cardId,sharedProjectId:as.sharedProjectId,text:'Edited through existing board'});
-    const updated=await env.call('sharedBoard.get',as);
-    check(updated.kind==='snapshot'&&updated.cards[0]?.text==='Edited through existing board','existing board edit did not replicate');
+    await until(async()=>{
+      const updated=await env.call('sharedBoard.get',as);
+      return updated.kind==='snapshot'&&updated.cards[0]?.text==='Edited through existing board';
+    },'existing board edit did not replicate');
     await env.call('sharedBoard.apply',{...as,command:{kind:'remove',cardId:command.cardId,requestId:'delete-contract'}});
-    check((await peer.call('sharedBoard.apply',{...bs,command:{...command,requestId:'resurrect-contract'}})).outcome==='deleted','deleted card resurrected');
+    await until(async()=>{
+      const result=await peer.call('sharedBoard.apply',{...bs,command:{...command,requestId:'resurrect-contract'}});
+      if(result.outcome==='queued')return false;
+      check(result.outcome==='deleted',`deleted card resurrected: ${result.outcome}`);
+      return true;
+    });
+    for(const [side,scope] of [[env,as],[peer,bs]] as const){
+      const deleted=await side.call('sharedBoard.get',scope);
+      check(deleted.kind==='snapshot'&&!deleted.cards.some(card=>card.id===command.cardId),'deleted card present after terminal receipt');
+    }
     await peer.call('collaboration.configure',{threadId:b.thread.id,config:{mode:'brief',remote:true,paused:true,resources:''}});
     await peer.call('contacts.update',{coreId:a.ref.coreId,name:'Receiver chosen name'});
     const letter={threadId:a.thread.id,to:remote.ref.address,text:'External human letter',requestId:'human-contract'};
