@@ -14,6 +14,8 @@ if (process.platform === 'win32') {
     GetLastError: {args: [], returns: FFIType.u32},
     WaitForSingleObject: {args: [FFIType.ptr, FFIType.u32], returns: FFIType.u32},
     GetExitCodeProcess: {args: [FFIType.ptr, FFIType.ptr], returns: FFIType.i32},
+    CreateFileW: {args: [FFIType.ptr, FFIType.u32, FFIType.u32, FFIType.ptr, FFIType.u32, FFIType.u32, FFIType.ptr], returns: FFIType.ptr},
+    CreateNamedPipeW: {args: [FFIType.ptr, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.ptr], returns: FFIType.ptr},
   });
   const advapi = dlopen('advapi32.dll', {
     OpenProcessToken: {args: [FFIType.i64, FFIType.u32, FFIType.ptr], returns: FFIType.i32},
@@ -53,10 +55,26 @@ console.log('child-checked');`], {encoding: 'utf8'});
     for (const access of [1, 2, 8, 0xb]) {
       heldToken.fill(0);
       const allowed = advapi.symbols.OpenProcessToken(-1n, access, ptr(heldToken));
-      const error = kernel.symbols.GetLastError();
+      const error = allowed ? 0 : kernel.symbols.GetLastError();
       console.error(JSON.stringify({probe: 'self-token', access, allowed, error}));
       const captured = Number(heldToken.readBigUInt64LE()) as Pointer;
       if (allowed) kernel.symbols.CloseHandle(captured);
+    }
+    const valid = (value: Pointer | null) => !!value && Number(value) !== Number(0xffffffffffffffffn);
+    const nul = Buffer.from('NUL\0', 'utf16le');
+    for (const access of [0x80000000, 0x40000000]) {
+      const file = kernel.symbols.CreateFileW(ptr(nul), access, 3, null, 3, 0, null);
+      console.error(JSON.stringify({probe: 'NUL', access, allowed: valid(file), error: valid(file) ? 0 : kernel.symbols.GetLastError()}));
+      if (valid(file)) kernel.symbols.CloseHandle(file);
+    }
+    const pipeName = Buffer.from(`\\\\.\\pipe\\LOCAL\\boite-native-${process.pid}\0`, 'utf16le');
+    const server = kernel.symbols.CreateNamedPipeW(ptr(pipeName), 3, 0, 1, 4096, 4096, 0, null);
+    console.error(JSON.stringify({probe: 'pipe-create', allowed: valid(server), error: valid(server) ? 0 : kernel.symbols.GetLastError()}));
+    if (valid(server)) {
+      const client = kernel.symbols.CreateFileW(ptr(pipeName), 0xc0000000, 0, null, 3, 0, null);
+      console.error(JSON.stringify({probe: 'pipe-open', allowed: valid(client), error: valid(client) ? 0 : kernel.symbols.GetLastError()}));
+      if (valid(client)) kernel.symbols.CloseHandle(client);
+      kernel.symbols.CloseHandle(server);
     }
     for (const stdio of ['inherit', 'ignore', 'pipe'] as const) {
       const result = spawnSync(process.execPath, ['-e', 'process.exit(0)'], {stdio});

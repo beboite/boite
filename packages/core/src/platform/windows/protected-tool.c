@@ -243,10 +243,24 @@ static int launch(int count, wchar_t **args) {
       CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT, NULL, args[3], &startup.StartupInfo, &child)) {error = GetLastError(); goto end;}
   HANDLE child_token = NULL; DWORD is_container = 0, returned = 0;
   stage = L"launch.token";
-  if (!OpenProcessToken(child.hProcess, TOKEN_QUERY, &child_token)) {error = GetLastError(); goto end;}
+  if (!OpenProcessToken(child.hProcess, TOKEN_QUERY | TOKEN_ADJUST_DEFAULT, &child_token)) {error = GetLastError(); goto end;}
   BOOL checked = GetTokenInformation(child_token, TokenIsAppContainer, &is_container, sizeof(is_container), &returned);
+  /* Server lowbox tokens can retain a host-only default DACL. A pipe created
+   * with that DACL cannot be reopened by its own restricted token. Set only
+   * this suspended job token's default, so new private IPC admits its package;
+   * no ambient application-package or host object grant is restored. */
+  PACL default_acl = NULL; BOOL present = FALSE, defaulted = FALSE;
+  if (checked && is_container) {
+    stage = L"launch.token.default-dacl";
+    checked = GetSecurityDescriptorDacl(object_security, &present, &default_acl, &defaulted);
+    if (checked && present && default_acl) {
+      TOKEN_DEFAULT_DACL defaults = {default_acl};
+      checked = SetTokenInformation(child_token, TokenDefaultDacl, &defaults, sizeof(defaults));
+    } else {checked = FALSE; SetLastError(ERROR_INVALID_ACL);}
+  }
+  DWORD token_error = checked ? 0 : GetLastError();
   CloseHandle(child_token);
-  if (!checked) {stage = L"launch.token.query"; error = GetLastError(); goto end;}
+  if (!checked) {error = token_error; goto end;}
   if (!is_container) {stage = L"launch.token.not-appcontainer"; error = ERROR_ACCESS_DENIED; goto end;}
   if (ResumeThread(child.hThread) == (DWORD)-1) {error = GetLastError(); goto end;}
   if (WaitForSingleObject(child.hProcess, INFINITE) != WAIT_OBJECT_0 || !GetExitCodeProcess(child.hProcess, &exit_code)) {error = GetLastError(); goto end;}
