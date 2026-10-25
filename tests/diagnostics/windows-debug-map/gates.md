@@ -14,8 +14,8 @@ admission and never changes the required two-compiler protected suites.
 The `windows-debug-map-diagnostic` artifact expires after three days. It includes
 kernel version, compiler commands, generated source, input/helper SHA256 hashes,
 complete native stdout/stderr, per-compiler structured results and cleanup logs.
-The generated helper also includes `identity.h` and `ownership.h`; their hashes
-are part of the same manifest.
+The generated helper also includes `identity.h`, `ownership.h`, `roundtrip.h`,
+`startup-site.h` and `startup-site.json`; their hashes are part of the manifest.
 
 On Linux, `bun .../run.ts <absolute-artifact-directory> --compile-only` verifies
 strict MinGW cross compilation. Without the Windows opt-in, the launcher and
@@ -66,18 +66,23 @@ uses `-static`, matching the existing helper builder.
    active processes, and the owned map disappears. Delete/recreate/delete each
    owned profile; remove synthetic state only with native cleanup evidence.
 
-Creation events are handled before target user-mode execution. Only the
-identified ntdll exported DbgBreakPoint address on the initial thread, at first
-chance and once per captured process, can be consumed. Its DLL volume/file ID
-must equal the trusted helper's actual loaded ntdll. An unknown initial
-breakpoint fails the experiment; application exceptions are forwarded with
-DBG_EXCEPTION_NOT_HANDLED. The address rule itself needs native validation.
-The d63e9d54 Server 26100 run disproves equality with that export as a sufficient
-startup rule: both compilers stop at a different first-chance breakpoint before
-inspector stdout. Its actual process image and thread role were not recorded.
-The diagnostic deliberately retains the rejection until matching image/symbol
-evidence establishes a precise replacement. It does not consume a first
-breakpoint merely because it lies inside ntdll.
+Creation events are handled before target user-mode execution. Only the exact
+verified `LdrpDoDebuggerBreak+0x35` INT3 on the initial event thread, at first
+chance and once per captured process, can be consumed. Its ntdll volume/file ID
+must equal the trusted helper's loaded ntdll, which must pass the pinned PE,
+RSDS and complete 62-byte runtime-function fingerprint in `startup-site.h`.
+An unknown image or startup breakpoint fails the experiment; application
+exceptions are forwarded with `DBG_EXCEPTION_NOT_HANDLED`. A range, basename,
+first breakpoint or guessed symbol offset never suffices.
+
+The d63e9d54 run disproved equality with exported DbgBreakPoint. The fc39484d
+Server 26100 run identified the actual second image as System32/conhost.exe,
+confined, and its exception on the exact initial TID at matching ntdll RVA
+0x11ee1d. The Microsoft image and matching public symbols establish the precise
+site; `startup-site.json` records both official URLs and SHA256, PE identity,
+PDB GUID, DBI age 1, separate PDB Info age 4, symbol section/offset and runtime
+function bounds. This is a pinned diagnostic candidate, not cross-kernel support
+or fresh native success. Other native images remain fatal.
 Image/DLL file handles are closed; Windows owns debug process/thread handles
 through their exit continuation. Separately returned process handles remain
 owned by the helper. No attach, privilege enabling, unrelated-process access,
@@ -90,21 +95,32 @@ boundary; mapping only enables availability.
 For every normal creation event, log the exact native file path, volume/file ID,
 size and write time from the event file. Independently open the process's queried
 image path read-only and require its file ID to agree. Compare that identity with
-the synthetic target opened before root resume. Record `target`, `non-target`,
-or fatal `unknown`, plus root/auxiliary position, event/handle thread IDs, thread
-owner, image base and start address. A non-target is not assumed to be conhost.
+the synthetic target opened before root resume, or the exact file ID of conhost
+opened read-only from GetSystemDirectoryW. Record `target`, `auxiliary`, or fatal
+`unknown`, plus root/auxiliary position, event/handle thread IDs, thread owner,
+image base and start address. A basename alone never classifies an auxiliary.
 All captured processes still require the full LPAC/job boundary before mapping
 and continuation. Three unique inspector PIDs must match three exact target
-identities; the existing assertions requiring exactly three captured processes,
-maps, consumed startup exceptions and normal exits remain unchanged. An auxiliary
-cannot silently replace one target generation or enlarge the accepted count.
+identities, plus exactly one identified console auxiliary. The hidden root uses
+CREATE_NEW_CONSOLE; ordinary children use CREATE_NO_WINDOW. More than three
+targets or one auxiliary is rejected before mapping/continuation. Tests require
+exactly four mapped processes, consumed startup exceptions and normal exits;
+each PID must have its own verified boundary and exact startup site. The
+auxiliary cannot satisfy any of the three marker/exit generation assertions.
+After a normal root exit, continue its exit event and allow five seconds for
+the console helper's orderly exit; a timeout still terminates the job, drains
+and fails. An abnormal root exit keeps the original immediate termination path.
 
 Record matching ntdll file identity, local PE machine/timestamp/image size,
 export RVA and the local RSDS PDB name/GUID/age key when present. At exceptions,
 record actual/main thread IDs, verified-native-image membership and RVA for
-future exact symbol lookup. These metadata do not authorize an exception.
+future exact symbol lookup. Metadata alone do not authorize an exception.
 Unknown startup breakpoints remain fatal; unexpected/application exceptions
-retain `DBG_EXCEPTION_NOT_HANDLED`, followed by the existing failure termination
+retain `DBG_EXCEPTION_NOT_HANDLED`. Each of the three target generations also
+calls exported DbgBreakPoint as an application breakpoint after startup. Its
+vectored handler must run exactly once and be removed; the host must log the
+exported RVA with consumed=0 and DBG_EXCEPTION_NOT_HANDLED. The handler does
+not change any context. Unknown startup exceptions retain failure termination
 and drain. Creation/exiting thread and process events are also recorded.
 
 For map lifetime, query `ProcessHandleInformation` (51) on this helper only,
@@ -118,9 +134,33 @@ matched local handles with `NtQueryObject` counts. A count alone, especially
 PointerCount with kernel fast references, still cannot establish a leak owner.
 An unsupported, malformed or failed snapshot remains an error.
 
+The fc39484d native snapshots showed exactly one local anchor throughout;
+global HandleCount rose from one to two at first assignment. RED's name vanished
+only after helper exit, while A/B names survived separate post-exit observers.
+This identifies the first retained phase, not the owner of the other handle.
+ContinueDebugEvent owns closing event process/thread handles on exit, as the
+Microsoft API contract specifies; do not close those borrowed values manually.
+
+RED now performs one bounded map-lifetime experiment before ResumeThread of its
+already confined suspended root. With the same private ACL it creates an empty
+owned directory B, assigns known A -> B -> A to that exact root and samples both
+objects after each call. PHNT's PROCESS_DEVICEMAP_INFORMATION.Set input is a
+directory handle with DIRECTORY_TRAVERSE; both explicitly created handles have
+that access. No original or ambient map is inferred. Any failed restoration
+aborts launch and terminates the job. Root's later positive marker proves the
+expected A mapping was restored. B has no link and the root's user thread stays
+suspended while it is assigned. Only the explicitly created B handle is closed,
+after restoring A.
+Its namespace is checked immediately after restoration, again at final cleanup,
+and independently after helper exit. Every failed absence stays fatal even if
+a later observation is absent. A/B debug tasks remain independent behind the
+existing RED safety prerequisites. This experiment does not claim a retention
+fix, transfer ownership of a kernel handle, or authorize closing one.
+
 After the exact spawned helper has exited and its capture reached EOF, a new
 registry-owned helper opens only the recorded `boite.route.<helper-pid>` name
-read-only. This is recorded as `mapAfterHelperExit` and `map-after-exit-*.log`.
+and, for RED, its exact `.swap` name read-only. This is recorded separately by
+kind as `mapAfterHelperExit` and `map-after-exit-*.log`.
 Absence after helper exit can distinguish helper-local retention from persistence,
 but never replaces the immediate in-helper absence gate or its fatal failure.
 Post-exit observation failure also blocks state deletion. No extra reference is

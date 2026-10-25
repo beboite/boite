@@ -11,12 +11,14 @@ typedef struct {
   union { ULONGLONG *Uint64; } Values;
 } ROUTE_ATTRIBUTE;
 typedef struct { USHORT Version, Reserved; ULONG Count; ROUTE_ATTRIBUTE *Attributes; } ROUTE_ATTRIBUTES;
-typedef struct { DWORD pid, main_tid; uintptr_t initial, native_base; BOOL consumed, exited; } ROUTE_RECORD;
+typedef struct { DWORD pid, main_tid; uintptr_t initial, native_base; BOOL consumed, exited, auxiliary; } ROUTE_RECORD;
 static HANDLE probe_map, probe_link;
 static wchar_t probe_name[256];
 static BOOL debug_mode;
 static ROUTE_RECORD records[32];
 static int captured, active;
+static int target_captured, auxiliary_captured;
+static BOOL root_exited;
 
 static FARPROC nt_api(const char *name) { return GetProcAddress(GetModuleHandleW(L"ntdll.dll"), name); }
 
@@ -106,6 +108,8 @@ static DWORD map_apply(HANDLE process) {
   return status < 0 ? (DWORD)status : observed;
 }
 
+#include "roundtrip.h"
+
 static DWORD map_prepare(HANDLE process, PSECURITY_DESCRIPTOR security, const wchar_t *root, const wchar_t *image) {
   typedef NTSTATUS (NTAPI *create_directory_fn)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, HANDLE, ULONG);
   typedef NTSTATUS (NTAPI *create_link_fn)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PUNICODE_STRING);
@@ -137,11 +141,16 @@ static DWORD map_prepare(HANDLE process, PSECURITY_DESCRIPTOR security, const wc
   if (status < 0) return (DWORD)status;
   observed = map_lifetime(L"after-create", L"link");
   if (observed) return observed;
-  return debug_mode ? 0 : map_apply(process);
+  if (debug_mode) return 0;
+  DWORD error = map_apply(process);
+  return error ? error : map_roundtrip(process, security);
 }
 
 static DWORD map_close(void) {
   DWORD error = probe_map ? object_counts(L"map-before-link-close", probe_map) : 0;
+  DWORD swap_closed = close_owned(L"swap-map", &swap_map); if (swap_closed && !error) error = swap_closed;
+  DWORD swap_final = swap_absence(L"final");
+  if (!error) error = swap_cleanup_error ? swap_cleanup_error : swap_final;
   DWORD closed = close_owned(L"link", &probe_link); if (closed && !error) error = closed;
   if (!probe_map) return error;
   closed = close_owned(L"map", &probe_map); if (closed && !error) error = closed;
@@ -219,16 +228,16 @@ static DWORD debug_loop(DWORD root, HANDLE job, PSID app, PSID capability, DWORD
   }
   ULONGLONG deadline = GetTickCount64() + (drain ? 5000 : 15000);
   uintptr_t local = (uintptr_t)GetModuleHandleW(L"ntdll.dll");
-  uintptr_t exported = (uintptr_t)nt_api("DbgBreakPoint"); DWORD image_size = 0;
+  uintptr_t exported = (uintptr_t)nt_api("DbgBreakPoint"); DWORD image_size = 0, loader_rva = 0;
   /* The basename alone is not identity. Require the same volume/file id as
-   * the trusted helper's actual loaded ntdll before using its export offset. */
+   * the trusted helper's actual loaded ntdll before using the pinned site. */
   BY_HANDLE_FILE_INFORMATION trusted; ZeroMemory(&trusted, sizeof(trusted));
   wchar_t local_path[4096]; DWORD local_length = GetModuleFileNameW((HMODULE)local, local_path, 4096);
   HANDLE local_file = local_length && local_length < 4096 ? CreateFileW(local_path, FILE_READ_ATTRIBUTES,
     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, 0, NULL) : INVALID_HANDLE_VALUE;
   BOOL identified = local_file != INVALID_HANDLE_VALUE && !file_identity(L"trusted-ntdll", GetCurrentProcessId(), local_file, &trusted);
   if (local_file != INVALID_HANDLE_VALUE && !CloseHandle(local_file)) identified = FALSE;
-  if (identified && exported && native_metadata(local, exported, &image_size)) identified = FALSE;
+  if (identified && exported && native_metadata(local, exported, &image_size, &loader_rva)) identified = FALSE;
   if (!exported || !identified) { stopping = TRUE; error = ERROR_INVALID_DATA; TerminateJobObject(job, 125); }
   for (;;) {
     if (GetTickCount64() >= deadline) {
@@ -240,7 +249,7 @@ static DWORD debug_loop(DWORD root, HANDLE job, PSID app, PSID capability, DWORD
       DWORD wait_error = GetLastError();
       if (wait_error != ERROR_SEM_TIMEOUT) { if (!error) error = wait_error; break; }
       JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting;
-      if (stopping && !active && QueryInformationJobObject(job, JobObjectBasicAccountingInformation, &accounting, sizeof(accounting), NULL) && !accounting.ActiveProcesses) break;
+      if ((stopping || root_exited) && !active && QueryInformationJobObject(job, JobObjectBasicAccountingInformation, &accounting, sizeof(accounting), NULL) && !accounting.ActiveProcesses) break;
       continue;
     }
     DWORD continuation = DBG_CONTINUE; ROUTE_RECORD *record = NULL;
@@ -255,7 +264,13 @@ static DWORD debug_loop(DWORD root, HANDLE job, PSID app, PSID capability, DWORD
           if (!DuplicateHandle(GetCurrentProcess(), event.u.CreateProcessInfo.hProcess, GetCurrentProcess(), &limited,
               PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SET_INFORMATION, FALSE, 0)) error = GetLastError();
           else {
-            error = event_image(&event, root);
+            error = event_image(&event, root, &record->auxiliary);
+            if (!error) {
+              if (record->auxiliary) { if (++auxiliary_captured > 1) error = ERROR_INVALID_DATA; }
+              else if (++target_captured > 3) error = ERROR_INVALID_DATA;
+              fwprintf(stderr, L"debug-role pid=%lu target-count=%d auxiliary-count=%d error=%lu\n",
+                event.dwProcessId, target_captured, auxiliary_captured, error);
+            }
             if (!error && !lowbox_verify(limited, job, app, capability)) error = ERROR_ACCESS_DENIED;
             fwprintf(stderr, L"debug-event-boundary pid=%lu tid=%lu verified=%d error=%lu\n", event.dwProcessId, event.dwThreadId, !error, error);
             if (!error) error = map_apply(limited);
@@ -283,7 +298,7 @@ static DWORD debug_loop(DWORD root, HANDLE job, PSID app, PSID capability, DWORD
               if (!stopping && !match && !error) error = ERROR_INVALID_DATA;
               if (match) {
                 record->native_base = (uintptr_t)event.u.LoadDll.lpBaseOfDll;
-                record->initial = record->native_base + exported - local;
+                record->initial = record->native_base + loader_rva;
               }
             }
           }
@@ -317,8 +332,12 @@ static DWORD debug_loop(DWORD root, HANDLE job, PSID app, PSID capability, DWORD
         fwprintf(stderr, L"debug-exit pid=%lu status=%lu active=%d tid=%lu main-tid=%lu\n", event.dwProcessId, event.u.ExitProcess.dwExitCode, active,
           event.dwThreadId, record ? record->main_tid : 0);
         if (event.dwProcessId == root && !stopping) {
-          *exit_code = event.u.ExitProcess.dwExitCode; stopping = TRUE;
-          deadline = GetTickCount64() + 5000; TerminateJobObject(job, 125);
+          *exit_code = event.u.ExitProcess.dwExitCode; root_exited = TRUE;
+          deadline = GetTickCount64() + 5000;
+          /* A known console helper can outlive its last client until this exit
+           * event is continued. Give it the same bounded orderly drain; a
+           * timeout still terminates the job and remains a fatal error. */
+          if (*exit_code) { stopping = TRUE; TerminateJobObject(job, 125); }
         }
         break;
       case CREATE_THREAD_DEBUG_EVENT:
@@ -338,7 +357,7 @@ static DWORD debug_loop(DWORD root, HANDLE job, PSID app, PSID capability, DWORD
     if (error && !stopping) { stopping = TRUE; deadline = GetTickCount64() + 5000; TerminateJobObject(job, 125); }
     if (!ContinueDebugEvent(event.dwProcessId, event.dwThreadId, continuation)) { if (!error) error = GetLastError(); break; }
     fflush(stderr);
-    if (stopping && !active && captured) {
+    if ((stopping || root_exited) && !active && captured) {
       JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting;
       if (QueryInformationJobObject(job, JobObjectBasicAccountingInformation, &accounting, sizeof(accounting), NULL) && !accounting.ActiveProcesses) break;
     }

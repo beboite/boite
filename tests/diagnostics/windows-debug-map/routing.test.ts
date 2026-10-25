@@ -45,7 +45,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   }
   function run(job: typeof jobs[number], debug: boolean) {
     const promise = execute(`lpac-${job.label}`, [debug ? 'debug-run' : 'run', job.profile, job.project,
-      join(job.runtime, 'inspect.exe'), 'inspect', '0', job.marker], job.home,
+      join(job.runtime, 'inspect.exe'), 'inspect', '0', job.marker, ...(debug ? ['forward-check'] : [])], job.home,
       {PATH: `${job.runtime};${process.env.SystemRoot}\\System32`});
     tasks.push(promise); void promise.catch(() => {}); return promise;
   }
@@ -104,6 +104,16 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     for (const phase of ['after-create subject=directory', 'after-create subject=link', 'before-assign subject=process', 'after-assign subject=process', 'before-close subject=map']) checks.push(
       verify(`${label} map lifetime ${phase}`, () => expect(result.err).toMatch(new RegExp(
         `map-lifetime phase=${phase} pid=${result.pid} query=0x00000000 matches=[1-9]\\d* error=0\\r?\\n`))));
+    if (label === 'RED') {
+      for (const step of ['A-to-B', 'B-to-A']) checks.push(verify(`RED suspended map ${step}`, () => expect(result.err)
+        .toMatch(new RegExp(`map-swap pid=\\d+ step=${step} set=0x00000000\\r?\\n`))));
+      checks.push(verify('RED swap handle closed', () => expect(result.err).toContain('cleanup close=swap-map closed=1 error=0')));
+      for (const phase of ['after-restore', 'final']) checks.push(verify(`RED swap absence ${phase}`, () => expect(result.err)
+        .toContain(`cleanup swap-open phase=${phase} status=0xc0000034 absent=1 closed=1 error=0`)));
+      for (const object of ['swap-before-assign', 'primary-after-swap-away', 'swap-after-assign', 'primary-after-swap-back', 'swap-after-restore']) checks.push(
+        verify(`RED swap counts ${object}`, () => expect(result.err).toMatch(new RegExp(
+          `cleanup object=${object} handle=\\S+ query=0x00000000 .*handles=\\d+ pointers=\\d+`))));
+    }
     cleanupConfirmed.set(`lpac-${label}`, !result.timedOut && result.code !== null &&
       result.err.includes('cleanup job-active=0') && checks.every(Boolean));
   }
@@ -114,18 +124,23 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
       cleanupConfirmed.set(`lpac-${label}`, false);
       failures.push(`${label} post-exit map observation requires completed helper`); return;
     }
-    const names = [...result.err.matchAll(/^private-map path=(.+) create=0x00000000\r?$/gm)].map(match => match[1]!.replace(/\r$/, ''));
+    const names = [...result.err.matchAll(/^private-(map|swap) path=(.+) create=0x00000000\r?$/gm)]
+      .map(match => ({kind: match[1]!, path: match[2]!.replace(/\r$/, '')}));
     if (!verify(`${label} owned map name`, () => {
-      expect(names).toHaveLength(1);
-      expect(names[0]).toMatch(new RegExp(`^\\\\(?:Sessions\\\\\\d+\\\\)?BaseNamedObjects\\\\boite\\.route\\.${result.pid}$`));
+      expect(names).toHaveLength(label === 'RED' ? 2 : 1);
+      expect(new Set(names.map(name => name.kind)).size).toBe(names.length);
+      for (const name of names) expect(name.path).toMatch(new RegExp(
+        `^\\\\(?:Sessions\\\\\\d+\\\\)?BaseNamedObjects\\\\boite\\.route\\.${result.pid}${name.kind === 'swap' ? '\\.swap' : ''}$`));
     })) { cleanupConfirmed.set(`lpac-${label}`, false); return; }
-    const observed = await execute(`map-after-exit-${label}`, ['observe-map', names[0]!]);
-    afterExit.push({label, helperPid: result.pid, path: names[0], ...observed}); save();
-    // Extra observation, never a replacement for the immediate in-helper gate.
-    const confirmed = [completed(`${label} post-exit observer`, observed),
-      verify(`${label} post-exit map absence`, () => expect(observed.out)
-        .toBe(`map-after-helper-exit path=${names[0]} open=0xc0000034 absent=1 closed=1 error=0\r\n`))].every(Boolean);
-    if (!confirmed) cleanupConfirmed.set(`lpac-${label}`, false);
+    for (const name of names) {
+      const observed = await execute(`map-after-exit-${label}${name.kind === 'swap' ? '-swap' : ''}`, ['observe-map', name.path]);
+      afterExit.push({label, kind: name.kind, helperPid: result.pid, path: name.path, ...observed}); save();
+      // Extra observation, never a replacement for either immediate gate.
+      const confirmed = [completed(`${label} ${name.kind} post-exit observer`, observed),
+        verify(`${label} ${name.kind} post-exit map absence`, () => expect(observed.out)
+          .toBe(`map-after-helper-exit path=${name.path} open=0xc0000034 absent=1 closed=1 error=0\r\n`))].every(Boolean);
+      if (!confirmed) cleanupConfirmed.set(`lpac-${label}`, false);
+    }
   }
   try {
     for (const job of jobs) {
@@ -193,18 +208,39 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
             expect(result.err).toMatch(new RegExp(`debug-event-boundary pid=${pid} tid=\\d+ verified=1 error=0`));
           }
         });
+        const auxiliary = [...result.err.matchAll(/debug-image pid=(\d+) tid=\d+ handle-tid=\d+ thread-owner=\d+ root=0 role=auxiliary identity=1 .*error=0/g)];
+        verify(`${job.label} exact console auxiliary`, () => {
+          expect(auxiliary).toHaveLength(1);
+          expect(targets).not.toContain(auxiliary[0]![1]!);
+          expect(result.err).not.toContain('role=unknown');
+          expect(result.err).toContain('debug-file label=trusted-conhost');
+          expect(result.err).toMatch(new RegExp(`debug-event-boundary pid=${auxiliary[0]![1]} tid=\\d+ verified=1 error=0`));
+          expect(result.err).toContain('target-count=3 auxiliary-count=1 error=0');
+        });
+        verify(`${job.label} pinned native startup rule`, () => expect(result.err)
+          .toContain('debug-startup-rule pinned=1 site-rva=0x0011ee1d symbol=LdrpDoDebuggerBreak+0x35 code-bytes=62'));
         for (let depth = 0; depth < 3; depth++) {
           verify(`${job.label} generation ${depth} routing`, () => expect(result.out)
             .toContain(`${marker}.generation-${depth} appcontainer=1 in-job=1 routing=1`));
           verify(`${job.label} generation ${depth} exit`, () => expect(result.out)
             .toContain(`${marker}.generation-${depth} inspect-exit=0 child-exit=0 forced=0`));
+          verify(`${job.label} generation ${depth} application exception`, () => expect(result.out)
+            .toContain(`${marker}.generation-${depth} application-break-forwarded=1 handler-removed=1`));
         }
         verify(`${job.label} distinct marker`, () => expect(result.out).not.toContain(jobs[index === 0 ? 2 : 1]!.marker));
-        verify(`${job.label} mapped processes`, () => expect(result.err.match(/private-map pid=\d+ set=0x00000000/g)).toHaveLength(3));
-        verify(`${job.label} loader breakpoints`, () => expect(result.err.match(/debug-exception .*consumed=1/g)).toHaveLength(3));
-        verify(`${job.label} process exit events`, () => expect(result.err.match(/debug-exit pid=\d+ status=0 active=\d+/g)).toHaveLength(3));
-        verify(`${job.label} normal drain`, () => expect(result.err).toContain('debug-drain cleanup=0 captured=3 remaining=0 error=0'));
-        verify(`${job.label} cleanup drain`, () => expect(result.err).toContain('debug-drain cleanup=1 captured=3 remaining=0 error=0'));
+        for (const pid of [...targets, ...auxiliary.map(match => match[1]!)]) {
+          verify(`${job.label} process ${pid} loader breakpoint`, () => expect(result.err).toMatch(new RegExp(
+            `debug-exception pid=${pid} code=0x80000003 first=1 .*consumed=1 .*native-identity=1 in-native=1 native-rva=0x11ee1d continuation=0x00010002`)));
+          if (targets.includes(pid)) verify(`${job.label} process ${pid} application breakpoint forwarded`, () => expect(result.err).toMatch(new RegExp(
+            `debug-exception pid=${pid} code=0x80000003 first=1 .*consumed=0 .*native-identity=1 in-native=1 native-rva=0x120570 continuation=0x80010001`)));
+        }
+        // Exactly three target generations plus one file-identified, confined
+        // console helper. Neither an unknown image nor extra helpers can pass.
+        verify(`${job.label} mapped processes`, () => expect(result.err.match(/private-map pid=\d+ set=0x00000000/g)).toHaveLength(4));
+        verify(`${job.label} loader breakpoints`, () => expect(result.err.match(/debug-exception .*consumed=1/g)).toHaveLength(4));
+        verify(`${job.label} process exit events`, () => expect(result.err.match(/debug-exit pid=\d+ status=0 active=\d+/g)).toHaveLength(4));
+        verify(`${job.label} normal drain`, () => expect(result.err).toContain('debug-drain cleanup=0 captured=4 remaining=0 error=0'));
+        verify(`${job.label} cleanup drain`, () => expect(result.err).toContain('debug-drain cleanup=1 captured=4 remaining=0 error=0'));
       }
       report.routingObserved = failures.length === debugStart;
     }

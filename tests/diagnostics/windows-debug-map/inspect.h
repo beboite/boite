@@ -20,7 +20,7 @@ static int observe_map(const wchar_t *path) {
   if (wcsncmp(tail, prefix, wcslen(prefix))) return failure(L"observer-map.path", ERROR_INVALID_NAME);
   tail += wcslen(prefix); const wchar_t *start = tail;
   while (*tail >= L'0' && *tail <= L'9') tail++;
-  if (tail == start || tail - start > 10 || *tail || wcslen(path) >= 256) return failure(L"observer-map.path", ERROR_INVALID_NAME);
+  if (tail == start || tail - start > 10 || (*tail && wcscmp(tail, L".swap")) || wcslen(path) >= 256) return failure(L"observer-map.path", ERROR_INVALID_NAME);
   open_directory_fn open = (open_directory_fn)(void *)nt_api("NtOpenDirectoryObject");
   if (!open) return failure(L"observer-map.api", ERROR_PROC_NOT_FOUND);
   UNICODE_STRING name = {(USHORT)(wcslen(path) * 2), (USHORT)((wcslen(path) + 1) * 2), (PWSTR)path};
@@ -49,8 +49,20 @@ static int cleanup_profile(const wchar_t *name) {
   return FAILED(final) ? 125 : 0;
 }
 
+static volatile LONG application_pending, application_handled;
+static PVOID application_break_site;
+static LONG CALLBACK application_exception(EXCEPTION_POINTERS *exception) {
+  if (application_pending && exception->ExceptionRecord->ExceptionCode == EXCEPTION_BREAKPOINT &&
+      exception->ExceptionRecord->ExceptionAddress == application_break_site) {
+    InterlockedIncrement(&application_handled);
+    return EXCEPTION_CONTINUE_EXECUTION;
+  }
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
 static int inspect(int count, wchar_t **args) {
-  if (count != 4) return 125;
+  if (count != 4 && (count != 5 || wcscmp(args[4], L"forward-check"))) return 125;
+  BOOL forward_check = count == 5;
   int depth = _wtoi(args[2]);
   if (depth < 0 || depth > 2 || wcslen(args[3]) > 96) return 125;
   wchar_t label[128]; swprintf(label, 128, L"%ls.generation-%d", args[3], depth);
@@ -109,6 +121,21 @@ static int inspect(int count, wchar_t **args) {
     control = !debug_known;
   }
   fwprintf(stdout, L"%ls host-debug-control=%d known=%d\n", label, control, debug_known); fflush(stdout);
+  if (forward_check) {
+    /* A real application breakpoint at the export must reach our handler after
+     * the distinct pinned loader site was consumed. No context is modified. */
+    typedef VOID (NTAPI *break_fn)(VOID);
+    application_break_site = (PVOID)(void *)nt_api("DbgBreakPoint");
+    if (!application_break_site) return 125;
+    PVOID handler = AddVectoredExceptionHandler(1, application_exception);
+    if (!handler) return 125;
+    application_pending = 1;
+    ((break_fn)application_break_site)();
+    application_pending = 0;
+    BOOL removed = RemoveVectoredExceptionHandler(handler) != 0;
+    fwprintf(stdout, L"%ls application-break-forwarded=%ld handler-removed=%d\n", label, application_handled, removed); fflush(stdout);
+    if (application_handled != 1 || !removed) return 125;
+  }
   if (depth == 0) {
     HANDLE ready = CreateFileW(L"ready", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, CREATE_NEW, 0, NULL);
     if (ready == INVALID_HANDLE_VALUE) return 125;
@@ -124,7 +151,7 @@ static int inspect(int count, wchar_t **args) {
     wchar_t image[4096], next[16]; DWORD image_length = GetModuleFileNameW(NULL, image, 4096);
     if (!image_length || image_length >= 4096) return 125;
     swprintf(next, 16, L"%d", depth + 1);
-    wchar_t *argv[] = {image, L"inspect", next, args[3]}; wchar_t *line = command_line(4, argv);
+    wchar_t *argv[] = {image, L"inspect", next, args[3], L"forward-check"}; wchar_t *line = command_line(forward_check ? 5 : 4, argv);
     if (!line) return 125;
     STARTUPINFOW startup; PROCESS_INFORMATION child;
     ZeroMemory(&startup, sizeof(startup)); ZeroMemory(&child, sizeof(child));
