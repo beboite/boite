@@ -755,7 +755,7 @@ test('scrolled up, the way to the bottom shows with nothing new below, and takes
   expect(jumpButton()).toBeNull();
 });
 
-test('a viewport clamp followed by wrapped content growth keeps the list pinned before its resize observer runs', async () => {
+test('a viewport clamp keeps the list pinned but a reader scroll during growth releases it', async () => {
   const messages = thread(20);
   stubLayout(messages.length * ESTIMATE);
   let height = VIEW_HEIGHT;
@@ -791,8 +791,18 @@ test('a viewport clamp followed by wrapped content growth keeps the list pinned 
   await settle();
   expect(document.querySelector('[data-testid=jump-to-latest]')).toBeNull();
   const observer = observers.at(-1)!;
-  observer.callback([{ target: timeline, contentRect: timeline.getBoundingClientRect(), borderBoxSize: [], contentBoxSize: [], devicePixelContentBoxSize: [] }], observer as unknown as ResizeObserver);
+  const entries = [{ target: timeline, contentRect: timeline.getBoundingClientRect(), borderBoxSize: [], contentBoxSize: [], devicePixelContentBoxSize: [] }];
+  observer.callback(entries, observer as unknown as ResizeObserver);
   expect(timeline.scrollTop).toBe(1100);
+
+  // Growth alone cannot clamp the scroll upward: the reader moved before the busy phone delivered touchstart.
+  scrollHeight += 40;
+  timeline.scrollTop -= 20;
+  timeline.dispatchEvent(new Event('scroll'));
+  await settle();
+  expect(document.querySelector('[data-testid=jump-to-latest]')).not.toBeNull();
+  observer.callback(entries, observer as unknown as ResizeObserver);
+  expect(timeline.scrollTop).toBe(1080);
 });
 
 test('a window opened around the reader pages down as they reach its bottom, and "Jump to latest" reads the last page', async ({ ready }) => {
