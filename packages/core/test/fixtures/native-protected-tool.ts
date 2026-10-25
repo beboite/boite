@@ -60,7 +60,7 @@ console.log('child-checked');`], {encoding: 'utf8'});
       const captured = Number(heldToken.readBigUInt64LE()) as Pointer;
       if (allowed) kernel.symbols.CloseHandle(captured);
     }
-    const valid = (value: Pointer | null) => !!value && Number(value) !== Number(0xffffffffffffffffn);
+    const valid = (value: Pointer | bigint | null) => !!value && Number(value) !== Number(0xffffffffffffffffn);
     const nul = Buffer.from('NUL\0', 'utf16le');
     for (const access of [0x80000000, 0x40000000]) {
       const file = kernel.symbols.CreateFileW(ptr(nul), access, 3, null, 3, 0, null);
