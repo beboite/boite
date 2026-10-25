@@ -232,7 +232,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
           verify(`${job.label} process ${pid} loader breakpoint`, () => expect(result.err).toMatch(new RegExp(
             `debug-exception pid=${pid} code=0x80000003 first=1 .*consumed=1 .*native-identity=1 in-native=1 native-rva=0x11ee1d continuation=0x00010002`)));
           if (targets.includes(pid)) verify(`${job.label} process ${pid} application breakpoint forwarded`, () => expect(result.err).toMatch(new RegExp(
-            `debug-exception pid=${pid} code=0x80000003 first=1 .*consumed=0 .*native-identity=1 in-native=1 native-rva=0x120570 continuation=0x80010001`)));
+            `debug-exception pid=${pid} code=0x80000003 first=1 .*consumed=0 .*continuation=0x80010001 parameters=2 payload=0x626f6974 owner=${pid}(?:\\r?\\n|$)`)));
         }
         // Exactly three target generations plus one file-identified, confined
         // console helper. Neither an unknown image nor extra helpers can pass.

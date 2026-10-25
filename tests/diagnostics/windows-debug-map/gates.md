@@ -117,10 +117,15 @@ record actual/main thread IDs, verified-native-image membership and RVA for
 future exact symbol lookup. Metadata alone do not authorize an exception.
 Unknown startup breakpoints remain fatal; unexpected/application exceptions
 retain `DBG_EXCEPTION_NOT_HANDLED`. Each of the three target generations also
-calls exported DbgBreakPoint as an application breakpoint after startup. Its
-vectored handler must run exactly once and be removed; the host must log the
-exported RVA with consumed=0 and DBG_EXCEPTION_NOT_HANDLED. The handler does
-not change any context. Unknown startup exceptions retain failure termination
+raises a continuable application breakpoint with `RaiseException` after startup.
+Its vectored handler requires the owned marker and PID, must run exactly once
+and be removed; the host must log those two parameters with consumed=0 and
+DBG_EXCEPTION_NOT_HANDLED. The handler does not change any context.
+The 8a3660ad native run showed the previous raw INT3 fixture repeating at
+DbgBreakPoint: continuing unchanged resumes at the trapping instruction.
+That fixture could not demonstrate handling without a context change.
+This scenario verifies a continuable software exception; unhandled traps
+remain a separate required gate. Unknown startup exceptions retain failure termination
 and drain. Creation/exiting thread and process events are also recorded.
 
 For map lifetime, query `ProcessHandleInformation` (51) on this helper only,

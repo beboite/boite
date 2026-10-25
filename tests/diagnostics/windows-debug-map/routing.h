@@ -319,11 +319,14 @@ static DWORD debug_loop(DWORD root, HANDLE job, PSID app, PSID capability, DWORD
         }
         uintptr_t address = (uintptr_t)exception->ExceptionRecord.ExceptionAddress;
         BOOL in_native = record && record->native_base && address >= record->native_base && address - record->native_base < image_size;
-        fwprintf(stderr, L"debug-exception pid=%lu code=0x%08lx first=%lu address=%p expected=%p consumed=%d tid=%lu main-tid=%lu native-identity=%d in-native=%d native-rva=0x%llx continuation=0x%08lx\n",
+        fwprintf(stderr, L"debug-exception pid=%lu code=0x%08lx first=%lu address=%p expected=%p consumed=%d tid=%lu main-tid=%lu native-identity=%d in-native=%d native-rva=0x%llx continuation=0x%08lx parameters=%lu payload=0x%llx owner=%llu\n",
           event.dwProcessId, exception->ExceptionRecord.ExceptionCode, exception->dwFirstChance,
           exception->ExceptionRecord.ExceptionAddress, (void *)(record ? record->initial : 0), loader,
           event.dwThreadId, record ? record->main_tid : 0, record && record->native_base != 0, in_native,
-          (unsigned long long)(in_native ? address - record->native_base : 0), continuation);
+          (unsigned long long)(in_native ? address - record->native_base : 0), continuation,
+          exception->ExceptionRecord.NumberParameters,
+          (unsigned long long)(exception->ExceptionRecord.NumberParameters >= 1 ? exception->ExceptionRecord.ExceptionInformation[0] : 0),
+          (unsigned long long)(exception->ExceptionRecord.NumberParameters >= 2 ? exception->ExceptionRecord.ExceptionInformation[1] : 0));
         break;
       }
       case EXIT_PROCESS_DEBUG_EVENT:

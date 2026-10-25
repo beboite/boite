@@ -32,7 +32,7 @@ static DWORD prepare_target(const wchar_t *path) {
   if (error) return error;
   wchar_t system[4096]; UINT length = GetSystemDirectoryW(system, 4096);
   if (!length || length + 13 >= 4096) return ERROR_INSUFFICIENT_BUFFER;
-  wcscat(system, L"\\conhost.exe");
+  memcpy(system + length, L"\\conhost.exe", sizeof(L"\\conhost.exe"));
   file = CreateFileW(system, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
     NULL, OPEN_EXISTING, 0, NULL);
   if (file == INVALID_HANDLE_VALUE) return GetLastError();
