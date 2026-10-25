@@ -290,13 +290,28 @@ test('shared attachments cannot publish a secret through the alternate snapshot 
 }, 30000);
 
 test('shared inline pages cannot embed a credential file under a permitted JSON extension', async () => {
-  const {b, worker, agent} = await fixture();
+  const {b, job, worker, agent} = await fixture();
   try {
     await waitFor(() => b.h.core.journal.lastTurn(worker.id)?.status === 'running');
     writeFileSync(join(worker.cwd, 'credentials.json'), '{"password":"view-secret-canary"}');
     writeFileSync(join(worker.cwd, 'index.html'), '<html><script src="credentials.json"></script><body>Fixture</body></html>');
     b.h.core.browser.probe = async () => ({errors: [], heights: [100, 100]});
     expect(await thrown(agent.call('artifacts.view', {threadId: worker.id, path: 'index.html'}))).toThrow('shared file policy');
+    b.h.core.browser.checkView = async () => ({errors: [], heights: [100, 100], captures: []});
+    // The owner uses the same shared-thread file policy as the worker.
+    expect(await thrown(b.client.call('artifacts.viewCheck', {threadId: worker.id, path: 'index.html'}))).toThrow('shared file policy');
+    expect(await thrown(agent.call('artifacts.viewCheck', {threadId: worker.id, path: 'index.html'}))).toThrow('shared file policy');
+    writeFileSync(join(worker.cwd, 'index.html'), '<html><body>Fixture</body></html>');
+    expect((await agent.call('artifacts.viewCheck', {threadId: worker.id, path: 'index.html'})).checked).toBe(true);
+    writeFileSync(join(worker.cwd, 'index.html'), '<html><script src="credentials.json"></script><body>Fixture</body></html>');
+    const override = await b.client.call('sharedAccess.override', {sharedProjectId: job.sharedProjectId, requestId: 'draft', override: {
+      path: 'credentials.json', actions: ['publish'], jobId: job.id, reason: 'fixture', expiresAt: Date.now() + 60000,
+    }});
+    b.h.core.browser.checkView = async () => {
+      await b.client.call('sharedAccess.revokeOverride', {sharedProjectId: job.sharedProjectId, overrideId: override.id});
+      return {errors: [], heights: [100, 100], captures: []};
+    };
+    expect(await thrown(agent.call('artifacts.viewCheck', {threadId: worker.id, path: 'index.html'}))).toThrow('shared file policy');
   } finally {agent.close();}
 }, 30000);
 

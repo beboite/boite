@@ -18,6 +18,8 @@ export interface SharedFilePermit { check(): void; opened?(real: string, stats: 
 /** Allowed routes have their own association/file gates. Everything else is closed for an external worker. */
 const WORKER_METHODS = new Set<string>([
   'files.read', 'files.list', 'artifacts.publish', 'artifacts.read', 'artifacts.view', 'artifacts.previewClose',
+  // Draft input/dependencies use publish permits; its ticket and result recheck consent.
+  'artifacts.viewCheck',
   'sharedProjects.list', 'sharedProjects.get', 'sharedProjects.threads', 'sharedProjects.search', 'sharedProjects.read', 'sharedProjects.subscribe',
   'sharedBoard.get', 'sharedBoard.apply', 'sharedBoard.start', 'sharedCompute.models', 'sharedCompute.start', 'sharedCompute.list', 'sharedCompute.get', 'sharedCompute.send', 'sharedCompute.cancel',
   'sharedAccess.get', 'workflows.output', 'threads.tasks.get', 'threads.tasks.set', 'threads.capabilities',

@@ -411,6 +411,7 @@ boite permissions [<id>]         pending tool permissions
 boite allow|deny <id> <request-id>
 boite attach <file>               publish a file snapshot in chat, at most 512 MB
 boite view <file.html>            draw the page where a line ![title](file.html) of the answer places it, else at its end (--title <text>)
+boite view check <file.html>      check without publishing; save PNGs at desktop/phone widths (--script checks.js, --scheme dark|light)
 boite view help                   the rules of a page: layout, the app's look, theme, motion, checks
 boite view example                a complete page in the app's look, to start from
 boite preview <file.html>          open a local HTML artifact and its neighbouring assets
@@ -587,6 +588,26 @@ threads are refused.
 `view` publishes one HTML page as an [inline view](chat-files.md#inline-views):
 its local files are embedded, a remote resource or a script error refuses it
 with the line to fix, and it is drawn under the answer when the turn ends.
+Run `view check <file.html>` first. It loads the embedded page with the view's
+kit and sandbox at 816 px and 330 px content widths, saves PNGs with unique
+names in the CLI's current directory, and creates no message, artifact,
+browser tab or panel. Open both captures before publishing. The check uses
+the app's fallback palettes and fonts, rather than a connected client's
+custom theme or chosen fonts. `--scheme light` selects the light palette and
+`prefers-color-scheme`; dark is the default.
+
+`view check <file.html> --script checks.js` reads a local JavaScript file as
+the body of an async function, without a function wrapper. It runs in the
+page on a fresh load at each width. Use DOM clicks and input/change events,
+await updates, throw when an assertion fails and return JSON results. The
+command prints those results and saves captures after the script, even when
+it throws. Any error or an unavailable browser returns a nonzero exit code
+after available captures are saved. `--json` returns `checked`, `errors`,
+`advice` and `captures` with `width`, `height`, local `path` and optional
+script `value`; PNG bytes are omitted. Existing captures are never overwritten.
+Fix errors and advice, rerun, open the captures and publish with
+`view <file.html>`.
+
 `preview` is for a site of several files the user browses in the panel.
 
 `attach` saves a snapshot referenced by an assistant message, so it remains downloadable from

@@ -21,6 +21,7 @@ import {
   BROWSER_DOWNLOAD_CHUNK_BYTES,
   findBrowserProfile,
   PRIVATE_BROWSER_PROFILE,
+  VIEW_WIDTH, VIEW_NARROW_WIDTH, VIEW_BLEED,
   type AgentBrowserStatus,
   type AgentBrowserTab,
   type BrowserAction,
@@ -38,7 +39,7 @@ import type { Core } from './core.ts';
 import type { Connection } from './router.ts';
 import { refused } from './errors.ts';
 import { findChromium } from './browser/chromium.ts';
-import { PageProbes, PROBE_TIMEOUT_MS, type PageProbe } from './browser/probe.ts';
+import { PageProbes, PROBE_TIMEOUT_MS, type PageProbe, type ViewCheckOptions } from './browser/probe.ts';
 import { TabRecorder } from './browser/recorder.ts';
 import { watchPage } from './browser/page-events.ts';
 import { BrowserHost } from './browser/host.ts';
@@ -667,6 +668,12 @@ export class AgentBrowser {
    */
   probe(url: string, widths: readonly number[], timeoutMs = PROBE_TIMEOUT_MS): Promise<PageProbe | null> {
     return this.#closed || this.findBrowser().path === null ? Promise.resolve(null) : this.#probes.check(url, widths, timeoutMs);
+  }
+
+  /** A disposable view draft: screenshots and optional DOM checks, outside the conversation's browser. */
+  checkView(url: string, options: ViewCheckOptions, timeoutMs = PROBE_TIMEOUT_MS): Promise<PageProbe | null> {
+    return this.#closed || this.findBrowser().path === null ? Promise.resolve(null)
+      : this.#probes.inspect(url, [VIEW_WIDTH, VIEW_NARROW_WIDTH].map(width => width + 2 * VIEW_BLEED), options, timeoutMs);
   }
 
   // ---------- lifetime ----------

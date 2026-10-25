@@ -6,13 +6,13 @@
  * with it goes back to the agent as the refusal's sentence, so the user is
  * only ever shown a page that loaded cleanly. docs/chat-files.md has the rest.
  */
-import { mkdir, rename, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { gzip, type InputType, type ZlibOptions } from 'node:zlib';
 import {
-  VIEW_BLEED, VIEW_DEFAULT_HEIGHT, VIEW_MAX_BYTES, VIEW_NARROW_WIDTH, VIEW_ROUTE, VIEW_TITLE_MAX, VIEW_WIDTH,
+  RPC_MAX_FRAME_BYTES, VIEW_BLEED, VIEW_DEFAULT_HEIGHT, VIEW_MAX_BYTES, VIEW_NARROW_WIDTH, VIEW_ROUTE, VIEW_TITLE_MAX, VIEW_WIDTH,
   clampViewHeight, viewDocument, viewTitleOf,
   type InlineView, type Message, type RpcParams, type RpcResult,
 } from '@boite/contracts';
@@ -213,7 +213,73 @@ function titleOf(asked: string | undefined, source: string, file: string): strin
   return title || 'View';
 }
 
-const notReady = (problems: string[]) => refused(`artifacts.view page is not ready to show. Fix the file and run the command again:\n${problems.map(problem => `- ${problem}`).join('\n')}`, { problems });
+const notReady = (problems: string[], method = 'artifacts.view') => refused(`${method} page is not ready to show. Fix the file and run the command again:\n${problems.map(problem => `- ${problem}`).join('\n')}`, { problems });
+
+/** The same checked input and embedded document for publication and private checks. */
+async function prepareView(core: Core, params: { threadId: string; path: string }, method: string) {
+  const thread = core.threads.require(params.threadId);
+  const permit = core.sharedAccess.file(thread.id, params.path, 'publish');
+  const sources = [params.path];
+  const permits = permit ? [permit] : [];
+  if (thread.archived) throw refused(`${method} needs an active thread`, { threadId: thread.id });
+  const turn = core.journal.lastTurn(thread.id);
+  if (!turn) throw refused(`${method} needs a thread with a turn`, { threadId: thread.id });
+  const found = existingInside(thread.cwd, params.path, 'file', `${method} path`);
+  if (!/\.html?$/i.test(found.relative)) throw refused(`${method} path must be an HTML file`, { path: params.path });
+  if (found.stats.size > VIEW_MAX_BYTES) throw refused(`${method} page must be at most 4 MB`, { path: params.path });
+  const handle = await openChecked(found.real, constants.O_RDONLY, found.stats.dev, found.stats.ino, `${method} path`, params.path);
+  let source: string;
+  try {
+    if (permit) permit.opened?.(found.real, await handle.stat({bigint: true}));
+    source = await handle.readFile('utf8');
+  } finally { await handle.close(); }
+  permit?.inspect(source);
+  if (!source.trim()) throw refused(`${method} page is empty`, { path: params.path });
+  const built = buildView(source, dirname(found.absolute), thread.cwd, permit ? path => {
+    const logical = relative(thread.cwd, path).split(sep).join('/');
+    const dependency = core.sharedAccess.file(thread.id, logical, 'publish')!;
+    sources.push(logical); permits.push(dependency); return dependency;
+  } : undefined);
+  if (built.problems.length) throw notReady(built.problems, method);
+  const data = Buffer.from(viewDocument(built.html), 'utf8');
+  if (data.length > VIEW_MAX_BYTES) throw refused(`${method} page is ${(data.length / 1024 / 1024).toFixed(1)} MB with its files embedded; the limit is 4 MB. Use smaller images.`, { path: params.path });
+  return { thread, turn, found, source, data, permit, permits, sources };
+}
+
+/** Render a disposable draft. No journal entry, panel request or browser tab is created. */
+export async function checkView(core: Core, params: RpcParams<'artifacts.viewCheck'>): Promise<RpcResult<'artifacts.viewCheck'>> {
+  if (params.script !== undefined && typeof params.script !== 'string') throw refused('artifacts.viewCheck script must be JavaScript text');
+  if (params.scheme !== undefined && params.scheme !== 'dark' && params.scheme !== 'light') throw refused('artifacts.viewCheck scheme must be dark or light');
+  const { found, source, data, permits } = await prepareView(core, params, 'artifacts.viewCheck');
+  const root = join(core.dataDir, 'view-checks');
+  await mkdir(root, { recursive: true });
+  const directory = await mkdtemp(join(root, 'draft-'));
+  let ticket: string | undefined;
+  try {
+    const destination = join(directory, 'page.html');
+    await writeFile(destination, data, { flag: 'wx' });
+    ticket = core.fileTickets.mint(destination, VIEW_MIME, Date.now(), basename(found.absolute), undefined, true,
+      permits.length ? {check: () => {for (const p of permits) p.check();}, inspect: () => {for (const p of permits) p.check();}} : undefined);
+    const probe = await core.browser.checkView(`${core.baseUrl()}${VIEW_ROUTE}/${ticket}`, { script: params.script, scheme: params.scheme });
+    for (const p of permits) p.check();
+    const result: RpcResult<'artifacts.viewCheck'> = {
+      checked: probe !== null,
+      errors: probe?.errors ?? ['the draft could not be checked: this machine has no available browser, or the browser did not answer in time'],
+      advice: viewAdvice(source),
+      captures: probe?.captures ?? [],
+    };
+    // Captures and a script return share one RPC frame. Keep room for its envelope.
+    if (Buffer.byteLength(JSON.stringify(result)) > RPC_MAX_FRAME_BYTES - 64 * 1024) {
+      result.captures = [];
+      result.errors.push('the draft captures and script results exceed the 16 MB RPC response limit; reduce image detail or return a smaller script result');
+    }
+    return result;
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+    // Resolving the deleted file also drops its ticket from memory.
+    if (ticket) core.fileTickets.resolve(ticket);
+  }
+}
 
 /**
  * Publish a page as a view. The message is journalled where the command ran;
@@ -222,33 +288,7 @@ const notReady = (problems: string[]) => refused(`artifacts.view page is not rea
  * in two where the command ran: only the answer's own line places it.
  */
 export async function publishView(core: Core, params: RpcParams<'artifacts.view'>): Promise<RpcResult<'artifacts.view'>> {
-  const thread = core.threads.require(params.threadId);
-  const permit = core.sharedAccess.file(thread.id, params.path, 'publish');
-  const sources = [params.path];
-  const permits = permit ? [permit] : [];
-  if (thread.archived) throw refused('artifacts.view needs an active thread', { threadId: thread.id });
-  const turn = core.journal.lastTurn(thread.id);
-  if (!turn) throw refused('artifacts.view needs a thread with a turn', { threadId: thread.id });
-  const found = existingInside(thread.cwd, params.path, 'file', 'artifacts.view path');
-  if (!/\.html?$/i.test(found.relative)) throw refused('artifacts.view path must be an HTML file', { path: params.path });
-  if (found.stats.size > VIEW_MAX_BYTES) throw refused('artifacts.view page must be at most 4 MB', { path: params.path });
-  // Read through the handle of the file that was checked: a link swapped in since is refused.
-  const handle = await openChecked(found.real, constants.O_RDONLY, found.stats.dev, found.stats.ino, 'artifacts.view path', params.path);
-  let source: string;
-  try {
-    if (permit) permit.opened?.(found.real, await handle.stat({bigint: true}));
-    source = await handle.readFile('utf8');
-  } finally { await handle.close(); }
-  permit?.inspect(source);
-  if (!source.trim()) throw refused('artifacts.view page is empty', { path: params.path });
-  const built = buildView(source, dirname(found.absolute), thread.cwd, permit ? path => {
-    const logical = relative(thread.cwd, path).split(sep).join('/');
-    const dependency = core.sharedAccess.file(thread.id, logical, 'publish')!;
-    sources.push(logical); permits.push(dependency); return dependency;
-  } : undefined);
-  if (built.problems.length) throw notReady(built.problems);
-  const data = Buffer.from(viewDocument(built.html), 'utf8');
-  if (data.length > VIEW_MAX_BYTES) throw refused(`artifacts.view page is ${(data.length / 1024 / 1024).toFixed(1)} MB with its files embedded; the limit is 4 MB. Use smaller images.`, { path: params.path });
+  const { thread, turn, found, source, data, permit, permits, sources } = await prepareView(core, params, 'artifacts.view');
 
   const id = randomUUID();
   const directory = join(core.dataDir, 'artifacts');

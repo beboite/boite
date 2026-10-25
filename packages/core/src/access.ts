@@ -185,6 +185,7 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['artifacts.publish', 'explicitly sharing a bounded snapshot from its own working directory in its own conversation'],
   ['artifacts.read', 'reading back only a published snapshot belonging to its own conversation'],
   ['artifacts.view', 'showing one HTML page of its own working directory in its own conversation, embedded whole, on an opaque origin that loads and calls nothing'],
+  ['artifacts.viewCheck', 'checking its own local HTML with the view sandbox in an isolated browser, returning captures without publishing or opening a panel'],
   ['artifacts.preview', 'showing an HTML artifact and its neighbouring assets inside its own working directory, on an isolated origin'],
   ['artifacts.previewClose', 'closing only an HTML preview belonging to its own conversation'],
   ['threads.tasks.set', 'the plan the tasks surface draws, from an agent whose protocol carries no todo tool'],

@@ -162,6 +162,39 @@ Publishing the same file again in the same turn replaces that visual on
 screen, so an agent fixes a page in place. In a later turn the same file is a
 new view, and the earlier answer keeps the page it had.
 
+### Check before publishing
+
+`boite view check <file.html> [--script checks.js] [--scheme dark|light]`
+loads a draft without publishing it. It embeds the same local assets and uses
+the same kit, sandbox and layout checks as publication, with content widths
+of 816 px and 330 px. It creates no message, artifact, browser tab or panel.
+Its temporary page and ticket are removed when the check ends, including on
+errors or timeout. The CLI saves the returned PNGs with unique names inside
+its current directory and never overwrites an existing file. Open both
+captures, fix the page and rerun before publishing.
+
+The check uses the app's fallback palettes and fonts, rather than a connected
+client's custom theme or selected fonts. Dark is the default;
+`--scheme light` uses the light palette and `prefers-color-scheme`.
+
+For a page with controls, `--script checks.js` reads a local JavaScript file
+whose contents are the body of an async function, without a function wrapper.
+It runs in the page after a fresh load at each width, so desktop interactions
+cannot carry state into the phone check. Use the DOM, click buttons, dispatch
+input/change events, await updates, throw when an assertion fails and return
+JSON values that describe the resulting state. Captures show the page after
+the script ran, including when it throws. Check every control and open the
+captures to inspect the resulting layout.
+
+The command prints captures, script results, errors and advice. Any error,
+or a browser unavailable or unable to answer, returns a nonzero exit code
+after available captures are saved. `--json` returns `checked`, `errors`,
+`advice` and `captures`; each capture has `width`, `height`, a local `path`
+and an optional script `value`, with no PNG bytes. A result exceeding the
+16 MB RPC response limit returns an error without captures; return smaller
+values or reduce the image detail. After fixing errors and advice and opening
+the new captures, run `boite view <file.html>` to publish as usual.
+
 ### What publishing does
 
 `artifacts.view` (`packages/core/src/views.ts`) reads the file, which must be

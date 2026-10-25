@@ -981,6 +981,7 @@ to owner-only.
 | Existing `delegation.spawn/models/resume`; `delegation.configure` | Yes | Denied | Spawn/models and permitted resume only; never configure |
 | Existing `files.list/read`, `git.status/diff` | Local scope | Existing project/credential guards and HEAD diff only | Own thread; shared policy applies additionally |
 | Existing `artifacts.publish/view/preview`; `artifacts.read` | Local scope | Published snapshot read only | Own thread only; no contact file/preview authority |
+| `artifacts.viewCheck` | Local thread scope | Denied | Own thread; shared publication policy covers the page, embedded files, draft ticket and returned captures |
 | `sharedProjects.list/get/threads/search/read/subscribe` | Source project scope | Same scope | Own associated project; reads still need readThreads |
 | `sharedBoard.get/apply/start` | Association + board consent, start uses its local reserved worker | Same; every board action | Own association, add/edit/claim/start; no remove/Done/reopen Done |
 | `sharedCompute.models/list/get/send/cancel` | Host jobs or source scope | Follow/steer/cancel existing jobs, no admission | Own source jobs; no host policy or permission answers |

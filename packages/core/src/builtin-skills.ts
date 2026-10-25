@@ -159,15 +159,31 @@ travels along them.
 
 When the user wants something to keep, share or print, write one
 self-contained HTML file (inline CSS and JavaScript, embedded images, nothing
-loaded from the network) and send it with \`boite attach\`. Run
-\`boite view\` on the same file to show it in the chat as well; its publish
-check catches script errors, remote resources and sideways scrolling.
+loaded from the network) and send it with \`boite attach\`. Check the same
+file as below, then run \`boite view\` to show it in the chat as well.
 
 ## Check
 
-\`boite view\` refuses a broken page and says why. For a page with controls,
-open the file in \`boite browser\`, use each control and read
-\`boite browser diagnostics\` before you publish.
+Run \`boite view check <page.html>\` before publishing. It embeds the local
+assets and loads the page with the view's kit and sandbox at desktop and
+phone content widths (816 and 330 px), without creating any message,
+artifact, tab or panel. It saves uniquely named PNGs in your current
+directory. Open both captures, fix what you see and rerun the check.
+
+For controls, write a local \`checks.js\` and run
+\`boite view check <page.html> --script checks.js\`. The file is the body of
+an async function, without a function wrapper. It runs after a fresh page
+load at each width. Use DOM clicks and input/change events to exercise every
+control, await updates, throw an Error when an assertion fails, and return
+JSON values that show the resulting state. The captures show that state
+after the script, even when it throws. Open those captures too.
+
+The check uses the app's fallback palettes and fonts, not the connected
+client's custom theme or selected fonts. Use \`--scheme light\` to check the
+light palette; dark is the default. Errors or an unavailable browser exit
+nonzero after saving available captures; \`--json\` returns capture paths.
+Fix errors and advice before publishing with \`boite view <page.html>\`,
+then place the page in your answer with the printed image line.
 `,
 };
 
