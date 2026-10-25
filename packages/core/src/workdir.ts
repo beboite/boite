@@ -21,6 +21,7 @@ import { locateFile } from './files.ts';
 import { refused, RpcFailure } from './errors.ts';
 import type { RpcContext } from './router.ts';
 import { newToken } from './ids.ts';
+import { currentOs } from './paths.ts';
 import { worktreeRoot } from './worktree.ts';
 
 /** How much of a file decides whether it is text: one NUL in there and it is not. */
@@ -191,7 +192,7 @@ export async function createExclusiveFile(dir: FileHandle, name: string, fallbac
     throw refused(`files.write path is not a file name: ${name}`, { what: 'files.write path', path: name });
   }
   const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW;
-  const target = process.platform === 'linux' ? `/proc/self/fd/${dir.fd}/${name}` : fallbackPath;
+  const target = currentOs() === 'linux' ? `/proc/self/fd/${dir.fd}/${name}` : fallbackPath;
   return open(target, flags, 0o666);
 }
 

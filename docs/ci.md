@@ -52,12 +52,14 @@ dependency is required too.
 | `tests/e2e/` | Desktop and E2E checks plus `check:e2e`; `tests/e2e/lib/` also selects stress |
 | `Dockerfile`, `.dockerignore`, `docker/` | Native x64 and ARM64 Docker smoke tests |
 | `packages/ui/` | Full type checks and UI tests, desktop/E2E without the shell's Rust tests, Docker and stress; `preview-picker.js` and `preview-highlight.js`, which `browser.rs` embeds, add them |
-| `apps/android/`, `android.yml`, `scripts/ci/android-apk.ts` | Unsigned APK build |
+| `apps/android/`, `android.yml`, `scripts/ci/android-apk.ts` | Unsigned APK build; `android-apk.ts` adds the Boite Server APK |
+| `apps/android-server/` outside `termux/`, `android-server.yml`, `scripts/ci/android-server-apk.ts` | Unsigned Boite Server APK build |
+| `apps/android-server/termux/` | Core tests, type checks and UI tests, desktop/E2E: the release bundle carries it |
 | `telemetry/` | Full type checks and UI tests plus the existing relay behavior suite |
 | `tests/stress/`, `bench/agent-stress.ts`, `bench/lib/` | Full type checks, UI tests and stress |
 | Other `bench/` files, `scripts/architecture/` | Full type checks and UI tests |
-| `packages/core/` | All checks except the shell's Rust tests and the APK |
-| `packages/contracts/` | All checks except the shell's Rust tests |
+| `packages/core/` | All checks except the shell's Rust tests and the APKs |
+| `packages/contracts/` | All checks except the shell's Rust tests and the Boite Server APK |
 | Dependencies, shared builds, other workflows and unknown paths | All checks |
 | Release or manual full run | All checks, except jobs the caller replaces through explicit inputs |
 
@@ -100,7 +102,8 @@ reports its own name (`Desktop`), never the inner ones. So:
   on), each skipped unless `coreRunners` lists its label; the E2E suite is
   `E2E 1/3` to `E2E 3/3`. YAML anchors (`&core-steps`, `&e2e-steps`) keep one
   step list.
-- `desktop.yml`, `server-verify.yml` and `android.yml` take an `enabled` input,
+- `desktop.yml`, `server-verify.yml`, `android.yml` and `android-server.yml`
+  take an `enabled` input,
   default on. `ci.yml` always calls them and turns it off when their paths did
   not change: every inner job skips, costs no runner, and reports
   `Desktop / Linux x64` as it would running. The portable jobs are one per
@@ -242,7 +245,7 @@ inspector answers only when the JavaScript thread is free.
 A draft pull request runs `draft` mode: the changes job, the Linux x64 core
 suite, type checks and UI tests, and the focused telemetry and E2E type checks,
 each only when its paths changed. Windows, macOS, desktop packages, E2E,
-stress, Docker and the APK wait: their checks skip.
+stress, Docker and the APKs wait: their checks skip.
 
 A skip passes in a ruleset, so a draft must not satisfy it:
 
@@ -515,8 +518,8 @@ and the next two were each replaced while pending, 9c974e65's passed at 09:33,
 and the night was lost on `ended cancelled` (run 39226757576). The job writes the commit it passed as
 its `sha` output, and every later job checks out, tags and publishes that
 commit, never `github.sha`; the version step runs that commit's `nightly.ts`
-with `GITHUB_SHA` set to it. `desktop.yml`, `android.yml`, `server.yml` and
-`server-verify.yml` take it as their `ref` input. `app.yml` deploys its own
+with `GITHUB_SHA` set to it. `desktop.yml`, `android.yml`, `android-server.yml`,
+`server.yml` and `server-verify.yml` take it as their `ref` input. `app.yml` deploys its own
 checkout, so it does not follow and a cancelled run still fails it. The whole
 wait is bounded at two hours: 35 minutes behind the main run ahead, 35 for the
 followed run and 35 for its rerun.
@@ -537,7 +540,7 @@ resetting the counter each UTC day. For example, September 15's first build is
 version; source manifests retain theirs.
 
 The CI check runs first, since it decides which commit gets built; the
-version, desktop builds, APK and native image builds follow on that commit,
+version, desktop builds, APKs and native image builds follow on that commit,
 alongside one another. A scheduled run usually finds its CI long finished, so
 the wait costs nothing there; a dispatch right after a merge waits for that
 run before building. Only after all pass does reservation bind the tag to the exact commit. A publishing
@@ -550,7 +553,9 @@ Stable and nightly desktop tracks share the regular install and data; Boite Dev
 is separate ([updates](updates.md)). The server uses `dev`; use separate Compose
 volumes ([server](server.md)). The signed or reused APK, which opens the phone
 app's address, is required too; [Android](android.md) owns the host, signing
-and reuse rules.
+and reuse rules. So is the Boite Server APK, signed with the same key or reused
+while `apps/android-server` outside `termux/` is unchanged
+([Android server](android-server.md#publishing-the-app)).
 
 ## The phone app's address
 

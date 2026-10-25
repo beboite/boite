@@ -95,7 +95,9 @@ cannot install.
 
 Changing the key means a new SHA-256 fingerprint in `assetlinks.json`, and
 every installed app must be uninstalled first, because Android refuses an
-update signed by another certificate.
+update signed by another certificate. The same key signs Boite Server
+([Android server](android-server.md#publishing-the-app)), whose nightly checks
+its APK against that fingerprint too.
 
 ## Building it locally
 
