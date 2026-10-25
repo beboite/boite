@@ -85,8 +85,10 @@ export class Closing {
    * `animationend` is not promised: a cancelled exit sends `animationcancel`
    * instead, and a page the browser draws no frame of ends nothing (a phone
    * tour stayed on screen after Done on a busy CI runner). Each exit's own
-   * `finished`, settled either way, unmounts the node, and its length in time
-   * does when no frame comes.
+   * `finished`, settled either way, unmounts the node; two seconds past its
+   * length, a page still drawing nothing lets it go without the exit. A busy
+   * runner can take longer than the exit itself to draw its first frame, so
+   * a deadline at its length cut the right panel's slide before it began.
    */
   async #settle(run: number): Promise<void> {
     await tick();
@@ -108,8 +110,8 @@ export class Closing {
   }
 }
 
-/** What a frame or two weighs past an exit's end before the node goes without it. */
-const EXIT_SLACK_MS = 100;
+/** How long past an exit's length a page may draw no frame before the node goes without it. */
+const EXIT_SLACK_MS = 2000;
 
 /** When an animation ends, in ms from its start; infinite for one that loops. */
 function endOf(animation: Animation): number {

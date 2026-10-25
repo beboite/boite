@@ -34,8 +34,10 @@ describe('Closing', () => {
     overlay.attach(playing(new Promise(() => {}), 150));
     overlay.hide();
     await settle();
+    // A slow first frame is not a missing one: the exit still has its time.
+    await vi.advanceTimersByTimeAsync(1500);
     expect(overlay.closing).toBe(true);
-    await vi.advanceTimersByTimeAsync(400);
+    await vi.advanceTimersByTimeAsync(1000);
     expect(overlay.shown).toBe(false);
   });
 
@@ -47,7 +49,7 @@ describe('Closing', () => {
     overlay.hide();
     await settle();
     overlay.show();
-    await vi.advanceTimersByTimeAsync(400);
+    await vi.advanceTimersByTimeAsync(2500);
     expect(overlay.open).toBe(true);
   });
 });
