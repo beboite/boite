@@ -471,10 +471,13 @@ when the core advertises `chunkedAnswers`.
   prefixes cannot prove that the omitted text stayed unchanged.
 - File links arrive with their name, MIME type and decoded byte count. Their
   base64 data loads through `messages.attachment` when opened or downloaded.
-  An assistant's video, audio or PDF keeps its bytes, since it previews on
-  mount. An assistant's picture above 8 KiB is deferred like a prompt's, with
-  its size and blur, and `ChatFile` loads it within 400 px of the screen in a
-  box of its proportions. Nine screenshots an agent attached made a 40-message
+  Video and audio players ask for a file ticket within 400 px of the screen;
+  the browser fetches their metadata and streams their bytes over HTTP, outside
+  the thread's JSON frames. Older cores and desktop relay connections fall back
+  to a separate base64 read. An assistant's PDF keeps its bytes for signature
+  checking before preview. An assistant's picture above 8 KiB is deferred like
+  a prompt's, with its size and blur, and `ChatFile` loads it within 400 px of
+  the screen in a box of its proportions. Nine screenshots an agent attached made a 40-message
   page of one thread weigh 12,020,008 bytes, 7,472,667 deflated (measured on
   2026-10-07). The same page projected this way weighs 50,961 bytes, 13,679
   deflated.
@@ -541,11 +544,10 @@ when the core advertises `chunkedAnswers`.
   base64: at 150 ms with no rate cap, ticketed thumbnails took 488 ms against
   299 ms for base64 large copies, and ticketed large copies gain no bytes over
   deflated base64 (1,325 against 1,327 KB) while taking that round trip.
-- A light read first makes the blurs of the messages around its page that no
-  read looked at before, waiting 1.5 s at most. It does this before the page is
-  read, never between the read and the answer, so the answer still holds every
-  event sent before it. A picture without a blur yet is sent without one and
-  queued.
+- A light read queues missing blurs while projecting its messages and answers
+  without waiting for image conversion. It does not scan surrounding messages
+  for previews before reading the page. Cached blurs accompany later reads;
+  a picture without one still reserves its dimensions while its copy loads.
 - `ChatImage.svelte` draws each picture in a box of its own proportions from
   the first frame: the blur, then the picture fading in over it. A picture that
   came with its bytes reads its size from their header. Nothing around the box

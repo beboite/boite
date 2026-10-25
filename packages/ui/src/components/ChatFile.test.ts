@@ -26,6 +26,56 @@ afterEach(() => {
 const photo = { type: 'file' as const, name: 'capture.png', mimeType: 'image/png', data: btoa('png bytes') };
 const archive = { type: 'file' as const, name: 'build.zip', mimeType: 'application/zip', data: btoa('zip bytes') };
 
+test.each(['video/mp4', 'audio/mpeg'])('deferred %s loads a file URL only near the screen without hydrating the message', async mimeType => {
+  let seen!: IntersectionObserverCallback;
+  const previous = globalThis.IntersectionObserver;
+  globalThis.IntersectionObserver = class {
+    constructor(callback: IntersectionObserverCallback) { seen = callback; }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof IntersectionObserver;
+  const loadMediaAttachment = vi.fn(async () => 'https://core.example/file/media');
+  const loadMessageAttachment = vi.fn();
+  const store = { loadMediaAttachment, loadMessageAttachment } as unknown as Store;
+  const file = { type: 'file' as const, name: 'recording', mimeType, data: '', dataDeferred: true as const, bytes: 20 * 1024 * 1024 };
+  try {
+    running = mount(ChatFile, { target: document.body, props: { file, store, threadId: 'thread', messageId: 'message', partIndex: 2 } });
+    flushSync();
+    expect(loadMediaAttachment).not.toHaveBeenCalled();
+    expect(typeof seen).toBe('function');
+    seen([{ target: query('[data-testid=chat-file]'), isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+    await vi.waitFor(() => expect(document.querySelector('video, audio')).not.toBeNull());
+    expect(loadMediaAttachment).toHaveBeenCalledExactlyOnceWith('thread', 'message', 2, mimeType);
+    expect(loadMessageAttachment).not.toHaveBeenCalled();
+    const player = query<HTMLMediaElement>('video, audio');
+    expect(player.src).toBe('https://core.example/file/media');
+    expect(player.preload).toBe('metadata');
+    expect(player.autoplay).toBe(false);
+    expect(file.data).toBe('');
+    expect(file.dataDeferred).toBe(true);
+  } finally {
+    if (running) { await unmount(running, { outro: false }); running = null; }
+    globalThis.IntersectionObserver = previous;
+  }
+});
+
+test('a deferred video received as base64 through a relay saves its bytes in the shell', async () => {
+  const invoke = vi.fn(async () => ({ path: 'C:/Downloads/clip.mp4', opened: false }));
+  window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
+  const loadMediaAttachment = vi.fn(async () => `data:video/mp4;base64,${btoa('original video bytes')}`);
+  running = mount(ChatFile, { target: document.body, props: {
+    store: { loadMediaAttachment } as unknown as Store, threadId: 'thread', messageId: 'message', partIndex: 0,
+    file: { type: 'file', name: 'clip.mp4', mimeType: 'video/mp4', data: '', dataDeferred: true, bytes: 20 },
+  } });
+  await vi.waitFor(() => expect(document.querySelector('video')).not.toBeNull());
+  query<HTMLAnchorElement>('[data-testid=artifact-download]').click();
+  await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(1));
+  const [command, body] = invoke.mock.lastCall as unknown as [string, Uint8Array];
+  expect(command).toBe('save_attachment');
+  expect(new TextDecoder().decode(body)).toBe('original video bytes');
+});
+
 function query<T extends Element>(selector: string): T {
   const found = document.querySelector<T>(selector);
   if (!found) throw new Error(`${selector} is not on the page`);

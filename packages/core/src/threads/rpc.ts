@@ -144,10 +144,8 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     if (params.subscribe === true) ctx.connection.subscriptions.add(thread.id);
     return thread;
   });
-  // The blurs of a light page are made before it is read, never between the
-  // read and the answer (`MediaPreviews.warm`).
-  core.router.register('threads.get', async (params, ctx) => {
-    if (params.compactImages === true) await core.media.warm(params.threadId, params.around, params.limit);
+  // Projection queues missing image previews without delaying the snapshot or its subscription.
+  core.router.register('threads.get', (params, ctx) => {
     const thread = core.threads.get(params.threadId, params.after, params);
     if (!params.open) return thread;
     ctx.connection.subscriptions.add(params.threadId);
@@ -159,12 +157,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
       permissions: core.threads.listPermissions(params.threadId), questions: core.threads.listQuestions(params.threadId)
     } };
   });
-  core.router.register('messages.list', async (params) => {
-    // A page read by position warms the pictures around its own first message, not the thread's last page.
-    const near = Number.isSafeInteger(params.from) && params.from! >= 0 ? core.journal.messageIdAt(params.threadId, params.from!) : params.before ?? params.after;
-    if (params.compactImages === true && near !== null) await core.media.warm(params.threadId, near, params.limit);
-    return core.threads.messages(params);
-  });
+  core.router.register('messages.list', params => core.threads.messages(params));
   core.router.register('messages.toolOutput', (params) => readToolOutput(core, params));
   core.router.register('messages.toolPart', (params) => readToolPart(core, params));
   core.router.register('messages.attachment', params => readMessageAttachment(core, params));

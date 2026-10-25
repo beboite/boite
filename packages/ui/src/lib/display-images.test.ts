@@ -47,6 +47,10 @@ test('a copy comes as a file route address at the machine it was asked of, by si
   await images.load('t-1', 'm-1', 0, 'image/png', true);
   expect(call).toHaveBeenCalledTimes(3);
 
+  // Players use the same owning endpoint, but ask for the original instead of a display copy.
+  expect(await images.original('t-1', 'm-video', 2, 'video/mp4')).toBe('http://192.168.1.5:7777/file/large');
+  expect(call).toHaveBeenLastCalledWith('messages.attachment', { threadId: 't-1', messageId: 'm-video', partIndex: 2, ticket: true });
+
   // The shell admits `/file/` only at a machine's own address: through a relay it asks for base64.
   store.endpointUrl = `http://192.168.1.5:7777/group/relay/${'a'.repeat(64)}`;
   window.__TAURI_INTERNALS__ = {} as never;
@@ -54,6 +58,8 @@ test('a copy comes as a file route address at the machine it was asked of, by si
     images.clear();
     expect(await images.load('t-1', 'm-1', 0, 'image/png', true)).toBe('data:image/webp;base64,UklG');
     expect(call).toHaveBeenLastCalledWith('messages.attachment', { threadId: 't-1', messageId: 'm-1', partIndex: 0, display: true, thumb: true });
+    expect(await images.original('t-1', 'm-video', 2, 'video/mp4')).toBe('data:image/webp;base64,UklG');
+    expect(call).toHaveBeenLastCalledWith('messages.attachment', { threadId: 't-1', messageId: 'm-video', partIndex: 2 });
   } finally {
     delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   }

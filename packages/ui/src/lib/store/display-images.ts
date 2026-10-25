@@ -1,4 +1,4 @@
-import { parseGroupRelayUrl, type ThreadId } from '@boite/contracts';
+import { parseGroupRelayUrl, type RpcParams, type ThreadId } from '@boite/contracts';
 import { coreHref } from '../endpoint';
 import { strings } from '../strings';
 import type { StoreContext } from './context';
@@ -56,14 +56,7 @@ export class DisplayImages {
       this.#held.set(key, held);
       return held.promise;
     }
-    const endpoint = this.ctx.store?.endpointUrl ?? null;
-    const ticket = !(window.__TAURI_INTERNALS__ !== undefined && endpoint !== null && parseGroupRelayUrl(endpoint) !== null);
-    const promise = client.call('messages.attachment', { threadId, messageId, partIndex, display: true, ...(thumb ? { thumb } : {}), ...(ticket ? { ticket } : {}) })
-      .then(({ data, mimeType: type, url }) => {
-        if (url === undefined) return `data:${type ?? mimeType};base64,${data}`;
-        // A path on the core's HTTP server, at the address this client reached it by.
-        return url.startsWith('/') && endpoint !== null ? coreHref(endpoint, url) : url;
-      });
+    const promise = this.request({ threadId, messageId, partIndex, display: true, ...(thumb ? { thumb } : {}) }, mimeType);
     const entry: Held = { promise, chars: 0 };
     promise.then((url) => {
       if (this.#held.get(key) !== entry) return;
@@ -77,6 +70,21 @@ export class DisplayImages {
     this.#held.set(key, entry);
     this.#evict();
     return promise;
+  }
+
+  /** A video or audio player reads its original from HTTP, without hydrating the message's base64. */
+  original(threadId: ThreadId, messageId: string, partIndex: number, mimeType: string): Promise<string> {
+    return this.request({ threadId, messageId, partIndex }, mimeType);
+  }
+
+  private async request(params: RpcParams<'messages.attachment'>, mimeType: string): Promise<string> {
+    const client = this.ctx.client;
+    if (!client) throw new Error(strings.connection.unavailable);
+    const endpoint = this.ctx.store?.endpointUrl ?? null;
+    const ticket = !(window.__TAURI_INTERNALS__ !== undefined && endpoint !== null && parseGroupRelayUrl(endpoint) !== null);
+    const { data, mimeType: type, url } = await client.call('messages.attachment', { ...params, ...(ticket ? { ticket } : {}) });
+    if (url === undefined) return `data:${type ?? mimeType};base64,${data}`;
+    return url.startsWith('/') && endpoint !== null ? coreHref(endpoint, url) : url;
   }
 
   /**
