@@ -7,7 +7,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import type { Account, Channel, Group, PairingGrant, PairingRole, Settings, TailscaleStatus } from '@boite/contracts';
+import type { Channel, Group, PairingGrant, PairingRole, Settings, TailscaleStatus } from '@boite/contracts';
 import { connect } from './client.ts';
 import type { Core } from './core.ts';
 import { CORE_VERSION } from './version.ts';
@@ -165,35 +165,6 @@ export async function pair(argv: string[]): Promise<PairingGrant> {
 }
 
 /**
- * `boite-core accounts [--refresh] [--json]`: the agent accounts of the core
- * already running on this data directory and whether each is signed in, the
- * Providers page of a machine with no window. `--refresh` first reloads the
- * providers, which adopts the default account of a CLI login made since the
- * core started, then asks each account's agent again, as the Providers
- * page's check does: a login file alone does not clear a refusal the agent
- * gave before.
- */
-export async function accounts(argv: string[]): Promise<Account[]> {
-  const client = await ownerClient(argv);
-  try {
-    if (!argv.includes('--refresh')) return await client.call('accounts.list', {});
-    await client.call('providers.reload', {});
-    const listed = await client.call('accounts.list', {});
-    // A failed check leaves the account in `error`, which the list then shows.
-    await Promise.allSettled(listed.map((account) => client.call('accounts.check', { accountId: account.id, refresh: true })));
-    return await client.call('accounts.list', {});
-  } finally {
-    client.close();
-  }
-}
-
-/** One line per account: provider, status, then the label, which may hold spaces. */
-function describeAccounts(list: Account[]): string {
-  if (list.length === 0) return 'no agent account: install an agent, or sign in with its CLI and run accounts --refresh\n';
-  return list.map((account) => `${account.providerId}\t${account.status}\t${account.label}${account.identity ? ` (${account.identity})` : ''}\n`).join('');
-}
-
-/**
  * `boite-core tailscale [status|on|off] [--replace]`: the Tailscale HTTPS
  * switch of Settings, for a machine with no window. `on` refuses to take 443
  * from another target unless `--replace` says so.
@@ -287,7 +258,7 @@ export async function group(argv: string[]): Promise<string> {
 }
 
 /** A connection to the core already running on this data directory, as its owner, with the token `core.json` holds. */
-async function ownerClient(argv: string[]): Promise<Awaited<ReturnType<typeof connect>>> {
+export async function ownerClient(argv: string[]): Promise<Awaited<ReturnType<typeof connect>>> {
   const flags = parseFlags(argv);
   const dataDir = resolveDataDir(flags.dataDir, flags.channel);
   const file = join(dataDir, 'core.json');
@@ -382,16 +353,7 @@ export function main(argv: string[]): void {
     return;
   }
   if (argv[0] === 'accounts') {
-    accounts(argv.slice(1)).then(
-      (list) => {
-        process.stdout.write(argv.includes('--json') ? `${JSON.stringify(list)}\n` : describeAccounts(list));
-        process.exit(0);
-      },
-      (error: unknown) => {
-        process.stderr.write(`boite-core accounts: ${error instanceof Error ? error.message : String(error)}\n`);
-        process.exit(1);
-      },
-    );
+    void import('./accounts-command.ts').then(({ runAccounts }) => runAccounts(argv.slice(1), ownerClient));
     return;
   }
   if (argv[0] === 'group') {
