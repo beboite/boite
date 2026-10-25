@@ -961,6 +961,23 @@ limits expensive work while streaming, typing and scrolling:
 
 ### A long turn is many rows
 
+Inline view placement keeps the same timeline array when streamed text leaves
+the message order unchanged. Checking a new placement line still happens as
+the answer grows, but downstream row and scroll effects do not rerun merely
+because a view exists. A changed placement, turn status, or republished page
+still reaches the timeline. The sidebar also uses its row index for full
+thread updates, including provider progress heartbeats, as it does for load
+samples.
+
+`bun run --cwd packages/ui test src/components/MessageList.test.ts -t 'four hundred messages'`
+covers 400 messages and 200 deltas both with and without an inline view. Before
+the change on 2026-10-25, the view case made 400 height reads during the deltas
+and failed the existing layout budget; the case without a view passed.
+`src/lib/store-thread-index.test.ts` covers progress updates as well as load
+samples, and `src/lib/inline-view.test.ts` checks placement changes and
+replacement message objects. These checks do not measure native WebView2
+frame times or establish an improvement in whole-machine CPU use.
+
 A long agent session leaves a thread whose weight is tool calls: four real
 ones of 15 to 23 MB read on 2026-10-07 held 4,000 to 6,200 calls, and one
 assistant message carried a whole turn, up to 3,106 parts. The window counted

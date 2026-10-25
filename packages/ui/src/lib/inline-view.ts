@@ -195,6 +195,21 @@ export function placeViews(timeline: Message[], turns: readonly Pick<Turn, 'id' 
   return placed;
 }
 
+/**
+ * A token can add a line placing a view without moving any messages. Keep
+ * the placed array until its order changes, so downstream windowing and
+ * scroll effects do not run again on every character of that answer.
+ */
+export class ViewPlacement {
+  #previous: Message[] | undefined;
+
+  build(timeline: Message[], turns: readonly Pick<Turn, 'id' | 'status'>[], views = turnViews(timeline)): Message[] {
+    const next = placeViews(timeline, turns, views);
+    if (this.#previous?.length === next.length && next.every((message, index) => message === this.#previous![index])) return this.#previous;
+    return this.#previous = next;
+  }
+}
+
 /** The height each view last reported, so a row that left the window comes back at its size. The newest 500. */
 export const viewHeights = new Map<string, number>();
 export function rememberViewHeight(id: string, height: number): void {
