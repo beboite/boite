@@ -120,8 +120,9 @@ export class DiagnosticLogs {
 
   normalize(payload: RpcEvents['core.log']): RpcEvents['core.log'] {
     const context = this.context(payload);
-    const data = normalizeLogData(payload.data, this.secrets);
-    return { level: payload.level, at: payload.at, message: payload.kind === 'provider-output' ? normalizeCoreLogOutput(payload.message, this.secrets) : redactLogText(payload.message, this.secrets),
+    const data = normalizeLogData(this.maskData(payload.data), this.secrets);
+    const message = this.mask(payload.message);
+    return { level: payload.level, at: payload.at, message: payload.kind === 'provider-output' ? normalizeCoreLogOutput(message, this.secrets) : redactLogText(message, this.secrets),
       source: context.source, event: context.event,
       ...(context.threadId === undefined ? {} : { threadId: context.threadId }),
       ...(context.turnId === undefined ? {} : { turnId: context.turnId }),
@@ -132,7 +133,13 @@ export class DiagnosticLogs {
   }
 
   /** Credentials and sensitive fields removed, as every stored record is. */
-  redact(text: string): string { return redactLogText(text, this.secrets); }
+  redact(text: string): string { return redactLogText(this.mask(text), this.secrets); }
+  /** Replaces the value of every secret in use by `•••• (<NAME>)`, before any cut; set by the core once its secret store exists. */
+  mask: (text: string) => string = text => text;
+  private maskData(raw: unknown): unknown {
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+    return Object.fromEntries(Object.entries(raw).map(([key, value]) => [key, typeof value === 'string' ? this.mask(value) : value]));
+  }
   /** A client's report, redacted with the secrets this store knows; they never leave it. */
   validateReport(raw: unknown): DiagnosticReportRecord[] { return validateDiagnosticReport(raw, this.secrets); }
 
@@ -164,14 +171,14 @@ export class DiagnosticLogs {
   record(level: CoreLogLevel, message: string, context: Partial<LogContext> = {}, at = Date.now()): void {
     if (this.closed) return;
     const base = this.context(context);
-    const data = normalizeLogData(context.data, this.secrets);
+    const data = normalizeLogData(this.maskData(context.data), this.secrets);
     const record: CoreLogRecord = {
       id: `${this.runId}:${++this.sequence}`, runId: this.runId, at, level,
       ...(context.origin && context.origin !== 'core' ? { origin: context.origin } : {}),
       ...base, ...this.identity(base.threadId, context),
       ...(validDuration(context.durationMs) ? { durationMs: Math.round(context.durationMs!) } : {}),
       ...(data ? { data } : {}),
-      message: redactLogText(message, this.secrets),
+      message: redactLogText(this.mask(message), this.secrets),
     };
     this.unpersisted.set(record.id, record);
     if (this.unpersisted.size > UNPERSISTED_RECORDS) this.unpersisted.delete(this.unpersisted.keys().next().value!);

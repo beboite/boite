@@ -76,6 +76,11 @@ export function parse(argv: string[]): Parsed {
       parsed.positional.push(arg);
       continue;
     }
+    // `boite secret` parses its own flags (secret-cli.ts); after `--` every word is the child command's, `--json` included.
+    if (parsed.positional[0] === 'secret' && (arg === '--' || parsed.positional.includes('--') || !['--json', '--thread', '--data-dir', '--core', '--channel'].includes(arg))) {
+      parsed.positional.push(arg);
+      continue;
+    }
     const boolean = BOOLEAN_OPTIONS.find(key => arg === `--${key}`);
     const numeric = NUMBER_OPTIONS.find(key => arg === `--${key}`);
     if (boolean !== undefined) parsed[boolean] = true;

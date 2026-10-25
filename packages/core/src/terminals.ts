@@ -294,6 +294,8 @@ export class TerminalStore {
     let held = '';
     let gate: ReturnType<typeof setTimeout> | null = null;
     const emit = (data: string) => {
+      // A value split across two chunks passes; one whole in a chunk is masked (docs/secrets.md).
+      if (options.threadId !== undefined) data = this.core.secrets.mask(options.threadId, data);
       history.push(data);
       sequence++;
       if (session) session.sequence = sequence;

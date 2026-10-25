@@ -78,6 +78,23 @@ export interface GuardStatus {
 /** What the firewall's allow command exits with when nobody accepted the administrator prompt. */
 export const FIREWALL_PROMPT_REFUSED = 3;
 
+/**
+ * The system's own store for a secret value: DPAPI on Windows, the Keychain on
+ * macOS, the Secret Service (libsecret) on Linux, or memory when none answers.
+ * Values go in and out as bytes; the caller zeroes what `take` hands back.
+ */
+export interface SecretVault {
+  readonly kind: 'dpapi' | 'keychain' | 'libsecret' | 'memory';
+  /** False for memory: everything is lost when the core stops. */
+  readonly persistent: boolean;
+  put(id: string, value: Uint8Array): Promise<void>;
+  /** A fresh copy of the value, or null when none is stored under `id`. */
+  take(id: string): Promise<Uint8Array | null>;
+  delete(id: string): Promise<void>;
+  /** Every id stored, where the backend can say (DPAPI and memory); null elsewhere. */
+  ids?(): Promise<string[] | null>;
+}
+
 /** OS services used by the shared process registry. No native imports here. */
 export interface ProcessPlatform {
   /** Model tool execution only. Trusted account/control processes never gain authority from this descriptor. */

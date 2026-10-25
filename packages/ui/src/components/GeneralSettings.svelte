@@ -5,6 +5,7 @@
   import TelemetrySettings from './TelemetrySettings.svelte';
   import ArchivedThreads from './ArchivedThreads.svelte';
   import WorktreesCard from './WorktreesCard.svelte';
+  import SecretsCard from './SecretsCard.svelte';
   import BrowserProfilesCard from './BrowserProfilesCard.svelte';
   import { strings } from '../lib/strings';
   import { openTour } from '../lib/onboarding.svelte';
@@ -74,6 +75,7 @@
 
   <ArchivedThreads {store} />
   <WorktreesCard {store} />
+  <SecretsCard {store} />
   <!-- Profiles also configure the core's agent browser from a plain web client. -->
   {#if here.owner}<BrowserProfilesCard />{/if}
 
