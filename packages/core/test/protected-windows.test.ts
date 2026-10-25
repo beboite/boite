@@ -1,4 +1,5 @@
 import {afterEach, describe, expect, test} from 'bun:test';
+import type {Pointer} from 'bun:ffi';
 import {copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -33,11 +34,18 @@ describe.skipIf(!native)('native Windows protected execution', () => {
     security.writeUInt32LE(24, 0); security.writeUInt32LE(1, 16); // Explicitly inheritable synthetic credential handle.
     const handle = native.symbols.CreateFileW(ptr(name), 0x80000000, 7, ptr(security), 3, 0, null);
     expect(Number(handle)).toBeGreaterThan(0);
+    // Probe the first protected process directly. A second descendant could
+    // discard a leaked handle and hide a launcher inheritance regression.
+    const handleProbe = procs.spawn('windows-native', process.execPath, ['-e', `const {dlopen,FFIType,ptr}=require('bun:ffi'); const k=dlopen('kernel32.dll',{ReadFile:{args:[FFIType.ptr,FFIType.ptr,FFIType.u32,FFIType.ptr,FFIType.ptr],returns:FFIType.i32}}); const bytes=Buffer.alloc(256),used=Buffer.alloc(4); if(k.symbols.ReadFile(${Number(handle)},ptr(bytes),bytes.length,ptr(used),null)) console.log(bytes.toString()); else console.log('denied');`], {cwd: root});
+    const [probeCode, probeOut, probeErr] = await Promise.all([handleProbe.exited, new Response(handleProbe.proc.stdout).text(), new Response(handleProbe.proc.stderr).text()]);
+    expect(probeOut).not.toContain('SYNTHETIC_PROTECTED');
+    if (probeCode === 0) expect(probeOut.trim()).toBe('denied');
+    else {expect(probeCode, probeErr).toBe(8); expect(probeErr).toContain('3221225480');} // STATUS_INVALID_HANDLE under strict checking.
     const child = procs.spawn('windows-native', process.execPath, ['tool.ts', outside, outside, String(handle), String(process.pid)], {cwd: root, env: {SYNTHETIC_KEY: 'SYNTHETIC_PROTECTED'}});
     const [code, out, err] = await Promise.all([child.exited, new Response(child.proc.stdout).text(), new Response(child.proc.stderr).text()]);
     expect(code, err).toBe(0);
     native.symbols.CloseHandle(handle); native.close();
-    expect(JSON.parse(out)).toEqual({exposed: [], built: true, tested: true, lowbox: true, hostProcessDenied: true});
+    expect(JSON.parse(out), err).toEqual({exposed: [], built: true, tested: true, lowbox: true, hostProcessDenied: true, breakawayDenied: true});
     procs.protection.flush('windows-native');
     expect(readFileSync(join(root, 'answer.js'), 'utf8')).toContain('42');
     expect(existsSync(join(root, 'dist/answer.js'))).toBe(true);
@@ -67,11 +75,13 @@ describe.skipIf(!native)('native Windows protected execution', () => {
     const identity = policyFile(root, '.env').identity;
     await procs.protection.install('override', input({readOverrides: [{path: '.env', identity, expiresAt: Date.now() + 60000}]}), () => {});
     const result = await execute('override', `const fs = require('fs'); let written = false, alias = false, host = false;
+const {dlopen,FFIType,ptr}=require('bun:ffi'); const acl=dlopen('advapi32.dll',{SetNamedSecurityInfoW:{args:[FFIType.ptr,FFIType.u32,FFIType.u32,FFIType.ptr,FFIType.ptr,FFIType.ptr,FFIType.ptr],returns:FFIType.u32}});
+const aclDenied=acl.symbols.SetNamedSecurityInfoW(ptr(Buffer.from('.env\\0','utf16le')),1,4,null,null,null,null)===5; acl.close();
 try {fs.writeFileSync('.env', 'altered'); written=true;} catch {}
 try {fs.readFileSync('secret-alias'); alias=true;} catch {}
 try {fs.readFileSync(${JSON.stringify(secret)}); host=true;} catch {}
-console.log(JSON.stringify({text:fs.readFileSync('.env','utf8'),written,alias,host}));`, root);
-    expect(JSON.parse(result)).toEqual({text: 'SYNTHETIC_PROTECTED', written: false, alias: false, host: false});
+console.log(JSON.stringify({text:fs.readFileSync('.env','utf8'),written,alias,host,aclDenied}));`, root);
+    expect(JSON.parse(result)).toEqual({text: 'SYNTHETIC_PROTECTED', written: false, alias: false, host: false, aclDenied: true});
     procs.protection.flush('override');
     writeFileSync(secret, 'changed');
     expect(() => procs.spawn('override', process.execPath, ['-e', ''], {cwd: root})).toThrow('authorized file');
@@ -87,7 +97,7 @@ console.log(JSON.stringify({text:fs.readFileSync('.env','utf8'),written,alias,ho
     expect(procs.protection.policy('child')?.fingerprint).toBe(captured.fingerprint);
     const tool = procs.spawn('child', process.execPath, ['-e', `const p=require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'}); p.unref(); console.log(p.pid); ${reason === 'root-exit' ? 'setTimeout(()=>process.exit(0),2000)' : 'setInterval(()=>{},1000)'}`], {cwd: root});
     const first = await tool.proc.stdout.getReader().read(), pid = Number(new TextDecoder().decode(first.value).trim());
-    expect(pid).toBeGreaterThan(0);
+    expect(pid, pid ? '' : await new Response(tool.proc.stderr).text()).toBeGreaterThan(0);
     const held = kernel.symbols.OpenProcess(0x100000, 0, pid); expect(Number(held)).toBeGreaterThan(0);
     try {
       if (reason === 'revoke') await procs.protection.revoke('parent');
@@ -107,7 +117,7 @@ console.log(JSON.stringify({text:fs.readFileSync('.env','utf8'),written,alias,ho
       try {
         expect(userenv.symbols.CreateAppContainerProfile(ptr(name), ptr(name), ptr(name), null, 0, ptr(sid))).toBe(0);
       } finally {
-        const pointer = sid.readBigUInt64LE(); if (pointer) advapi.symbols.FreeSid(pointer);
+        const pointer = Number(sid.readBigUInt64LE()) as Pointer; if (pointer) advapi.symbols.FreeSid(pointer);
         expect(userenv.symbols.DeleteAppContainerProfile(ptr(name))).toBe(0);
         userenv.close(); advapi.close();
       }
@@ -120,9 +130,14 @@ console.log(JSON.stringify({text:fs.readFileSync('.env','utf8'),written,alias,ho
     const captured = await procs.protection.install('scope', input({scope: {kind: 'board', id: 'claim', associationId: 'primary', grantRevision: 3},
       additionalScopes: [{kind: 'letter', id: 'letter', associationId: 'secondary', grantRevision: 4}]}), () => {if (!valid) throw new Error('secondary association revoked');});
     expect(captured.route).toEqual({providerId: 'native-fixture', accountId: 'host-account', permissionMode: 'default'});
-    const server = Bun.serve({hostname: '127.0.0.1', port: 0, fetch: () => new Response('SYNTHETIC_PROTECTED')});
+    let requests = 0;
+    const server = Bun.serve({hostname: '127.0.0.1', port: 0, fetch: () => {requests++; return new Response('SYNTHETIC_PROTECTED');}});
     try {
-      expect((await execute('scope', `try {await fetch('http://127.0.0.1:${server.port}',{signal:AbortSignal.timeout(1500)}); console.log('escaped')} catch {console.log('offline')}`, root)).trim()).toBe('offline');
+      const network = procs.spawn('scope', process.execPath, ['-e', `try {await fetch('http://127.0.0.1:${server.port}',{signal:AbortSignal.timeout(1500)}); console.log('escaped')} catch {console.log('offline')}`], {cwd: root});
+      const [code, out, err] = await Promise.all([network.exited, new Response(network.proc.stdout).text(), new Response(network.proc.stderr).text()]);
+      if (code === 0) expect(out.trim()).toBe('offline');
+      else expect(err).toContain('WSAStartup'); // Some LPAC hosts refuse Winsock initialization itself.
+      expect(requests).toBe(0); expect(out).not.toContain('escaped');
     } finally {server.stop(true);}
     valid = false;
     expect(() => procs.spawn('scope', process.execPath, [], {cwd: root})).toThrow('secondary association');

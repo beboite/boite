@@ -1,13 +1,17 @@
 import {dlopen, FFIType, ptr} from 'bun:ffi';
-import {copyFileSync, existsSync, lstatSync, mkdirSync, realpathSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+import {copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync} from 'node:fs';
 import {basename, dirname, isAbsolute, join, relative, resolve} from 'node:path';
 import {inside} from '../../contacts/file-policy.ts';
-import {assertExecutionPolicy, executionFileIdentity, type ExecutionPolicy} from '../../execution-policy.ts';
+import {assertExecutionPolicy, executionIdentity, type ExecutionPolicy} from '../../execution-policy.ts';
 import type {NativeExecutionBoundary, NativeExecutionSession, ProtectedLaunch, ProtectionRunner} from '../protected.ts';
 import {ProtectedCheckout} from '../protected-checkout.ts';
 
 const version = 'boite-windows-protected 1';
 const wide = (value: string) => Buffer.from(`${value}\0`, 'utf16le');
+// Windows may update only ChangeTime on first execution (for example an image
+// trust cache). Pin both the file object and actual bytes instead of that timestamp.
+const helperIdentity = (path: string) => `${executionIdentity(path)}:${createHash('sha256').update(readFileSync(path)).digest('hex')}`;
 
 /** A private LPAC identity plus a non-breakaway kernel job; never changes a host ACL. */
 export class WindowsExecutionBoundary implements NativeExecutionBoundary {
@@ -20,7 +24,7 @@ export class WindowsExecutionBoundary implements NativeExecutionBoundary {
     if (!candidate) throw new Error('execution.windows.helper: protected-tool.exe is required; build the userspace helper described in docs/contacts.md');
     const helper = realpathSync(candidate);
     if (!isAbsolute(helper) || !lstatSync(helper).isFile()) throw new Error('execution.windows.helper: expected a canonical native helper executable');
-    const identity = executionFileIdentity(helper);
+    const identity = helperIdentity(helper);
     const windows = realpathSync(process.env['SystemRoot'] || 'C:\\Windows');
     if (policy.credentialPaths.some(path => inside(windows, path) || inside(path, windows))
       || inside(windows, policy.checkout)) throw new Error('execution.windows.runtime: credentials and checkout must be outside the public Windows runtime');
@@ -52,6 +56,9 @@ export class WindowsExecutionBoundary implements NativeExecutionBoundary {
         copyFileSync(executable.path, dest);
         binaries.set(executable.path.toLowerCase(), dest); aliases.set(name, dest);
       }
+      const probeExecutable = join(runtime, 'boite-native-probe.exe');
+      if (existsSync(probeExecutable)) throw new Error('execution.executables: boite-native-probe.exe is reserved for native admission');
+      copyFileSync(helper, probeExecutable);
       const env: Record<string, string> = {SystemRoot: windows, WINDIR: windows,
         PATH: `${runtime};${join(windows, 'System32')}`, COMSPEC: join(windows, 'System32', 'cmd.exe'),
         HOME: home, USERPROFILE: home, APPDATA: home, LOCALAPPDATA: home, TEMP: join(home, 'temp'), TMP: join(home, 'temp'),
@@ -59,7 +66,7 @@ export class WindowsExecutionBoundary implements NativeExecutionBoundary {
       const launch = (command: string, args: string[], cwd: string): ProtectedLaunch => {
         if (closed) throw new Error('execution.windows: private view is closed');
         assertExecutionPolicy(policy); checkout.checkOverrides();
-        if (executionFileIdentity(helper) !== identity) throw new Error('execution.windows.helper: captured launcher changed');
+        if (helperIdentity(helper) !== identity) throw new Error('execution.windows.helper: captured launcher bytes or file identity changed');
         if (!isAbsolute(cwd) || !inside(policy.checkout, resolve(cwd))) throw new Error('execution.cwd: expected a directory in the captured checkout');
         const local = resolve(checkout.root, relative(policy.checkout, cwd));
         if (realpathSync(local) !== local || !lstatSync(local).isDirectory()) throw new Error('execution.cwd: expected a real private checkout directory');
@@ -81,9 +88,8 @@ export class WindowsExecutionBoundary implements NativeExecutionBoundary {
       const setup = await run(helper, ['setup', profile, checkout.scratch, checkout.root, runtime, home,
         ...policy.readOverrides.map(override => resolve(checkout.root, override.path))], checkout.scratch);
       if (setup.code || setup.stdout !== 'protected-native-prepared') throw new Error(`execution.windows.setup: native preparation failed (${setup.code}): ${setup.stderr.trim()}`);
-      const probe = launch(join(windows, 'System32', 'cmd.exe'), ['/d', '/c', 'echo protected-native-ready'], policy.checkout);
-      const result = await run(probe.command, probe.args, probe.cwd);
-      if (result.code || result.stdout.trim() !== 'protected-native-ready') throw new Error(`execution.windows.lpac: native protected launch failed (${result.code}): ${result.stderr.trim()}; no unprotected fallback`);
+      const result = await run(helper, ['run', profile, checkout.root, probeExecutable, '--probe', join(checkout.scratch, 'ambient-probe')], checkout.scratch, env);
+      if (result.code || result.stdout !== version) throw new Error(`execution.windows.lpac: native protected launch failed (${result.code}): ${result.stderr.trim()}; no unprotected fallback`);
       assertExecutionPolicy(policy);
       return {launch, flush: () => checkout.flush(), close};
     } catch (error) {close(); throw error;}

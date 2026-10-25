@@ -1068,7 +1068,9 @@ credential environment is supplied.
 
 Each root starts with kernel process attributes for LPAC, only three duplicated
 standard handles and a private non-breakaway Job Object. The launcher verifies
-the suspended child's AppContainer and LPAC token before resuming it. Neither
+the suspended child's AppContainer token; a trusted native probe must also fail
+to read a task-owned file granted only to `ALL APPLICATION PACKAGES`. This tests
+LPAC access rather than relying on an unsupported token-information query. Neither
 the private job handle nor other inheritable host handles reach the tool.
 Launcher termination closes the job and kills descendants. A normal root exit
 also terminates and drains detached descendants before reporting success. Revoke
@@ -1079,15 +1081,21 @@ and its children.
 Build with a preinstalled Windows SDK clang or MinGW, then configure the host
 helper path (or put it beside the running core executable):
 
-```sh
+```powershell
 bun packages/core/bin/install-windows-sandbox.ts C:/task-owned/bin/protected-tool.exe
-BOITE_WINDOWS_SANDBOX_PATH=C:/task-owned/bin/protected-tool.exe BOITE_TEST_NATIVE_EXECUTION=1 bun test packages/core/test/protected-windows.test.ts --timeout 120000
+$env:BOITE_WINDOWS_SANDBOX_PATH = 'C:/task-owned/bin/protected-tool.exe'
+$env:BOITE_TEST_NATIVE_EXECUTION = '1'
+bun test packages/core/test/protected-windows.test.ts --timeout 120000
 ```
 
 The build script also accepts Linux's installed cross compiler to produce the
 userspace PE helper; cross-compilation alone is not native execution proof.
 Nothing compiles or downloads at core startup. Missing helpers or unsupported
 Windows kernel attributes fail closed before a model tool runs. The native
+launcher creates its console hidden so console toolchains can launch descendants.
+It does not alter a host window station or desktop ACL. A noninteractive Windows
+session whose desktop cannot initialize the LPAC probe remains refused.
+The native
 Windows CI lane runs inside the existing Windows core check, including protection
 changes on a draft PR. It uses synthetic directories/accounts and deterministic
 local provider APIs. Its fixture checks useful builds/tests, secret paths,

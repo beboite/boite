@@ -7,7 +7,7 @@ export interface ProtectedLaunch {
   env: Record<string, string | undefined>;
 }
 /** Helpers use the same process registry as tools, never an independent native launcher. */
-export type ProtectionRunner = (command: string, args: string[], cwd: string) => Promise<{code: number; stdout: string; stderr: string}>;
+export type ProtectionRunner = (command: string, args: string[], cwd: string, env?: Record<string, string | undefined>) => Promise<{code: number; stdout: string; stderr: string}>;
 
 export interface NativeExecutionSession {
   launch(command: string, args: string[], cwd: string): ProtectedLaunch;

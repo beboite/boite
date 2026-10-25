@@ -96,6 +96,21 @@ static int setup(int count, wchar_t **args) {
   if (!error) error = tree_acl(args[5], app, user->User.Sid, FILE_GENERIC_READ | FILE_GENERIC_EXECUTE, 0, NULL);
   if (!error) error = tree_acl(args[6], app, user->User.Sid,
     FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE | DELETE, 0, NULL);
+  if (!error) {
+    /* A real access probe distinguishes LPAC from ordinary AppContainer even on
+     * kernels where TokenIsLessPrivilegedAppContainer is not a public query. */
+    size_t size = wcslen(args[3]) + 32;
+    wchar_t *path = calloc(size, sizeof(wchar_t)); PSID packages = NULL;
+    if (!path) {error = ERROR_NOT_ENOUGH_MEMORY; goto end;}
+    swprintf(path, size, L"%ls\\ambient-probe", args[3]);
+    HANDLE file = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) error = GetLastError();
+    else CloseHandle(file);
+    if (!error && !ConvertStringSidToSidW(L"S-1-15-2-1", &packages)) error = GetLastError();
+    if (!error) error = set_acl(path, packages, user->User.Sid, FILE_GENERIC_READ, FALSE);
+    if (packages) LocalFree(packages);
+    free(path);
+  }
 end:
   if (token) CloseHandle(token);
   if (user) free(user);
@@ -132,22 +147,23 @@ static int launch(int count, wchar_t **args) {
   PSID app = NULL; HANDLE job = NULL, streams[3] = {NULL, NULL, NULL};
   LPPROC_THREAD_ATTRIBUTE_LIST list = NULL; PROCESS_INFORMATION child; ZeroMemory(&child, sizeof(child));
   DWORD error = 0, exit_code = 125; wchar_t *line = NULL; BOOL initialized = FALSE;
+  const wchar_t *stage = L"launch.job";
   HRESULT hr = DeriveAppContainerSidFromAppContainerName(args[2], &app);
   if (FAILED(hr)) return failure(L"profile.derive", (DWORD)hr);
   job = CreateJobObjectW(NULL, NULL);
   if (!job) {error = GetLastError(); goto end;}
   JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits; ZeroMemory(&limits, sizeof(limits));
   limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-  JOBOBJECT_BASIC_UI_RESTRICTIONS ui = {0xff};
-  if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits)) ||
-      !SetInformationJobObject(job, JobObjectBasicUIRestrictions, &ui, sizeof(ui))) {error = GetLastError(); goto end;}
+  if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits))) {error = GetLastError(); goto end;}
   DWORD ids[3] = {STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE};
+  stage = L"launch.streams";
   for (int i = 0; i < 3; i++) {
     HANDLE original = GetStdHandle(ids[i]);
     if (!original || original == INVALID_HANDLE_VALUE || !DuplicateHandle(GetCurrentProcess(), original,
         GetCurrentProcess(), &streams[i], 0, TRUE, DUPLICATE_SAME_ACCESS)) {error = GetLastError(); goto end;}
   }
   SIZE_T bytes = 0;
+  stage = L"launch.attributes";
   InitializeProcThreadAttributeList(NULL, 4, 0, &bytes);
   list = HeapAlloc(GetProcessHeap(), 0, bytes);
   if (!list || !InitializeProcThreadAttributeList(list, 4, 0, &bytes)) {error = GetLastError(); goto end;}
@@ -162,21 +178,24 @@ static int launch(int count, wchar_t **args) {
   STARTUPINFOEXW startup; ZeroMemory(&startup, sizeof(startup));
   startup.StartupInfo.cb = sizeof(startup); startup.lpAttributeList = list;
   startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+  // A hidden real console permits native toolchain descendants. CREATE_NO_WINDOW
+  // and alternate window stations break console initialization under AppContainer.
   startup.StartupInfo.wShowWindow = SW_HIDE;
   startup.StartupInfo.hStdInput = streams[0]; startup.StartupInfo.hStdOutput = streams[1]; startup.StartupInfo.hStdError = streams[2];
   line = command_line(count - 4, args + 4);
   if (!line) {error = ERROR_NOT_ENOUGH_MEMORY; goto end;}
   /* Kernel applies the lowbox, handle allowlist and non-breakaway job atomically.
    * Suspension also lets us reject a missing lowbox before its first instruction. */
+  stage = L"launch.process";
   if (!CreateProcessW(args[4], line, NULL, NULL, TRUE, EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED |
-      CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT, NULL, args[3], &startup.StartupInfo, &child)) {error = GetLastError(); goto end;}
-  HANDLE child_token = NULL; DWORD is_container = 0, less_privileged = 0, returned = 0;
+      CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT, NULL, args[3], &startup.StartupInfo, &child)) {error = GetLastError(); goto end;}
+  HANDLE child_token = NULL; DWORD is_container = 0, returned = 0;
+  stage = L"launch.token";
   if (!OpenProcessToken(child.hProcess, TOKEN_QUERY, &child_token)) {error = GetLastError(); goto end;}
   BOOL checked = GetTokenInformation(child_token, TokenIsAppContainer, &is_container, sizeof(is_container), &returned);
-  checked = checked && GetTokenInformation(child_token, (TOKEN_INFORMATION_CLASS)46,
-    &less_privileged, sizeof(less_privileged), &returned);
   CloseHandle(child_token);
-  if (!checked || !is_container || !less_privileged) {error = ERROR_ACCESS_DENIED; goto end;}
+  if (!checked) {stage = L"launch.token.query"; error = GetLastError(); goto end;}
+  if (!is_container) {stage = L"launch.token.not-appcontainer"; error = ERROR_ACCESS_DENIED; goto end;}
   if (ResumeThread(child.hThread) == (DWORD)-1) {error = GetLastError(); goto end;}
   if (WaitForSingleObject(child.hProcess, INFINITE) != WAIT_OBJECT_0 || !GetExitCodeProcess(child.hProcess, &exit_code)) {error = GetLastError(); goto end;}
 end:
@@ -198,13 +217,22 @@ end:
   if (job) CloseHandle(job);
   if (app) FreeSid(app);
   if (line) free(line);
-  return error ? failure(L"launch", error) : (int)exit_code;
+  if (!error && exit_code) fwprintf(stderr, L"execution.windows.child: exit status %lu\n", exit_code);
+  return error ? failure(stage, error) : (int)exit_code;
+}
+
+static int probe(const wchar_t *path) {
+  HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+  if (file != INVALID_HANDLE_VALUE) {CloseHandle(file); return failure(L"probe.ambient-grant", ERROR_ACCESS_DENIED);}
+  if (GetLastError() != ERROR_ACCESS_DENIED) return failure(L"probe.ambient-path", GetLastError());
+  fputws(VERSION, stdout); return 0;
 }
 
 int main(void) {
   int count = 0; wchar_t **args = CommandLineToArgvW(GetCommandLineW(), &count);
   int result = 125;
   if (count == 2 && !wcscmp(args[1], L"--version")) {fputws(VERSION, stdout); result = 0;}
+  else if (count == 3 && !wcscmp(args[1], L"--probe")) result = probe(args[2]);
   else if (count > 1 && !wcscmp(args[1], L"setup")) result = setup(count, args);
   else if (count > 1 && !wcscmp(args[1], L"run")) result = launch(count, args);
   else result = failure(L"arguments", ERROR_INVALID_PARAMETER);
