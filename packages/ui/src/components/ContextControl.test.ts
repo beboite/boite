@@ -39,6 +39,8 @@ test('the meter follows the automatic compaction threshold and keeps a smaller m
     [250_000, 250_000, '85', 250_000, false],
     [1_000_000, null, '21', 1_000_000, false],
     [null, 250_000, '85', 250_000, true],
+    [0, 250_000, '85', 250_000, true],
+    [-1, 250_000, '85', 250_000, true],
   ] as const) {
     store.openThread!.context = { ...store.openThread!.context!, window };
     store.settings = { ...store.settings!, autoCompact: { tokens: threshold, moments: ['turn-end'] } };
@@ -46,6 +48,7 @@ test('the meter follows the automatic compaction threshold and keeps a smaller m
     expect(meter().dataset.percent).toBe(percent);
     expect(popup().querySelector('.total')!.textContent).toBe(`${exact(212_569)} / ${exact(limit)}`);
     expect(!!popup().querySelector('[data-testid="context-auto-compact"]')).toBe(notice);
+    if (notice) expect(popup().querySelector('[data-testid="context-auto-compact"]')!.textContent).toBe('Auto-compaction threshold.');
   }
   store.settings = { ...store.settings!, autoCompact: null };
   flushSync();

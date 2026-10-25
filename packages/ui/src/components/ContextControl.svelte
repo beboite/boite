@@ -18,8 +18,9 @@
   const thread = $derived(store.openThread);
   const context = $derived(thread?.context ?? null);
   const autoCompact = $derived(store.settings?.autoCompact);
+  const modelWindow = $derived(context ? contextLimit(context) : null);
   const limit = $derived(context ? contextLimit(context, autoCompact) : null);
-  const compactLimit = $derived(limit !== null && (context?.window == null || limit < context.window));
+  const compactLimit = $derived(limit !== null && (modelWindow === null || limit < modelWindow));
   const percent = $derived(context ? contextPercent(context, autoCompact) : null);
   const protocol = $derived(thread ? store.providerOf(thread.providerId)?.protocol : null);
   let capabilities = $state<ThreadCapabilities | null>(null);
@@ -120,7 +121,7 @@
       <div class="heading"><span>{strings.thread.contextDetails}</span>{#if percent !== null}<span class="mono">{percent}%</span>{/if}</div>
       {#if context}
         <p class="total mono">{exact(context.tokens)}{#if limit !== null}{' / '}{exact(limit)}{/if}</p>
-        {#if compactLimit}<p class="note compact-limit" data-testid="context-auto-compact">{context.window !== null ? strings.thread.contextAutoCompactWindow(exact(context.window)) : strings.thread.contextAutoCompact}</p>{/if}
+        {#if compactLimit}<p class="note compact-limit" data-testid="context-auto-compact">{modelWindow !== null ? strings.thread.contextAutoCompactWindow(exact(modelWindow)) : strings.thread.contextAutoCompact}</p>{/if}
         <div class="bar" aria-hidden="true">
           {#each segments as segment (segment.kind)}<span class={segment.kind} style:width={`${Math.min(100, segment.count / Math.max(1, limit ?? context.tokens) * 100)}%`}></span>{/each}
         </div>

@@ -163,9 +163,14 @@ test('context meter uses the auto-compaction threshold on desktop and phone', as
   expect(await page.evaluate(`document.querySelector('[data-testid="context-auto-compact"]') === null`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('[data-testid="context-popup"] .total').textContent`)).toBe('100,000 / 128,000');
   await capture('auto-compact-context-smaller-model-phone');
-  await update(`store.settings = {...store.settings,autoCompact:null};`);
   await page.send('Emulation.setDeviceMetricsOverride',{width:1300,height:850,deviceScaleFactor:1,mobile:false});
   await page.send('Emulation.setTouchEmulationEnabled',{enabled:false});
+  await update(`thread.context = {...thread.context,tokens:212569,window:0};`);
+  await page.waitFor(`document.querySelector('[data-testid="context-auto-compact"]')?.textContent === 'Auto-compaction threshold.'`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="context-meter"]').dataset.percent`)).toBe('85');
+  expect(await page.evaluate(`document.querySelector('[data-testid="context-popup"] .total').textContent`)).toBe('212,569 / 250,000');
+  await capture('auto-compact-context-unknown-window-desktop');
+  await update(`store.settings = {...store.settings,autoCompact:null};`);
   await page.evaluate(`window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
   await page.waitFor(`!document.querySelector('[data-testid="context-popup"]')`);
 }, 30000);
