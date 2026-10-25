@@ -421,7 +421,7 @@ export class GroupBots {
     const id = `gb-${createHash('sha256').update(`${agent?.id ?? params.threadId}\n${params.requestId}`).digest('hex').slice(0, 40)}`;
     // The follow becomes visible with the answer, but a newer lease must not erase
     // the host's watch while that answer is still in flight.
-    const pending = agent !== null && typeof params.machine === 'string' && params.machine.trim() && typeof params.target === 'string'
+    const pending = agent !== null && typeof params.machine === 'string' && params.machine.trim() && typeof params.target === 'string' && params.target.length >= 1 && params.target.length <= 128
       ? { agentId: agent.id, coreId: memberNamed(this.core, params.machine, 'resident.send').coreId, threadId: params.target }
       : null;
     if (pending) this.sending.add(pending);
