@@ -30,13 +30,20 @@ ARM64, containing the compiled core, CLI shim, UI and embedded release version.
 with the desktop updater key and release version. Both stable and nightly
 publication require those signatures, include the archives in the checksums,
 and add separate server targets to `latest.json`. Docker images remain separate.
+The same x64 job writes `boite-server_<version>_android.zip` for phones: the
+core's scripts, the UI and the Termux controller, which run on Bun's Android
+build. It is signed and listed the same way, under the `android-aarch64-server`
+target ([Android server](android-server.md#releases-and-updates)).
 
 The nightly also attaches the signed Android app as
 `boite-android-<MAJOR.MINOR.PATCH>.apk`. That version belongs to the app, not
 to the release: `apps/android/VERSION` holds `MAJOR.MINOR`, raised by hand, and
 the patch grows by one only when the APK is rebuilt. A release with no change
 to the app attaches the previous APK under its original name.
-[Android](android.md#the-app-version) has the full rule.
+[Android](android.md#the-app-version) has the full rule. Boite Server, the app
+that runs a core on a phone, comes beside it as
+`boite-server-android-<MAJOR.MINOR.PATCH>.apk` under the same rule, counted from
+`apps/android-server/VERSION` ([Android server](android-server.md#publishing-the-app)).
 
 - `build:ui` writes `packages/ui/dist`. That directory is what the core serves at
   `/`, with a `.br` and a `.gz` copy beside each text asset. The Tauri config

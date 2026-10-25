@@ -1,14 +1,14 @@
 import { expect, test } from 'bun:test';
 import { affectedChecks, ciMode, lastGreen, needsCodeChecks, needsNativeWindows, needsWorkflowLint, plan } from './changes.ts';
 
-const none = { core: false, web: false, desktop: false, shellRust: false, server: false, android: false, telemetry: false, e2eTypes: false, stress: false };
-const allChecks = { core: true, web: true, desktop: true, shellRust: true, server: true, android: true, telemetry: true, e2eTypes: true, stress: true };
+const none = { core: false, web: false, desktop: false, shellRust: false, server: false, android: false, androidServer: false, telemetry: false, e2eTypes: false, stress: false };
+const allChecks = { core: true, web: true, desktop: true, shellRust: true, server: true, android: true, androidServer: true, telemetry: true, e2eTypes: true, stress: true };
 
 test('checks follow runtime boundaries and combine changed paths', () => {
   expect(affectedChecks(['apps/shell/src-tauri/src/main.rs'])).toEqual({ ...none, desktop: true, shellRust: true });
   expect(affectedChecks(['Dockerfile'])).toEqual({ ...none, server: true });
   expect(affectedChecks(['packages/ui/src/app.css'])).toEqual({ ...none, web: true, desktop: true, server: true, stress: true });
-  expect(affectedChecks(['packages/core/src/main.ts'])).toEqual({ ...allChecks, shellRust: false, android: false });
+  expect(affectedChecks(['packages/core/src/main.ts'])).toEqual({ ...allChecks, shellRust: false, android: false, androidServer: false });
   expect(affectedChecks(['tests/e2e/ui.test.ts', 'docker/compose.yml'])).toEqual({ ...none, desktop: true, server: true, e2eTypes: true });
 });
 
@@ -36,16 +36,26 @@ test('the APK follows the contracts it reads, not the core', () => {
 });
 
 test('only the wrapper and its own pipeline build the APK', () => {
-  for (const file of ['apps/android/app/build.gradle', '.github/workflows/android.yml', 'scripts/ci/android-apk.ts']) {
+  for (const file of ['apps/android/app/build.gradle', '.github/workflows/android.yml']) {
     expect(affectedChecks([file])).toEqual({ ...none, android: true });
   }
+  // Boite Server counts its version with the same script.
+  expect(affectedChecks(['scripts/ci/android-apk.ts'])).toEqual({ ...none, android: true, androidServer: true });
+});
+
+test('Boite Server builds its APK for the app and the bundle checks for its Termux scripts', () => {
+  for (const file of ['apps/android-server/app/src/main/java/com/boite/server/App.kt', 'apps/android-server/VERSION', '.github/workflows/android-server.yml', 'scripts/ci/android-server-apk.ts']) {
+    expect(affectedChecks([file])).toEqual({ ...none, androidServer: true });
+  }
+  // The release bundle carries termux/, not the APK.
+  expect(affectedChecks(['apps/android-server/termux/boite-server.ts'])).toEqual({ ...none, core: true, web: true, desktop: true });
 });
 
 test('ordinary benches and architecture scripts keep the cheap type-check route', () => {
   for (const file of ['bench/retitle.ts', 'scripts/architecture/check.ts']) {
     expect(affectedChecks([file])).toEqual({ ...none, web: true });
   }
-  expect(affectedChecks(['bench/retitle.ts', 'packages/core/src/main.ts'])).toEqual({ ...allChecks, shellRust: false, android: false });
+  expect(affectedChecks(['bench/retitle.ts', 'packages/core/src/main.ts'])).toEqual({ ...allChecks, shellRust: false, android: false, androidServer: false });
 });
 
 test('telemetry-only changes require behavioral relay coverage on PRs and main', () => {
@@ -77,7 +87,7 @@ test('shared inputs and unknown files fail open to every check', () => {
   for (const file of ['bun.lock', 'package.json', '.github/workflows/ci.yml', 'new-config.json']) {
     expect(Object.values(affectedChecks([file])).every(Boolean)).toBe(true);
   }
-  expect(affectedChecks(['packages/contracts/src/index.ts'])).toEqual({ ...allChecks, shellRust: false });
+  expect(affectedChecks(['packages/contracts/src/index.ts'])).toEqual({ ...allChecks, shellRust: false, androidServer: false });
   expect(Object.values(affectedChecks(['README.md', '.coderabbit.yaml'])).some(Boolean)).toBe(false);
 });
 
@@ -149,7 +159,7 @@ test('main pushes run affected tests while warming the extra portable architectu
 test('a draft runs only the Linux checks and leaves the rest to the ready pull request', () => {
   const all = affectedChecks(['packages/core/src/main.ts']);
   const draft = plan(all, 'draft');
-  expect(draft).toMatchObject({ core: true, web: true, desktop: false, e2e: false, server: false, android: false, stress: false });
+  expect(draft).toMatchObject({ core: true, web: true, desktop: false, e2e: false, server: false, android: false, androidServer: false, stress: false });
   expect(JSON.parse(draft.coreRunners)).toEqual([{ os: 'ubuntu-24.04', name: 'Linux x64' }]);
   // Focused checks still stand in for absent full suites.
   expect(plan(affectedChecks(['tests/e2e/ui.test.ts']), 'draft')).toMatchObject({ e2eTypes: true, desktop: false, e2e: false });

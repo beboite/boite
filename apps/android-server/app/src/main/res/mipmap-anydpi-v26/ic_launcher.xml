@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Boite's mark on white, as the Boite app shows it (apps/android). -->
+    <background android:drawable="@android:color/white" />
+    <foreground>
+        <inset
+            android:drawable="@mipmap/ic_maskable"
+            android:inset="8.5dp" />
+    </foreground>
+</adaptive-icon>

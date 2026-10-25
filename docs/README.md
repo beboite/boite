@@ -42,6 +42,7 @@
 - [Session import](imports.md): bringing in a Claude Code conversation.
 - [Phone access](phone.md): pairing, permissions and offline behavior.
 - [Android app](android.md): the nightly APK, one built for another host, and its signing key.
+- [Android server](android-server.md): Boite on a phone in Termux, the Boite Server app and keeping it running.
 - [Voice dictation](voice.md): local Whisper, API transcription and microphone access.
 - [Headless server](server.md): Docker, persistent storage and remote access.
 - [Plugins](plugins.md): recommended plugins, adding one from a git URL, and writing your own.

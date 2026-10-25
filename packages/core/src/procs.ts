@@ -4,6 +4,7 @@ import type { AgentResourceSnapshot, ProcessRecord, Settings, ThreadId, ThreadLo
 import type { Bus } from './bus.ts';
 import type { Journal } from './journal.ts';
 import { MemoryGuard } from './memory-guard.ts';
+import { currentOs } from './paths.ts';
 import type { MemoryProcess } from './memory-guard-logic.ts';
 import { processPlatform } from './platform/index.ts';
 import { type KnownProcess, type ProcessIdentity, unseenIdentity } from './process-identity.ts';
@@ -377,7 +378,7 @@ export class ProcRegistry {
         if (process.platform === 'win32') return proc.kill();
         // Interactive jobs have separate groups: capture their descendants
         // before the shell exits and reparents jobs that ignore its hang-up.
-        if (process.platform === 'linux' && this.platform.terminateProcess(threadId, proc.pid)) return;
+        if (currentOs() === 'linux' && this.platform.terminateProcess(threadId, proc.pid)) return;
         // An interactive shell ignores SIGTERM. A hang-up is what closing a
         // terminal sends: the shell exits on it and passes it to its jobs.
         proc.kill('SIGHUP');

@@ -18,6 +18,7 @@ import { AGENT_ENV } from '@boite/contracts';
 import type { PluginGatewayState } from '@boite/contracts';
 import { stripAnsi } from '../ansi.ts';
 import { messageOf } from '../errors.ts';
+import { currentOs } from '../paths.ts';
 import type { SpawnedProcess } from '../procs.ts';
 import { CRASH_WINDOW_MS, RELAUNCH_DELAYS_MS, readRunChoice, writeRunChoice, type AppClock } from './apps.ts';
 
@@ -241,7 +242,7 @@ export class PluginGateways {
     try { pid = (JSON.parse(readFileSync(file, 'utf8')) as { pid?: unknown }).pid; }
     catch { return; }
     rmSync(file, { force: true });
-    if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 1 || process.platform !== 'linux') return;
+    if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 1 || currentOs() !== 'linux') return;
     try {
       if (!readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').includes(config)) return;
       process.kill(pid, 'SIGTERM');

@@ -3,7 +3,7 @@ import { appendFileSync } from 'node:fs';
 // Unknown files run the complete suite. Documentation-only PRs still get the
 // required job, so branch protection never waits for a filtered-out workflow.
 export function affectedChecks(files: string[]) {
-  const checks = { core: false, web: false, desktop: false, shellRust: false, server: false, android: false, telemetry: false, e2eTypes: false, stress: false };
+  const checks = { core: false, web: false, desktop: false, shellRust: false, server: false, android: false, androidServer: false, telemetry: false, e2eTypes: false, stress: false };
   for (const file of files) {
     if (
       /^(docs\/.*\.md|README\.md|AGENTS\.md|CONTRIBUTING\.md|SECURITY\.md|CODE_OF_CONDUCT\.md|LICENSE)$/.test(file) ||
@@ -12,7 +12,17 @@ export function affectedChecks(files: string[]) {
     ) continue;
     if (file.startsWith('apps/android/') || file === '.github/workflows/android.yml' || file === 'scripts/ci/android-apk.ts') {
       // The wrapper loads the UI from the core, so nothing else goes into the APK.
+      // Boite Server's pipeline counts its version with the same script.
       checks.android = true;
+      if (file === 'scripts/ci/android-apk.ts') checks.androidServer = true;
+    } else if (file.startsWith('apps/android-server/termux/')) {
+      // The release bundle: the core suite packs it, the web job type-checks
+      // it and the Linux x64 desktop job builds it. The changes job always
+      // runs its tests.
+      checks.core = checks.web = checks.desktop = true;
+    } else if (file.startsWith('apps/android-server/') || file === '.github/workflows/android-server.yml' || file === 'scripts/ci/android-server-apk.ts') {
+      // Boite Server's APK drives the core through Termux and reads nothing from it.
+      checks.androidServer = true;
     } else if (file.startsWith('apps/shell/')) {
       checks.desktop = checks.shellRust = true;
     } else if (/^packages\/(core|contracts)\//.test(file)) {
@@ -40,7 +50,7 @@ export function affectedChecks(files: string[]) {
       checks.web = true;
     } else {
       // Dependencies, shared builds and unknown inputs stay safe.
-      checks.core = checks.web = checks.desktop = checks.shellRust = checks.server = checks.android = checks.telemetry = checks.e2eTypes = checks.stress = true;
+      checks.core = checks.web = checks.desktop = checks.shellRust = checks.server = checks.android = checks.androidServer = checks.telemetry = checks.e2eTypes = checks.stress = true;
     }
   }
   return checks;
@@ -107,12 +117,12 @@ export function ciMode(event: string, force: boolean, draft = false): Mode {
 
 // A draft keeps the Linux core suite, type checks, UI tests and focused checks;
 // Protection inputs also select Windows core/native tests; macOS, desktop
-// packages, E2E, stress, Docker and the APK wait for the ready pull request.
+// packages, E2E, stress, Docker and the APKs wait for the ready pull request.
 const CORE_DRAFT: CoreRunner[] = CORE_PR.slice(0, 1);
 
 export function plan(checks: ReturnType<typeof affectedChecks>, mode: Mode, nativeWindows = false) {
   if (mode === 'draft') {
-    const draft = plan({ ...checks, desktop: false, server: false, android: false, stress: false }, 'pr', nativeWindows);
+    const draft = plan({ ...checks, desktop: false, server: false, android: false, androidServer: false, stress: false }, 'pr', nativeWindows);
     const runners = nativeWindows ? CORE_PR.filter((runner) => runner.os === 'ubuntu-24.04' || runner.os === 'windows-2025') : CORE_DRAFT;
     return { ...draft, coreRunners: JSON.stringify(runners) };
   }

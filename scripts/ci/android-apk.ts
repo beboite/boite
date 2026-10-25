@@ -31,16 +31,16 @@ export interface AppVersion {
 /** Android keeps versionCode under 2100000000; three digits per part keep the order. */
 const PART = 1000;
 
-/** The MAJOR.MINOR of `apps/android/VERSION`. */
-export function parseBase(text: string): { major: number; minor: number } {
+/** The MAJOR.MINOR of `apps/android/VERSION`, or of `file`. */
+export function parseBase(text: string, file = VERSION_FILE): { major: number; minor: number } {
   const match = /^(\d+)\.(\d+)$/.exec(text.trim());
-  if (!match) throw new Error(`${VERSION_FILE} must hold MAJOR.MINOR such as 1.0, got '${text.trim()}'`);
+  if (!match) throw new Error(`${file} must hold MAJOR.MINOR such as 1.0, got '${text.trim()}'`);
   const major = Number(match[1]);
   const minor = Number(match[2]);
   // Codes under 1000000 were the commit count of main; a lower code is an
   // update every installed app refuses.
-  if (major < 1 || major > 999) throw new Error(`${VERSION_FILE}: MAJOR must be 1 to 999, got ${major}`);
-  if (minor >= PART) throw new Error(`${VERSION_FILE}: MINOR must be under ${PART}, got ${minor}`);
+  if (major < 1 || major > 999) throw new Error(`${file}: MAJOR must be 1 to 999, got ${major}`);
+  if (minor >= PART) throw new Error(`${file}: MINOR must be under ${PART}, got ${minor}`);
   return { major, minor };
 }
 
@@ -69,13 +69,13 @@ export function versionCode({ major, minor, patch }: AppVersion): number {
  * The version of a rebuilt APK. Same MAJOR.MINOR as the last published APK:
  * its patch plus one. VERSION raised, or no earlier app version: patch 0.
  */
-export function nextVersion(base: { major: number; minor: number }, previous: AppVersion | null): AppVersion {
+export function nextVersion(base: { major: number; minor: number }, previous: AppVersion | null, file = VERSION_FILE): AppVersion {
   let next: AppVersion = { ...base, patch: 0 };
   if (previous) {
     if (previous.major === base.major && previous.minor === base.minor) {
       next = { ...base, patch: previous.patch + 1 };
     } else if (previous.major > base.major || (previous.major === base.major && previous.minor > base.minor)) {
-      throw new Error(`${VERSION_FILE} holds ${base.major}.${base.minor}, below the published ${formatVersion(previous)}: phones would refuse the update`);
+      throw new Error(`${file} holds ${base.major}.${base.minor}, below the published ${formatVersion(previous)}: phones would refuse the update`);
     }
   }
   versionCode(next);
@@ -145,12 +145,12 @@ export function assetlinksDigest(json: string, packageName = 'com.boite.two'): s
   return digest(fingerprint);
 }
 
-function run(command: string[], quiet = false): { ok: boolean; out: string } {
+export function run(command: string[], quiet = false): { ok: boolean; out: string } {
   const result = Bun.spawnSync(command, { stdout: 'pipe', stderr: quiet ? 'pipe' : 'inherit' });
   return { ok: result.exitCode === 0, out: result.stdout.toString() };
 }
 
-function buildTool(name: string): string {
+export function buildTool(name: string): string {
   const home = process.env.ANDROID_HOME;
   if (!home) throw new Error('ANDROID_HOME is unset');
   const versions = readdirSync(join(home, 'build-tools')).sort((a, b) => Bun.semver.order(a, b));

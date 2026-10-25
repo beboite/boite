@@ -77,6 +77,7 @@ jobs:
       shellRust: ${{ steps.filter.outputs.shellRust }}
       server: ${{ steps.filter.outputs.server == 'true' && !inputs.skip-server }}
       android: ${{ steps.filter.outputs.android }}
+      androidServer: ${{ steps.filter.outputs.androidServer }}
       e2e: ${{ steps.filter.outputs.e2e }}
       telemetry: ${{ steps.filter.outputs.telemetry }}
       e2eTypes: ${{ steps.filter.outputs.e2eTypes }}
@@ -132,7 +133,7 @@ jobs:
       - name: Audit frozen dependencies
         run: bun audit
       - run: bun scripts/check-docs.ts
-      - run: bun test scripts/ci scripts/migrate ./bench ./apps/shell/scripts
+      - run: bun test scripts/ci scripts/migrate ./bench ./apps/shell/scripts ./apps/android-server
       # Missing sentences are warnings here and in the nightly; release.yml refuses them.
       - run: bun scripts/ci/translations.ts
       - run: bun run check:copy
@@ -622,3 +623,10 @@ jobs:
     uses: ./.github/workflows/android.yml
     with:
       enabled: ${{ needs.changes.outputs.android == 'true' }}
+
+  android-server:
+    name: ${{ github.event.pull_request.draft && 'Android server (draft)' || 'Android server' }}
+    needs: changes
+    uses: ./.github/workflows/android-server.yml
+    with:
+      enabled: ${{ needs.changes.outputs.androidServer == 'true' }}
