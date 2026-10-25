@@ -373,8 +373,9 @@ echo and protected Claude/Codex/Muse/OpenCode/pi on a host with a native boundar
 and a supported permission mode. File enforcement, activity review, attested human letters and the Client/Store/fake
 transport and project/board/Contacts components are implemented. Direct and
 group-member associations share the signed/sealed transport. Unsupported ACP
-implementations remain refused, and native Windows remains
-a separate gate; this protocol does not claim the whole roadmap is complete.
+implementations remain refused. Windows requires the native helper described
+below; macOS has no protected backend. This protocol does not claim the whole
+roadmap is complete.
 `packages/contracts/src/shared-projects.ts` declares the vocabulary;
 `coordination.ts` retains the existing contact types. A core must not advertise
 `features.sharedProjects: 1` until its enforcing handlers exist. A contact
@@ -1006,14 +1007,15 @@ An unavailable requirement is recorded explicitly rather than counted as passed.
 | Required outcome | Executable evidence | Coverage and current limit |
 | --- | --- | --- |
 | Explicit association and allowed foreign threads | `packages/core/test/shared-projects.test.ts`; `tests/e2e/shared-cores.test.ts`: two owners associate a group member; member initiates association; `packages/ui/src/lib/fake-client.shared-projects.test.ts` | Exact colliding owner/core/project/thread IDs, private project exclusion, read/search grants, wrong source/route refusal, owner/paired/agent roles, reverse member offer and persisted association. No foreign owner RPC is created. |
-| Shared four-column board and goal | `packages/core/test/shared-board.test.ts`; `tests/e2e/shared-cores.test.ts`; `packages/ui/src/components/shared/SharedCollaboration.test.ts`; `tests/e2e/shared-collaboration.test.ts` | Atomic competing claims, receipts, field patches, offline replay/restarts, permanent deletes, protected goal start/release/progress, retained busy assignment, person/machine/agent labels and phone menus. Claude/Codex/Muse native goal transitions are covered in `shared-access.test.ts`; other adapters and native Windows remain separate gates. |
-| Host compute and actual Git consumption | `packages/core/test/shared-compute.test.ts`; `SharedCollaboration.test.ts`: reopen a host from another thread; `tests/e2e/shared-cores.test.ts`: consume an attested Git result and cancel reverse compute after member restart | Host account/profile, persisted private parent, unchanged-policy authority, contribution settings, durable job and exact result, repository/base validation, restart and captured cancellation. The source performs a real fixture-controlled fetch, object/ancestry check and cherry-pick of the returned commit. No automatic peer URL/command execution. Claude/Codex native fixtures also edit/test/commit through the production driver and consume the returned real commit; OpenCode/pi have separate native adapter fixtures; Muse 1.4.13 has native job/letter/board fixtures; other ACP implementations remain refused. |
+| Shared four-column board and goal | `packages/core/test/shared-board.test.ts`; `tests/e2e/shared-cores.test.ts`; `packages/ui/src/components/shared/SharedCollaboration.test.ts`; `tests/e2e/shared-collaboration.test.ts` | Atomic competing claims, receipts, field patches, offline replay/restarts, permanent deletes, protected goal start/release/progress, retained busy assignment, person/machine/agent labels and phone menus. Native goal transitions are covered in `shared-access.test.ts` for Claude/Codex/Muse/OpenCode/pi on Linux and Claude/Codex/OpenCode/pi on Windows. |
+| Host compute and actual Git consumption | `packages/core/test/shared-compute.test.ts`; `SharedCollaboration.test.ts`: reopen a host from another thread; `tests/e2e/shared-cores.test.ts`: consume an attested Git result and cancel reverse compute after member restart | Host account/profile, persisted private parent, unchanged-policy authority, contribution settings, durable job and exact result, repository/base validation, restart and captured cancellation. The source performs a real fixture-controlled fetch, object/ancestry check and cherry-pick of the returned commit. No automatic peer URL/command execution. Claude/Codex/OpenCode/pi native fixtures edit/test/commit through the production driver and consume the returned real commit on Linux and Windows. Muse 1.4.13 has native Linux job/letter/board fixtures; other ACP implementations remain refused. |
 | Human and agent contact mail | `packages/core/test/contact-mailboxes.test.ts`, `coordination.test.ts`; `tests/e2e/shared-cores.test.ts`; `tests/e2e/contact-messaging-ui.test.ts`, `shared-collaboration.test.ts` | Owner/paired human sends, agent impersonation refusal, recipient's configured contact name, separate provenance, both member directions, source journal and mailbox replay/restart. No external letter answers owner approval. |
-| Audit regressions and selective invalidation | `packages/core/test/contacts-review-regressions.test.ts`, `shared-projects.test.ts`, `shared-review.test.ts`, `shared-compute-journal.test.ts`; `packages/ui/src/lib/store-shared-projects.test.ts`; `tests/e2e/shared-cores.test.ts` | Contact wake/steer/hooks/history and intersected guards, transcript post-await revocation/readmission/restoration, human mailbox provenance after gateway restart at the default tier, current-revision direct/member lease teardown, access-only refresh, retained compute fences and cancellations. Claude/Codex/Muse native associated-letter execution and ordinary warm-session retirement are covered in `shared-access.test.ts`; unsupported routes remain held. |
-| Secret file and tool boundaries | `packages/core/test/shared-access.test.ts`, `shared-review.test.ts`, `ntfs-file-ids.test.ts`; `packages/ui/src/lib/fake-client.shared-projects.test.ts` | Classified files/content, handles/symlinks, Windows path forms/identities, transfer/tickets/HTML/attachments/checkpoints, overrides and immediate revocation. All six protocols have admission checks; echo/default reports no-tools, Claude/Codex use the native boundary and OpenCode/pi have separate native adapter fixtures; Muse 1.4.13 has native job/letter/board fixtures; other ACP implementations remain refused. Windows native execution is not established by Linux fixtures. |
-| Native Linux tool boundary | `packages/core/test/protected-execution.test.ts`; `packages/core/test/fixtures/native-protected-tool.ts` | Production registry launches an ordinary program: useful read/edit/build/child test, denied synthetic secrets/outside files/credentials and inheritable descriptors/links/children, isolated network, exact read-only overrides, immutable scope/retry/cwd, expiry/revoke/cleanup (including detached descendants), unsupported-host refusal and ordinary local process retention. Claude/Codex integration is covered by `protected-drivers.test.ts` and native `shared-access.test.ts` scenarios; Muse uses `protected-muse.test.ts` and the same native scopes. OpenCode/pi adapter behavior is covered by `protected-adapters.test.ts`; full job/board/letter integration and native Windows remain separate gates. |
+| Audit regressions and selective invalidation | `packages/core/test/contacts-review-regressions.test.ts`, `shared-projects.test.ts`, `shared-review.test.ts`, `shared-compute-journal.test.ts`; `packages/ui/src/lib/store-shared-projects.test.ts`; `tests/e2e/shared-cores.test.ts` | Contact wake/steer/hooks/history and intersected guards, transcript post-await revocation/readmission/restoration, human mailbox provenance after gateway restart at the default tier, current-revision direct/member lease teardown, access-only refresh, retained compute fences and cancellations. Claude/Codex/OpenCode/pi native associated-letter execution and ordinary warm-session retirement are covered on Linux and Windows in `shared-access.test.ts`; Muse is covered on Linux. Unsupported routes remain held. |
+| Secret file and tool boundaries | `packages/core/test/shared-access.test.ts`, `shared-review.test.ts`, `ntfs-file-ids.test.ts`; `packages/ui/src/lib/fake-client.shared-projects.test.ts` | Classified files/content, handles/symlinks, Windows path forms/identities, transfer/tickets/HTML/attachments/checkpoints, overrides and immediate revocation. All six protocols have admission checks; echo/default reports no-tools, Claude/Codex use the native boundary and OpenCode/pi have separate native adapter fixtures; Muse 1.4.13 has native job/letter/board fixtures; other ACP implementations remain refused. Dedicated `protected-windows.test.ts` fixtures establish Windows execution independently of Linux. |
+| Native Linux tool boundary | `packages/core/test/protected-execution.test.ts`; `packages/core/test/fixtures/native-protected-tool.ts` | Production registry launches an ordinary program: useful read/edit/build/child test, denied synthetic secrets/outside files/credentials and inheritable descriptors/links/children, isolated network, exact read-only overrides, immutable scope/retry/cwd, expiry/revoke/cleanup (including detached descendants), unsupported-host refusal and ordinary local process retention. Claude/Codex integration is covered by `protected-drivers.test.ts` and native `shared-access.test.ts` scenarios; Muse uses `protected-muse.test.ts` and the same native scopes. OpenCode/pi adapter behavior is covered by `protected-adapters.test.ts`, with full job/board/letter and Git integration in `shared-access.test.ts`. |
+| Native Windows tool boundary | `packages/core/test/protected-windows.test.ts`, `protected-drivers.test.ts`, `protected-adapters.test.ts`, `shared-access.test.ts` | Real Windows processes exercise useful project edits/builds/child tests, synthetic file and descriptor denial, read-only exceptions, offline networking, scope/account/mode retention, restart and captured descendant termination/identity cleanup. Claude/Codex/OpenCode/pi use native clients and deterministic local APIs for remote jobs, letters and board scopes. Muse Windows and macOS remain unverified. |
 | Lazy review and confirmed project revoke | `packages/core/test/shared-review.test.ts`; `tests/e2e/shared-cores.test.ts`: member policy revocation without a direct contact | Tool-free deterministic verdicts, confirmation independent of inference, timeout/invalid/stale response, no-work laziness and exact local project hold. A member hold does not mutate gateway grants or obtain owner authority; a stale mirror cannot reopen it. |
-| Security and network proof | `packages/core/test/contacts.test.ts`, `contacts-group.test.ts`, `contact-mailboxes.test.ts`, `contacts-review-regressions.test.ts`, `access.test.ts`; `tests/e2e/shared-cores.test.ts`: held transcript and readmission regressions | Independent security/network passes identified three access/provenance faults, a review feedback loop, stale lease teardown and compute scan waste. Regressions cover their corrections. Per-peer SQLite expression indexes/selective materialization retain all durable job fences. A fresh native-isolation review is still required when that implementation exists; current fixtures do not prove it. |
+| Security and network proof | `packages/core/test/contacts.test.ts`, `contacts-group.test.ts`, `contact-mailboxes.test.ts`, `contacts-review-regressions.test.ts`, `access.test.ts`; `tests/e2e/shared-cores.test.ts`: held transcript and readmission regressions | Independent security/network passes identified three access/provenance faults, a review feedback loop, stale lease teardown and compute scan waste. Regressions cover their corrections. Per-peer SQLite expression indexes/selective materialization retain all durable job fences. The independent combined native-isolation review remains a separate gate; fixture passes do not substitute for that review. |
 | Transport and UI parity | `tests/contract/shared-projects.ts` through core/fake contract suites; fake/Store tests; `tests/e2e/shared-collaboration.test.ts` at 1440 and 390 px | Same contract and refusals, captured owning Store, canonical remote offers/addresses, connection cache fencing, leases and phone actions. No paid inference, physical phone, real Tailscale/Funnel or remote CI proof is implied. |
 
 Local release proof on 2026-10-24 reran `bun run check`, 733 core tests in
@@ -1034,18 +1036,16 @@ contribution preserved its binding, grant revision and running jobs at both ends
 The desktop and phone captures were opened. These remain deterministic
 protocol/UI fixtures, not native-provider isolation proof.
 
-The overall release gate remains incomplete. Claude/Codex now have native
-Linux driver/control/tool fixtures proving useful edits/build/tests, native
-forged-tool denial, account/mode retention, associated letters/board goals,
-warm transitions, protected stop/overrides and real Git result consumption.
-These run installed clients against deterministic local APIs without inference.
-OpenCode/pi adapter fixtures now prove useful protected tools and warm/revoked
-retries. Muse 1.4.13 now proves its mandatory native-tool gate, useful execution,
-job/letter/board transitions and actual Git consumption; 1.3.0 remains refused.
-Native Windows, full OpenCode/pi job/board/letter integration and independent
-integration/security review remain required gates. Native macOS, live inference
-and remote CI of this implementation are unverified. Echo/protocol fixtures
-and synthetic Windows paths cannot substitute for native execution proof.
+The overall release gate remains incomplete pending the independent combined
+integration/security review. Claude/Codex/OpenCode/pi now have native Linux and
+Windows driver/control/tool fixtures proving useful edits/build/tests, forged
+tool denial, account/mode retention, associated letters/board goals, warm
+transitions, protected stop/overrides and real Git result consumption. These run
+installed clients against deterministic local APIs without inference.
+Muse 1.4.13 proves its mandatory native-tool gate, useful execution,
+job/letter/board transitions and actual Git consumption on Linux; 1.3.0 remains
+refused. Muse Windows, native macOS and live inference remain unverified.
+Windows evidence comes from its own native lane, independently of Linux.
 
 ### Native Windows tool execution
 
@@ -1063,8 +1063,11 @@ It grants the package project edits, private home/temp and runtime reads, with
 read-only ACLs for exact file exceptions. No host directory ACL, firewall policy,
 loopback exemption, elevated token or service is installed. LPAC excludes ambient
 `ALL APPLICATION PACKAGES` grants; only the explicitly allowed private files and
-Windows' public LPAC runtime remain accessible. No network capability or host
-credential environment is supplied.
+Windows' public LPAC runtime remain accessible. The sole capability is
+`registryRead`: native child creation needs the public Windows registry keys
+whose ACLs grant that SID. It does not grant arbitrary registry keys or restore
+ambient application-package access. No network capability or host credential
+environment is supplied.
 
 Each root starts with kernel process attributes for LPAC, only three duplicated
 standard handles and a private non-breakaway Job Object. The launcher verifies
@@ -1072,11 +1075,18 @@ the suspended child's AppContainer token; a trusted native probe must also fail
 to read a task-owned file granted only to `ALL APPLICATION PACKAGES`. This tests
 LPAC access rather than relying on an unsupported token-information query. Neither
 the private job handle nor other inheritable host handles reach the tool.
+Each launch owns an invisible window station and desktop, with ACLs for that
+capability and its owner only. A hidden console permits toolchain descendants.
 Launcher termination closes the job and kills descendants. A normal root exit
 also terminates and drains detached descendants before reporting success. Revoke
 and expiry stop captured processes before deleting the private profile and
-filesystem. Windows' normal process registry and guards still trace the launcher
-and its children.
+filesystem. Native control bridges revoke their channel immediately and remove
+their private directory after the captured process releases its Windows working
+directory. Windows' normal process registry and guards still trace the launcher
+and its children. Checked publication retains full metadata checks before
+opening a host file. When NTFS updates ChangeTime on a write-open, it also checks
+the file object, size, LastWriteTime and captured content through that same
+descriptor before writing.
 
 Build with a preinstalled Windows SDK clang or MinGW, then configure the host
 helper path (or put it beside the running core executable):
@@ -1091,12 +1101,10 @@ bun test packages/core/test/protected-windows.test.ts --timeout 120000
 The build script also accepts Linux's installed cross compiler to produce the
 userspace PE helper; cross-compilation alone is not native execution proof.
 Nothing compiles or downloads at core startup. Missing helpers or unsupported
-Windows kernel attributes fail closed before a model tool runs. The native
-launcher creates its console hidden so console toolchains can launch descendants.
-It does not alter a host window station or desktop ACL. A noninteractive Windows
-session whose desktop cannot initialize the LPAC probe remains refused.
-The native
-Windows CI lane runs inside the existing Windows core check, including protection
+Windows kernel attributes fail closed before a model tool runs. The launcher
+creates and releases its own window station and desktop, including in a
+noninteractive session; it does not alter a host station or desktop ACL.
+The native Windows CI lane runs inside the existing Windows core check, including protection
 changes on a draft PR. It uses synthetic directories/accounts and deterministic
 local provider APIs. Its fixture checks useful builds/tests, secret paths,
 junctions/hardlinks, inheritable handles, host process access, offline networking,

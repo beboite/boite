@@ -7,7 +7,7 @@ import {createAcpDriver} from '../src/drivers/acp.ts';
 import type {Driver, TurnContext} from '../src/drivers/types.ts';
 import {protectedTools} from '../src/protected-tools.ts';
 import {protectedProviderApi} from './fixtures/protected-provider-api.ts';
-import {startTestCore, type TestCore} from './harness.ts';
+import {startTestCore, waitFor, type TestCore} from './harness.ts';
 
 let harness: TestCore | undefined, driver: Driver | undefined;
 let api: ReturnType<typeof protectedProviderApi> | undefined;
@@ -59,13 +59,14 @@ describe.skipIf(!native)('native protected extensions', () => {
     const accountEnv = {PI_CODING_AGENT_DIR: accountDir, XDG_CONFIG_HOME: accountDir, XDG_DATA_HOME: accountDir, XDG_CACHE_HOME: join(accountDir, 'cache')};
     const logs: string[] = [];
     let approvals = 0, spawns = 0;
+    const workspaces: string[] = [];
     const ctx: TurnContext = {thread: {...thread, contextMode: {...TOOL_FREE_CONTEXT}}, account, provider, accountEnv, protectedExecution, prompt: 'Run the deterministic fixture.', attachments: [], sessionId: null,
       turn: {id: 'synthetic-turn', threadId: thread.id} as TurnContext['turn'], warmProcessMinutes: 1,
       emit: {startMessage: () => 'synthetic-message', delta: () => {}, part: () => {}, patchTool: () => {}, complete: () => {}},
       log: (_level, text) => logs.push(text), diagnostic: (_level, text) => logs.push(text), commands: () => {}, context: () => {},
       askQuestion: () => {throw new Error('No question');}, requestPermission: () => {approvals++; return Object.assign(Promise.resolve('allow' as const), {requestId: 'synthetic-approval', withdraw() {}});},
       spawn: () => {throw new Error('Control must use the tracked child route');},
-      spawnChild: (cmd, args, opts) => {spawns++; return core.procs.spawnChild(control, cmd, args, {...opts,
+      spawnChild: (cmd, args, opts) => {spawns++; if (opts?.cwd) workspaces.push(opts.cwd); return core.procs.spawnChild(control, cmd, args, {...opts,
         env: {PATH: process.env.PATH, SystemRoot: process.env['SystemRoot'], HOME: accountDir, LANG: 'C.UTF-8', ...accountEnv, ...opts?.env}});},
       killTree: () => {core.procs.killTree(control); core.procs.killTree(thread.id);},
     };
@@ -116,5 +117,7 @@ describe.skipIf(!native)('native protected extensions', () => {
     expect(await driver.startTurn(warm).done).toMatchObject({status: 'error'});
     expect(api.requests).toHaveLength(before);
     expect(core.procs.liveCount(control)).toBe(0);
+    driver.shutdown?.();
+    await waitFor(() => workspaces.every(path => !existsSync(path)));
   }, 90000);
 });

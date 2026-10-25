@@ -1,5 +1,5 @@
 /* Trusted launcher. No command interpreter, elevation, global ACL or firewall changes.
- * Build: Windows SDK clang, or x86_64-w64-mingw32-gcc, with userenv/advapi32/shell32.
+ * Build: Windows SDK clang, or x86_64-w64-mingw32-gcc, with userenv/advapi32/shell32/user32.
  * Only this process owns the non-inherited private job handle. */
 #define _WIN32_WINNT 0x0A00
 #define UNICODE
@@ -142,12 +142,45 @@ static wchar_t *command_line(int count, wchar_t **args) {
   *out = 0; return result;
 }
 
+/* A service/SSH window station does not admit lowbox processes. Give the tool
+ * its own invisible station and desktop; never edit the host station's ACL. */
+static DWORD private_desktop(PSID app, const wchar_t *profile, HWINSTA *station, HDESK *desktop,
+    wchar_t *name, size_t size, PSECURITY_DESCRIPTOR *object_security) {
+  HANDLE token = NULL; TOKEN_USER *user = NULL; DWORD bytes = 0, error = 0;
+  LPWSTR app_text = NULL, user_text = NULL; PSECURITY_DESCRIPTOR descriptor = NULL;
+  if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return GetLastError();
+  GetTokenInformation(token, TokenUser, NULL, 0, &bytes); user = calloc(1, bytes);
+  if (!user || !GetTokenInformation(token, TokenUser, user, bytes, &bytes) ||
+      !ConvertSidToStringSidW(app, &app_text) || !ConvertSidToStringSidW(user->User.Sid, &user_text)) {error = GetLastError(); goto end;}
+  wchar_t sddl[512]; swprintf(sddl, 512, L"D:P(A;;GA;;;%ls)(A;;GA;;;%ls)S:(ML;;NW;;;LW)", user_text, app_text);
+  if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, SDDL_REVISION_1, &descriptor, NULL)) {error = GetLastError(); goto end;}
+  SECURITY_ATTRIBUTES attributes = {sizeof(attributes), descriptor, FALSE};
+  swprintf(name, size, L"%ls.%lu", profile, GetCurrentProcessId());
+  *station = CreateWindowStationW(name, 1 /* CWF_CREATE_ONLY */, WINSTA_ALL_ACCESS, &attributes);
+  if (!*station || !SetProcessWindowStation(*station)) {error = GetLastError(); goto end;}
+  *desktop = CreateDesktopW(L"default", NULL, NULL, 0, GENERIC_ALL, &attributes);
+  if (!*desktop) {error = GetLastError(); goto end;}
+  wcscat(name, L"\\default");
+  *object_security = descriptor; descriptor = NULL;
+end:
+  if (descriptor) LocalFree(descriptor);
+  if (app_text) LocalFree(app_text);
+  if (user_text) LocalFree(user_text);
+  if (user) free(user);
+  CloseHandle(token); return error;
+}
+
 static int launch(int count, wchar_t **args) {
   if (count < 5) return failure(L"launch.arguments", ERROR_INVALID_PARAMETER);
   PSID app = NULL; HANDLE job = NULL, streams[3] = {NULL, NULL, NULL};
+  PSID *groups = NULL, *capability_sids = NULL; DWORD group_count = 0, capability_count = 0;
+  SID_AND_ATTRIBUTES registry_read;
   LPPROC_THREAD_ATTRIBUTE_LIST list = NULL; PROCESS_INFORMATION child; ZeroMemory(&child, sizeof(child));
   DWORD error = 0, exit_code = 125; wchar_t *line = NULL; BOOL initialized = FALSE;
   const wchar_t *stage = L"launch.job";
+  HWINSTA original_station = GetProcessWindowStation(), station = NULL; HDESK desktop = NULL;
+  PSECURITY_DESCRIPTOR object_security = NULL;
+  wchar_t desktop_name[256];
   HRESULT hr = DeriveAppContainerSidFromAppContainerName(args[2], &app);
   if (FAILED(hr)) return failure(L"profile.derive", (DWORD)hr);
   job = CreateJobObjectW(NULL, NULL);
@@ -155,6 +188,9 @@ static int launch(int count, wchar_t **args) {
   JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits; ZeroMemory(&limits, sizeof(limits));
   limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
   if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits))) {error = GetLastError(); goto end;}
+  stage = L"launch.desktop";
+  error = private_desktop(app, args[2], &station, &desktop, desktop_name, 256, &object_security);
+  if (error) goto end;
   DWORD ids[3] = {STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE};
   stage = L"launch.streams";
   for (int i = 0; i < 3; i++) {
@@ -169,7 +205,19 @@ static int launch(int count, wchar_t **args) {
   if (!list || !InitializeProcThreadAttributeList(list, 4, 0, &bytes)) {error = GetLastError(); goto end;}
   initialized = TRUE;
   SECURITY_CAPABILITIES capabilities; ZeroMemory(&capabilities, sizeof(capabilities));
-  capabilities.AppContainerSid = app; /* No network, shared-file or other capability SIDs. */
+  /* CreateProcess reads public Windows registry configuration even for a private
+   * executable. Without registryRead the native call fails with ACCESS_DENIED.
+   * This SID grants only registry keys whose ACL already names that capability;
+   * it neither restores ALL APPLICATION PACKAGES nor grants network/file access. */
+  typedef BOOL (WINAPI *derive_capability)(LPCWSTR, PSID **, DWORD *, PSID **, DWORD *);
+  derive_capability derive = (derive_capability)(void *)GetProcAddress(GetModuleHandleW(L"kernelbase.dll"), "DeriveCapabilitySidsFromName");
+  stage = L"launch.registry-capability";
+  if (!derive || !derive(L"registryRead", &groups, &group_count, &capability_sids, &capability_count) || capability_count != 1) {
+    error = GetLastError(); if (!error) error = ERROR_NOT_SUPPORTED; goto end;
+  }
+  registry_read.Sid = capability_sids[0]; registry_read.Attributes = SE_GROUP_ENABLED;
+  capabilities.AppContainerSid = app;
+  capabilities.Capabilities = &registry_read; capabilities.CapabilityCount = 1;
   DWORD lpac = 1; /* PROCESS_CREATION_ALL_APPLICATION_PACKAGES_OPT_OUT: exclude ambient ALL APPLICATION PACKAGES grants. */
   if (!UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, &capabilities, sizeof(capabilities), NULL, NULL) ||
       !UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_ALL_APPLICATION_PACKAGES_POLICY, &lpac, sizeof(lpac), NULL, NULL) ||
@@ -178,16 +226,17 @@ static int launch(int count, wchar_t **args) {
   STARTUPINFOEXW startup; ZeroMemory(&startup, sizeof(startup));
   startup.StartupInfo.cb = sizeof(startup); startup.lpAttributeList = list;
   startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-  // A hidden real console permits native toolchain descendants. CREATE_NO_WINDOW
-  // and alternate window stations break console initialization under AppContainer.
+  /* A hidden console and registryRead permit native toolchain descendants. */
   startup.StartupInfo.wShowWindow = SW_HIDE;
+  startup.StartupInfo.lpDesktop = desktop_name;
   startup.StartupInfo.hStdInput = streams[0]; startup.StartupInfo.hStdOutput = streams[1]; startup.StartupInfo.hStdError = streams[2];
   line = command_line(count - 4, args + 4);
   if (!line) {error = ERROR_NOT_ENOUGH_MEMORY; goto end;}
   /* Kernel applies the lowbox, handle allowlist and non-breakaway job atomically.
    * Suspension also lets us reject a missing lowbox before its first instruction. */
   stage = L"launch.process";
-  if (!CreateProcessW(args[4], line, NULL, NULL, TRUE, EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED |
+  SECURITY_ATTRIBUTES child_security = {sizeof(child_security), object_security, FALSE};
+  if (!CreateProcessW(args[4], line, &child_security, &child_security, TRUE, EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED |
       CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT, NULL, args[3], &startup.StartupInfo, &child)) {error = GetLastError(); goto end;}
   HANDLE child_token = NULL; DWORD is_container = 0, returned = 0;
   stage = L"launch.token";
@@ -215,6 +264,14 @@ end:
   if (list) {if (initialized) DeleteProcThreadAttributeList(list); HeapFree(GetProcessHeap(), 0, list);}
   for (int i = 0; i < 3; i++) if (streams[i]) CloseHandle(streams[i]);
   if (job) CloseHandle(job);
+  if (station) SetProcessWindowStation(original_station);
+  if (desktop) CloseDesktop(desktop);
+  if (station) CloseWindowStation(station);
+  if (object_security) LocalFree(object_security);
+  for (DWORD i = 0; i < group_count; i++) LocalFree(groups[i]);
+  if (groups) LocalFree(groups);
+  for (DWORD i = 0; i < capability_count; i++) LocalFree(capability_sids[i]);
+  if (capability_sids) LocalFree(capability_sids);
   if (app) FreeSid(app);
   if (line) free(line);
   if (!error && exit_code) fwprintf(stderr, L"execution.windows.child: exit status %lu\n", exit_code);

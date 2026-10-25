@@ -19,7 +19,7 @@ try {
   writeFileSync(local, readFileSync(source));
   const msvc = process.platform === 'win32' && /clang/i.test(compiler);
   const child = procs.spawnPiped('install-windows-sandbox', compiler, ['-O2', '-Wall', '-Wextra', '-Werror', local, '-o', built,
-    ...(msvc ? ['-luserenv', '-ladvapi32', '-lshell32'] : ['-static', '-luserenv', '-ladvapi32', '-lshell32'])], {cwd: scratch, agentRoot: false});
+    ...(msvc ? [] : ['-static']), '-luserenv', '-ladvapi32', '-lshell32', '-luser32'], {cwd: scratch, agentRoot: false});
   child.proc.stdin.end();
   const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.proc.stdout).text(), new Response(child.proc.stderr).text()]);
   if (code) throw new Error(`execution.windows.compiler: native helper build failed (${code}): ${stdout}${stderr}`);

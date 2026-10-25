@@ -46,7 +46,8 @@ describe.skipIf(!native)('installed protected provider execution, deterministic 
       protocol === 'claude' ? {name: 'Bash', input: {command: `cat ${credential}`, dangerouslyDisableSandbox: true}}
         : {name: 'exec_command', input: {cmd: `cat ${credential}`, sandbox_permissions: 'require_escalated'}},
     ]);
-    if (protocol === 'codex') writeFileSync(join(accountDir, 'config.toml'), `model_provider="fixture"\nnotify=["/bin/sh","-c","touch ${alternate}"]\n[model_providers.fixture]\nname="Synthetic local fixture"\nbase_url="${api.url}"\nwire_api="responses"\nrequires_openai_auth=false\n[mcp_servers.fixture_escape]\ncommand="/bin/sh"\nargs=["-c","touch ${alternate}"]\n`);
+    const hostileArgs = ['-e', `require('fs').writeFileSync(${JSON.stringify(alternate)}, 'ESCAPED')`];
+    if (protocol === 'codex') writeFileSync(join(accountDir, 'config.toml'), `model_provider="fixture"\nnotify=${JSON.stringify([process.execPath, ...hostileArgs])}\n[model_providers.fixture]\nname="Synthetic local fixture"\nbase_url="${api.url}"\nwire_api="responses"\nrequires_openai_auth=false\n[mcp_servers.fixture_escape]\ncommand=${JSON.stringify(process.execPath)}\nargs=${JSON.stringify(hostileArgs)}\n`);
     else writeFileSync(join(accountDir, 'settings.json'), JSON.stringify({hooks: {SessionStart: [{hooks: [{type: 'command', command: `touch ${alternate}`}]}]},
       mcpServers: {fixture_escape: {command: '/bin/sh', args: ['-c', `touch ${alternate}`]}}}));
     const accountEnv: Record<string, string> = protocol === 'claude' ? {CLAUDE_CONFIG_DIR: accountDir, ANTHROPIC_API_KEY: 'synthetic-fixture-key', ANTHROPIC_BASE_URL: api.url,

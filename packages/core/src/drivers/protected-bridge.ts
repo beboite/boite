@@ -1,6 +1,7 @@
 import {randomBytes} from 'node:crypto';
 import {mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, symlinkSync, readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
+import {rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import type {SessionContext, TurnContext} from './types.ts';
 import {PROTECTED_TOOL, PROTECTED_COMMIT, PROTECTED_DESCRIPTION, PROTECTED_SCHEMA, PROTECTED_COMMIT_DESCRIPTION, protectedTool, protectedCommit} from './protected.ts';
@@ -61,7 +62,15 @@ export function protectedBridge(ctx: SessionContext, head: ProtectedHead) {
     asset(name: string, code: string) {const path = join(directory, name); writeFileSync(path, code, {mode: 0o600}); return path;},
     assertReady() {ctx.protectedExecution!.check(); if (!ready) throw new Error('execution.extension: native protection extension did not initialize; no unprotected fallback');},
     assertMcpReady() {ctx.protectedExecution!.check(); if (!mcpReady) throw new Error('execution.mcp: native host did not initialize protected tools; no unprotected fallback');},
-    close() {if (closed) return; closed = true; server.stop(true); rmSync(directory, {recursive: true, force: true});},
+    close(released?: Promise<unknown>) {
+      if (closed) return;
+      closed = true; server.stop(true);
+      // Windows retains a native process's cwd until exit. Revoke the channel
+      // now, then remove its files after the captured control process releases it.
+      if (released) void released.catch(() => {}).then(() => rm(directory, {recursive: true, force: true, maxRetries: 10, retryDelay: 50}))
+        .catch(error => ctx.log('error', `execution.bridge.cleanup: ${error instanceof Error ? error.message : String(error)}`));
+      else rmSync(directory, {recursive: true, force: true});
+    },
   };
 }
 export type ProtectedBridge = ReturnType<typeof protectedBridge>;

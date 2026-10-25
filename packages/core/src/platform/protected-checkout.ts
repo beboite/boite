@@ -140,9 +140,10 @@ export class ProtectedCheckout {
         this.makeParents(dirname(path));
         const existed = this.files.has(path);
         // No truncation until the captured inode is checked through its held descriptor.
-        const fd = openSync(host, constants.O_WRONLY | constants.O_NOFOLLOW | (existed ? 0 : constants.O_CREAT | constants.O_EXCL), 0o600 | (state.mode & 0o111));
+        const fd = openSync(host, (process.platform === 'win32' ? constants.O_RDWR : constants.O_WRONLY)
+          | constants.O_NOFOLLOW | (existed ? 0 : constants.O_CREAT | constants.O_EXCL), 0o600 | (state.mode & 0o111));
         try {
-          if (existed && policyIdentity(host, fstatSync(fd, {bigint: true})) !== this.files.get(path)!.identity) throw new Error('execution.result: host file changed before write');
+          if (existed && !this.sameWriteTarget(host, fd, this.files.get(path)!)) throw new Error('execution.result: host file changed before write');
           const input = openSync(join(publication, path), constants.O_RDONLY | constants.O_NOFOLLOW);
           try {
             const bytes = Buffer.alloc(65536);
@@ -167,6 +168,25 @@ export class ProtectedCheckout {
       }
       return changed;
     } finally { rmSync(publication, {recursive: true, force: true}); }
+  }
+
+  private sameWriteTarget(path: string, fd: number, expected: FileState): boolean {
+    const opened = fstatSync(fd, {bigint: true});
+    if (policyIdentity(path, opened) === expected.identity) return true;
+    if (process.platform !== 'win32') return false;
+    // NTFS can update ChangeTime just by opening an existing file for writing.
+    // Retain the file object, size and LastWriteTime check, and compare the actual
+    // captured bytes through that same descriptor before allowing any write.
+    const withoutChangeTime = (identity: string) => identity.slice(0, identity.lastIndexOf('|'));
+    if (!opened.isFile() || withoutChangeTime(policyIdentity(path, opened)) !== withoutChangeTime(expected.identity)) return false;
+    const digest = createHash('sha256'), bytes = Buffer.alloc(65536);
+    let offset = 0;
+    for (;;) {
+      const count = readSync(fd, bytes, 0, bytes.length, offset);
+      if (!count) break;
+      digest.update(bytes.subarray(0, count)); offset += count;
+    }
+    return digest.digest('hex') === expected.digest;
   }
 
   private checkDestination(path: string): void {
