@@ -430,6 +430,37 @@ calls succeed. SDK execution is blocked by three deprecated wcscpy calls under
 fresh SDK compilation/execution remains required. Production still fails all
 seven NUL probes per compiler; no cause or production acceptance is established.
 
+The d82f8c44 Server run verifies 27 hashes and compiles with both SDK and
+MinGW. Each compiler completes CREATOR and all five fault probes, but retains
+the map through the immediate, 2000-ms and additional 3000-ms gates. The
+creator's two recorded registry handles close 2068 ms before the SDK checkpoint
+and 2072/2074 ms before the MinGW checkpoint. SDK closes 454/454 captured registry
+handles; MinGW closes 457/457, with no ledger failures. All 96 normal-case
+stream/window cleanup calls succeed. Each compiler has exactly 25 diagnostic
+cleanup failures and seven production NUL failures. Early creator exit alone
+therefore does not resolve this fixture with either compiler.
+
+## Exited-root retirement control
+
+RETIRE matches DIRECT through its single assignment, root marker, expected
+descendant map loss and normal exits. Only after the owned job reaches zero,
+the original root handle is signaled and its exit status is available, create
+an empty unnamed directory with the same security descriptor. Verify its empty
+object name and noninheritable handle; replace only that captured, already
+terminated root's map before closing the original process/thread handles.
+Require the root to remain signaled with its exact exit status unchanged.
+Close the known unnamed handle and retain every original named-map absence,
+caller/ambient, profile and registry gate. No target resumes and no inferred
+ambient map or foreign handle is restored, inspected or closed.
+
+The existing RED A/B/A control already demonstrates that replacing a map can
+release its old counted handle. RETIRE asks whether that replacement is also
+possible after root termination. Success would establish only that the named
+working map can disappear before helper exit. The anonymous replacement may
+still have kernel references: its complete rundown, descendants, cancellation
+and a real NUL endpoint would remain separate requirements. No native RETIRE
+result or production admission is established by compilation.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:

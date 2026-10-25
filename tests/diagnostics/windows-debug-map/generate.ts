@@ -34,6 +34,11 @@ export function generate(source: string): string {
     '      if (drain && !error) error = drain;\n    }\n    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting;');
   source = once(source, '      if (!accounting.ActiveProcesses) break;',
     '      if (!accounting.ActiveProcesses) { fputws(L"cleanup job-active=0\\n", stderr); break; }');
+  source = once(source, '  if (child.hThread) CloseHandle(child.hThread);',
+    '  if (retire_owned_map && child.hProcess) {\n' +
+    '    DWORD retired = map_retire(child.hProcess, job, object_security);\n' +
+    '    if (retired && !error) { error = retired; stage = L"routing.cleanup.retire"; }\n  }\n' +
+    '  if (child.hThread) CloseHandle(child.hThread);');
   // Keep the production cleanup order. Observe our own returned handles only;
   // debug-event process/thread handles still belong to Windows.
   for (const [field, label] of [['child.hThread', 'root-thread'], ['child.hProcess', 'root-process'], ['job', 'job']]) {
@@ -68,13 +73,14 @@ export function generate(source: string): string {
     '  else if (count > 1 && !wcscmp(args[1], L"create-map")) result = creator_entry(count, args);\n' +
     '  else if (count > 4 && (!wcscmp(args[1], L"run") || !wcscmp(args[1], L"debug-run") ||\n' +
     '      !wcscmp(args[1], L"direct-run") || !wcscmp(args[1], L"setter-run") || !wcscmp(args[1], L"quiet-run") ||\n' +
-    '      !wcscmp(args[1], L"reopen-run") || !wcscmp(args[1], L"creator-run"))) {\n' +
+    '      !wcscmp(args[1], L"reopen-run") || !wcscmp(args[1], L"creator-run") || !wcscmp(args[1], L"retire-run"))) {\n' +
     '    debug_mode = !wcscmp(args[1], L"debug-run");\n' +
     '    reopen_owned_map = !wcscmp(args[1], L"reopen-run");\n' +
     '    external_map_creator = !wcscmp(args[1], L"creator-run");\n' +
+    '    retire_owned_map = !wcscmp(args[1], L"retire-run");\n' +
     '    observe_owned_handles = wcscmp(args[1], L"quiet-run") != 0;\n' +
     '    assignment_scope = !wcscmp(args[1], L"setter-run") ? 2 :\n' +
-    '      (!wcscmp(args[1], L"direct-run") || !observe_owned_handles || reopen_owned_map || external_map_creator) ? 1 : 0;\n' +
+    '      (!wcscmp(args[1], L"direct-run") || !observe_owned_handles || reopen_owned_map || external_map_creator || retire_owned_map) ? 1 : 0;\n' +
     '    DWORD before = caller_snapshot(args[3], FALSE);\n' +
     '    if (!before) result = launch(count, args);\n' +
     '    DWORD after = caller_snapshot(args[3], TRUE);\n' +

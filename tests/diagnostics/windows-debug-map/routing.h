@@ -24,6 +24,8 @@ static BOOL observe_owned_handles = TRUE;
 /* REOPEN matches DIRECT after replacing creation handles with verified opens. */
 static BOOL reopen_owned_map;
 static BOOL external_map_creator;
+/* RETIRE changes only a signaled, owned root after its job reaches zero. */
+static BOOL retire_owned_map;
 static DWORD creator_prepare(PSECURITY_DESCRIPTOR security, const wchar_t *target, const wchar_t *root);
 static unsigned int object_count_queries, handle_snapshot_queries;
 /* 0 retains the original RED roundtrip, 1 omits it as a control, 2 also moves
@@ -124,6 +126,61 @@ static DWORD map_apply(HANDLE process) {
   fflush(stderr);
   observed = map_lifetime(L"after-assign", L"process");
   return status != 0 ? (DWORD)status : observed;
+}
+
+/* Keep DIRECT's original routing and exit. After all execution has stopped,
+ * replace only that captured root's map with an empty, unnamed directory.
+ * This never restores an inferred ambient map or resumes any process. The
+ * unnamed map may still have kernel references: this is not rundown proof. */
+static DWORD map_retire(HANDLE process, HANDLE job, PSECURITY_DESCRIPTOR security) {
+  if (!retire_owned_map || !probe_map) return 0;
+  typedef NTSTATUS (NTAPI *create_directory_fn)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, HANDLE, ULONG);
+  typedef NTSTATUS (NTAPI *set_process_fn)(HANDLE, PROCESSINFOCLASS, PVOID, ULONG);
+  create_directory_fn create = (create_directory_fn)(void *)nt_api("NtCreateDirectoryObjectEx");
+  set_process_fn set = (set_process_fn)(void *)nt_api("NtSetInformationProcess");
+  query_object_fn query = (query_object_fn)(void *)nt_api("NtQueryObject");
+  if (!create || !set || !query) return ERROR_PROC_NOT_FOUND;
+  DWORD pid = GetProcessId(process), before = STILL_ACTIVE, after = STILL_ACTIVE;
+  DWORD waited = WaitForSingleObject(process, 0), error = 0;
+  JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting; ZeroMemory(&accounting, sizeof(accounting));
+  if (!pid || pid != probe_root_pid) return ERROR_INVALID_DATA;
+  if (waited != WAIT_OBJECT_0) return waited == WAIT_TIMEOUT ? ERROR_BUSY : GetLastError();
+  if (!GetExitCodeProcess(process, &before)) return GetLastError();
+  if (!QueryInformationJobObject(job, JobObjectBasicAccountingInformation, &accounting, sizeof(accounting), NULL))
+    return GetLastError();
+  if (accounting.ActiveProcesses || before == STILL_ACTIVE) return ERROR_BUSY;
+  fwprintf(stderr, L"map-retire ready pid=%lu signaled=1 job-active=0 exit=%lu\n", pid, before); fflush(stderr);
+  HANDLE empty = NULL;
+  OBJECT_ATTRIBUTES attributes; ZeroMemory(&attributes, sizeof(attributes));
+  attributes.Length = sizeof(attributes); attributes.SecurityDescriptor = security;
+  NTSTATUS status = create(&empty, 0xf000f, &attributes, NULL, 0);
+  fwprintf(stderr, L"map-retire create=0x%08lx\n", (unsigned long)status); fflush(stderr);
+  if (status != 0) return (DWORD)status;
+  BYTE buffer[8192]; ULONG used = 0; DWORD flags = 0;
+  status = query(empty, (OBJECT_INFORMATION_CLASS)1, buffer, sizeof(buffer), &used);
+  if (status != 0) { error = (DWORD)status; goto end; }
+  if (used < sizeof(UNICODE_STRING) || used > sizeof(buffer) || ((UNICODE_STRING *)buffer)->Length) {
+    error = ERROR_INVALID_NAME; goto end;
+  }
+  if (!GetHandleInformation(empty, &flags)) { error = GetLastError(); goto end; }
+  if (flags) { error = ERROR_INVALID_DATA; goto end; }
+  fputws(L"map-retire unnamed=1 inherited=0 links=0\n", stderr); fflush(stderr);
+  error = map_lifetime(L"before-retire", L"exited-root");
+  if (error) goto end;
+  status = set(process, (PROCESSINFOCLASS)23, &empty, sizeof(empty));
+  fwprintf(stderr, L"map-retire pid=%lu set=0x%08lx\n", pid, (unsigned long)status); fflush(stderr);
+  if (status != 0) { error = (DWORD)status; goto end; }
+  error = map_lifetime(L"after-retire", L"exited-root");
+  if (error) goto end;
+  waited = WaitForSingleObject(process, 0);
+  if (waited != WAIT_OBJECT_0) { error = waited == WAIT_TIMEOUT ? ERROR_BUSY : GetLastError(); goto end; }
+  if (!GetExitCodeProcess(process, &after)) { error = GetLastError(); goto end; }
+  if (after != before) { error = ERROR_INVALID_DATA; goto end; }
+  fwprintf(stderr, L"map-retire preserved pid=%lu signaled=1 exit=%lu unchanged=1\n", pid, after); fflush(stderr);
+end:
+  { DWORD closed = close_owned(L"retire-unnamed-map", &empty); if (closed && !error) error = closed; }
+  fwprintf(stderr, L"map-retire result=%lu\n", error); fflush(stderr);
+  return error;
 }
 
 #include "roundtrip.h"
