@@ -27,7 +27,10 @@ line too. A touchscreen laptop whose primary pointer is a mouse keeps Enter's
 send.
 
 At phone widths, Settings opens a list in two groups. This phone:
-Notifications, Appearance and Privacy, the two analytics switches. Machine: the
+Notifications, Appearance, Privacy, the two analytics switches, and
+Experiments, which each device turns on for itself: Bots on the computer leaves
+the phone's bar without its Bots tab until the phone switches them on too.
+Machine: the
 machine itself with its connection, which opens Machines, then Usage, Voice and
 Archived threads. Each opens a screen of its own; the back button or browser
 Back returns to the list. Theme and accent belong to the current device;
@@ -52,7 +55,7 @@ CLIProxyAPI gateway on or off
 ([providers](providers.md#switching-the-gateway-from-limits)).
 
 Provider accounts, keyboard shortcuts, plugins, resource limits, the brain, the
-task manager, worktrees, automatic compaction, diagnostics, experiments, the
+task manager, worktrees, automatic compaction, diagnostics, the
 tour, adding and removing devices and server configuration stay in desktop
 settings; a link or a card in a conversation that names one of those pages
 still opens it. Project management stays on the desktop too. This smaller

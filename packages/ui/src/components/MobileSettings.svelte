@@ -1,6 +1,6 @@
 <script lang="ts">
   import TelemetrySettings from './TelemetrySettings.svelte';
-  import { AppWindow, ArchiveRestore, ArrowLeft, Bell, ChevronRight, Coins, Gauge, KeyRound, Lock, Monitor, Palette, Mic } from '@lucide/svelte';
+  import { AppWindow, ArchiveRestore, ArrowLeft, Bell, ChevronRight, Coins, FlaskConical, Gauge, KeyRound, Lock, Monitor, Palette, Mic } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
@@ -107,6 +107,10 @@
           </button>
           <button class="ghost row" data-testid="mobile-settings-privacy" onclick={() => { privacy = true; }}>
             <Lock size={20} /><span class="ui-label">{strings.mobile.settingsPrivacy}</span><ChevronRight size={18} />
+          </button>
+          <!-- Experiments are kept per device: Bots on the computer leaves the phone's tab bar without them until the phone turns its own on. -->
+          <button class="ghost row" data-testid="settings-tab-experiments" onclick={() => store.showSettings('experiments')}>
+            <FlaskConical size={20} /><span class="ui-label">{strings.settings.tabs.experiments}</span><ChevronRight size={18} />
           </button>
         </div>
       </section>
