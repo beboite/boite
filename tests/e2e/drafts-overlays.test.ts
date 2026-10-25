@@ -22,11 +22,11 @@ test('height-capped desktop popovers can scroll to their last action', async () 
       await page.click(`[data-testid="${trigger}"]`);
       await page.waitFor(`document.querySelector('[data-testid="${popup}"]')`);
       await page.settleAnimations();
-      const result = await page.evaluate<{ overflow: string; scroll: number; visible: boolean }>(`(() => { const el = document.querySelector('[data-testid="${popup}"]'); el.scrollTop = el.scrollHeight; const action = el.querySelector('button:last-of-type'); const r = action.getBoundingClientRect(); return { overflow: getComputedStyle(el).overflowY, scroll: el.scrollTop, visible: r.top >= 0 && r.bottom <= innerHeight }; })()`);
+      const result = await page.evaluate<{ overflow: string; scroll: number; visible: boolean }>(`(() => { const el = document.querySelector('[data-testid="${popup}"]'); el.scrollTop = el.scrollHeight; const action = [...el.querySelectorAll('button')].at(-1); const r = action.getBoundingClientRect(); return { overflow: getComputedStyle(el).overflowY, scroll: el.scrollTop, visible: r.top >= 0 && r.bottom <= innerHeight }; })()`);
+      await page.screenshot(join(import.meta.dir, '.artifacts', `${popup}-short.png`));
       expect(result.overflow).toBe('auto');
       expect(result.scroll).toBeGreaterThan(0);
       expect(result.visible).toBe(true);
-      await page.screenshot(join(import.meta.dir, '.artifacts', `${popup}-short.png`));
       await escape(page);
       await page.waitFor(`!document.querySelector('[data-testid="${popup}"]')`);
     }

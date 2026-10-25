@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import { Clock, Minimize2, ScanEye } from '@lucide/svelte';
+  import { Clock, Info, Minimize2, ScanEye } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { threadActive, type ThreadCapabilities } from '@boite/contracts';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
   import { contextLimit, contextPercent, contextLevel } from '../lib/tokens';
   import { count, time } from '../lib/format';
   import { Closing } from '../lib/closing.svelte';
@@ -14,6 +14,9 @@
   let submitting = $state(false);
   let root = $state<HTMLDivElement>();
   const popup = new Closing();
+  const readingId = $props.id();
+  let readingExpanded = $state(false);
+  $effect(() => { if (!popup.open) readingExpanded = false; });
   let leave: ReturnType<typeof setTimeout> | undefined;
   const thread = $derived(store.openThread);
   const context = $derived(thread?.context ?? null);
@@ -95,7 +98,8 @@
     if (event.key !== 'Escape' || !popup.open) return;
     event.preventDefault();
     event.stopPropagation();
-    popup.hide();
+    if (readingExpanded) readingExpanded = false;
+    else popup.hide();
   }
   async function compact() {
     if (reason || submitting) return;
@@ -118,18 +122,22 @@
   {#if popup.shown}
     <div class="popup" class:closing={popup.closing} role="dialog" aria-label={strings.thread.contextDetails} tabindex="-1" data-testid="context-popup" use:popup.attach onanimationend={popup.end}
       use:floating={{ anchor: () => root ?? null, placement: 'top', align: 'end', cap: Infinity, dismiss: () => popup.hide() }}>
-      <div class="heading"><span>{strings.thread.contextDetails}</span>{#if percent !== null}<span class="mono">{percent}%</span>{/if}</div>
+      <div class="heading"><span class="title">{strings.thread.contextDetails}
+        {#if context}<button type="button" class="reading-info ghost icon" data-testid="context-info" aria-label={fill(strings.common.moreInfo, { topic: strings.thread.contextDetails })} aria-expanded={readingExpanded} aria-controls={readingId} onclick={() => { readingExpanded = !readingExpanded; }}><Info size={14} /></button>{/if}
+      </span>{#if percent !== null}<span class="mono">{percent}%</span>{/if}</div>
       {#if context}
-        <p class="total mono">{exact(context.tokens)}{#if limit !== null}{' / '}{exact(limit)}{/if}</p>
-        {#if compactLimit}<p class="note compact-limit" data-testid="context-auto-compact">{modelWindow !== null ? strings.thread.contextAutoCompactWindow(exact(modelWindow)) : strings.thread.contextAutoCompact}</p>{/if}
+        <p class="total"><span class="mono">{exact(context.tokens)}{#if limit !== null}{' / '}{exact(limit)}{/if}</span> <span class="unit">{strings.thread.contextTokens}</span></p>
         <div class="bar" aria-hidden="true">
           {#each segments as segment (segment.kind)}<span class={segment.kind} style:width={`${Math.min(100, segment.count / Math.max(1, limit ?? context.tokens) * 100)}%`}></span>{/each}
         </div>
-        <dl>{#each segments as segment (segment.kind)}<div><dt><i class={segment.kind}></i>{segment.name}</dt><dd class="mono">{exact(segment.count)}</dd></div>{/each}
-          {#if limit !== null}<div><dt><i class="free"></i>{compactLimit ? strings.thread.contextBeforeCompact : strings.thread.contextFree}</dt><dd class="mono">{exact(Math.max(0, limit - context.tokens))}</dd></div>{/if}
-        </dl>
-        {#if !context.breakdown}<p class="note">{strings.thread.contextNoBreakdown}</p>{/if}
-        <p class="note">{strings.thread.contextMeasured} · {time(context.at)}</p>
+        {#if limit !== null}<p class="remaining" data-testid="context-remaining">{compactLimit ? strings.thread.contextRemainingCompact(exact(Math.max(0, limit - context.tokens))) : strings.thread.contextRemaining(exact(Math.max(0, limit - context.tokens)))}</p>{/if}
+        <div id={readingId} class="reading-detail" hidden={!readingExpanded}>
+          {#if compactLimit}<p class="note" data-testid="context-auto-compact">{modelWindow !== null ? strings.thread.contextAutoCompactWindow(exact(modelWindow)) : strings.thread.contextAutoCompact}</p>{/if}
+          {#if context.breakdown}
+            <dl>{#each segments as segment (segment.kind)}<div><dt><i class={segment.kind}></i>{segment.name}</dt><dd class="mono">{exact(segment.count)}</dd></div>{/each}</dl>
+          {:else}<p class="note">{strings.thread.contextNoBreakdown}</p>{/if}
+          <p class="note">{strings.thread.contextMeasured} · {time(context.at)}</p>
+        </div>
       {:else}<p class="note">{strings.thread.contextNoReading}</p>{/if}
       <button type="button" class="compact" data-testid="context-compact" disabled={reason !== null} title={reason ?? strings.composer.compact} onclick={() => void compact()}><Minimize2 size={14} /><span class="ui-label">{strings.composer.compact}</span></button>
       {#if reason}<p class="note">{reason}</p>{/if}
@@ -173,19 +181,24 @@
   .popup { position: fixed; width: min(320px, calc(100vw - 24px)); z-index: 60; padding: 16px; border: 1px solid var(--color-edge); border-radius: var(--radius-lg); background: var(--color-surface-2); box-shadow: var(--shadow-e3); animation: pop var(--dur-2) var(--ease-out-quint); color: var(--color-foreground); overflow-y: auto; overscroll-behavior: contain; }
   .popup.closing { animation: pop-out var(--dur-2) var(--ease-out-quint); pointer-events: none; }
   .heading { display: flex; justify-content: space-between; font-size: var(--text-sm); font-weight: 600; }
+  .title { display: flex; align-items: center; gap: 4px; }
+  .reading-info { width: 22px; height: 22px; margin: -2px 0; padding: 0; color: var(--color-muted-foreground); }
+  .reading-info[aria-expanded='true'] { color: var(--color-accent); }
   .total { margin: 8px 0 12px; font-size: var(--text-sm); }
+  .unit { color: var(--color-muted-foreground); font-size: var(--text-xs); }
+  .remaining { margin: 10px 0 0; font-size: var(--text-xs); line-height: 1.5; color: var(--color-muted-foreground); }
+  .reading-detail { margin-top: 12px; padding-top: 4px; border-top: 1px solid var(--color-border); }
   .bar { display: flex; height: 7px; overflow: hidden; background: var(--color-border); border-radius: var(--radius-sm); }
   .input { background: var(--color-accent); }
   .cache { background: var(--color-success); }
   .output { background: var(--color-live); }
-  .free { background: var(--color-border); }
   dl { margin: 12px 0; font-size: var(--text-xs); }
   dl div { display: flex; justify-content: space-between; gap: 16px; margin: 6px 0; }
   dt { display: flex; align-items: center; gap: 7px; color: var(--color-muted-foreground); }
   dd { margin: 0; }
   i { width: 7px; height: 7px; border-radius: var(--radius-sm); }
   .note { font-size: var(--text-xs); line-height: 1.5; color: var(--color-muted-foreground); margin: 8px 0 0; }
-  .note.compact-limit { margin: 0 0 12px; }
   .compact, .shape { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin-top: 14px; font-size: var(--text-sm); }
   .shape { margin-top: 8px; }
+  @media (max-width: 720px) { .reading-info { width: 30px; height: 30px; margin: -6px -4px; } }
 </style>

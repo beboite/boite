@@ -16,8 +16,10 @@ Behind the
 
 When automatic compaction has a token threshold, the ring, percentage, bar and
 remaining capacity use that threshold, capped at the model's reported window.
-The popup explains when the threshold replaces the model window and retains
-the model's full capacity in that note. A known threshold also supplies a limit
+The popup shows the exact usage, a bar and tokens remaining before compaction
+or the model limit. Its info button reveals the model's full capacity when the
+threshold replaces it, the token breakdown when reported and the reading time.
+A known threshold also supplies a limit
 when the agent reports no window. Disabling automatic compaction or choosing no
 size condition restores the model window. The reading itself is unchanged;
 compaction still waits for a selected moment, as described below.
