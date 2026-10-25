@@ -48,7 +48,8 @@
   const unticked = new SvelteSet<string>();
 
   const words = $derived(strings.agentSettingRequest);
-  const names = $derived({ projects: store.projects, providers: store.providers });
+  // A project of another machine of the group is named as the core read it, `<machine>/<name>`.
+  const names = $derived({ projects: [...store.projects, ...Object.entries(setting.labels ?? {}).map(([id, name]) => ({ id, name }))], providers: store.providers });
   const heading = $derived(fill(words.heading, { name: setting.agentName }));
   const delta = $derived(setting.key === 'projects' ? projectsDelta(setting) : null);
   const edited = $derived(delta !== null && unticked.size > 0 ? editedProjects(setting, unticked) : null);

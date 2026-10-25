@@ -96,6 +96,12 @@ export function seedAgentsDemo(ctx: FakeContext): void {
     ctx.agents.seedWatch({ agentId: nova.agent.id, threadId: migrate.id, origin: 'entrusted', since: migrate.createdAt, stalledSince: now - 24 * MINUTE, pullRequest: null });
     ctx.agents.seedWatch({ agentId: nova.agent.id, threadId: icons.id, origin: 'followed', since: icons.createdAt, stalledSince: null, pullRequest: null });
     ctx.agents.seedWatch({ agentId: nova.agent.id, threadId: notes.id, origin: 'started', since: notes.createdAt, stalledSince: null, pullRequest: pr(479, 'merged', null) });
+    // A thread of another machine of the group, which does not answer right now.
+    ctx.agents.seedWatch({
+      agentId: nova.agent.id, threadId: 'thr_skoll_save', title: 'Fix the save migration', projectId: 'core_skoll/prj_hearthfall', origin: 'followed', since: now - 2 * 60 * MINUTE,
+      stalledSince: null, pullRequest: null, lastActivityAt: now - 40 * MINUTE, coreId: 'core_skoll', machine: 'skoll',
+      unreachable: 'skoll is unreachable (connection refused); its events reach you once it is back',
+    });
   }
   liveTurn(ctx, novaThread, now - 3 * MINUTE, 'Is the release notes draft ready?', 'Checking the release branch first, then I will sum up what changed since 2.0.', { name: 'Bash', input: { command: 'bun run test packages/ui', description: 'Run the UI tests' }, step: 'Run the UI tests' });
   ctx.agents.seedRoutine({ agentId: nova.agent.id, name: 'Release check', prompt: 'Check the release branch and the open pull requests.', schedule: { kind: 'interval', everyMinutes: 120 } });

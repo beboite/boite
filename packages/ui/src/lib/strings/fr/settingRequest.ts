@@ -58,6 +58,7 @@ export const fr: Translation = {
       autoResumeLimitedThreads: 'Reprendre les conversations après une limite d\'usage',
       deviceStream: "Flux en direct de l'appareil",
       groupThreads: 'Laisser les autres machines lancer des conversations ici',
+      groupBots: "Laisser les bots des autres machines s'occuper des projets ici",
     },
     zero: {
       agentCpuCapPercent: 'Sans plafond',

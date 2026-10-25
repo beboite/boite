@@ -132,7 +132,7 @@ function deskLines(core: Core, agent: AgentProfile): string[] {
   const watches = store.projects.watchesOf(agent.id).slice(0, 30);
   const linked = linkedPullRequests(core, watches.map(w => w.threadId));
   const projectNames = new Map<string, string | null>();
-  return watches.map(({ thread }) => {
+  return [...watches.map(({ thread }) => {
     let project: string | null = null;
     if (thread.projectId !== null) {
       if (!projectNames.has(thread.projectId)) projectNames.set(thread.projectId, core.journal.getProject(thread.projectId)?.name ?? null);
@@ -142,7 +142,7 @@ function deskLines(core: Core, agent: AgentProfile): string[] {
     const stalled = store.projects.stalledSince(thread.id);
     // One JSON object per thread: a title is the thread's own text and opens no line of its own here.
     return `- ${JSON.stringify({ thread: thread.id, title: thread.title, ...(project ? { project } : {}), state: deskState(core, thread), ...(stalled === null ? {} : { silentSince: new Date(stalled).toISOString() }), ...(pr ? { pullRequest: pr } : {}) })}`;
-  });
+  }), ...store.group.deskLines(agent).slice(0, Math.max(0, 30 - watches.length))];
 }
 
 /** The routines, at most `ROUTINES_TEXT_MAX` characters of them, then how many more there are. */

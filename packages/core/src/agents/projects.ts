@@ -23,7 +23,7 @@
  * fail.
  */
 import type {
-  AgentLetter, AgentProfile, AgentWatch, AgentWatchPullRequest, Message, MessagePart, PermissionRequest, ProjectId, ProjectThreadRow, QuestionRequest,
+  AgentLetter, AgentProfile, AgentWatch, AgentWatchPullRequest, Message, MessagePart, PermissionRequest, ProjectId, ProjectThreadDetail, ProjectThreadRow, QuestionRequest,
   ResidentThreadAction, ResidentView, RpcParams, ThreadId, ThreadSummary, Turn,
 } from '@boite/contracts';
 import type { Core } from '../core.ts';
@@ -62,6 +62,20 @@ const ACTIONS: readonly ResidentThreadAction[] = ['archive', 'done', 'unarchive'
 /** `lent`: the `owner` flag came with an entrustment of a thread the bot already followed, and leaves with it. */
 type Follow = { at: number; origin: AgentWatch['origin']; pr?: AgentWatchPullRequest | null; owner?: true; lent?: true };
 interface Stall { turnId: string; since: number | null }
+
+/**
+ * The bot that acts on a thread: one of this machine (`steward`) or one of
+ * another machine of the group (`group-host.ts`). `by` words it in the
+ * target's timeline; `follow` puts the thread on its desk when it has one here.
+ */
+export interface Steward {
+  agentId: string;
+  name: string;
+  projectIds: readonly ProjectId[];
+  by(target: ThreadSummary): string;
+  log: Record<string, string>;
+  follow?(threadId: ThreadId): void;
+}
 
 /** Whether a follow of this thread still holds: it is open, or done or archived less than a day ago. */
 function holding(thread: ThreadSummary | null, now: number): thread is ThreadSummary {
@@ -174,10 +188,15 @@ export class AgentProjects {
     return target !== null && this.drives(agent, this.projectsOf(agent), target) ? agent : null;
   }
 
-  /** Whether a letter marked as an agent's may reach its thread now, or null when ordinary coordination rules decide. */
+  /**
+   * Whether a letter marked as an agent's may reach its thread now, or null
+   * when ordinary coordination rules decide. One from a bot of another
+   * machine of the group holds while its lease and `groupBots` do here.
+   */
   mayReceive(letter: AgentLetter, local: boolean): boolean | null {
     if (letter.origin !== 'resident') return null;
-    return local && this.over(letter.from.threadId, letter.to.threadId) !== null;
+    if (!local) return this.store.groupHost.covers(letter.from.coreId, letter.from.threadId, letter.to.threadId);
+    return this.over(letter.from.threadId, letter.to.threadId) !== null;
   }
 
   // -- its desk: the threads it follows ---------------------------------------
@@ -280,6 +299,8 @@ export class AgentProjects {
    * in one of its projects, or on its desk by a follow that still holds.
    */
   mayHear(agent: AgentProfile, threadId: ThreadId): boolean {
+    // `<core-id>/<project-id>/<thread-id>`: a thread of another machine of the group.
+    if (threadId.split('/').length === 3) return this.store.group.mayHear(agent, threadId);
     const projectId = this.core.journal.getThread(threadId)?.projectId;
     return (projectId != null && this.projectsOf(agent).includes(projectId)) || this.follows(agent.id, threadId);
   }
@@ -453,10 +474,10 @@ export class AgentProjects {
   }
 
   view(threadId: ThreadId): ResidentView {
-    const resident = this.residentOf(threadId);
-    if (resident === null) return { agentId: null, name: null, projects: [] };
-    const projects = resident.projectIds.map(id => this.core.journal.getProject(id)!).map(project => ({ id: project.id, name: project.name, path: project.path }));
-    return { agentId: resident.agent.id, name: resident.agent.name, projects };
+    const agent = this.botOf(threadId);
+    const local = agent === null ? [] : this.projectsOf(agent).map(id => this.core.journal.getProject(id)!).map(project => ({ id: project.id, name: project.name, path: project.path }));
+    const projects = [...local, ...(agent === null ? [] : this.store.group.views(agent))];
+    return agent === null || projects.length === 0 ? { agentId: null, name: null, projects: [] } : { agentId: agent.id, name: agent.name, projects };
   }
 
   threads(params: RpcParams<'resident.threads'>): ProjectThreadRow[] {
@@ -467,7 +488,11 @@ export class AgentProjects {
       if (!resident.projectIds.includes(project.id)) throw refused(`resident.threads.project: ${params.project} is not entrusted to this bot`, { threadId: params.threadId, field: 'project', expected: 'one of its projects' });
       projectIds = [project.id];
     }
-    const archived = params.archived === true;
+    return this.rows(projectIds, params.archived === true);
+  }
+
+  /** The top-level threads of `projectIds`, open or archived, the most recently active first. */
+  rows(projectIds: readonly ProjectId[], archived: boolean): ProjectThreadRow[] {
     return projectIds.flatMap(id => this.core.journal.listThreads(id))
       .filter(thread => !thread.agentSessionId && !thread.parentThreadId && thread.archived === archived)
       .sort((a, b) => b.updatedAt - a.updatedAt)
@@ -476,7 +501,11 @@ export class AgentProjects {
   }
 
   detail(params: RpcParams<'resident.thread'>) {
-    const { target } = this.target(params.threadId, params.target, 'resident.thread');
+    return this.detailOf(this.target(params.threadId, params.target, 'resident.thread').target);
+  }
+
+  /** A thread with its pending questions, permissions and last answer. */
+  detailOf(target: ThreadSummary): ProjectThreadDetail {
     const last = this.core.journal.lastEndedTurn(target.id);
     return {
       thread: this.row(target),
@@ -488,12 +517,27 @@ export class AgentProjects {
 
   async act(params: RpcParams<'resident.act'>): Promise<{ thread: ProjectThreadRow }> {
     const method = 'resident.act';
+    if (!ACTIONS.includes(params.action)) throw invalidParams(`${method}.action: expected one of ${ACTIONS.join(', ')}; deleting a thread stays the owner's`);
+    const { agent, projectIds, target } = this.target(params.threadId, params.target, method);
+    return this.perform(this.steward(agent, projectIds), target, params, method);
+  }
+
+  /** A bot of this machine as `perform` and `answerAs` take it. */
+  private steward(agent: AgentProfile, projectIds: readonly ProjectId[]): Steward {
+    return { agentId: agent.id, name: agent.name, projectIds, by: target => this.by(agent, projectIds, target), log: { residentAgentId: agent.id }, follow: threadId => this.follow(agent.id, threadId) };
+  }
+
+  /**
+   * What a bot does to a thread it may drive, here or from another machine of
+   * the group: the same actions, each with a line in the target's timeline.
+   * Deleting it and deciding its tool permissions are no action.
+   */
+  async perform(steward: Steward, target: ThreadSummary, params: { action: ResidentThreadAction; title?: string; project?: string }, method: string): Promise<{ thread: ProjectThreadRow }> {
     const action = params.action;
     if (!ACTIONS.includes(action)) throw invalidParams(`${method}.action: expected one of ${ACTIONS.join(', ')}; deleting a thread stays the owner's`);
-    const { agent, projectIds, target } = this.target(params.threadId, params.target, method);
-    const by = this.by(agent, projectIds, target);
+    const by = steward.by(target);
     if (target.parentThreadId && action !== 'stop') {
-      throw refused(`${method}: ${target.id} is a delegated agent; act on its parent ${target.parentThreadId}`, { threadId: params.threadId, field: 'target', expected: 'a top-level thread' });
+      throw refused(`${method}: ${target.id} is a delegated agent; act on its parent ${target.parentThreadId}`, { field: 'target', expected: 'a top-level thread' });
     }
     switch (action) {
       case 'archive':
@@ -510,7 +554,7 @@ export class AgentProjects {
         this.core.activity.pauseAll(target.id);
         const stopped = this.core.threads.stopTurn(target.id);
         // The same fields as an owner's or an agent's stop in threads/rpc.ts: a persistent agent is an agent principal.
-        this.core.logs.info(`Stop requested by the agent ${agent.name}: ${stopped ? 'a turn was stopped' : 'nothing was running'}`, { source: 'turns', event: 'turn.stop-asked', threadId: target.id, data: { principal: 'agent', client: null, stopped, residentAgentId: agent.id } });
+        this.core.logs.info(`Stop requested by the agent ${steward.name}: ${stopped ? 'a turn was stopped' : 'nothing was running'}`, { source: 'turns', event: 'turn.stop-asked', threadId: target.id, data: { principal: 'agent', client: null, stopped, ...steward.log } });
         if (stopped) this.line(target.id, `Stopped by ${by}.`);
         break;
       }
@@ -522,9 +566,9 @@ export class AgentProjects {
         break;
       }
       case 'move': {
-        const project = this.core.projects.find(params.project, method, 'project', { threadId: params.threadId });
-        if (!projectIds.includes(project.id)) throw refused(`${method}.project: ${project.name} is not entrusted to this bot`, { threadId: params.threadId, field: 'project', expected: 'another of its projects' });
-        if (project.id === target.projectId) throw refused(`${method}.project: ${target.id} is already in ${project.name}`, { threadId: params.threadId, field: 'project', expected: 'another project' });
+        const project = this.core.projects.find(params.project, method, 'project');
+        if (!steward.projectIds.includes(project.id)) throw refused(`${method}.project: ${project.name} is not entrusted to this bot`, { field: 'project', expected: 'another of its projects' });
+        if (project.id === target.projectId) throw refused(`${method}.project: ${target.id} is already in ${project.name}`, { field: 'project', expected: 'another project' });
         await this.core.threads.move(target.id, project.id);
         this.line(target.id, `Moved to ${project.name} by ${by}.`);
         break;
@@ -535,22 +579,31 @@ export class AgentProjects {
 
   answer(params: RpcParams<'resident.answer'>): { ok: true } {
     const { agent, projectIds, target } = this.target(params.threadId, params.target, 'resident.answer');
+    return this.answerAs(this.steward(agent, projectIds), target, params, 'resident.answer');
+  }
+
+  /** A bot answers or skips a pending question of a thread it may drive, marked as its own in that timeline. */
+  answerAs(steward: Steward, target: ThreadSummary, params: { questionId: string; optionIds: string[]; text?: string; skip?: boolean }, method: string): { ok: true } {
     const question = this.core.threads.listQuestions(target.id).find(request => request.id === params.questionId);
-    if (question === undefined) throw refused(`resident.answer.questionId: ${String(params.questionId)} is not a pending question of ${target.id}`, { threadId: params.threadId, field: 'questionId', expected: 'a pending question id of the target' });
+    if (question === undefined) throw refused(`${method}.questionId: ${String(params.questionId)} is not a pending question of ${target.id}`, { field: 'questionId', expected: 'a pending question id of the target' });
     if (params.skip === true) this.core.threads.skipQuestion({ threadId: target.id, questionId: question.id }, 'agent');
     else {
-      if (!Array.isArray(params.optionIds)) throw invalidParams('resident.answer.optionIds: expected an array of option ids');
+      if (!Array.isArray(params.optionIds)) throw invalidParams(`${method}.optionIds: expected an array of option ids`);
       this.core.threads.answerQuestion({ threadId: target.id, questionId: question.id, optionIds: params.optionIds, ...(params.text === undefined ? {} : { text: params.text }) }, 'agent');
     }
-    this.follow(agent.id, target.id);
-    this.line(target.id, `${params.skip === true ? 'Question skipped' : 'Question answered'} by ${this.by(agent, projectIds, target)}, not by the user.`);
+    steward.follow?.(target.id);
+    this.line(target.id, `${params.skip === true ? 'Question skipped' : 'Question answered'} by ${steward.by(target)}, not by the user.`);
     return { ok: true };
   }
 
   /** What the agent's context block says about its projects and the commands that reach them, or nothing. */
   instructions(agent: AgentProfile): string {
     const projectIds = this.projectsOf(agent);
-    if (!projectIds.length) return '';
+    const remote = this.store.group.views(agent);
+    const away = remote.length === 0 ? '' : `Projects of other machines of the group entrusted to you: ${remote.map(project => project.name).join(', ')}. `
+      + '`boite threads` lists their threads as `<machine>/<thread-id>` with `machine=<name>`; name them that way in `boite thread show|send|done|archive|unarchive|stop <id>`, `boite thread rename <id> <title>`, `boite answer` and `boite bot watch`. '
+      + 'That machine decides: it may refuse bots of the group, and a machine that does not answer is named unreachable; its events reach you once it is back. You cannot start threads there.';
+    if (!projectIds.length) return away;
     const projects = projectIds.map(id => this.core.journal.getProject(id)!).map(p => `${p.name} (${p.path})`).join(', ');
     return `Projects the user entrusted to you: ${projects}. You look after every Boite thread in them. Code work happens in those threads, never in this conversation: `
       + '`boite thread new <project> <brief>` starts one (its agent codes, verifies and opens the pull request); `boite threads [--project <p>] [--archived]` lists them with your desk; `boite thread show <id>` reads one with its questions and last answer; '
@@ -558,7 +611,8 @@ export class AgentProjects {
       + '`boite answer <id> <ask-id> <option-or-text...>` answers what it asked when you know what the user wants. Deleting threads and allowing tool permissions stay the user\'s: tell them. '
       + 'An event turn tells you when a thread on your desk ends a turn, and when any thread of your projects fails or asks the user something; its final answer comes with the event, so never poll. '
       + 'You may start a thread in any other project too: you drive the threads you start, never the others there. '
-      + 'Never invent the user\'s approval; keep each thread moving toward a merged, verified result and mark it done (`boite thread done <id>`) once it is.';
+      + 'Never invent the user\'s approval; keep each thread moving toward a merged, verified result and mark it done (`boite thread done <id>`) once it is.'
+      + (away ? ` ${away}` : '');
   }
 
   // -- facts ------------------------------------------------------------------
@@ -639,7 +693,7 @@ export class AgentProjects {
     return target.projectId !== null && projectIds.includes(target.projectId) ? `${agent.name}, the bot the user entrusted this project to` : `${agent.name}, the bot that started this thread`;
   }
 
-  private row(thread: ThreadSummary): ProjectThreadRow {
+  row(thread: ThreadSummary): ProjectThreadRow {
     const project = thread.projectId === null ? null : this.core.journal.getProject(thread.projectId);
     return {
       id: thread.id, title: thread.title, projectId: thread.projectId, project: project?.name ?? null,
@@ -664,9 +718,12 @@ export class AgentProjects {
 
 export function registerResidentMethods(core: Core): void {
   const projects = () => core.workforce.projects;
+  // `machine`: a thread of another machine of the group, asked of that machine (`group-bots.ts`).
+  const group = () => core.workforce.group;
   core.router.register('resident.view', params => projects().view(params.threadId));
-  core.router.register('resident.threads', params => projects().threads(params));
-  core.router.register('resident.thread', params => projects().detail(params));
-  core.router.register('resident.act', params => projects().act(params));
-  core.router.register('resident.answer', params => projects().answer(params));
+  core.router.register('resident.threads', params => params.machine === undefined ? projects().threads(params) : group().threads(params));
+  core.router.register('resident.thread', params => params.machine === undefined ? projects().detail(params) : group().detail(params));
+  core.router.register('resident.act', params => params.machine === undefined ? projects().act(params) : group().act(params));
+  core.router.register('resident.answer', params => params.machine === undefined ? projects().answer(params) : group().answer(params));
+  core.router.register('resident.send', params => group().send(params));
 }
