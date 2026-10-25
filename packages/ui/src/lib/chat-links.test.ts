@@ -8,6 +8,7 @@ test('a copied file path is whole, resolved and in the separators of its system'
   expect(fullPath('./a/../b.ts', '/home/boite/project/')).toBe('/home/boite/project/b.ts');
   expect(fullPath('../../../x', '/a')).toBe('/x');
   expect(fullPath('/etc/hosts', 'C:/project')).toBe('/etc/hosts');
+  expect(fullPath('/etc/hosts', 'C:\\project')).toBe('/etc/hosts');
   expect(fullPath('../notes.md', undefined)).toBe('../notes.md');
   expect(fullPath('notes.md', '\\\\server\\share\\project')).toBe('\\\\server\\share\\project\\notes.md');
   expect(fullPath('../..', '\\\\server\\share\\project')).toBe('\\\\server\\share\\');
