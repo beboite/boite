@@ -13,6 +13,14 @@ Behind the
 `prompt-cache` experiment the meter also carries the
 [prompt cache timer](prompt-cache.md).
 
+When automatic compaction has a token threshold, the ring, percentage, bar and
+remaining capacity use that threshold, capped at the model's reported window.
+The popup explains when the threshold replaces the model window and retains
+the model's full capacity in that note. A known threshold also supplies a limit
+when the agent reports no window. Disabling automatic compaction or choosing no
+size condition restores the model window. The reading itself is unchanged;
+compaction still waits for a selected moment, as described below.
+
 ## What is measured
 
 `ThreadSummary.context` is `{ tokens, window, at, breakdown? }` or null:

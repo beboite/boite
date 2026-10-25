@@ -4,7 +4,7 @@
   import type { Store } from '../lib/store.svelte';
   import { threadActive, type ThreadCapabilities } from '@boite/contracts';
   import { strings } from '../lib/strings';
-  import { contextPercent, contextLevel } from '../lib/tokens';
+  import { contextLimit, contextPercent, contextLevel } from '../lib/tokens';
   import { count, time } from '../lib/format';
   import { Closing } from '../lib/closing.svelte';
   import { floating } from '../lib/floating';
@@ -17,7 +17,10 @@
   let leave: ReturnType<typeof setTimeout> | undefined;
   const thread = $derived(store.openThread);
   const context = $derived(thread?.context ?? null);
-  const percent = $derived(context ? contextPercent(context) : null);
+  const autoCompact = $derived(store.settings?.autoCompact);
+  const limit = $derived(context ? contextLimit(context, autoCompact) : null);
+  const compactLimit = $derived(limit !== null && (context?.window == null || limit < context.window));
+  const percent = $derived(context ? contextPercent(context, autoCompact) : null);
   const protocol = $derived(thread ? store.providerOf(thread.providerId)?.protocol : null);
   let capabilities = $state<ThreadCapabilities | null>(null);
   /** The thread whose last request is shown; it stays the one opened even if the user navigates. */
@@ -116,12 +119,13 @@
       use:floating={{ anchor: () => root ?? null, placement: 'top', align: 'end', cap: Infinity, dismiss: () => popup.hide() }}>
       <div class="heading"><span>{strings.thread.contextDetails}</span>{#if percent !== null}<span class="mono">{percent}%</span>{/if}</div>
       {#if context}
-        <p class="total mono">{exact(context.tokens)}{#if context.window !== null}{' / '}{exact(context.window)}{/if}</p>
+        <p class="total mono">{exact(context.tokens)}{#if limit !== null}{' / '}{exact(limit)}{/if}</p>
+        {#if compactLimit}<p class="note compact-limit" data-testid="context-auto-compact">{context.window !== null ? strings.thread.contextAutoCompactWindow(exact(context.window)) : strings.thread.contextAutoCompact}</p>{/if}
         <div class="bar" aria-hidden="true">
-          {#each segments as segment (segment.kind)}<span class={segment.kind} style:width={`${Math.min(100, segment.count / Math.max(1, context.window ?? context.tokens) * 100)}%`}></span>{/each}
+          {#each segments as segment (segment.kind)}<span class={segment.kind} style:width={`${Math.min(100, segment.count / Math.max(1, limit ?? context.tokens) * 100)}%`}></span>{/each}
         </div>
         <dl>{#each segments as segment (segment.kind)}<div><dt><i class={segment.kind}></i>{segment.name}</dt><dd class="mono">{exact(segment.count)}</dd></div>{/each}
-          {#if context.window !== null}<div><dt><i class="free"></i>{strings.thread.contextFree}</dt><dd class="mono">{exact(Math.max(0, context.window - context.tokens))}</dd></div>{/if}
+          {#if limit !== null}<div><dt><i class="free"></i>{compactLimit ? strings.thread.contextBeforeCompact : strings.thread.contextFree}</dt><dd class="mono">{exact(Math.max(0, limit - context.tokens))}</dd></div>{/if}
         </dl>
         {#if !context.breakdown}<p class="note">{strings.thread.contextNoBreakdown}</p>{/if}
         <p class="note">{strings.thread.contextMeasured} · {time(context.at)}</p>
@@ -180,6 +184,7 @@
   dd { margin: 0; }
   i { width: 7px; height: 7px; border-radius: var(--radius-sm); }
   .note { font-size: var(--text-xs); line-height: 1.5; color: var(--color-muted-foreground); margin: 8px 0 0; }
+  .note.compact-limit { margin: 0 0 12px; }
   .compact, .shape { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin-top: 14px; font-size: var(--text-sm); }
   .shape { margin-top: 8px; }
 </style>

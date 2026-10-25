@@ -74,7 +74,7 @@
 
   let bound = $derived(!target && store.openThread !== null);
   // Keep the stored visibility preference and reveal a nearly full context.
-  let showContext = $derived(work.shows('header.context') || contextLevel(store.openThread?.context ? contextPercent(store.openThread.context) : null) === 'full');
+  let showContext = $derived(work.shows('header.context') || contextLevel(store.openThread?.context ? contextPercent(store.openThread.context, store.settings?.autoCompact) : null) === 'full');
   /** Every agent can read uploaded files through its local tools. */
   let canAttach = $derived(!!target || (provider !== null && provider !== undefined));
 
