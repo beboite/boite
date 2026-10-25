@@ -397,7 +397,8 @@ export async function controlCommand(client: CoreClient, caller: Caller, threadI
     }
     case 'questions': {
       const { items, unavailable } = await pendingQuestions(rest[0]);
-      print([...(items.length === 0 ? ['questions: none'] : items.flatMap(questionLines)), ...unavailable.map(reason => `unavailable: ${reason}`)], items);
+      // A bot's JSON across its machines names those it could not read, so an empty list is never taken for none pending.
+      print([...(items.length === 0 ? ['questions: none'] : items.flatMap(questionLines)), ...unavailable.map(reason => `unavailable: ${reason}`)], owner || rest[0] !== undefined ? items : { questions: items, unavailable });
       return;
     }
     case 'answer': {
@@ -422,7 +423,7 @@ export async function controlCommand(client: CoreClient, caller: Caller, threadI
     }
     case 'permissions': {
       const { items, unavailable } = await pendingPermissions(rest[0]);
-      print([...(items.length === 0 ? ['permissions: none'] : items.map(permissionLine)), ...unavailable.map(reason => `unavailable: ${reason}`)], items);
+      print([...(items.length === 0 ? ['permissions: none'] : items.map(permissionLine)), ...unavailable.map(reason => `unavailable: ${reason}`)], owner || rest[0] !== undefined ? items : { permissions: items, unavailable });
       return;
     }
     case 'allow':

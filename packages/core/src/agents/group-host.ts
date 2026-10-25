@@ -20,7 +20,7 @@
 import type { AgentLetter, CoordinationPeer, PermissionRequest, ProjectId, ProjectThreadRow, QuestionRequest, ThreadId, ThreadSummary, Turn } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { RESIDENT_LETTER_TTL_MS } from '../coordination-letter.ts';
-import { PeerRefusal, type BotOperation } from '../coordination-wire.ts';
+import { MAX_BODY, PeerRefusal, type BotOperation } from '../coordination-wire.ts';
 import { invalidParams, messageOf, refused } from '../errors.ts';
 import type { Steward } from './projects.ts';
 
@@ -60,6 +60,20 @@ export interface BotEvent {
 }
 
 const cut = (value: string, max: number): string => (value.length > max ? `${value.slice(0, max - 20)}\n[Truncated.]` : value);
+/** A sealed request grows by its encryption and base64: a batch keeps well under the body a member accepts. */
+const BATCH_BYTES = Math.floor(MAX_BODY * 3 / 8);
+/** The oldest events that fit one request; the rest go with the next. */
+export function batchOf(events: BotEvent[]): BotEvent[] {
+  const batch: BotEvent[] = [];
+  let size = 0;
+  for (const event of events) {
+    const bytes = Buffer.byteLength(JSON.stringify(event));
+    if (batch.length > 0 && size + bytes > BATCH_BYTES) break;
+    batch.push(event);
+    size += bytes;
+  }
+  return batch;
+}
 const textOf = (value: unknown, field: string, max: number): string => {
   if (typeof value !== 'string' || value.length === 0 || value.length > max) throw invalidParams(`${field}: expected 1 to ${max} characters`);
   return value;
@@ -93,6 +107,7 @@ export class GroupBotHost {
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly attempts = new Map<string, number>();
   private readonly sending = new Set<string>();
+  private startup: ReturnType<typeof setTimeout> | null;
 
   constructor(private readonly core: Core) {
     this.off = core.bus.onAny((name, payload) => {
@@ -107,12 +122,17 @@ export class GroupBotHost {
       }
     });
     // A restart: the bots' desks learn how their threads stand here now, and what waited goes.
-    if (this.allowed()) for (const coreId of this.coreIds()) this.hello(coreId);
+    // The store that builds this host is not `core.workforce` yet: the rows are read once it is.
+    this.startup = setTimeout(() => {
+      this.startup = null;
+      if (!this.closed && this.allowed()) for (const coreId of this.coreIds()) this.hello(coreId);
+    }, 0);
   }
 
   close(): void {
     this.closed = true;
     this.off();
+    if (this.startup !== null) clearTimeout(this.startup);
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
   }
@@ -398,7 +418,7 @@ export class GroupBotHost {
   /** Sends what waits for a machine; it stays until that machine took it, and is tried again later when it is away. */
   async flush(coreId: string): Promise<void> {
     if (this.closed || this.sending.has(coreId) || !this.allowed()) return;
-    const events = this.outbox(coreId);
+    const events = batchOf(this.outbox(coreId));
     if (events.length === 0) return;
     const peer = this.member(coreId);
     // A machine that left the group hears nothing more.

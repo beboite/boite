@@ -546,7 +546,9 @@ Their threads are `<machine>/<thread-id>`, their rows end with
 `machine=<name>`, and `--project <machine>/<name>` narrows the list to one of
 them. A machine whose `groupBots` switch is off, or that does not answer, adds
 an `unavailable: <machine> ...` line saying which, and a command on one of its
-threads is refused with the same reason. The owner's own terminal does not
+threads is refused with the same reason. With `--json` and no thread named, a
+bot's `questions` and `permissions` print `{ questions|permissions, unavailable }`
+rather than a bare list, so an empty list is not taken for nothing pending. The owner's own terminal does not
 take `<machine>/<thread-id>`.
 
 `projects` prints one row per project: its id, name and folder, `(this
@@ -657,7 +659,8 @@ that machine holds about the others: `groupThreads` and `groupBots`. The card re
 value there, names the machine, and its switch changes that machine's setting
 when this window is connected to it with full control; otherwise it says to
 change it from that machine. It settles when that machine reports the change to
-the group or when a `thread new --machine` there succeeds.
+the group; a `groupThreads` card also settles when a `thread new --machine`
+there succeeds.
 
 The card makes the change in the chat. A true-or-false setting, an experiment
 included, draws its switch showing the value now; any other value shows the

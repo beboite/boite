@@ -54,7 +54,7 @@ export function remoteGrant(id: string): { coreId: string; projectId: string } |
 export class GroupBots {
   private closed = false;
   private readonly reach = new Map<string, Reach>();
-  private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly timers = new Map<string, { timer: ReturnType<typeof setTimeout>; at: number }>();
   private readonly attempts = new Map<string, number>();
   private readonly syncing = new Set<string>();
   private readonly again = new Set<string>();
@@ -70,7 +70,7 @@ export class GroupBots {
   close(): void {
     this.closed = true;
     clearTimeout(this.start);
-    for (const timer of this.timers.values()) clearTimeout(timer);
+    for (const held of this.timers.values()) clearTimeout(held.timer);
     this.timers.clear();
   }
 
@@ -227,11 +227,18 @@ export class GroupBots {
 
   // -- leases ------------------------------------------------------------------
 
+  /** A sync of a member's leases; a sooner one replaces a later retry, so a revocation never waits behind a backoff. */
   private schedule(coreId: string, delay: number): void {
-    if (this.closed || this.timers.has(coreId)) return;
+    if (this.closed) return;
+    const at = Date.now() + delay;
+    const held = this.timers.get(coreId);
+    if (held !== undefined) {
+      if (held.at <= at) return;
+      clearTimeout(held.timer);
+    }
     const timer = setTimeout(() => { this.timers.delete(coreId); void this.sync(coreId).catch(() => undefined); }, delay);
     timer.unref?.();
-    this.timers.set(coreId, timer);
+    this.timers.set(coreId, { timer, at });
   }
 
   /**

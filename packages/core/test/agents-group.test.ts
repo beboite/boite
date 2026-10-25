@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { AgentProfile, AgentSettingAsk, CoordinationPeer } from '@boite/contracts';
 import { runCli } from '../src/cli.ts';
@@ -7,15 +8,17 @@ import { connect } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { EVENT_HEADER } from '../src/agents/runtime.ts';
+import { batchOf, OUTBOX_MAX, type BotEvent } from '../src/agents/group-host.ts';
+import { MAX_BODY } from '../src/coordination-wire.ts';
 import { makeAgent, settled } from './agent-fixture.ts';
-import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { echoThread, removeDir, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
 
 /* A bot of one machine looks after a project another machine of its group entrusted to it. */
 
 const cores: TestCore[] = [];
-const restores: (() => void)[] = [];
-afterEach(async () => { for (const h of cores.splice(0)) await h.stop(); for (const restore of restores.splice(0)) restore(); });
+const restores: (() => unknown)[] = [];
+afterEach(async () => { for (const h of cores.splice(0)) await h.stop(); for (const restore of restores.splice(0)) await restore(); });
 
 /** An echo driver that records every prompt, answers with its folder's name and keeps quiet on events. */
 function answering(): Map<string, string[]> {
@@ -37,7 +40,10 @@ function answering(): Map<string, string[]> {
  */
 async function setup(entrusted = true) {
   const desk = await startTestCore();
-  const pc = await startTestCore();
+  // pc keeps its data directory when it stops, so a test can start it again.
+  const pcDir = mkdtempSync(join(tmpdir(), 'boite-core-'));
+  restores.push(() => removeDir(pcDir));
+  const pc = await startTestCore({ dataDir: pcDir });
   cores.push(desk, pc);
   const owner = await desk.connect();
   const pcOwner = await pc.connect();
@@ -192,6 +198,10 @@ test('a machine that does not answer is named unreachable, and its events reach 
   const listed = await cli(['threads']);
   expect(listed.code).toBe(0);
   expect(listed.out).toContain(`unavailable: ${machine} is unreachable (`);
+  // Its JSON says so too: an empty list is not taken for nothing pending.
+  const pending = JSON.parse((await cli(['questions', '--json'])).out) as { questions: unknown[]; unavailable: string[] };
+  expect(pending.questions).toEqual([]);
+  expect(pending.unavailable).toEqual([expect.stringContaining(`${machine} is unreachable (`)]);
   const shown = await cli(['thread', 'show', ref]);
   expect(shown.code).not.toBe(0);
   expect(shown.err).toContain(`${machine} is unreachable (`);
@@ -199,11 +209,17 @@ test('a machine that does not answer is named unreachable, and its events reach 
   const [row] = desk.core.workforce.group.desk(agent());
   expect(row).toMatchObject({ threadId: letter, coreId: pcId });
   expect(row!.unreachable).toContain('is unreachable');
+
+  // pc starts again with the bot's thread on its lease: it tells the bot's machine how that thread stands, which clears the mark.
+  const again = await startTestCore({ dataDir: pc.dataDir });
+  cores.push(again);
+  await waitFor(() => desk.core.workforce.group.desk(agent())[0]?.unreachable === undefined, 5_000);
+  expect(again.core.workforce.groupHost.outbox(deskId)).toEqual([]);
 }, 30_000);
 
 test('a setting card offers the projects of the other machines by machine, and the owner applying it entrusts one', async () => {
   answering();
-  const { owner, pc, pcOwner, pcId, deskId, notes, accounts, grant, self, cli, agent, machine } = await setup(false);
+  const { owner, pc, pcOwner, pcId, deskId, notes, accounts, letter, grant, self, cli, agent, machine } = await setup(false);
   await pcOwner.call('settings.set', { groupBots: true });
   const read = await cli(['settings', 'bot', 'projects']);
   expect([read.code, read.err]).toEqual([0, '']);
@@ -223,6 +239,11 @@ test('a setting card offers the projects of the other machines by machine, and t
   // A project of a machine outside the group cannot be entrusted.
   const current = agent();
   expect(await thrown(owner.call('agents.profile.save', { id: current.id, expectedRevision: current.revision, value: { ...current, projectIds: ['core_elsewhere/prj_x'] } }))).toThrow();
+
+  // Taking back its last project of pc empties the lease there, and pc stops answering for that bot at once.
+  await owner.call('agents.profile.save', { id: current.id, expectedRevision: current.revision, value: { ...current, projectIds: [] } });
+  await waitFor(() => pc.core.workforce.groupHost.leases(deskId)[agent().id] === undefined);
+  expect((await cli(['threads'])).out).not.toContain(letter);
 }, 30_000);
 
 test('the machine holding the projects decides: its own switch, members of its group only, open projects only', async () => {
@@ -245,3 +266,17 @@ test('the machine holding the projects decides: its own switch, members of its g
   expect(offered.projects.map(project => project.name)).toContain('Notes');
   expect(offered.projects.map(project => project.name)).not.toContain('Accounts');
 }, 30_000);
+
+test('a full outbox goes in requests a member accepts, oldest first, none left behind', () => {
+  const row = { id: 'thr_x', title: 'Letter', projectId: 'prj_x', project: 'Notes', status: 'idle', archived: false, branch: null, questions: 0, permissions: 0, pullRequest: null, updatedAt: 1, lastCompletedAt: null } as const;
+  const events: BotEvent[] = Array.from({ length: OUTBOX_MAX }, (_, index) => ({ agentId: 'agt_ada', kind: 'turn', key: `turn:${index}`, row, status: 'done', answer: 'x'.repeat(1_500) + 'é'.repeat(1_000) }));
+  const sent: BotEvent[] = [];
+  for (let left = events; left.length > 0;) {
+    const batch = batchOf(left);
+    // A sealed request carries its plaintext as base64, a third larger.
+    expect(Buffer.byteLength(JSON.stringify({ events: batch })) * 4 / 3).toBeLessThan(MAX_BODY);
+    sent.push(...batch);
+    left = left.slice(batch.length);
+  }
+  expect(sent.map(event => event.key)).toEqual(events.map(event => event.key));
+});

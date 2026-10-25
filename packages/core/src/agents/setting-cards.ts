@@ -97,9 +97,10 @@ export class AgentSettingCards {
 
   async read(params: AgentSettingsReadParams): Promise<AgentSettingsReading> {
     this.core.threads.require(params.threadId);
-    const agent = this.agentFor(params.threadId, params.agent);
+    this.agentFor(params.threadId, params.agent);
     // The other machines' projects, read fresh; one away keeps the names it gave last.
     await this.store.group.refresh();
+    const agent = this.agentFor(params.threadId, params.agent);
     const ctx = this.context(agent);
     const provider = agentProvider(this.core, agent);
     const models = modelsFor(provider, agent.selection.accountId);
@@ -125,7 +126,8 @@ export class AgentSettingCards {
     if (thread.archived) throw refused('cannot ask on an archived thread', { threadId: thread.id });
     const agent = this.agentFor(thread.id, params.agent);
     if (params.key === 'projects') await this.store.group.refresh();
-    const checked = checkAgentSettingRequest(params, this.context(agent), this.openOn(thread.id));
+    // The card is drawn against the profile as it stands now: the owner may have changed it while the machines answered.
+    const checked = checkAgentSettingRequest(params, this.context(params.key === 'projects' ? this.agentFor(thread.id, params.agent) : agent), this.openOn(thread.id));
     if (!checked.ok) throw refused(checked.message, checked.data);
     const { reason, setting, options } = checked;
     const { questionId } = this.core.threads.cards.drawAsync(thread, { text: reason, options, allowText: false, multiple: false, async: true, agentSetting: setting });
