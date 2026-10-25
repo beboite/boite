@@ -265,6 +265,33 @@ Equal retention would exclude removing that group alone as a remedy here.
 The original failures remain fatal regardless of the control's result. Native
 SDK/MinGW execution is required; this control grants no production admission.
 
+The dab398d5 Server run reproduces this negative QUIET comparison with the same
+diagnostic source: 26 manifest hashes verified, SDK/MinGW ownership complete at
+277/279 acquisitions and closures, and all 72 stream/window cleanup calls succeed.
+All six primary maps still exist immediately, after 2000 ms and at the later
+3000 ms checkpoint. All seven names per compiler are absent after helper exit;
+RED's empty swap already disappears after restoration. This excludes neither an
+unidentified kernel holder nor a creation/acquisition lifetime effect.
+
+REOPEN matches DIRECT's root-only, helper-local, single assignment. After the
+unchanged directory and NUL link creation, it explicitly opens those exact owned
+names while both creation anchors remain held. NtCompareObjects must identify
+each opened object with its creation anchor; native name, exact access/attributes,
+noninheritability and the link's unchanged NT destination must also agree.
+Only then do the two known creation handles close and the opened handles become
+the anchors. Local snapshots must show two directory handles before handoff and
+one afterward, before assignment. No zero-handle interval, namespace enumeration,
+map replacement, creator process change or unknown handle closure occurs.
+
+REOPEN requires the same root marker/descendant-loss, LPAC/job, caller/ambient,
+normal-exit and immediate/eventual/checkpoint cleanup gates as DIRECT. Malformed
+observations, open/identity/target/closure failures and incomplete handoff abort
+before target resume. The original RED/A/B/DIRECT/SCOPE/QUIET assertions remain.
+If reopening changes retention, it is a confound for a future external-creator
+experiment; if both retain, reopening alone is not a remedy in this fixture.
+Neither result identifies a kernel owner. Native SDK/MinGW results are pending;
+strict cross compilation alone establishes no lifetime or production success.
+
 After the exact spawned helper has exited and its capture reached EOF, a new
 registry-owned helper opens only the recorded `boite.route.<helper-pid>` name
 and, for RED, its exact `.swap` name read-only. This is recorded separately by

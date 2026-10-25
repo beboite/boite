@@ -21,6 +21,8 @@ static DWORD probe_root_pid;
 static BOOL debug_mode;
 /* QUIET differs from DIRECT only in these optional ownership observations. */
 static BOOL observe_owned_handles = TRUE;
+/* REOPEN matches DIRECT after replacing creation handles with verified opens. */
+static BOOL reopen_owned_map;
 static unsigned int object_count_queries, handle_snapshot_queries;
 /* 0 retains the original RED roundtrip, 1 omits it as a control, 2 also moves
  * assignment into a trusted child that exits before the target resumes. */
@@ -124,6 +126,78 @@ static DWORD map_apply(HANDLE process) {
 
 #include "roundtrip.h"
 
+/* Open the exact live objects before releasing either creation anchor. This
+ * tests handle acquisition without changing the creating/assigning process. */
+static DWORD map_reopen(const wchar_t *target) {
+  typedef NTSTATUS (NTAPI *open_link_fn)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES);
+  typedef NTSTATUS (NTAPI *query_link_fn)(HANDLE, PUNICODE_STRING, PULONG);
+  typedef NTSTATUS (NTAPI *compare_fn)(HANDLE, HANDLE);
+  open_directory_fn open = (open_directory_fn)(void *)nt_api("NtOpenDirectoryObject");
+  open_link_fn open_link = (open_link_fn)(void *)nt_api("NtOpenSymbolicLinkObject");
+  query_link_fn query_link = (query_link_fn)(void *)nt_api("NtQuerySymbolicLinkObject");
+  query_object_fn query = (query_object_fn)(void *)nt_api("NtQueryObject");
+  compare_fn compare = (compare_fn)(void *)nt_api("NtCompareObjects");
+  if (!open || !open_link || !query_link || !query || !compare) return ERROR_PROC_NOT_FOUND;
+  HANDLE reopened[2] = {NULL, NULL}; DWORD error = 0;
+  UNICODE_STRING name = {(USHORT)(wcslen(probe_name) * 2), (USHORT)sizeof(probe_name), probe_name};
+  OBJECT_ATTRIBUTES attributes; ZeroMemory(&attributes, sizeof(attributes));
+  attributes.Length = sizeof(attributes); attributes.ObjectName = &name; attributes.Attributes = 0x40;
+  NTSTATUS status = open(&reopened[0], 0xf000f, &attributes);
+  if (status != 0) {error = (DWORD)status; goto end;}
+  wchar_t leaf_text[] = L"NUL"; UNICODE_STRING leaf = {6, 8, leaf_text};
+  attributes.RootDirectory = reopened[0]; attributes.ObjectName = &leaf;
+  status = open_link(&reopened[1], 0xf0001, &attributes);
+  if (status != 0) {error = (DWORD)status; goto end;}
+  wchar_t link_name[512];
+  int length = swprintf(link_name, 512, L"%ls\\NUL", probe_name);
+  if (length < 0 || length >= 512) {error = ERROR_INSUFFICIENT_BUFFER; goto end;}
+  for (int i = 0; i < 2; i++) {
+    wchar_t actual[512]; DWORD flags = 0; ULONG used = 0;
+    struct { ULONG attributes, granted, handles, pointers; ULONG reserved[10]; } info;
+    ZeroMemory(&info, sizeof(info));
+    status = compare(i ? probe_link : probe_map, reopened[i]);
+    if (status != 0) {error = (DWORD)status; goto end;}
+    error = object_name(reopened[i], actual, 512);
+    if (error) goto end;
+    if (wcscmp(actual, i ? link_name : probe_name)) {error = ERROR_INVALID_NAME; goto end;}
+    if (!GetHandleInformation(reopened[i], &flags)) {error = GetLastError(); goto end;}
+    object_count_queries++;
+    status = query(reopened[i], (OBJECT_INFORMATION_CLASS)0, &info, sizeof(info), &used);
+    if (status != 0) {error = (DWORD)status; goto end;}
+    if (flags || info.attributes || info.granted != (i ? 0xf0001UL : 0xf000fUL)) {
+      error = ERROR_INVALID_DATA; goto end;
+    }
+    fwprintf(stderr, L"map-reopen object=%ls same=1 name=1 granted=0x%08lx attributes=0x%08lx flags=%lu\n",
+      i ? L"link" : L"directory", info.granted, info.attributes, flags); fflush(stderr);
+  }
+  wchar_t destination[8192];
+  UNICODE_STRING value = {0, (USHORT)sizeof(destination), destination}; ULONG used = 0;
+  status = query_link(reopened[1], &value, &used);
+  if (status != 0) {error = (DWORD)status; goto end;}
+  if (value.Length != wcslen(target) * sizeof(wchar_t) || value.Length > sizeof(destination) ||
+      used > sizeof(destination) || memcmp(destination, target, value.Length)) {
+    error = ERROR_INVALID_DATA; goto end;
+  }
+  fputws(L"map-reopen link-target=1\n", stderr); fflush(stderr);
+  error = map_lifetime(L"after-reopen", L"before-handoff");
+  if (error) goto end;
+  error = close_owned(L"creation-link", &probe_link);
+  if (error) goto end;
+  error = close_owned(L"creation-map", &probe_map);
+  if (error) goto end;
+  probe_map = reopened[0]; probe_link = reopened[1];
+  reopened[0] = NULL; reopened[1] = NULL;
+  fputws(L"map-reopen handoff=1 originals-closed=2\n", stderr); fflush(stderr);
+  error = map_lifetime(L"after-reopen", L"handoff");
+end:
+  for (int i = 1; i >= 0; i--) {
+    DWORD closed = close_owned(i ? L"unadopted-reopen-link" : L"unadopted-reopen-map", &reopened[i]);
+    if (closed && !error) error = closed;
+  }
+  fwprintf(stderr, L"map-reopen result=%lu\n", error); fflush(stderr);
+  return error;
+}
+
 static DWORD map_prepare(HANDLE process, PSECURITY_DESCRIPTOR security, const wchar_t *root, const wchar_t *image) {
   typedef NTSTATUS (NTAPI *create_directory_fn)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, HANDLE, ULONG);
   typedef NTSTATUS (NTAPI *create_link_fn)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PUNICODE_STRING);
@@ -156,6 +230,7 @@ static DWORD map_prepare(HANDLE process, PSECURITY_DESCRIPTOR security, const wc
   if (status < 0) return (DWORD)status;
   observed = map_lifetime(L"after-create", L"link");
   if (observed) return observed;
+  if (reopen_owned_map) { DWORD error = map_reopen(target); if (error) return error; }
   if (debug_mode) return 0;
   DWORD error = map_apply(process);
   return error ? error : assignment_scope ? 0 : map_roundtrip(process, security);

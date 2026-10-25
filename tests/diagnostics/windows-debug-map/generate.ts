@@ -66,11 +66,13 @@ export function generate(source: string): string {
     '  else if (count > 1 && !wcscmp(args[1], L"inspect")) result = inspect(count, args);\n' +
     '  else if (count > 1 && !wcscmp(args[1], L"assign-map")) result = setter_entry(count, args);\n' +
     '  else if (count > 4 && (!wcscmp(args[1], L"run") || !wcscmp(args[1], L"debug-run") ||\n' +
-    '      !wcscmp(args[1], L"direct-run") || !wcscmp(args[1], L"setter-run") || !wcscmp(args[1], L"quiet-run"))) {\n' +
+    '      !wcscmp(args[1], L"direct-run") || !wcscmp(args[1], L"setter-run") || !wcscmp(args[1], L"quiet-run") ||\n' +
+    '      !wcscmp(args[1], L"reopen-run"))) {\n' +
     '    debug_mode = !wcscmp(args[1], L"debug-run");\n' +
+    '    reopen_owned_map = !wcscmp(args[1], L"reopen-run");\n' +
     '    observe_owned_handles = wcscmp(args[1], L"quiet-run") != 0;\n' +
     '    assignment_scope = !wcscmp(args[1], L"setter-run") ? 2 :\n' +
-    '      (!wcscmp(args[1], L"direct-run") || !observe_owned_handles) ? 1 : 0;\n' +
+    '      (!wcscmp(args[1], L"direct-run") || !observe_owned_handles || reopen_owned_map) ? 1 : 0;\n' +
     '    DWORD before = caller_snapshot(args[3], FALSE);\n' +
     '    if (!before) result = launch(count, args);\n' +
     '    DWORD after = caller_snapshot(args[3], TRUE);\n' +
