@@ -24,7 +24,8 @@
   const owner = $derived(selected.store);
   let readings = $state<Record<string, MachineResourceSnapshot | null>>({});
   const read = $derived(machines.flatMap(m => readings[m.id] ?? []));
-  const memoryUsed = $derived(read.reduce((sum, row) => ({ used: sum.used + (row.memory.availableBytes === null ? 0 : row.memory.totalBytes - row.memory.availableBytes), total: sum.total + row.memory.totalBytes }), { used: 0, total: 0 }));
+  // A machine that reads only its total (macOS) is left out of both sides, not counted as idle.
+  const memoryUsed = $derived(read.reduce((sum, row) => row.memory.availableBytes === null ? sum : { used: sum.used + row.memory.totalBytes - row.memory.availableBytes, total: sum.total + row.memory.totalBytes }, { used: 0, total: 0 }));
   const busy = $derived(machines.reduce((sum, m) => sum + m.store.threads.filter(thread => (thread.load?.processes ?? 0) > 0).length, 0));
   const online = $derived(machines.filter(m => m.store.connection === 'ready').length);
   // Windows names each agent's GPU share; elsewhere the column is left out rather than shown empty.
@@ -122,7 +123,7 @@
   <div class="overview card" data-testid="task-manager-overview">
     <div><span>{strings.taskManager.machines}</span><strong>{count(machines.length)}</strong><small>{strings.taskManager.online(online, machines.length)}</small></div>
     <div><span>{strings.taskManager.agents}</span><strong>{count(busy)}</strong></div>
-    <div><span>{strings.taskManager.memoryInUse}</span><strong>{read.length ? strings.taskManager.machine.of(bytes(memoryUsed.used), bytes(memoryUsed.total)) : strings.resources.unknown}</strong></div>
+    <div><span>{strings.taskManager.memoryInUse}</span><strong>{memoryUsed.total > 0 ? strings.taskManager.machine.of(bytes(memoryUsed.used), bytes(memoryUsed.total)) : strings.resources.unknown}</strong></div>
     <span class="live" class:paused={owner.connection !== 'ready' || !!error || !snapshot}><span aria-hidden="true"></span><span class="ui-label">{owner.connection !== 'ready' ? strings.taskManager.disconnected : error ? strings.taskManager.paused : !snapshot ? strings.taskManager.loading : strings.taskManager.live}</span></span>
   </div>
   <div class="machines">

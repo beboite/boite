@@ -216,14 +216,23 @@ test('every machine has its card, and the one picked lists its agents', async ({
   const original = b.client.call.bind(b.client);
   // The laptop runs an older core: its card says so, and its agents have no GPU column.
   const call = vi.spyOn(b.client, 'call').mockImplementation((method, params) => method === 'resources.machine' ? Promise.reject(new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: 'unknown method resources.machine' })) : original(method, params));
+  // The Mac reads only its total memory: the overview leaves it out rather than count it idle.
+  const c = await ready({ delayMs: 0, coreId: 'machine-c' });
+  const macCall = c.client.call.bind(c.client);
+  vi.spyOn(c.client, 'call').mockImplementation(async (method, params) => {
+    const answer = await macCall(method, params);
+    return method === 'resources.machine' ? { ...answer, memory: { ...(answer as { memory: object }).memory, totalBytes: 64 * 2 ** 30, availableBytes: null } } : answer;
+  });
   const listed = workspace.machines;
-  workspace.machines = [{ id: 'https://laptop.test', label: 'Laptop', store: b.store }, { id: 'desk', label: 'Desk', store: a.store }];
+  workspace.machines = [{ id: 'https://laptop.test', label: 'Laptop', store: b.store }, { id: 'desk', label: 'Desk', store: a.store }, { id: 'mac', label: 'Mac', store: c.store }];
   try {
     const props = $state({ store: a.store });
     mounted = mount(TaskManager, { target: document.body, props }); await settle();
     const cards = () => [...document.querySelectorAll<HTMLElement>('[data-testid="task-manager-machine"]')];
     const card = (id: string) => cards().find(row => row.dataset.machineId === id)!;
-    expect(cards().map(row => row.dataset.machineId).sort()).toEqual(['desk', 'https://laptop.test']);
+    expect(cards().map(row => row.dataset.machineId).sort()).toEqual(['desk', 'https://laptop.test', 'mac']);
+    const memoryInUse = [...document.querySelectorAll('.overview > div')].find(row => row.textContent?.includes(strings.taskManager.memoryInUse))!.querySelector('strong')!.textContent;
+    expect(memoryInUse).toBe(card('desk').querySelector('[data-testid="task-manager-machine-memory"] b')!.textContent);
     expect(card('desk').getAttribute('aria-pressed')).toBe('true');
     expect(card('desk').querySelector('[data-testid="task-manager-machine-cpu"]')!.textContent).toMatch(/\d+%/);
     expect(card('desk').querySelector('[data-testid="task-manager-machine-storage"]')!.textContent).toContain('C:');
