@@ -372,9 +372,10 @@
   }
 
   /* A table is a code well's cousin: the surface-2 ground, hairlines, the head one step up.
-     It takes its content's width up to the column's and scrolls inside itself past
-     that, like a code well: a table box ignores overflow, so it is a block here, or
-     a wide one pans the whole conversation on a phone. */
+     It takes its content's width up to the column's and its cells wrap their text
+     to stay inside it. Only what cannot break, a long path or too many columns,
+     scrolls inside the table: a table box ignores overflow, so it is a block here,
+     or a wide one pans the whole conversation on a phone. */
   .prose :global(table) {
     display: block;
     width: max-content;
@@ -397,6 +398,12 @@
     text-align: left;
     vertical-align: top;
     border-bottom: 1px solid var(--color-border);
+    /* The app's data tables keep a row on one line; an answer's table wraps at
+       spaces. Not inside a word: the reading text's break-word would let the
+       table split a short one to narrow a column, so a path too long for the
+       column scrolls instead. */
+    white-space: normal;
+    word-break: normal;
   }
 
   .prose :global(th) {
