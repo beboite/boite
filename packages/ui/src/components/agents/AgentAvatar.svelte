@@ -95,7 +95,7 @@
   .track { stroke: color-mix(in srgb, var(--ring-tint) 50%, transparent); }
   [data-ring='working'] .track { stroke: color-mix(in srgb, var(--color-accent) 28%, transparent); }
   /* At work: an arc of the accent turns around the disc. */
-  .arc { stroke: var(--color-accent); stroke-linecap: round; stroke-width: 2.5px; stroke-dasharray: 30 70; transform-box: fill-box; transform-origin: center; animation: spin 1.2s steps(72) infinite var(--loops); }
+  .avatar-ring .arc { stroke: var(--color-accent); stroke-linecap: round; stroke-width: 2.5px; stroke-dasharray: 30 70; transform-box: fill-box; transform-origin: center; animation: spin 1.2s steps(72) infinite var(--loops); }
   [data-ring='queued'] .track { stroke: var(--color-accent); stroke-dasharray: 4 6; opacity: 0.7; }
   /* Needs the user: the waiting colour, pulsing. */
   [data-ring='waiting'] .track { stroke: var(--color-live); animation: pulse 1.6s var(--loop-ease-in-out-48) infinite var(--loops); }
