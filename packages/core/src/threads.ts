@@ -771,14 +771,17 @@ export class ThreadStore {
     return this.core.journal.queuedTurn(threadId, 'coordination') === null ? false : this.core.scheduler.stop(threadId);
   }
 
-  /** A keepalive takes no steering: what would steer it waits for the turn after it, and a result stops it. */
-  canSteer(threadId: string): boolean { return typeof this.runner.handles.get(threadId)?.steer === 'function' && !this.cacheKeepalive.pinging(threadId); }
+  /** Maintenance takes no steering: results remain in their inbox until the next conversation turn. */
+  canSteer(threadId: string): boolean {
+    const operation = this.core.journal.lastTurn(threadId)?.execution?.operation;
+    return typeof this.runner.handles.get(threadId)?.steer === 'function' && operation !== 'compact' && !this.cacheKeepalive.pinging(threadId);
+  }
 
   async steer(threadId: string, text: string): Promise<boolean> {
     const handle = this.runner.handles.get(threadId);
     if (!handle?.steer || this.runner.steering.has(threadId)) return false;
     const turn = this.core.journal.runningTurn(threadId);
-    if (!turn || turn.execution?.operation === 'keepalive') return false;
+    if (!turn || turn.execution?.operation === 'keepalive' || turn.execution?.operation === 'compact') return false;
     this.runner.steering.add(threadId);
     try {
       const submitted = await handle.steer(text);

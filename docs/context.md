@@ -106,13 +106,33 @@ again when invoked.
 Settings, Advanced. A phone connected as owner can open the same card through
 a settings link or an agent's settings card; it has no row in the phone's
 settings list ([phone settings](phone.md#settings-on-a-phone)). Null is
-the default: the core never compacts by itself, and each
-agent keeps its own mid-turn compaction, which this setting does not change.
+the default: each agent keeps its own compaction behaviour.
 
-`tokens` is the size the meter must read, between 1000 and 10 000 000, or null
-for no size condition. It is a count and not a share of the window, so one
-number covers every model: a model that never reaches it is never compacted,
-and neither is an agent that reports no reading.
+`tokens` is an independent limit, between 1000 and 10 000 000, or null to leave
+only the selected idle moments. Native drivers apply it at safe tool boundaries
+where their protocol supports it. The core also checks the last reported
+reading after a turn: reaching the limit schedules compaction after 2 s,
+regardless of the selected moments. The count belongs to the owner; Boite does
+not substitute a per-model threshold.
+
+| Driver | Token limit during a turn |
+|---|---|
+| Claude | Measures the native output and compaction reserves locally, opens with a calibrated window and verifies the exact threshold before sending the prompt. An unsupported or clamped window keeps native policy and the between-turn fallback. |
+| Codex | Sends the owner's count as `model_auto_compact_token_limit` on thread start and resume; Codex performs compaction in its own loop. |
+| Muse, pi, ACP | Keep their native in-turn policy; Boite checks its limit between turns because these protocols expose no exact token-limit setter. |
+| echo | Checks between turns only. |
+
+Changing the limit during a running Claude or Codex turn applies before the
+next prompt. Claude defers reopening while its native background work still
+holds the query. Boite never interrupts and restarts a running turn to compact it.
+Claude Code 2.1.310 accepts the live window flag without updating its active
+window, so a changed limit reopens the session between turns. Its summary
+context-control request is local and makes no provider token-count call.
+
+`cache-expiry` is independent of this limit: it can compact a smaller context
+before the cache lapses. The optional `turn-end` and `background` moments keep
+their size condition when a token limit is set; without one, they compact at
+each selected moment.
 
 `moments` lists when the core checks. All three sit between two turns, because
 the core cannot cut into a running one:
@@ -125,21 +145,26 @@ the core cannot cut into a running one:
 
 `cache-expiry` tries to compact before the mapped lifetime ends, using the
 current model and account. It can reduce the context a later prompt sends;
-the timer does not guarantee a cache hit or a lower provider bill.
+the timer does not guarantee a cache hit or a lower provider bill. A planned
+compaction takes precedence over a keepalive ping, which would refresh the
+cache and postpone compaction again.
 
-A finished turn arms one timer for its thread, at the first chosen moment that
-applies. Any turn that opens before it fires disarms it, and the 2 s leave a
+A finished turn arms one timer for its thread, for the token limit or the first
+chosen moment that applies. Any turn that opens before it fires disarms it, and the 2 s leave a
 client's queued prompt, a wake and a held answer the time to open theirs. When
 it fires the core checks again and compacts only when all of this holds:
 
 - the turn ended `done`, and was not itself a compaction;
 - the thread is idle, not archived, has a native session, and is not a
   delegated agent's; a bot's own thread compacts like any other;
-- the reading is at or above `tokens`;
+- the token limit was reached, or a selected idle moment applies;
 - the agent can compact, as for the manual button;
-- no goal or loop is active, no delegated agent or workflow of the thread is
-  at work, and no wake or held answer waits: each of those opens a turn by
-  itself, and a compaction in flight would refuse it.
+- no goal or loop is active and no wake, held answer or delegation letter
+  already waits to open the next conversation turn.
+
+Children and workflows can keep working during an idle parent's compaction.
+Their results stay in the inbox until the compaction ends; they never steer
+its native command or enter a compaction tool hook as additional context.
 
 The compaction is the turn `threads.compact` schedules, with
 `execution.automatic: true`. Its opening message is Boite's (`system`,
@@ -147,7 +172,7 @@ The compaction is the turn `threads.compact` schedules, with
 A threshold below what the agent keeps after compacting makes every turn end
 compact again. The timers live in memory: a core restart drops them, and the
 next finished turn arms a new one. The in-memory client implements `turn-end`
-and the threshold only; it has no background work and no cache to wait on.
+and the independent token limit; it has no background work or prompt cache.
 
 When a merged PR moves a conversation to Done, its last prompt can finish,
 but a compaction turn is stopped. If the provider announces native compaction

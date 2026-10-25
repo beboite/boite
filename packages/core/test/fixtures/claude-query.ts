@@ -81,6 +81,37 @@ export class FakeQuery {
    * speed, as CLI 2.1.291 does on an account without extra usage.
    */
   fastStaysOff = false;
+  /** Native compaction policy, independently of the session flag overlay. */
+  nativeCompactionWindow = 1_000_000;
+  nativeCompactionEnabled = true;
+  compactionReserve = 33_000;
+  modelWindow = 1_000_000;
+  private compactionWindow: number | null = null;
+  private compactionEnabled: boolean | null = null;
+  readonly compactionSettings: { autoCompactWindow?: number | null; autoCompactEnabled?: boolean | null }[] = [];
+  readonly contextUsageCalls: { detail?: 'summary' | 'full' }[] = [];
+
+  launchCompaction(settings: Options['settings']): void {
+    if (typeof settings !== 'object') return;
+    if (typeof settings.autoCompactWindow === 'number') this.compactionWindow = settings.autoCompactWindow;
+    if (typeof settings.autoCompactEnabled === 'boolean') this.compactionEnabled = settings.autoCompactEnabled;
+  }
+
+  get compactionThreshold(): number | undefined {
+    return (this.compactionEnabled ?? this.nativeCompactionEnabled)
+      ? Math.min(this.modelWindow, this.compactionWindow ?? this.nativeCompactionWindow) - this.compactionReserve
+      : undefined;
+  }
+
+  getContextUsage(options: { detail?: 'summary' | 'full' } = {}): Promise<Awaited<ReturnType<Query['getContextUsage']>>> {
+    this.contextUsageCalls.push(options);
+    return Promise.resolve({
+      model: 'claude-opus-5',
+      rawMaxTokens: Math.min(this.modelWindow, this.compactionWindow ?? this.nativeCompactionWindow),
+      autoCompactThreshold: this.compactionThreshold,
+      isAutoCompactEnabled: this.compactionEnabled ?? this.nativeCompactionEnabled,
+    } as Awaited<ReturnType<Query['getContextUsage']>>);
+  }
   /** What `supportedCommands()` answers, scripted before the query is used. */
   commandsAnswer: SlashCommand[] = [];
   modelsAnswer: Awaited<ReturnType<Query["supportedModels"]>> = [];
@@ -120,7 +151,14 @@ export class FakeQuery {
     return this.setter('setPermissionMode', mode);
   }
 
-  applyFlagSettings(settings: { effortLevel?: string | null; disableAllHooks?: boolean | null; fastMode?: boolean }): Promise<void> {
+  applyFlagSettings(settings: { effortLevel?: string | null; disableAllHooks?: boolean | null; fastMode?: boolean; autoCompactWindow?: number | null; autoCompactEnabled?: boolean | null }): Promise<void> {
+    if ('autoCompactWindow' in settings || 'autoCompactEnabled' in settings) {
+      if (this.refuse === 'autoCompactWindow') return Promise.reject(new Error('autoCompactWindow is not available on this CLI'));
+      this.compactionSettings.push({ ...settings });
+      // CLI 2.1.310 updates its settings layer here but leaves the window in
+      // appState unchanged. A fake live update must not hide that regression.
+      return Promise.resolve();
+    }
     if ('fastMode' in settings) {
       const set = this.setter('fastMode', String(settings.fastMode));
       // The real CLI re-emits `init` after a flag change; its fast mode state is the only truth.
@@ -182,6 +220,7 @@ export function scripted(
     calls.push(call);
     void readPrompts(prompt, call, fake, reply);
     script(fake, options);
+    fake.launchCompaction(options.settings);
     return fake as unknown as Query;
   };
   restore = setDriver('claude-sdk', createClaudeDriver({ loadQuery: () => Promise.resolve(query) }));
