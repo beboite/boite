@@ -68,11 +68,31 @@ test('production desktop and phone restore cached reading before a slow core rep
         box.dispatchEvent(new WheelEvent('wheel', { deltaY: -800 }));
         box.scrollTop = box.scrollHeight / 2;
         box.dispatchEvent(new Event('scroll'));
-        await ${frames}; await ${frames};
-        const top = box.getBoundingClientRect().top;
-        const node = [...box.querySelectorAll('[data-mid]')].find(node => node.getBoundingClientRect().bottom > top);
-        globalThis.readingProof = { id: node.dataset.mid, offset: node.getBoundingClientRect().top - top };
+        // The virtual window can still hold the old rows after two frames.
+        // Save an actually visible row once both its offset and scroll have settled.
+        const deadline = performance.now() + 5000;
+        let previous;
+        for (;;) {
+          if (performance.now() > deadline) throw new Error('reading fixture never settled on a visible row');
+          await ${frames};
+          const bounds = box.getBoundingClientRect();
+          const node = [...box.querySelectorAll('[data-mid]')].find(node => {
+            const rect = node.getBoundingClientRect();
+            return rect.bottom > bounds.top && rect.top < bounds.bottom;
+          });
+          const current = node ? { id: node.dataset.mid, offset: node.getBoundingClientRect().top - bounds.top, scroll: box.scrollTop } : null;
+          if (current && previous?.id === current.id && Math.abs(previous.offset - current.offset) < 0.1 && previous.scroll === current.scroll) {
+            globalThis.readingProof = { id: current.id, offset: current.offset };
+            break;
+          }
+          previous = current;
+        }
       })()`);
+      expect(await page.evaluate(`(() => {
+        const row = document.querySelector('[data-mid="' + readingProof.id + '"]').getBoundingClientRect();
+        const view = document.querySelector('${timeline}').getBoundingClientRect();
+        return row.bottom > view.top && row.top < view.bottom;
+      })()`)).toBe(true);
       await open(other.id, phoneView);
       await page.waitFor('document.querySelector(\'[data-mid="other-message"]\')');
       const resized = phoneView !== phone;
