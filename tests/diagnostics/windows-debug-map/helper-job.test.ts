@@ -66,7 +66,13 @@ async function fixture(run: (options: Parameters<typeof observeHelperJob>[0], re
   const directory = mkdtempSync(join(tmpdir(), 'boite-helper-job-')), trace = join(directory, 'trace'); mkdirSync(trace);
   const prefix = join(directory, 'trial'), f = frame(), text = JSON.stringify(f);
   let alive = true;
-  const rows: Parameters<typeof releasedProof>[3] = [...membershipRows(), ...refs(helper, true), ...refs(creator, false)];
+  const rows: Parameters<typeof releasedProof>[3] = [...membershipRows(), ...refs(helper, true),
+    ...refs({...creator, created: '199'}, true).map(r => ({...r, id: `${r.id}-stale`})),
+    {event: 'owned-exit', owner: 'launcher', role: 'launcher-main', ...creator, created: '199', exitCode: 0},
+    ...refs(creator, false),
+    {event: 'transfer-send', owner: 'launcher', role: 'launcher-worker', transfer: {id: 'launcher/22'}},
+    {event: 'transfer-received', owner: 'launcher', role: 'launcher-main', ...creator, incarnation: creator.created, id: 'launcher/22'},
+  ];
   const writeRows = () => writeFileSync(join(trace, 'harness-main.jsonl'), rows.map(r => JSON.stringify(r)).join('\n') + '\n');
   writeRows(); writeFileSync(`${prefix}.hold.ready`, text);
   const options: Parameters<typeof observeHelperJob>[0] = {prefix, trace, roots: [proof], record: {},
@@ -87,6 +93,12 @@ test('real file protocol keeps populated name evidence separate, releases only a
       const populated = options.record.populated as {observation: {absent: boolean}}[];
       expect(populated.map(r => r.observation.absent)).toEqual([true, false]);
       expect(options.record.empty).toHaveLength(2);
+      const ledger = options.record.closureRows as Parameters<typeof releasedProof>[3];
+      expect(ledger.some(r => r.incarnation === '199' || r.created === '199' || r.id?.endsWith('-stale'))).toBe(false);
+      expect(ledger.filter(r => r.event === 'acquired')).toHaveLength(2);
+      expect(ledger.filter(r => r.event === 'close-result')).toHaveLength(2);
+      expect(ledger.filter(r => r.event === 'owned-exit')).toHaveLength(2);
+      expect(ledger.some(r => r.event === 'transfer-send')).toBe(true);
     } finally {clearInterval(timer);}
   });
 });

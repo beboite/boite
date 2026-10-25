@@ -124,8 +124,11 @@ export async function observeHelperJob(options: {
     if (readControl(`${prefix}.hold.done`) === text &&
         options.live(frame.creator.pid) === null && releasedProof(frame, anchor, accounting, rows)) {
       record.creatorClosedAt = Date.now();
-      const ids = new Set(rows.filter(r => r.pid === frame.creator.pid && r.incarnation === frame.creator.created).map(r => r.id));
-      record.closureRows = rows.filter(r => r.pid === frame.creator.pid || (r.id && ids.has(r.id)) || (r.transfer && ids.has(r.transfer.id)));
+      // A reused PID does not identify the captured creator's reference ledger.
+      const ids = new Set(rows.filter(r => r.pid === frame.creator.pid && r.incarnation === frame.creator.created)
+        .flatMap(r => r.id ? [r.id] : []));
+      record.closureRows = rows.filter(r => (r.pid === frame.creator.pid && (r.incarnation ?? r.created) === frame.creator.created) ||
+        (r.id && ids.has(r.id)) || (r.transfer && ids.has(r.transfer.id)));
       record.emptyAccounting = accounting; closed = true; break;
     }
     await new Promise(resolve => setTimeout(resolve, 5));

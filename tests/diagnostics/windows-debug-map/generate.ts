@@ -111,6 +111,21 @@ export function generate(source: string): string {
     '      DWORD creator_map = creator_closed ? creator_closed : target_creator_absence();\n' +
     '      if (creator_map) result = failure(L"routing.cleanup.creator-exited-map", creator_map);\n' +
     '    }\n  }');
+  // Share exactly the generated DIRECT body with both worker arms. Other arms
+  // retain their existing inline body and selectors.
+  const bodyStart = source.indexOf('    DWORD before = caller_snapshot(args[3], FALSE);');
+  const bodyEnd = source.indexOf('\n  }\n  else result', bodyStart);
+  if (bodyStart < 0 || bodyEnd < 0) throw new Error('DIRECT body boundary changed');
+  const directBody = source.slice(bodyStart, bodyEnd);
+  source = once(source, directBody,
+    '    if (!wcscmp(args[1], L"direct-run")) result = direct_body(count, args);\n    else {\n' + directBody + '\n    }');
+  source = once(source, 'int main(void) {',
+    'static int direct_body(int count, wchar_t **args) {\n  int result = 125;\n' + directBody +
+    '\n  return result;\n}\n#include "worker-lifetime.h"\n\nint main(void) {');
+  source = once(source, '  else if (count > 4 && (!wcscmp(args[1], L"run")',
+    '  else if (count > 4 && (!wcscmp(args[1], L"thread-exited-run") || !wcscmp(args[1], L"thread-waiting-run")))\n' +
+    '    result = worker_lifetime_run(count, args, !wcscmp(args[1], L"thread-waiting-run"));\n' +
+    '  else if (count > 4 && (!wcscmp(args[1], L"run")');
   if (source.includes('INFINITE')) throw new Error('diagnostic retains an unbounded wait');
   return source;
 }
@@ -121,7 +136,7 @@ export function writeSource(output: string): Record<string, string> {
   const source = generate(original);
   writeFileSync(join(output, 'debug-map.c'), source);
   const hashes: Record<string, string> = {'protected-tool.c': sha256(original), 'debug-map.c': sha256(source)};
-  for (const file of ['routing.h', 'inspect.h', 'ownership.h', 'identity.h', 'startup-site.h', 'startup-site.json', 'roundtrip.h', 'setter.h', 'creator.h', 'target-creator.h', 'target-acl.h', 'helper-job.h']) {
+  for (const file of ['routing.h', 'inspect.h', 'ownership.h', 'identity.h', 'startup-site.h', 'startup-site.json', 'roundtrip.h', 'setter.h', 'creator.h', 'target-creator.h', 'target-acl.h', 'helper-job.h', 'worker-lifetime.h']) {
     const bytes = readFileSync(join(import.meta.dir, file));
     writeFileSync(join(output, file), bytes);
     hashes[file] = sha256(bytes);

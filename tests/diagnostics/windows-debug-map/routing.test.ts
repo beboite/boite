@@ -5,7 +5,8 @@ import {join} from 'node:path';
 import {capture, type Captured} from './capture.ts';
 import {selectedEnvironment} from './environment.ts';
 import {verifyOwnershipPlatform, ownedMembershipReader, ownedJobReader} from './ownership-generate.ts';
-import {serveTopology} from './target-topology.ts';
+import {serveTopology, traceRows} from './target-topology.ts';
+import {validateWorkerLifetime, type WorkerReport} from './worker-lifetime.ts';
 import {observeHelperJob, type RootProof} from './helper-job.ts';
 
 const native = process.platform === 'win32' && process.env.BOITE_TEST_DEBUG_MAP === '1';
@@ -34,9 +35,10 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   const readMembership = await ownedMembershipReader();
   const readJob = await ownedJobReader();
   const helperJobControls: Record<string, unknown>[] = []; report.helperJobControls = helperJobControls;
+  const workerControls: WorkerReport[] = []; report.workerLifetime = workerControls;
   const controls = join(state, 'target-creator-control'); mkdirSync(controls);
   const topologyProofs: unknown[] = []; report.targetCreatorTopology = topologyProofs;
-  const jobs = ['RED', 'A', 'B', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED'].map(label => {
+  const jobs = ['RED', 'A', 'B', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'THREAD-EXITED', 'THREAD-WAITING'].map(label => {
     const root = join(state, label), project = join(root, 'project'), runtime = join(root, 'runtime'), home = join(root, 'home');
     const marker = `TASK_ROUTE_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
     return {label, root, project, runtime, home, marker, profile: `boite.debug.route.${crypto.randomUUID().replaceAll('-', '')}`};
@@ -48,13 +50,16 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   const targetCreatorFaultCleanup: boolean[] = [];
   const afterExit: Record<string, unknown>[] = []; report.mapAfterHelperExit = afterExit;
   async function execute(id: string, args: string[], home = state, extra: Record<string, string | undefined> = {}, milliseconds?: number) {
+    const workerMode = args[0] === 'thread-exited-run' ? 'exited' : args[0] === 'thread-waiting-run' ? 'waiting' : null;
+    const workerNonce = crypto.randomUUID().replaceAll('-', '');
     const helperExited = args[0] === 'target-helper-exited-run';
     const targetCreator = helperExited || args[0] === 'target-exited-run' || args[0] === 'target-waiting-run';
     const prefix = join(controls, crypto.randomUUID()), topologyStart = topologyProofs.length;
     const child = procs.spawnPiped(id, helper!, args, {cwd: state, agentRoot: false,
       env: selectedEnvironment({HOME: home, USERPROFILE: home, APPDATA: home, LOCALAPPDATA: home,
         TEMP: home, TMP: home, BOITE_DEBUG_MAP_OWNERSHIP: '1',
-        ...(targetCreator ? {BOITE_TARGET_CREATOR_BARRIER: prefix} : {}), ...extra})});
+        ...(targetCreator ? {BOITE_TARGET_CREATOR_BARRIER: prefix} : {}),
+        ...(workerMode ? {BOITE_DIAGNOSTIC_WORKER_NONCE: workerNonce} : {}), ...extra})});
     let stopped = false;
     const topology = targetCreator ? serveTopology(prefix, child.record.pid, process.env.BOITE_DEBUG_MAP_TRACE!,
       readMembership, () => stopped, topologyProofs, helperExited).catch(error => {failures.push(`${id} topology: ${error}`);}) : undefined;
@@ -81,11 +86,21 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
         procs.killTree(id);
       }
     }
+    if (workerMode) {
+      // Corroborate the helper incarnation through existing owned registry proof,
+      // never a fresh OpenProcess or the child's own identity assertion alone.
+      const member = traceRows(process.env.BOITE_DEBUG_MAP_TRACE!).find(row => row.event === 'owned-membership' &&
+        row.role === 'harness-main' && row.threadId === id && row.pid === result.pid);
+      const evidence = validateWorkerLifetime(result, {mode: workerMode, nonce: workerNonce,
+        helper: {pid: result.pid, created: member?.created ?? ''}, marker: args[6] ?? ''});
+      workerControls.push(evidence);
+      if (!evidence.protocolValid) failures.push(`${id} worker protocol: ${evidence.error}`);
+    }
     steps.push({id, ...result});
     writeFileSync(join(output!, `${id}.log`), `pid=${result.pid} exit=${result.code} timedOut=${result.timedOut}\n${result.out}${result.err}`);
     console.log(`${id}: ${JSON.stringify(result)}`); save(); return result;
   }
-  function run(job: typeof jobs[number], debug: boolean, mode?: 'direct-run' | 'setter-run' | 'quiet-run' | 'reopen-run' | 'creator-run' | 'retire-run' | 'retire-named-run' | 'target-exited-run' | 'target-waiting-run' | 'target-helper-exited-run') {
+  function run(job: typeof jobs[number], debug: boolean, mode?: 'direct-run' | 'setter-run' | 'quiet-run' | 'reopen-run' | 'creator-run' | 'retire-run' | 'retire-named-run' | 'target-exited-run' | 'target-waiting-run' | 'target-helper-exited-run' | 'thread-exited-run' | 'thread-waiting-run') {
     const promise = execute(`lpac-${job.label}`, [mode ?? (debug ? 'debug-run' : 'run'), job.profile, job.project,
       join(job.runtime, 'inspect.exe'), 'inspect', '0', job.marker, ...(debug ? ['forward-check'] : [])], job.home,
       {PATH: `${job.runtime};${process.env.SystemRoot}\\System32`});
@@ -154,7 +169,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
         expect(Number(checkpoint?.[2])).toBeGreaterThan(0);
         const targets = checkpoint?.[3]?.split(',') ?? [];
         const inspected = [...result.out.matchAll(/^inspect-start=\S+ pid=(\d+)\r?$/gm)].map(match => match[1]!);
-        expect(new Set(targets)).toEqual(new Set(['RED', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED'].includes(label) ? inspected.slice(0, 1) : inspected));
+        expect(new Set(targets)).toEqual(new Set(['RED', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'THREAD-EXITED', 'THREAD-WAITING'].includes(label) ? inspected.slice(0, 1) : inspected));
         expect(result.err.indexOf('ownership-checkpoint ')).toBeGreaterThan(result.err.indexOf('cleanup map-eventual-open='));
         expect(result.err).toMatch(/cleanup checkpoint-map-open=0x[\da-f]+ absent=[01] closed=1 error=0 wall-ms=\d+/);
       }),
@@ -376,7 +391,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     // from RED's A/B/A roundtrip. Helpers stay alive through the fatal gates.
     // These observations cannot make a failed original RED/A/B gate pass.
     if (report.redSafetyPassed === true) {
-      for (const [index, mode] of (['direct-run', 'setter-run', 'quiet-run', 'reopen-run', 'creator-run', 'retire-run', 'retire-named-run', 'target-exited-run', 'target-waiting-run', 'target-helper-exited-run'] as const).entries()) {
+      for (const [index, mode] of (['direct-run', 'setter-run', 'quiet-run', 'reopen-run', 'creator-run', 'retire-run', 'retire-named-run', 'target-exited-run', 'target-waiting-run', 'target-helper-exited-run', 'thread-exited-run', 'thread-waiting-run'] as const).entries()) {
         const job = jobs[index + 3]!;
         writeFileSync(join(job.project, 'release'), 'synthetic');
         const result = await run(job, false, mode);
@@ -510,6 +525,14 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
           const parked = result.err.match(/helper-job-parked creator=\d+ pipe=0 process=0 thread=0 child-closed=7 io-acquired=(\d+) io-closed=(\d+) error=0/);
           expect(Number(parked?.[1])).toBeGreaterThan(0); expect(parked?.[1]).toBe(parked?.[2]);
           expect(result.err.indexOf('helper-job-parked ')).toBeGreaterThan(result.err.indexOf('cleanup retired-open phase=final '));
+        });
+        if (mode === 'thread-exited-run' || mode === 'thread-waiting-run') verify(`${job.label} worker evidence`, () => {
+          const evidence = workerControls.at(-1);
+          expect(evidence?.protocolValid).toBe(true); expect(evidence?.prerequisites).toBe(true);
+          expect(evidence?.bodyResult).toBe(result.code); expect(evidence?.productionAccepted).toBe(false);
+          expect(evidence?.causeConfirmed).toBe(false);
+          // A missing retained baseline is separately inconclusive. The original
+          // cleanup assertions below remain fatal regardless of later phases.
         });
         cleanup(job.label, result);
         if (mode !== 'target-helper-exited-run') await observeAfterExit(job.label, result);

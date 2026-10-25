@@ -717,6 +717,57 @@ job emptiness as necessary in this fixture. Persistence until the last member
 exits does not identify a unique internal owner. productionAccepted=false.
 No SDK or native Windows result is established for this new arm.
 
+## Matched DIRECT execution-thread lifetime pair
+
+THREAD-EXITED and THREAD-WAITING append two root-only arms. DIRECT and both
+arms call the same generated direct_body function; every other arm keeps its
+existing inline body and selection. The worker uses DIRECT's settings, with
+no debugger, retirement, creator, roundtrip or new job/process architecture.
+Production source and all original fatal gates remain unchanged.
+
+Each helper starts one CRT-managed _beginthreadex callback suspended, captures
+its returned owned handle/TID/creation time and helper PID/creation identity,
+then resumes it. Main logs its start proof before the body; main calls neither
+USER32 nor stdio concurrently with the body. The callback runs the entire
+original before/launch/cleanup/after/final body, saves its immutable real result,
+flushes output, verifies no known map/creator/pending-I/O anchors, and publishes
+READY with Interlocked synchronization. Heap context and argv remain alive
+until confirmed join. No OpenThread/OpenProcess, new rights, job assignment,
+SetThreadDesktop, ACL/map change or thread termination is introduced.
+
+Both arms first observe the exact successfully created map with the worker
+live. Captured helper incarnation is corroborated by the existing owned
+registry trace; a private per-execution nonce binds all native phase frames.
+The parser independently requires the exact root assignment/marker, lowbox,
+descendant denial, normal exits, caller equality and original token/window/
+stream/known-object cleanup prerequisites. Missing retained baseline is a
+separate reproducibility failure, making comparison inconclusive while keeping
+protocol/status evidence and every original absence assertion intact.
+
+EXITED releases the callback to return normally; WAITING remains parked for
+the comparison. Both sample at least100ms after READY, recording actual times.
+The terminated arm observes first with the known thread handle still held,
+then after its successful close. WAITING later releases and repeats normal
+exit0/join, held-handle and closed-handle observations with main still alive.
+The callback's protocol exit0 never overwrites the body's original failure125.
+
+READY starts a maximum3s park and maximum5s main observation budget. Native
+checks surround every identity/query/observation and waits use remaining
+budgets; the existing40s whole-helper capture bounds a stuck native call.
+An unjoined callback keeps its heap/argv while main waits at most45s for the
+existing captured owner to terminate the helper. A late join remains failure;
+if the owner watchdog fails, only this helper fails stopped with TerminateProcess
+on its own process, without CRT teardown or closing a live worker handle.
+Neither forced cleanup nor incomplete phase output counts as evidence.
+
+results.json records protocol validity, prerequisites, body result, retained
+baseline, actual phase times and presence separately. Retention through return,
+release at normal return and release only after known thread-handle close are
+distinct outcomes. Thread termination includes USER32/CRT/TLS rundown; this
+pair cannot identify their individual roles or an internal kernel owner.
+No native/SDK proof exists for these new arms. productionAccepted=false and
+CAUSE_CONFIRMED=no remain unconditional.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:
