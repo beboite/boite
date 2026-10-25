@@ -73,8 +73,8 @@ export function listen(ctx: StoreContext, client: Client): void {
   }
 
   // After the state handler above, so a reconnect has its principal and core first.
-  if (observable(client)) ctx.off.push(reportPreferences(client, current, experiments => heardDesktop(s, experiments)));
-  on('client.desktopExperiments', ({ experiments }) => heardDesktop(s, experiments));
+  if (observable(client)) ctx.off.push(reportPreferences(client, current, experiments => heardDesktop(s, experiments, s.core?.coreId ?? null)));
+  on('client.desktopExperiments', ({ experiments }) => heardDesktop(s, experiments, s.core?.coreId ?? null));
 
   on('core.updateChanged', snapshot => ctx.serverUpdater.apply(snapshot));
   on('core.desktopUpdateChanged', ({ status }) => { if (!s.localCore) ctx.serverUpdater.applyDesktop(status); });

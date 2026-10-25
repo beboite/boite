@@ -11,13 +11,14 @@ test('phones follow the desktop app on this machine before one reached from else
   const moves: ExperimentId[][] = [];
   const book = new ClientPreferencesBook(() => {}, experiments => moves.push(experiments));
   let next = 0;
-  const socket = (sentFrom: SentFrom | null, remote: boolean) => ({ id: `c${next++}`, subscriptions: new Set(), identity: { principal: 'owner', sessionId: null, threadId: null }, sentFrom, remote, sendEvent() {}, close() {} }) as unknown as Connection;
+  const socket = (sentFrom: SentFrom | null, remote: boolean, principal = 'owner') => ({ id: `c${next++}`, subscriptions: new Set(), identity: { principal, sessionId: null, threadId: null }, sentFrom, remote, sendEvent() {}, close() {} }) as unknown as Connection;
   const phone = socket({ client: 'pwa', device: 'phone' }, true);
   const laptop = socket({ client: 'shell', device: 'laptop' }, true);
   const here = socket({ client: 'shell', device: 'pc' }, false);
 
-  // A phone is no desktop app.
+  // A phone is no desktop app, nor is a paired device that calls itself one.
   book.report(phone, report(['whip']));
+  book.report(socket({ client: 'shell', device: 'paired' }, true, 'session'), report(['whip'], 'app-paired-01'));
   expect(book.desktopExperiments()).toBeNull();
   // A desktop app from elsewhere stands in while this machine's has not reported.
   book.report(laptop, report(['goal2'], 'app-laptop-01'));

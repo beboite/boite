@@ -181,6 +181,18 @@ test('a phone has the desktop app\'s experiments until it flips one of its own, 
   expect([on('contacts'), on('whip'), on('theme-grain')]).toEqual([true, false, false]);
 });
 
+test('a core that has heard no desktop app keeps its own set, not another machine\'s', () => {
+  window.localStorage.setItem(EXPERIMENTS_STORAGE_KEY, '["theme-grain"]');
+  const owner = {};
+  followDesktopOf(owner);
+  onTestFinished(() => followDesktopOf(null));
+  heardDesktop(owner, ['contacts'], 'core-a');
+  heardDesktop(owner, null, 'core-a');
+  expect(isExperimentEnabled('contacts')).toBe(true);
+  heardDesktop(owner, null, 'core-b');
+  expect([isExperimentEnabled('contacts'), isExperimentEnabled('theme-grain')]).toEqual([false, true]);
+});
+
 test('the desktop app follows no one', async () => {
   const shell = window as unknown as { __TAURI_INTERNALS__?: unknown };
   shell.__TAURI_INTERNALS__ = {};

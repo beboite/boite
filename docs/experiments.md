@@ -8,9 +8,12 @@ A phone or a browser starts with the switches of the desktop app on its primary
 machine, and changes when that app does. The core answers each app's report
 (`client.preferences`) with the desktop app's experiments and announces their
 changes (`client.desktopExperiments`); a desktop app on the machine's loopback
-outranks one reached from elsewhere. The core keeps them in memory, and the
-phone keeps the last set in `boite.experiments.desktop` so a reload starts
-with it. Flipping a switch on the phone, from the page or from an agent's
+outranks one reached from elsewhere. Only an app on the owner's own token
+counts: a paired device that calls itself a desktop app is not followed. The
+core keeps them in memory, and the phone keeps the last set in
+`boite.experiments.desktop`, with the id of the core that named it, so a reload
+starts with it. A core that has heard no desktop app yet leaves that set in
+place if it named it, and clears it if another machine did. Flipping a switch on the phone, from the page or from an agent's
 card, keeps what it showed, with that flip, as its own (`boite.experiments`,
 `boite.experiments.follow` set to `off`). "Same as the computer" at the top of
 the phone's page follows the desktop app again. The desktop app follows no one.

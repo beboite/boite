@@ -83,9 +83,20 @@ export function followsDesktop(): boolean {
   return canFollowDesktop() && stored(FOLLOW_STORAGE_KEY) !== 'off';
 }
 
+/** The desktop app's experiments as last heard, with the core that named them. */
+function heard(): { core: string | null; experiments: ExperimentId[] } | null {
+  try {
+    const parsed = JSON.parse(stored(DESKTOP_STORAGE_KEY) ?? 'null') as { core?: unknown; experiments?: unknown } | null;
+    const experiments = parse(JSON.stringify(parsed?.experiments ?? null));
+    return experiments === null ? null : { core: typeof parsed?.core === 'string' ? parsed.core : null, experiments };
+  } catch {
+    return null;
+  }
+}
+
 /** The desktop app's experiments as last heard, null before any core named them. */
 export function desktopExperiments(): ExperimentId[] | null {
-  return parse(stored(DESKTOP_STORAGE_KEY));
+  return heard()?.experiments ?? null;
 }
 
 /**
@@ -143,11 +154,18 @@ export function followDesktopOf(owner: object | null): void {
   leader = owner;
 }
 
-/** What a core said its desktop app has on (`client.preferences`, `client.desktopExperiments`); null says nothing yet. */
-export function heardDesktop(owner: object, experiments: readonly ExperimentId[] | null): void {
-  if (owner !== leader || experiments === null || !canFollowDesktop()) return;
+/**
+ * What a core (`core`, its id) said its desktop app has on
+ * (`client.preferences`, `client.desktopExperiments`). Null says nothing yet:
+ * the same core keeps the set heard last, through reloads and restarts, but
+ * a primary that moved to another machine forgets the previous one's.
+ */
+export function heardDesktop(owner: object, experiments: readonly ExperimentId[] | null, core: string | null = null): void {
+  if (owner !== leader || !canFollowDesktop()) return;
+  const last = heard();
+  if (experiments === null && (last === null || core === null || last.core === null || last.core === core)) return;
   const before = followsDesktop() ? readExperiments() : null;
-  store(DESKTOP_STORAGE_KEY, JSON.stringify(EXPERIMENT_IDS.filter((id) => experiments.includes(id))));
+  store(DESKTOP_STORAGE_KEY, experiments === null ? null : JSON.stringify({ core, experiments: EXPERIMENT_IDS.filter((id) => experiments.includes(id)) }));
   if (before !== null && before.join() !== readExperiments().join()) tell();
 }
 

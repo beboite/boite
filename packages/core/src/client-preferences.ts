@@ -48,7 +48,8 @@ export class ClientPreferencesBook {
     // The app agents read stays known once its socket closes, until another app reports.
     const vacant = this.latest === null || !this.byConnection.has(this.latest.connectionId) || this.latest.connectionId === connection.id;
     if (vacant || moved) this.latest = { connectionId: connection.id, ...entry };
-    if (entry.from?.client === 'shell') this.follow(preferences.experiments, connection.remote === false);
+    // A paired device may call itself a shell: only the owner's desktop app is followed.
+    if (entry.from?.client === 'shell' && connection.identity.principal === 'owner') this.follow(preferences.experiments, connection.remote === false);
     this.reported(preferences, before?.experiments ?? null);
   }
 
