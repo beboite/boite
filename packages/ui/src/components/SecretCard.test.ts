@@ -177,6 +177,8 @@ test.each([false, true])('new requests keep the current secret, input and storag
   query<HTMLButtonElement>('[data-testid=activity-question-next]').click();
   await settle();
   expect(query('[data-testid=activity-question]:not([hidden]) [data-testid=secret-reason]').textContent).toBe('Deploy the preview.');
+  expect(query<HTMLInputElement>('[data-testid=activity-question]:not([hidden]) [data-testid=secret-field]').value).toBe('');
+  expect(query<HTMLInputElement>('[data-testid=activity-question]:not([hidden]) [data-testid=secret-keep]').checked).toBe(false);
   query<HTMLButtonElement>('[data-testid=activity-question-toggle]').click();
   await settle();
   query<HTMLButtonElement>('[data-testid=secret-docked]').click();
