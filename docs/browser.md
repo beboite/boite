@@ -311,6 +311,9 @@ Emulation, Network, Log and DOM domains, never the profile's cookies
 (`apps/shell/src-tauri/src/browser_control.rs`). An agent webview out of sight
 is moved outside the window rather than hidden, since a hidden WebView2 stops
 painting and the agent screenshots and records pages nobody looks at.
+An agent webview and every popup its pages open are muted by WebView2 from
+creation (`ICoreWebView2_8::IsMuted`), which no page can undo; the user's own
+tabs keep their sound.
 
 The core keeps a copy of a hosted profile's cookies in the same
 `boite-cookies.json` as for its own browser, with the same saves. The app
