@@ -39,8 +39,15 @@ if (process.platform === 'win32') {
     kernel.symbols.TerminateProcess(childHandle, 125);
     kernel.symbols.CloseHandle(threadHandle); kernel.symbols.CloseHandle(childHandle);
   }
-  const child = spawnSync(process.execPath, ['-e', `try {console.log(require('fs').readFileSync(${JSON.stringify(outside)}, 'utf8'))} catch {}`], {encoding: 'utf8'});
+  // A descendant must retain LPAC, including exclusion of ambient application
+  // package grants. The launcher's preflight checks only the first process.
+  const child = spawnSync(process.execPath, ['-e', `const fs=require('fs'),p=require('path');
+try {console.log(fs.readFileSync(${JSON.stringify(outside)}, 'utf8'))} catch {}
+try {fs.readFileSync(p.join(p.dirname(p.dirname(process.execPath)),'ambient-probe'));console.log('ambient-readable')} catch {}
+console.log('child-checked');`], {encoding: 'utf8'});
+  if (child.status !== 0 || !child.stdout?.includes('child-checked')) throw new Error(`Native child probe failed: ${child.error ?? child.stderr}`);
   if (child.stdout?.includes('SYNTHETIC_PROTECTED')) exposed.push('child');
+  if (child.stdout?.includes('ambient-readable')) exposed.push('child-ambient-grant');
   if (Object.values(process.env).some(value => value?.includes('SYNTHETIC_PROTECTED'))) exposed.push('environment');
   writeFileSync('answer.js', readFileSync('answer.js', 'utf8').replace('return 41', 'return 42'));
   const build = spawnSync(process.execPath, ['build', 'answer.js', '--outdir', 'dist', '--target', 'bun'], {encoding: 'utf8'});
