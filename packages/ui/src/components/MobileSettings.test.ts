@@ -118,13 +118,21 @@ test('the phone settings hold this phone\'s three screens and the machine\'s ess
   store.showSettings();
   await waitFor(home);
   expect([...document.querySelectorAll<HTMLElement>('[data-testid=mobile-settings-home] .row')].map(row => row.dataset.testid)).toEqual([
-    'mobile-settings-phone', 'settings-tab-appearance', 'mobile-settings-privacy',
+    'mobile-settings-phone', 'settings-tab-appearance', 'mobile-settings-privacy', 'settings-tab-experiments',
     'mobile-settings-connection', 'settings-tab-usage', 'settings-tab-voice', 'mobile-settings-browser-profiles', 'mobile-settings-windows', 'mobile-settings-archived',
     'mobile-settings-secrets'
   ]);
   // The header already says Settings, and the list's display options group the threads.
   expect(document.querySelector('[data-testid=mobile-settings-home] h1')).toBeNull();
   expect(document.querySelector('[data-testid=setting-group-working-threads]')).toBeNull();
+
+  // Experiments are this phone's own: Bots on the computer does not give the phone its tab until it is switched on here.
+  expect(document.querySelector('[data-testid=mobile-agents]')).toBeNull();
+  query<HTMLButtonElement>('[data-testid=settings-tab-experiments]').click();
+  await waitFor(() => document.querySelector('[data-testid=experiment-resident-agents]') !== null);
+  query<HTMLInputElement>('[data-testid=experiment-resident-agents]').click();
+  await waitFor(() => document.querySelector('[data-testid=mobile-tabs] [data-testid=mobile-agents]') !== null);
+  await back();
 
   query<HTMLButtonElement>('[data-testid=mobile-settings-browser-profiles]').click();
   await waitFor(() => document.querySelector('[data-testid=browser-profiles-card]') !== null);
