@@ -1,4 +1,4 @@
-import type { AccountQuota, GatewayQuotaCredit, GatewayQuotaEntry, GatewayQuotaProvider, QuotaWindow, SubscriptionProxy, SubscriptionProxyQuotas } from '@boite/contracts';
+import { subscriptionProxyOf, type AccountQuota, type GatewayQuotaCredit, type GatewayQuotaEntry, type GatewayQuotaProvider, type QuotaWindow, type SubscriptionProxy, type SubscriptionProxyQuotas } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { proxyApiUrl, proxyKey } from './subscription-proxy.ts';
 
@@ -183,7 +183,16 @@ export class GatewayQuotas {
     this.readAt = 0;
     this.last = { ...OFF, status: 'unavailable' };
     this.core.bus.emit('subscriptionProxy.quotasUpdated', this.state());
+    this.checkMuseAccounts();
     this.onReset();
+  }
+
+  /** A newly discovered Meta pool changes Muse's login state without touching its native sign-in. */
+  private checkMuseAccounts(): void {
+    if (subscriptionProxyOf(this.core.settings.get(), { id: 'muse', protocol: 'muse' }, this.state())) this.core.accounts.ensureDefaults();
+    for (const account of this.core.accounts.list()) {
+      if (account.providerId === 'muse') this.core.accounts.check(account.id);
+    }
   }
 
   /** What is known without asking the gateway. */
@@ -214,6 +223,7 @@ export class GatewayQuotas {
       if (epoch !== this.epoch) return this.state();
       this.last = next;
       this.readAt = Date.now();
+      this.checkMuseAccounts();
       this.core.bus.emit('subscriptionProxy.quotasUpdated', next);
       return next;
     })();

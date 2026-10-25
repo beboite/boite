@@ -627,7 +627,9 @@ export class Connection {
         s.providers = value.loaded; s.rejectedProviders = value.rejected; s.installStates = installStatesOf(value.loaded);
       }),
       slice(client.call('accounts.list', {}), rows => { s.accounts = retainRows(s.accounts, accountRead.apply(rows, s.accounts)); this.ctx.models.restoreModels(); }, () => accountRead.cancel()),
-      slice(client.call('settings.get', {}), value => { if (revisions.settings === this.ctx.metadataRevision.settings) s.settings = value; }),
+      slice(client.call('settings.get', {}), value => {
+        if (revisions.settings === this.ctx.metadataRevision.settings) { s.settings = value; void accounts.readProxyQuotas(client); }
+      }),
       slice(permissionRead.promise, rows => permissionRead.apply(rows), permissionRead.cancel),
       slice(questionRead.promise, rows => questionRead.apply(rows), questionRead.cancel),
       ...(reopened ? [reopened] : [])

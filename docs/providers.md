@@ -186,6 +186,20 @@ key and would send that token to the gateway, so `GROK_AUTH_PATH` points it at
 finds no sign-in, and the account's own stays for when the proxy is off. This
 was measured on Grok CLI 1.0.46, where `GROK_AUTH_PATH` is not documented.
 
+Muse Code uses Douane only after its quotas response announces a non-disabled
+entry in the native `meta` pool. A Muse model served by OpenCode Go does not
+connect Muse Code. Without that pool, with CLIProxyAPI, or with the gateway
+off, Muse keeps its native sign-in. Discovery updates the connection state
+even when Meta has not reported a quota window yet.
+
+Muse's MSP host reads an isolated gateway configuration under the core's data
+directory, with `endpoint_transport.base_url` pinned to `/muse-code` and
+`auth: "bearer"`. Its catalog uses `/muse-code/models` and its turns use
+`/muse-code/responses`, both restricted to Meta by Douane. `META_API_KEY`
+carries the proxy key only in the child environment; it overrides saved
+authentication. Native settings and sign-ins remain intact. Models and
+efforts still come from Muse's own MSP discovery, with their upstream ids.
+
 Both OpenCode versions gain the gateway as an additional provider, named after
 its kind (`douane` or `cliproxyapi`), calling its Chat Completions route.
 OpenCode 1 uses the singular `provider` configuration with

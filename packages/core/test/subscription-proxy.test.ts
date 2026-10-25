@@ -27,6 +27,63 @@ test('proxy URLs reject credential channels and retain the dashboard route', () 
   expect(checkSettingsPatch({ subscriptionProxy: config('http://gateway.lan:8787') }).ok).toBe(true);
 });
 
+test('Muse uses only an observed native Meta subscription and restores its own login otherwise', async () => {
+  let meta = false;
+  gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
+    return Response.json({ providers: [{ provider: meta ? 'meta' : 'opencode_go', name: 'Muse', entries: [
+      { id: 'seat', label: 'Subscription', accounts: 1, status: 'ready', windows: [], credits: [] },
+    ] }] });
+  } });
+  harness = await startTestCore({ settings: { subscriptionProxy: config(`http://127.0.0.1:${gateway.port}/v1`) } });
+  const owner = await harness.connect();
+  const account = await owner.call('accounts.add', { providerId: 'muse', label: 'Native Muse' });
+  const provider = harness.core.providers.require('muse');
+  const nativeEnv = harness.core.accounts.accountEnv(account, provider);
+  expect(account.status).toBe('unauthenticated');
+  await owner.call('subscriptionProxy.quotas', { refresh: true });
+  expect(subscriptionProxyEnv(harness.core, provider)).toEqual({});
+  meta = true;
+  await owner.call('subscriptionProxy.quotas', { refresh: true });
+  expect((await owner.call('accounts.check', { accountId: account.id })).status).toBe('ok');
+  const env = harness.core.accounts.accountEnv(account, provider);
+  expect(env.META_API_KEY).toBe('boite-subscription-proxy');
+  expect(env.XDG_CONFIG_HOME).not.toBe(nativeEnv.XDG_CONFIG_HOME);
+  const settings = JSON.parse(await Bun.file(join(env.XDG_CONFIG_HOME!, 'muse', 'settings.json')).text());
+  expect(settings).toEqual({ schema_version: 1, endpoint_transport: { base_url: `http://127.0.0.1:${gateway.port}/muse-code`, auth: 'bearer' } });
+  expect(JSON.stringify(settings)).not.toContain(env.META_API_KEY!);
+  expect(agentEnv(provider, env).META_API_KEY).toBe(env.META_API_KEY);
+  expect(existsSync(join(account.isolationDir!, 'muse', 'auth.json'))).toBe(false);
+  expect(await readSubscriptionProxyModels(harness.core, provider)).toBeNull();
+  meta = false;
+  await owner.call('subscriptionProxy.quotas', { refresh: true });
+  expect((await owner.call('accounts.check', { accountId: account.id })).status).toBe('unauthenticated');
+  expect(harness.core.accounts.accountEnv(account, provider)).toEqual(nativeEnv);
+  meta = true;
+  await owner.call('subscriptionProxy.quotas', { refresh: true });
+  await owner.call('subscriptionProxy.setEnabled', { enabled: false });
+  expect(harness.core.accounts.accountEnv(account, provider)).toEqual(nativeEnv);
+});
+
+test('the first Muse probe discovers Meta before capturing its account revision', async () => {
+  gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
+    return Response.json({ providers: [{ provider: 'meta', entries: [
+      { id: 'native', label: 'Native subscription', status: 'ready', windows: [], credits: [] },
+    ] }] });
+  } });
+  harness = await startTestCore({ settings: { subscriptionProxy: config(`http://127.0.0.1:${gateway.port}/v1`) } });
+  const owner = await harness.connect();
+  const provider = harness.core.providers.require('muse');
+  for (const profile of Object.values(provider.profiles)) {
+    profile.executable = [{ kind: 'file', value: process.execPath }];
+    profile.launch = { args: [join(import.meta.dir, 'fixtures', 'muse-server.ts')] };
+  }
+  const account = await owner.call('accounts.add', { providerId: 'muse', label: 'Gateway Muse' });
+  expect(account.status).toBe('unauthenticated');
+  const { models } = await owner.call('providers.probe', { providerId: 'muse', accountId: account.id });
+  expect(models.some(model => model.id === 'muse-spark-1.3')).toBe(true);
+  expect(harness.core.accounts.require(account.id).status).toBe('ok');
+});
+
 test('configuration and private key roll back together without leaking to events, snapshots, errors or logs', async () => {
   const previous = config('http://gateway.lan:8787');
   const next = config('https://gateway.test');

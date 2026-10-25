@@ -321,12 +321,15 @@ export function listen(ctx: StoreContext, client: Client): void {
     models.dropProbes(accountId);
   });
   on('brain.configured', () => { void s.loadBrainCommands(); });
+  on('subscriptionProxy.quotasUpdated', quotas => accounts.acceptProxyQuotas(quotas));
   on('settings.updated', (settings) => {
     ctx.metadataRevision.settings++;
     if (JSON.stringify(s.settings?.subscriptionProxy) !== JSON.stringify(settings.subscriptionProxy)) {
+      accounts.proxyQuotas = null;
       for (const account of s.accounts) models.dropProbes(account.id);
     }
     s.settings = settings;
+    void accounts.readProxyQuotas(client);
     void s.refreshMemory();
   });
   on('keybindings.updated', (keybindings) => {

@@ -40,6 +40,9 @@ export function gatewayQuotas(ctx: FakeContext): SubscriptionProxyQuotas {
     { providerId: 'antigravity', name: 'Antigravity', display: 'average', entries: [
       entry('antigravity', 'Antigravity · 10 comptes', null, [window('gemini-pro', 'Gemini Pro', 42, 4), window('claude', 'Claude', 18, 4)], { accounts: 10 }),
     ] },
+    { providerId: 'meta', name: 'Muse Code', display: 'accounts', entries: [
+      entry('meta-1', 'Muse Code subscription', null, []),
+    ] },
   ] };
 }
 
@@ -60,7 +63,7 @@ function quotas(ctx: FakeContext): AccountQuota[] {
 
 function accountQuotas(ctx: FakeContext): AccountQuota[] {
   const accounts = ctx.accounts;
-  const proxied = (providerId: string) => subscriptionProxyOf(ctx.settings, ctx.providers.find(provider => provider.id === providerId)) !== null;
+  const proxied = (providerId: string) => subscriptionProxyOf(ctx.settings, ctx.providers.find(provider => provider.id === providerId), gatewayQuotas(ctx)) !== null;
   // As the core: a managed Antigravity account reads its own sign-in, so one
   // not signed in yet reports why instead of limits.
   const signedOut = (account: (typeof accounts)[number]) => account.providerId === 'antigravity'
