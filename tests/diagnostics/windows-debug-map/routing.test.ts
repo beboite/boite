@@ -110,6 +110,12 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
         expect(result.err).toMatch(/cleanup checkpoint-map-open=0x[\da-f]+ absent=[01] closed=1 error=0 wall-ms=\d+/);
       }),
     ];
+    for (const action of ['station-restore', 'desktop', 'station']) checks.push(
+      verify(`${label} window cleanup ${action}`, () => expect(result.err)
+        .toContain(`window-cleanup action=${action} success=1 error=0`)));
+    for (let index = 0; index < 3; index++) checks.push(
+      verify(`${label} stream cleanup ${index}`, () => expect(result.err)
+        .toContain(`stream-cleanup index=${index} success=1 error=0`)));
     for (const object of ['root-thread', 'root-process', 'job', 'map-before-link-close', 'link', 'map']) checks.push(
       verify(`${label} ${object} counts`, () => expect(result.err).toMatch(new RegExp(
         `cleanup object=${object} handle=\\S+ query=0x00000000 attributes=0x[0-9a-f]+ granted=0x[0-9a-f]+ handles=\\d+ pointers=\\d+`))));

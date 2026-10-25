@@ -40,6 +40,23 @@ export function generate(source: string): string {
     source = once(source, `  if (${field}) CloseHandle(${field});`,
       `  { DWORD cleanup = close_owned(L"${label}", &${field}); if (cleanup && !error) { error = cleanup; stage = L"routing.cleanup.${label}"; } }`);
   }
+  // Capture the existing calls once, in their original order, before logging
+  // can overwrite GetLastError. No new USER32 call precedes desktop creation.
+  for (const [guard, call, label] of [
+    ['station', 'SetProcessWindowStation(original_station)', 'station-restore'],
+    ['desktop', 'CloseDesktop(desktop)', 'desktop'],
+    ['station', 'CloseWindowStation(station)', 'station'],
+  ]) {
+    source = once(source, `  if (${guard}) ${call};`,
+      `  if (${guard}) {\n    BOOL ok = ${call}; DWORD native_error = ok ? 0 : GetLastError();\n` +
+      `    fwprintf(stderr, L"window-cleanup action=${label} success=%d error=%lu\\n", ok, native_error); fflush(stderr);\n` +
+      `    if (!ok && !error) { error = native_error ? native_error : ERROR_INVALID_DATA; stage = L"routing.cleanup.${label}"; }\n  }`);
+  }
+  source = once(source, '  for (int i = 0; i < 3; i++) if (streams[i]) CloseHandle(streams[i]);',
+    '  for (int i = 0; i < 3; i++) if (streams[i]) {\n' +
+    '    BOOL ok = CloseHandle(streams[i]); DWORD native_error = ok ? 0 : GetLastError();\n' +
+    '    fwprintf(stderr, L"stream-cleanup index=%d success=%d error=%lu\\n", i, ok, native_error); fflush(stderr);\n' +
+    '    if (!ok && !error) { error = native_error ? native_error : ERROR_INVALID_DATA; stage = L"routing.cleanup.stream"; }\n  }');
   source = once(source, '  for (DWORD i = 0; i < group_count; i++)',
     '  { DWORD cleanup = map_close(); if (cleanup && !error) { error = cleanup; stage = L"routing.cleanup.map"; } }\n  for (DWORD i = 0; i < group_count; i++)');
   source = once(source, '  else if (count > 1 && !wcscmp(args[1], L"run")) result = launch(count, args);',

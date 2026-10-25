@@ -230,6 +230,20 @@ difference. No outcome grants production admission or retroactively passes an
 original cleanup failure. Native SDK/MinGW results are required; cross compilation
 alone establishes no routing, lifetime or Server support.
 
+The fd0f6ba4 Server run keeps both DIRECT and SCOPE maps through all absence
+gates. The setter exits normally, and its two captured registry handles close
+2076 ms (SDK) and 2084 ms (MinGW) before the still-retained-map checkpoint.
+This excludes those captured setter handles at that checkpoint; early setter
+exit alone does not cure this fixture. It does not identify the kernel owner.
+
+The next diagnostic captures the existing SetProcessWindowStation, CloseDesktop,
+CloseWindowStation and three stream CloseHandle return values once in their
+original order. Failure codes are saved immediately, before logging, and remain
+fatal. No new USER32 call is made before creation, so thread-desktop initialization
+is not perturbed. In particular, this experiment neither adds SetThreadDesktop
+nor changes cleanup to make a map disappear. A failed desktop close would show
+an incomplete teardown, without proving its relationship to map retention.
+
 After the exact spawned helper has exited and its capture reached EOF, a new
 registry-owned helper opens only the recorded `boite.route.<helper-pid>` name
 and, for RED, its exact `.swap` name read-only. This is recorded separately by
