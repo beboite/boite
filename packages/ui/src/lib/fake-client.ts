@@ -13,6 +13,7 @@ import {
   RpcErrorCode,
   type CoreInfo,
   type CoreLogContext,
+  type ExperimentId,
   type HookRun,
   type MemoryEvent,
   type ProcessRecord,
@@ -375,6 +376,12 @@ export class FakeClient implements ObservableClient {
     if (!contact) throw refusedShared('coreId: expected a contact');
     contact.link = connected ? 'connected' : 'offline';
     reconcileShared(this.#ctx);
+  }
+
+  /** The desktop app on the fake machine reporting its experiments, as the core's book announces a change. */
+  reportDesktopExperiments(experiments: ExperimentId[]): void {
+    this.#ctx.desktopExperiments = [...experiments];
+    this.#ctx.emit('client.desktopExperiments', { experiments: [...experiments] });
   }
 
   /** A line of the core's own log, as `core.log` carries it: a failed scheduler, a guard at work. */

@@ -233,7 +233,7 @@ test('Whip phone controls stay reachable with agents and disable mid-hit', async
   await page.screenshot(join(import.meta.dir, '.artifacts', 'whip-phone.png'));
   // The phone control lives in the list's header; the bottom bar holds only the places.
   expect(await page.evaluate(`!document.querySelector('[data-testid=mobile-tabs] [data-testid=whip-button-mobile]')`)).toBe(true);
-  // A phone's settings list has no Experiments: the page stays reachable for a test.
+  // The phone's own Experiments page, as its settings row opens it.
   await page.evaluate(`__boiteTest.workspace.active.showSettings('experiments')`);
   await page.waitFor(`document.querySelector('${toggle}')`);
   await page.click('[data-testid=experiment-resident-agents]');
@@ -255,7 +255,7 @@ test('Whip phone controls stay reachable with agents and disable mid-hit', async
   await page.click(button);
   expect(await page.evaluate(`document.getElementById('app').getAnimations().length`)).toBe(0);
   expect(await page.evaluate(`document.querySelector('[data-testid=whip-canvas]') === null`)).toBe(true);
-  // A phone's settings list has no Experiments: the page stays reachable for a test.
+  // The phone's own Experiments page, as its settings row opens it.
   await page.evaluate(`__boiteTest.workspace.active.showSettings('experiments')`);
   await page.waitFor(`document.querySelector('${toggle}')`);
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });

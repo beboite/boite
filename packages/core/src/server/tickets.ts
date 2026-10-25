@@ -12,11 +12,11 @@ import { fdResponse, heldBytes } from './file-response.ts';
  * answer says what an unknown one missed. A `Range` is honoured because that
  * is how a video seeks, and nothing is cached because the ticket outlives
  * neither the ten minutes nor the next write to the file. A message's
- * picture comes from the journal instead (`heldBytes`).
+ * attachment comes from the journal instead (`heldBytes`), with the same range support.
  */
 export async function ticketedFile(core: Core, ticket: string, range: string | null): Promise<Response> {
   const held = core.fileTickets.bytes(ticket);
-  if (held !== null) return heldBytes(held);
+  if (held !== null) return heldBytes(held, range);
   const opened = await core.fileTickets.open(ticket);
   if (opened === null) return new Response('unknown or expired ticket', { status: 404 });
   const headers: Record<string, string> = {

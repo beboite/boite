@@ -677,7 +677,8 @@ that app's socket closes, the next app to report takes its place. The language a
 (`SentFrom.language`), so the one-line note on where a prompt came from says
 `which shows Boite in French` when a session starts and when the language
 changes. Before any app reported, the first line says so and no experiment is
-listed.
+listed. A phone that follows the desktop app ([experiments](experiments.md))
+reports the desktop app's switches as its own.
 
 `settings request <key> <value> --why <text>` draws a settings card the same
 way `ask` draws a question: the agent keeps working and the card outlives the

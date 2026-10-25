@@ -27,7 +27,11 @@ line too. A touchscreen laptop whose primary pointer is a mouse keeps Enter's
 send.
 
 At phone widths, Settings opens a list in two groups. This phone:
-Notifications, Appearance and Privacy, the two analytics switches. Machine: the
+Notifications, Appearance, Privacy, the two analytics switches, and
+Experiments, which follow the computer's desktop app until the phone flips one
+of its own: Bots on the computer brings the phone's Bots tab with it
+([experiments](experiments.md)).
+Machine: the
 machine itself with its connection, which opens Machines, then Usage, Voice and
 Archived threads. Each opens a screen of its own; the back button or browser
 Back returns to the list. Theme and accent belong to the current device;
@@ -52,7 +56,7 @@ CLIProxyAPI gateway on or off
 ([providers](providers.md#switching-the-gateway-from-limits)).
 
 Provider accounts, keyboard shortcuts, plugins, resource limits, the brain, the
-task manager, worktrees, automatic compaction, diagnostics, experiments, the
+task manager, worktrees, automatic compaction, diagnostics, the
 tour, adding and removing devices and server configuration stay in desktop
 settings; a link or a card in a conversation that names one of those pages
 still opens it. Project management stays on the desktop too. This smaller
@@ -314,7 +318,9 @@ link scanned or pasted in the app asks nothing either: the owner just showed it.
 The browser uses mobile navigation under 720 px. A bar along the bottom edge
 (`MobileTabs.svelte`) holds the places: Conversations, Activity, a filled +
 that starts a thread, Agents and Contacts when they are on, and Settings.
-Activity's tab counts the conversations waiting for you. Conversations lists
+Activity's tab counts the conversations waiting for you; Bots counts the bots
+at work on every machine, as the desktop's switch does, in the waiting colour
+once one needs you. Conversations lists
 threads across connected machines; Activity puts waiting requests first,
 followed by running and queued turns. Each list's header shows the machine,
 which opens its connection settings, over the screen's name, and the project

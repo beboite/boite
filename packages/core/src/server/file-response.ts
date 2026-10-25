@@ -1,31 +1,28 @@
-import type { BunFile } from 'bun';
 import type { FileHandle } from 'node:fs/promises';
 import type { HeldBytes } from '../workdir.ts';
 import type { SharedFilePermit } from '../contacts/access-policy.ts';
 
 /**
- * Bytes a ticket of `FileTickets.mintBytes` names: a picture of a message,
- * its original or a copy. The bytes behind that ticket never change, so the
+ * Bytes a ticket of `FileTickets.mintBytes` names: an attachment of a message,
+ * its original or a picture copy. The bytes behind that ticket never change, so the
  * client keeps them for good and the timeline draws them again without
- * asking; a new ticket is a new address. Pictures need no range. An
+ * asking; a new ticket is a new address. Players use ranges to seek. An
  * incognito conversation's are kept by no cache, since it leaves nothing
  * behind once erased.
  */
-export function heldBytes(held: HeldBytes): Response {
+export function heldBytes(held: HeldBytes, range: string | null): Response {
   // Bytes from SQLite or a Buffer, both backed by an ArrayBuffer.
-  return new Response(held.data as Uint8Array<ArrayBuffer>, {
-    headers: {
-      'content-type': held.mime,
-      'cache-control': held.noStore ? 'no-store' : 'private, max-age=31536000, immutable',
-      'x-content-type-options': 'nosniff',
-      'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(held.name ?? 'download')}`,
-    },
+  return fileResponse(held.data as Uint8Array<ArrayBuffer>, range, {
+    'content-type': held.mime,
+    'cache-control': held.noStore ? 'no-store' : 'private, max-age=31536000, immutable',
+    'x-content-type-options': 'nosniff',
+    'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(held.name ?? 'download')}`,
   });
 }
 
 /** A single byte range, shared by downloadable snapshots and isolated preview assets. */
-export function fileResponse(file: BunFile, range: string | null, headers: Record<string, string>, head = false): Response {
-  const size = file.size;
+export function fileResponse(file: Blob | Uint8Array<ArrayBuffer>, range: string | null, headers: Record<string, string>, head = false): Response {
+  const size = file instanceof Uint8Array ? file.byteLength : file.size;
   headers = { ...headers, 'accept-ranges': 'bytes' };
   if (head) return new Response(null, { headers: { ...headers, 'content-length': String(size) } });
   const asked = range === null ? null : /^bytes=(\d*)-(\d*)$/.exec(range.trim());
@@ -36,7 +33,7 @@ export function fileResponse(file: BunFile, range: string | null, headers: Recor
   if ((!from && !to) || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= size) {
     return new Response('range not satisfiable', { status: 416, headers: { ...headers, 'content-range': `bytes */${size}` } });
   }
-  return new Response(file.slice(start, end + 1), {
+  return new Response(file instanceof Uint8Array ? file.subarray(start, end + 1) : file.slice(start, end + 1), {
     status: 206, headers: { ...headers, 'content-range': `bytes ${start}-${end}/${size}`, 'content-length': String(end - start + 1) },
   });
 }

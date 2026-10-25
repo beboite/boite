@@ -3,6 +3,7 @@ import { RpcErrorCode, type AgentShape, type Message, type MessageId, type Permi
 import type { Client } from './client';
 import { RpcFailure, wasClosed, wasDropped } from './rpc-error';
 import { readModelDefaults } from './model-defaults';
+import { followDesktopOf } from './experiments';
 import { modelFavorites } from './model-favorites.svelte';
 import { readLayout, readPrefs } from './prefs';
 import { watchIncognito } from './store/incognito.svelte';
@@ -564,6 +565,8 @@ export class Store {
   loadMessageAttachment(...args: Parameters<Threads['loadMessageAttachment']>) { return this.#ctx.threads.loadMessageAttachment(...args); }
   /** The light copy of a deferred picture the timeline draws (`store/display-images.ts`); the original stays with `loadMessageAttachment`. */
   loadDisplayImage(...args: Parameters<DisplayImages['load']>) { return this.#ctx.displayImages.load(...args); }
+  /** A deferred video or audio attachment as a file URL, without putting its bytes in the message. */
+  loadMediaAttachment(...args: Parameters<DisplayImages['original']>) { return this.#ctx.displayImages.original(...args); }
   /** A copy whose address stopped loading, asked again by the next `loadDisplayImage`. */
   forgetDisplayImage(...args: Parameters<DisplayImages['forget']>) { this.#ctx.displayImages.forget(...args); }
   get loadingThreadId() { return this.#ctx.threads.loadingThreadId; }
@@ -771,3 +774,5 @@ export class Store {
 }
 
 export const store = new Store();
+// The primary machine's desktop app is the one this device's experiments follow.
+followDesktopOf(store);

@@ -231,6 +231,8 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   'quotas.updated', 'quotas.progress', 'subscriptionProxy.quotasUpdated', // What quotas.list and subscriptionProxy.quotas answer.
   'quotas.alerted', // One window of a row quotas.list already answers the device.
   'settings.updated', 'keybindings.updated', 'sessions.updated',
+  // Experiment ids of the desktop app, as client.preferences already answers the device.
+  'client.desktopExperiments',
   'group.updated', // Invalidation only; group.get applies the device read policy.
   'providers.updated', 'providers.installProgress', 'providers.probed',
 ]);
