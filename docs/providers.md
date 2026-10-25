@@ -1351,8 +1351,12 @@ process here goes through `procs.spawnChild`. The driver refuses a host whose
 - From Muse 1.4.13, read from `.muse-version` beside a `muse` executable, the
   host starts with `-c run.reminder_roster={}`. Muse's skill, goal and verify
   reminder agents each call the thread's model again at every step, and the
-  blocking ones hold the turn open after the answer: a two-step turn through
-  Douane took 24.6 s with them and 15.5 s without (2026-10-25, two runs each).
+  blocking ones hold the turn open after the answer. On 2026-10-25, through
+  Douane, `muse exec --json --model muse-wonder-full-1.0-contributor
+  --reasoning-effort xhigh --workspace <empty dir> "<list this folder with a
+  tool, then answer ok>"`, alternated with and without
+  `-c 'run.reminder_roster={}'`, took 24.1 s and 25.1 s with the reminders and
+  14.8 s and 16.3 s without.
   Older hosts refuse `-c`, so they start as before.
 
 ### pi
