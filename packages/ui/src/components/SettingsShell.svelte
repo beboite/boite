@@ -98,6 +98,7 @@
       { id: 'archived', label: strings.settings.archived.heading },
       ...(store.owner ? [{ id: 'worktrees', label: strings.settings.worktrees.heading }] : []),
       ...(store.owner ? [{ id: 'windows', label: strings.windows.settings.allowedHeading }, { id: 'window-exclusions', label: strings.windows.settings.exclusionsHeading }] : []),
+      { id: 'secrets', label: strings.secrets.heading },
       ...(store.owner ? [{ id: 'browser-profiles', label: strings.browserProfiles.card }] : []),
       { id: 'app', label: strings.settings.app },
       ...(store.owner ? [{ id: 'privacy', label: strings.telemetry.heading }] : [])

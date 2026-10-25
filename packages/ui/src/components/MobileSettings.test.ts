@@ -119,7 +119,8 @@ test('the phone settings hold this phone\'s three screens and the machine\'s ess
   await waitFor(home);
   expect([...document.querySelectorAll<HTMLElement>('[data-testid=mobile-settings-home] .row')].map(row => row.dataset.testid)).toEqual([
     'mobile-settings-phone', 'settings-tab-appearance', 'mobile-settings-privacy',
-    'mobile-settings-connection', 'settings-tab-usage', 'settings-tab-voice', 'mobile-settings-browser-profiles', 'mobile-settings-windows', 'mobile-settings-archived'
+    'mobile-settings-connection', 'settings-tab-usage', 'settings-tab-voice', 'mobile-settings-browser-profiles', 'mobile-settings-windows', 'mobile-settings-archived',
+    'mobile-settings-secrets'
   ]);
   // The header already says Settings, and the list's display options group the threads.
   expect(document.querySelector('[data-testid=mobile-settings-home] h1')).toBeNull();

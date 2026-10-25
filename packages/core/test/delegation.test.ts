@@ -320,9 +320,10 @@ test('the parent learns dynamic workflows and coordination within a compact prom
   // Then 52 for batching browser steps with `&&` or `boite browser run -`: each separate command costs a turn (4010 measured 2026-10-20).
   // Then 30 for `|create` and "or creates the bot the user asked for": a thread the user asked for a bot creates it (4040 measured 2026-10-24).
   // Then 75 for the line sending a schema to a mermaid fence and a formula to `$$`, which chat draws (4115 measured 2026-10-25).
+  // Then 142 for the `boite secret` line: an agent that asks for a key in chat puts it in the provider's transcript (4257 measured 2026-10-25).
   // Then 129 for `boite window help`, emulators going to `boite device` and what a picture costs to read: an agent that
-  // captures a window with no `--max` or `--crop` spends thousands of tokens on every look (4259 measured with both lines, 2026-10-25).
-  expect(Buffer.byteLength(prompt.replaceAll(h.dataDir, '<data>'))).toBeLessThan(4261);
+  // captures a window with no `--max` or `--crop` spends thousands of tokens on every look (4401 measured with all three lines, 2026-10-25).
+  expect(Buffer.byteLength(prompt.replaceAll(h.dataDir, '<data>'))).toBeLessThan(4403);
   runs.get(threadId)!.finish();
   await waitFor(() => h.core.threads.require(threadId).status === 'idle');
   await owner.call('turns.start', { threadId, prompt: 'Continue' });

@@ -421,6 +421,11 @@ boite browse <url>               open the url in a new tab of this conversation'
 boite open trace|tasks|changes|files [dir]
 boite status                     git status: branch, upstream, one row per change
 boite ask <question> [option ...] [--multiple] [--open <url>]
+boite secret list
+boite secret ask <NAME> --why <reason> [--placeholder <example>] [--timeout <minutes>] [--replace]
+boite secret write <ref> --env-file <path> --key <VAR> [--allow-unignored]
+boite secret run <ref> --as <VAR> -- <cmd> [args ...]
+boite secret pipe <ref> -- <cmd> [args ...]
 boite task list|add <text>|start <id>|done <id>|remove <id>|clear
 boite todo list|add <text>|claim <id>
 boite threads inbox

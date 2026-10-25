@@ -117,6 +117,8 @@ and assertions when making the suite faster.
   for, the bounds on it and how the image reaches a client.
 - [Hooks](docs/hooks.md): the user's hooks on isolated accounts, what each
   driver reports and the Settings view.
+- [Secrets](docs/secrets.md): the card an agent asks for a key on, refs,
+  the system vault per OS, erasure rules and masking limits.
 - [Agent updates](docs/agent-updates.md): version checks, the agent's own
   updater and what a remote machine does by itself.
 - [Desktop updates](docs/updates.md): signed app updates and switching nightly channels.

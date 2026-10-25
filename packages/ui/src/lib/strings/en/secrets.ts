@@ -1,0 +1,36 @@
+export const strings = {
+  /** Secret cards in the timeline and the keys Settings lists: names and dates, never a value. */
+  secrets: {
+    cardLabel: 'Secret requested by the agent',
+    replaces: 'Replaces the key kept for this project.',
+    fieldLabel: 'Value of {name}',
+    save: 'Save securely',
+    neverShown: 'Never shown to the agent',
+    decline: 'Decline',
+    keep: 'Keep for this project',
+    keepHint: "Other conversations in this project can use it without asking again. Remove it in the project's settings.",
+    keepReplaceHint: 'Unchecked, the agent gets a one-off copy and the kept key stays as it was.',
+    plainLink: 'Answer from the PC or over HTTPS',
+    saved: '{name} saved for this conversation',
+    savedKept: '{name} saved and kept for this project',
+    declined: '{name} declined',
+    cancelled: '{name} not asked anymore',
+    timedOut: '{name} timed out',
+    heading: 'Secrets',
+    info: 'Keys an agent asked for and you kept for a project. Agents use them by name; Boite never shows a value again. This is not a sandbox: an agent can read back a file a key was written to, and the value then reaches its provider. Masking works only inside Boite.',
+    empty: 'No key kept for a project.',
+    created: 'Added {time}',
+    lastUsed: 'last used {time}',
+    neverUsed: 'never used',
+    storage: 'Stored in {storage}',
+    storageDpapi: 'Windows (DPAPI)',
+    storageKeychain: 'macOS Keychain',
+    storageLibsecret: 'Secret Service',
+    storageMemory: 'Memory only: lost when Boite stops',
+    delete: 'Delete',
+    deleteLabel: 'Delete {name}',
+    deleteTitle: 'Delete {name}?',
+    deleteBody: 'Conversations in {project} will have to ask for this key again.',
+    deletePlain: 'Delete from the PC or over HTTPS'
+  }
+} as const;

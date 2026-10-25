@@ -96,6 +96,9 @@ export class ServerConnection implements Connection {
    */
   constructor(private readonly core: Core, readonly remote = false, private readonly congestionTimeoutMs = OUTBOUND_CONGESTION_TIMEOUT_MS) { }
 
+  /** Set at the upgrade from the peer address, the Host and the Origin (`encryptedLink` in server/peer.ts). */
+  encrypted = false;
+
   attach(socket: ServerWebSocket<SocketData>): void {
     if (!this.closed) this.socket = socket;
   }

@@ -177,6 +177,22 @@ test('a phone paired with one member reaches another through it, and keeps the k
   phone.close();
 });
 
+test('a phone on plain HTTP to one member stays plain on the member it is relayed to, so it sends that one no secret', async () => {
+  const { a, b, phone } = await home();
+  const { threadId } = await echoThread(b, await b.connect());
+  const relay = groupRelayUrl(a.url, id(b));
+  const options = async (host: string) => ({ ticket: (await phone.call('group.ticket', { coreId: id(b) })).ticket, relay: phone.session!.token, client: { name: 'pwa', version: '1' }, headers: { host } });
+
+  // a dials b on loopback either way: only what a tells b of the phone's hop to it decides.
+  const plain = await connect(relay, '', await options('phone.example'));
+  expect(await plain.call('secrets.list', { threadId })).toMatchObject({ encrypted: false });
+  plain.close();
+  const local = await connect(relay, '', await options(new URL(a.url).host));
+  expect(await local.call('secrets.list', { threadId })).toMatchObject({ encrypted: true });
+  local.close();
+  phone.close();
+});
+
 test('a relay carries only a client of its own machine, and says so without touching its key on the other one', async () => {
   const { a, b, phone } = await home();
   const relay = groupRelayUrl(a.url, id(b));

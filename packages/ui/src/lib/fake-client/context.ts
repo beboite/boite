@@ -3,6 +3,7 @@ import type { FakeArchiveState, MergedPrFixture } from './merged-pr-archive';
 /** The state one fake core keeps, and the plumbing every domain module shares. */
 import { observeProgress } from './progress';
 import type { FakeRoster } from './group';
+import type { FakeSecretCard, FakeSecretKey } from './secrets';
 import {
   type ClientPreferences,
   type QuotaAlerts,
@@ -132,6 +133,8 @@ export interface FakeClientOptions {
   windowsDemo?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
+  /** A link nobody encrypts (plain HTTP from another machine): no secret value travels on it; `?fake=1&plainLink=1` sets it. */
+  plainLink?: boolean;
   /**
    * Methods this core answers `unknown method` to, like a machine on an older
    * Boite; `?fake=1&missing=diagnostics.summary,diagnostics.export` sets them.
@@ -284,6 +287,9 @@ export class FakeContext {
     string,
     { request: QuestionRequest; resolve: (answer: QuestionAnswer | null) => void }
   >();
+  /** Secret cards still open (`secrets.ts`), and the keys kept per project: names, dates and a length, never a value. */
+  readonly pendingSecrets = new Map<string, FakeSecretCard>();
+  secretKeys: FakeSecretKey[] = [];
   readonly inFlight = new Map<ThreadId, { cancelled: boolean; done: Promise<void>; steered?: { prompt: string; attachments: Attachment[] }[] }>();
   private readonly toolBoundaries = new Set<string>();
   /** Async answers waiting for the thread to be free, oldest first. */
@@ -305,6 +311,7 @@ export class FakeContext {
   readonly heavy: boolean;
   readonly diagrams: boolean;
   readonly quotaExtras: boolean;
+  readonly plainLink: boolean;
   brainLinkPermission: boolean;
   /**
    * Two agents behind their newest release, one by each route, so the notices
@@ -315,6 +322,7 @@ export class FakeContext {
   constructor(options: FakeClientOptions = {}) {
     this.quotaExtras = options.quotaExtras ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('quotaExtras') === '1');
     this.brainLinkPermission = options.brainLinkPermission ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('brainLinkPermission') === '1');
+    this.plainLink = options.plainLink ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('plainLink') === '1');
     this.bus = new FakeBus(options.principal ?? 'owner');
     this.agents = new FakeAgents(revision => {
       this.emit('agents.changed', { revision });

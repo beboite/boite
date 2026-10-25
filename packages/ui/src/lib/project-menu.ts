@@ -1,4 +1,4 @@
-import { AppWindow, Archive, ArrowDown, ArrowLeft, ArrowUp, Copy, FolderMinus, GitBranch, History, Import, Plus, RefreshCw, Settings, Trash2 } from '@lucide/svelte';
+import { AppWindow, Archive, ArrowDown, ArrowLeft, ArrowUp, Copy, FolderMinus, GitBranch, History, Import, KeyRound, Plus, RefreshCw, Settings, Trash2 } from '@lucide/svelte';
 import type { Project } from '@boite/contracts';
 import type { Store } from './store.svelte';
 import { workspace } from './workspace.svelte';
@@ -63,6 +63,8 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
           ...(project.kind === 'drafts' ? [] : [{ id: 'refresh-icon', label: strings.sidebar.refreshIcon, glyph: RefreshCw, disabled: project.missing === true }])
         ]
       : []),
+    // The keys kept for this project: a paired device lists them too.
+    { id: 'secrets', label: strings.secrets.heading, glyph: KeyRound },
     ...(owner.owner && project.kind !== 'drafts' ? [separator('archive-sep')] : []),
     ...(project.kind === 'drafts' ? [] : [{ id: 'archive-project', label: strings.sidebar.archiveProject, glyph: Archive, disabled: project.archived === true }]),
     ...(owner.owner ? [{ id: 'remove', label: strings.sidebar.removeProject, glyph: Trash2, danger: true }] : [])
@@ -110,6 +112,10 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
       if (action === 'worktrees' || action === 'windows') {
         if (workspace.active !== owner) await workspace.select(owner);
         owner.showSettings('general', action);
+      }
+      if (action === 'secrets') {
+        if (workspace.active !== owner) await workspace.select(owner);
+        owner.showSettings('general', 'secrets');
       }
       if (action === 'refresh-icon') await owner.refreshProjectIcon(project.id);
       if (action === 'import') {

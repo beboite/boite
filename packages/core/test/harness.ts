@@ -6,6 +6,7 @@ import { connect } from '../src/client.ts';
 import type { CoreClient } from '../src/client.ts';
 import { Core, type CoreOptions } from '../src/core.ts';
 import { newToken } from '../src/ids.ts';
+import { MemoryVault } from '../src/platform/secret-vault.ts';
 import { startServer } from '../src/server.ts';
 import type { RunningServer } from '../src/server.ts';
 
@@ -30,6 +31,8 @@ export interface TestCoreOptions {
   pullRequestWatches?: CoreOptions['pullRequestWatches'];
   /** A data directory an earlier test core used: the restart a test wants to see. The test removes it. */
   dataDir?: string;
+  /** The secret vault; a memory vault by default, so no test reaches the system's. */
+  secretVault?: CoreOptions['secretVault'];
 }
 
 const HOST_AGENT_OPT_INS = [
@@ -82,7 +85,7 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
   process.env.BOITE_TERMINAL_SHELL = process.platform === 'win32' ? (process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe') : '/bin/sh';
 
   const token = newToken();
-  const core = new Core({ dataDir, token, onShutdown: options.onShutdown, bundleHash: options.bundleHash, serverUpdates: options.serverUpdates, retentionPassMs: options.retentionPassMs, pullRequestWatches: options.pullRequestWatches });
+  const core = new Core({ dataDir, token, onShutdown: options.onShutdown, bundleHash: options.bundleHash, serverUpdates: options.serverUpdates, retentionPassMs: options.retentionPassMs, pullRequestWatches: options.pullRequestWatches, secretVault: options.secretVault ?? (() => Promise.resolve(new MemoryVault())) });
   // The scripted agents echo their prompt, and the line that teaches `boite ask`
   // would ride along in every reply: a test that wants it turns it back on.
   core.settings.set({ asyncQuestions: false, shortAnswers: false, ...options.settings });

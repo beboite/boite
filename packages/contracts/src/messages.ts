@@ -5,6 +5,7 @@ import type { NativeAgentUpdate } from './delegation';
 import type { MessageId, ProjectId, RequestId, ThreadId, Timestamp, TurnId } from './ids';
 import type { RpcMethods } from './index';
 import type { QuestionAnswer, QuestionOption } from './questions';
+import type { SecretRequestStatus } from './secrets';
 import type { AppLanguage, SettingAsk } from './setting-requests.ts';
 import type { ActivityTurn } from './threads';
 import type { Turn } from './turns';
@@ -200,6 +201,25 @@ export type MessagePart =
       agentSetting?: AgentSettingAsk;
       /** A page to open: see `QuestionRequest.open`. */
       open?: { url: string };
+    }
+  /**
+   * A secret card (`boite secret ask`): the name, the reason and how it ended,
+   * never the value. Answered with `secrets.answer`; `status` and `ref` are
+   * written back once it closes.
+   */
+  | {
+      type: 'secret_request';
+      requestId: RequestId;
+      name: string;
+      reason: string;
+      placeholder: string | null;
+      status: SecretRequestStatus;
+      ref: string | null;
+      /** It replaces a key kept for the project. */
+      replace?: boolean;
+      /** The user kept it for the project. */
+      kept?: boolean;
+      expiresAt?: Timestamp;
     }
   /**
    * The agent compacted its context mid-turn: what it held before, what is

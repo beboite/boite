@@ -126,6 +126,10 @@ export class PushStore {
         const message = payload as RpcEvents['message.started'];
         const consent = message.parts.find(part => part.type === 'window_consent');
         if (consent?.type === 'window_consent') this.notify(message.threadId, { body: `Wants to capture ${consent.process}`, kind: 'approvals' }, `request-${consent.requestId}`, true);
+      } else if (name === 'secret.requested') {
+        // Only that the user is needed: the push service is a third party, and a value never comes this way.
+        const request = payload as RpcEvents['secret.requested'];
+        this.notify(request.threadId, { body: 'Needs your answer', label: 'needsYou', kind: 'questions' }, `request-${request.id}`, true);
       } else if (name === 'turn.finished') {
         const turn = payload as RpcEvents['turn.finished'];
         if (this.closed || this.core.journal.isClosed() || (turn.status !== 'done' && turn.status !== 'error') || !this.reachable()) return;

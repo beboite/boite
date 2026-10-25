@@ -71,7 +71,7 @@ test('a paired device is offered none of the affordances the core refuses it', a
   expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=archive-project]') !== null);
-  expect(menuValues()).toEqual(['back', 'archive-project']);
+  expect(menuValues()).toEqual(['back', 'secrets', 'archive-project']);
   press('Escape');
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
   // The phone's own header manages no project at all.
@@ -106,7 +106,7 @@ test('the desktop still has every one of them', async ({ app: _app }) => {
   expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=archive-project]') !== null);
-  expect(menuValues()).toEqual(['back', 'worktree-default', 'worktrees', 'auto-archive-merged-pr', 'auto-remove-worktrees', 'windows', 'refresh-icon', 'archive-project', 'remove']);
+  expect(menuValues()).toEqual(['back', 'worktree-default', 'worktrees', 'auto-archive-merged-pr', 'auto-remove-worktrees', 'windows', 'refresh-icon', 'secrets', 'archive-project', 'remove']);
   const policyProjectId = query('[data-testid=project-row]').getAttribute('data-project-id')!;
   const policy = query<HTMLButtonElement>('[data-value=auto-archive-merged-pr]');
   expect(policy.getAttribute('role')).toBe('menuitemcheckbox');
