@@ -203,6 +203,17 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     }
     const before = await execute('ordinary-before', ['observe', state]);
     if (!observer('before', before)) throw new Error('ordinary baseline unavailable; no protected task launched');
+    // The new owned suffix must not admit a near-match or a nested path.
+    for (const [index, suffix] of ['.retired.extra', '.retired\\child'].entries()) {
+      const invalid = await execute(`observer-reject-${index}`, ['observe-map',
+        `\\BaseNamedObjects\\boite.route.${process.pid}${suffix}`]);
+      completed(`observer rejected suffix ${index}`, invalid, 125);
+      verify(`observer rejected suffix ${index} before opening`, () => {
+        expect(invalid.out).toBe('');
+        expect(invalid.err).toContain('execution.windows.observer-map.path: native call failed (123)');
+        expect(invalid.err).not.toContain('cleanup close=map-post-exit-observer');
+      });
+    }
     for (const job of jobs) {
       const setup = await execute(`setup-${job.label}`, ['setup', job.profile, job.root, job.project, job.runtime, job.home]);
       const valid = [completed(`setup ${job.label}`, setup),

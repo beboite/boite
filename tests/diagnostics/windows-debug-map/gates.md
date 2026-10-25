@@ -488,6 +488,22 @@ named empty-directory arm's absence; it would not prove every anonymous object
 reference gone, debug-descendant or cancellation cleanup, or NUL compatibility.
 No RETIRE-NAMED native result is established by local compilation.
 
+The dee68dc4 Server run verifies 27 hashes. Both compilers complete
+RETIRE-NAMED's guarded replacement, preserve the terminated root's exit code
+and close the known replacement handle. The original name disappears
+immediately; the replacement name remains at both in-helper gates. Each
+compiler reports the same 25 earlier failures plus the replacement's failed
+exit/absence gates and two failed external-observer assertions, for 30 total.
+The external observer rejects `.retired` with path error 123 before attempting
+an open, so replacement existence after helper exit remains unknown. The
+observer now admits only this additional exact suffix; the existing post-exit
+assertions remain, and near-match/nested suffixes must still fail before open.
+SDK closes 545/545 captured registry handles, MinGW 547/547, and all 120 normal
+stream/window cleanup calls succeed. Five creator fault probes pass for each
+compiler. Production remains 0/7 NUL error 5 per compiler. The in-helper result
+shows that named-map retirement can leave the new empty name retained; no
+complete rundown, owner attribution or production admission is established.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:
