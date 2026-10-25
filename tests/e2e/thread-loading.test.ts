@@ -312,7 +312,9 @@ describe('deferred pictures on a real core', () => {
 
     await cachePreviews(agentThreadId, SCENES);
     const warm = await client.call('threads.get', { threadId: agentThreadId, limit: 40, compactFiles: true, compactImages: true });
-    expect(warm.messages.flatMap(message => message.parts.filter(part => part.type === 'file')).every(part => part.type === 'file' && part.preview)).toBe(true);
+    const warmFiles = warm.messages.flatMap(message => message.parts.filter(part => part.type === 'file'));
+    expect(warmFiles).toHaveLength(SCENES);
+    expect(warmFiles.every(part => part.type === 'file' && part.preview)).toBe(true);
 
     const shown = `Array.from(document.querySelectorAll('${timeline} [data-testid=chat-file] .shot')).filter((node) => {
       const rect = node.getBoundingClientRect();
