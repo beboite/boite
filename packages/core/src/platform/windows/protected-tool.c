@@ -155,12 +155,15 @@ static DWORD private_desktop(PSID app, const wchar_t *profile, HWINSTA *station,
   wchar_t sddl[512]; swprintf(sddl, 512, L"D:P(A;;GA;;;%ls)(A;;GA;;;%ls)S:(ML;;NW;;;LW)", user_text, app_text);
   if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, SDDL_REVISION_1, &descriptor, NULL)) {error = GetLastError(); goto end;}
   SECURITY_ATTRIBUTES attributes = {sizeof(attributes), descriptor, FALSE};
-  swprintf(name, size, L"%ls.%lu", profile, GetCurrentProcessId());
+  int length = swprintf(name, size, L"%ls.%lu", profile, GetCurrentProcessId());
+  if (length < 0 || (size_t)length >= size) {error = ERROR_INSUFFICIENT_BUFFER; goto end;}
   *station = CreateWindowStationW(name, 1 /* CWF_CREATE_ONLY */, WINSTA_ALL_ACCESS, &attributes);
   if (!*station || !SetProcessWindowStation(*station)) {error = GetLastError(); goto end;}
   *desktop = CreateDesktopW(L"default", NULL, NULL, 0, GENERIC_ALL, &attributes);
   if (!*desktop) {error = GetLastError(); goto end;}
-  wcscat(name, L"\\default");
+  size_t remaining = size - (size_t)length;
+  int appended = swprintf(name + length, remaining, L"\\default");
+  if (appended < 0 || (size_t)appended >= remaining) {error = ERROR_INSUFFICIENT_BUFFER; goto end;}
   *object_security = descriptor; descriptor = NULL;
 end:
   if (descriptor) LocalFree(descriptor);
