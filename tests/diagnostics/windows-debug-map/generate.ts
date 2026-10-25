@@ -15,12 +15,17 @@ function once(source: string, before: string, after: string): string {
 export function generate(source: string): string {
   if (sha256(source) !== sourceHash) throw new Error('protected-tool.c changed: review and repin the diagnostic before running');
   source = once(source, 'static int launch(int count, wchar_t **args) {',
-    '#include "routing.h"\n#include "inspect.h"\n#include "setter.h"\n#include "creator.h"\n\nstatic int launch(int count, wchar_t **args) {');
+    '#include "routing.h"\n#include "inspect.h"\n#include "setter.h"\n#include "creator.h"\n#include "target-creator.h"\n\nstatic int launch(int count, wchar_t **args) {');
   source = once(source, 'CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT, NULL, args[3]',
     'CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT | (debug_mode ? DEBUG_PROCESS : 0), NULL, args[3]');
+  source = once(source, '  if (!CreateProcessW(args[4], line, &child_security, &child_security, TRUE, EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED |',
+    '  if (target_creator_mode) {\n' +
+    '    error = target_creator_start(args[2], args[4], line, args[3], desktop_name, object_security, app, registry_read.Sid, job, streams, &child);\n' +
+    '    if (error) goto end;\n  } else if (!CreateProcessW(args[4], line, &child_security, &child_security, TRUE, EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED |');
   source = once(source, '  if (ResumeThread(child.hThread)',
     '  stage = L"routing.boundary"; if (!lowbox_verify(child.hProcess, job, app, registry_read.Sid)) { error = ERROR_ACCESS_DENIED; goto end; }\n' +
-    '  stage = L"routing.prepare"; error = map_prepare(child.hProcess, object_security, args[3], args[4]); if (error) goto end;\n  if (ResumeThread(child.hThread)');
+    '  stage = L"routing.prepare"; error = map_prepare(child.hProcess, object_security, args[3], args[4]); if (error) goto end;\n' +
+    '  if (target_creator_mode) { stage = L"routing.creator-resume"; error = target_creator_before_resume(child.dwProcessId); if (error) goto end; }\n  if (ResumeThread(child.hThread)');
   source = once(source, '  if (WaitForSingleObject(child.hProcess, INFINITE) != WAIT_OBJECT_0 || !GetExitCodeProcess(child.hProcess, &exit_code)) {error = GetLastError(); goto end;}',
     '  if (debug_mode) { stage = L"routing.events"; error = debug_loop(child.dwProcessId, job, app, registry_read.Sid, &exit_code, FALSE); }\n' +
     '  else {\n    DWORD waited = WaitForSingleObject(child.hProcess, 15000);\n' +
@@ -75,13 +80,16 @@ export function generate(source: string): string {
     '  else if (count > 1 && !wcscmp(args[1], L"inspect")) result = inspect(count, args);\n' +
     '  else if (count > 1 && !wcscmp(args[1], L"assign-map")) result = setter_entry(count, args);\n' +
     '  else if (count > 1 && !wcscmp(args[1], L"create-map")) result = creator_entry(count, args);\n' +
+    '  else if (count > 1 && !wcscmp(args[1], L"create-target")) result = target_creator_entry(count, args);\n' +
     '  else if (count > 4 && (!wcscmp(args[1], L"run") || !wcscmp(args[1], L"debug-run") ||\n' +
     '      !wcscmp(args[1], L"direct-run") || !wcscmp(args[1], L"setter-run") || !wcscmp(args[1], L"quiet-run") ||\n' +
-    '      !wcscmp(args[1], L"reopen-run") || !wcscmp(args[1], L"creator-run") || !wcscmp(args[1], L"retire-run") || !wcscmp(args[1], L"retire-named-run"))) {\n' +
+    '      !wcscmp(args[1], L"reopen-run") || !wcscmp(args[1], L"creator-run") || !wcscmp(args[1], L"retire-run") || !wcscmp(args[1], L"retire-named-run") ||\n' +
+    '      !wcscmp(args[1], L"target-exited-run") || !wcscmp(args[1], L"target-waiting-run"))) {\n' +
     '    debug_mode = !wcscmp(args[1], L"debug-run");\n' +
     '    reopen_owned_map = !wcscmp(args[1], L"reopen-run");\n' +
     '    external_map_creator = !wcscmp(args[1], L"creator-run");\n' +
-    '    retire_named_map = !wcscmp(args[1], L"retire-named-run");\n' +
+    '    target_creator_mode = !wcscmp(args[1], L"target-exited-run") ? 1 : !wcscmp(args[1], L"target-waiting-run") ? 2 : 0;\n' +
+    '    retire_named_map = !wcscmp(args[1], L"retire-named-run") || target_creator_mode;\n' +
     '    retire_owned_map = !wcscmp(args[1], L"retire-run") || retire_named_map;\n' +
     '    observe_owned_handles = wcscmp(args[1], L"quiet-run") != 0;\n' +
     '    assignment_scope = !wcscmp(args[1], L"setter-run") ? 2 :\n' +
@@ -93,7 +101,15 @@ export function generate(source: string): string {
     '      observe_owned_handles, object_count_queries, handle_snapshot_queries); fflush(stderr);\n' +
     '    if (before || after) result = failure(L"routing.caller-state", before ? before : after);\n' +
     '    DWORD final_map = retired_absence(L"final");\n' +
-    '    if (final_map) result = failure(L"routing.cleanup.final-map", final_map);\n  }');
+    '    if (final_map) result = failure(L"routing.cleanup.final-map", final_map);\n' +
+    '    DWORD creator_exit = target_creator_finish(FALSE);\n' +
+    '    if (creator_exit) result = failure(L"routing.cleanup.target-creator", creator_exit);\n' +
+    '    if (target_creator_mode == 2 && tc_released) {\n' +
+    '      DWORD creator_closed = creator_exit ? creator_exit : tc_barrier(L"closed", NULL);\n' +
+    '      if (creator_closed) result = failure(L"routing.cleanup.creator-registry", creator_closed);\n' +
+    '      DWORD creator_map = creator_closed ? creator_closed : target_creator_absence();\n' +
+    '      if (creator_map) result = failure(L"routing.cleanup.creator-exited-map", creator_map);\n' +
+    '    }\n  }');
   if (source.includes('INFINITE')) throw new Error('diagnostic retains an unbounded wait');
   return source;
 }
@@ -104,7 +120,7 @@ export function writeSource(output: string): Record<string, string> {
   const source = generate(original);
   writeFileSync(join(output, 'debug-map.c'), source);
   const hashes: Record<string, string> = {'protected-tool.c': sha256(original), 'debug-map.c': sha256(source)};
-  for (const file of ['routing.h', 'inspect.h', 'ownership.h', 'identity.h', 'startup-site.h', 'startup-site.json', 'roundtrip.h', 'setter.h', 'creator.h']) {
+  for (const file of ['routing.h', 'inspect.h', 'ownership.h', 'identity.h', 'startup-site.h', 'startup-site.json', 'roundtrip.h', 'setter.h', 'creator.h', 'target-creator.h']) {
     const bytes = readFileSync(join(import.meta.dir, file));
     writeFileSync(join(output, file), bytes);
     hashes[file] = sha256(bytes);

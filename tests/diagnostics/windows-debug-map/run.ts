@@ -49,7 +49,7 @@ try {
   const hashes = writeSource(output); manifest.sourceHashes = hashes;
   if (ownership) for (const file of ['jobs.ts', 'jobs-worker.ts', 'preload.ts', 'provenance.json'])
     hashes[`ownership-source/${file}`] = sha256(readFileSync(join(ownership.directory, file)));
-  for (const file of ['generate.ts', 'run.ts', 'routing.test.ts', 'environment.ts', 'capture.ts', 'gates.md',
+  for (const file of ['generate.ts', 'run.ts', 'routing.test.ts', 'environment.ts', 'capture.ts', 'gates.md', 'target-topology.ts', 'target-topology.test.ts', 'target-topology-export.txt',
     'ownership-generate.ts', 'ownership-ledger.ts', 'ownership-trace.ts', 'ownership-summary.ts']) {
     hashes[file] = sha256(readFileSync(join(import.meta.dir, file)));
   }
@@ -60,7 +60,7 @@ try {
   async function execute(id: string, executable: string, args: string[], env = selectedEnvironment()) {
     if (!procs) throw new Error('compiler registry not initialized');
     const child = procs.spawnPiped(id, executable, args, {cwd: output, env, agentRoot: false});
-    const result = await capture(procs, id, child, id.startsWith('compile') ? 90000 : 110000);
+    const result = await capture(procs, id, child, id.startsWith('compile') ? 90000 : 170000);
     writeFileSync(join(output!, `${id}.log`), `pid=${result.pid} exit=${result.code} timedOut=${result.timedOut}\n${result.out}${result.err}`);
     console.log(`${id}: pid=${result.pid} exit=${result.code} timedOut=${result.timedOut}\n${result.out}${result.err}`);
     return result;

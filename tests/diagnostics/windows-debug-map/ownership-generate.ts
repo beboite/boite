@@ -39,13 +39,15 @@ export function instrumentJobs(source: string, generatedWorker: string): string 
     "      ownershipTrace.stage(entry.handle, 'still-active-deferral', {threadId, pid}); return;\n    }");
   source = once(source, '  tracked.set(pid, { threadId, handle, peakMemoryBytes: 0, identity });',
     "  tracked.set(pid, { threadId, handle, peakMemoryBytes: 0, identity });\n" +
-    "  ownershipTrace.stage(handle, 'tracked', {threadId, pid, capturedIdentity: identity});");
+    "  ownershipTrace.stage(handle, 'tracked', {threadId, pid, capturedIdentity: identity});\n" +
+    "  ownershipMembership(pid);");
   source = once(source, 'function onJobPacket(message: number, key: number, pid: number, handle = 0): void {',
     "function onJobPacket(message: number, key: number, pid: number, handle = 0): void {\n" +
     "  ownershipTrace.event({event: 'job-packet', message, key, pid, handle});");
   source = imports(source, jobsPath);
   return `import {ownershipTrace, ownershipWorkerOptions} from ${JSON.stringify(runtime)};\n` + source +
-    '\nexport const ownershipTraceInstalled = true;\n';
+    '\nexport const ownershipTraceInstalled = true;\n' +
+    readFileSync(join(import.meta.dir, 'target-topology-export.txt'), 'utf8');
 }
 export function instrumentWorker(source: string): string {
   if (sha256(source) !== workerHash) throw new Error('jobs-worker.ts source drift: review and repin ownership trace');
@@ -80,7 +82,7 @@ export function prepareOwnership(directory: string): PreparedOwnership {
     [jobs]: sha256(generatedJobs), [worker]: sha256(generatedWorker),
     [preload]: sha256(readFileSync(preload)),
   };
-  for (const name of ['ownership-generate.ts', 'ownership-ledger.ts', 'ownership-trace.ts'])
+  for (const name of ['ownership-generate.ts', 'ownership-ledger.ts', 'ownership-trace.ts', 'target-topology-export.txt'])
     hashes[join(import.meta.dir, name)] = sha256(readFileSync(join(import.meta.dir, name)));
   writeFileSync(join(directory, 'provenance.json'), JSON.stringify({jobsPath, workerPath, hashes}, null, 2) + '\n');
   return {directory, jobs, worker, preload, hashes};
@@ -105,6 +107,14 @@ export async function verifyOwnershipPlatform(): Promise<void> {
     throw new Error('Windows ProcessPlatform bypassed ownership interception');
   const {ownershipTrace} = await import('./ownership-trace.ts');
   ownershipTrace.event({event: 'interception-verified', canonical: jobsPath, platformAttach: true});
+}
+
+/** Resolve only the installed hash-pinned diagnostic copy, never a new owner. */
+export async function ownedMembershipReader(): Promise<(pid: number) => Omit<import('./target-topology.ts').Membership, 'owner' | 'role'> | null> {
+  const canonical = await import(pathToFileURL(jobsPath).href);
+  if (canonical.ownershipTraceInstalled !== true || typeof canonical.ownershipMembership !== 'function')
+    throw new Error('owned membership diagnostic export unavailable');
+  return canonical.ownershipMembership;
 }
 
 export function ownershipTestArgs(preload: string, file: string): string[] {

@@ -528,6 +528,74 @@ explicit launch cleanup as a sufficient explanation, without attributing an
 internal reference. No native result of this added observation is established
 by compilation.
 
+## Target creator lifetime pair
+
+TARGET-EXITED and TARGET-WAITING retain the root-only RETIRE-NAMED setup and
+every original immediate, eventual, checkpoint, final and post-helper gate.
+Only the suspended LPAC target's CreateProcess call moves into the exact trusted
+helper image. The controller still creates the map/link, adjusts the target
+token default, verifies its boundary, assigns/resumes it and performs retirement.
+The intermediary creates no job, requests no breakaway or PARENT_PROCESS, and
+never resumes the target. It inherits the existing ancestor chain; the same
+private target job is supplied atomically in the target's JOB_LIST, with the
+same LPAC capabilities, descriptor, desktop, argv, environment, cwd and three
+stdio handles. No production source, job identity/name/policy or assignment
+changes.
+
+Two private 5-second barriers block intermediary resume and target handoff.
+Each requires exact PID/creation identity and equal membership in the actual
+owned global/thread job references of BOTH launcher and harness. The generated
+jobs copy emits launcher membership automatically at its existing tracked
+event; the harness queries its existing captured handles afresh. Record
+globalJob/nestingRefused and actual membership, including an explicit missing
+global job or nesting refusal. Missing acquisitions, identities or memberships
+never release a barrier. No PID is reopened for these checks, no job/process
+handle is transferred out of its registry, and no assignments or access masks
+change. This verifies the two registries' owned ancestor jobs; it does not
+enumerate or identify any other runner-owned jobs.
+
+An owner-only nonce-bound overlapped pipe carries extent-validated frames,
+the exact self-relative SD and independently validated package/capability SIDs.
+The intermediary initially inherits only that pipe, a minimal QUERY/ASSIGN
+duplicate of the private job and three stdio duplicates. Its target HANDLE_LIST
+contains only the three stdio handles. The controller duplicates only the two
+explicit newly returned target process/thread handles through its captured
+intermediary process handle, while their source handles remain live until the
+handoff acknowledgement. No table search, PID reopening or remote close occurs.
+Before acknowledgement it validates creation identity, thread ownership,
+image file ID, native parent, private job, noninheritance and exact process/thread
+DACLs. The original controller token setup and boundary checks still precede
+map assignment/resume.
+
+RELEASED requires the intermediary to close its two target handles, job/stdout/
+stdin/stderr duplicates and attribute resources; only its control channel and
+bounded I/O event remain among known resources. TARGET-EXITED requires exit 0,
+controller closure and a third closure-only handshake reconciling every known
+creator reference in both registries before map assignment/root resume.
+TARGET-WAITING keeps the same intermediary alive through the unchanged final
+gate, then requests exit and the same registry reconciliation while the outer
+helper remains alive. Only after that handshake, observe both original and
+replacement names with no observer spanning creator exit. Earlier failures
+remain fatal even if this later observation succeeds.
+
+Creation/handoff takes at most 5 seconds after intermediary resume; its control
+wait has an independent 30-second lifetime. Each I/O cancellation gets a 1-second
+drain; an undrained heap-backed buffer/OVERLAPPED remains alive until process
+exit and makes the trial fatal. Cleanup uses only captured intermediary and
+owned target-job handles. Parent and successful-child I/O event acquisition/
+closure counts must match. Five native faults (nonce, descriptor extent, short
+frame, premature exit, stall) must reject before any target instruction or map
+assignment and reconcile cleanup. Portable tests exercise invalid identities,
+missing/wrong owner membership, nesting refusal, transfer/closure evidence and
+actual barrier release. The aggregate diagnostic test/launcher watchdogs allow
+150/170 seconds for the additional cases; existing per-target/process/map
+deadlines and all required production suites are unchanged.
+
+No native result is established for this pair. Releasing only after an exited
+target creator would correlate the fixture's retention with that lifetime,
+without identifying an internal owner. An invalid protocol/identity/topology/
+closure makes the comparison unusable; no production admission follows.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:
