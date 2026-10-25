@@ -157,6 +157,8 @@ export interface SubscriptionProxyQuotas {
    */
   status: 'ready' | 'unsupported' | 'unavailable' | 'off';
   providers: GatewayQuotaProvider[];
+  /** The core verified the native Muse catalog and Responses route without running inference. */
+  nativeMuse?: boolean;
   /** The gateway's own `updated_at`. */
   updatedAt: Timestamp | null;
   /** When the core last had an answer. */

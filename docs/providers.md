@@ -187,7 +187,10 @@ finds no sign-in, and the account's own stays for when the proxy is off. This
 was measured on Grok CLI 1.0.46, where `GROK_AUTH_PATH` is not documented.
 
 Muse Code uses Douane only after its quotas response announces a non-disabled
-entry in the native `meta` pool. A Muse model served by OpenCode Go does not
+entry in the native `meta` pool and the core verifies both native routes without
+inference: the catalog must contain Muse metadata, and an OPTIONS request to the
+Responses route must advertise POST. Older gateways returning 404 or dashboard
+HTML keep native authentication. A Muse model served by OpenCode Go does not
 connect Muse Code. Without that pool, with CLIProxyAPI, or with the gateway
 off, Muse keeps its native sign-in. Discovery updates the connection state
 even when Meta has not reported a quota window yet.

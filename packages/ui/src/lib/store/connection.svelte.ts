@@ -357,6 +357,7 @@ export class Connection {
     s.todos = {};
     s.resources = [];
     s.trace = [];
+    this.ctx.accounts.proxyQuotas = null;
     this.ctx.workbench.tracedThreadId = null;
     this.principal = null;
     this.core = null;

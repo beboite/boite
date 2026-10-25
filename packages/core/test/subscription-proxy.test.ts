@@ -29,7 +29,16 @@ test('proxy URLs reject credential channels and retain the dashboard route', () 
 
 test('Muse uses only an observed native Meta subscription and restores its own login otherwise', async () => {
   let meta = false;
-  gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
+  let routes: 'missing' | 'html' | 'error' | 'catalog-only' | 'native' = 'missing';
+  gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+    const path = new URL(request.url).pathname;
+    if (path === '/muse-code/models') {
+      if (routes === 'missing') return new Response('Missing', { status: 404 });
+      if (routes === 'html') return new Response('<html>Dashboard</html>');
+      if (routes === 'error') return new Response('Temporary failure', { status: 503 });
+      return Response.json({ data: [{ id: 'muse-spark-1.3', metadata: { 'muse-code': { name: 'Muse Spark 1.3' } } }] });
+    }
+    if (path === '/muse-code/responses') return new Response(null, { status: routes === 'native' ? 405 : 404, headers: routes === 'native' ? { Allow: 'POST' } : {} });
     return Response.json({ providers: [{ provider: meta ? 'meta' : 'opencode_go', name: 'Muse', entries: [
       { id: 'seat', label: 'Subscription', accounts: 1, status: 'ready', windows: [], credits: [] },
     ] }] });
@@ -43,6 +52,13 @@ test('Muse uses only an observed native Meta subscription and restores its own l
   await owner.call('subscriptionProxy.quotas', { refresh: true });
   expect(subscriptionProxyEnv(harness.core, provider)).toEqual({});
   meta = true;
+  for (const mode of ['missing', 'html', 'error', 'catalog-only'] as const) {
+    routes = mode;
+    await owner.call('subscriptionProxy.quotas', { refresh: true });
+    expect((await owner.call('accounts.check', { accountId: account.id })).status).toBe('unauthenticated');
+    expect(subscriptionProxyEnv(harness.core, provider)).toEqual({});
+  }
+  routes = 'native';
   await owner.call('subscriptionProxy.quotas', { refresh: true });
   expect((await owner.call('accounts.check', { accountId: account.id })).status).toBe('ok');
   const env = harness.core.accounts.accountEnv(account, provider);
@@ -65,7 +81,9 @@ test('Muse uses only an observed native Meta subscription and restores its own l
 });
 
 test('the first Muse probe discovers Meta before capturing its account revision', async () => {
-  gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
+  gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+    if (new URL(request.url).pathname === '/muse-code/models') return Response.json({ data: [{ id: 'muse-spark-1.3', metadata: { 'muse-code': { name: 'Muse Spark 1.3' } } }] });
+    if (new URL(request.url).pathname === '/muse-code/responses') return new Response(null, { status: 405, headers: { Allow: 'POST' } });
     return Response.json({ providers: [{ provider: 'meta', entries: [
       { id: 'native', label: 'Native subscription', status: 'ready', windows: [], credits: [] },
     ] }] });
