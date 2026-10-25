@@ -629,6 +629,27 @@ production suites still fail all seven cases per compiler on NUL access error 5.
 
 ## Independent ordinary pipe semantics
 
+The 5d3a9d6a run verifies 39 source/helper hashes. Both ordinary pipe probes
+compile and complete 32 EOF reads, 32 zero-message writes/flushes and 32 64-KiB
+writes, with 225/225 I/O events, three joins and nine fixture handles closed.
+SDK counts only 983,040 received bytes; MinGW counts 1,015,808, and both report
+1460. Neither result is accepted. Registry references reconcile 793/793 SDK and
+797/797 MinGW; all 38 map failures per compiler and production NUL failures
+remain. The artifact does not identify the failing wait or initial read branches.
+
+The overlapped wrapper used the synchronous ReadFile byte output and skipped
+GetOverlappedResult after immediate ERROR_MORE_DATA. Microsoft requires
+asynchronous callers to retrieve the actual count through GetOverlappedResult.
+The wrapper now does so after immediate success or partial completion as well
+as pending completion, and preserves partial data for its caller. A queued
+32-byte prefix must produce an immediate seven-byte MORE_DATA fragment with
+exact contents, then the remaining 25 bytes. Its immediate-partial count and
+byte total are recorded separately from the subsequent 2-MiB discard total.
+The summary records the main failure stage. This fixes a documented accounting
+assumption; whether it explains the observed deficit requires a new native run.
+No successful SDK/native result is established for this patch.
+
+
 The same opt-in launcher also compiles `null-message.c` separately with both
 strict compiler configurations and launches it through the real ProcRegistry.
 It creates one private message pipe, leaves the client's default byte-read
@@ -636,7 +657,8 @@ mode unchanged, sends zero-length messages separated by FlushFileBuffers,
 and drains incoming writes independently. Acceptance requires 32 successful
 zero-byte reads, 32 zero writes/flushes and 32 discarded 64-KiB writes
 (2,097,152 bytes), three joined workers, nine closed fixture handles and
-balanced per-operation I/O events. No pipe handle closes before workers join;
+balanced per-operation I/O events. The prefix adds three operations and must
+verify both fragments before the concurrent exercise. No pipe handle closes before workers join;
 undecidable cancellation keeps its buffer/event alive until process termination.
 A 15-second process watchdog and 20-second registry capture bound the trial.
 
