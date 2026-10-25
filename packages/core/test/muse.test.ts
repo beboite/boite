@@ -6,7 +6,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { MessagePart, PermissionMode, ProviderDescriptor, RpcEvents, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
-import { choiceFor, mintUuidV7, museExecutable, museHostArgs } from '../src/drivers/muse.ts';
+import { choiceFor, mintUuidV7, museExecutable, museHostArgs, MUSE_HOST_SETTINGS } from '../src/drivers/muse.ts';
 import { setMuseStartupDeadlineForTests } from '../src/drivers/muse/session.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -736,13 +736,15 @@ describe('muse wire helpers', () => {
     }
   });
 
-  test("the host runs without reminder agents only on a release that has the setting", () => {
+  test("the host runs without reminder agents and with an early compaction only on a release that has the settings", () => {
     const dir = mkdtempSync(join(tmpdir(), 'muse-install-'));
     try {
       const binary = join(dir, 'muse');
       // No version record: the host keeps its own reminders.
       expect(museHostArgs(binary)).toEqual([]);
-      const off = ['-c', 'run.reminder_roster={}'];
+      const off = MUSE_HOST_SETTINGS;
+      expect(off).toContain('run.reminder_roster={}');
+      expect(off).toContain('context_compaction.provider_context_limit_tokens=200000');
       for (const [version, args] of [
         ['1.3.0-R3401.1', []],
         ['1.4.12', []],

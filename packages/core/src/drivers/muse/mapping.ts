@@ -65,19 +65,32 @@ export function museExecutable(provider: ProviderDescriptor): string {
 }
 
 /**
- * The first release known to take `-c run.reminder_roster`. Older hosts refuse
+ * The first release known to take these `-c` settings. Older hosts refuse
  * `-c` (1.3.0) or an unknown key, and either refusal stops the host at launch.
  */
-const EMPTY_ROSTER_SINCE = [1, 4, 13];
+const HOST_SETTINGS_SINCE = [1, 4, 13];
 
 /**
- * Settings for the `muse serve` host. An empty reminder roster stops the
- * skill, goal and verify reminder agents: each one is a second call to the
- * thread's model at every step, and the blocking ones hold the turn open after
- * the answer. A two-step turn took 24.6 s with them and 15.5 s without.
+ * Settings for the `muse serve` host, both for speed:
+ * - An empty reminder roster stops the skill, goal and verify reminder agents.
+ *   Each one is a second call to the thread's model at every step, and the
+ *   blocking ones hold the turn open after the answer: a two-step turn took
+ *   24.6 s with them and 15.5 s without.
+ * - A 200k-token context limit, soft threshold at 60 % and hard at 85 %, makes
+ *   Muse compact in the background from 120k and before a step at 170k. Left
+ *   at the model's 1M window it never compacted: one 75-call turn reached
+ *   245k tokens, and steps above 150k took 17 to 48 s against 5 to 8 s
+ *   under 100k.
  * Applied only to a Muse executable whose `.muse-version` beside it names a
- * release that has the setting.
+ * release that has the settings.
  */
+export const MUSE_HOST_SETTINGS = [
+  '-c', 'run.reminder_roster={}',
+  '-c', 'context_compaction.provider_context_limit_tokens=200000',
+  '-c', 'context_compaction.soft_threshold=0.6',
+  '-c', 'context_compaction.hard_threshold=0.85',
+];
+
 export function museHostArgs(executable: string): string[] {
   if (!basename(executable).toLowerCase().startsWith('muse')) return [];
   let version = '';
@@ -88,9 +101,9 @@ export function museHostArgs(executable: string): string[] {
   }
   const parts = /^(\d+)\.(\d+)\.(\d+)/.exec(version)?.slice(1).map(Number);
   if (parts === undefined) return [];
-  const index = parts.findIndex((part, i) => part !== EMPTY_ROSTER_SINCE[i]);
-  const supported = index === -1 || parts[index]! > EMPTY_ROSTER_SINCE[index]!;
-  return supported ? ['-c', 'run.reminder_roster={}'] : [];
+  const index = parts.findIndex((part, i) => part !== HOST_SETTINGS_SINCE[i]);
+  const supported = index === -1 || parts[index]! > HOST_SETTINGS_SINCE[index]!;
+  return supported ? [...MUSE_HOST_SETTINGS] : [];
 }
 
 /** The model this turn asks for, or null for the agent's own. */

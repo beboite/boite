@@ -665,7 +665,7 @@ is the deterministic fake the tests and the bench run on, loaded only under
 | Antigravity | `acp` | Managed `agy_acp_server` for the host OS |
 | Grok | `acp` | `grok [permission flags] agent [approval flag] stdio` |
 | Codex | `codex-appserver` | `codex app-server` |
-| Muse Code | `muse` | `muse serve --trust-workspace [-c run.reminder_roster={}] [mode flags]` |
+| Muse Code | `muse` | `muse serve --trust-workspace [MUSE_HOST_SETTINGS] [mode flags]` |
 | pi | `pi` | Package bin through Node or `pi --mode rpc` |
 | Echo | `echo` | In-process fixture |
 
@@ -1349,15 +1349,24 @@ process here goes through `procs.spawnChild`. The driver refuses a host whose
   Boite pinned, and unsets `META_API_KEY`, so a key in the user's environment
   never replaces the account's login.
 - From Muse 1.4.13, read from `.muse-version` beside a `muse` executable, the
-  host starts with `-c run.reminder_roster={}`. Muse's skill, goal and verify
-  reminder agents each call the thread's model again at every step, and the
-  blocking ones hold the turn open after the answer. On 2026-10-25, through
-  Douane, `muse exec --json --model muse-wonder-full-1.0-contributor
-  --reasoning-effort xhigh --workspace <empty dir> "<list this folder with a
-  tool, then answer ok>"`, alternated with and without
-  `-c 'run.reminder_roster={}'`, took 24.1 s and 25.1 s with the reminders and
-  14.8 s and 16.3 s without.
-  Older hosts refuse `-c`, so they start as before.
+  host starts with `MUSE_HOST_SETTINGS` (`drivers/muse/mapping.ts`). Older
+  hosts refuse `-c`, so they start as before.
+  - `run.reminder_roster={}` stops Muse's skill, goal and verify reminder
+    agents. Each one calls the thread's model again at every step, and the
+    blocking ones hold the turn open after the answer. On 2026-10-25, through
+    Douane, `muse exec --json --model muse-wonder-full-1.0-contributor
+    --reasoning-effort xhigh --workspace <empty dir> "<list this folder with a
+    tool, then answer ok>"`, alternated with and without
+    `-c 'run.reminder_roster={}'`, took 24.1 s and 25.1 s with the reminders and
+    14.8 s and 16.3 s without.
+  - `context_compaction.provider_context_limit_tokens=200000` with the soft
+    threshold at 0.6 and the hard one at 0.85 makes Muse compact in the
+    background from 120k tokens and before a step at 170k. At the model's 1M
+    window it never compacted: on 2026-10-25 one turn of 75 model calls on
+    muse-wonder-full-1.0-contributor reached 245k tokens, with steps of 5 to
+    8 s under 100k and 17 to 48 s above 150k (`duration_ms` and
+    `estimated_prompt_tokens` of its `session.jsonl`). The context meter shows
+    the 200k window the host reports.
 
 ### pi
 
