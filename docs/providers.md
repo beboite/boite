@@ -665,7 +665,7 @@ is the deterministic fake the tests and the bench run on, loaded only under
 | Antigravity | `acp` | Managed `agy_acp_server` for the host OS |
 | Grok | `acp` | `grok [permission flags] agent [approval flag] stdio` |
 | Codex | `codex-appserver` | `codex app-server` |
-| Muse Code | `muse` | `muse serve --trust-workspace [mode flags]` |
+| Muse Code | `muse` | `muse serve --trust-workspace [MUSE_HOST_SETTINGS] [mode flags]` |
 | pi | `pi` | Package bin through Node or `pi --mode rpc` |
 | Echo | `echo` | In-process fixture |
 
@@ -1402,6 +1402,17 @@ process here goes through `procs.spawnChild`. The driver refuses a host whose
 - The profile sets `MUSE_NO_AUTO_UPDATE=1`, so the launcher never updates what
   Boite pinned, and unsets `META_API_KEY`, so a key in the user's environment
   never replaces the account's login.
+- From Muse 1.4.13, read from `.muse-version` beside a `muse` executable, the
+  host starts with `MUSE_HOST_SETTINGS` (`drivers/muse/mapping.ts`). Older
+  hosts refuse `-c`, so they start as before.
+  - `run.reminder_roster={}` stops Muse's skill, goal and verify reminder
+    agents. Each one calls the thread's model again at every step, and the
+    blocking ones hold the turn open after the answer. On 2026-10-25, through
+    Douane, `muse exec --json --model muse-wonder-full-1.0-contributor
+    --reasoning-effort xhigh --workspace <empty dir> "<list this folder with a
+    tool, then answer ok>"`, alternated with and without
+    `-c 'run.reminder_roster={}'`, took 24.1 s and 25.1 s with the reminders and
+    14.8 s and 16.3 s without.
 
 Protected shared Muse sessions require native 1.4.13 and MSP fingerprint
 `sha256:7fddaf646dbc317e5fcac0785e135eb04df14fbb0db1863089dfd6da21730e5b`.

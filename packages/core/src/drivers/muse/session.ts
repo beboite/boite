@@ -18,6 +18,7 @@ import {
   mapUsage,
   modelOf,
   museExecutable,
+  museHostArgs,
   optionsOf,
   questionTextOf,
   tasksOf,
@@ -347,7 +348,8 @@ export class MuseSession {
     const posture = MODE_POSTURE[ctx.thread.permissionMode];
     const declared = profileFor(ctx.provider)?.launch?.args ?? [];
     this.protection = protectedMuse(ctx, () => this.current ? {ctx: this.current.ctx, stopped: this.current.stopped} : null, declared);
-    const child = ctx.spawnChild(executable, this.protection?.args ?? [...declared, ...posture.flags], {
+    const args = this.protection?.args ?? [...declared, ...museHostArgs(executable), ...posture.flags];
+    const child = ctx.spawnChild(executable, args, {
       cwd: this.protection?.cwd ?? ctx.thread.cwd,
       env: this.protection?.env ?? agentEnv(ctx.provider, ctx.accountEnv),
     });
