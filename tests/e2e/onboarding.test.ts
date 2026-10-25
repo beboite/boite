@@ -18,11 +18,11 @@ const WATCH_PALETTE = `(() => {
 })()`;
 /** Runs before the app on the next load: notes whether the tour is ever drawn. */
 const WATCH_TOUR = `new MutationObserver(() => { if (document.querySelector('[data-testid=onboarding]')) window.__tourShown = true; }).observe(document, { childList: true, subtree: true });`;
-async function capture(name: string) {
+async function capture(name: string, browser = page) {
   // Static layout captures use the final frame. The interaction test below
   // checks the running timeline, pause and replay separately.
-  await page.evaluate(`document.fonts.ready.then(() => { for (const animation of document.getAnimations()) { if (animation.effect?.getTiming().iterations !== Infinity) animation.finish(); } })`);
-  await page.screenshot(join(import.meta.dir, '.artifacts', name));
+  await browser.evaluate(`document.fonts.ready.then(() => { for (const animation of document.getAnimations()) { if (animation.effect?.getTiming().iterations !== Infinity) animation.finish(); } })`);
+  await browser.screenshot(join(import.meta.dir, '.artifacts', name));
 }
 beforeAll(async () => {
   const port = await freePort();
@@ -266,28 +266,31 @@ test('an unavailable onboarding chunk keeps agent updates accessible in Machines
 }, 60_000);
 
 test('a phone gets two screens: the welcome and what the computer does, no host setting', async () => {
-  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
-  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-  try {
-    for (const locale of ['en', 'fr']) {
-      await page.evaluate(`localStorage.removeItem('boite.onboarding'); localStorage.setItem('boite.locale', '${locale}')`);
-      await page.reload();
-      await page.waitFor(`document.querySelector('[data-testid=onboarding-step]')?.dataset.step === 'welcome'`);
-      expect(await page.evaluate<string[]>(`[...document.querySelectorAll('[data-testid=onboarding] .dot')].map(dot => dot.dataset.testid)`)).toEqual(['onboarding-dot-welcome', 'onboarding-dot-reach']);
-      await capture(`tour-phone-${locale}-welcome.png`);
-      await page.click('[data-testid=onboarding-next]');
-      await page.waitFor(`document.querySelector('[data-testid=onboarding-step]')?.dataset.step === 'reach'`);
-      expect(await page.evaluate(`document.querySelector('#onboarding-title').textContent`)).toBe(locale === 'en' ? 'Your computer does the work' : 'Votre ordinateur fait le travail');
-      expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
-      expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-next]').getBoundingClientRect().bottom <= innerHeight`)).toBe(true);
-      await capture(`tour-phone-${locale}-reach.png`);
+  const origin = await page.evaluate<string>('location.origin');
+  for (const locale of ['en', 'fr']) {
+    // A first-run phone owns a fresh profile and history, independent of the desktop Settings scenarios.
+    const phone = await BrowserPage.launch({ url: 'about:blank', showTour: true, windowSize: { width: 390, height: 844 } });
+    try {
+      await phone.send('Page.addScriptToEvaluateOnNewDocument', { source: `localStorage.setItem('boite.locale', '${locale}')` });
+      await phone.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+      await phone.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+      await phone.navigate(`${origin}/?fake=1`);
+      await phone.waitFor(`document.querySelector('[data-testid=onboarding-step]')?.dataset.step === 'welcome' && (history.state?.boiteDepth ?? 0) > 0`);
+      const historyDepth = await phone.evaluate<number>('history.state.boiteDepth');
+      expect(await phone.evaluate<string[]>(`[...document.querySelectorAll('[data-testid=onboarding] .dot')].map(dot => dot.dataset.testid)`)).toEqual(['onboarding-dot-welcome', 'onboarding-dot-reach']);
+      await capture(`tour-phone-${locale}-welcome.png`, phone);
+      await phone.click('[data-testid=onboarding-next]');
+      await phone.waitFor(`document.querySelector('[data-testid=onboarding-step]')?.dataset.step === 'reach'`);
+      expect(await phone.evaluate(`document.querySelector('#onboarding-title').textContent`)).toBe(locale === 'en' ? 'Your computer does the work' : 'Votre ordinateur fait le travail');
+      expect(await phone.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+      expect(await phone.evaluate(`document.querySelector('[data-testid=onboarding-next]').getBoundingClientRect().bottom <= innerHeight`)).toBe(true);
+      await capture(`tour-phone-${locale}-reach.png`, phone);
       // The second screen is the last: its button closes the tour, and the device remembers.
-      await page.click('[data-testid=onboarding-next]');
-      await page.waitFor(`!document.querySelector('[data-testid=onboarding]')`);
-      expect(await page.evaluate<number>(`JSON.parse(localStorage.getItem('boite.onboarding')).version`)).toBeGreaterThan(0);
+      await phone.click('[data-testid=onboarding-next]');
+      await phone.waitFor(`!document.querySelector('[data-testid=onboarding]') && (history.state?.boiteDepth ?? 0) < ${historyDepth}`);
+      expect(await phone.evaluate<number>(`JSON.parse(localStorage.getItem('boite.onboarding')).version`)).toBeGreaterThan(0);
+    } finally {
+      await phone.close();
     }
-  } finally {
-    await page.evaluate(`localStorage.removeItem('boite.locale')`);
-    await page.send('Emulation.clearDeviceMetricsOverride', {});
   }
 }, 45_000);

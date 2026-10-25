@@ -167,11 +167,26 @@ export interface Settings {
    */
   deviceStream?: boolean;
   /**
+   * Apps `boite window` never captures, beside `WINDOW_CAPTURE_EXCLUDED`:
+   * executable names (`Signal.exe`) or full paths, matched without case
+   * (docs/windows.md). Missing reads as none.
+   */
+  windowCaptureExclusions?: string[];
+  /**
    * Agents on the other machines of this machine's group may start threads
    * here (`boite thread new --machine`), in its projects, as their own agent
    * would from this machine. Each machine decides for itself. Missing reads as off.
    */
   groupThreads?: boolean;
+  /**
+   * The bots of the other machines of this machine's group may look after the
+   * projects here their owner entrusted to them: list their threads, read and
+   * steer them, answer their questions, archive, stop or rename them, and hear
+   * their events. Never delete them, decide tool permissions or change this
+   * machine's settings. Turned off, every such access ends at once. Each
+   * machine decides for itself. Missing reads as off.
+   */
+  groupBots?: boolean;
   /**
    * While this machine follows its group's settings home, what it keeps for
    * itself (`SyncKey`): each entry was changed here and the copy skips it.

@@ -5,6 +5,8 @@
   import TelemetrySettings from './TelemetrySettings.svelte';
   import ArchivedThreads from './ArchivedThreads.svelte';
   import WorktreesCard from './WorktreesCard.svelte';
+  import WindowAllowlistCard from './WindowAllowlistCard.svelte';
+  import WindowExclusionsCard from './WindowExclusionsCard.svelte';
   import SecretsCard from './SecretsCard.svelte';
   import BrowserProfilesCard from './BrowserProfilesCard.svelte';
   import { strings } from '../lib/strings';
@@ -75,6 +77,8 @@
 
   <ArchivedThreads {store} />
   <WorktreesCard {store} />
+  <WindowAllowlistCard {store} />
+  <WindowExclusionsCard {store} />
   <SecretsCard {store} />
   <!-- Profiles also configure the core's agent browser from a plain web client. -->
   {#if here.owner}<BrowserProfilesCard />{/if}

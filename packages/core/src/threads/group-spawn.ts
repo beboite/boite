@@ -6,7 +6,7 @@
  * starts it on the caller's provider and model when it has them. The first
  * answer goes back through coordination, as for a thread started here.
  */
-import { effectiveSetting, isMachineSetting } from '@boite/contracts';
+import { effectiveSetting, isMachineSetting, MACHINE_SETTINGS, type MachineSetting } from '@boite/contracts';
 import type { CoordinationPeer, ContextPreset, ContextRequest, PermissionMode, ThreadLink } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { loggedInAccount } from '../delegation/routes.ts';
@@ -118,21 +118,22 @@ export function remoteOrigin(start: GroupStart, peer: CoordinationPeer): ThreadL
 /** `setting.read`: what this machine has for a setting the others may ask about. */
 export function readMachineSetting(core: Core, payload: unknown): { key: string; value: unknown } {
   const key = (payload as { key?: unknown } | null)?.key;
-  if (!isMachineSetting(key)) throw invalidParams('setting.key: expected groupThreads');
+  if (!isMachineSetting(key)) throw invalidParams(`setting.key: expected ${MACHINE_SETTINGS.join(' or ')}`);
   return { key, value: effectiveSetting(core.settings.get(), key) };
 }
 
-/** `setting.changed`: a member says its setting moved; the cards about it there settle. */
+/** `setting.changed`: a member says its setting moved; the cards about it there settle, and the bots here that look after its projects hear it. */
 export function machineSettingChanged(core: Core, peer: CoordinationPeer, payload: unknown): { ok: true } {
   const { key, value } = (payload ?? {}) as { key?: unknown; value?: unknown };
-  if (!isMachineSetting(key) || typeof value !== 'boolean') throw invalidParams('setting: expected groupThreads and true or false');
+  if (!isMachineSetting(key) || typeof value !== 'boolean') throw invalidParams(`setting: expected ${MACHINE_SETTINGS.join(' or ')} and true or false`);
   core.threads.cards.machineSettingChanged(peer, key, value);
+  if (key === 'groupBots') core.workforce.group.peerAllows(peer, value);
   return { ok: true };
 }
 
-/** The owner changed `groupThreads` here: the other members hear it, so the cards asking about it settle. A member away misses it. */
-export function announceGroupThreads(core: Core, value: boolean): void {
+/** The owner changed a machine setting here: the other members hear it, so the cards asking about it settle. A member away misses it. */
+export function announceMachineSetting(core: Core, key: MachineSetting, value: boolean): void {
   for (const peer of core.group.peers()) {
-    void core.coordination.request(peer, 'setting.changed', { key: 'groupThreads', value }).catch(() => undefined);
+    void core.coordination.request(peer, 'setting.changed', { key, value }).catch(() => undefined);
   }
 }

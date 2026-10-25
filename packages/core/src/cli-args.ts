@@ -76,8 +76,10 @@ export function parse(argv: string[]): Parsed {
       parsed.positional.push(arg);
       continue;
     }
+    // `boite window` parses its own flags (window-cli.ts): its --title names a window, not a thread.
     // `boite secret` parses its own flags (secret-cli.ts); after `--` every word is the child command's, `--json` included.
-    if (parsed.positional[0] === 'secret' && (arg === '--' || parsed.positional.includes('--') || !['--json', '--thread', '--data-dir', '--core', '--channel'].includes(arg))) {
+    if ((parsed.positional[0] === 'window' && parsed.positional.length > 1 && !['--json', '--thread', '--data-dir', '--core', '--channel', '--help', '-h'].includes(arg))
+      || (parsed.positional[0] === 'secret' && (arg === '--' || parsed.positional.includes('--') || !['--json', '--thread', '--data-dir', '--core', '--channel'].includes(arg)))) {
       parsed.positional.push(arg);
       continue;
     }

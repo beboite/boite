@@ -128,6 +128,10 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['resident.thread', 'one of those threads with its pending questions, permissions and last answer'],
   ['resident.act', 'marking done, archiving, moving between its projects, stopping or renaming one of those threads, with a line in its timeline saying so; deleting stays the owner\'s'],
   ['resident.answer', 'answering a question one of those threads asked, marked as the agent\'s in that timeline; tool permissions stay the owner\'s'],
+  // With `machine`, the four above and resident.send reach a project of another machine of the group the
+  // owner entrusted to the bot, over the group's sealed link (agents/group-bots.ts). That machine holds each
+  // request to the lease and to its own groupBots setting (agents/group-host.ts); nothing else crosses.
+  ['resident.send', 'a message to a thread of a project of another machine of the group entrusted to it, marked there as the bot\'s, never the user\'s, while that machine has groupBots on'],
   ['agent.where', 'the thread, its project, its working directory and its branch: what the CLI prints first'],
   ['agent.projects', 'the names and folders of the projects the owner added, so it can name one to delegation.spawn or agent.move; reading them opens nothing'],
   ['agent.addProject', 'registering an existing folder as a project, which the owner sees appear and can remove; it opens no file access the agent\'s process lacks, and it stays within the communication settings and one agent generation, like agent.spawn'],
@@ -141,6 +145,13 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['devices.screenshot', 'one PNG of a device open in its own conversation'],
   ['devices.input', 'taps, swipes, text and keys on a device open in its own conversation, as adb input would, or through the live stream a viewer keeps up'],
   ['devices.close', 'removing a device from its own panel; powering it off closes it in every conversation, as the emulator\'s own window would'],
+  ['windows.list', 'the desktop windows of this machine with their process, size and state; a title only for an app its project allows, since another title can name a document or an account'],
+  ['windows.screenshot', 'one PNG of a window of an app its project allows or the owner allows on a card, written inside its own folder, project or temporary folder; excluded apps never, and the capture shows in its timeline'],
+  ['windows.clip', 'a contact sheet of a few seconds of such a window, on the same terms as windows.screenshot'],
+  ['windows.watch', 'showing such a window in its own conversation\'s Window panel; nothing is captured until the person watching presses Show'],
+  ['windows.close', 'emptying its own conversation\'s Window panel'],
+  // windows.frame stays with the owner and paired devices: the stream is for the person watching, a screenshot gives
+  // the agent the window. windows.consent, windows.allowlist and windows.revoke are the owner's: the agent asks, never answers.
   // devices.stream and devices.clipboard stay with the owner and paired devices: the video is for the person
   // watching, a screenshot already gives the agent the screen, and the device's clipboard can hold what that person copied.
   ['questions.ask','a question card on its own thread that it does not wait on; the answer comes back as a message'],

@@ -288,6 +288,7 @@ fieldset.card { border: 1px solid var(--color-border); padding: var(--settings-p
 .desk-chip[data-tone='danger'] { --tone: var(--color-danger); }
 .desk-chip[data-tone='success'] { --tone: var(--color-success); }
 .desk-card-silent { color: var(--color-live); }
+.desk-card-unreachable { color: var(--color-danger); }
 .desk-card-pr { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
 .desk-pr-badge, .desk-pr-checks { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .desk-card-pr[data-pr='open'] .desk-pr-badge, .desk-card-pr[data-pr='draft'] .desk-pr-badge { color: var(--color-live); }

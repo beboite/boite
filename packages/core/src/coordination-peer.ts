@@ -8,7 +8,7 @@ import { verify } from 'node:crypto';
 import type { AgentContact, AgentLetter, CoordinationPeer } from '@boite/contracts';
 import { text } from './coordination-letter.ts';
 import { checkRemoteContact, searchContacts, searchWords, transcript } from './coordination-lookup.ts';
-import { boundedBody, type Envelope } from './coordination-wire.ts';
+import { boundedBody, BOT_OPERATIONS, type BotOperation, type Envelope } from './coordination-wire.ts';
 import { pack, SEALED, sealResponse, unpack, type Sealing } from './group/seal.ts';
 import type { Core } from './core.ts';
 import { invalidParams, refused, RpcFailure } from './errors.ts';
@@ -87,7 +87,7 @@ export class PeerDesk {
       if (rate.count > 120) return new Response('peer rate limit', { status: 429 });
     } catch { return new Response('invalid signed message', { status: 403 }); }
     const groupOnly = envelope.operation === 'group.sync' || envelope.operation === 'group.push' || envelope.operation === 'contact.route'
-      || envelope.operation === 'thread.start' || envelope.operation.startsWith('setting.'); // the group's own: sealed, from a member
+      || envelope.operation === 'thread.start' || envelope.operation.startsWith('setting.') || envelope.operation.startsWith('bot.'); // the group's own: sealed, from a member
     if (this.core.group.removedPeer(peer.coreId) !== null && (groupOnly || !this.side.trusted().some(p => p.coreId === peer.coreId))) {
       return this.signed({ nonce: envelope.nonce, error: 'this machine was removed from the group', gone: true }, 410, sealing);
     }
@@ -113,6 +113,7 @@ export class PeerDesk {
         if (!member && envelope.operation.startsWith('relay.')) throw refused('operation: only a machine of this core\'s group relays for a contact');
         if (!member && envelope.operation === 'thread.start') throw refused('operation: only a machine of this core\'s group starts threads here');
         if (!member && envelope.operation.startsWith('setting.')) throw refused('operation: only a machine of this core\'s group reads or announces its settings');
+        if (!member && envelope.operation.startsWith('bot.')) throw refused('operation: only a machine of this core\'s group looks after projects here');
         if (envelope.operation === 'contact.route') result = await this.core.coordination.mailboxes.handle(currentPeer, envelope.payload);
         else if (contact) result = await this.contact(currentPeer, envelope.operation, envelope.payload, false);
         else if (envelope.operation === 'directory') result = this.side.directory();
@@ -142,7 +143,8 @@ export class PeerDesk {
         } else if (envelope.operation === 'thread.start') result = await this.core.threads.spawns.startFor(currentPeer, envelope.payload);
         else if (envelope.operation === 'setting.read') result = readMachineSetting(this.core, envelope.payload);
         else if (envelope.operation === 'setting.changed') result = machineSettingChanged(this.core, currentPeer, envelope.payload);
-        else throw invalidParams(member ? 'operation: expected directory, deliver, receipt, search, read, group.sync, group.push, relay.*, thread.start or setting.*' : 'operation: expected directory, deliver, receipt, search, read, group.sync or group.push');
+        else if ((BOT_OPERATIONS as readonly string[]).includes(envelope.operation)) result = await this.core.workforce.group.peer(currentPeer, envelope.operation as BotOperation, envelope.payload);
+        else throw invalidParams(member ? 'operation: expected directory, deliver, receipt, search, read, group.sync, group.push, relay.*, thread.start, setting.* or bot.*' : 'operation: expected directory, deliver, receipt, search, read, group.sync or group.push');
       } catch (reason) {
         status = reason instanceof RpcFailure ? 400 : 500;
         error = reason instanceof RpcFailure ? reason.message : 'Machine could not process the request';

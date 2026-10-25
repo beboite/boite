@@ -103,7 +103,7 @@ export interface CacheKeepalive {
 }
 
 const NUMERIC_KEYS = ['warmProcessMinutes', 'agentCpuCapPercent', 'threadMemoryCapMb', 'agentMemoryBudgetPercent', 'memoryReserveMb'] as const;
-const BOOLEAN_KEYS = ['listenOnLan', 'focusGuard', 'muteAgents', 'reapOrphans', 'memoryProtection', 'autoUpdateHarnesses', 'autoInstallUpdates', 'asyncQuestions', 'shortAnswers', 'toolSummaries', 'agentLogAccess', 'autoResumeLimitedThreads', 'deviceStream', 'groupThreads'] as const;
+const BOOLEAN_KEYS = ['listenOnLan', 'focusGuard', 'muteAgents', 'reapOrphans', 'memoryProtection', 'autoUpdateHarnesses', 'autoInstallUpdates', 'asyncQuestions', 'shortAnswers', 'toolSummaries', 'agentLogAccess', 'autoResumeLimitedThreads', 'deviceStream', 'groupThreads', 'groupBots'] as const;
 /** Keys whose value is a percentage of the machine, so anything past 100 is a mistake. */
 const PERCENT_KEYS = ['agentCpuCapPercent'] as const;
 
@@ -188,6 +188,13 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
       return { ok: false, field: 'syncOverrides', message: `syncOverrides must list at most ${SYNC_OVERRIDES_MAX} keys: a setting, keybinding:<command> or brain:<switch>` };
     }
     next.syncOverrides = [...new Set(keys as string[])];
+  }
+  if (patch.windowCaptureExclusions !== undefined) {
+    const apps: unknown = patch.windowCaptureExclusions;
+    if (!Array.isArray(apps) || apps.length > 100 || apps.some((app) => typeof app !== 'string' || !app.trim() || app.length > 300 || /\p{Cc}/u.test(app))) {
+      return { ok: false, field: 'windowCaptureExclusions', message: 'windowCaptureExclusions must list at most 100 executable names or paths of 1 to 300 characters' };
+    }
+    next.windowCaptureExclusions = [...new Set((apps as string[]).map((app) => app.trim()))];
   }
   if (patch.worktreeStorage !== undefined) {
     const storage = patch.worktreeStorage;

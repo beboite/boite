@@ -19,7 +19,7 @@ test('Nova\'s desk shows its live step, every card state in order, answers a que
     store.showAgents();
     await openAgent(store, nova.id);
     desk = mount(AgentDesk, { target: document.body, props: { store } });
-    await vi.waitFor(() => expect(chips()).toHaveLength(5));
+    await vi.waitFor(() => expect(chips()).toHaveLength(6));
     flushSync();
 
     // The overview keeps followed work visible and gives secondary content its own tab.
@@ -36,11 +36,16 @@ test('Nova\'s desk shows its live step, every card state in order, answers a que
     expect(document.querySelectorAll('[data-testid=desk-steps] li')).toHaveLength(4);
     expect(document.querySelector('[data-testid=desk-steps] li:last-child')?.getAttribute('data-status')).toBe('running');
 
-    // Work: what needs the user first, then the silent turn, the work, the open pull request with failing checks, the merged one.
-    expect(chips()).toEqual(['Needs you', 'Stalled', 'Working', 'PR open', 'Merged']);
+    // Work: what needs the user first, then the silent turn, the work, the open pull request with failing checks, the merged one, the other machine's quiet thread.
+    expect(chips()).toEqual(['Needs you', 'Stalled', 'Working', 'PR open', 'Merged', 'Idle']);
     expect(card('Migrate the settings store')?.textContent).toContain('silent for 24 min');
     expect(card('Fix login redirect loop')?.querySelector('[data-testid=desk-card-pr]')?.textContent).toMatch(/PR #482\s*checks failing/);
     expect(card('Release notes 2.0.4')?.querySelector('[data-testid=desk-card-pr]')?.textContent).toContain('PR #479 merged');
+    // A thread of another machine names it, says it cannot be reached, and opens nowhere this client does not reach.
+    const away = card('Fix the save migration')!;
+    expect(away.querySelector('[data-testid=desk-card-machine]')?.textContent).toBe('skoll');
+    expect(away.querySelector('[data-testid=desk-card-unreachable]')?.getAttribute('title')).toContain('its events reach you once it is back');
+    expect(away.querySelector('.desk-card-open')).toBeNull();
 
     // The question is answered from the card, and leaves the desk.
     const icons = card('Pick the release icon set')!;
