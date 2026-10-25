@@ -1,4 +1,4 @@
-import { mobileAction, openMobileMenu } from './lib/mobile.ts';
+import { mobileAction, toMobileList } from './lib/mobile.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
@@ -203,9 +203,8 @@ test('the experiment adds the Threads and Agents switch on the desktop and Agent
   await page.waitFor(`document.querySelector('${id('view-agents')}')`);
   expect(await page.evaluate(`document.querySelector('${id('agents-page')}') === null`)).toBe(true);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-  await openMobileMenu(page);
-  expect(await page.evaluate(`document.querySelector('[data-testid=mobile-tabs]') === null`)).toBe(true);
-  expect(await page.evaluate(`document.querySelector('${id('mobile-agents')}').closest('[data-testid=mobile-menu-dialog]') !== null`)).toBe(true);
+  await toMobileList(page);
+  expect(await page.evaluate(`document.querySelector('${id('mobile-agents')}').closest('[data-testid=mobile-tabs]') !== null`)).toBe(true);
   await capture('agents-launcher-enabled-phone.png');
   await mobileAction(page, 'mobile-agents');
   await page.waitFor(`document.querySelector('${id('agents-page')}')`);
