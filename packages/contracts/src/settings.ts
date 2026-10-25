@@ -136,8 +136,9 @@ export interface Settings {
    */
   goalTracker?: GoalTrackerModel | null;
   /**
-   * When the core compacts a conversation by itself, between two turns. Null
-   * or missing: never, each agent keeps its own behaviour. Missing on older cores.
+   * Independent token limit and idle moments for automatic compaction. The
+   * limit reaches native tool boundaries where supported. Null or missing
+   * leaves each agent's own behaviour. Missing on older cores.
    */
   autoCompact?: AutoCompact | null;
   /**

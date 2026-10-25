@@ -168,6 +168,9 @@ export class CacheKeepalive {
    * first, and the ping looks again a little later.
    */
   private expected(threadId: ThreadId): boolean {
+    // Keep the wait and recheck: cancelling compaction must allow the next
+    // ping without requiring another conversation turn to rebuild the wait.
+    if (this.threads.autoCompact.planned(threadId)) return true;
     if (this.threads.runner.handles.has(threadId) || this.threads.runner.steering.has(threadId)) return true;
     const deferred = this.threads.deferred;
     if (deferred.pendingWakes.has(threadId) || deferred.deferredAnswers.has(threadId) || deferred.consumed.has(threadId)) return true;
