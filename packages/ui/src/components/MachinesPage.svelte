@@ -19,8 +19,10 @@
   let { mobile = false, onopenthread }: { mobile?: boolean; onopenthread?: () => void } = $props();
   const uid = $props.id();
   /**
-   * The switch a machine of a group holds for itself: whether the agents of
-   * the other machines may start threads there (`groupThreads`). Drawn for a
+   * The switches a machine of a group holds for itself: whether the agents of
+   * the other machines may start threads there (`groupThreads`), and whether
+   * their bots may look after the projects their owner entrusted to them
+   * there (`groupBots`). Drawn for a
    * member this client owns and reaches, once the group has another machine.
    */
   function groupThreadsShown(machine: Machine, owner: Store, coreId: string | undefined): boolean {
@@ -210,6 +212,12 @@
               <input id="{uid}-threads-{machine.id}" aria-labelledby="{uid}-threads-{machine.id}-name" type="checkbox" role="switch" data-testid="machine-group-threads-switch"
                 checked={machine.store.settings?.groupThreads === true}
                 onchange={async (event) => { const input = event.currentTarget; if (!(await machine.store.saveSettings({ groupThreads: input.checked }))) input.checked = machine.store.settings?.groupThreads === true; }} />
+            </label>
+            <label class="group-threads" for="{uid}-bots-{machine.id}" data-testid="machine-group-bots">
+              <span class="ui-label-box"><span class="ui-label" id="{uid}-bots-{machine.id}-name">{strings.machines.groupBots}</span><InfoTip topic={strings.machines.groupBots} text={strings.machines.groupBotsHint} /></span>
+              <input id="{uid}-bots-{machine.id}" aria-labelledby="{uid}-bots-{machine.id}-name" type="checkbox" role="switch" data-testid="machine-group-bots-switch"
+                checked={machine.store.settings?.groupBots === true}
+                onchange={async (event) => { const input = event.currentTarget; if (!(await machine.store.saveSettings({ groupBots: input.checked }))) input.checked = machine.store.settings?.groupBots === true; }} />
             </label>
           {/if}
           <div class="disclosure-fold" class:open={customizing === machine.id} inert={customizing !== machine.id}>

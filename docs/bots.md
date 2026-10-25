@@ -380,6 +380,80 @@ which go through `resident.*` (`agents/projects.ts`):
 Deleting a thread and allowing a tool permission stay the owner's. An archived
 bot has none of this; a paused one still acts when the user asks it to.
 
+## Projects of the other machines of the group
+
+A bot can also look after projects of another machine of its
+[group](groups.md): the server that hosts it, say, minding the PC's game
+project. Only the bot's owner entrusts one, like a local project (its
+settings, or a card the bot asks with `boite settings bot request projects
++<machine>/<project>`); the profile keeps it as `<core-id>/<project-id>` and
+`boite settings bot projects` lists those projects as `<machine>/<name>`.
+
+**That machine decides.** Its own `groupBots` setting, **Bots from the other
+machines** on the Machines page, off by default, is the permission that
+counts (`agents/group-host.ts`). It is separate from `groupThreads`: letting
+the other machines start a thread here is not letting their bots steer every
+thread of a project. While it is off the machine refuses every request of a
+bot, and turning it off cuts at once: requests are refused from that moment,
+the events waiting for the bots are dropped and the letters a bot wrote that
+no thread has read yet go nowhere. The grants stay, so turning it on again
+needs nothing from the bots' owner. A machine leaving the group, or removed
+from it, loses the same way, since every request is checked against the group
+as it is now.
+
+**What crosses.** Every request goes over the group's sealed and signed link
+(`bot.lease`, `bot.threads`, `bot.thread`, `bot.send`, `bot.act`,
+`bot.answer`, `bot.event`, see [coordination](coordination.md)); no key or
+token is copied from one machine to the other. Each request carries the bot's
+lease: its name, its thread, the projects of that machine its owner entrusted
+and the threads there on its desk, numbered so an older lease never replaces a
+newer one. The bot's machine sends it again whenever the bot's projects or
+desk change, and with no project of that machine left it sends an empty one,
+which ends the bot's access there. The other machine keeps only the projects
+of the lease that are still there, open and not drafts.
+A send includes its intended watch before the request leaves, so a concurrent
+lease sync cannot erase it while the answer is in flight. A rejected send drops
+that intent; a successful one keeps the thread on the bot's desk.
+
+**What the bot may do there** is what it may do in a project of its own
+machine, and no more: list and read the threads with their questions, write
+to a thread (a letter marked `resident`, as from the bot of a project), mark
+it done, archive, restore, rename, stop, move it between the bot's projects
+there, and answer or skip its questions.
+Deleting a thread, deciding a tool permission and that machine's settings stay
+its owner's, refused there whatever the request says; starting a thread there
+(`boite thread new --machine`) goes through `groupThreads` as for any other
+thread. The CLI names such a thread `<machine>/<thread-id>`, and `boite
+threads` gives `machine=<name>` on its row. Code: `agents/group-bots.ts` on the
+bot's machine, `agents/group-host.ts` on the other.
+
+**Events.** A thread there the bot wrote to, answered or watched goes on its
+desk. That machine sends a `bot.event` when a turn of a thread on the desk
+ends, when any turn of the bot's projects there fails, when one of their
+threads asks a question and when a thread on the desk waits on a tool
+permission (which stays the owner's to decide), and the bot's machine turns it
+into a fact like a local one (keys start `remote:<core-id>:`), with the row
+the desk shows. An event that cannot leave waits in an outbox per machine
+(`OUTBOX_MAX`, the oldest leave first), retried after 5 s, 15 s, 1 min, then
+every 5 min, and at once when the bot's machine sends any request again; an
+event already delivered never wakes the bot twice.
+
+**A machine that does not answer** is named, never skipped: `boite threads`
+ends with `unavailable: <machine> is unreachable (...)`, a command on one of
+its threads fails with the same reason and says its events arrive once it is
+back, and the desk rows of its threads keep the last row it sent, marked
+unreachable. A machine with `groupBots` off says so the same way, with the
+command that asks its owner to turn it on.
+
+Limits: a machine does not check which of its projects the bots' owner
+entrusted, it trusts the lease the bot's machine sends (the owner of both is
+the same person); its project names reach the bot's machine only once it
+allows bots, so the settings and cards offer its projects from then on; a
+remote desk row carries no question nor stall time, and opens only on a
+client that reaches that machine; a stalled turn there wakes no one; the letters the bot sends there do not
+appear in its own machine's mail view; a bot cannot start a thread on another
+machine (`thread new --machine` is refused to a bot thread).
+
 ## Entrusting a thread
 
 Any kept thread of a project can be handed to a bot from its menus (row,
@@ -546,7 +620,9 @@ From its own thread a bot calls `agents.snapshot` (its own identity,
 routines, desk and status only), `agents.brain.get`, `agents.memory.note`,
 `agents.routine.save|remove`, `agents.watch` on its own desk,
 `agents.settings.read|request` and the `resident.*` methods
-(`packages/core/src/access.ts`, each with its reason). A paired device reads
+(`packages/core/src/access.ts`, each with its reason); `resident.*` reaches
+the projects of another machine through that machine's `groupBots`
+permission. A paired device reads
 `agents.snapshot`, `agents.open`, `agents.runtime.get` and `agents.brain.get`
 (`packages/contracts/src/access.ts`) and talks to the bot through its thread
 like any other; configuration, account grants and entrusting stay owner-only.
@@ -562,7 +638,10 @@ outcomes, quiet events, budget, pauses, fact batching, instructions changed),
 thread, follows kept while open and dropped a day after done, the open cap,
 the stall event once per turn, an entrusted goal waking the bot, pull
 request checks failing and merged, status activity and today's counts,
-dropped facts), `agents-projects.test.ts`, `agents-entrust.test.ts`,
+dropped facts), `agents-group.test.ts` (two cores of one group: a bot of
+one sees, steers and hears a thread of the other, owner-only actions refused,
+an offline machine named and its events delivered on return, access cut when
+`groupBots` goes off), `agents-projects.test.ts`, `agents-entrust.test.ts`,
 `agents-memory.test.ts`, `agents-migration.test.ts`,
 `agents-setting-cards.test.ts` and the bot section of `cli.test.ts`.
 `bench/agents-snapshot.ts` measures the snapshot over a bot thread with

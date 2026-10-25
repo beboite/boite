@@ -70,6 +70,7 @@ export const fr: Translation = {
       workEmpty: 'Rien sur son bureau. Les fils qu’il lance, qu’on lui confie ou qu’il suit arrivent ici.',
       open: 'Ouvrir {title}', drop: 'Retirer {title} de son bureau',
       silent: 'silencieux depuis {time}',
+      unreachable: 'injoignable',
       state: { 'needs-you': 'Vous attend', stalled: 'Bloqué', failed: 'Échec', working: 'Au travail', queued: 'En file', merged: 'Fusionnée', review: 'PR ouverte', done: 'Terminé', idle: 'Au repos', archived: 'Archivé' },
       pr: { open: 'PR #{number}', draft: 'Brouillon #{number}', merged: 'PR #{number} fusionnée', closed: 'PR #{number} fermée' },
       checks: { pending: 'vérifications en cours', passing: 'vérifications OK', failing: 'vérifications en échec' },
