@@ -605,7 +605,13 @@ function signIn(args: Args, say: (line: string) => void): { ok: true; agent: str
   const release = currentRelease();
   if (!release || !alive(readState().core)) return { ok: true, agent, signedIn: null };
   say('Telling Boite…');
-  return { ok: true, agent, signedIn: coreSignIns(release, true)[agent] === 'ok' };
+  try {
+    return { ok: true, agent, signedIn: coreSignIns(release, true)[agent] === 'ok' };
+  } catch (error) {
+    // The login went through all the same: the core reads it when it starts again.
+    say(`Boite did not answer: ${error instanceof Error ? error.message : String(error)}`);
+    return { ok: true, agent, signedIn: null };
+  }
 }
 
 /** The latest Claude Code, checked against Anthropic's manifest as the core's own installer does. */
@@ -1101,7 +1107,7 @@ async function main(argv: string[]): Promise<void> {
     case 'sign-in': {
       const result = signIn(args, say);
       const name = SIGN_IN_COMMANDS[result.agent]!.name;
-      return answer(result, result.signedIn === null ? `${name} is signed in; Boite reads it when it starts.`
+      return answer(result, result.signedIn === null ? `${name} is signed in; Boite reads it at its next start.`
         : result.signedIn ? `${name} is signed in. You can go back to Boite Server.`
           : `Boite still reads ${name} as signed out: see Settings, Providers in Boite.`);
     }

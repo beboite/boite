@@ -29,7 +29,7 @@ export async function accounts(argv: string[], ownerClient: OwnerClient): Promis
 
 /** One line per account: provider, status, then the label, which may hold spaces. */
 function describeAccounts(list: Account[]): string {
-  if (list.length === 0) return 'no agent account: install an agent, or sign in with its CLI and run accounts --refresh\n';
+  if (list.length === 0) return 'no agent account: install an agent, or sign in with its CLI and run boite-core accounts --refresh\n';
   return list.map((account) => `${account.providerId}\t${account.status}\t${account.label}${account.identity ? ` (${account.identity})` : ''}\n`).join('');
 }
 

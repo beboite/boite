@@ -240,7 +240,8 @@ private fun Dashboard(model: ServerModel, actions: MainActivity.Actions) {
     val status = model.status ?: return
     val busy = model.busy
     StatusSection(status, busy, model)
-    if (status.running && status.healthy) SignInSection(status, busy, model)
+    // With no agent installed there is nothing to sign in: Updates offers Claude Code.
+    if (status.running && status.healthy && (status.claude?.version != null || status.codex?.version != null)) SignInSection(status, busy, model)
     if (status.running) PairSection(busy, model)
     UpdatesSection(status, busy, model)
     SettingsSection(status, busy, model)
