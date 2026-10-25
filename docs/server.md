@@ -410,6 +410,12 @@ says which role it carries and until when it works. Without `--owner` the link
 is a phone's. `--data-dir` and `--channel` name another core, as they do at
 start.
 
+`boite-core accounts` asks the running core the same way for the agent
+accounts Settings › Providers shows, one line per account with its provider,
+status and label, or the list as JSON with `--json`. `--refresh` first reloads
+the providers, which adopts a login made with an agent's own CLI, then checks
+every account against its agent.
+
 A server that belongs with your other machines joins their [group](groups.md)
 instead, with `boite-core group join`, which reads the invitation on its
 standard input: the desktop app of every member then drives it, and it needs
