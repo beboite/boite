@@ -600,7 +600,8 @@ function signIn(args: Args, say: (line: string) => void): { ok: true; agent: str
     throw new Error(`${known.name} is not installed: ${agent === 'claude' ? 'boite-server agents' : 'pkg install codex'}`);
   }
   const [command, ...rest] = known.command();
-  const login = spawnSync(command!, rest, { stdio: 'inherit' });
+  // With --json the agent's own lines go to stderr: stdout holds the one answer line.
+  const login = spawnSync(command!, rest, { stdio: ['inherit', args.flag('--json') ? 2 : 'inherit', 'inherit'] });
   if (login.status !== 0) throw new Error(`${known.name}'s sign-in stopped: ${login.error?.message ?? `exit status ${login.status}`}`);
   const release = currentRelease();
   if (!release || !alive(readState().core)) return { ok: true, agent, signedIn: null };

@@ -385,19 +385,21 @@ private fun UpdatesSection(status: Status, busy: String?, model: ServerModel) = 
 /** Whether the agents can answer: a conversation with no signed-in account gets nothing back. */
 @Composable
 private fun SignInSection(status: Status, busy: String?, model: ServerModel) = Section(stringResource(R.string.sign_in_title)) {
-    val signIns = status.signIns ?: return@Section Muted(stringResource(R.string.sign_in_unknown))
-    if (status.nobodySignedIn) {
+    // Not knowing the accounts still leaves each agent's Sign in to try.
+    val signIns = status.signIns
+    if (signIns == null) Muted(stringResource(R.string.sign_in_unknown))
+    else if (status.nobodySignedIn) {
         Text(stringResource(R.string.nobody_signed_in), fontSize = 14.sp, fontWeight = FontWeight.Medium)
         Muted(stringResource(R.string.sign_in_hint))
     }
     listOf(Triple("claude", R.string.claude, status.claude), Triple("codex", R.string.codex, status.codex))
         .filter { (_, _, agent) -> agent?.version != null }
         .forEach { (id, name, _) ->
-            val state = signIns[id]
+            val state = signIns?.get(id)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column(Modifier.weight(1f)) {
                     Text(stringResource(name), fontSize = 14.sp)
-                    Text(
+                    if (signIns != null) Text(
                         stringResource(when (state) {
                             "ok" -> R.string.signed_in
                             "unknown" -> R.string.sign_in_checking
