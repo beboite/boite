@@ -37,7 +37,7 @@
    * others are this window's (appearance, experiments), the whole group's
    * (machines) or pick their own (usage, which also reads every machine).
    */
-  const MACHINE_TABS: SettingsTab[] = ['general', 'keyboard', 'voice', 'accounts', 'plugins', 'brain', 'limits', 'task-manager', 'resources', 'advanced', 'diagnostics'];
+  const MACHINE_TABS: SettingsTab[] = ['general', 'keyboard', 'voice', 'accounts', 'plugins', 'brain', 'limits', 'resources', 'advanced', 'diagnostics'];
   /** Machines this window controls, and the window's own whatever its role there. */
   let choices = $derived(workspace.machines.filter((machine) => machine.store === store || (machine.store.connection === 'ready' && machine.store.owner)));
   let picked = $state<string | null>(null);
@@ -370,7 +370,7 @@
       {:else if tab === 'limits'}
         <LimitsPage store={target} />
       {:else if tab === 'task-manager'}
-        <TaskManagerLoader store={target} {onopenthread} />
+        <TaskManagerLoader {store} {onopenthread} />
       {:else if tab === 'plugins'}
         <PluginsPage store={target} />
       {:else if tab === 'experiments'}

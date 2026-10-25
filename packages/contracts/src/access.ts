@@ -170,6 +170,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // Read-only screens.
   // Sanitized per-thread usage has no command lines, executable paths or account identifiers.
   'resources.usage',
+  // Machine-wide totals: model names, sizes and loads, no paths beyond drive letters or mount points.
+  'resources.machine',
   'scheduler.get',
   'usage.get',
   // Sums of the same finished turns per day, provider and model. The thread

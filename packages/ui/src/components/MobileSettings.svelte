@@ -138,7 +138,7 @@
       <h1>{#if page === 'limits'}<QuotaMachineScope store={target} fallback={title} />{:else}{title}{/if}{#if info}<InfoTip topic={title} text={info} testid="mobile-settings-info" />{/if}</h1>
     </header>
     <div class="detail" data-testid="mobile-settings-detail">
-      {#if bar && ['brain', 'voice', 'limits', 'task-manager', 'resources', 'diagnostics', 'worktrees', 'secrets', 'auto-compact', 'archived'].includes(page)}<div class="bar">{@render bar()}</div>{/if}
+      {#if bar && ['brain', 'voice', 'limits', 'resources', 'diagnostics', 'worktrees', 'secrets', 'auto-compact', 'archived'].includes(page)}<div class="bar">{@render bar()}</div>{/if}
       {#key target}
       {#if quota}
         <div class="tabs" role="tablist" aria-label={strings.usage.heading} data-testid="mobile-usage-tabs">
@@ -167,7 +167,7 @@
       {:else if page === 'limits'}
         <LimitsPage store={target} showTitle={false} />
       {:else if page === 'task-manager'}
-        <TaskManagerLoader store={target} {onopenthread} />
+        <TaskManagerLoader {store} {onopenthread} />
       {:else if page === 'resources' && target.owner}
         <ResourcesPage store={target} />
       {:else if page === 'experiments'}

@@ -164,7 +164,7 @@ export class ProcRegistry {
   constructor(
     private readonly journal: Journal,
     private readonly bus: Bus,
-    private readonly platform: ProcessPlatform = processPlatform,
+    readonly platform: ProcessPlatform = processPlatform,
     private readonly options: ProcRegistryOptions = {},
   ) {
     this.memory = new MemoryGuard(bus, platform);

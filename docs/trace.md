@@ -106,6 +106,7 @@ as many as `trace.get` returns without a `limit`.
 | `trace.get` | One thread's recorded processes, newest first |
 | `resources.list` | Threads with live processes, their last sampled `ThreadLoad`, busiest first |
 | `resources.usage` | Agent identity and cached CPU, memory, storage and TCP readings, without process arguments or paths |
+| `resources.machine` | The machine's own CPU, memory, GPUs and fixed disks, and on Windows each agent's GPU share; model names, sizes and loads, no path beyond a drive letter or mount point |
 | `resources.killTree` | Stops the registered thread tree or groups; wait for live count zero before treating exits as observed |
 | `ThreadLoad` | Sampled process count, CPU percentage and memory on each thread summary |
 | `thread.load` | A thread's new `ThreadLoad` alone, sent to a connection whose `hello` `accepts` it; any other connection gets the whole row as `thread.updated` |
@@ -137,8 +138,11 @@ A command line belongs in this authorized trace view, not diagnostic logs.
 
 ## Agent task manager
 
-Settings > Task manager shows this machine's live processes grouped by agent,
-with search and sorting by memory, CPU, disk or network activity. Desktop owners
+Settings > Task manager opens with one card per connected machine: CPU and
+GPU over the last minute, memory with the share Boite's agents hold, and the
+free space of each fixed disk, red under 10%. Picking a card lists that
+machine's live processes grouped by agent, with search and sorting by memory,
+CPU, GPU, disk or network activity. Desktop owners
 can stop an agent's processes after confirming. Paired phones can read the same
 measurements and open the owning conversation, but cannot stop processes.
 
@@ -166,6 +170,21 @@ UDP traffic and protocol overhead are outside these TCP counters. Disk activity
 does not describe folder size.
 A failed TCP dump displays unavailable; a later valid reading can recover the
 actual byte delta only when the socket and process identities still match.
+
+Each card asks its own machine's core for `resources.machine` every two
+seconds while visible. Callers within a second share one reading, and the
+first reading waits 200 ms so CPU has an interval to measure. A core that
+predates the method says so on its card and is not asked again.
+
+| Platform | CPU and memory | GPU | Disks |
+| --- | --- | --- | --- |
+| Windows | `os.cpus()` deltas, `GlobalMemoryStatusEx` | DXGI adapters, PDH `GPU Engine` and `GPU Adapter Memory`; the busiest engine, summed over its processes as Task Manager counts it; per-agent share from the pid in each instance | Fixed drives from `GetLogicalDrives` |
+| Linux | `os.cpus()` deltas, `/proc/meminfo` | `nvidia-smi` with a 2 s timeout, then amdgpu sysfs; other DRM cards listed without a load | Disk filesystems in `/proc/self/mounts`, one row per device at its shortest mount point, `/boot` and snaps left out |
+| macOS | `os.cpus()` deltas, total memory only | Not measured: IOKit statistics are private API | `/` and `/Volumes` |
+
+The PDH query opens on the first GPU read and closes after 30 seconds without
+one. A GPU reader that fails marks the GPU "not measured" and the rest of the
+reading still arrives.
 
 Windows supplies job CPU and memory measurements. macOS supplies readable
 physical footprint measurements, with CPU unavailable. Storage and network
