@@ -129,6 +129,7 @@ export const REQUESTABLE_SETTINGS = {
   autoResumeLimitedThreads: { page: 'limits', section: 'limit-resume', sensitive: false },
   deviceStream: { page: 'experiments', section: 'device-stream', sensitive: false },
   groupThreads: { page: 'machines', section: 'machines', sensitive: false },
+  groupBots: { page: 'machines', section: 'machines', sensitive: false },
 } as const satisfies Partial<Record<keyof Settings, SettingPlace>>;
 
 export type RequestableSetting = keyof typeof REQUESTABLE_SETTINGS;
@@ -143,7 +144,7 @@ export function isRequestableSetting(key: unknown): key is RequestableSetting {
  * (`boite settings request <key> <value> --machine <name>`): what that machine
  * lets the others do there. Apply writes it on that machine.
  */
-export const MACHINE_SETTINGS = ['groupThreads'] as const satisfies readonly RequestableSetting[];
+export const MACHINE_SETTINGS = ['groupThreads', 'groupBots'] as const satisfies readonly RequestableSetting[];
 export type MachineSetting = (typeof MACHINE_SETTINGS)[number];
 
 export function isMachineSetting(key: unknown): key is MachineSetting {
@@ -246,6 +247,7 @@ const MISSING: Partial<Record<RequestableSetting, unknown>> = {
   autoResumeLimitedThreads: false,
   deviceStream: false,
   groupThreads: false,
+  groupBots: false,
   shortAnswers: true,
   toolSummaries: false,
   titleModel: null,

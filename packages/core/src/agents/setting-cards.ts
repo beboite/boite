@@ -17,6 +17,7 @@ import {
 import type { Core } from '../core.ts';
 import { messageOf, notFound, refused, RpcFailure } from '../errors.ts';
 import { agentProvider, checkEffort, checkModel, modelsFor } from '../threads/selection.ts';
+import { remoteGrant } from './group-bots.ts';
 import type { AgentStore } from './store.ts';
 
 export class AgentSettingCards {
@@ -67,7 +68,7 @@ export class AgentSettingCards {
     return {
       profile: agent,
       config: this.store.resident.config(agent.id),
-      projects: this.core.projects.list().filter(project => project.kind !== 'drafts').map(project => ({ id: project.id, label: project.name })),
+      projects: this.projectChoices(agent),
       bots: this.store.records.list('profile').filter(bot => bot.status !== 'archived'),
       model: model => checked(() => {
         const kept = checkModel(provider, accountId, model);
@@ -82,8 +83,23 @@ export class AgentSettingCards {
     };
   }
 
-  read(params: AgentSettingsReadParams): AgentSettingsReading {
+  /**
+   * The projects of this machine, then those of the other machines of the
+   * group as `<machine>/<name>`. One the bot holds stays a choice after its
+   * machine left, so a card can take it away.
+   */
+  private projectChoices(agent: AgentProfile): AgentSettingContext['projects'] {
+    const here = this.core.projects.list().filter(project => project.kind !== 'drafts').map(project => ({ id: project.id, label: project.name }));
+    const group = this.store.group.choices();
+    const held = (agent.projectIds ?? []).filter(id => remoteGrant(id) !== null && !group.some(choice => choice.id === id)).map(id => ({ id, label: this.store.group.label(id) }));
+    return [...here, ...group, ...held];
+  }
+
+  async read(params: AgentSettingsReadParams): Promise<AgentSettingsReading> {
     this.core.threads.require(params.threadId);
+    this.agentFor(params.threadId, params.agent);
+    // The other machines' projects, read fresh; one away keeps the names it gave last.
+    await this.store.group.refresh();
     const agent = this.agentFor(params.threadId, params.agent);
     const ctx = this.context(agent);
     const provider = agentProvider(this.core, agent);
@@ -105,11 +121,13 @@ export class AgentSettingCards {
     return this.core.threads.listQuestions(threadId).flatMap(request => (request.agentSetting ? [request.agentSetting] : []));
   }
 
-  request(params: AgentSettingRequestParams): { questionId: RequestId; setting: AgentSettingAsk } {
+  async request(params: AgentSettingRequestParams): Promise<{ questionId: RequestId; setting: AgentSettingAsk }> {
     const thread = this.core.threads.require(params.threadId);
     if (thread.archived) throw refused('cannot ask on an archived thread', { threadId: thread.id });
     const agent = this.agentFor(thread.id, params.agent);
-    const checked = checkAgentSettingRequest(params, this.context(agent), this.openOn(thread.id));
+    if (params.key === 'projects') await this.store.group.refresh();
+    // The card is drawn against the profile as it stands now: the owner may have changed it while the machines answered.
+    const checked = checkAgentSettingRequest(params, this.context(params.key === 'projects' ? this.agentFor(thread.id, params.agent) : agent), this.openOn(thread.id));
     if (!checked.ok) throw refused(checked.message, checked.data);
     const { reason, setting, options } = checked;
     const { questionId } = this.core.threads.cards.drawAsync(thread, { text: reason, options, allowText: false, multiple: false, async: true, agentSetting: setting });
@@ -174,7 +192,8 @@ export class AgentSettingCards {
   /** What the asking thread reads, projects by name. */
   answerText(setting: AgentSettingAsk, answer: QuestionAnswer): string {
     const names = new Map(this.core.projects.list().map(project => [project.id, project.name]));
-    return agentSettingAnswerText(setting, answer, value => JSON.stringify(setting.key === 'projects' && Array.isArray(value) ? value.map(id => names.get(String(id)) ?? id) : value ?? null));
+    const label = (id: string): string => names.get(id) ?? setting.labels?.[id] ?? this.store.group.label(id);
+    return agentSettingAnswerText(setting, answer, value => JSON.stringify(setting.key === 'projects' && Array.isArray(value) ? value.map(id => label(String(id))) : value ?? null));
   }
 }
 

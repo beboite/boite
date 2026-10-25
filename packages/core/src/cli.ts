@@ -109,7 +109,7 @@ ${CONTROL_HELP}
                                  the outcome arrives as a message (applied,
                                  changed or refused); --machine <name> asks
                                  about another machine of the group
-                                 (groupThreads)
+                                 (groupThreads, groupBots)
   settings open <page>[#<card>] --why <text>
                                  a card with a button to that Settings page,
                                  for what is not one value: a provider login,
@@ -121,7 +121,9 @@ ${CONTROL_HELP}
   settings bot request <key> <value> --why <text>
                                  a card asking the user to change one, for you
                                  or --bot <name>: name Ada, status paused,
-                                 projects +boite -old, instructions with
+                                 projects +boite -old (+<machine>/<name> for a
+                                 project of another machine of the group),
+                                 instructions with
                                  --instructions-file <path>; the outcome
                                  arrives as a message (applied, changed, refused)
   settings bot create <name>     create the bot the user asked for, at once,
@@ -155,7 +157,8 @@ ${CONTROL_HELP}
   bot schedule <json>            name, prompt, schedule; optional id and enabled
   bot unschedule <routine-id>    remove one routine
   bot watch|unwatch <thread-id>  put a thread of its projects on its desk, or
-                                 take one off
+                                 take one off; <machine>/<thread-id> for a
+                                 project another machine entrusted to it
   --request-id <id>              reuse to retry threads send|reply or delegate spawn|send
   delegate models                models, reasoning levels and speeds a subagent can use
   delegate spawn <brief>         start a subagent on one bounded job; its result
