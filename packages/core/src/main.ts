@@ -353,7 +353,8 @@ export function main(argv: string[]): void {
     return;
   }
   if (argv[0] === 'accounts') {
-    void import('./accounts-command.ts').then(({ runAccounts }) => runAccounts(argv.slice(1), ownerClient));
+    import('./accounts-command.ts').then(({ runAccounts }) => runAccounts(argv.slice(1), ownerClient))
+      .catch(error => { process.stderr.write(`boite-core accounts: ${messageOf(error)}\n`); process.exit(1); });
     return;
   }
   if (argv[0] === 'group') {
