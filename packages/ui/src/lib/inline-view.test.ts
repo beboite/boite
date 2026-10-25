@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'vitest';
 import type { Message } from '@boite/contracts';
-import { answerPieces, placeViews, placedPath, turnViews, viewAt, viewPart, viewTheme } from './inline-view';
+import { answerPieces, placeViews, placedPath, turnViews, viewAt, viewPart, viewTheme, ViewPlacement } from './inline-view';
 
 let at = 0;
 const text = (id: string, turnId: string, role: Message['role'] = 'assistant', body = id): Message =>
@@ -101,6 +101,33 @@ test('a view its answer places is drawn there, even while the turn runs, and the
   // A view of another turn is not this answer's to place.
   const later = [...timeline, text('u2', 'two', 'user'), text('b1', 'two', 'assistant', '![Bars](bars.html)')];
   expect(ids(placeViews(later, idle))).toEqual(['u1', 'a1', 'v2', 'u2', 'b1']);
+});
+
+test('view placement keeps the window until a streamed line, turn state or publish moves a view', () => {
+  const placement = new ViewPlacement();
+  const answer = text('a', 'one', 'assistant', 'Chart follows.');
+  const timeline = [view('v', 'one', 'chart.html'), answer];
+  const initial = placement.build(timeline, idle);
+  const part = answer.parts[0]!;
+  if (part.type !== 'text') throw new Error('expected text');
+  part.text += ' More text.';
+  expect(placement.build(timeline, idle)).toBe(initial);
+  expect(placement.build(timeline, live('one'))).toEqual([answer]);
+  expect(placement.build(timeline, idle)).toEqual(initial);
+
+  part.text += '\n\n![Chart](chart.html)';
+  const inline = placement.build(timeline, idle);
+  expect(inline).toEqual([answer]);
+  expect(inline).not.toBe(initial);
+  part.text += '\n\nStill writing.';
+  expect(placement.build(timeline, idle)).toBe(inline);
+  // A refreshed page with a new object must reach the window too.
+  const replacement = { ...answer };
+  expect(placement.build([timeline[0]!, replacement], idle)).toEqual([replacement]);
+  expect(placement.build([timeline[0]!, replacement], idle)).not.toBe(inline);
+  part.text = 'No placement line.';
+  const published = view('v-new', 'one', 'chart.html');
+  expect(placement.build([...timeline, published], idle)).toEqual([answer, published]);
 });
 
 test('a page is handed the tokens this device computes, and the reader\'s motion setting', () => {
