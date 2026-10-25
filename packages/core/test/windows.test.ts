@@ -119,6 +119,15 @@ describe('window capture', () => {
     expect(await thrown(agent.call('windows.screenshot', { threadId, target: { id: '101' } }))).toThrow('the owner refused the capture of Unity.exe');
     await again;
     expect(parts('window_consent').map(part => part.answer)).toEqual(['once', 'refuse']);
+
+    // The window closes while the card waits and its id goes to another program: Allow once lets nothing through.
+    const reused = owner.next('message.started', message => message.threadId === threadId && message.parts[0]?.type === 'window_consent', 5000).then(message => {
+      windows[0] = win('101', { pid: 303, path: 'C:\\Tools\\KeePass\\KeePass.exe', process: 'KeePass.exe' });
+      return owner.call('windows.consent', { threadId, requestId: (message.parts[0] as { requestId: string }).requestId, answer: 'once' });
+    });
+    expect(await thrown(agent.call('windows.screenshot', { threadId, target: { id: '101' } }))).toThrow('window 101 of Unity.exe is gone');
+    await reused;
+    expect(parts('window_capture')).toHaveLength(1);
   });
 
   test('always adds the app to the project, shows its titles, and revoking it asks again', async () => {

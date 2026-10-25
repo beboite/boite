@@ -320,7 +320,14 @@ export class DesktopWindows {
     if (window.path === '') throw refused(`the system does not tell which program owns window ${window.id}, so it cannot be allowed`, { windowId: window.id });
     if (allowed.has(pathKey(window.path))) return { backend, window, grant: 'allowed' };
     const grant = await this.#ask(thread, window, kind);
-    return { backend, window, grant };
+    // The answer can come minutes later: the id may name another program by then, or the app may be excluded or minimized.
+    const current = (await backend.list()).find(candidate => candidate.id === window.id);
+    if (!current || current.pid !== window.pid || pathKey(current.path) !== pathKey(window.path)) {
+      throw refused(`window ${window.id} of ${window.process} is gone`, { windowId: window.id, code: 'gone' });
+    }
+    if (this.#excluded(current)) throw refused(`${current.process} is never captured: password managers, the sign-in screen and the apps in Settings > Window capture are excluded`, { windowId: current.id });
+    if (current.minimized) throw refused('window minimized: restore it first', { windowId: current.id, code: 'minimized' });
+    return { backend, window: current, grant };
   }
 
   /**

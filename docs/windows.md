@@ -85,6 +85,9 @@ The checks run in this order. The first one that fails refuses the capture:
      - **Allow once** lets this capture or watch through.
      - **Always for this project** adds the app to the list.
      - **Refuse**, or no answer in time, refuses the capture.
+   - Once the owner answers, the window is checked again: if its id now names
+     another program, or the app was excluded or minimized during the wait,
+     the capture is refused.
    - Phones get a push notification for the card.
    - Two captures of the same kind (screenshot, clip or watch) of the same app
      share one card.
