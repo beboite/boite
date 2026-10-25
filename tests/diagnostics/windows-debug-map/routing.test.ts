@@ -33,6 +33,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   const tasks: Promise<Captured>[] = [];
   const profileCleanup: Captured[] = [];
   const cleanupConfirmed = new Map<string, boolean>();
+  const afterExit: Record<string, unknown>[] = []; report.mapAfterHelperExit = afterExit;
   async function execute(id: string, args: string[], home = state, extra: Record<string, string | undefined> = {}) {
     const child = procs.spawnPiped(id, helper!, args, {cwd: state, agentRoot: false,
       env: selectedEnvironment({HOME: home, USERPROFILE: home, APPDATA: home, LOCALAPPDATA: home,
@@ -100,8 +101,31 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
         `cleanup object=${object} handle=\\S+ query=0x00000000 attributes=0x[0-9a-f]+ granted=0x[0-9a-f]+ handles=\\d+ pointers=\\d+`))));
     for (const object of ['root-thread', 'root-process', 'job', 'link', 'map']) checks.push(
       verify(`${label} ${object} closure`, () => expect(result.err).toContain(`cleanup close=${object} closed=1 error=0`)));
+    for (const phase of ['after-create subject=directory', 'after-create subject=link', 'before-assign subject=process', 'after-assign subject=process', 'before-close subject=map']) checks.push(
+      verify(`${label} map lifetime ${phase}`, () => expect(result.err).toMatch(new RegExp(
+        `map-lifetime phase=${phase} pid=${result.pid} query=0x00000000 matches=[1-9]\\d* error=0\\r?\\n`))));
     cleanupConfirmed.set(`lpac-${label}`, !result.timedOut && result.code !== null &&
       result.err.includes('cleanup job-active=0') && checks.every(Boolean));
+  }
+  async function observeAfterExit(label: string, result: Captured) {
+    // capture has awaited the exact spawned helper's exit and pipe EOF. Never
+    // infer disappearance from a timeout or rewrite its immediate absence gate.
+    if (result.timedOut || result.code === null) {
+      cleanupConfirmed.set(`lpac-${label}`, false);
+      failures.push(`${label} post-exit map observation requires completed helper`); return;
+    }
+    const names = [...result.err.matchAll(/^private-map path=(.+) create=0x00000000\r?$/gm)].map(match => match[1]!.replace(/\r$/, ''));
+    if (!verify(`${label} owned map name`, () => {
+      expect(names).toHaveLength(1);
+      expect(names[0]).toMatch(new RegExp(`^\\\\(?:Sessions\\\\\\d+\\\\)?BaseNamedObjects\\\\boite\\.route\\.${result.pid}$`));
+    })) { cleanupConfirmed.set(`lpac-${label}`, false); return; }
+    const observed = await execute(`map-after-exit-${label}`, ['observe-map', names[0]!]);
+    afterExit.push({label, helperPid: result.pid, path: names[0], ...observed}); save();
+    // Extra observation, never a replacement for the immediate in-helper gate.
+    const confirmed = [completed(`${label} post-exit observer`, observed),
+      verify(`${label} post-exit map absence`, () => expect(observed.out)
+        .toBe(`map-after-helper-exit path=${names[0]} open=0xc0000034 absent=1 closed=1 error=0\r\n`))].every(Boolean);
+    if (!confirmed) cleanupConfirmed.set(`lpac-${label}`, false);
   }
   try {
     for (const job of jobs) {
@@ -123,6 +147,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     completed('RED', red, 1);
     const redSafe = boundary('RED', red, jobs[0]!.marker);
     cleanup('RED', red);
+    await observeAfterExit('RED', red);
     for (let depth = 0; depth < 3; depth++) verify(`RED generation ${depth} routing`, () => expect(red.out)
       .toContain(`${jobs[0]!.marker}.generation-${depth} appcontainer=1 in-job=1 routing=${depth === 0 ? 1 : 0}`));
     const between = await execute('ordinary-after-red', ['observe', state]);
@@ -156,6 +181,18 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
         if (settled.status === 'rejected') {failures.push(`${job.label} capture: ${settled.reason}`); continue;}
         const result = settled.value, marker = job.marker;
         completed(job.label, result); boundary(job.label, result, marker); cleanup(job.label, result);
+        await observeAfterExit(job.label, result);
+        // Every generation must correspond to a verified exact target image,
+        // not a count padded by an auxiliary created before inspector output.
+        const targets = [...result.out.matchAll(new RegExp(`^inspect-start=${marker}\\.generation-[012] pid=(\\d+)\\r?$`, 'gm'))].map(match => match[1]!);
+        verify(`${job.label} target identities`, () => {
+          expect(new Set(targets).size).toBe(3);
+          expect(result.err.match(/debug-image .*role=target identity=1 .*error=0/g)).toHaveLength(3);
+          for (const pid of targets) {
+            expect(result.err).toMatch(new RegExp(`debug-image pid=${pid} tid=\\d+ handle-tid=\\d+ thread-owner=${pid} root=[01] role=target identity=1 .*error=0`));
+            expect(result.err).toMatch(new RegExp(`debug-event-boundary pid=${pid} tid=\\d+ verified=1 error=0`));
+          }
+        });
         for (let depth = 0; depth < 3; depth++) {
           verify(`${job.label} generation ${depth} routing`, () => expect(result.out)
             .toContain(`${marker}.generation-${depth} appcontainer=1 in-job=1 routing=1`));

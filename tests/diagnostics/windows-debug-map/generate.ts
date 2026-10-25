@@ -20,7 +20,7 @@ export function generate(source: string): string {
     'CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT | (debug_mode ? DEBUG_PROCESS : 0), NULL, args[3]');
   source = once(source, '  if (ResumeThread(child.hThread)',
     '  stage = L"routing.boundary"; if (!lowbox_verify(child.hProcess, job, app, registry_read.Sid)) { error = ERROR_ACCESS_DENIED; goto end; }\n' +
-    '  stage = L"routing.prepare"; error = map_prepare(child.hProcess, object_security, args[3]); if (error) goto end;\n  if (ResumeThread(child.hThread)');
+    '  stage = L"routing.prepare"; error = map_prepare(child.hProcess, object_security, args[3], args[4]); if (error) goto end;\n  if (ResumeThread(child.hThread)');
   source = once(source, '  if (WaitForSingleObject(child.hProcess, INFINITE) != WAIT_OBJECT_0 || !GetExitCodeProcess(child.hProcess, &exit_code)) {error = GetLastError(); goto end;}',
     '  if (debug_mode) { stage = L"routing.events"; error = debug_loop(child.dwProcessId, job, app, registry_read.Sid, &exit_code, FALSE); }\n' +
     '  else {\n    DWORD waited = WaitForSingleObject(child.hProcess, 15000);\n' +
@@ -44,6 +44,7 @@ export function generate(source: string): string {
     '  { DWORD cleanup = map_close(); if (cleanup && !error) { error = cleanup; stage = L"routing.cleanup.map"; } }\n  for (DWORD i = 0; i < group_count; i++)');
   source = once(source, '  else if (count > 1 && !wcscmp(args[1], L"run")) result = launch(count, args);',
     '  else if (count == 3 && !wcscmp(args[1], L"observe")) result = observe(args[2]);\n' +
+    '  else if (count == 3 && !wcscmp(args[1], L"observe-map")) result = observe_map(args[2]);\n' +
     '  else if (count == 3 && !wcscmp(args[1], L"cleanup")) result = cleanup_profile(args[2]);\n' +
     '  else if (count > 1 && !wcscmp(args[1], L"inspect")) result = inspect(count, args);\n' +
     '  else if (count > 4 && (!wcscmp(args[1], L"run") || !wcscmp(args[1], L"debug-run"))) {\n' +
@@ -62,7 +63,7 @@ export function writeSource(output: string): Record<string, string> {
   const source = generate(original);
   writeFileSync(join(output, 'debug-map.c'), source);
   const hashes: Record<string, string> = {'protected-tool.c': sha256(original), 'debug-map.c': sha256(source)};
-  for (const file of ['routing.h', 'inspect.h']) {
+  for (const file of ['routing.h', 'inspect.h', 'ownership.h', 'identity.h']) {
     const bytes = readFileSync(join(import.meta.dir, file));
     writeFileSync(join(output, file), bytes);
     hashes[file] = sha256(bytes);

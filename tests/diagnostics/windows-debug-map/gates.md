@@ -14,6 +14,8 @@ admission and never changes the required two-compiler protected suites.
 The `windows-debug-map-diagnostic` artifact expires after three days. It includes
 kernel version, compiler commands, generated source, input/helper SHA256 hashes,
 complete native stdout/stderr, per-compiler structured results and cleanup logs.
+The generated helper also includes `identity.h` and `ownership.h`; their hashes
+are part of the same manifest.
 
 On Linux, `bun .../run.ts <absolute-artifact-directory> --compile-only` verifies
 strict MinGW cross compilation. Without the Windows opt-in, the launcher and
@@ -70,12 +72,59 @@ chance and once per captured process, can be consumed. Its DLL volume/file ID
 must equal the trusted helper's actual loaded ntdll. An unknown initial
 breakpoint fails the experiment; application exceptions are forwarded with
 DBG_EXCEPTION_NOT_HANDLED. The address rule itself needs native validation.
+The d63e9d54 Server 26100 run disproves equality with that export as a sufficient
+startup rule: both compilers stop at a different first-chance breakpoint before
+inspector stdout. Its actual process image and thread role were not recorded.
+The diagnostic deliberately retains the rejection until matching image/symbol
+evidence establishes a precise replacement. It does not consume a first
+breakpoint merely because it lies inside ntdll.
 Image/DLL file handles are closed; Windows owns debug process/thread handles
 through their exit continuation. Separately returned process handles remain
 owned by the helper. No attach, privilege enabling, unrelated-process access,
 memory/context modification, runtime patch, host ACL/map mutation or ordinary
 execution fallback exists. LPAC, file ACLs and the non-breakaway job remain the
 boundary; mapping only enables availability.
+
+## Startup identity and owned-map observations
+
+For every normal creation event, log the exact native file path, volume/file ID,
+size and write time from the event file. Independently open the process's queried
+image path read-only and require its file ID to agree. Compare that identity with
+the synthetic target opened before root resume. Record `target`, `non-target`,
+or fatal `unknown`, plus root/auxiliary position, event/handle thread IDs, thread
+owner, image base and start address. A non-target is not assumed to be conhost.
+All captured processes still require the full LPAC/job boundary before mapping
+and continuation. Three unique inspector PIDs must match three exact target
+identities; the existing assertions requiring exactly three captured processes,
+maps, consumed startup exceptions and normal exits remain unchanged. An auxiliary
+cannot silently replace one target generation or enlarge the accepted count.
+
+Record matching ntdll file identity, local PE machine/timestamp/image size,
+export RVA and the local RSDS PDB name/GUID/age key when present. At exceptions,
+record actual/main thread IDs, verified-native-image membership and RVA for
+future exact symbol lookup. These metadata do not authorize an exception.
+Unknown startup breakpoints remain fatal; unexpected/application exceptions
+retain `DBG_EXCEPTION_NOT_HANDLED`, followed by the existing failure termination
+and drain. Creation/exiting thread and process events are also recorded.
+
+For map lifetime, query `ProcessHandleInformation` (51) on this helper only,
+with a 1 MiB allocation ceiling. From its own directory handle's type index,
+compare candidate handles with that live handle using `NtCompareObjects`.
+Only exact matches are emitted; no foreign table or unrelated handle contents
+are queried, and no matching extra handle is closed. Observe after directory
+creation, after link creation, before/after every map assignment, and before/after
+each known owned handle closure while the directory anchor exists. Compare the
+matched local handles with `NtQueryObject` counts. A count alone, especially
+PointerCount with kernel fast references, still cannot establish a leak owner.
+An unsupported, malformed or failed snapshot remains an error.
+
+After the exact spawned helper has exited and its capture reached EOF, a new
+registry-owned helper opens only the recorded `boite.route.<helper-pid>` name
+read-only. This is recorded as `mapAfterHelperExit` and `map-after-exit-*.log`.
+Absence after helper exit can distinguish helper-local retention from persistence,
+but never replaces the immediate in-helper absence gate or its fatal failure.
+Post-exit observation failure also blocks state deletion. No extra reference is
+held across cleanup polls, and only explicitly acquired handles are closed.
 
 The event deadline is checked even under continuous events. Early launch errors
 also terminate the owned job and drain debug events before polling job cleanup.

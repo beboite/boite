@@ -11,7 +11,7 @@ typedef struct {
   union { ULONGLONG *Uint64; } Values;
 } ROUTE_ATTRIBUTE;
 typedef struct { USHORT Version, Reserved; ULONG Count; ROUTE_ATTRIBUTE *Attributes; } ROUTE_ATTRIBUTES;
-typedef struct { DWORD pid, main_tid; uintptr_t initial; BOOL consumed, exited; } ROUTE_RECORD;
+typedef struct { DWORD pid, main_tid; uintptr_t initial, native_base; BOOL consumed, exited; } ROUTE_RECORD;
 static HANDLE probe_map, probe_link;
 static wchar_t probe_name[256];
 static BOOL debug_mode;
@@ -32,13 +32,18 @@ static DWORD object_counts(const wchar_t *label, HANDLE object) {
   fflush(stderr); return status < 0 ? (DWORD)status : 0;
 }
 
+#include "ownership.h"
+#include "identity.h"
+
 static DWORD close_owned(const wchar_t *label, HANDLE *object) {
   if (!*object) return 0;
+  DWORD lifetime = map_lifetime(L"before-close", label);
   DWORD observed = object_counts(label, *object);
   BOOL closed = CloseHandle(*object); DWORD error = closed ? 0 : GetLastError();
   fwprintf(stderr, L"cleanup close=%ls closed=%d error=%lu\n", label, closed, error); fflush(stderr);
   if (closed) *object = NULL;
-  return error ? error : observed;
+  DWORD after = map_lifetime(L"after-close", label);
+  return error ? error : observed ? observed : lifetime ? lifetime : after;
 }
 
 static DWORD object_name(HANDLE object, wchar_t *out, size_t length) {
@@ -92,17 +97,22 @@ static DWORD map_apply(HANDLE process) {
   typedef NTSTATUS (NTAPI *set_process_fn)(HANDLE, PROCESSINFOCLASS, PVOID, ULONG);
   set_process_fn set = (set_process_fn)(void *)nt_api("NtSetInformationProcess");
   if (!set) return ERROR_PROC_NOT_FOUND;
+  DWORD observed = map_lifetime(L"before-assign", L"process");
+  if (observed) return observed;
   NTSTATUS status = set(process, (PROCESSINFOCLASS)23, &probe_map, sizeof(probe_map));
   fwprintf(stderr, L"private-map pid=%lu set=0x%08lx\n", GetProcessId(process), (unsigned long)status);
-  fflush(stderr); return status < 0 ? (DWORD)status : 0;
+  fflush(stderr);
+  observed = map_lifetime(L"after-assign", L"process");
+  return status < 0 ? (DWORD)status : observed;
 }
 
-static DWORD map_prepare(HANDLE process, PSECURITY_DESCRIPTOR security, const wchar_t *root) {
+static DWORD map_prepare(HANDLE process, PSECURITY_DESCRIPTOR security, const wchar_t *root, const wchar_t *image) {
   typedef NTSTATUS (NTAPI *create_directory_fn)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, HANDLE, ULONG);
   typedef NTSTATUS (NTAPI *create_link_fn)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PUNICODE_STRING);
   create_directory_fn create = (create_directory_fn)(void *)nt_api("NtCreateDirectoryObjectEx");
   create_link_fn link = (create_link_fn)(void *)nt_api("NtCreateSymbolicLinkObject");
   if (!create || !link) return ERROR_PROC_NOT_FOUND;
+  if (debug_mode) { DWORD error = prepare_target(image); if (error) return error; }
   DWORD session = 0;
   if (!ProcessIdToSessionId(GetCurrentProcessId(), &session)) return GetLastError();
   if (session) swprintf(probe_name, 256, L"\\Sessions\\%lu\\BaseNamedObjects\\boite.route.%lu", session, GetCurrentProcessId());
@@ -114,6 +124,8 @@ static DWORD map_prepare(HANDLE process, PSECURITY_DESCRIPTOR security, const wc
   NTSTATUS status = create(&probe_map, 0xf000f, &attributes, NULL, 0);
   fwprintf(stderr, L"private-map path=%ls create=0x%08lx\n", probe_name, (unsigned long)status);
   if (status < 0) return (DWORD)status;
+  DWORD observed = map_lifetime(L"after-create", L"directory");
+  if (observed) return observed;
   wchar_t drive[3] = {root[0], L':', 0}, device[4096], target[8192];
   if (!QueryDosDeviceW(drive, device, 4096)) return GetLastError();
   int length = swprintf(target, 8192, L"%ls%ls\\null-map-marker", device, root + 2);
@@ -123,6 +135,8 @@ static DWORD map_prepare(HANDLE process, PSECURITY_DESCRIPTOR security, const wc
   attributes.RootDirectory = probe_map; attributes.ObjectName = &leaf;
   status = link(&probe_link, 0xf0001, &attributes, &destination);
   if (status < 0) return (DWORD)status;
+  observed = map_lifetime(L"after-create", L"link");
+  if (observed) return observed;
   return debug_mode ? 0 : map_apply(process);
 }
 
@@ -205,15 +219,16 @@ static DWORD debug_loop(DWORD root, HANDLE job, PSID app, PSID capability, DWORD
   }
   ULONGLONG deadline = GetTickCount64() + (drain ? 5000 : 15000);
   uintptr_t local = (uintptr_t)GetModuleHandleW(L"ntdll.dll");
-  uintptr_t exported = (uintptr_t)nt_api("DbgBreakPoint");
+  uintptr_t exported = (uintptr_t)nt_api("DbgBreakPoint"); DWORD image_size = 0;
   /* The basename alone is not identity. Require the same volume/file id as
    * the trusted helper's actual loaded ntdll before using its export offset. */
   BY_HANDLE_FILE_INFORMATION trusted; ZeroMemory(&trusted, sizeof(trusted));
   wchar_t local_path[4096]; DWORD local_length = GetModuleFileNameW((HMODULE)local, local_path, 4096);
   HANDLE local_file = local_length && local_length < 4096 ? CreateFileW(local_path, FILE_READ_ATTRIBUTES,
     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, 0, NULL) : INVALID_HANDLE_VALUE;
-  BOOL identified = local_file != INVALID_HANDLE_VALUE && GetFileInformationByHandle(local_file, &trusted);
-  if (local_file != INVALID_HANDLE_VALUE) CloseHandle(local_file);
+  BOOL identified = local_file != INVALID_HANDLE_VALUE && !file_identity(L"trusted-ntdll", GetCurrentProcessId(), local_file, &trusted);
+  if (local_file != INVALID_HANDLE_VALUE && !CloseHandle(local_file)) identified = FALSE;
+  if (identified && exported && native_metadata(local, exported, &image_size)) identified = FALSE;
   if (!exported || !identified) { stopping = TRUE; error = ERROR_INVALID_DATA; TerminateJobObject(job, 125); }
   for (;;) {
     if (GetTickCount64() >= deadline) {
@@ -240,12 +255,15 @@ static DWORD debug_loop(DWORD root, HANDLE job, PSID app, PSID capability, DWORD
           if (!DuplicateHandle(GetCurrentProcess(), event.u.CreateProcessInfo.hProcess, GetCurrentProcess(), &limited,
               PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SET_INFORMATION, FALSE, 0)) error = GetLastError();
           else {
-            if (!lowbox_verify(limited, job, app, capability)) error = ERROR_ACCESS_DENIED;
-            else error = map_apply(limited);
-            CloseHandle(limited);
+            error = event_image(&event, root);
+            if (!error && !lowbox_verify(limited, job, app, capability)) error = ERROR_ACCESS_DENIED;
+            fwprintf(stderr, L"debug-event-boundary pid=%lu tid=%lu verified=%d error=%lu\n", event.dwProcessId, event.dwThreadId, !error, error);
+            if (!error) error = map_apply(limited);
+            DWORD closed = close_owned(L"debug-limited-process", &limited); if (closed && !error) error = closed;
           }
         }
-        if (event.u.CreateProcessInfo.hFile) CloseHandle(event.u.CreateProcessInfo.hFile);
+        if (stopping) fwprintf(stderr, L"debug-create-draining pid=%lu tid=%lu start=%p\n", event.dwProcessId, event.dwThreadId, (void *)event.u.CreateProcessInfo.lpStartAddress);
+        if (event.u.CreateProcessInfo.hFile && !CloseHandle(event.u.CreateProcessInfo.hFile) && !error) error = GetLastError();
         /* Windows owns event process/thread handles through exit continuation.
          * PROCESS_INFORMATION returned from CreateProcess remains separately ours. */
         break;
@@ -257,12 +275,19 @@ static DWORD debug_loop(DWORD root, HANDLE job, PSID app, PSID capability, DWORD
           if (length && length < 4096 && record) {
             wchar_t *leaf = wcsrchr(path, L'\\');
             BY_HANDLE_FILE_INFORMATION loaded;
-            if (leaf && !_wcsicmp(leaf + 1, L"ntdll.dll") && GetFileInformationByHandle(file, &loaded) &&
-                loaded.dwVolumeSerialNumber == trusted.dwVolumeSerialNumber &&
-                loaded.nFileIndexHigh == trusted.nFileIndexHigh && loaded.nFileIndexLow == trusted.nFileIndexLow)
-              record->initial = (uintptr_t)event.u.LoadDll.lpBaseOfDll + exported - local;
+            if (leaf && !_wcsicmp(leaf + 1, L"ntdll.dll")) {
+              DWORD identity = file_identity(L"loaded-ntdll", event.dwProcessId, file, &loaded);
+              BOOL match = !identity && identified && same_file(&loaded, &trusted);
+              fwprintf(stderr, L"debug-native-load pid=%lu tid=%lu base=%p identity=%d error=%lu\n",
+                event.dwProcessId, event.dwThreadId, event.u.LoadDll.lpBaseOfDll, match, identity);
+              if (!stopping && !match && !error) error = ERROR_INVALID_DATA;
+              if (match) {
+                record->native_base = (uintptr_t)event.u.LoadDll.lpBaseOfDll;
+                record->initial = record->native_base + exported - local;
+              }
+            }
           }
-          CloseHandle(file);
+          if (!CloseHandle(file) && !error) error = GetLastError();
         }
         break;
       }
@@ -277,21 +302,37 @@ static DWORD debug_loop(DWORD root, HANDLE job, PSID app, PSID capability, DWORD
           if (!stopping && record && !record->consumed && exception->ExceptionRecord.ExceptionCode == EXCEPTION_BREAKPOINT)
             error = ERROR_INVALID_ADDRESS;
         }
-        fwprintf(stderr, L"debug-exception pid=%lu code=0x%08lx first=%lu address=%p expected=%p consumed=%d\n",
+        uintptr_t address = (uintptr_t)exception->ExceptionRecord.ExceptionAddress;
+        BOOL in_native = record && record->native_base && address >= record->native_base && address - record->native_base < image_size;
+        fwprintf(stderr, L"debug-exception pid=%lu code=0x%08lx first=%lu address=%p expected=%p consumed=%d tid=%lu main-tid=%lu native-identity=%d in-native=%d native-rva=0x%llx continuation=0x%08lx\n",
           event.dwProcessId, exception->ExceptionRecord.ExceptionCode, exception->dwFirstChance,
-          exception->ExceptionRecord.ExceptionAddress, (void *)(record ? record->initial : 0), loader);
+          exception->ExceptionRecord.ExceptionAddress, (void *)(record ? record->initial : 0), loader,
+          event.dwThreadId, record ? record->main_tid : 0, record && record->native_base != 0, in_native,
+          (unsigned long long)(in_native ? address - record->native_base : 0), continuation);
         break;
       }
       case EXIT_PROCESS_DEBUG_EVENT:
         if (!record || record->exited) error = ERROR_INVALID_DATA;
         else { record->exited = TRUE; active--; }
-        fwprintf(stderr, L"debug-exit pid=%lu status=%lu active=%d\n", event.dwProcessId, event.u.ExitProcess.dwExitCode, active);
+        fwprintf(stderr, L"debug-exit pid=%lu status=%lu active=%d tid=%lu main-tid=%lu\n", event.dwProcessId, event.u.ExitProcess.dwExitCode, active,
+          event.dwThreadId, record ? record->main_tid : 0);
         if (event.dwProcessId == root && !stopping) {
           *exit_code = event.u.ExitProcess.dwExitCode; stopping = TRUE;
           deadline = GetTickCount64() + 5000; TerminateJobObject(job, 125);
         }
         break;
-      case CREATE_THREAD_DEBUG_EVENT: case EXIT_THREAD_DEBUG_EVENT: case OUTPUT_DEBUG_STRING_EVENT: break;
+      case CREATE_THREAD_DEBUG_EVENT:
+        fwprintf(stderr, L"debug-thread-create pid=%lu tid=%lu main-tid=%lu start=%p handle-tid=%lu thread-owner=%lu\n",
+          event.dwProcessId, event.dwThreadId, record ? record->main_tid : 0, (void *)event.u.CreateThread.lpStartAddress,
+          GetThreadId(event.u.CreateThread.hThread), GetProcessIdOfThread(event.u.CreateThread.hThread));
+        if (!stopping && (!record || GetThreadId(event.u.CreateThread.hThread) != event.dwThreadId ||
+            GetProcessIdOfThread(event.u.CreateThread.hThread) != event.dwProcessId)) error = ERROR_INVALID_DATA;
+        break;
+      case EXIT_THREAD_DEBUG_EVENT:
+        fwprintf(stderr, L"debug-thread-exit pid=%lu tid=%lu main-tid=%lu status=%lu\n",
+          event.dwProcessId, event.dwThreadId, record ? record->main_tid : 0, event.u.ExitThread.dwExitCode);
+        break;
+      case OUTPUT_DEBUG_STRING_EVENT: break;
       default: error = ERROR_INVALID_DATA; break;
     }
     if (error && !stopping) { stopping = TRUE; deadline = GetTickCount64() + 5000; TerminateJobObject(job, 125); }

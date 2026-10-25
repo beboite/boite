@@ -7,6 +7,34 @@ static int observe(const wchar_t *root) {
   return 0;
 }
 
+/* No process/handle search. The parent supplies the exact name emitted by its
+ * completed helper, and records this separately from immediate in-helper cleanup. */
+static int observe_map(const wchar_t *path) {
+  const wchar_t *tail = path;
+  if (!wcsncmp(tail, L"\\Sessions\\", 10)) {
+    tail += 10; const wchar_t *start = tail;
+    while (*tail >= L'0' && *tail <= L'9') tail++;
+    if (tail == start || tail - start > 10) return failure(L"observer-map.path", ERROR_INVALID_NAME);
+  }
+  const wchar_t prefix[] = L"\\BaseNamedObjects\\boite.route.";
+  if (wcsncmp(tail, prefix, wcslen(prefix))) return failure(L"observer-map.path", ERROR_INVALID_NAME);
+  tail += wcslen(prefix); const wchar_t *start = tail;
+  while (*tail >= L'0' && *tail <= L'9') tail++;
+  if (tail == start || tail - start > 10 || *tail || wcslen(path) >= 256) return failure(L"observer-map.path", ERROR_INVALID_NAME);
+  open_directory_fn open = (open_directory_fn)(void *)nt_api("NtOpenDirectoryObject");
+  if (!open) return failure(L"observer-map.api", ERROR_PROC_NOT_FOUND);
+  UNICODE_STRING name = {(USHORT)(wcslen(path) * 2), (USHORT)((wcslen(path) + 1) * 2), (PWSTR)path};
+  OBJECT_ATTRIBUTES attributes; ZeroMemory(&attributes, sizeof(attributes));
+  attributes.Length = sizeof(attributes); attributes.ObjectName = &name; attributes.Attributes = 0x40;
+  HANDLE map = NULL; NTSTATUS status = open(&map, 1, &attributes); DWORD error = 0;
+  if (map) error = close_owned(L"map-post-exit-observer", &map);
+  fwprintf(stdout, L"map-after-helper-exit path=%ls open=0x%08lx absent=%d closed=%d error=%lu\n",
+    path, (unsigned long)status, status == (NTSTATUS)0xc0000034, !map, error);
+  fflush(stdout);
+  if (status != 0 && status != (NTSTATUS)0xc0000034 && !error) error = (DWORD)status;
+  return error ? failure(L"observer-map", error) : 0;
+}
+
 static int cleanup_profile(const wchar_t *name) {
   HRESULT deleted = DeleteAppContainerProfile(name);
   fwprintf(stdout, L"profile delete=0x%08lx\n", (unsigned long)deleted);
