@@ -183,7 +183,11 @@ carries a **Threads from the other machines** switch (`groupThreads`), off by
 default: on, the agents of the other machines may start threads in its
 projects with `boite thread new --machine` ([CLI](cli.md#commands)). The
 setting belongs to that machine and is saved there, so the PC with the printer
-can accept them while the server does not. A row shown away hides it.
+can accept them while the server does not. Beside it, **Bots from the other
+machines** (`groupBots`, off by default) lets a bot of another machine look
+after the projects of this one its owner entrusted to it; off, it cuts them
+off at once ([bots](bots.md#projects-of-the-other-machines-of-the-group)). A
+row shown away hides both.
 Agent versions and their automatic update switch are on each machine's
 Providers page. How a phone reaches this machine without a server of the
 group (Tailscale HTTPS, the local network, a reverse proxy of one's own) is the

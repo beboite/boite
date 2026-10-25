@@ -1,5 +1,5 @@
 /** Core settings, the scheduler they size, keybindings and telemetry. */
-import { KEYBINDING_COMMANDS, parseChord, RpcErrorCode, checkSettingsPatch, followedPatch, keepLaterFavorites } from '@boite/contracts';
+import { KEYBINDING_COMMANDS, MACHINE_SETTINGS, parseChord, RpcErrorCode, checkSettingsPatch, followedPatch, keepLaterFavorites } from '@boite/contracts';
 import type { Settings } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import type { FakeContext, FakeMethods } from './context';
@@ -104,13 +104,14 @@ export function settingsMethods(ctx: FakeContext) {
       if (tracker && !ctx.providers.some(p => p.id === tracker.providerId)) {
         throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `goalTracker names ${tracker.providerId}, which is not a loaded provider`, data: { field: 'goalTracker' } });
       }
-      const allowed = ctx.settings.groupThreads === true;
+      const before = Object.fromEntries(MACHINE_SETTINGS.map(key => [key, ctx.settings[key] === true]));
       ctx.settings = { ...ctx.settings, ...keepLaterFavorites(ctx.settings, checked.patch) };
       // As the core's `setting.changed`: the other members' cards about this machine settle.
-      if ((ctx.settings.groupThreads === true) !== allowed) {
+      for (const key of MACHINE_SETTINGS) {
+        if ((ctx.settings[key] === true) === before[key]) continue;
         for (const core of ctx.roster?.cores ?? []) {
           const other = core.coreId === ctx.identity.coreId ? undefined : fakeCore(core.coreId);
-          if (other) settleMachineSetting(other, ctx.identity.coreId, 'groupThreads', ctx.settings.groupThreads === true);
+          if (other) settleMachineSetting(other, ctx.identity.coreId, key, ctx.settings[key] === true);
         }
       }
       ctx.emit('scheduler.updated', structuredClone(ctx.scheduler));

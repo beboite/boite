@@ -107,6 +107,8 @@ test('a thread on one machine asks the other to accept threads, the card flips i
     const switches = id('machine-group-threads-switch');
     await page.waitFor(`document.querySelectorAll('${switches}').length === 2`, 15_000);
     expect(await page.evaluate(`[...document.querySelectorAll('${switches}')].map(input => input.checked).sort()`)).toEqual([false, true]);
+    // Bots of the other machines are a switch of their own, off on both until the owner turns it on.
+    expect(await page.evaluate(`[...document.querySelectorAll('${id('machine-group-bots-switch')}')].map(input => input.checked)`)).toEqual([false, false]);
     await page.evaluate(`document.querySelector('${id('machine-group-threads')}').closest('${id('machine-card')}').scrollIntoView({ block: 'center' })`);
     await capture('machines-desktop.png');
     await page.send('Emulation.setDeviceMetricsOverride', PHONE);

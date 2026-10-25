@@ -1,5 +1,6 @@
 import type { AgentSchedule, RpcParams } from '@boite/contracts';
 import type { CoreClient } from '../client.ts';
+import { targetOf } from '../control-cli.ts';
 
 export const BOT_ACTIONS = 'memory, remember, routines, schedule, unschedule, watch or unwatch';
 
@@ -44,7 +45,9 @@ export async function botCommand(client: CoreClient, threadId: string, args: str
     case 'unschedule': return client.call('agents.routine.remove', { threadId, routineId: need(0, 'a routine id (boite bot routines lists them)') });
     case 'watch':
     case 'unwatch': {
-      const watched = await client.call('agents.watch', { threadId, watchThreadId: need(0, 'a thread id'), watched: action === 'watch' });
+      // `<machine>/<thread-id>`: a thread of a project another machine of the group entrusted to the bot.
+      const { target, machine } = targetOf(need(0, 'a thread id'));
+      const watched = await client.call('agents.watch', { threadId, watchThreadId: target, watched: action === 'watch', ...(machine === undefined ? {} : { machine }) });
       return watched ?? { unwatched: rest[0] };
     }
     default: throw new Error(`bot expects ${BOT_ACTIONS}`);

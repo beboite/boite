@@ -200,8 +200,16 @@ to start a top-level thread in one of its projects for `boite thread new
 --machine`; the member refuses it while its own `groupThreads` setting is off,
 and keeps a ledger per starting thread so a retried request returns the same
 thread. `setting.read` returns that member's value of a setting it holds about
-the others (`groupThreads`), for a settings card, and `setting.changed` tells
+the others (`groupThreads`, `groupBots`), for a settings card, and `setting.changed` tells
 the other members that it changed, which settles their open cards.
+
+The `bot.*` operations, also sealed and group-only, let a bot of one member
+look after the projects of another that its owner entrusted to it:
+`bot.lease`, `bot.threads`, `bot.thread`, `bot.send`, `bot.act` and
+`bot.answer` go to the member that holds the project, each with the bot's
+lease, and `bot.event` comes back with a turn, a question or a failure. The
+holding member refuses all of them while its own `groupBots` setting is off
+([bots](bots.md#projects-of-the-other-machines-of-the-group)).
 
 A group member can relay contact discovery, lookups, requests and letters
 through another member's durable virtual mailbox. The initiating core keeps

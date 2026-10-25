@@ -144,6 +144,10 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['resident.thread', 'one of those threads with its pending questions, permissions and last answer'],
   ['resident.act', 'marking done, archiving, moving between its projects, stopping or renaming one of those threads, with a line in its timeline saying so; deleting stays the owner\'s'],
   ['resident.answer', 'answering a question one of those threads asked, marked as the agent\'s in that timeline; tool permissions stay the owner\'s'],
+  // With `machine`, the four above and resident.send reach a project of another machine of the group the
+  // owner entrusted to the bot, over the group's sealed link (agents/group-bots.ts). That machine holds each
+  // request to the lease and to its own groupBots setting (agents/group-host.ts); nothing else crosses.
+  ['resident.send', 'a message to a thread of a project of another machine of the group entrusted to it, marked there as the bot\'s, never the user\'s, while that machine has groupBots on'],
   ['agent.where', 'the thread, its project, its working directory and its branch: what the CLI prints first'],
   ['agent.projects', 'the names and folders of the projects the owner added, so it can name one to delegation.spawn or agent.move; reading them opens nothing'],
   ['agent.addProject', 'registering an existing folder as a project, which the owner sees appear and can remove; it opens no file access the agent\'s process lacks, and it stays within the communication settings and one agent generation, like agent.spawn'],
