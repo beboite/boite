@@ -4,6 +4,7 @@ import Prose from './Prose.svelte';
 import type { Store } from '../lib/store.svelte';
 import { resetFeatures, setFeature } from '../lib/features';
 import { installExternalLinks } from '../lib/links';
+import { contextMenu } from '../lib/context-menu.svelte';
 
 /** `files.locate` for a file that is there as written. */
 const asWritten = async (_threadId: string, path: string) => ({ ok: true, value: [path] });
@@ -231,4 +232,36 @@ test('a file named by its tail opens where the core finds it, and two candidates
   await tick(); links[1]!.click();
   await vi.waitFor(() => expect(reportError).toHaveBeenCalledWith(new Error('index.ts names several files: a/index.ts, b/index.ts'), 'minor'));
   expect(invoke).toHaveBeenCalledTimes(1);
+});
+
+test('a file link\'s menu copies the whole path, not the #file placeholder, and still opens it', async () => {
+  setFeature('chat-artifacts', true);
+  const writeText = vi.fn(async (_text: string) => {});
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+  const invoke = vi.fn(async () => {});
+  window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
+  const store = { owner: true, localCore: true, locateFile: asWritten, threads: [{ id: 'hex', cwd: 'E:\\Hexalife' }], reportError: vi.fn() } as unknown as Store;
+  running = mount(Prose, { target: document.body, props: { text: 'See `addons/printer.qc:12`, `E:\\Hexalife\\models\\` and `thr_abcdefabcdef12`.', store, threadId: 'hex' } });
+  flushSync();
+  const [file, folder] = document.querySelectorAll<HTMLAnchorElement>('a[data-file-path]');
+
+  const menu = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 });
+  file!.dispatchEvent(menu);
+  expect(menu.defaultPrevented).toBe(true);
+  expect(contextMenu.current?.items.map(item => item.id)).toEqual(['open', 'copy']);
+  contextMenu.current!.onpick('copy');
+  await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('E:\\Hexalife\\addons\\printer.qc'));
+
+  folder!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  contextMenu.current!.onpick('copy');
+  await vi.waitFor(() => expect(writeText).toHaveBeenLastCalledWith('E:\\Hexalife\\models\\'));
+
+  file!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  contextMenu.current!.onpick('open');
+  await vi.waitFor(() => expect(document.querySelector('[data-testid=chat-file]')).not.toBeNull());
+
+  query<HTMLAnchorElement>('a[data-thread-address]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  contextMenu.current!.onpick('copy');
+  await vi.waitFor(() => expect(writeText).toHaveBeenLastCalledWith('thr_abcdefabcdef12'));
+  contextMenu.close();
 });

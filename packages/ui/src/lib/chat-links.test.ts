@@ -1,6 +1,15 @@
 import { expect, test } from 'vitest';
-import { chatLink, fileLike } from './chat-links';
+import { chatLink, fileLike, fullPath } from './chat-links';
 import { renderMarkdown } from './markdown';
+
+test('a copied file path is whole, resolved and in the separators of its system', () => {
+  expect(fullPath('src/main.ts', 'E:\\Hexalife')).toBe('E:\\Hexalife\\src\\main.ts');
+  expect(fullPath('E:/Hexalife/models/', null)).toBe('E:\\Hexalife\\models\\');
+  expect(fullPath('./a/../b.ts', '/home/boite/project/')).toBe('/home/boite/project/b.ts');
+  expect(fullPath('../../../x', '/a')).toBe('/x');
+  expect(fullPath('/etc/hosts', 'C:/project')).toBe('/etc/hosts');
+  expect(fullPath('../notes.md', undefined)).toBe('../notes.md');
+});
 
 test('rich markdown supports local paths, spaces, line numbers, file URIs and balanced URL parentheses', () => {
   expect(chatLink('C:\\project\\file.ts:12:3')).toEqual({ kind: 'file', target: 'C:/project/file.ts', line: 12 });

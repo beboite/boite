@@ -41,6 +41,28 @@ export function chatLink(raw: string): ChatLink | null {
   return { kind: 'file', target, ...(line ? { line: Number(line[1] ?? line[2]) } : {}) };
 }
 
+/**
+ * The path a file link names, whole, as it goes on the clipboard: a relative
+ * one joined to the thread's folder, `.` and `..` resolved, written with
+ * Windows separators when it is a Windows path, since `chatLink` turned them
+ * all into `/`.
+ */
+export function fullPath(path: string, cwd: string | null | undefined): string {
+  const whole = !cwd || /^(?:[a-z]:)?[\\/]/i.test(path) ? path : `${cwd}/${path}`;
+  const parts: string[] = [];
+  for (const part of whole.replaceAll('\\', '/').replace(/\/{2,}/g, '/').split('/')) {
+    if (part === '.') continue;
+    const last = parts.at(-1);
+    // The root (`''` before a leading `/`, or `E:`) has no parent to climb to.
+    const root = parts.length === 1 && (last === '' || /^[a-z]:$/i.test(last!));
+    if (part === '..' && root) continue;
+    if (part === '..' && last !== undefined && last !== '..') { parts.pop(); continue; }
+    parts.push(part);
+  }
+  const joined = parts.join('/');
+  return /^[a-z]:\//i.test(joined) || cwd?.includes('\\') ? joined.replaceAll('/', '\\') : joined;
+}
+
 // Ratios and dates can have path separators without naming a file.
 const NUMERIC_PATH = /^[\\/]?\d[\d.,\\/]*$/;
 
