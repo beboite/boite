@@ -771,7 +771,7 @@ pub async fn browser_create(
     {
         if let Err(error) = crate::platform::browser_page::surface(&view, muted(&label)).await {
             let _ = view.close();
-            return Err(format!("the browser surface {id:?} could not be cleared of the app's scripts: {error}"));
+            return Err(format!("the browser surface {id:?} could not be prepared: {error}"));
         }
         if let Err(error) = crate::platform::browser_diagnostics::attach(view.clone(), id.clone()).await {
             crate::platform::browser_diagnostics::remove(&id); let _ = view.close(); return Err(error);

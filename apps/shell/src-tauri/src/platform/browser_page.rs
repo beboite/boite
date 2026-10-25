@@ -71,7 +71,12 @@ pub(crate) async fn surface(view: &Webview, muted: bool) -> Result<(), String> {
     let (sender, receiver) = mpsc::channel();
     view.with_webview(move |platform| {
         let made = unsafe { platform.controller().CoreWebView2() }.map_err(|error| error.to_string())
-            .and_then(|webview| plain(&webview).and_then(|()| if muted { mute(&webview) } else { Ok(()) }));
+            .and_then(|webview| {
+                plain(&webview).map_err(|error| format!("it could not be cleared of the app's scripts: {error}"))?;
+                // Fails closed: an agent page left with its sound is the bug this prevents.
+                if muted { mute(&webview).map_err(|error| format!("its sound could not be muted: {error}"))?; }
+                Ok(())
+            });
         let _ = sender.send(made);
     }).map_err(|error| error.to_string())?;
     tauri::async_runtime::spawn_blocking(move || receiver.recv_timeout(Duration::from_secs(10))
@@ -92,7 +97,7 @@ pub(crate) fn popup<R: Runtime>(window: &WebviewWindow<R>, muted: bool) -> Resul
         let made = (|| -> Result<(), String> {
             let webview = unsafe { platform.controller().CoreWebView2() }.map_err(|error| error.to_string())?;
             plain(&webview)?;
-            if muted { mute(&webview)?; }
+            if muted { mute(&webview).map_err(|error| format!("its sound could not be muted: {error}"))?; }
             let handler = WindowCloseRequestedEventHandler::create(Box::new(move |_, _| {
                 // Closed later, off this WebView2 callback, which must not
                 // destroy the webview it is running in.
