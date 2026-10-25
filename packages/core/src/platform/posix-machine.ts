@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statfsSync } from 'node:fs';
+import { readdirSync, readFileSync, statfsSync, statSync } from 'node:fs';
 import type { MachineGpu, MachineVolume } from '@boite/contracts';
 
 /** Filesystems that hold data on a local disk; tmpfs, overlays, squashfs snaps and network mounts are left out. */
@@ -42,19 +42,25 @@ export function linuxVolumes(mounts: string | null = readText('/proc/self/mounts
   return [...byDevice.values()].sort().flatMap(point => measure(point) ?? []);
 }
 
-/** The startup volume and every disk mounted under `/Volumes`. */
-export function macosVolumes(): MachineVolume[] {
-  let mounted: string[] = [];
-  try { mounted = readdirSync('/Volumes').map(name => `/Volumes/${name}`); } catch { /* none */ }
-  const seen = new Set<string>();
+const mountedVolumes = (): string[] => {
+  try { return readdirSync('/Volumes').map(name => `/Volumes/${name}`); } catch { return []; }
+};
+
+const deviceOf = (point: string): number | null => {
+  try { return statSync(point).dev; } catch { return null; }
+};
+
+/**
+ * The startup volume and every disk mounted under `/Volumes`, once per device:
+ * `/Volumes/Macintosh HD` leads back to `/`, while two identical sticks stay two rows.
+ */
+export function macosVolumes(mounted: string[] = mountedVolumes(), device: (point: string) => number | null = deviceOf, measure: (point: string) => MachineVolume | null = volume): MachineVolume[] {
+  const seen = new Set<number>();
   return ['/', ...mounted].flatMap(point => {
-    const row = volume(point);
-    if (row === null) return [];
-    // `/Volumes/Macintosh HD` is the startup volume again.
-    const key = `${row.totalBytes}:${row.freeBytes}`;
-    if (seen.has(key)) return [];
-    seen.add(key);
-    return [row];
+    const dev = device(point);
+    if (dev === null || seen.has(dev)) return [];
+    seen.add(dev);
+    return measure(point) ?? [];
   });
 }
 

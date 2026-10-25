@@ -171,9 +171,9 @@ const MEMORY = /^luid_(0x[0-9a-f]+)_(0x[0-9a-f]+)_phys_\d+$/i;
 
 /**
  * Sums each engine over its processes and keeps the busiest engine, the way
- * Task Manager reads the same counters.
+ * Task Manager reads the same counters. No engine at all is no reading, never an idle GPU.
  */
-export function engineLoads(items: readonly Item[], pids: ReadonlySet<number>): { adapters: Map<string, number>; pids: Map<number, number> } {
+export function engineLoads(items: readonly Item[], pids: ReadonlySet<number>): { adapters: Map<string, number>; pids: Map<number, number> } | null {
   const engines = new Map<string, number>();
   const pidEngines = new Map<number, Map<string, number>>();
   for (const { name, value } of items) {
@@ -188,6 +188,7 @@ export function engineLoads(items: readonly Item[], pids: ReadonlySet<number>): 
     own.set(engine, (own.get(engine) ?? 0) + value);
     pidEngines.set(pid, own);
   }
+  if (engines.size === 0) return null;
   const adapters = new Map<string, number>();
   for (const [engine, value] of engines) {
     const luid = engine.slice(0, engine.indexOf('/'));
@@ -239,11 +240,11 @@ export async function readGpus(pids: ReadonlySet<number>): Promise<{ gpus: Machi
     return {
       gpus: adapters.list.map(row => ({
         name: row.name,
-        percent: loads.adapters.get(row.luid) ?? 0,
+        percent: loads?.adapters.get(row.luid) ?? null,
         memoryUsedBytes: used.get(row.luid) ?? null,
         memoryTotalBytes: row.memoryTotalBytes || null,
       })),
-      pids: loads.pids,
+      pids: loads?.pids ?? null,
     };
   } catch {
     // No dxgi.dll or pdh.dll (Server Core, a stripped image): say so once and stop trying.

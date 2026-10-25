@@ -40,7 +40,7 @@ export interface MachineAgents {
  */
 export class MachineResources {
   private lastCpu: CpuTimes | null = null;
-  private shared: { at: number; reading: Promise<MachineResourceSnapshot> } | null = null;
+  private shared: { at: number; reading: Promise<MachineResourceSnapshot>; settled: boolean } | null = null;
 
   constructor(
     private readonly platform: ProcessPlatform,
@@ -51,11 +51,12 @@ export class MachineResources {
 
   read(): Promise<MachineResourceSnapshot> {
     const at = this.now();
-    if (this.shared !== null && at - this.shared.at < SHARE_MS) return this.shared.reading;
-    const reading = this.sample();
-    this.shared = { at, reading };
-    reading.catch(() => { if (this.shared?.reading === reading) this.shared = null; });
-    return reading;
+    // A slow sample (nvidia-smi may take two seconds) is waited for, not overlapped: two would race on `lastCpu`.
+    if (this.shared !== null && (!this.shared.settled || at - this.shared.at < SHARE_MS)) return this.shared.reading;
+    const shared = { at, reading: this.sample(), settled: false };
+    this.shared = shared;
+    shared.reading.then(() => { shared.settled = true; }, () => { if (this.shared === shared) this.shared = null; });
+    return shared.reading;
   }
 
   private async sample(): Promise<MachineResourceSnapshot> {
