@@ -228,3 +228,17 @@ test('a chord kept on the target while the settings part is copied is left alone
   await syncSettings(await end(from), await end(racing));
   expect((await to.call('keybindings.get', {})).bindings.panel).toBe('mod+alt+p');
 });
+
+test('installing updates by itself follows the default machine, a server included, and a desktop that turns it off keeps its own', async () => {
+  // A Docker server cannot update itself, yet as the group's default it carries the choice to every desktop.
+  const server = await machine();
+  const desk = await machine();
+  await server.call('settings.set', { autoInstallUpdates: true });
+  await syncSettings(await end(server), await end(desk));
+  expect((await desk.call('settings.get', {})).autoInstallUpdates).toBe(true);
+
+  // Turned off from that desktop's own window, which marks it as kept there.
+  await desk.call('settings.set', { autoInstallUpdates: false, syncOverrides: ['autoInstallUpdates'] });
+  await syncSettings(await end(server), await end(desk));
+  expect((await desk.call('settings.get', {})).autoInstallUpdates).toBe(false);
+});

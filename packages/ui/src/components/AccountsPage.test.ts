@@ -128,6 +128,29 @@ test('a proxied provider shows only the gateway account, without actions, and it
   expect(row('claude')!.querySelector('[data-testid="account-add"]')).not.toBeNull();
 });
 const toggle = (id: string) => document.querySelector<HTMLInputElement>(`[data-testid="provider-enabled"][data-provider-id="${id}"]`)!;
+
+test('Muse recognizes the native Meta pool and restores Sign in when Douane is disabled', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0 });
+  await store.reload();
+  const muse = store.accounts.find(account => account.providerId === 'muse')!;
+  store.accounts = store.accounts.map(account => account.id === muse.id ? { ...account, status: 'unauthenticated' } : account);
+  mounted = mount(AccountsPage, { target: document.body, props: { store } });
+  flushSync();
+  expect(row('muse')?.textContent).toContain('Not signed in');
+  const douane = { enabled: true, kind: 'douane' as const, baseUrl: 'https://gateway.test/v1', dashboardUrl: 'https://gateway.test/admin/' };
+  store.settings = await client.call('subscriptionProxy.configure', { subscriptionProxy: douane });
+  flushSync();
+  expect(row('muse')?.textContent).toContain('Ready · via Douane');
+  expect(store.accountsOf('muse')).toEqual([expect.objectContaining({ id: muse.id, label: 'Douane', status: 'ok' })]);
+  expect(store.accounts.find(account => account.id === muse.id)?.status).toBe('unauthenticated');
+  store.settings = await client.call('subscriptionProxy.configure', { subscriptionProxy: { ...douane, enabled: false } });
+  flushSync();
+  expect(row('muse')?.textContent).toContain('Not signed in');
+  store.settings = await client.call('subscriptionProxy.configure', { subscriptionProxy: { ...douane, kind: 'cliproxyapi' } });
+  flushSync();
+  expect(store.gatewayOf('muse')).toBeNull();
+  expect(row('muse')?.textContent).toContain('Not signed in');
+});
 const group = (id: string) => row(id)?.parentElement?.getAttribute('data-testid');
 
 test('the switch turns a provider off through providers.setEnabled and its row moves to Turned off', async ({ ready }) => {

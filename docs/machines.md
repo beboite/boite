@@ -177,6 +177,13 @@ Docker, hand-made or too old server says how it updates in a tip on its row.
 This computer goes by its host name while it keeps the default name, and by
 the name it was given once renamed; either way lists add "(you)" after it. **Add a device**, in the card's
 header, draws the QR code and offers the link ([groups](groups.md#using-it)).
+
+Once the group has two machines, each machine's row this window controls
+carries a **Threads from the other machines** switch (`groupThreads`), off by
+default: on, the agents of the other machines may start threads in its
+projects with `boite thread new --machine` ([CLI](cli.md#commands)). The
+setting belongs to that machine and is saved there, so the PC with the printer
+can accept them while the server does not. A row shown away hides it.
 Agent versions and their automatic update switch are on each machine's
 Providers page. How a phone reaches this machine without a server of the
 group (Tailscale HTTPS, the local network, a reverse proxy of one's own) is the
@@ -213,6 +220,9 @@ The client copies (`SYNCED_SETTINGS` in the contracts):
 
 - deleted-history retention, process guards, question mode, short answers,
   tool summaries, automatic compaction and the cache keepalive;
+- **Install updates by itself when nothing runs** (`autoInstallUpdates`), so a
+  server as default machine, which cannot update itself, still carries the
+  choice to every desktop ([updates](updates.md#installing-by-itself));
 - keybindings where the two differ, including unbound commands and restored
   defaults. A failed or canceled copy attempts to restore entries already changed;
 - the brain's Share instructions automatically, instructions, guide and automatic pull switches
@@ -220,7 +230,10 @@ The client copies (`SYNCED_SETTINGS` in the contracts):
 
 Resource limits, memory protection, process retention, automatic agent updates,
 worktree storage, network access, public URLs, browser origins and provider
-sign-ins stay on their own machine.
+sign-ins stay on their own machine. So does **Threads from the other
+machines**: it says what one machine lets the others do, a choice made per
+machine, and a copy would open every follower as soon as the default machine
+opened.
 
 A synced setting changed on a following machine stays there: the change also
 adds it to that machine's `syncOverrides` (a setting's key,

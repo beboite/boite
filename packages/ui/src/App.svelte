@@ -220,6 +220,9 @@
 
   onMount(installWhipEscape);
 
+  // This computer's own setting decides whether the window's updater installs by itself.
+  $effect(() => { appUpdater.autoInstall = workspace.machines.find((machine) => machine.store.localCore)?.store.settings?.autoInstallUpdates === true; });
+
   onMount(() => {
     const stopViewport = startViewport();
     const stopRest = watchRest();

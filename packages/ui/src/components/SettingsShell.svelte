@@ -169,6 +169,8 @@
     ['general', 'conversations', strings.settings.toolSummaries],
     ['general', 'conversations', strings.settings.titleModel],
     ['general', 'conversations', strings.features.chatArtifacts.title],
+    ...(inShell ? [['general', 'conversations', strings.features.openChatLinks.title] as [SettingsTab, string, string]] : []),
+    ['general', 'conversations', strings.features.previewComments.title],
     ...(store.owner ? [['general', 'browser-profiles', strings.browserProfiles.heading]] as [SettingsTab, string, string][] : []),
     ['general', 'archived', strings.settings.archived.doneRetentionLabel],
     // The switch lives in the shell's own card: a browser has no tray.
@@ -180,6 +182,7 @@
     ['appearance', 'theme', strings.settings.language],
     ['appearance', 'theme', strings.settings.groupChanges],
     ['appearance', 'theme', strings.settings.expandDiffs],
+    ['appearance', 'theme', strings.features.edgeScrollbars.title],
     ['appearance', 'reading', strings.settings.font],
     ['appearance', 'reading', strings.settings.monoFont],
     ...(inShell ? [['appearance', 'reading', strings.settings.zoom] as [SettingsTab, string, string]] : []),

@@ -1,5 +1,9 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { MediaQuery } from 'svelte/reactivity';
+  import { experimentOn } from '../lib/experiments.svelte';
+  import { pinnedQuotas, PINNED_QUOTA_WIDTH } from '../lib/pinned-quotas.svelte';
+  import Deferred, { parts } from './Deferred.svelte';
   import { ChevronDown, FolderOpen, VenetianMask } from '@lucide/svelte';
   import { fill, strings } from '../lib/strings';
   import { modePhrase } from '../lib/permission-modes';
@@ -27,6 +31,24 @@
   let { store, locked = null }: { store: Store; locked?: string | null } = $props();
 
   let thread = $derived(store.openThread);
+  const phone = new MediaQuery('(max-width: 720px)');
+  let dockAvailable = $derived(phone.current ? store.page === 'chat' && store.sidebarOpen : !store.sidebarCollapsed);
+  let pinnedHere = $derived(experimentOn('pinned-quotas') && pinnedQuotas.current.pinned
+    && (!phone.current || !store.sidebarOpen)
+    && !(pinnedQuotas.wantsDock(store) && dockAvailable));
+  let discussion = $state<HTMLElement>();
+  let quotaRoom = $state<HTMLElement>();
+  $effect(() => {
+    const box = discussion, column = quotaRoom, owner = store;
+    if (!box || !column || !experimentOn('pinned-quotas') || !pinnedQuotas.current.pinned) return;
+    const measure = () => pinnedQuotas.crowded.set(owner, (box.clientWidth - column.clientWidth) / 2 < PINNED_QUOTA_WIDTH + 24);
+    let frame = 0;
+    const observer = new ResizeObserver(() => { cancelAnimationFrame(frame); frame = requestAnimationFrame(measure); });
+    observer.observe(box);
+    observer.observe(column);
+    untrack(measure);
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); pinnedQuotas.crowded.delete(owner); };
+  });
   /**
    * The prompt on its way to the core, drawn after what the thread holds. A
    * draft shows it too, while its thread is still being created. One whose
@@ -40,6 +62,7 @@
     }
     return local;
   });
+  let quotaInDraft = $derived(!thread && !sending && !phone.current);
   /** An edit or a retry in flight: the message it replaces and what follows leave the screen before the core answers. */
   let kept = $derived.by(() => {
     const held = thread?.messages ?? [];
@@ -94,6 +117,8 @@
      or it shrinks a second time when the thread opens. -->
   <section class="chat" class:drafting={!thread && !sending} bind:this={chat} data-testid="chat">
     {#if thread?.forkOrigin}{#key thread.id}<ForkReturn {store} {thread} />{/key}{/if}
+    <div class="discussion" class:draft-body={!thread && !sending} bind:this={discussion} data-testid={!thread && !sending ? 'draft-empty' : undefined}>
+    {#if experimentOn('pinned-quotas') && pinnedQuotas.current.pinned}<div class="quota-room" bind:this={quotaRoom} aria-hidden="true"></div>{/if}
     {#if thread}
       <!-- One timeline per thread: the heights it measured and the ids that
            already played the rise belong to that thread alone, and kept across
@@ -108,7 +133,6 @@
     {:else if sending}
       <MessageList {store} threadId={DRAFT_STASH_KEY} {messages} />
     {:else}
-      <div class="draft-body" data-testid="draft-empty">
         <div class="mobile-welcome">
           <img src="./icons/icon.svg" alt="" width="42" height="42" />
           <h1>{strings.mobile.draftTitle}</h1>
@@ -147,8 +171,12 @@
             </p>
           {/if}
         </div>
-      </div>
     {/if}
+
+    {#if pinnedHere && !quotaInDraft && (!pinnedQuotas.crowded.get(store) || (!thread && !sending))}<Deferred part={parts.PinnedQuota} quiet>{#snippet children(PinnedQuota)}<PinnedQuota {store} area={discussion} />{/snippet}</Deferred>{/if}
+    </div>
+
+    {#if pinnedHere && pinnedQuotas.crowded.get(store) && (thread || sending)}<Deferred part={parts.PinnedQuota} quiet>{#snippet children(PinnedQuota)}<PinnedQuota {store} inline area={discussion} />{/snippet}</Deferred>{/if}
 
     {#if thread}<AgentDock {store} threadId={thread.id} />{/if}
     {#if thread}<ThreadRecovery {store} /><ThreadRetry {store} />{/if}
@@ -177,6 +205,8 @@
         {/if}
       </div>
     {/if}
+    <!-- Desktop drafts anchor against the whole chat so their centered heading stays clear. -->
+    {#if pinnedHere && quotaInDraft}<Deferred part={parts.PinnedQuota} quiet>{#snippet children(PinnedQuota)}<PinnedQuota {store} area={chat} />{/snippet}</Deferred>{/if}
   </section>
 {/if}
 
@@ -217,11 +247,15 @@
   }
 
   .chat {
+    position: relative;
     display: flex;
     flex-direction: column;
     height: 100%;
     min-height: 0;
   }
+
+  .discussion { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .quota-room { position: absolute; width: 100%; max-width: var(--content); height: 0; pointer-events: none; }
 
   .chat.drafting {
     --composer-input-height: 80px;
@@ -233,7 +267,9 @@
      top as the composer sits above the bottom: one centred block. */
   .draft-body {
     flex: 1 1 0;
+    min-height: auto;
     display: flex;
+    flex-direction: row;
     align-items: flex-end;
     justify-content: center;
     padding: 24px 20px 32px;

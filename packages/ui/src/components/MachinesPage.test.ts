@@ -220,3 +220,26 @@ test('a link minted on another machine of the group, by the Tailscale switch on 
   flushSync();
   await vi.waitFor(() => { flushSync(); expect(query('[data-testid="add-device"]').dataset.link).toBe('https://target.tail.ts.net/?grant=g#join=j'); });
 });
+
+test('each machine says for itself whether the others may start threads on it, and the default machine does not copy it', async () => {
+  const { source, target } = await setup();
+  await source.store.client!.call('group.settingsHome', { coreId: 'source' });
+  await vi.waitFor(() => expect(target.store.group?.settingsHome).toBe('source'));
+  await vi.waitFor(() => { flushSync(); expect(document.querySelectorAll('[data-testid="machine-group-threads-switch"]')).toHaveLength(2); });
+  const switches = [...document.querySelectorAll<HTMLInputElement>('[data-testid="machine-group-threads-switch"]')];
+  expect(switches.map(toggle => toggle.checked)).toEqual([false, false]);
+  expect(query('[data-testid="machine-group-threads"]').textContent).toContain(strings.machines.groupThreads);
+
+  // The default machine, the one the others copy, accepts them: the machine that follows it keeps its own answer.
+  query<HTMLInputElement>('[data-machine-id="source"] [data-testid="machine-group-threads-switch"]').click();
+  await vi.waitFor(() => expect(source.store.settings?.groupThreads).toBe(true));
+  await source.store.client!.call('settings.set', { asyncQuestions: false });
+  await vi.waitFor(() => expect(target.store.settings?.asyncQuestions).toBe(false));
+  expect(target.store.settings?.groupThreads ?? false).toBe(false);
+  expect(target.store.settings?.syncOverrides ?? []).not.toContain('groupThreads');
+  // Its own switch changes that machine alone.
+  query<HTMLInputElement>('[data-machine-id="target"] [data-testid="machine-group-threads-switch"]').click();
+  await vi.waitFor(() => expect(target.store.settings?.groupThreads).toBe(true));
+  await target.store.saveSettings({ groupThreads: false });
+  expect([source.store.settings?.groupThreads, target.store.settings?.groupThreads]).toEqual([true, false]);
+});

@@ -91,6 +91,15 @@ export interface Settings {
    */
   autoUpdateHarnesses: boolean;
   /**
+   * This computer's desktop app installs a release the six-hourly check found
+   * by itself: it downloads it, then installs only while the window is in the
+   * tray and the core grants an idle stop (no turn, queued turn or tracked
+   * process); a busy machine tries again at the next check. The new app comes
+   * back in the tray. Followed from the group's default machine. Missing reads
+   * as off.
+   */
+  autoInstallUpdates?: boolean;
+  /**
    * Agents without asynchronous questions of their own are told about
    * `boite ask` at the start of a session, so they can ask without stopping.
    * Missing on older cores, which read as on.
@@ -157,6 +166,12 @@ export interface Settings {
    * panel polls screenshots and `adb shell input`. Missing reads as off.
    */
   deviceStream?: boolean;
+  /**
+   * Agents on the other machines of this machine's group may start threads
+   * here (`boite thread new --machine`), in its projects, as their own agent
+   * would from this machine. Each machine decides for itself. Missing reads as off.
+   */
+  groupThreads?: boolean;
   /**
    * While this machine follows its group's settings home, what it keeps for
    * itself (`SyncKey`): each entry was changed here and the copy skips it.

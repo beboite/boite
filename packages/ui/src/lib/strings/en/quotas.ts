@@ -1,6 +1,13 @@
 export const strings = {
 
   quotas: {
+    pin: 'Pin model quotas',
+    unpin: 'Unpin model quotas',
+    pinnedTitle: 'Model quotas',
+    pinnedEmpty: 'No quota reading for this model provider.',
+    position: 'Move quota card',
+    dragHint: 'Drag to a corner or the sidebar. Use arrow keys to move, Home to dock.',
+    positions: { 'top-left': 'Top left', 'top-right': 'Top right', 'bottom-left': 'Bottom left', 'bottom-right': 'Bottom right', dock: 'Dock below threads' },
     machineAccounts: 'Account limits for {machine}',
     outdated: 'Update Boite on this machine to see its limits on this device.',
     usingCredits: 'Using credits',

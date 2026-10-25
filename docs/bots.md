@@ -285,14 +285,18 @@ unpredictable name, created exclusively, then renamed over the file.
 
 MEMORY.md is the one memory store. `boite bot remember <fact>`
 (`agents.memory.note`) appends a dated line `- YYYY-MM-DD <fact>`, at most
-1,000 characters, refused once the file would pass `AGENT_MEMORY_MAX` (8,000)
+1,000 characters, refused once the file would pass `AGENT_MEMORY_MAX` (16,000)
 with the file's path. After a non-quiet turn whose answer the user sees, a
 memory pass rewrites the file (`agents/memory.ts`). It is a subagent of the
 bot's thread that the core owns, like a goal reviewer: it reads the current
 file, what was asked and what the bot answered, and returns the whole file
-rewritten with a one-line summary, keeping dated facts about the user, their
-projects, decisions and open follow-ups and dropping what the exchange made
-wrong or finished. It runs on the provider's small model (the one that titles
+rewritten with a one-line summary. A bot stays on for months, so the file is a
+map rather than a store: where things are (projects, folders, files, URLs,
+threads, accounts, each with its path or id and where it stands), then dated
+facts about the user, decisions and open follow-ups. A detail stays in the
+place that holds it and the line points there; the pass drops what the
+exchange made wrong or finished. It aims under `MEMORY_TARGET` (three
+quarters of the cap) and is told the file's current size. It runs on the provider's small model (the one that titles
 threads) when the bot's subagent policy allows it, else on the bot's own
 model. The core writes the file, so the pass runs with no tool at all, enforced
 by its driver rather than its prompt: no built-in tool, MCP server, hook,
@@ -308,7 +312,9 @@ in their plan mode with no MCP server Boite passes; Muse in its plan posture
 still asks for is denied without a card. The pass reads MEMORY.md and the
 exchange as JSON strings. It keeps the old
 file when the owner edited it meanwhile, when the answer passes
-`AGENT_MEMORY_MAX`, or when it would drop most of a file past 1,500
+`AGENT_MEMORY_MAX` (an answer past it first goes back once to the same pass,
+which is asked to cut its rewrite under `MEMORY_TARGET`; past it twice, the
+old file stays), or when it would drop most of a file past 1,500
 characters. The next turn never waits for it, and its notification never
 waits for the pass either. One pass runs per bot at a time; every exchange
 that ends meanwhile joins the next one, and a pass still running after ten

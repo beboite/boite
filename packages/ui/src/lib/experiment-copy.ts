@@ -8,17 +8,14 @@ import { strings } from './strings';
  */
 export function experimentCopy(): Record<ExperimentId, { title: string; hint: string }> {
   return {
+    'pinned-quotas': strings.experiments.pinnedQuotas,
     'recording-indicators': strings.experiments.recordingIndicators,
     'theme-grain': strings.experiments.themeGrain,
     'session-import': strings.experiments.sessionImport,
     'prompt-cache': strings.experiments.promptCache,
-    'open-chat-links': strings.experiments.openChatLinks,
-    'preview-comments': strings.experiments.previewComments,
     'resident-agents': strings.experiments.residentAgents,
     goal2: strings.experiments.goal2,
     whip: strings.experiments.whip,
-    'edge-scrollbars': strings.experiments.edgeScrollbars,
-    'press-preload': strings.experiments.pressPreload,
     contacts: strings.experiments.contacts
   };
 }

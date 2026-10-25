@@ -40,7 +40,7 @@ export interface AgentBrain {
   revision: string;
 }
 /** The size MEMORY.md is kept under: the memory pass consolidates to it, a turn reads at most this much. */
-export const AGENT_MEMORY_MAX = 8000;
+export const AGENT_MEMORY_MAX = 16_000;
 /** Routines one agent may hold; a save past it is refused with the count. */
 export const AGENT_ROUTINES_MAX = 50;
 /** A routine's name and prompt, in characters. */

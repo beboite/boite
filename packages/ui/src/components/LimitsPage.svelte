@@ -16,6 +16,7 @@
   import GatewayOpenButton from './GatewayOpenButton.svelte';
   import SubscriptionProxySettings from './SubscriptionProxySettings.svelte';
   import GatewaySwitch from './GatewaySwitch.svelte';
+  import QuotaPin from './QuotaPin.svelte';
 
   /**
    * The subscription windows of every signed-in provider. The last reading
@@ -112,6 +113,7 @@
   {:else}
   <header class="top">
     {#if showTitle}<h1><QuotaMachineScope {store} fallback={strings.usage.limits} /></h1>{/if}
+    <QuotaPin />
     {#if store.owner}
       <button type="button" class="quiet icon refresh" aria-label={strings.usage.refresh} title={strings.usage.refresh} data-testid="limits-refresh" aria-busy={reader.busy} onclick={refresh}>
         <RefreshCw size={15} strokeWidth={1.75} class={reader.busy ? 'spinning' : ''} />

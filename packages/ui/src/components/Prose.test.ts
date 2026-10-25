@@ -2,7 +2,6 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import Prose from './Prose.svelte';
 import type { Store } from '../lib/store.svelte';
-import { writeExperiments } from '../lib/experiments';
 import { resetFeatures, setFeature } from '../lib/features';
 import { installExternalLinks } from '../lib/links';
 
@@ -15,7 +14,6 @@ afterEach(() => {
   if (running) unmount(running, { outro: false });
   running = null;
   document.body.innerHTML = '';
-  writeExperiments([]);
   resetFeatures();
   delete window.__TAURI_INTERNALS__;
 });
@@ -121,7 +119,7 @@ test.each([false, true])('selecting external link text skips navigation, then a 
   } finally { stopLinks(); opened.mockRestore(); }
 });
 
-test('the direct-link experiment opens a desktop shortcut and text outside the checkout only on a click', async () => {
+test('the open-chat-links switch opens a desktop shortcut and text outside the checkout only on a click', async () => {
   setFeature('chat-artifacts', false);
   const invoke = vi.fn(async () => {});
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
@@ -131,7 +129,7 @@ test('the direct-link experiment opens a desktop shortcut and text outside the c
   } });
   flushSync();
   expect(document.querySelector('a[data-file-path]')).toBeNull();
-  writeExperiments(['open-chat-links']); flushSync();
+  setFeature('open-chat-links', true); flushSync();
   expect(invoke).not.toHaveBeenCalled();
   const links = document.querySelectorAll<HTMLAnchorElement>('a[data-file-path]');
   links[0]!.click();
@@ -139,12 +137,12 @@ test('the direct-link experiment opens a desktop shortcut and text outside the c
   await tick(); links[1]!.click();
   await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('open_chat_file', { directory: 'E:/project', path: 'E:/reports/test result.txt' }, undefined));
   expect(store.readFile).not.toHaveBeenCalled();
-  writeExperiments([]); flushSync();
+  setFeature('open-chat-links', false); flushSync();
   expect(document.querySelector('a[data-file-path]')).toBeNull();
 });
 
-test('a remote machine file is never opened by the desktop experiment', async () => {
-  writeExperiments(['open-chat-links']);
+test('a remote machine file is never opened by the open-chat-links switch', async () => {
+  setFeature('open-chat-links', true);
   const invoke = vi.fn(async () => {});
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
   const readFile = vi.fn(async () => ({ ok: false, error: 'Remote file unavailable' }));
@@ -219,7 +217,7 @@ test('plain text preserves its rendered content and gets no copy button', async 
 });
 
 test('a file named by its tail opens where the core finds it, and two candidates are reported', async () => {
-  writeExperiments(['open-chat-links']);
+  setFeature('open-chat-links', true);
   const invoke = vi.fn(async () => {});
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
   const reportError = vi.fn();

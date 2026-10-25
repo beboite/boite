@@ -8,11 +8,15 @@
   import { elapsed } from '../lib/format';
   import { ThoughtTitleScan } from '../lib/tool-groups';
   import type { Store } from '../lib/store.svelte';
+  import { richMarkdown } from '../lib/rich-markdown';
+  import { viewerHost } from '../lib/media-gallery';
 
   /** `store` and `threadId` say where a thread link in the reasoning starts from. */
   let { text, live = false, startedAt = null, finishedAt = null, store, threadId }: { text: string; live?: boolean; startedAt?: number | null; finishedAt?: number | null; store?: Store; threadId?: string } = $props();
 
   const took = $derived(startedAt === null || (!live && finishedAt === null) ? '' : elapsed((live ? secondClock.now : finishedAt!) - startedAt));
+  // A diagram in the reasoning opens in the timeline's viewer.
+  const viewers = viewerHost();
 
   // Folded by default, and the fold belongs to this part alone.
   let open = $state(false);
@@ -62,7 +66,7 @@
     <div>
       {#if built}
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-        <div class="body" data-testid="thinking-text" onclick={event => workspace.followThreadLink(event, store, threadId)}>
+        <div class="body" data-testid="thinking-text" use:richMarkdown={{ onenlarge: viewers ? item => { viewers.open({ items: [item], index: 0 }); viewers.release(item.src); } : undefined }} onclick={event => workspace.followThreadLink(event, store, threadId)}>
           {#each content.blocks as block, index (index)}<div class="paragraph">{@html renderMarkdown(block)}</div>{/each}
           {#if content.pending}<div class="paragraph">{content.pending}</div>{/if}
         </div>

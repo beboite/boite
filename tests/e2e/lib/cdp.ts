@@ -14,6 +14,12 @@ import { TextSocket } from '../../../packages/core/src/ws-client.ts';
  * record is stored yet, so a test that writes its own keeps it across a reload.
  * Every profile a test drives is new, and the tour it would open covers the page.
  */
+/**
+ * This harness's Chrome leaves `navigator.webdriver` false where Playwright's
+ * sets it. A launched page is told it is driven, so the app's automation
+ * guards hold: Load on press waits for the click (`lib/press-preload.ts`).
+ */
+const DRIVEN = `Object.defineProperty(Navigator.prototype, 'webdriver', { get: () => true, configurable: true });`;
 const SEEN_TOUR = `try { if (localStorage.getItem(${JSON.stringify(ONBOARDING_STORAGE_KEY)}) === null) localStorage.setItem(${JSON.stringify(ONBOARDING_STORAGE_KEY)}, ${JSON.stringify(JSON.stringify({ version: ONBOARDING_VERSION, at: 0 }))}); } catch {}`;
 
 const CONNECT_TIMEOUT_MS = 30_000;
@@ -360,6 +366,7 @@ export class BrowserPage {
       await page.send('Network.enable', {});
       await page.#enableHangProbes();
       await page.#watchHistory();
+      await page.send('Page.addScriptToEvaluateOnNewDocument', { source: DRIVEN });
       if (options.showTour !== true) await page.send('Page.addScriptToEvaluateOnNewDocument', { source: SEEN_TOUR });
       if (options.terminalGpu !== true) {
         // Only on a fresh profile: a test that turns the GPU on and reloads keeps its choice.

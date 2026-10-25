@@ -123,8 +123,9 @@ describe('history gaps', () => {
     expect(heldNear([0, ESTIMATE], folded, messages, ESTIMATE, new Map())).toBe(8);
   });
 
-  test('a page landing above the reader moves the view by what the row drifted on screen, and only then', async () => {
+  test.each([340, 1, -1, 0.75, -0.75])('a page landing above the reader corrects a %s px drift, and only then', async (drift) => {
     const view = document.createElement('div');
+    view.scrollTop = 200;
     const row = document.createElement('article');
     row.dataset['mid'] = 'm-2';
     view.append(row);
@@ -134,13 +135,13 @@ describe('history gaps', () => {
     expect(rowOnScreen(view)).toEqual({ id: 'm-2', offset: 20 });
     const moved = vi.fn();
     const hold = vi.fn();
-    // The rows drawn above it pushed it 340 px down, and nothing anchored it: the view follows.
-    expect(await loadKeepingReader(async (landing) => { landing(); rowTop = 360; return 3; }, () => view, hold, async () => {}, moved)).toBe(3);
-    expect(view.scrollTop).toBe(340);
-    expect(moved).toHaveBeenLastCalledWith(340);
+    // Even a fractional shift from the rows drawn above it moves the view by the same amount.
+    expect(await loadKeepingReader(async (landing) => { landing(); rowTop += drift; return 3; }, () => view, hold, async () => {}, moved)).toBe(3);
+    expect(view.scrollTop).toBe(200 + drift);
+    expect(moved).toHaveBeenLastCalledWith(200 + drift);
     // Anchored by the browser already: nothing moves.
     expect(await loadKeepingReader(async (landing) => { landing(); return 3; }, () => view, hold, async () => {}, moved)).toBe(3);
-    expect(view.scrollTop).toBe(340);
+    expect(view.scrollTop).toBe(200 + drift);
     // The window was held on the row as each page went in, before it was drawn.
     expect(hold).toHaveBeenCalledTimes(2);
     expect(hold).toHaveBeenNthCalledWith(1, { id: 'm-2', offset: 20 });
