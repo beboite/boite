@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { AGENT_ENV, VIEW_CONTENT_POLICY, VIEW_HELP, VIEW_GUIDE_LINE, viewDocument, viewFrameHeight, viewTitleOf, readViewMessage, type MessagePart } from '@boite/contracts';
 import { agentGuide } from '../src/agent-guide.ts';
 import { findChromium } from '../src/browser/chromium.ts';
@@ -31,6 +31,8 @@ async function start(withBrowser: boolean): Promise<void> {
   // are about what a check finds, so they give it a minute; the product keeps its limit.
   const probe = harness.core.browser.probe.bind(harness.core.browser);
   harness.core.browser.probe = (url, widths) => probe(url, widths, 60_000);
+  const checkView = harness.core.browser.checkView.bind(harness.core.browser);
+  harness.core.browser.checkView = (url, options) => checkView(url, options, 60_000);
   ({ threadId } = await echoThread(harness, client));
   agent = await connect(harness.url, harness.core.agents.tokenFor(threadId));
   await client.call('turns.start', { threadId, prompt: 'Explain it with a drawing' });
@@ -259,6 +261,133 @@ test('a page that is not ready is refused with what to fix, and nothing is store
   await client.call('threads.archive', { threadId });
   expect(await thrown(client.call('artifacts.view', { threadId, path: 'empty.html' }))).toThrow('active thread');
 });
+
+type SavedCheck = { checked: boolean; errors: string[]; advice: string[]; captures: Array<{ width: number; height: number; path: string; value?: unknown; png?: string }> };
+
+test('view check without a browser fails explicitly without publishing or opening anything', async () => {
+  write('quiet.html', page('<p>quiet</p>'));
+  await client.call('threads.subscribe', { threadId });
+  const before = (await client.call('threads.get', { threadId })).messages;
+  const events: string[] = [];
+  const off = client.onAny(event => events.push(event));
+  try {
+    const checked = await cli('view', 'check', 'quiet.html', '--json');
+    expect(checked.code).toBe(1);
+    expect(checked.error).toBe('');
+    const result = JSON.parse(checked.output) as SavedCheck;
+    expect(result.checked).toBe(false);
+    expect(result.errors.join(' ')).toMatch(/browser/i);
+    expect(result.captures).toEqual([]);
+    expect((await client.call('threads.get', { threadId })).messages).toEqual(before);
+    expect(events.filter(event => /^(message\.|panel\.|browser\.remote)/.test(event))).toEqual([]);
+    expect(existsSync(join(harness.dataDir, 'artifacts'))).toBe(false);
+    expect(existsSync(join(harness.dataDir, 'view-checks')) ? readdirSync(join(harness.dataDir, 'view-checks')) : []).toEqual([]);
+  } finally { off(); }
+});
+
+test('view check validates its file and options before publication', async () => {
+  for (const args of [[], ['quiet.html', 'extra.html'], ['quiet.html', '--script'], ['quiet.html', '--scheme', 'sepia']]) {
+    const checked = await cli('view', 'check', ...args);
+    expect(checked.code).toBe(2);
+  }
+  write('quiet.html', page('<p>quiet</p>'));
+  const missing = await cli('view', 'check', 'quiet.html', '--script', 'missing.js');
+  expect(missing.code).toBe(1);
+  expect(missing.error).toContain('missing.js');
+  expect(existsSync(join(harness.dataDir, 'artifacts'))).toBe(false);
+});
+
+test('view check RPC refuses invalid options, unsafe input and another agent thread', async () => {
+  write('quiet.html', page('<p>quiet</p>'));
+  const params = { threadId, path: 'quiet.html' };
+  expect(await thrown(agent.call('artifacts.viewCheck', { ...params, scheme: 'sepia' as 'dark' }))).toThrow('scheme must be dark or light');
+  expect(await thrown(agent.call('artifacts.viewCheck', { ...params, script: 42 as unknown as string }))).toThrow('script must be JavaScript text');
+  expect(await thrown(agent.call('artifacts.viewCheck', { ...params, path: '../outside.html' }))).toThrow('leaves');
+  write('remote.html', page('<script src="https://example.com/library.js"></script>'));
+  expect(await thrown(agent.call('artifacts.viewCheck', { ...params, path: 'remote.html' }))).toThrow('library.js is remote');
+  const other = await echoThread(harness, client, 'another thread');
+  expect(await thrown(agent.call('artifacts.viewCheck', { ...params, threadId: other.threadId }))).toThrow('is for thread');
+  await client.call('threads.archive', { threadId });
+  expect(await thrown(client.call('artifacts.viewCheck', params))).toThrow('active thread');
+  expect(existsSync(join(harness.dataDir, 'artifacts'))).toBe(false);
+  expect(existsSync(join(harness.dataDir, 'view-checks'))).toBe(false);
+});
+
+real('view check scripts run on a fresh page at each width and leave only local captures', async () => {
+  await restartWithBrowser();
+  write('controls.html', page('<button id="increment">Add</button><output id="count">0</output><script>document.querySelector("#increment").onclick = () => document.querySelector("#count").textContent++;</script>'));
+  write('checks.js', `
+    const count = document.querySelector('#count');
+    if (count.textContent !== '0') throw new Error('page was reused');
+    document.querySelector('#increment').click();
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    if (count.textContent !== '1') throw new Error('button did not increment');
+    return { count: Number(count.textContent), scheme: getComputedStyle(document.documentElement).colorScheme };
+  `);
+  await client.call('threads.subscribe', { threadId });
+  const before = (await client.call('threads.get', { threadId })).messages;
+  const events: string[] = [];
+  const off = client.onAny(event => events.push(event));
+  try {
+    const checked = await cli('view', 'check', 'controls.html', '--script', 'checks.js', '--scheme', 'light', '--json');
+    expect(checked.code).toBe(0);
+    expect(checked.error).toBe('');
+    const result = JSON.parse(checked.output) as SavedCheck;
+    expect(result).toMatchObject({ checked: true, errors: [], advice: [] });
+    expect(result.captures.map(capture => capture.width)).toEqual([816, 330]);
+    for (const capture of result.captures) {
+      expect(capture.height).toBeGreaterThan(0);
+      expect(capture.value).toEqual({ count: 1, scheme: 'light' });
+      expect(capture.png).toBeUndefined();
+      expect(dirname(capture.path)).toBe(harness.dataDir);
+      expect(readFileSync(capture.path).subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    }
+    expect((await client.call('threads.get', { threadId })).messages).toEqual(before);
+    const status = (await agent.call('browser.command', { threadId, action: { kind: 'status' } })).value as { tabs: unknown[] };
+    expect(status.tabs).toEqual([]);
+    expect(events.filter(event => /^(message\.|panel\.|browser\.remote)/.test(event))).toEqual([]);
+    expect(existsSync(join(harness.dataDir, 'artifacts'))).toBe(false);
+    expect(existsSync(join(harness.dataDir, 'view-checks')) ? readdirSync(join(harness.dataDir, 'view-checks')) : []).toEqual([]);
+  } finally { off(); }
+}, 180_000);
+
+real('view check keeps screenshots after a script error, returns failure and never overwrites a capture', async () => {
+  await restartWithBrowser();
+  write('throws.html', page('<p>Still visible</p>'));
+  write('fails.js', "document.querySelector('p').textContent = 'Changed before failure'; throw new Error('control assertion failed');");
+  const failed = await cli('view', 'check', 'throws.html', '--script', 'fails.js', '--json');
+  expect(failed.code).toBe(1);
+  expect(failed.error).toBe('');
+  const result = JSON.parse(failed.output) as SavedCheck;
+  expect(result.checked).toBe(true);
+  expect(result.errors.join(' ')).toContain('control assertion failed');
+  expect(result.captures.map(capture => capture.width)).toEqual([816, 330]);
+  for (const capture of result.captures) {
+    expect(capture.png).toBeUndefined();
+    expect(readFileSync(capture.path).subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    writeFileSync(capture.path, 'keep this capture');
+  }
+  const again = await cli('view', 'check', 'throws.html', '--script', 'fails.js');
+  expect(again.code).toBe(1);
+  expect(again.output).toContain('capture:');
+  expect(again.output).toContain('control assertion failed');
+  for (const capture of result.captures) {
+    expect(readFileSync(capture.path, 'utf8')).toBe('keep this capture');
+    expect(again.output).not.toContain(capture.path);
+  }
+  expect(existsSync(join(harness.dataDir, 'artifacts'))).toBe(false);
+  expect(existsSync(join(harness.dataDir, 'view-checks')) ? readdirSync(join(harness.dataDir, 'view-checks')) : []).toEqual([]);
+  // Each width fits alone, but together the values would exceed one RPC response.
+  write('large-result.js', 'return "x".repeat(8 * 1024 * 1024);');
+  const oversized = await cli('view', 'check', 'throws.html', '--script', 'large-result.js', '--json');
+  expect(oversized.code).toBe(1);
+  expect(oversized.error).toBe('');
+  const oversizedResult = JSON.parse(oversized.output) as SavedCheck;
+  expect(oversizedResult).toMatchObject({ checked: true, captures: [] });
+  expect(oversizedResult.errors.join(' ')).toContain('16 MB');
+  expect(existsSync(join(harness.dataDir, 'artifacts'))).toBe(false);
+  expect(readdirSync(join(harness.dataDir, 'view-checks'))).toEqual([]);
+}, 180_000);
 
 real('a page is loaded in a headless browser before it is shown: its height is measured, its errors refuse it', async () => {
   await restartWithBrowser();

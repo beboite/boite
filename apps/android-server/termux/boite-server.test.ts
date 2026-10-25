@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { verifyPayload } from '../../../packages/core/src/server-update/release.ts';
 import {
   bindAddress, bundleName, checkEntries, coreEnv, DEFAULT_CONFIG, deviceName, GLIBC_INTERPRETER, loaderLink, newestRelease, offerOf, pairingLinks, parseConfig, patchInterpreter, pickRelease,
-  reachableAt, rotateLog, startTimeOf, tailscaleAddress, TARGET, UPDATE_PUBLIC_KEY, verifyFile, withSetting, type Interfaces,
+  reachableAt, rotateLog, signIns, startTimeOf, tailscaleAddress, TARGET, UPDATE_PUBLIC_KEY, verifyFile, withSetting, type Interfaces,
 } from './boite-server.ts';
 
 const temporary = () => mkdtempSync(join(tmpdir(), 'boite-android-server-'));
@@ -95,6 +95,16 @@ test('a rotated log keeps receiving what the running supervisor writes', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('an agent counts as signed in when one of its accounts is, and as signed out with none', () => {
+  const account = (providerId: string, status: string) => ({ id: `${providerId}-${status}`, providerId, label: 'Default', status, isolationDir: null, identity: null, createdAt: 0 });
+  // The owner's own account beside a default one the CLI signed out of; Codex never signed in, so the core holds no account of it.
+  expect(signIns([account('claude', 'unauthenticated'), account('claude', 'ok'), account('pi', 'unknown'), account('pi', 'error')]))
+    .toEqual({ claude: 'ok', pi: 'unknown' });
+  expect(signIns([account('claude', 'unauthenticated'), { providerId: 'codex', status: 'signed-in' }, null])).toEqual({ claude: 'unauthenticated' });
+  expect(signIns([])).toEqual({});
+  expect(() => signIns({ error: 'no core' })).toThrow('no list');
 });
 
 test('an archive entry that would land outside its release directory stops the update', () => {

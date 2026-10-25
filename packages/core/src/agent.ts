@@ -19,7 +19,7 @@ import { registerGitMethods } from './git.ts';
 import { registerTodoMethods } from './todos.ts';
 import { existingInside, registerWorkdirMethods, resolveInside } from './workdir.ts';
 import { publishArtifact, readArtifact } from './artifacts.ts';
-import { publishView } from './views.ts';
+import { checkView, publishView } from './views.ts';
 
 /** More than a plan, and the tasks surface stops being readable anyway. */
 export const TASKS_MAX = 200;
@@ -240,6 +240,7 @@ export function registerAgentMethods(core: Core): void {
   core.router.register('artifacts.publish', (params) => publishArtifact(core, params));
   core.router.register('artifacts.read', (params) => readArtifact(core, params));
   core.router.register('artifacts.view', (params) => publishView(core, params));
+  core.router.register('artifacts.viewCheck', (params) => checkView(core, params));
   core.router.register('artifacts.preview', ({ threadId, path }) => {
     const preview = core.artifactPreviews.open(threadId, path);
     core.bus.emit('panel.requested', { threadId, surface: { kind: 'browser', url: preview.url, artifact: { path: preview.path, port: preview.port } }, at: Date.now() });

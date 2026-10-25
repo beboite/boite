@@ -572,6 +572,71 @@ function codexVersion(): string | null {
   return result.status === 0 ? (/\d+\.\d+\.\d+/.exec(result.stdout)?.[0] ?? null) : null;
 }
 
+/** An account's status as the core reports it (`AccountStatus`). */
+export type SignIn = 'ok' | 'unknown' | 'error' | 'unauthenticated';
+const SIGN_INS: SignIn[] = ['ok', 'unknown', 'error', 'unauthenticated'];
+
+/**
+ * Each provider's best account in `boite-core accounts --json`: one signed-in
+ * account is enough for its agent to answer. A provider with no account at
+ * all is absent, as signed out as can be.
+ */
+export function signIns(accounts: unknown): Record<string, SignIn> {
+  if (!Array.isArray(accounts)) throw new Error('boite-core accounts gave no list');
+  const best: Record<string, SignIn> = {};
+  for (const account of accounts as { providerId?: unknown; status?: unknown }[]) {
+    const status = SIGN_INS.find((known) => known === account?.status);
+    if (typeof account?.providerId !== 'string' || !status) continue;
+    const current = best[account.providerId];
+    if (!current || SIGN_INS.indexOf(status) < SIGN_INS.indexOf(current)) best[account.providerId] = status;
+  }
+  return best;
+}
+
+/** What the running core says of its accounts; `refresh` adopts a CLI login made since it started. */
+function coreSignIns(release: Release, refresh: boolean): Record<string, SignIn> {
+  const result = spawnSync(join(PATHS.bin, 'bun'), [join(release.dir, 'core', 'main.js'), 'accounts', '--json', ...(refresh ? ['--refresh'] : [])], {
+    // A refresh starts each agent once to ask it, seconds apiece on a slow phone.
+    encoding: 'utf8', env: coreEnv(release), timeout: refresh ? 180_000 : 30_000,
+  });
+  if (result.status !== 0) throw new Error(failure(result).replace(/^boite-core accounts: /, ''));
+  return signIns(JSON.parse(result.stdout));
+}
+
+/** The command each agent signs in with, run in a Termux terminal: both print a link to open. */
+const SIGN_IN_COMMANDS: Record<string, { name: string; command: () => string[] }> = {
+  claude: { name: 'Claude Code', command: () => [join(PATHS.bin, 'claude'), 'auth', 'login'] },
+  codex: { name: 'Codex', command: () => ['codex', 'login', '--device-auth'] },
+};
+
+/**
+ * `sign-in claude|codex`: the agent's own login, in the terminal the person
+ * types in, into the login the core's default account reads. A running core
+ * then reloads its providers to adopt it; a stopped one reads it at start.
+ */
+function signIn(args: Args, say: (line: string) => void): { ok: true; agent: string; signedIn: boolean | null } {
+  const agent = args.positionals()[0] ?? '';
+  const known = SIGN_IN_COMMANDS[agent];
+  if (!known) throw new Error(`sign-in takes ${Object.keys(SIGN_IN_COMMANDS).join(' or ')}, got ${agent || 'nothing'}`);
+  if ((agent === 'claude' ? claudeVersion() : codexVersion()) === null) {
+    throw new Error(`${known.name} is not installed: ${agent === 'claude' ? 'boite-server agents' : 'pkg install codex'}`);
+  }
+  const [command, ...rest] = known.command();
+  // With --json the agent's own lines go to stderr: stdout holds the one answer line.
+  const login = spawnSync(command!, rest, { stdio: ['inherit', args.flag('--json') ? 2 : 'inherit', 'inherit'] });
+  if (login.status !== 0) throw new Error(`${known.name}'s sign-in stopped: ${login.error?.message ?? `exit status ${login.status}`}`);
+  const release = currentRelease();
+  if (!release || !alive(readState().core)) return { ok: true, agent, signedIn: null };
+  say('Telling Boite…');
+  try {
+    return { ok: true, agent, signedIn: coreSignIns(release, true)[agent] === 'ok' };
+  } catch (error) {
+    // The login went through all the same: the core reads it when it starts again.
+    say(`Boite did not answer: ${error instanceof Error ? error.message : String(error)}`);
+    return { ok: true, agent, signedIn: null };
+  }
+}
+
 /** The latest Claude Code, checked against Anthropic's manifest as the core's own installer does. */
 async function installClaude(say: (line: string) => void): Promise<{ version: string; changed: boolean }> {
   const loader = join(PREFIX, 'glibc', 'lib', 'ld-linux-aarch64.so.1');
@@ -866,6 +931,8 @@ interface Status {
   /** Absent when not checked: `codex --version` takes seconds on a slow phone. */
   claude?: string | null;
   codex?: string | null;
+  /** Each provider's best account, checked with the versions; null when the core did not answer. */
+  signIns?: Record<string, SignIn> | null;
 }
 
 async function status(agents = true): Promise<Status> {
@@ -874,12 +941,17 @@ async function status(agents = true): Promise<Status> {
   const state = readState();
   const core = alive(state.core) ? state.core : null;
   const probe = core ? probeUrl(core.host, core.port) : null;
+  const healthy = probe !== null && await health(probe) !== null;
+  let accounts: Record<string, SignIn> | null = null;
+  if (agents && healthy && release) {
+    try { accounts = coreSignIns(release, false); } catch { /* Shown as not known. */ }
+  }
   return {
     ok: true,
     installed: release !== null,
     version: release?.version ?? null,
     running: alive(state.supervisor) || core !== null,
-    healthy: probe !== null && await health(probe) !== null,
+    healthy,
     channel: config.channel,
     host: config.host,
     port: config.port,
@@ -887,17 +959,19 @@ async function status(agents = true): Promise<Status> {
     probe,
     urls: core ? reachableAt(config.host, core.port) : [],
     since: core?.since ?? null,
-    ...(agents ? { claude: claudeVersion(), codex: codexVersion() } : {}),
+    ...(agents ? { claude: claudeVersion(), codex: codexVersion(), signIns: accounts } : {}),
   };
 }
 
 function describe(state: Status): string {
+  const signedIn = Object.entries(state.signIns ?? {}).filter(([, status]) => status === 'ok').map(([provider]) => provider);
   const lines = [
     state.installed ? `Boite ${state.version}, ${state.channel} channel` : 'Boite is not installed',
     state.running ? (state.healthy ? 'running' : 'starting or not answering') : 'stopped',
     `listens: ${state.host}, port ${state.port}${state.autostart ? ', starts with the phone' : ''}`,
     ...state.urls.map((url) => `reach it at ${url}`),
     ...('claude' in state ? [`Claude Code: ${state.claude ?? 'not installed'}, Codex: ${state.codex ?? 'not installed'}`] : []),
+    ...(state.signIns ? [signedIn.length ? `signed in: ${signedIn.join(', ')}` : 'no agent is signed in: boite-server sign-in claude, or codex'] : []),
   ];
   return lines.join('\n');
 }
@@ -992,6 +1066,7 @@ const USAGE = `usage: boite-server <command> [--json]
   pair [--owner]           a one-time link for a browser (or, with --owner, a computer that drives this server)
   update [--check] [--force] [--bundle <zip>]
   agents                   install or update Claude Code
+  sign-in claude|codex     the agent's sign-in, typed in this terminal; Boite then uses it
   config [<key> <value>]   channel stable|nightly, host lan|tailscale|local, port <n>, autostart on|off, name <text> ("" for the phone's own)
   logs [<lines>]
   uninstall [--purge]      --purge also deletes the conversations in ${PATHS.data}`;
@@ -1056,6 +1131,13 @@ async function main(argv: string[]): Promise<void> {
     case 'pair': {
       const grant = await pair(args);
       return answer(grant, grant.url);
+    }
+    case 'sign-in': {
+      const result = signIn(args, say);
+      const name = SIGN_IN_COMMANDS[result.agent]!.name;
+      return answer(result, result.signedIn === null ? `${name} is signed in; Boite reads it at its next start.`
+        : result.signedIn ? `${name} is signed in. You can go back to Boite Server.`
+          : `Boite still reads ${name} as signed out: see Settings, Providers in Boite.`);
     }
     case 'config': {
       const [key, value] = args.positionals();

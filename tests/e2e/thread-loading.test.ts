@@ -157,6 +157,21 @@ describe('deferred pictures on a real core', () => {
     await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
   }
 
+  /** Blur transitions use cached previews; a cold page may return before any are ready. */
+  async function cachePreviews(id: string, count: number): Promise<void> {
+    const deadline = Date.now() + 30_000;
+    let cached = 0;
+    do {
+      const { messages } = await client.call('messages.list', { threadId: id, from: 0, limit: 200, compactImages: true, compactFiles: true });
+      const pictures = messages.flatMap(message => message.parts.filter(part => part.type === 'image' || part.type === 'file' && part.mimeType.startsWith('image/')));
+      expect(pictures).toHaveLength(count);
+      cached = pictures.filter(part => (part.type === 'image' || part.type === 'file') && part.preview).length;
+      if (cached === count) return;
+      await Bun.sleep(50);
+    } while (Date.now() < deadline);
+    expect(cached).toBe(count);
+  }
+
   beforeAll(async () => {
     mkdirSync(artifacts, { recursive: true });
     core = await startCore();
@@ -200,9 +215,11 @@ describe('deferred pictures on a real core', () => {
     const started = performance.now();
     const light = JSON.stringify(await client.call('threads.get', { threadId, compactImages: true })).length;
     const took = performance.now() - started;
-    console.log(`threads.get: ${plain} characters with the bytes, ${light} with compactImages (${took.toFixed(0)} ms, blurs made on this first read)`);
+    console.log(`threads.get: ${plain} characters with the bytes, ${light} with compactImages (${took.toFixed(0)} ms, blurs queued in the background)`);
     expect(light * 100).toBeLessThan(plain);
 
+    // Cover cached blurs separately from the cold, nonblocking page above, including older history pages.
+    await cachePreviews(threadId, SHOTS);
     await page.click(`[data-thread-id="${threadId}"]`);
     await page.waitFor(`document.querySelectorAll('${timeline} [data-testid=image-box][data-state=shown]').length > 0`);
     await settled();
@@ -290,8 +307,14 @@ describe('deferred pictures on a real core', () => {
     const total = files.reduce((sum, part) => sum + (part.type === 'file' ? part.bytes ?? 0 : 0), 0);
     console.log(`agent pictures: ${files.length} files of ${total} bytes, the light page ${JSON.stringify(light).length} characters`);
     expect(files).toHaveLength(SCENES);
-    expect(files.every((part) => part.type === 'file' && part.dataDeferred && part.width === WIDTH && part.height === HEIGHT && part.preview)).toBe(true);
+    expect(files.every((part) => part.type === 'file' && part.dataDeferred && part.width === WIDTH && part.height === HEIGHT)).toBe(true);
     expect(JSON.stringify(light).length).toBeLessThan(total / 20);
+
+    await cachePreviews(agentThreadId, SCENES);
+    const warm = await client.call('threads.get', { threadId: agentThreadId, limit: 40, compactFiles: true, compactImages: true });
+    const warmFiles = warm.messages.flatMap(message => message.parts.filter(part => part.type === 'file'));
+    expect(warmFiles).toHaveLength(SCENES);
+    expect(warmFiles.every(part => part.type === 'file' && part.preview)).toBe(true);
 
     const shown = `Array.from(document.querySelectorAll('${timeline} [data-testid=chat-file] .shot')).filter((node) => {
       const rect = node.getBoundingClientRect();

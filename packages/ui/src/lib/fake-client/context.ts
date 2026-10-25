@@ -6,6 +6,7 @@ import type { FakeRoster } from './group';
 import type { FakeSecretCard, FakeSecretKey } from './secrets';
 import {
   type ClientPreferences,
+  type ExperimentId,
   type QuotaAlerts,
   DEFAULT_THREAD_DELETION_RETENTION_DAYS,
   DEFAULT_THREAD_DONE_RETENTION_DAYS,
@@ -256,6 +257,8 @@ export class FakeContext {
   clientPreferences: ClientPreferences | null = null;
   /** Each app's last report by its id, as the core's book keeps them. */
   readonly clientApps = new Map<string, ClientPreferences>();
+  /** What the fake machine's desktop app has on, as `client.desktopExperiments` says; null before it reported. */
+  desktopExperiments: ExperimentId[] | null = null;
   speech: SpeechConfig = { engine: 'local', language: '', apiProvider: 'groq', fallback: false, executable: '', modelPath: '', model: SPEECH_DEFAULT_MODEL };
   readonly speechStatus: SpeechStatus = { revision: 'fake-voice', engine: 'local', ready: true, localReady: true, groqKeySet: false, openrouterKeySet: false, installing: false, downloadedBytes: 0, totalBytes: 0, error: null, canInstallRuntime: true, models: fakeSpeechModels(), downloading: null, runtimeOutdated: false };
   readonly speechRequests = new Map<string, symbol>();

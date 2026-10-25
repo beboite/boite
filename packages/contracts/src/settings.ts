@@ -1,6 +1,6 @@
 import type { BrowserProfile } from './browser';
 import type { AccountId, ProviderId, RequestId } from './ids';
-import type { ClientPreferences, SettingAsk, SettingRequestParams } from './setting-requests.ts';
+import type { ClientPreferences, ExperimentId, SettingAsk, SettingRequestParams } from './setting-requests.ts';
 import type { AutoCompact, CacheKeepalive } from './settings-validation.ts';
 import type { SubscriptionProxy } from './subscription-proxy';
 import type { ThreadSummary } from './threads';
@@ -265,12 +265,20 @@ export interface SettingsRpcMethods {
    * The app says its language, the experiments it has on and the names it
    * gives settings, after each hello and on every change. Agents read them
    * from the app the user last used (`agent.settings`), and a card about an
-   * experiment settles when that app reports it changed.
+   * experiment settles when that app reports it changed. `desktop` is what
+   * `client.desktopExperiments` last said, null before any desktop app
+   * reported: a phone follows the computer's switches from its first hello.
    */
-  'client.preferences': { params: ClientPreferences; result: { ok: true } };
+  'client.preferences': { params: ClientPreferences; result: { ok: true; desktop: ExperimentId[] | null } };
 }
 
 export interface SettingsRpcEvents {
   /** The whole settings object, as `settings.set` wrote it. */
   'settings.updated': Settings;
+  /**
+   * The experiments of the desktop app this core follows, once its report
+   * changes them: the app on this machine's loopback, else the last desktop
+   * app to report from elsewhere. Kept in memory, like the reports.
+   */
+  'client.desktopExperiments': { experiments: ExperimentId[] };
 }

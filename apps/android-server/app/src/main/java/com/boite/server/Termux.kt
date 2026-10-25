@@ -61,6 +61,21 @@ object Termux {
         send(context, intent(arguments.toList() + "--json", "boite-server ${arguments.joinToString(" ")}"))
     }
 
+    /**
+     * Runs `boite-server <arguments>` in a new Termux terminal, for a command
+     * the person types into, and brings Termux forward. This app opens the
+     * activity itself: Android lets an app on screen do so, where Termux's
+     * service, in the background, would need the right to draw over apps.
+     */
+    fun terminal(context: Context, vararg arguments: String) {
+        try {
+            send(context, intent(arguments.toList(), "boite-server ${arguments.joinToString(" ")}").putExtra("com.termux.RUN_COMMAND_BACKGROUND", false))
+            context.packageManager.getLaunchIntentForPackage(PACKAGE)?.let { context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        } catch (error: RuntimeException) {
+            throw TermuxRefused(error.message ?: error.toString())
+        }
+    }
+
     private val ids = AtomicInteger((System.currentTimeMillis() % 1_000_000).toInt())
     private val pending = ConcurrentHashMap<Int, CompletableDeferred<Bundle>>()
 
