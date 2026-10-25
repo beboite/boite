@@ -414,6 +414,22 @@ observed after its exit while the outer helper remains alive. If both retain,
 early creator exit does not resolve this fixture. Cross compilation and static
 review establish no native result or production admission for this control.
 
+The 66b66bc4 Server run verifies 26 hashes. MinGW completes CREATOR's exact
+handoff, exit 0, five owned-handle closures and six I/O-event closures before
+the original single assignment; the root reads its marker and descendants
+retain the expected root-only denial. Both captured registry handles for the
+creator PID/creation identity close 2073 ms before the ownership checkpoint
+starts. The map still exists immediately, after 2000 ms and after the additional
+3000-ms hold. Early creator exit therefore does not resolve this fixture.
+All five malformed/timeout probes pass, including bounded cancellation and
+name absence before/after helper exit. MinGW has exactly 25 failures, limited
+to the eight normal cases' exit/immediate/eventual gates and retained state;
+456/456 registry handles close and all 48 normal-case stream/window cleanup
+calls succeed. SDK execution is blocked by three deprecated wcscpy calls under
+-Werror. Their replacement uses bounded memcpy after checking source lengths;
+fresh SDK compilation/execution remains required. Production still fails all
+seven NUL probes per compiler; no cause or production acceptance is established.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:

@@ -262,9 +262,11 @@ static DWORD creator_prepare(PSECURITY_DESCRIPTOR security, const wchar_t *targe
   CREATOR_PACKET request; ZeroMemory(&request, sizeof(request));
   request.message.version = 1; request.message.bytes = sizeof(request); request.message.phase = CREATOR_REQUEST;
   request.message.parent = GetCurrentProcessId(); request.security_bytes = GetSecurityDescriptorLength(security);
-  if (!creator_security(security, request.security_bytes) || wcslen(target) >= 8192) return ERROR_INVALID_SECURITY_DESCR;
+  if (!creator_security(security, request.security_bytes) || wcslen(probe_name) >= 256 || wcslen(target) >= 8192)
+    return ERROR_INVALID_SECURITY_DESCR;
   memcpy(request.security, security, request.security_bytes);
-  wcscpy(request.name, probe_name); wcscpy(request.target, target);
+  memcpy(request.name, probe_name, (wcslen(probe_name) + 1) * sizeof(wchar_t));
+  memcpy(request.target, target, (wcslen(target) + 1) * sizeof(wchar_t));
   fwprintf(stderr, L"creator-attempt path=%ls\n", probe_name); fflush(stderr);
   typedef BOOLEAN (WINAPI *random_fn)(PVOID, ULONG);
   random_fn random = (random_fn)(void *)GetProcAddress(GetModuleHandleW(L"advapi32.dll"), "SystemFunction036");
@@ -305,7 +307,7 @@ static DWORD creator_prepare(PSECURITY_DESCRIPTOR security, const wchar_t *targe
       wcscmp(fault, L"exit") && wcscmp(fault, L"descriptor") && wcscmp(fault, L"frame"))) {
     error = ERROR_INVALID_PARAMETER; goto end;
   }
-  if (!fault_length) wcscpy(fault, L"none");
+  if (!fault_length) memcpy(fault, L"none", sizeof(L"none"));
   wchar_t *argv[] = {image, L"create-map", pipe_text, parent_text, nonce_text, (wchar_t *)target, fault};
   line = command_line(7, argv); if (!line) {error = ERROR_NOT_ENOUGH_MEMORY; goto end;}
   InitializeProcThreadAttributeList(NULL, 2, 0, &bytes); startup.lpAttributeList = malloc(bytes);
