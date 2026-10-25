@@ -73,11 +73,12 @@ export function generate(source: string): string {
     '  else if (count > 1 && !wcscmp(args[1], L"create-map")) result = creator_entry(count, args);\n' +
     '  else if (count > 4 && (!wcscmp(args[1], L"run") || !wcscmp(args[1], L"debug-run") ||\n' +
     '      !wcscmp(args[1], L"direct-run") || !wcscmp(args[1], L"setter-run") || !wcscmp(args[1], L"quiet-run") ||\n' +
-    '      !wcscmp(args[1], L"reopen-run") || !wcscmp(args[1], L"creator-run") || !wcscmp(args[1], L"retire-run"))) {\n' +
+    '      !wcscmp(args[1], L"reopen-run") || !wcscmp(args[1], L"creator-run") || !wcscmp(args[1], L"retire-run") || !wcscmp(args[1], L"retire-named-run"))) {\n' +
     '    debug_mode = !wcscmp(args[1], L"debug-run");\n' +
     '    reopen_owned_map = !wcscmp(args[1], L"reopen-run");\n' +
     '    external_map_creator = !wcscmp(args[1], L"creator-run");\n' +
-    '    retire_owned_map = !wcscmp(args[1], L"retire-run");\n' +
+    '    retire_named_map = !wcscmp(args[1], L"retire-named-run");\n' +
+    '    retire_owned_map = !wcscmp(args[1], L"retire-run") || retire_named_map;\n' +
     '    observe_owned_handles = wcscmp(args[1], L"quiet-run") != 0;\n' +
     '    assignment_scope = !wcscmp(args[1], L"setter-run") ? 2 :\n' +
     '      (!wcscmp(args[1], L"direct-run") || !observe_owned_handles || reopen_owned_map || external_map_creator || retire_owned_map) ? 1 : 0;\n' +

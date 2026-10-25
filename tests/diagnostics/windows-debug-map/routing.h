@@ -26,6 +26,9 @@ static BOOL reopen_owned_map;
 static BOOL external_map_creator;
 /* RETIRE changes only a signaled, owned root after its job reaches zero. */
 static BOOL retire_owned_map;
+/* Separate control: name the empty replacement to expose relocated retention. */
+static BOOL retire_named_map, retired_created;
+static wchar_t retired_name[280];
 static DWORD creator_prepare(PSECURITY_DESCRIPTOR security, const wchar_t *target, const wchar_t *root);
 static unsigned int object_count_queries, handle_snapshot_queries;
 /* 0 retains the original RED roundtrip, 1 omits it as a control, 2 also moves
@@ -153,18 +156,39 @@ static DWORD map_retire(HANDLE process, HANDLE job, PSECURITY_DESCRIPTOR securit
   HANDLE empty = NULL;
   OBJECT_ATTRIBUTES attributes; ZeroMemory(&attributes, sizeof(attributes));
   attributes.Length = sizeof(attributes); attributes.SecurityDescriptor = security;
+  UNICODE_STRING named; ZeroMemory(&named, sizeof(named));
+  if (retire_named_map) {
+    if (wcslen(probe_name) + 9 > sizeof(retired_name) / sizeof(*retired_name)) return ERROR_INSUFFICIENT_BUFFER;
+    memcpy(retired_name, probe_name, (wcslen(probe_name) + 1) * sizeof(wchar_t));
+    memcpy(retired_name + wcslen(probe_name), L".retired", sizeof(L".retired"));
+    named.Buffer = retired_name; named.Length = (USHORT)(wcslen(retired_name) * sizeof(wchar_t));
+    named.MaximumLength = (USHORT)sizeof(retired_name); attributes.ObjectName = &named;
+    attributes.Attributes = 0x40;
+  }
   NTSTATUS status = create(&empty, 0xf000f, &attributes, NULL, 0);
   fwprintf(stderr, L"map-retire create=0x%08lx\n", (unsigned long)status); fflush(stderr);
+  if (retire_named_map) {
+    fwprintf(stderr, L"map-retire named path=%ls create=0x%08lx\n", retired_name, (unsigned long)status); fflush(stderr);
+  }
   if (status != 0) return (DWORD)status;
+  if (retire_named_map) retired_created = TRUE;
   BYTE buffer[8192]; ULONG used = 0; DWORD flags = 0;
   status = query(empty, (OBJECT_INFORMATION_CLASS)1, buffer, sizeof(buffer), &used);
   if (status != 0) { error = (DWORD)status; goto end; }
-  if (used < sizeof(UNICODE_STRING) || used > sizeof(buffer) || ((UNICODE_STRING *)buffer)->Length) {
+  if (used < sizeof(UNICODE_STRING) || used > sizeof(buffer)) { error = ERROR_INVALID_NAME; goto end; }
+  UNICODE_STRING *returned_name = (UNICODE_STRING *)buffer;
+  uintptr_t first = (uintptr_t)buffer, end = first + used, text = (uintptr_t)returned_name->Buffer;
+  BOOL valid_name = retire_named_map
+    ? returned_name->Length == named.Length && text >= first + sizeof(UNICODE_STRING) &&
+      text <= end && returned_name->Length <= end - text && !memcmp(returned_name->Buffer, named.Buffer, named.Length)
+    : returned_name->Length == 0;
+  if (!valid_name) {
     error = ERROR_INVALID_NAME; goto end;
   }
   if (!GetHandleInformation(empty, &flags)) { error = GetLastError(); goto end; }
   if (flags) { error = ERROR_INVALID_DATA; goto end; }
-  fputws(L"map-retire unnamed=1 inherited=0 links=0\n", stderr); fflush(stderr);
+  fputws(retire_named_map ? L"map-retire named=1 inherited=0 links=0\n"
+    : L"map-retire unnamed=1 inherited=0 links=0\n", stderr); fflush(stderr);
   error = map_lifetime(L"before-retire", L"exited-root");
   if (error) goto end;
   status = set(process, (PROCESSINFOCLASS)23, &empty, sizeof(empty));
@@ -178,9 +202,25 @@ static DWORD map_retire(HANDLE process, HANDLE job, PSECURITY_DESCRIPTOR securit
   if (after != before) { error = ERROR_INVALID_DATA; goto end; }
   fwprintf(stderr, L"map-retire preserved pid=%lu signaled=1 exit=%lu unchanged=1\n", pid, after); fflush(stderr);
 end:
-  { DWORD closed = close_owned(L"retire-unnamed-map", &empty); if (closed && !error) error = closed; }
+  { DWORD closed = close_owned(retire_named_map ? L"retire-named-map" : L"retire-unnamed-map", &empty); if (closed && !error) error = closed; }
   fwprintf(stderr, L"map-retire result=%lu\n", error); fflush(stderr);
   return error;
+}
+
+/* Observe only our exact replacement name after closing its known handle.
+ * Existence is a fatal gate, even when the original working map disappeared. */
+static DWORD retired_absence(const wchar_t *phase) {
+  if (!retire_named_map || !retired_created) return 0;
+  open_directory_fn open = (open_directory_fn)(void *)nt_api("NtOpenDirectoryObject");
+  if (!open) return ERROR_PROC_NOT_FOUND;
+  UNICODE_STRING name = {(USHORT)(wcslen(retired_name) * 2), (USHORT)sizeof(retired_name), retired_name};
+  OBJECT_ATTRIBUTES attributes; ZeroMemory(&attributes, sizeof(attributes));
+  attributes.Length = sizeof(attributes); attributes.ObjectName = &name; attributes.Attributes = 0x40;
+  HANDLE remaining = NULL; NTSTATUS status = open(&remaining, 1, &attributes);
+  BOOL closed = !remaining || CloseHandle(remaining); DWORD error = closed ? 0 : GetLastError();
+  fwprintf(stderr, L"cleanup retired-open phase=%ls status=0x%08lx absent=%d closed=%d error=%lu path=%ls\n",
+    phase, (unsigned long)status, status == (NTSTATUS)0xc0000034, closed, error, retired_name); fflush(stderr);
+  return error ? error : status == (NTSTATUS)0xc0000034 ? 0 : ERROR_INVALID_DATA;
 }
 
 #include "roundtrip.h"
@@ -339,6 +379,7 @@ static DWORD map_close(void) {
   DWORD closed = close_owned(L"link", &probe_link); if (closed && !error) error = closed;
   if (!probe_map) return error;
   closed = close_owned(L"map", &probe_map); if (closed && !error) error = closed;
+  DWORD retired = retired_absence(L"immediate"); if (retired && !error) error = retired;
   open_directory_fn open = (open_directory_fn)(void *)nt_api("NtOpenDirectoryObject");
   if (!open) return ERROR_PROC_NOT_FOUND;
   UNICODE_STRING name = {(USHORT)(wcslen(probe_name) * 2), (USHORT)sizeof(probe_name), probe_name};
@@ -367,6 +408,7 @@ static DWORD map_close(void) {
   fflush(stderr);
   if (status != (NTSTATUS)0xc0000034 && !error) error = ERROR_INVALID_DATA;
   DWORD checkpoint = map_checkpoint(open, &attributes); if (checkpoint && !error) error = checkpoint;
+  retired = retired_absence(L"checkpoint"); if (retired && !error) error = retired;
   return error;
 }
 

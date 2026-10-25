@@ -461,6 +461,33 @@ still have kernel references: its complete rundown, descendants, cancellation
 and a real NUL endpoint would remain separate requirements. No native RETIRE
 result or production admission is established by compilation.
 
+The 5694aa2a Server run verifies 27 hashes. SDK and MinGW both accept
+replacement of the exact signaled root after job-zero, preserve exit 1 and
+close the known anonymous handle. The old named map is absent immediately,
+on the first bounded-poll attempt and at the additional 3000-ms checkpoint.
+All eight earlier cases retain their 25 fatal failures per compiler; each
+compiler still fails seven production NUL probes. SDK closes 497/497 captured
+registry handles and MinGW 499/499; all 108 normal stream/window calls succeed.
+This proves named-map retirement only, not anonymous-map rundown or production
+admission.
+
+RETIRE-NAMED is a separate matched control. It gives the empty replacement the
+exact owned name `<original-map>.retired`, with no OPENIF, shadow directory or
+links; it otherwise retains RETIRE's descriptor, rights, signaled PID, job-zero
+and exit-status checks. The helper verifies the returned exact name and
+noninheritable handle before assigning it. After closing that known handle and
+the original process/thread/job/working-map handles, require replacement-name
+absence immediately and after the existing 3000-ms ownership checkpoint. Each
+successful observer open closes before returning. An external observer also
+requires both owned names absent after helper exit; post-exit absence never
+substitutes for either earlier gate. RETIRE and all previous cases remain.
+
+A retained replacement would show that named-map retirement can relocate
+retention to a new empty map. An absent replacement would establish only this
+named empty-directory arm's absence; it would not prove every anonymous object
+reference gone, debug-descendant or cancellation cleanup, or NUL compatibility.
+No RETIRE-NAMED native result is established by local compilation.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:

@@ -29,7 +29,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   save();
   const harness = await startTestCore({dataDir: join(state, 'core-data')});
   const procs = harness.core.procs;
-  const jobs = ['RED', 'A', 'B', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE'].map(label => {
+  const jobs = ['RED', 'A', 'B', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED'].map(label => {
     const root = join(state, label), project = join(root, 'project'), runtime = join(root, 'runtime'), home = join(root, 'home');
     const marker = `TASK_ROUTE_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
     return {label, root, project, runtime, home, marker, profile: `boite.debug.route.${crypto.randomUUID().replaceAll('-', '')}`};
@@ -48,7 +48,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     writeFileSync(join(output!, `${id}.log`), `pid=${result.pid} exit=${result.code} timedOut=${result.timedOut}\n${result.out}${result.err}`);
     console.log(`${id}: ${JSON.stringify(result)}`); save(); return result;
   }
-  function run(job: typeof jobs[number], debug: boolean, mode?: 'direct-run' | 'setter-run' | 'quiet-run' | 'reopen-run' | 'creator-run' | 'retire-run') {
+  function run(job: typeof jobs[number], debug: boolean, mode?: 'direct-run' | 'setter-run' | 'quiet-run' | 'reopen-run' | 'creator-run' | 'retire-run' | 'retire-named-run') {
     const promise = execute(`lpac-${job.label}`, [mode ?? (debug ? 'debug-run' : 'run'), job.profile, job.project,
       join(job.runtime, 'inspect.exe'), 'inspect', '0', job.marker, ...(debug ? ['forward-check'] : [])], job.home,
       {PATH: `${job.runtime};${process.env.SystemRoot}\\System32`});
@@ -106,11 +106,26 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
         expect(Number(checkpoint?.[2])).toBeGreaterThan(0);
         const targets = checkpoint?.[3]?.split(',') ?? [];
         const inspected = [...result.out.matchAll(/^inspect-start=\S+ pid=(\d+)\r?$/gm)].map(match => match[1]!);
-        expect(new Set(targets)).toEqual(new Set(['RED', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE'].includes(label) ? inspected.slice(0, 1) : inspected));
+        expect(new Set(targets)).toEqual(new Set(['RED', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED'].includes(label) ? inspected.slice(0, 1) : inspected));
         expect(result.err.indexOf('ownership-checkpoint ')).toBeGreaterThan(result.err.indexOf('cleanup map-eventual-open='));
         expect(result.err).toMatch(/cleanup checkpoint-map-open=0x[\da-f]+ absent=[01] closed=1 error=0 wall-ms=\d+/);
       }),
     ];
+    if (label === 'RETIRE-NAMED') {
+      for (const phase of ['immediate', 'checkpoint']) checks.push(
+        verify(`${label} replacement absence ${phase}`, () => expect(result.err)
+          .toContain(`cleanup retired-open phase=${phase} status=0xc0000034 absent=1 closed=1 error=0`)));
+      checks.push(verify(`${label} replacement observation order`, () => {
+        const immediate = result.err.indexOf('cleanup retired-open phase=immediate ');
+        expect(immediate).toBeGreaterThan(result.err.indexOf('cleanup close=retire-named-map closed=1'));
+        for (const owned of ['root-thread', 'root-process', 'job', 'link', 'map'])
+          expect(immediate).toBeGreaterThan(result.err.indexOf(`cleanup close=${owned} closed=1`));
+        expect(result.err.indexOf('cleanup retired-open phase=checkpoint '))
+          .toBeGreaterThan(result.err.indexOf('cleanup checkpoint-map-open='));
+      }));
+    } else checks.push(verify(`${label} no named replacement`, () => {
+      expect(result.err).not.toContain('map-retire named '); expect(result.err).not.toContain('cleanup retired-open ');
+    }));
     for (const action of ['station-restore', 'desktop', 'station']) checks.push(
       verify(`${label} window cleanup ${action}`, () => expect(result.err)
         .toContain(`window-cleanup action=${action} success=1 error=0`)));
@@ -162,14 +177,16 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     }
     const names = [...result.err.matchAll(/^private-(map|swap) path=(.+) create=0x00000000\r?$/gm)]
       .map(match => ({kind: match[1]!, path: match[2]!.replace(/\r$/, '')}));
+    for (const match of result.err.matchAll(/^map-retire named path=(.+) create=0x00000000\r?$/gm))
+      names.push({kind: 'retired', path: match[1]!.replace(/\r$/, '')});
     if (!verify(`${label} owned map name`, () => {
-      expect(names).toHaveLength(label === 'RED' ? 2 : 1);
+      expect(names).toHaveLength(label === 'RED' || label === 'RETIRE-NAMED' ? 2 : 1);
       expect(new Set(names.map(name => name.kind)).size).toBe(names.length);
       for (const name of names) expect(name.path).toMatch(new RegExp(
-        `^\\\\(?:Sessions\\\\\\d+\\\\)?BaseNamedObjects\\\\boite\\.route\\.${result.pid}${name.kind === 'swap' ? '\\.swap' : ''}$`));
+        `^\\\\(?:Sessions\\\\\\d+\\\\)?BaseNamedObjects\\\\boite\\.route\\.${result.pid}${name.kind === 'swap' ? '\\.swap' : name.kind === 'retired' ? '\\.retired' : ''}$`));
     })) { cleanupConfirmed.set(`lpac-${label}`, false); return; }
     for (const name of names) {
-      const observed = await execute(`map-after-exit-${label}${name.kind === 'swap' ? '-swap' : ''}`, ['observe-map', name.path]);
+      const observed = await execute(`map-after-exit-${label}${name.kind === 'map' ? '' : `-${name.kind}`}`, ['observe-map', name.path]);
       afterExit.push({label, kind: name.kind, helperPid: result.pid, path: name.path, ...observed}); save();
       // Extra observation, never a replacement for either immediate gate.
       const confirmed = [completed(`${label} ${name.kind} post-exit observer`, observed),
@@ -296,7 +313,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     // from RED's A/B/A roundtrip. Helpers stay alive through the fatal gates.
     // These observations cannot make a failed original RED/A/B gate pass.
     if (report.redSafetyPassed === true) {
-      for (const [index, mode] of (['direct-run', 'setter-run', 'quiet-run', 'reopen-run', 'creator-run', 'retire-run'] as const).entries()) {
+      for (const [index, mode] of (['direct-run', 'setter-run', 'quiet-run', 'reopen-run', 'creator-run', 'retire-run', 'retire-named-run'] as const).entries()) {
         const job = jobs[index + 3]!;
         writeFileSync(join(job.project, 'release'), 'synthetic');
         const result = await run(job, false, mode);
@@ -361,15 +378,17 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
           expect(result.err).not.toContain('creator-io ');
         });
         verify(`${job.label} retirement selection`, () => {
-          if (mode !== 'retire-run') {expect(result.err).not.toContain('map-retire '); return;}
+          if (mode !== 'retire-run' && mode !== 'retire-named-run') {expect(result.err).not.toContain('map-retire '); return;}
           const target = result.out.match(/^inspect-start=\S+\.generation-0 pid=(\d+)\r?$/m)?.[1];
           expect(Number(target)).toBeGreaterThan(0);
           expect(result.err).toContain(`map-retire ready pid=${target} signaled=1 job-active=0 exit=1`);
           expect(result.err).toContain('map-retire create=0x00000000');
-          expect(result.err).toContain('map-retire unnamed=1 inherited=0 links=0');
+          expect(result.err).toContain(mode === 'retire-named-run'
+            ? 'map-retire named=1 inherited=0 links=0' : 'map-retire unnamed=1 inherited=0 links=0');
           expect(result.err).toContain(`map-retire pid=${target} set=0x00000000`);
           expect(result.err).toContain(`map-retire preserved pid=${target} signaled=1 exit=1 unchanged=1`);
-          expect(result.err).toContain('cleanup close=retire-unnamed-map closed=1 error=0');
+          expect(result.err).toContain(mode === 'retire-named-run'
+            ? 'cleanup close=retire-named-map closed=1 error=0' : 'cleanup close=retire-unnamed-map closed=1 error=0');
           expect(result.err).toContain('map-retire result=0');
           for (const phase of ['before-retire', 'after-retire']) expect(result.err)
             .toContain(`map-lifetime phase=${phase} subject=exited-root pid=${result.pid} query=0x00000000 matches=1 error=0`);
