@@ -755,6 +755,46 @@ test('scrolled up, the way to the bottom shows with nothing new below, and takes
   expect(jumpButton()).toBeNull();
 });
 
+test('a viewport clamp followed by wrapped content growth keeps the list pinned before its resize observer runs', async () => {
+  const messages = thread(20);
+  stubLayout(messages.length * ESTIMATE);
+  let height = VIEW_HEIGHT;
+  Object.defineProperty(Element.prototype, 'clientHeight', { configurable: true, get: () => height });
+  Object.defineProperty(Element.prototype, 'scrollTop', {
+    configurable: true,
+    get(this: Element) {
+      const top = Math.min(tops.get(this) ?? 0, Math.max(0, scrollHeight - height));
+      tops.set(this, top);
+      return top;
+    },
+    set(this: Element, value: number) { tops.set(this, Math.max(0, Math.min(value, scrollHeight - height))); }
+  });
+  const observers: Array<{ callback: ResizeObserverCallback }> = [];
+  vi.stubGlobal('ResizeObserver', class {
+    callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) { this.callback = callback; observers.push(this); }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  });
+  onTestFinished(() => { vi.unstubAllGlobals(); });
+  running = mount(MessageList, { target: document.body, props: { store, threadId: 't-resize-clamp', messages } });
+  await settle();
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+  expect(timeline.scrollTop).toBe(1000);
+
+  // Layout first clamps the old bottom, then narrower text grows before that scroll event is delivered.
+  height = 900;
+  expect(timeline.scrollTop).toBe(700);
+  scrollHeight += 400;
+  timeline.dispatchEvent(new Event('scroll'));
+  await settle();
+  expect(document.querySelector('[data-testid=jump-to-latest]')).toBeNull();
+  const observer = observers.at(-1)!;
+  observer.callback([{ target: timeline, contentRect: timeline.getBoundingClientRect(), borderBoxSize: [], contentBoxSize: [], devicePixelContentBoxSize: [] }], observer as unknown as ResizeObserver);
+  expect(timeline.scrollTop).toBe(1100);
+});
+
 test('a window opened around the reader pages down as they reach its bottom, and "Jump to latest" reads the last page', async ({ ready }) => {
   window.localStorage.clear();
   const { store: live } = await ready({ delayMs: 0, long: true });

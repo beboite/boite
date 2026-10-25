@@ -547,8 +547,8 @@
       if (distance > 1) return;
       endGlide(false);
     }
-    // A busy phone delivers the touchstart after its scroll: a rise off the bottom is the reader too.
-    if (rose && pinned && distance > 1) leftBottom = true;
+    // A busy phone can deliver touchstart after its scroll. Layout clamps alone also rise before the resize observer follows.
+    if (rose && pinned && distance > 1 && !resized && !relaid) leftBottom = true;
     // Scrolled down into the tolerance, the reader is back: a streaming answer keeps moving the very bottom. Moved down
     // as far from it, by a row growing above after a small notch up, the list took it back and bounced each notch.
     if (descended && closer && atBottom(box)) leftBottom = false;
