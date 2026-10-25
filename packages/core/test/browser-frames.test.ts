@@ -19,7 +19,7 @@ beforeAll(() => {
   sameSite = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: request => new Response(CARD(new URL(request.url).searchParams.get('who') ?? 'billing'), { headers: { 'content-type': 'text/html' } }) });
   checkout = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: request => {
     const { pathname, port, searchParams } = new URL(request.url);
-    const html = (body: string) => new Response(`<!doctype html><title>Placed</title><style>body{margin:0}</style>${body}<script>addEventListener('message', event => { window.result = event.data })</script>`, { headers: { 'content-type': 'text/html' } });
+    const html = (body: string) => new Response(`<!doctype html><title>Placed</title><style>body{margin:0}</style>${body}<script>addEventListener('message', event => { window.result = event.data; window.clicks = (window.clicks ?? 0) + 1 })</script>`, { headers: { 'content-type': 'text/html' } });
     // A button whose message says whether the click was native, in frames placed every way a page places them.
     const foreign = (style: string) => `<iframe title="Foreign" src="http://localhost:${port}/placed/button" style="border:0;position:absolute;left:260px;top:180px;width:400px;height:120px;${style}"></iframe>`;
     if (pathname === '/placed/button') return html(`<button style="position:absolute;left:160px;top:30px;width:60px;height:30px" onclick="top.postMessage('clicked ' + event.isTrusted, '*')">Pay</button>`);
@@ -123,16 +123,18 @@ real('a click in a frame lands where the frame is drawn, and goes through the DO
     const clicked = await command({ kind: 'click', selector: `@${pay![1]}` });
     let result: unknown;
     for (const end = Date.now() + 3000; Date.now() < end && !(result = await command({ kind: 'evaluate', expression: 'window.result ?? null' }) as unknown);) await Bun.sleep(50);
-    return { note: clicked.note, result };
+    const clicks = await command({ kind: 'evaluate', expression: 'window.clicks ?? 0' }) as unknown;
+    return { note: clicked.note, result, clicks };
   };
   // A frame of another site inside an offset frame of the page's own origin.
-  expect(await clickPay('/placed/nested')).toEqual({ note: undefined, result: 'clicked true' });
+  expect(await clickPay('/placed/nested')).toEqual({ note: undefined, result: 'clicked true', clicks: 1 });
   // An iframe scaled to half its size takes its points scaled too.
-  expect(await clickPay('/placed/scaled')).toEqual({ note: undefined, result: 'clicked true' });
+  expect(await clickPay('/placed/scaled')).toEqual({ note: undefined, result: 'clicked true', clicks: 1 });
   // A button drawn over the frame would take a native click: the frame's button is clicked through the DOM instead.
   for (const path of ['/placed/covered', '/placed/covered-foreign']) {
     const covered = await clickPay(path);
     expect(covered.result).toBe('clicked false');
+    expect(covered.clicks).toBe(1);
     expect(String(covered.note)).toContain('covered by button Overlay');
   }
 }, 120_000);

@@ -250,8 +250,15 @@ export async function press(page: FrameChannel, combo: string): Promise<void> {
   await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: key.key, code: key.code, windowsVirtualKeyCode: key.keyCode, modifiers });
   for (const mod of held.reverse()) await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: mod.key, code: `${mod.key}Left`, windowsVirtualKeyCode: mod.keyCode, modifiers: 0 });
 }
-async function nativeClick(page: FrameChannel, point: { x: number; y: number }, count: 1 | 2): Promise<void> {
-  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point, button: 'none' });
+async function nativeClick(page: FrameChannel, scope: Scope, selector: string, point: { x: number; y: number }, count: 1 | 2): Promise<void> {
+  // A newly drawn cross-process frame can still route input to its iframe.
+  // Confirm the native move reached the target before pressing, never retry a click.
+  for (const end = Date.now() + 2000;;) {
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point, button: 'none' });
+    if (await run<boolean>(scope.channel, `return K.hovered(${js(selector)})`)) break;
+    if (Date.now() >= end) throw new Error('the element did not receive native pointer movement; wait for the page to finish drawing, then try again');
+    await sleep(16);
+  }
   for (let click = 1; click <= count; click++) {
     await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', buttons: 1, clickCount: click });
     await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: click });
@@ -280,7 +287,7 @@ async function pointOf(scope: Scope, selector: string, mode: string): Promise<Po
 /** Clicks through native input where the element is reachable, through the DOM when something covers it. */
 async function click(page: AgentPage, scope: Scope, selector: string, count: 1 | 2): Promise<string | undefined> {
   const point = await pointOf(scope, selector, 'click');
-  if (point && !point.covered) { await nativeClick(page, point, count); return undefined; }
+  if (point && !point.covered) { await nativeClick(page, scope, selector, point, count); return undefined; }
   await run(scope.channel, `return K.dom('click', ${js(selector)}, ${count})`);
   return point?.covered ? `the element was covered by ${point.covered}; it was clicked through the DOM` : undefined;
 }

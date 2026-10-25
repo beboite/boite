@@ -351,6 +351,7 @@ function agentKit() {
   K.scroll = (x, y, target) => { const el = target ? K.find(target) : null; if (el) el.scrollBy(x, y); else scrollBy(x, y); return { x: scrollX, y: scrollY }; };
   K.scrollIntoView = target => { K.find(target).scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }); return true; };
   K.focus = target => { K.find(target).focus(); return true; };
+  K.hovered = target => operable(K.find(target)).matches(':hover');
   // A point of the document iframe `target` shows, in this window's viewport, and what covers the way there.
   K.through = (target, x, y) => {
     const frame = K.find(target), point = through(frame, x, y), out = outward(frame.ownerDocument.defaultView ?? window, point.x, point.y);
