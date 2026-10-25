@@ -29,7 +29,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   save();
   const harness = await startTestCore({dataDir: join(state, 'core-data')});
   const procs = harness.core.procs;
-  const jobs = ['RED', 'A', 'B'].map(label => {
+  const jobs = ['RED', 'A', 'B', 'DIRECT', 'SCOPE'].map(label => {
     const root = join(state, label), project = join(root, 'project'), runtime = join(root, 'runtime'), home = join(root, 'home');
     const marker = `TASK_ROUTE_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
     return {label, root, project, runtime, home, marker, profile: `boite.debug.route.${crypto.randomUUID().replaceAll('-', '')}`};
@@ -47,8 +47,8 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     writeFileSync(join(output!, `${id}.log`), `pid=${result.pid} exit=${result.code} timedOut=${result.timedOut}\n${result.out}${result.err}`);
     console.log(`${id}: ${JSON.stringify(result)}`); save(); return result;
   }
-  function run(job: typeof jobs[number], debug: boolean) {
-    const promise = execute(`lpac-${job.label}`, [debug ? 'debug-run' : 'run', job.profile, job.project,
+  function run(job: typeof jobs[number], debug: boolean, mode?: 'direct-run' | 'setter-run') {
+    const promise = execute(`lpac-${job.label}`, [mode ?? (debug ? 'debug-run' : 'run'), job.profile, job.project,
       join(job.runtime, 'inspect.exe'), 'inspect', '0', job.marker, ...(debug ? ['forward-check'] : [])], job.home,
       {PATH: `${job.runtime};${process.env.SystemRoot}\\System32`});
     tasks.push(promise); void promise.catch(() => {}); return promise;
@@ -105,7 +105,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
         expect(Number(checkpoint?.[2])).toBeGreaterThan(0);
         const targets = checkpoint?.[3]?.split(',') ?? [];
         const inspected = [...result.out.matchAll(/^inspect-start=\S+ pid=(\d+)\r?$/gm)].map(match => match[1]!);
-        expect(new Set(targets)).toEqual(new Set(label === 'RED' ? inspected.slice(0, 1) : inspected));
+        expect(new Set(targets)).toEqual(new Set(['RED', 'DIRECT', 'SCOPE'].includes(label) ? inspected.slice(0, 1) : inspected));
         expect(result.err.indexOf('ownership-checkpoint ')).toBeGreaterThan(result.err.indexOf('cleanup map-eventual-open='));
         expect(result.err).toMatch(/cleanup checkpoint-map-open=0x[\da-f]+ absent=[01] closed=1 error=0 wall-ms=\d+/);
       }),
@@ -193,14 +193,14 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     } else {
       const debugStart = failures.length;
       report.debugStarted = true; save();
-      const pending = jobs.slice(1).map(job => run(job, true));
+      const pending = jobs.slice(1, 3).map(job => run(job, true));
       try {
-        await waitFor(() => jobs.slice(1).every(job => existsSync(join(job.project, 'ready'))), 5000);
+        await waitFor(() => jobs.slice(1, 3).every(job => existsSync(join(job.project, 'ready'))), 5000);
         report.overlap = true;
         const during = await execute('ordinary-during', ['observe', state]); observer('during', during, before);
       } catch (error) { failures.push(`independent overlap/observer: ${error}`); }
       finally {
-        for (const job of jobs.slice(1)) writeFileSync(join(job.project, 'release'), 'synthetic');
+        for (const job of jobs.slice(1, 3)) writeFileSync(join(job.project, 'release'), 'synthetic');
       }
       const results = await Promise.allSettled(pending); report.debug = results;
       const after = await execute('ordinary-after', ['observe', state]); observer('after', after, before);
@@ -269,6 +269,36 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
         verify(`${job.label} cleanup drain`, () => expect(result.err).toContain('debug-drain cleanup=1 captured=6 remaining=0 error=0'));
       }
       report.routingObserved = failures.length === debugStart;
+    }
+    // Matched root-only controls isolate assignment caller from RED's A/B/A
+    // roundtrip. Each keeps its creator/helper alive through the fatal gates.
+    // These observations cannot make a failed original RED/A/B gate pass.
+    if (report.redSafetyPassed === true) {
+      for (const [index, mode] of ['direct-run', 'setter-run'].entries()) {
+        const job = jobs[index + 3]!;
+        writeFileSync(join(job.project, 'release'), 'synthetic');
+        const result = await run(job, false, mode as 'direct-run' | 'setter-run');
+        report[job.label.toLowerCase()] = result;
+        completed(job.label, result, 1); boundary(job.label, result, job.marker);
+        for (let depth = 0; depth < 3; depth++) verify(`${job.label} generation ${depth} routing`, () => expect(result.out)
+          .toContain(`${job.marker}.generation-${depth} appcontainer=1 in-job=1 routing=${depth === 0 ? 1 : 0}`));
+        verify(`${job.label} no roundtrip`, () => expect(result.err).not.toContain('map-swap '));
+        if (mode === 'setter-run') {
+          verify('SCOPE assignment and exit before target', () => {
+            const setter = result.err.match(/setter-assignment target=(\d+) setter=(\d+) inherited=2 member=1 resumed=1 wait=0 exit=0x00000000 forced=0 error=0/);
+            const target = result.out.match(/^inspect-start=\S+\.generation-0 pid=(\d+)\r?$/m)?.[1];
+            expect(setter?.[1]).toBe(target);
+            expect(Number(setter?.[2])).toBeGreaterThan(0);
+            expect(setter?.[2]).not.toBe(target); expect(setter?.[2]).not.toBe(String(result.pid));
+            expect(result.err).toMatch(/setter-transfer target=\d+ created=\d+ parent-closed=2 error=0 process-access=0x00101200 map-access=0x00000003/);
+            expect(result.err).toContain('setter-cleanup handles=3 closed=3 error=0');
+          });
+        } else verify('DIRECT in-helper assignment', () => expect(result.err).not.toContain('setter-assignment '));
+        cleanup(job.label, result); await observeAfterExit(job.label, result);
+        const afterScope = await execute(`ordinary-after-${job.label.toLowerCase()}`, ['observe', state]);
+        observer(`after ${job.label}`, afterScope, before);
+        save();
+      }
     }
   } catch (error) { failures.push(String(error)); }
   finally {

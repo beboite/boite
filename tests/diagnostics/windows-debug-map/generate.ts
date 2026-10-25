@@ -15,7 +15,7 @@ function once(source: string, before: string, after: string): string {
 export function generate(source: string): string {
   if (sha256(source) !== sourceHash) throw new Error('protected-tool.c changed: review and repin the diagnostic before running');
   source = once(source, 'static int launch(int count, wchar_t **args) {',
-    '#include "routing.h"\n#include "inspect.h"\n\nstatic int launch(int count, wchar_t **args) {');
+    '#include "routing.h"\n#include "inspect.h"\n#include "setter.h"\n\nstatic int launch(int count, wchar_t **args) {');
   source = once(source, 'CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT, NULL, args[3]',
     'CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT | (debug_mode ? DEBUG_PROCESS : 0), NULL, args[3]');
   source = once(source, '  if (ResumeThread(child.hThread)',
@@ -47,8 +47,11 @@ export function generate(source: string): string {
     '  else if (count == 3 && !wcscmp(args[1], L"observe-map")) result = observe_map(args[2]);\n' +
     '  else if (count == 3 && !wcscmp(args[1], L"cleanup")) result = cleanup_profile(args[2]);\n' +
     '  else if (count > 1 && !wcscmp(args[1], L"inspect")) result = inspect(count, args);\n' +
-    '  else if (count > 4 && (!wcscmp(args[1], L"run") || !wcscmp(args[1], L"debug-run"))) {\n' +
+    '  else if (count > 1 && !wcscmp(args[1], L"assign-map")) result = setter_entry(count, args);\n' +
+    '  else if (count > 4 && (!wcscmp(args[1], L"run") || !wcscmp(args[1], L"debug-run") ||\n' +
+    '      !wcscmp(args[1], L"direct-run") || !wcscmp(args[1], L"setter-run"))) {\n' +
     '    debug_mode = !wcscmp(args[1], L"debug-run");\n' +
+    '    assignment_scope = !wcscmp(args[1], L"setter-run") ? 2 : !wcscmp(args[1], L"direct-run") ? 1 : 0;\n' +
     '    DWORD before = caller_snapshot(args[3], FALSE);\n' +
     '    if (!before) result = launch(count, args);\n' +
     '    DWORD after = caller_snapshot(args[3], TRUE);\n' +
@@ -63,7 +66,7 @@ export function writeSource(output: string): Record<string, string> {
   const source = generate(original);
   writeFileSync(join(output, 'debug-map.c'), source);
   const hashes: Record<string, string> = {'protected-tool.c': sha256(original), 'debug-map.c': sha256(source)};
-  for (const file of ['routing.h', 'inspect.h', 'ownership.h', 'identity.h', 'startup-site.h', 'startup-site.json', 'roundtrip.h']) {
+  for (const file of ['routing.h', 'inspect.h', 'ownership.h', 'identity.h', 'startup-site.h', 'startup-site.json', 'roundtrip.h', 'setter.h']) {
     const bytes = readFileSync(join(import.meta.dir, file));
     writeFileSync(join(output, file), bytes);
     hashes[file] = sha256(bytes);

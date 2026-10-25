@@ -14,7 +14,7 @@ admission and never changes the required two-compiler protected suites.
 The `windows-debug-map-diagnostic` artifact expires after three days. It includes
 kernel version, compiler commands, generated source, input/helper SHA256 hashes,
 complete native stdout/stderr, per-compiler structured results and cleanup logs.
-The generated helper also includes `identity.h`, `ownership.h`, `roundtrip.h`,
+The generated helper also includes `identity.h`, `ownership.h`, `roundtrip.h`, `setter.h`,
 `startup-site.h` and `startup-site.json`; their hashes are part of the manifest.
 
 On Linux, `bun .../run.ts <absolute-artifact-directory> --compile-only` verifies
@@ -188,6 +188,47 @@ and independently after helper exit. Every failed absence stays fatal even if
 a later observation is absent. A/B debug tasks remain independent behind the
 existing RED safety prerequisites. This experiment does not claim a retention
 fix, transfer ownership of a kernel handle, or authorize closing one.
+
+## Matched assignment-caller experiment
+
+The original RED and concurrent A/B cases retain their existing roundtrip,
+boundary and fatal cleanup assertions. Two additional root-only cases follow
+their independently established process/caller/ambient safety prerequisites:
+DIRECT creates and assigns its private map once in the helper; SCOPE creates
+the same kind of map in the helper but assigns it in a trusted setter child.
+Neither additional case performs RED's A/B/A roundtrip. The creator/helper stays
+alive through target exit, owned-handle cleanup, immediate and 2000 ms absence
+gates and the later ownership checkpoint. Root marker success and descendant
+map loss are checked independently of cleanup, as in RED.
+
+The setter receives exactly two purpose-made inheritable duplicates through
+PROC_THREAD_ATTRIBUTE_HANDLE_LIST: the captured target with SET_INFORMATION,
+QUERY_LIMITED_INFORMATION and SYNCHRONIZE, and the owned directory with QUERY
+and TRAVERSE. The parent's transfer duplicates close immediately after creation.
+Before assigning, the setter validates the target's captured PID and creation
+time, live state and the directory's exact object name/type; it clears both
+inherit flags and never creates a child. Invalid arguments cannot authorize
+explicit handle closure. It only calls ProcessDeviceMap on that supplied
+target, closes both validated received handles and reports through its exit code.
+It inherits no stdio or job handle and never changes its own device map.
+
+The setter starts suspended, enters a separate kill-on-close job and only then
+resumes. The helper waits at most five seconds for its successful exit, closes
+the three captured setter/job handles and requires success before the original
+root ResumeThread. Failure kills only this captured setter or its owned job;
+the original failure path terminates the still-suspended target's owned job.
+Transfer and closure logs supplement the registries' process-handle trace.
+Ordinary NUL/drive/map/privilege observations must remain equal throughout.
+Reconcile the setter PID's captured registry handles as well as mapped target
+handles before attributing a negative result to setter process-object lifetime.
+
+A changed SCOPE cleanup outcome compared with DIRECT would implicate the
+assignment caller in this fixture, without identifying the kernel owner. Equal
+failures would show that early setter exit alone does not cure retention.
+Equal successes would instead implicate the removed roundtrip or another RED
+difference. No outcome grants production admission or retroactively passes an
+original cleanup failure. Native SDK/MinGW results are required; cross compilation
+alone establishes no routing, lifetime or Server support.
 
 After the exact spawned helper has exited and its capture reached EOF, a new
 registry-owned helper opens only the recorded `boite.route.<helper-pid>` name

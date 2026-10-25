@@ -19,6 +19,10 @@ static HANDLE probe_map, probe_link;
 static wchar_t probe_name[256];
 static DWORD probe_root_pid;
 static BOOL debug_mode;
+/* 0 retains the original RED roundtrip, 1 omits it as a control, 2 also moves
+ * assignment into a trusted child that exits before the target resumes. */
+static int assignment_scope;
+static DWORD setter_assign(HANDLE process, HANDLE directory);
 static ROUTE_RECORD records[32];
 static int captured, active;
 static int target_captured, auxiliary_captured;
@@ -105,11 +109,12 @@ static DWORD map_apply(HANDLE process) {
   if (!set) return ERROR_PROC_NOT_FOUND;
   DWORD observed = map_lifetime(L"before-assign", L"process");
   if (observed) return observed;
-  NTSTATUS status = set(process, (PROCESSINFOCLASS)23, &probe_map, sizeof(probe_map));
+  NTSTATUS status = assignment_scope == 2 ? (NTSTATUS)setter_assign(process, probe_map)
+    : set(process, (PROCESSINFOCLASS)23, &probe_map, sizeof(probe_map));
   fwprintf(stderr, L"private-map pid=%lu set=0x%08lx\n", GetProcessId(process), (unsigned long)status);
   fflush(stderr);
   observed = map_lifetime(L"after-assign", L"process");
-  return status < 0 ? (DWORD)status : observed;
+  return status != 0 ? (DWORD)status : observed;
 }
 
 #include "roundtrip.h"
@@ -148,7 +153,7 @@ static DWORD map_prepare(HANDLE process, PSECURITY_DESCRIPTOR security, const wc
   if (observed) return observed;
   if (debug_mode) return 0;
   DWORD error = map_apply(process);
-  return error ? error : map_roundtrip(process, security);
+  return error ? error : assignment_scope ? 0 : map_roundtrip(process, security);
 }
 
 static ULONGLONG ownership_wall_ms(void) {
