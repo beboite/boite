@@ -65,8 +65,9 @@ export function pullOlder(store: Store, box: HTMLElement, reach: number, head: s
       moved();
       void tick().then(() => {
         const now = stood === null ? null : offset();
-        if (now === null || stood === null || Math.abs(now - stood) <= 1) return;
-        box.scrollTop += now - stood;
+        const step = now === null || stood === null ? 0 : Math.round(now - stood);
+        if (step === 0) return;
+        box.scrollTop += step;
         moved();
       });
     });

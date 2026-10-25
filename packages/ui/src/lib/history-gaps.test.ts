@@ -148,4 +148,21 @@ describe('history gaps', () => {
     expect(await loadKeepingReader(async (landing) => { landing(); return 3; }, () => undefined, hold, async () => {}, moved)).toBe(3);
     expect(hold).toHaveBeenCalledTimes(2);
   });
+
+  test('a page landing a fraction of a pixel off moves the view by the whole pixel the reader would see', async () => {
+    const view = document.createElement('div');
+    const row = document.createElement('article');
+    row.dataset['mid'] = 'm-2';
+    view.append(row);
+    let rowTop = 20;
+    view.getBoundingClientRect = () => ({ top: 0, bottom: 600 }) as DOMRect;
+    row.getBoundingClientRect = () => ({ top: rowTop, bottom: rowTop + 80 }) as DOMRect;
+    // At a device scale of 1 the scroll position is whole while rows sit on fractions: 0.75 px reads as a pixel.
+    await loadKeepingReader(async (landing) => { landing(); rowTop = 20.75; return 3; }, () => view, vi.fn(), async () => {}, vi.fn());
+    expect(view.scrollTop).toBe(1);
+    // Under half a pixel shows nothing: the view stays.
+    rowTop = 20;
+    await loadKeepingReader(async (landing) => { landing(); rowTop = 20.3; return 3; }, () => view, vi.fn(), async () => {}, vi.fn());
+    expect(view.scrollTop).toBe(1);
+  });
 });
