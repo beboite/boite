@@ -1,4 +1,4 @@
-import type { ResourceByteUsage, Settings, TraceCapability } from '@boite/contracts';
+import type { MachineGpu, MachineVolume, ResourceByteUsage, Settings, TraceCapability } from '@boite/contracts';
 import type { ServerUpdatePlatform } from '../server-update/types.ts';
 import type { CgroupMemory } from './linux-cgroup.ts';
 
@@ -176,6 +176,16 @@ export interface ProcessPlatform {
   finishResources?(): void;
   /** Null `availableBytes` when the OS gives no honest reading; the reserve check then sits out. */
   machineMemory(): { totalBytes: number; availableBytes: number | null } | null;
+  /** Fixed volumes with their size and free space; removable, network and virtual ones are left out. */
+  machineVolumes?(): MachineVolume[];
+  /**
+   * Every GPU and its load, and on Windows each listed pid's share of its
+   * busiest engine. Null when this OS has no reader. Readers open lazily and
+   * close themselves once nobody has asked for a while.
+   */
+  machineGpus?(pids: ReadonlySet<number>): Promise<{ gpus: MachineGpu[]; pids: Map<number, number> | null } | null>;
+  /** The system's display name, such as "Windows 11 Pro". */
+  osLabel?(): string | null;
   /**
    * The memory readings of the cgroup holding `pid`, or null when the OS has no
    * such group, it has no throttling limit or its files cannot be read. Linux only.
