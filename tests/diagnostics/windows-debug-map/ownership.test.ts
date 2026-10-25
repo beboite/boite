@@ -6,7 +6,7 @@ import {fileURLToPath} from 'node:url';
 import {OwnershipLedger, type TraceEvent} from './ownership-ledger.ts';
 import {instrumentJobs, instrumentWorker, jobsPath, workerPath, prepareOwnership, ownershipTestArgs} from './ownership-generate.ts';
 import {summarizeOwnership} from './ownership-summary.ts';
-import {OwnershipTrace} from './ownership-trace.ts';
+import {OwnershipTrace, ownershipWorkerOptions} from './ownership-trace.ts';
 
 test('worker transfer, retained record, reuse and failed original closure preserve ownership generations', () => {
   const events: TraceEvent[] = [], worker = new OwnershipLedger('worker', e => events.push(e)), main = new OwnershipLedger('main', e => events.push(e));
@@ -136,4 +136,48 @@ test('Bun preloads the exact generated Windows jobs module in two independent op
     expect(readdirSync(join(directory, 'disabled'))).toEqual(['diagnostic.json']);
     expect(JSON.parse(readFileSync(join(directory, 'disabled', 'diagnostic.json'), 'utf8')).enabled).toBe(false);
   } finally {rmSync(directory, {recursive: true, force: true});}
+});
+
+
+test('a registry worker logs each compiler in the trace directory selected after launcher startup', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'boite-ownership-worker-'));
+  const saved = Object.fromEntries(['BOITE_DEBUG_MAP_TRACE', 'BOITE_DEBUG_MAP_OWNER'].map(key => [key, process.env[key]]));
+  const probe = join(directory, 'probe.ts');
+  writeFileSync(probe, `import {ownershipTrace} from ${JSON.stringify(join(import.meta.dir, 'ownership-trace.ts'))};\n` +
+    `ownershipTrace.stop(); postMessage('WORKER_TRACE_STOPPED');\n`);
+  try {
+    // A worker may have started before run.ts selects its compiler directory.
+    const prime = new Worker(probe);
+    let primedDeadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        prime.onmessage = () => resolve(); prime.onerror = error => reject(new Error(String(error)));
+        primedDeadline = setTimeout(() => reject(new Error('initial worker deadline')), 5000);
+      });
+    } finally {clearTimeout(primedDeadline); prime.terminate();}
+    for (const compiler of ['sdk', 'mingw']) {
+      const trace = join(directory, compiler);
+      process.env.BOITE_DEBUG_MAP_TRACE = trace; process.env.BOITE_DEBUG_MAP_OWNER = 'launcher';
+      // Server's launcher worker had no trace environment; keep that native failure condition.
+      const environment: Record<string, string> = {};
+      for (const [key, value] of Object.entries(process.env))
+        if (value !== undefined && !['BOITE_DEBUG_MAP_TRACE', 'BOITE_DEBUG_MAP_OWNER'].includes(key)) environment[key] = value;
+      const worker = new Worker(probe, {...ownershipWorkerOptions(), env: environment});
+      let deadline: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await new Promise<void>((resolve, reject) => {
+          worker.onmessage = event => event.data === 'WORKER_TRACE_STOPPED' ? resolve() : reject(new Error('unexpected worker message'));
+          worker.onerror = error => reject(new Error(String(error)));
+          deadline = setTimeout(() => reject(new Error('worker trace deadline')), 5000);
+        });
+        const rows = readdirSync(trace).flatMap(name => readFileSync(join(trace, name), 'utf8').trim().split('\n').map(line => JSON.parse(line)));
+        expect(rows[0]).toMatchObject({event: 'owner-start', role: 'launcher-worker', ownerPid: process.pid});
+        expect(rows.at(-1)).toMatchObject({event: 'owner-stop', complete: true});
+        expect(rows[0].ownerThread).toBeGreaterThan(0);
+      } finally {clearTimeout(deadline); worker.terminate();}
+    }
+  } finally {
+    for (const [key, value] of Object.entries(saved)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    rmSync(directory, {recursive: true, force: true});
+  }
 });

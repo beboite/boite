@@ -28,7 +28,7 @@ export function instrumentJobs(source: string, generatedWorker: string): string 
     '      const closed = k32.CloseHandle(asPointer(handle));\n' +
     '      const closeError = k32.GetLastError();\n' +
     '      ownershipTrace.closed(handle, closed !== 0, closed !== 0 ? 0 : closeError);');
-  source = once(source, "workerEntry(import.meta.url, 'jobs-worker')", JSON.stringify(pathToFileURL(generatedWorker).href));
+  source = once(source, "workerEntry(import.meta.url, 'jobs-worker')", JSON.stringify(pathToFileURL(generatedWorker).href) + ', ownershipWorkerOptions()');
   source = once(source, 'function onWorkerMessage(message: JobsWorkerMessage): void {',
     'function onWorkerMessage(message: JobsWorkerMessage): void {\n  ownershipTrace.received(message);');
   source = once(source, "      else if (message.kind === 'packet' && message.handle !== 0) api?.close(message.handle);",
@@ -44,7 +44,7 @@ export function instrumentJobs(source: string, generatedWorker: string): string 
     "function onJobPacket(message: number, key: number, pid: number, handle = 0): void {\n" +
     "  ownershipTrace.event({event: 'job-packet', message, key, pid, handle});");
   source = imports(source, jobsPath);
-  return `import {ownershipTrace} from ${JSON.stringify(runtime)};\n` + source +
+  return `import {ownershipTrace, ownershipWorkerOptions} from ${JSON.stringify(runtime)};\n` + source +
     '\nexport const ownershipTraceInstalled = true;\n';
 }
 export function instrumentWorker(source: string): string {

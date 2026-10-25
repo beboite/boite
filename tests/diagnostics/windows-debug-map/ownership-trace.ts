@@ -1,9 +1,31 @@
 import {appendFileSync, mkdirSync} from 'node:fs';
-import {join} from 'node:path';
+import {isAbsolute, join} from 'node:path';
 import {threadId} from 'node:worker_threads';
 import {dlopen, FFIType, ptr} from 'bun:ffi';
 import type {Pointer} from 'bun:ffi';
 import {OwnershipLedger, type HandleIdentity, type TraceEvent, type Transfer} from './ownership-ledger.ts';
+
+/** Pass each compiler's trace selection directly; worker environment inheritance is not evidence. */
+export function ownershipWorkerOptions(): {argv: string[]} {
+  const directory = process.env.BOITE_DEBUG_MAP_TRACE, role = process.env.BOITE_DEBUG_MAP_OWNER;
+  if (!directory || !isAbsolute(directory) || !['launcher', 'harness'].includes(role ?? ''))
+    throw new Error('ownership worker requires an absolute trace directory and launcher/harness owner');
+  return {argv: ['--boite-debug-map-trace', directory, '--boite-debug-map-owner', role!]};
+}
+function workerConfiguration(): {directory: string; role: string} | undefined {
+  if (threadId === 0) return;
+  const read = (flag: string): string | undefined => {
+    const index = process.argv.indexOf(flag);
+    if (index < 0) return;
+    if (process.argv.lastIndexOf(flag) !== index || !process.argv[index + 1]) throw new Error(`invalid ownership worker argument: ${flag}`);
+    return process.argv[index + 1];
+  };
+  const directory = read('--boite-debug-map-trace'), role = read('--boite-debug-map-owner');
+  if (directory === undefined && role === undefined) return;
+  if (!directory || !isAbsolute(directory) || !['launcher', 'harness'].includes(role ?? ''))
+    throw new Error('invalid ownership worker trace directory or owner');
+  return {directory, role: role!};
+}
 
 export interface OwnershipReads {
   save(): number;
@@ -43,9 +65,8 @@ export class OwnershipTrace {
   private sequence = 0;
   private ledger: OwnershipLedger;
   readonly owner = `${process.pid}/${threadId}/${crypto.randomUUID()}`;
-  constructor(readonly role: string, private native: OwnershipReads | null = nativeReads()) {
+  constructor(readonly role: string, private native: OwnershipReads | null = nativeReads(), directory = process.env.BOITE_DEBUG_MAP_TRACE) {
     this.ledger = new OwnershipLedger(this.owner, event => this.write(event));
-    const directory = process.env.BOITE_DEBUG_MAP_TRACE;
     if (directory) this.start(directory);
   }
   private guarded<T>(action: () => T): T | undefined {
@@ -123,5 +144,8 @@ export class OwnershipTrace {
 }
 
 // Imported only by opt-in generated modules, before their first original call.
-export const ownershipTrace = new OwnershipTrace(`${process.env.BOITE_DEBUG_MAP_OWNER ?? 'unknown'}-${threadId === 0 ? 'main' : 'worker'}`);
+const workerConfig = workerConfiguration();
+export const ownershipTrace = new OwnershipTrace(`${workerConfig?.role ?? process.env.BOITE_DEBUG_MAP_OWNER ?? 'unknown'}-${threadId === 0 ? 'main' : 'worker'}`,
+  undefined, workerConfig?.directory ?? process.env.BOITE_DEBUG_MAP_TRACE);
+if (workerConfig) ownershipTrace.event({event: 'worker-configuration', transport: 'argv', directory: workerConfig.directory});
 process.once('exit', () => ownershipTrace.stop());

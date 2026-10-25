@@ -222,6 +222,13 @@ summary. The native child uses `bun test --preload <file> <test>`: putting the
 preload flag before `test` selects a package script on the tested Bun version.
 The isolated two-owner test exercises that actual command and checks the
 canonical module and `ProcessPlatform.attach` together.
+Each generated worker receives the current compiler directory and owner explicitly
+through Bun Worker argv, then records `worker-configuration`; it does not rely on
+worker environment inheritance. The 035e2065 Server run lacked the launcher's
+worker files, so its reconciliation was incomplete despite both main owners
+being intercepted. A real-worker test removes those environment values and
+requires independent SDK/MinGW trace files through the explicit arguments.
+
 Each compiler has a separate `ownership/` trace directory. A registry
 and its worker record separate owner PID/thread files with monotonic sequence,
 monotonic nanoseconds and common wall-clock milliseconds. Worker acquisitions,
