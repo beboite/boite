@@ -504,6 +504,30 @@ compiler. Production remains 0/7 NUL error 5 per compiler. The in-helper result
 shows that named-map retirement can leave the new empty name retained; no
 complete rundown, owner attribution or production admission is established.
 
+The 327bba06 Server run verifies 27 hashes and closes the observer regression:
+under both compilers, the exact `.retired` observer succeeds after helper exit
+with absent=1, and both near-match/nested paths reject with error 123 before
+open. The replacement still exists at both earlier in-helper gates. Each
+compiler retains 28 fatal diagnostic failures and seven production NUL failures;
+all 12 observed names are absent after helper exit. Captured registry closures
+reconcile 557/557 and 559/559; all 120 normal stream/window calls succeed.
+Neither post-exit disappearance nor the parser repair establishes full cleanup
+while the helper lives or identifies a kernel owner.
+
+The same existing RETIRE-NAMED arm now observes its owned replacement once more
+after launch returns and the final caller snapshot completes, helper still
+alive. This covers the interval after the remaining SID/group/command-line
+cleanup; its exact-name observer closes before returning. Final absence is
+required in addition to every prior gate, never as their substitute. The
+already-existing launch-token and boundary-token CloseHandle calls now capture
+their immediate result before logging; failed closure is fatal. Assertions
+require the root launch token and all verified target/auxiliary boundary tokens
+closed. No new token, handle, assignment, arm or cleanup reorder is introduced.
+A retained final name with successful closures would rule out incomplete
+explicit launch cleanup as a sufficient explanation, without attributing an
+internal reference. No native result of this added observation is established
+by compilation.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:

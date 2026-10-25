@@ -76,6 +76,17 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
       verify(`${label} caller after`, () => expect(result.err).toMatch(/caller snapshot=after .* unchanged=1/)),
       verify(`${label} caller equality`, () => expect(result.err.match(/^caller snapshot=after (.+)\r?$/m)?.[1])
         .toBe(result.err.match(/^caller snapshot=before (.+)\r?$/m)?.[1])),
+      verify(`${label} launch token closed`, () => {
+        const root = result.out.match(/^inspect-start=\S+\.generation-0 pid=(\d+)\r?$/m)?.[1];
+        expect(Number(root)).toBeGreaterThan(0);
+        expect(result.err).toContain(`token-cleanup role=launch pid=${root} success=1 error=0`);
+        expect(result.err.match(/token-cleanup role=launch /g)).toHaveLength(1);
+      }),
+      verify(`${label} boundary tokens closed`, () => {
+        const closures = [...result.err.matchAll(/token-cleanup role=boundary pid=(\d+) success=1 error=0/g)];
+        expect(closures).toHaveLength(label === 'A' || label === 'B' ? 7 : 1);
+        expect(result.err.match(/token-cleanup role=boundary /g)).toHaveLength(closures.length);
+      }),
       verify(`${label} owned processes gone`, () => expect(result.err).toContain('cleanup job-active=0')),
       verify(`${label} no debugger control`, () => expect(result.out).not.toContain('host-debug-control=1')),
     ];
@@ -112,7 +123,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
       }),
     ];
     if (label === 'RETIRE-NAMED') {
-      for (const phase of ['immediate', 'checkpoint']) checks.push(
+      for (const phase of ['immediate', 'checkpoint', 'final']) checks.push(
         verify(`${label} replacement absence ${phase}`, () => expect(result.err)
           .toContain(`cleanup retired-open phase=${phase} status=0xc0000034 absent=1 closed=1 error=0`)));
       checks.push(verify(`${label} replacement observation order`, () => {
@@ -122,6 +133,8 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
           expect(immediate).toBeGreaterThan(result.err.indexOf(`cleanup close=${owned} closed=1`));
         expect(result.err.indexOf('cleanup retired-open phase=checkpoint '))
           .toBeGreaterThan(result.err.indexOf('cleanup checkpoint-map-open='));
+        expect(result.err.indexOf('cleanup retired-open phase=final '))
+          .toBeGreaterThan(result.err.indexOf('caller snapshot=after '));
       }));
     } else checks.push(verify(`${label} no named replacement`, () => {
       expect(result.err).not.toContain('map-retire named '); expect(result.err).not.toContain('cleanup retired-open ');
@@ -270,6 +283,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
           for (const pid of targets) {
             expect(result.err).toMatch(new RegExp(`debug-image pid=${pid} tid=\\d+ handle-tid=\\d+ thread-owner=${pid} root=[01] role=target identity=1 .*error=0`));
             expect(result.err).toMatch(new RegExp(`debug-event-boundary pid=${pid} tid=\\d+ verified=1 error=0`));
+            expect(result.err).toContain(`token-cleanup role=boundary pid=${pid} success=1 error=0`);
           }
           for (let depth = 1; depth < 3; depth++) {
             expect(result.err).toMatch(new RegExp(`debug-parent pid=${targets[depth]} query=0x00000000 bytes=48 known=1 reported-pid=${targets[depth]} parent=${targets[depth - 1]}(?:\\r?\\n|$)`));
@@ -286,6 +300,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
             const pid = match[1]!;
             expect(targets).not.toContain(pid);
             expect(result.err).toMatch(new RegExp(`debug-event-boundary pid=${pid} tid=\\d+ verified=1 error=0`));
+            expect(result.err).toContain(`token-cleanup role=boundary pid=${pid} success=1 error=0`);
             const parent = result.err.match(new RegExp(`debug-parent pid=${pid} query=0x00000000 bytes=48 known=1 reported-pid=${pid} parent=(\\d+)(?:\\r?\\n|$)`));
             expect(parent).not.toBeNull();
             parents.push(parent![1]!);

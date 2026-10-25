@@ -437,10 +437,11 @@ static BOOL lowbox_verify(HANDLE process, HANDLE job, PSID expected, PSID capabi
   BOOL lpac = status >= 0 && info->Version == 1 && info->Count == 1 && info->Attributes &&
     info->Attributes->ValueCount == 1 && (info->Attributes->ValueType == 2 || info->Attributes->ValueType == 6) &&
     info->Attributes->Values.Uint64 && *info->Attributes->Values.Uint64 == 1;
-  CloseHandle(token);
+  BOOL token_closed = CloseHandle(token); DWORD close_error = token_closed ? 0 : GetLastError();
+  fwprintf(stderr, L"token-cleanup role=boundary pid=%lu success=%d error=%lu\n", GetProcessId(process), token_closed, close_error);
   fwprintf(stderr, L"debug-create pid=%lu job=%d nonbreakaway=%d package/capability=%d lpac=%d attribute=0x%08lx\n",
     GetProcessId(process), in_job, confined, ok, lpac, (unsigned long)status);
-  fflush(stderr); return ok && lpac && confined;
+  fflush(stderr); return ok && lpac && confined && token_closed;
 }
 
 /* Deadline checked for every event too: a stream of events cannot defeat it.

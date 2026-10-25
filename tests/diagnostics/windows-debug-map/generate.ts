@@ -26,6 +26,10 @@ export function generate(source: string): string {
     '  else {\n    DWORD waited = WaitForSingleObject(child.hProcess, 15000);\n' +
     '    if (waited != WAIT_OBJECT_0) { error = waited == WAIT_TIMEOUT ? ERROR_TIMEOUT : GetLastError(); goto end; }\n' +
     '    if (!GetExitCodeProcess(child.hProcess, &exit_code)) { error = GetLastError(); goto end; }\n  }');
+  source = once(source, '  CloseHandle(child_token);',
+    '  { BOOL closed = CloseHandle(child_token); DWORD close_error = closed ? 0 : GetLastError();\n' +
+    '    fwprintf(stderr, L"token-cleanup role=launch pid=%lu success=%d error=%lu\\n", child.dwProcessId, closed, close_error); fflush(stderr);\n' +
+    '    if (!closed) { error = close_error ? close_error : ERROR_INVALID_HANDLE; stage = L"routing.cleanup.launch-token"; goto end; }\n  }');
   // Even failures between CreateProcess and ResumeThread must continue debug exit events.
   source = once(source, '    TerminateJobObject(job, 125);\n    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting;',
     '    if (!TerminateJobObject(job, 125) && !error) error = GetLastError();\n' +
@@ -87,7 +91,9 @@ export function generate(source: string): string {
     '    DWORD after = caller_snapshot(args[3], TRUE);\n' +
     '    fwprintf(stderr, L"owned-observers enabled=%d object-queries=%u handle-snapshots=%u\\n",\n' +
     '      observe_owned_handles, object_count_queries, handle_snapshot_queries); fflush(stderr);\n' +
-    '    if (before || after) result = failure(L"routing.caller-state", before ? before : after);\n  }');
+    '    if (before || after) result = failure(L"routing.caller-state", before ? before : after);\n' +
+    '    DWORD final_map = retired_absence(L"final");\n' +
+    '    if (final_map) result = failure(L"routing.cleanup.final-map", final_map);\n  }');
   if (source.includes('INFINITE')) throw new Error('diagnostic retains an unbounded wait');
   return source;
 }
