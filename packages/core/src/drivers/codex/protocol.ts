@@ -1,4 +1,12 @@
-import type { NativeAgentUpdate, PermissionMode, ThreadContextMode, ToolStatus } from '@boite/contracts';
+import type { HookOutcome, NativeAgentUpdate, PermissionMode, ThreadContextMode, ToolStatus } from '@boite/contracts';
+
+/** `hook/completed` statuses as the ledger counts them; `running` is not an end. */
+export const HOOK_OUTCOMES: Record<string, HookOutcome> = {
+  completed: 'ok',
+  failed: 'failed',
+  blocked: 'blocked',
+  stopped: 'stopped',
+};
 
 /** What the agent sees as `clientInfo.name`. */
 export const CLIENT_NAME = 'boite';

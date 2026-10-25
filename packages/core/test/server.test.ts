@@ -7,7 +7,8 @@ import { connect, type CoreClient } from '../src/client.ts';
 import { refused, type RpcFailure } from '../src/errors.ts';
 import { Core } from '../src/core.ts';
 import { newToken } from '../src/ids.ts';
-import { pair, readPreviousRun } from '../src/main.ts';
+import { accounts } from '../src/accounts-command.ts';
+import { ownerClient, pair, readPreviousRun } from '../src/main.ts';
 import { isAllowedOrigin, PLACEHOLDER_HTML, PREFERRED_PORTS, preauthPeer, preauthRefusal, ServerConnection, startServer, startServerOnStickyPort, UI_DIST } from '../src/server.ts';
 import { lanAddress } from '../src/server/lan.ts';
 import { echoThread, removeDir, startTestCore, waitFor } from './harness.ts';
@@ -877,6 +878,12 @@ describe('server', () => {
 
     const phoneLink = await pair(['--data-dir', harness.dataDir]);
     expect(phoneLink.role).toBe('device');
+
+    // `boite-core accounts` asks the same core, as its owner, what Settings > Providers shows.
+    const listed = harness.core.accounts.list();
+    expect(listed.length).toBeGreaterThan(0);
+    expect(await accounts(['--data-dir', harness.dataDir], ownerClient)).toEqual(listed);
+    expect((await accounts(['--refresh', '--data-dir', harness.dataDir], ownerClient)).map((account) => account.id)).toEqual(listed.map((account) => account.id));
   });
 
   test('a grant whose answer was lost gives the same session to a retry with the same nonce, and to nobody else', async () => {

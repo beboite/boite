@@ -432,14 +432,17 @@ export const FAKE_AUTO_COMPACT_SETTLE_MS = 400;
 
 /**
  * The `autoCompact` setting, for what a fake thread can show: it has no
- * background work and no prompt cache, so only `turn-end` and the threshold
- * apply. A turn that opens first keeps the thread busy and the timer does nothing.
+ * prompt cache or native tool-boundary compaction. A reached token limit falls
+ * back to the end of the turn regardless of moments; otherwise only `turn-end`
+ * applies, still gated by a configured limit. A new turn keeps the timer idle.
  */
 function autoCompact(ctx: FakeContext, thread: Thread, turn: Turn): void {
   // Checked when the turn ends and again when the timer fires, on the setting and the thread as they are then.
   const wanted = (now: Thread): boolean => {
     const rule = ctx.settings.autoCompact;
-    if (!rule || !rule.moments.includes('turn-end') || (rule.tokens !== null && (now.context?.tokens ?? 0) < rule.tokens)) return false;
+    if (!rule) return false;
+    const reachedLimit = rule.tokens !== null && (now.context?.tokens ?? 0) >= rule.tokens;
+    if (!reachedLimit && !(rule.tokens === null && rule.moments.includes('turn-end'))) return false;
     return now.activity?.goal?.status !== 'active' && now.activity?.loop?.status !== 'active';
   };
   if (turn.status !== 'done' || turn.execution?.operation === 'compact' || thread.parentThreadId || !wanted(thread)) return;

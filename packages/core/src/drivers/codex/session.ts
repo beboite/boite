@@ -1,5 +1,5 @@
 import { logMessageOf, withLogDiagnostic } from '../../log-errors.ts';
-import type { HookOutcome, ModelInfo, QuestionAnswer } from '@boite/contracts';
+import type { ModelInfo, QuestionAnswer } from '@boite/contracts';
 import pkg from '../../../package.json';
 import { messageOf, unavailable } from '../../errors.ts';
 import { tildePath } from '../../paths.ts';
@@ -31,6 +31,7 @@ import {
   COMMAND_TOOL_NAME,
   EXIT_GRACE_MS,
   FILE_CHANGE_TOOL_NAME,
+  HOOK_OUTCOMES,
   contextArgs,
   MODE_POLICY,
   LIVE_TURN_SETTINGS,
@@ -49,14 +50,6 @@ import { SessionRetention } from '../session-retention.ts';
 import { noteReady } from '../driver-log.ts';
 import {PROTECTED_CODEX_ARGS, protectedCodexConfig, protectedCodexThread} from './protected.ts';
 import {PROTECTED_TOOL, protectedTool, PROTECTED_COMMIT, protectedCommit} from '../protected.ts';
-
-/** `hook/completed` statuses as the ledger counts them; `running` is not an end. */
-const HOOK_OUTCOMES: Record<string, HookOutcome> = {
-  completed: 'ok',
-  failed: 'failed',
-  blocked: 'blocked',
-  stopped: 'stopped',
-};
 
 /** How long a stopped turn waits for the agent to end it before its process is stopped. */
 const STOP_GRACE_MS = 3_000;
@@ -348,6 +341,10 @@ export class CodexSession {
     // A context mode without MCP turns the user's servers off by name.
     const config = {...await threadConfig(rpc, ctx.thread.cwd, (level, message) => ctx.log(level, message), !!ctx.protectedExecution || ctx.thread.contextMode?.mcp === false, !!ctx.protectedExecution), ...protectedCodexConfig(ctx)};
     const sandbox = ctx.protectedExecution ? protectedCodexThread(ctx) : {sandbox: policy.sandbox};
+    // Codex checks this at its own model/tool boundaries. Its live settings
+    // RPC does not accept it; the session key reopens changed limits between turns.
+    const tokens = ctx.autoCompactTokens?.() ?? null;
+    if (tokens !== null) config.model_auto_compact_token_limit = tokens;
     if (ctx.sessionId !== null) {
       const resumed = await resumeThread(rpc, ctx, {
         threadId: ctx.sessionId,

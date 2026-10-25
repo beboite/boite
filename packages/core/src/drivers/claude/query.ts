@@ -2,6 +2,7 @@ import type { EffortLevel, Options, PermissionMode as SdkPermissionMode, Query, 
 import type { ImageAttachment, PermissionMode } from '@boite/contracts';
 import type { SessionContext } from '../types.ts';
 import { fitImages } from './images.ts';
+import { CONTEXT_ENV, CONTEXT_GUIDES_ENV } from '../../context-mode.ts';
 
 export const STDERR_MAX = 400;
 
@@ -147,6 +148,18 @@ export function childEnv(accountEnv: Record<string, string>): Record<string, str
     if (key.startsWith('CLAUDE_CODE_')) delete env[key];
   }
   return { ...env, ...accountEnv };
+}
+
+/** The account's CLI environment with the conversation's context mode. */
+export function cliEnv(ctx: SessionContext): Record<string, string | undefined> {
+  const mode = ctx.thread.contextMode ?? null;
+  const env = agentEnv(ctx.accountEnv, ctx.toolSummaries === true, ctx.shortAnswers === true);
+  return mode === null ? env : {
+    ...env,
+    [CONTEXT_ENV]: mode.label,
+    [CONTEXT_GUIDES_ENV]: mode.guides ? undefined : '0',
+    CLAUDE_CODE_DISABLE_CLAUDE_MDS: mode.instructions ? undefined : '1',
+  };
 }
 
 /** The CLI flag that picks what the API returns of the model's reasoning: `summarized` or `omitted`. */

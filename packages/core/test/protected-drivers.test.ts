@@ -56,6 +56,8 @@ describe.skipIf(!native)('installed protected provider execution, deterministic 
     let approvals = 0;
     const ctx: TurnContext = {thread, account, provider, accountEnv, protectedExecution, prompt: 'Run the supplied deterministic protected fixture.', attachments: [], sessionId: null,
       turn: {id: 'synthetic-turn', threadId: thread.id} as TurnContext['turn'], warmProcessMinutes: 0,
+      // Exercise the independent compaction launch path without losing protected tools or settings.
+      autoCompactTokens: () => permissionMode === 'default' ? 200_000 : null,
       emit: {startMessage: () => 'synthetic-message', delta: (_id, _index, text) => parts.push(text), part: (_id, _index, part) => parts.push(part), patchTool: () => {}, complete: () => {}},
       log: (_level, text) => logs.push(text), commands: () => {}, context: () => {},
       askQuestion: () => {throw new Error('No fixture question');}, requestPermission: () => {approvals++; return Object.assign(Promise.resolve('allow' as const), {requestId: 'synthetic-approval', withdraw() {}});},

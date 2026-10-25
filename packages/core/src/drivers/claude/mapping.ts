@@ -3,6 +3,11 @@ import type { AgentCommand, BackgroundTask, ToolDocument, Usage } from '@boite/c
 import type { PromptCacheLife } from '../types.ts';
 import { stringify } from '../tool-text.ts';
 
+/** `api_retry`: the CLI is running a request that failed and will try again. */
+export function isApiRetry(message: SDKMessage): boolean {
+  return message.type === 'system' && message.subtype === 'api_retry';
+}
+
 /** The JSON boundary: the SDK types these through the Anthropic API package. */
 interface ContentBlock {
   type: string;

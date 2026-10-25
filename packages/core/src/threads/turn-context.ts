@@ -99,6 +99,7 @@ export class TurnContexts {
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
       toolSummaries: this.core.settings.get().toolSummaries === true,
       shortAnswers: this.core.settings.get().shortAnswers !== false,
+      autoCompactTokens: () => this.core.settings.get().autoCompact?.tokens ?? null,
       log: (level, message, context) => {
         if (context?.kind === 'provider-output') noteStderr(threadId, message);
         this.core.log(level, message, { ...context, source: provider.id, threadId });
@@ -386,7 +387,7 @@ export class TurnContexts {
       systemGuide,
       continuation: freshStart(this.core.dataDir, carry, compose, provider),
       // A keepalive takes nothing while it runs: a result or a note waits for the turn after it.
-      coordination: () => operation === 'keepalive' ? null : this.core.delegation.take(threadId, turn.id) ?? this.core.coordination.take(threadId, turn.id)
+      coordination: () => bare ? null : this.core.delegation.take(threadId, turn.id) ?? this.core.coordination.take(threadId, turn.id)
         ?? this.threads.deferred.takeForRunningTurn(threadId),
       attachments: prepared.attachments,
       sessionId: thread.sessionId,
@@ -396,6 +397,7 @@ export class TurnContexts {
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
       toolSummaries: this.core.settings.get().toolSummaries === true,
       shortAnswers: this.core.settings.get().shortAnswers !== false,
+      autoCompactTokens: () => this.core.settings.get().autoCompact?.tokens ?? null,
       emit,
       reportProgress: progress,
       reportProviderEvent: () => this.threads.progress.contact(threadId, turn.id),

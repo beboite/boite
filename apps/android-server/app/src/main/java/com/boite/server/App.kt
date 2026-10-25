@@ -240,6 +240,8 @@ private fun Dashboard(model: ServerModel, actions: MainActivity.Actions) {
     val status = model.status ?: return
     val busy = model.busy
     StatusSection(status, busy, model)
+    // With no agent installed there is nothing to sign in: Updates offers Claude Code.
+    if (status.running && status.healthy && (status.claude?.version != null || status.codex?.version != null)) SignInSection(status, busy, model)
     if (status.running) PairSection(busy, model)
     UpdatesSection(status, busy, model)
     SettingsSection(status, busy, model)
@@ -378,6 +380,39 @@ private fun UpdatesSection(status: Status, busy: String?, model: ServerModel) = 
     OutlinedButton(onClick = model::updateClaude, enabled = busy == null) { Text(stringResource(R.string.update_claude)) }
     AgentRow(stringResource(R.string.codex), status.codex)
     Text(stringResource(R.string.codex_hint), color = Palette.subtle, fontSize = 12.sp)
+}
+
+/** Whether the agents can answer: a conversation with no signed-in account gets nothing back. */
+@Composable
+private fun SignInSection(status: Status, busy: String?, model: ServerModel) = Section(stringResource(R.string.sign_in_title)) {
+    // Not knowing the accounts still leaves each agent's Sign in to try.
+    val signIns = status.signIns
+    if (signIns == null) Muted(stringResource(R.string.sign_in_unknown))
+    else if (status.nobodySignedIn) {
+        Text(stringResource(R.string.nobody_signed_in), fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        Muted(stringResource(R.string.sign_in_hint))
+    }
+    listOf(Triple("claude", R.string.claude, status.claude), Triple("codex", R.string.codex, status.codex))
+        .filter { (_, _, agent) -> agent?.version != null }
+        .forEach { (id, name, _) ->
+            val state = signIns?.get(id)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(name), fontSize = 14.sp)
+                    if (signIns != null) Text(
+                        stringResource(when (state) {
+                            "ok" -> R.string.signed_in
+                            "unknown" -> R.string.sign_in_checking
+                            "error" -> R.string.sign_in_error
+                            else -> R.string.signed_out
+                        }),
+                        color = if (state == "ok") Palette.success else Palette.muted,
+                        fontSize = 13.sp,
+                    )
+                }
+                if (state != "ok") OutlinedButton(onClick = { model.signIn(id) }, enabled = busy == null) { Text(stringResource(R.string.sign_in)) }
+            }
+        }
 }
 
 @Composable

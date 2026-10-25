@@ -233,8 +233,8 @@ export function imageInputsOf(attachments: ImageAttachment[]): { type: 'image'; 
  * then, so a change reaches the running app-server with the next prompt. The
  * permission mode is, unlike the ACP driver's key: Codex takes the
  * `approvalPolicy` and `sandbox` pair on `thread/start` and `thread/resume` and
- * has no call that changes it on a live thread, so a change there is the one
- * thing that still drops the process.
+ * has no call that changes it on a live thread. The compaction limit has the
+ * same restriction: a change reopens the session before its next turn.
  */
 export function sessionKey(ctx: SessionContext): string {
   return JSON.stringify({
@@ -242,6 +242,7 @@ export function sessionKey(ctx: SessionContext): string {
     generation: ctx.thread.sessionGeneration ?? 0,
     permissionMode: ctx.thread.permissionMode,
     contextMode: ctx.thread.contextMode ?? null,
+    autoCompactTokens: ctx.autoCompactTokens?.() ?? null,
     accountId: ctx.account.id,
     providerId: ctx.provider.id,
     env: ctx.accountEnv,

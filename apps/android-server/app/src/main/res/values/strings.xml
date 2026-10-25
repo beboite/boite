@@ -48,6 +48,17 @@
     <string name="busy_restart">Restarting. A turn under way gets up to 75 s to finish.</string>
     <string name="busy_other">Working…</string>
 
+    <!-- Signing the agents in -->
+    <string name="sign_in_title">Agents</string>
+    <string name="sign_in_unknown">Boite did not say which agents are signed in.</string>
+    <string name="nobody_signed_in">No agent is signed in</string>
+    <string name="sign_in_hint">A conversation gets no answer until one is. Sign in opens Termux: open the link it shows, sign in, then paste the code back if it asks for one. You can also pair a Boite desktop app below and sign in from its Settings › Providers.</string>
+    <string name="signed_in">Signed in</string>
+    <string name="signed_out">Not signed in</string>
+    <string name="sign_in_checking">Not checked yet</string>
+    <string name="sign_in_error">Sign-in check failed</string>
+    <string name="sign_in">Sign in</string>
+
     <!-- Pairing -->
     <string name="pair_title">Pair a device</string>
     <string name="pair_device">Phone or browser</string>

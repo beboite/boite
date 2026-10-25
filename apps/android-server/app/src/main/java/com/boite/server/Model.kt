@@ -11,7 +11,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
-/** `boite-server status --json`. `claude` and `codex` are null when not checked. */
+/**
+ * `boite-server status --json`. `claude` and `codex` are null when not checked;
+ * `signIns` holds each provider's best account status, null when not known.
+ */
 data class Status(
     val installed: Boolean,
     val version: String?,
@@ -25,7 +28,11 @@ data class Status(
     val since: Long?,
     val claude: Agent?,
     val codex: Agent?,
+    val signIns: Map<String, String>?,
 ) {
+    /** True when the core answered and holds no signed-in account: a conversation would get no answer. */
+    val nobodySignedIn: Boolean get() = signIns != null && "ok" !in signIns.values
+
     companion object {
         fun of(json: JSONObject, before: Status?): Status = Status(
             installed = json.optBoolean("installed"),
@@ -38,9 +45,13 @@ data class Status(
             autostart = json.optBoolean("autostart", true),
             urls = json.optJSONArray("urls")?.let { list -> List(list.length()) { list.getString(it) } }.orEmpty(),
             since = if (json.isNull("since")) null else json.optLong("since"),
-            // A quick status leaves the agents out: the last known versions stay.
+            // A quick status leaves the agents out: the last known versions and sign-ins stay.
             claude = if (json.has("claude")) Agent(json.stringOrNull("claude")) else before?.claude,
             codex = if (json.has("codex")) Agent(json.stringOrNull("codex")) else before?.codex,
+            signIns = when {
+                !json.has("claude") -> before?.signIns
+                else -> json.optJSONObject("signIns")?.let { all -> all.keys().asSequence().associateWith { all.getString(it) } }
+            },
         )
     }
 }
@@ -156,6 +167,15 @@ class ServerModel(private val context: Context, private val scope: CoroutineScop
         val urls = json.optJSONArray("urls")?.let { list -> List(list.length()) { list.getString(it) } }
             ?: listOf(json.getString("url"))
         pairing = Pairing(owner, urls, json.stringOrNull("expiresAt"))
+    }
+
+    /** The agent's sign-in, typed in a Termux terminal; coming back here reads the accounts again. */
+    fun signIn(agent: String) {
+        try {
+            Termux.terminal(context, "sign-in", agent)
+        } catch (error: TermuxRefused) {
+            notice = Notice(error.message.orEmpty(), error = true)
+        }
     }
 
     fun loadLogs() = act("logs", 60_000, "logs", "200") { json ->

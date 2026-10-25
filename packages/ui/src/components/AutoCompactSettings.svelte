@@ -11,18 +11,18 @@
   import SaveStatus from './SaveStatus.svelte';
 
   /**
-   * When the core compacts a conversation by itself: the moments it may pick,
-   * and an optional size below which it leaves a conversation alone. The size
-   * is in tokens and not in percent, so one number covers every model.
+   * Automatic compaction: selected idle moments and an independent token limit.
+   * The limit triggers at a safe native tool boundary where supported, otherwise
+   * between turns. It also gates turn-end/background moments, never cache expiry.
    */
   let { store }: { store: Store } = $props();
   const uid = $props.id();
 
-  /** What switching it on starts from: dead time only, so no message of the user's ever waits behind it. */
+  /** Start with idle moments only and leave the independent token limit off. */
   const FIRST: AutoCompact = { tokens: null, moments: ['background', 'cache-expiry'] };
   const FIRST_TOKENS = 200_000;
   const PRESETS = [100_000, 200_000, 400_000, 800_000];
-  /** Shown from the one that costs the user nothing to the one that can make a message wait. */
+  /** Idle moments, from cache reuse to one that can make a new message wait. */
   const MOMENTS: { id: AutoCompactMoment; icon: typeof Timer; name: string; hint: string; recommended?: true }[] = [
     { id: 'cache-expiry', icon: Timer, name: strings.settings.autoCompactCacheExpiry, hint: strings.settings.autoCompactCacheExpiryHint, recommended: true },
     { id: 'background', icon: Hourglass, name: strings.settings.autoCompactBackground, hint: strings.settings.autoCompactBackgroundHint },
@@ -30,7 +30,7 @@
   ];
 
   let rule = $derived(store.settings?.autoCompact ?? null);
-  /** The field as typed, kept while the threshold is off so switching it back on restores it. */
+  /** The field as typed, kept while the token limit is off so switching it back on restores it. */
   let tokens = $state<number | null | undefined>(FIRST_TOKENS);
   let dirty = $state(false);
   $effect(() => {
@@ -50,18 +50,19 @@
     if (!ok && input) input.checked = !input.checked;
     return ok;
   }
-  /** Switching the last moment off leaves nothing to compact at, which is the whole setting off. */
+  /** Removing the last idle moment preserves an independent token limit. */
   function toggleMoment(moment: AutoCompactMoment, input: HTMLInputElement) {
     if (!rule) return;
     const moments = AUTO_COMPACT_MOMENTS.filter((entry) => entry === moment ? input.checked : rule.moments.includes(entry));
-    void save(moments.length ? { ...rule, moments } : null, input);
+    void save(moments.length || rule.tokens !== null ? { ...rule, moments } : null, input);
   }
   /** The switch sends the size as it stands, so an earlier size status or draft no longer applies. */
   async function toggleThreshold(input: HTMLInputElement) {
     if (!rule) return;
     if (input.checked && !valid) tokens = FIRST_TOKENS;
     sizeSave.state = 'idle';
-    if (await save({ ...rule, tokens: input.checked ? tokens as number : null }, input)) dirty = false;
+    const next = { ...rule, tokens: input.checked ? tokens as number : null };
+    if (await save(next.tokens !== null || next.moments.length ? next : null, input)) dirty = false;
   }
   /**
    * The size saves like every typed setting: after a pause, when the field is

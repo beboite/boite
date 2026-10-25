@@ -51,6 +51,23 @@ test('switching it on asks for no size, and the last moment switched off turns i
   expect(input('auto-compact-on').checked).toBe(false);
 });
 
+test('the independent token limit survives switching off the last idle moment until its own switch is off', async () => {
+  const store = render({ tokens: 200_000, moments: ['cache-expiry'] });
+  await flip('auto-compact-cache-expiry', false);
+  expect(store.saveSettings).toHaveBeenLastCalledWith({ autoCompact: { tokens: 200_000, moments: [] } });
+  expect(store.settings.autoCompact).toEqual({ tokens: 200_000, moments: [] });
+  expect(input('auto-compact-on').checked).toBe(true);
+  expect(input('auto-compact-threshold').checked).toBe(true);
+  expect(input('auto-compact-tokens').value).toBe('200000');
+  expect(input('auto-compact-cache-expiry').checked).toBe(false);
+
+  await flip('auto-compact-threshold', false);
+  expect(store.saveSettings).toHaveBeenLastCalledWith({ autoCompact: null });
+  expect(store.settings.autoCompact).toBeNull();
+  expect(input('auto-compact-on').checked).toBe(false);
+  expect(input('auto-compact-threshold')).toBeNull();
+});
+
 test('the size is its own switch: on it saves a valid number or a preset, off it goes back to any size', async () => {
   const store = render({ tokens: null, moments: ['turn-end'] });
   await flip('auto-compact-threshold', true);

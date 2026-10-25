@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { checkSettingsPatch } from '@boite/contracts';
+import { checkSettingsPatch, DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
-import { echoThread, startTestCore, type TestCore } from './harness.ts';
+import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { AUTO_COMPACT } from '../src/threads/auto-compact.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { echoDriver } from '../src/drivers/echo.ts';
@@ -179,6 +179,79 @@ describe('automatic compaction', () => {
     client.close();
   });
 
+  test('the token limit does not wait for the cache-expiry moment', async () => {
+    const client = await h.connect();
+    const { threadId } = await quiet(client);
+    await client.call('settings.set', { autoCompact: { tokens: 1000, moments: ['cache-expiry'] } });
+    const compacted = client.next('turn.finished', t => t.threadId === threadId && t.execution?.operation === 'compact');
+    await turn(client, threadId, 'x'.repeat(950));
+    expect((await compacted).status).toBe('done');
+    expect((await compactions(client, threadId)).map(t => t.status)).toEqual(['done']);
+    client.close();
+  });
+
+  test('cache expiry compacts a context below the independent token limit', async () => {
+    const client = await h.connect();
+    const { threadId } = await quiet(client);
+    await client.call('settings.set', { autoCompact: { tokens: 100_000, moments: ['cache-expiry'] } });
+    AUTO_COMPACT.cacheMarginMs = 300_000 - 50;
+    const compacted = client.next('turn.finished', t => t.threadId === threadId && t.execution?.operation === 'compact');
+    await turn(client, threadId, 'short');
+    expect((await compacted).status).toBe('done');
+    expect((await compactions(client, threadId)).map(t => t.status)).toEqual(['done']);
+    client.close();
+  });
+
+  test('working children do not block compaction, and their result waits until it finishes', async () => {
+    let finishChild: (() => void) | undefined;
+    let compactContext: Parameters<typeof echoDriver.startTurn>[0] | undefined;
+    const compact = Promise.withResolvers<Awaited<ReturnType<typeof echoDriver.startTurn>['done']>>();
+    const steered: string[] = [];
+    const restore = setDriver('echo', { ...echoDriver, startTurn(ctx) {
+      if (ctx.turn.execution?.operation === 'compact') {
+        compactContext = ctx;
+        return { done: compact.promise, stop() {}, async steer(text) { steered.push(text); return true; } };
+      }
+      if (ctx.thread.parentThreadId) {
+        const child = Promise.withResolvers<Awaited<ReturnType<typeof echoDriver.startTurn>['done']>>();
+        finishChild = () => {
+          const id = ctx.emit.startMessage('assistant');
+          ctx.emit.part(id, 0, { type: 'text', text: 'child result after compaction' });
+          ctx.emit.complete(id, 'complete');
+          child.resolve({ status: 'done', sessionId: 'child', usage: null });
+        };
+        return { done: child.promise, stop() { child.resolve({ status: 'stopped', sessionId: 'child', usage: null }); } };
+      }
+      return echoDriver.startTurn(ctx);
+    } });
+    const client = await h.connect();
+    try {
+      const { threadId } = await quiet(client);
+      const { accountId, model } = h.core.threads.require(threadId);
+      await client.call('delegation.configure', { threadId, config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true,
+        profiles: [{ id: 'worker', name: 'Worker', providerId: 'echo', accountId, model: model!, effort: null }] } });
+      await client.call('delegation.spawn', { threadId, profileId: 'worker', task: 'Wait', requestId: 'child' });
+      await waitFor(() => finishChild !== undefined);
+      await client.call('settings.set', { autoCompact: { tokens: null, moments: ['turn-end'] } });
+      await turn(client, threadId, 'parent waits');
+      await waitFor(() => compactContext !== undefined);
+      expect(h.core.threads.canSteer(threadId)).toBe(false);
+      expect(await h.core.threads.steer(threadId, 'must wait')).toBe(false);
+      const delivered = client.next('turn.finished', t => t.threadId === threadId && t.execution?.operation === 'delegation');
+      finishChild!();
+      await waitFor(() => h.core.delegation.hasMail(threadId));
+      expect(compactContext!.coordination?.()).toBeNull();
+      expect(steered).toEqual([]);
+      // Disable future automatic compactions so only this held one is observed.
+      await client.call('settings.set', { autoCompact: null });
+      compact.resolve({ status: 'done', sessionId: compactContext!.sessionId, usage: null });
+      expect((await delivered).status).toBe('done');
+      expect(h.core.delegation.hasMail(threadId)).toBe(false);
+      const thread = await client.call('threads.get', { threadId });
+      expect(thread.messages.some(m => m.parts.some(p => p.type === 'text' && p.text.includes('child result after compaction')))).toBe(true);
+    } finally { restore(); client.close(); }
+  });
+
   test('an active goal keeps its next iteration: the core does not compact under it', async () => {
     const client = await h.connect();
     const { threadId } = await quiet(client);
@@ -193,6 +266,8 @@ describe('automatic compaction', () => {
 
   test('the setting refuses a threshold out of range and an empty or unknown list of moments', () => {
     expect(checkSettingsPatch({ autoCompact: null }).ok).toBe(true);
+    expect(checkSettingsPatch({ autoCompact: { tokens: 200_000, moments: [] } }))
+      .toEqual({ ok: true, patch: { autoCompact: { tokens: 200_000, moments: [] } } });
     expect(checkSettingsPatch({ autoCompact: { tokens: 200_000, moments: ['cache-expiry', 'turn-end', 'turn-end'] } }))
       .toEqual({ ok: true, patch: { autoCompact: { tokens: 200_000, moments: ['turn-end', 'cache-expiry'] } } });
     for (const bad of [{ tokens: 999, moments: ['turn-end'] }, { tokens: 1.5e3 + 0.5, moments: ['turn-end'] }, { tokens: null, moments: [] }, { tokens: null, moments: ['mid-turn'] }, 'on']) {
