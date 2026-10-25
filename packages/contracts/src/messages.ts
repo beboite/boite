@@ -9,7 +9,7 @@ import type { SecretRequestStatus } from './secrets';
 import type { AppLanguage, SettingAsk } from './setting-requests.ts';
 import type { ActivityTurn } from './threads';
 import type { Turn } from './turns';
-import type { InlineView } from './view.ts';
+import type { InlineView, ViewCheckCapture } from './view.ts';
 import type { WindowCaptureKind, WindowConsentAnswer } from './windows';
 
 export type MessageRole = 'user' | 'assistant' | 'system';
@@ -352,6 +352,8 @@ export interface MessagesRpcMethods {
    * color, a font of its own): it never refuses a publish.
    */
   'artifacts.view': { params: { threadId: ThreadId; path: string; title?: string }; result: { message: Message; checked: boolean; advice: string[] } };
+  /** Render a private draft with the view kit; optionally run an async DOM check at each width. Publishes nothing. */
+  'artifacts.viewCheck': { params: { threadId: ThreadId; path: string; script?: string; scheme?: 'dark' | 'light' }; result: { checked: boolean; errors: string[]; advice: string[]; captures: ViewCheckCapture[] } };
   'artifacts.preview': { params: { threadId: ThreadId; path: string }; result: { url: string; shown: boolean } };
   'artifacts.previewClose': { params: { threadId: ThreadId; path: string }; result: { ok: true } };
   /** Push credentials are owned by the authenticated pairing, never a caller-supplied session id. */
