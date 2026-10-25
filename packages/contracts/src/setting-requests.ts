@@ -15,7 +15,7 @@ import type { QuestionAnswer, QuestionOption, Settings, ThreadId } from './index
  * The experiments this build ships, in the order Settings lists them. Each
  * device turns them on for itself (`packages/ui/src/lib/experiments.ts`).
  */
-export const EXPERIMENT_IDS = ['theme-grain', 'session-import', 'prompt-cache', 'resident-agents', 'whip', 'recording-indicators', 'goal2', 'contacts'] as const;
+export const EXPERIMENT_IDS = ['theme-grain', 'session-import', 'prompt-cache', 'resident-agents', 'whip', 'recording-indicators', 'goal2', 'contacts', 'pinned-quotas'] as const;
 export type ExperimentId = (typeof EXPERIMENT_IDS)[number];
 
 export function isExperimentId(id: unknown): id is ExperimentId {
@@ -120,6 +120,7 @@ export const REQUESTABLE_SETTINGS = {
   memoryProtection: { page: 'resources', section: 'limits', sensitive: true },
   reapOrphans: { page: 'resources', section: 'tasks', sensitive: false },
   autoUpdateHarnesses: { page: 'accounts', section: 'agent-updates', sensitive: false },
+  autoInstallUpdates: { page: 'machines', section: 'updates', sensitive: false },
   listenOnLan: { page: 'advanced', section: 'phone', sensitive: true },
   publicUrl: { page: 'advanced', section: 'phone', sensitive: true },
   browserOrigins: { page: 'advanced', section: 'origins', sensitive: true },
@@ -241,6 +242,7 @@ export type SettingRequestParams = { threadId: ThreadId; reason: string } & (
 /** What a missing key means, for the keys the core's defaults leave out. */
 const MISSING: Partial<Record<RequestableSetting, unknown>> = {
   asyncQuestions: true,
+  autoInstallUpdates: false,
   autoResumeLimitedThreads: false,
   deviceStream: false,
   groupThreads: false,

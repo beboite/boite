@@ -181,3 +181,29 @@ test('two machines under one name keep their own rows, and a refused cancel says
   await vi.waitFor(() => { flushSync(); expect(one('updates-failure')?.textContent).toContain('the download is already verified'); });
   expect(first.store.serverUpdater.error).toBeNull();
 });
+
+test('this computer installs updates by itself only once its own switch is on, saved on its core', async () => {
+  const { updater } = await app(nightly('current'));
+  const { store: here } = await machine('here', false);
+  const { store: server } = await machine('server', false);
+  view = mount(UpdatesCard, { target: document.body, props: { updater, native: true } });
+  flushSync();
+  // No core started by this window's shell: nothing to save the choice on.
+  expect(one('app-update-auto')).toBeNull();
+  here.localCore = true;
+  flushSync();
+  const toggle = one<HTMLInputElement>('app-update-auto-switch')!;
+  expect(one('app-update-auto')!.textContent).toContain(strings.appUpdate.autoInstall);
+  expect([toggle.checked, toggle.getAttribute('role')]).toEqual([false, 'switch']);
+  toggle.click();
+  await vi.waitFor(() => expect(here.settings?.autoInstallUpdates).toBe(true));
+  expect(server.settings?.autoInstallUpdates ?? false).toBe(false);
+});
+
+test('a browser has no updater to install by itself: the switch is not drawn', async () => {
+  const { store } = await machine('here', false);
+  store.localCore = true;
+  view = mount(UpdatesCard, { target: document.body, props: { native: false } });
+  flushSync();
+  expect(one('app-update-auto')).toBeNull();
+});

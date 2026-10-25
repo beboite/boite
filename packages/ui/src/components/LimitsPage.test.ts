@@ -194,10 +194,10 @@ test('Douane quotas are native cards grouped by provider, with plan, status, cre
   const open = vi.spyOn(window, 'open').mockReturnValue(null);
   mounted = mount(LimitsPage, { target: document.body, props: { store } });
   try {
-    await vi.waitFor(() => expect(document.querySelectorAll('[data-testid="gateway-quotas"]')).toHaveLength(3));
+    await vi.waitFor(() => expect(document.querySelectorAll('[data-testid="gateway-quotas"]')).toHaveLength(4));
     expect(document.querySelector('[data-testid="subscription-proxy-dashboard-page"]')).toBeNull();
     const groups = [...document.querySelectorAll<HTMLElement>('[data-testid="gateway-quotas"]')];
-    expect(groups.map(group => group.dataset.provider)).toEqual(['claude', 'codex', 'antigravity']);
+    expect(groups.map(group => group.dataset.provider)).toEqual(['claude', 'codex', 'antigravity', 'meta']);
     expect(groups[0]!.querySelector('h2')!.textContent).toContain('via Douane');
     const claude = groups[0]!.querySelectorAll('[data-testid="usage-limit-provider"]');
     expect(claude).toHaveLength(2);
@@ -207,6 +207,9 @@ test('Douane quotas are native cards grouped by provider, with plan, status, cre
     expect(groups[1]!.querySelector('[data-testid="usage-limit-credit"]')!.textContent).toMatch(/Credits.*62,500 credits/);
     // An average stands for its accounts: Boite names it, in the app's language.
     expect(groups[2]!.querySelector('strong')!.textContent).toBe('Antigravity · 10 accounts');
+    // A connected native Muse subscription can have no observed quota window yet.
+    expect(groups[3]!.textContent).toContain('Muse Code subscription');
+    expect(groups[3]!.querySelectorAll('[role="meter"]')).toHaveLength(0);
     // The gateway's entries are always read: no monitor switch for them.
     expect(document.querySelector('[data-testid="quota-monitor"][data-account-id^="proxy:"]')).toBeNull();
     document.querySelector<HTMLButtonElement>('[data-testid="subscription-proxy-open"]')!.click();
@@ -228,7 +231,7 @@ test('a paired phone shows Douane as native bars, never its embedded dashboard',
   expect(phone.owner).toBe(false);
   mounted = mount(LimitsPage, { target: document.body, props: { store: phone } });
   try {
-    await vi.waitFor(() => expect(document.querySelectorAll('[data-testid="gateway-quotas"]')).toHaveLength(3));
+    await vi.waitFor(() => expect(document.querySelectorAll('[data-testid="gateway-quotas"]')).toHaveLength(4));
     expect(document.querySelector('[data-testid="subscription-proxy-dashboard-page"]')).toBeNull();
     expect(document.querySelector('iframe')).toBeNull();
     expect(document.querySelector('[data-testid="limits-error"]')).toBeNull();

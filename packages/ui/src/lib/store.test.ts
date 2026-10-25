@@ -288,8 +288,11 @@ test('changing a Store endpoint drops the previous machine composer and element 
 
 test('changing a Store endpoint drops the previous machine updates, todos, resources, trace and folds', async ({ store, client }) => {
   const saved = Object.entries(localStorage);
+  const replacement = new FakeClient({ delayMs: 0 });
   const connect = vi.spyOn(store, 'connect').mockResolvedValue();
   const open = vi.spyOn(store, 'openWhereLeft').mockResolvedValue();
+  store.settings = await client.call('subscriptionProxy.configure', { subscriptionProxy: { enabled: true, kind: 'douane', baseUrl: 'https://gateway.test/v1', dashboardUrl: 'https://gateway.test/admin/' } });
+  expect(store.gatewayOf('muse')).not.toBeNull();
   store.harnessUpdates = [{ providerId: 'claude', name: 'Claude', route: 'managed', current: '1.0.0', latest: '1.1.0', pending: false, skipped: null, state: 'idle', message: null, checkedAt: null }] as never;
   store.todos = { 'p-boite': [{ id: 'todo-1' }] } as never;
   store.resources = [{ threadId: 't-trace' }] as never;
@@ -298,14 +301,30 @@ test('changing a Store endpoint drops the previous machine updates, todos, resou
   store.collapsedProjects = ['p-boite'];
   try {
     await store.connectTo('https://second.test', 'fixture-token');
+    expect(store.gatewayOf('muse')).toBeNull();
     expect(store.harnessUpdates).toEqual([]);
     expect(store.todos).toEqual({});
     expect(store.resources).toEqual([]);
     expect(store.trace).toEqual([]);
     expect(store.collapsedProjects).toEqual([]);
+    // The new core can have the same gateway settings while its quota read fails.
+    await replacement.connect();
+    await replacement.call('subscriptionProxy.configure', { subscriptionProxy: store.settings!.subscriptionProxy! });
+    const call = replacement.call.bind(replacement);
+    const calls = vi.spyOn(replacement, 'call').mockImplementation(async (method, params) => {
+      if (method === 'subscriptionProxy.quotas') throw new Error('Temporary quota transport failure');
+      return call(method, params);
+    });
+    store.client?.close();
+    store.attach(replacement);
+    connect.mockRestore();
+    await store.connect();
+    await store.reload();
+    expect(calls.mock.calls.some(([method]) => method === 'subscriptionProxy.quotas')).toBe(true);
+    expect(store.gatewayOf('muse')).toBeNull();
   } finally {
     connect.mockRestore(); open.mockRestore();
-    store.client?.close(); store.detach(); client.close();
+    store.client?.close(); store.detach(); client.close(); replacement.close();
     localStorage.clear();
     for (const [key, value] of saved) localStorage.setItem(key, value);
   }

@@ -157,7 +157,8 @@ export class Connection {
         const { FakeClient } = await import('../fake-client');
         // `&long=1` adds the four-hundred-message thread the windowed list is
         // looked at on (`&copies=<n>` n more for the reading cache), `&heavy=1` the forty messages and 11.5 MiB of tool calls
-        // a long agent session leaves, `&working=<n>` n more threads at work, `&principal=session` answers as a paired
+        // a long agent session leaves, `&diagrams=1` an answer with diagrams and formulas,
+        // `&working=<n>` n more threads at work, `&principal=session` answers as a paired
         // phone, so the screens a device is refused can be walked without pairing one,
         // `&missing=<method>,...` answers those methods like an older machine,
         // and `&load=<n>` adds n threads that stream without end (`&loadtick=<ms>`).
@@ -166,6 +167,7 @@ export class Connection {
             long: params.get('long') === '1',
             ...(params.get('copies') ? { longCopies: Number(params.get('copies')) } : {}),
             heavy: params.get('heavy') === '1',
+            diagrams: params.get('diagrams') === '1',
             ...(params.get('working') ? { working: Number(params.get('working')) } : {}),
             ...(params.get('load') ? { load: Number(params.get('load')) } : {}),
             ...(params.get('loadtick') ? { loadTickMs: Number(params.get('loadtick')) } : {}),
@@ -357,6 +359,7 @@ export class Connection {
     s.todos = {};
     s.resources = [];
     s.trace = [];
+    this.ctx.accounts.proxyQuotas = null;
     this.ctx.workbench.tracedThreadId = null;
     this.principal = null;
     this.core = null;
@@ -628,7 +631,9 @@ export class Connection {
         s.providers = value.loaded; s.rejectedProviders = value.rejected; s.installStates = installStatesOf(value.loaded);
       }),
       slice(client.call('accounts.list', {}), rows => { s.accounts = retainRows(s.accounts, accountRead.apply(rows, s.accounts)); this.ctx.models.restoreModels(); }, () => accountRead.cancel()),
-      slice(client.call('settings.get', {}), value => { if (revisions.settings === this.ctx.metadataRevision.settings) s.settings = value; }),
+      slice(client.call('settings.get', {}), value => {
+        if (revisions.settings === this.ctx.metadataRevision.settings) { s.settings = value; void accounts.readProxyQuotas(client); }
+      }),
       slice(permissionRead.promise, rows => permissionRead.apply(rows), permissionRead.cancel),
       slice(questionRead.promise, rows => questionRead.apply(rows), questionRead.cancel),
       ...(reopened ? [reopened] : [])

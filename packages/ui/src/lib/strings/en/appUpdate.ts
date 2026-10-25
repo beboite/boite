@@ -33,5 +33,7 @@ export const strings = {
     readyAction: 'Update',
     installTitle: 'Install the Boite update?',
     installBody: 'Agents finish their current tool call, 30 seconds at most. Boite then updates, restarts and resumes them.',
+    autoInstall: 'Install updates by itself when nothing runs',
+    autoInstallHint: 'A release found by the check every six hours downloads and installs with no question, only while the window is in the tray and no conversation, queued message or process runs. Boite comes back in the tray. Otherwise it tries again at the next check. Agents keep their own switch on the Providers page.',
   }
 } as const;

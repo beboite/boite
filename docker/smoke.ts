@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { accessSync, constants, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+// Agent updates run `npm install -g`: the prefix is the server user's, and its bin wins over the image's agents.
+const prefix = execFileSync('npm', ['prefix', '-g'], { encoding: 'utf8' }).trim();
+assert.equal(prefix, '/home/node/.local');
+accessSync(prefix, constants.W_OK);
+assert.equal(process.env.PATH?.split(':')[0], `${prefix}/bin`);
 
 const base = process.env.BOITE_SMOKE_URL ?? 'http://127.0.0.1:7337';
 const data = process.env.BOITE_DATA_DIR ?? '/data';

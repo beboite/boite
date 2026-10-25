@@ -1,10 +1,12 @@
 <script lang="ts">
   import { untrack, type Snippet } from 'svelte';
+  import { MediaQuery } from 'svelte/reactivity';
   import { Settings } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { clampSidebar, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from '../lib/prefs';
   import { strings } from '../lib/strings';
   import { experimentOn } from '../lib/experiments.svelte';
+  import { pinnedQuotas } from '../lib/pinned-quotas.svelte';
   import { work } from '../lib/work-prefs.svelte';
   import { controlMenu } from '../lib/controls';
   import LimitsGlance from './LimitsGlance.svelte';
@@ -55,6 +57,8 @@
   } = $props();
 
   let rail = $state<HTMLElement | undefined>(undefined);
+  const phone = new MediaQuery('(max-width: 720px)');
+  let dockVisible = $derived(phone.current ? kind === 'sidebar' && store.sidebarOpen : !store.sidebarCollapsed);
   let folded: boolean | undefined;
   /**
    * Whether this list was folded since it was drawn. Only then does its
@@ -108,12 +112,16 @@
   style:--sidebar-width={`${store.sidebarWidth}px`}
   aria-label={label}
   data-testid={testid}
+  data-quota-dock-target=""
 >
   <div class="views">{@render head()}</div>
   {@render subhead?.()}
   <div class="scroll" data-project-list={kind === 'sidebar' ? '' : undefined} bind:this={scroller} {onscroll}>
     {@render children()}
   </div>
+  {#if (store.page === 'chat' || store.page === 'agents') && dockVisible && experimentOn('pinned-quotas') && pinnedQuotas.current.pinned && pinnedQuotas.wantsDock(store)}
+    <Deferred part={parts.PinnedQuota} quiet>{#snippet children(PinnedQuota)}<PinnedQuota {store} dock />{/snippet}</Deferred>
+  {/if}
   <div class="foot">
     {@render lead?.()}
     <span class="grow"></span>

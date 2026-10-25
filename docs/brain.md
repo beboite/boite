@@ -127,20 +127,20 @@ Delegation also teaches dynamic workflows: `after`, `forEach`, `when` and
 
 ### Short answers
 
-Settings > General > Short answers, on by default, puts one line before every
-normal turn: work silently, with no text before or between tool calls, and
-write once when the work is done or when the user's decision or hands are
-needed; the result first in short plain sentences, without preamble, recap or
-hedging, and every fact, number, path and command kept. It goes every turn
+Settings > General > Short answers, on by default, puts one paragraph before every
+normal turn: reduce text before or between tool calls and make the final reply
+self-contained with the result and everything the user needs to know. It asks
+for short plain sentences, without preamble or hedging, while keeping every
+fact, number, path and command the user needs. It goes every turn
 rather than once a session because harnesses ask for progress notes and a
 style said once fades within a few answers. It is `SHORT_ANSWERS` in
-`packages/core/src/agent-guide.ts`, about 450 bytes. Context modes without
+`packages/core/src/agent-guide.ts`. Context modes without
 guides, compaction and native slash commands do not receive it, and turning the
 Boite guide off removes it with the rest of Boite's own text.
 
 The setting also starts Claude with `CLAUDE_CODE_SILENT_TURN_REMINDER=0`. The
 CLI otherwise slips "the user hasn't heard from you in a while" into a long
-silent turn, which asks for the progress lines this setting forbids. It applies
+silent turn, which asks for routine progress notes this setting reduces. It applies
 when a Claude process starts, so a warm session keeps its value until then.
 
 ## Global instructions
