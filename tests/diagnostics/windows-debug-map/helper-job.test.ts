@@ -2,6 +2,7 @@ import {expect, test} from 'bun:test';
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {thrown} from '../../../packages/core/test/settle.ts';
 import {observeHelperJob, parseHold, populatedProof, releasedProof, observation, type HoldFrame, type RootProof, type JobAccounting} from './helper-job.ts';
 import type {Membership} from './target-topology.ts';
 import type {Captured} from './capture.ts';
@@ -92,14 +93,14 @@ test('real file protocol keeps populated name evidence separate, releases only a
 test('early release and a missed populated-observation deadline cannot produce a valid protocol', async () => {
   await fixture(async options => {
     writeFileSync(`${options.prefix}.hold.release`, readFileSync(`${options.prefix}.hold.ready`));
-    await expect(observeHelperJob(options)).rejects.toThrow('early release');
+    expect(await thrown(observeHelperJob(options))).toThrow('early release');
     expect(options.record.protocolValid).toBe(false);
   });
   await fixture(async options => {
     const f = frame(); f.deadlineWallMs = Date.now() + 20;
     writeFileSync(`${options.prefix}.hold.ready`, JSON.stringify(f));
     options.observe = async path => {await new Promise(resolve => setTimeout(resolve, 30)); return captured(path);};
-    await expect(observeHelperJob(options)).rejects.toThrow('deadline');
+    expect(await thrown(observeHelperJob(options))).toThrow('deadline');
     expect(existsSync(`${options.prefix}.hold.release`)).toBe(false);
   });
 });
