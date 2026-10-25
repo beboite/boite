@@ -28,8 +28,9 @@ send.
 
 At phone widths, Settings opens a list in two groups. This phone:
 Notifications, Appearance, Privacy, the two analytics switches, and
-Experiments, which each device turns on for itself: Bots on the computer leaves
-the phone's bar without its Bots tab until the phone switches them on too.
+Experiments, which follow the computer's desktop app until the phone flips one
+of its own: Bots on the computer brings the phone's Bots tab with it
+([experiments](experiments.md)).
 Machine: the
 machine itself with its connection, which opens Machines, then Usage, Voice and
 Archived threads. Each opens a screen of its own; the back button or browser

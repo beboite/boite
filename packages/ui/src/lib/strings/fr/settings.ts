@@ -109,7 +109,10 @@ export const fr: Translation = {
     zoomReset: 'Revenir à 100 %',
     zoomFailed: "Le zoom n'a pas changé : {error}",
     experiments: {
-      intro: 'Ce n\'est pas fini et peut changer ou disparaître.'
+      intro: 'Ce n\'est pas fini et peut changer ou disparaître.',
+      follow: 'Comme sur l\'ordinateur',
+      followHint: "Cet appareil active les mêmes expérimentations que l'application de bureau Boite et suit ses changements. Si vous changez un interrupteur ci-dessous, cet appareil garde ses propres réglages.",
+      followNone: "Aucune application de bureau n'a encore transmis ses expérimentations à cet ordinateur. Cet appareil garde les siennes en attendant."
     },
     cacheKeepalive: 'Garder le cache de prompt au chaud',
     cacheKeepaliveHint: "Pendant qu'une conversation attend ses agents ou ses workflows, Boite envoie un tour d'un mot peu avant que le fournisseur oublie le prompt en cache, pour que leur résultat soit lu au tarif du cache. Chaque relance compte dans l'usage. Une relance qui rate le cache met fin aux relances.",
