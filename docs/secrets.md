@@ -62,8 +62,10 @@ ticking the box on a name the project keeps is a replace too. Each use updates
 the key's `lastUsedAt`, which project settings show.
 
 The core sweeps at startup and when the next transit copy expires: it erases
-expired copies, copies whose conversation is archived or gone, and vault
-entries no index line names.
+expired copies and copies whose conversation is archived or gone. The DPAPI and
+memory vaults can list their entries, so the sweep also erases the ones no
+index line names. The Keychain and Secret Service vaults cannot, so an entry
+whose erasure failed stays there.
 
 ## The card
 
@@ -103,8 +105,11 @@ and `DEVICE_METHODS` in `packages/contracts/src/access.ts`.
 | Linux | Secret Service, through `secret-tool` | the session's keyring (GNOME Keyring, KWallet) |
 | any | memory | this process only |
 
-The vault loads when the first secret is saved or used, not at startup. When no
-system vault answers, Boite keeps values in memory, and `boite secret ask` and
+The vault loads when the first secret is saved or used, and at startup when
+`<data>/secrets/index.json` exists: the startup sweep reads every stored value
+back to restore the masks, which on macOS and Linux runs `security` or
+`secret-tool` once per value. An entry it cannot read is logged and skipped,
+not erased. When no system vault answers, Boite keeps values in memory, and `boite secret ask` and
 `list` tell the agent that they are lost when Boite stops. On macOS and Linux
 the value reaches the tool as hex on its standard input, never as an argument.
 
@@ -129,8 +134,9 @@ The exact value and its URL-encoded form become `•••• (<NAME>)` in:
 - Boite's own logs, and so diagnostics exports.
 
 A transit copy masks its own conversation. A kept key masks every conversation
-of its project. Boite keeps a keyed hash of each value, not the value, so the
-masks come back after a restart without opening the vault.
+of its project. The masks hold a keyed hash of each value, not the value, under
+a key drawn for each process, so after a restart the startup sweep reads the
+values from the vault to build them again.
 
 Values shorter than 8 bytes are not masked: masking them would hide ordinary
 words in the conversation. Streamed text is masked per chunk, and each message

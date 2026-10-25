@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { secretMask } from '@boite/contracts';
@@ -65,6 +65,12 @@ test('write puts the value in an ignored env file, keeps its other lines, and re
   expect(readFileSync(join(root, 'notes.env'), 'utf8')).toBe('');
   expect(await write(join(root, 'notes.env'), { allowUnignored: true })).toMatchObject({ replaced: false });
   expect(readFileSync(join(root, 'config.env'), 'utf8')).toBe('MODE=dev\n');
+  if (process.platform !== 'win32') {
+    // A dangling link inside the folder would have the write create its target outside it.
+    symlinkSync(join(h.dataDir, 'created.env'), join(root, 'link.env'));
+    expect(await thrown(write(join(root, 'link.env'), { allowUnignored: true }))).toThrow('a link to a missing file');
+    expect(existsSync(join(h.dataDir, 'created.env'))).toBe(false);
+  }
   expect(await leaks(h, value, [root])).toEqual([]);
 });
 
@@ -98,6 +104,23 @@ test('run and pipe hand the value to the command and give back its exit code and
   expect(traced.some(line => line.endsWith(`-e 0 ${mask}`))).toBe(true);
   expect(await leaks(h, value)).toEqual([]);
 });
+
+test('run stops the command and what it started at the deadline: a child of its own holds the output open and the value in its env', async () => {
+  h = await startTestCore();
+  const { owner, root, threadId } = await repoThread();
+  const ref = await saveSecret(h, owner, threadId, 'API_KEY', secretValue());
+  const started = Date.now();
+  const ran = await owner.call('secrets.use', { threadId, ref, use: {
+    action: 'run', as: 'API_KEY', command: bun, cwd: root, timeoutMs: 1000,
+    args: ['-e', "const child = Bun.spawn([process.execPath, '-e', 'setInterval(() => {}, 1000)'], { stdout: 'inherit', stderr: 'inherit' }); require('node:fs').writeFileSync('grandchild.pid', String(child.pid)); setInterval(() => {}, 1000);"],
+  } });
+  expect(ran).toMatchObject({ action: 'run', timedOut: true });
+  expect(Date.now() - started).toBeLessThan(15_000);
+  // Signal 0 only asks whether the pid the command wrote is still running.
+  const pid = Number(readFileSync(join(root, 'grandchild.pid'), 'utf8'));
+  const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  await waitFor(() => !alive(), 10_000);
+}, 30_000);
 
 test('an agent that reads the env file back gets the value masked in its conversation, though it reached its provider', async () => {
   h = await startTestCore();

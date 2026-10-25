@@ -57,6 +57,7 @@ export interface SpawnedPipedProcess {
   record: ProcessRecord;
   proc: PipedChildProcess;
   exited: Promise<number>;
+  stop: () => void;
 }
 
 export interface TerminalSpawnOptions {
@@ -349,12 +350,10 @@ export class ProcRegistry {
       },
     });
 
-    const exited = proc.exited.then((code) => {
-      this.onExit(threadId, record.pid, code, undefined, record);
-      return code;
-    });
-
-    return { record, proc, exited };
+    const exited = proc.exited.then((code) => { this.onExit(threadId, record.pid, code, undefined, record); return code; });
+    // This child and what it started, leaving the thread's other processes: on Windows `proc.kill` reaches no grandchild.
+    const stop = (): void => { const tree = this.platform.terminateUnassigned(proc.pid); this.trackStop(tree instanceof Promise ? tree.then(() => killBunChild(proc), () => killBunChild(proc)) : killBunChild(proc)); };
+    return { record, proc, exited, stop };
   }
 
   /**

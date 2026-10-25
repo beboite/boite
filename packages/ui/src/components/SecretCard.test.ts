@@ -29,7 +29,7 @@ function query<T extends Element>(selector: string): T {
 const SECRET = 'sk-test-0123456789abcdef';
 
 /** A card asked on the seeded thread, drawn the way the timeline draws it. */
-async function asked(options: FakeClientOptions = {}, ask: { replace?: boolean; placeholder?: string } = {}) {
+async function asked(options: FakeClientOptions = {}, ask: { replace?: boolean; placeholder?: string; requestId?: string } = {}) {
   const client = new FakeClient({ delayMs: 0, ...options });
   const store = new Store();
   store.attach(client);
@@ -128,13 +128,19 @@ test('a card replacing the kept key says so and starts ticked; unticked, it save
   expect(query('[data-testid=secret-card]').hasAttribute('data-kept')).toBe(false);
 });
 
-test('over a link nobody encrypts the field and Save are off, and Decline still answers', async () => {
-  const { outcome } = await asked({ plainLink: true });
+test('over a link nobody encrypts the field and Save are off, Decline still answers, and a retry with the id gets the same card', async () => {
+  const { store, client, outcome } = await asked({ plainLink: true }, { requestId: 'sreq-retry' });
+  const retry = () => client.call('secrets.ask', { threadId: 't-trace', name: 'OPENAI_API_KEY', reason: 'To call the embeddings API.', requestId: 'sreq-retry' });
+  const again = retry();
+  await settle();
+  expect(store.openThread!.messages.filter((entry) => entry.parts[0]?.type === 'secret_request')).toHaveLength(1);
   expect(query('[data-testid=secret-plain]').textContent).toBe('Answer from the PC or over HTTPS');
   expect(query<HTMLInputElement>('[data-testid=secret-field]').disabled).toBe(true);
   expect(query<HTMLButtonElement>('[data-testid=secret-save]').disabled).toBe(true);
   query<HTMLButtonElement>('[data-testid=secret-decline]').click();
   expect(await outcome).toMatchObject({ outcome: 'declined', ref: null });
+  expect(await again).toEqual(await outcome);
+  expect(await retry()).toEqual(await outcome);
   await settle();
   expect(query('[data-testid=secret-card]').getAttribute('data-state')).toBe('declined');
   expect(query('[data-testid=secret-outcome]').textContent).toBe('OPENAI_API_KEY declined');

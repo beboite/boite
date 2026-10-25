@@ -489,7 +489,9 @@ export class SecretStore {
       const gone = entry.expiresAt <= now || thread === null || thread.archived || thread.projectId !== entry.projectId || (startup && !vault.persistent);
       if (gone) { await this.#eraseTransit(entry); erased += 1; continue; }
       if (!startup) continue;
-      const value = await vault.take(entry.id);
+      // One unreadable entry is skipped, not erased: the next start may read it, and the others still mask.
+      const value = await vault.take(entry.id).catch(error => { this.#warn(`could not read ${entry.name} at startup`, error); return undefined; });
+      if (value === undefined) continue;
       if (value === null) { await this.#eraseTransit(entry); erased += 1; continue; }
       this.masks.add(threadScope(entry.threadId), `transit:${entry.id}`, entry.name, value);
       value.fill(0);
@@ -497,7 +499,8 @@ export class SecretStore {
     for (const entry of [...this.index.data.kept]) {
       if (this.core.journal.getProject(entry.projectId) === null) { await this.#eraseKept(entry); erased += 1; continue; }
       if (!startup) continue;
-      const value = await vault.take(entry.id);
+      const value = await vault.take(entry.id).catch(error => { this.#warn(`could not read the kept key ${entry.name} at startup`, error); return undefined; });
+      if (value === undefined) continue;
       if (value === null) {
         this.index.update(data => { data.kept = data.kept.filter(item => item.id !== entry.id); });
         erased += 1;

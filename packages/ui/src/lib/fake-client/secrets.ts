@@ -22,6 +22,8 @@ export interface FakeSecretCard {
   request: SecretRequest;
   message: Message;
   timer: ReturnType<typeof setTimeout>;
+  /** What the first `ask` waits on; a retry with the same id waits on it too. */
+  done: Promise<RpcResult<'secrets.ask'>>;
   resolve: (result: RpcResult<'secrets.ask'>) => void;
 }
 
@@ -64,10 +66,20 @@ function settle(ctx: FakeContext, thread: Thread, card: FakeSecretCard, status: 
 }
 
 export function secretMethods(ctx: FakeContext) {
+  // What a closed card answered, so a retry with its id gets it again, as the core's `#settled`.
+  const settled = new Map<string, { threadId: Thread['id']; result: RpcResult<'secrets.ask'> }>();
   return {
     'secrets.ask': async (params) => {
       const thread = ctx.thread(params.threadId);
       if (thread.archived) throw refused('cannot ask for a secret on an archived conversation', { threadId: thread.id, field: 'archived', expected: false });
+      if (params.requestId !== undefined) {
+        const live = ctx.pendingSecrets.get(params.requestId);
+        const closed = settled.get(params.requestId);
+        const owner = live?.request.threadId ?? closed?.threadId;
+        if (owner !== undefined && owner !== thread.id) throw refused('requestId: already used by another conversation', { field: 'requestId', expected: 'a fresh id' });
+        if (live) return live.done;
+        if (closed) return closed.result;
+      }
       if (!SECRET_NAME_PATTERN.test(params.name)) {
         throw refused('name: expected capitals, digits and _, starting with a letter, at most 64 characters', { field: 'name', expected: SECRET_NAME_PATTERN.source });
       }
@@ -97,13 +109,14 @@ export function secretMethods(ctx: FakeContext) {
       thread.messages.push(message);
       ctx.emitToThread(thread.id, 'message.started', structuredClone(message));
       ctx.emitToThread(thread.id, 'message.completed', { threadId: thread.id, messageId: message.id, state: 'complete' });
-      const done = new Promise<RpcResult<'secrets.ask'>>((resolve) => {
-        const timer = setTimeout(() => {
-          const card = ctx.pendingSecrets.get(request.id);
-          if (card) settle(ctx, thread, card, 'timed_out', null, false);
-        }, minutes * 60_000);
-        ctx.pendingSecrets.set(request.id, { request, message, timer, resolve });
-      });
+      let wake!: (result: RpcResult<'secrets.ask'>) => void;
+      const done = new Promise<RpcResult<'secrets.ask'>>((resolve) => { wake = resolve; });
+      const timer = setTimeout(() => {
+        const card = ctx.pendingSecrets.get(request.id);
+        if (card) settle(ctx, thread, card, 'timed_out', null, false);
+      }, minutes * 60_000);
+      const resolve = (result: RpcResult<'secrets.ask'>): void => { settled.set(request.id, { threadId: thread.id, result }); wake(result); };
+      ctx.pendingSecrets.set(request.id, { request, message, timer, done, resolve });
       if (turn.status === 'running') {
         thread.status = 'waiting';
         ctx.touch(thread);

@@ -3,7 +3,7 @@
  * an ignored env file, or hands it to a command in an env var or on stdin,
  * and gives back only the masked output.
  */
-import { closeSync, existsSync, fchmodSync, openSync, readFileSync, realpathSync, statSync, writeSync } from 'node:fs';
+import { closeSync, constants, existsSync, fchmodSync, fstatSync, ftruncateSync, lstatSync, openSync, readFileSync, realpathSync, statSync, writeSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { SecretExecUse, SecretUseResult, SecretWriteUse, ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
@@ -34,6 +34,9 @@ function containedPath(cwd: string, file: string): { root: string; path: string 
   if (existsSync(path)) {
     path = realpathSync(path);
     if (!statSync(path).isFile()) throw refused(`path: ${file} is not a file`, { field: 'path', expected: 'a file' });
+  } else if (lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink()) {
+    // A dangling link: opening it would create its target, wherever that is.
+    throw refused(`path: ${file} is a link to a missing file`, { field: 'path', expected: 'a file or no file' });
   }
   if (!inside(root, path)) throw refused(`path: ${file} is outside the conversation's folder`, { field: 'path', expected: `a file inside ${root}` });
   return { root, path };
@@ -73,30 +76,36 @@ export async function writeSecret(core: Core, threadId: ThreadId, cwd: string, u
     const ignored = await git(core, threadId, root, ['check-ignore', '-q', '--', rel], undefined, 'checking a secret file');
     if (ignored.code !== 0) throw refused(`path: git does not ignore ${rel}; add it to .gitignore or pass --allow-unignored`, { field: 'path', expected: 'a file git check-ignore ignores' });
   }
-  const before = existsSync(path) ? readFileSync(path, 'utf8') : '';
-  const eol = before.includes('\r\n') ? '\r\n' : '\n';
-  const lines = before.length === 0 ? [] : before.split(/\r?\n/);
-  const trailing = lines.at(-1) === '';
-  if (trailing) lines.pop();
-  const line = new RegExp(`^\\s*(export\\s+)?${use.key}\\s*=`);
-  const at = lines.findIndex(text => line.test(text));
-  const head = (at < 0 ? lines : lines.slice(0, at)).map(text => text + eol).join('');
-  const tail = at < 0 ? '' : lines.slice(at + 1).map(text => eol + text).join('') + (trailing ? eol : '');
-  const quoted = envValue(value);
-  const prefix = encoder.encode(`${head}${at >= 0 && lines[at]!.trimStart().startsWith('export') ? 'export ' : ''}${use.key}=`);
-  const suffix = encoder.encode(at < 0 ? eol : tail);
-  const fd = openSync(path, 'w', 0o600);
+  // O_NOFOLLOW refuses a link swapped in since the checks above; Windows has no such flag.
+  let fd: number;
+  try { fd = openSync(path, constants.O_RDWR | constants.O_CREAT | (constants.O_NOFOLLOW ?? 0), 0o600); } catch (error) {
+    throw refused(`path: could not open ${rel} (${(error as NodeJS.ErrnoException).code ?? 'unknown error'})`, { field: 'path', expected: 'a regular file inside the folder, not a link' });
+  }
+  let quoted: Uint8Array | null = null;
   try {
+    if (!fstatSync(fd).isFile()) throw refused(`path: ${rel} is not a file`, { field: 'path', expected: 'a file' });
+    const before = readFileSync(fd, 'utf8');
+    const eol = before.includes('\r\n') ? '\r\n' : '\n';
+    const lines = before.length === 0 ? [] : before.split(/\r?\n/);
+    const trailing = lines.at(-1) === '';
+    if (trailing) lines.pop();
+    const line = new RegExp(`^\\s*(export\\s+)?${use.key}\\s*=`);
+    const at = lines.findIndex(text => line.test(text));
+    const head = (at < 0 ? lines : lines.slice(0, at)).map(text => text + eol).join('');
+    const tail = at < 0 ? '' : lines.slice(at + 1).map(text => eol + text).join('') + (trailing ? eol : '');
+    quoted = envValue(value);
+    const prefix = encoder.encode(`${head}${at >= 0 && lines[at]!.trimStart().startsWith('export') ? 'export ' : ''}${use.key}=`);
+    const suffix = encoder.encode(at < 0 ? eol : tail);
     // The mode applies only to a new file: an existing one readable by others is narrowed too.
     if (process.platform !== 'win32') fchmodSync(fd, 0o600);
-    writeSync(fd, prefix);
-    writeSync(fd, quoted);
-    writeSync(fd, suffix);
+    ftruncateSync(fd, 0);
+    let offset = 0;
+    for (const bytes of [prefix, quoted, suffix]) offset += writeSync(fd, bytes, 0, bytes.length, offset);
+    return { action: 'write', path, replaced: at >= 0 };
   } finally {
     closeSync(fd);
-    quoted.fill(0);
+    quoted?.fill(0);
   }
-  return { action: 'write', path, replaced: at >= 0 };
 }
 
 /** Reads a stream whole up to the cap, dropping the rest so the child never blocks on a full pipe. */
@@ -142,7 +151,7 @@ export async function execSecret(core: Core, threadId: ThreadId, cwd: string, us
   const spawned = core.procs.spawnPiped(threadId, use.command, use.args, { cwd: real, env, agentRoot: false });
   delete env[use.as ?? ''];
   let timedOut = false;
-  const stop = (): void => { try { spawned.proc.kill(); } catch { /* already gone */ } };
+  const stop = (): void => { try { spawned.stop(); } catch { /* already gone */ } };
   const timer = setTimeout(() => { timedOut = true; stop(); }, timeoutMs);
   const detach = connection?.onClose?.(stop);
   try {
