@@ -199,6 +199,31 @@ jobs:
           Get-FileHash "$env:RUNNER_TEMP\protected-tool*.exe" -Algorithm SHA256 | Format-List
           & "$env:RUNNER_TEMP\protected-tool.exe" --diagnose-null
           "BOITE_WINDOWS_SANDBOX_PATH=$env:RUNNER_TEMP\protected-tool.exe" >> $env:GITHUB_ENV
+      - name: Diagnostic DEBUG_PROCESS descendant marker routing (non-acceptance)
+        if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        continue-on-error: true
+        env:
+          BOITE_TEST_DEBUG_MAP: '1'
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        shell: pwsh
+        run: |
+          # Preserve native status explicitly; stderr is diagnostic output, including on PS 5.
+          $ErrorActionPreference = 'Continue'
+          bun tests/diagnostics/windows-debug-map/run.ts "$env:RUNNER_TEMP\windows-debug-map"
+          $diagnosticExit = $LASTEXITCODE
+          Set-Content -Path "$env:RUNNER_TEMP\windows-debug-map\launcher-exit.txt" -Value $diagnosticExit
+          Write-Host "DEBUG_PROCESS diagnostic exit=$diagnosticExit; not production acceptance"
+          exit $diagnosticExit
+      - name: Preserve DEBUG_PROCESS diagnostic evidence
+        if: always() && runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-debug-map-diagnostic
+          path: ${{ runner.temp }}/windows-debug-map/
+          retention-days: 3
+          if-no-files-found: error
       - name: Native Windows protected tools
         if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
         env:

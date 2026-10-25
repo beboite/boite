@@ -1,0 +1,15 @@
+{
+  "historicalOnly": true,
+  "freshDiagnosticRun": false,
+  "rootOnlyObservation": {
+    "privateMapSet": "0x00000000",
+    "rootNul": "NULLMAP_SENTINEL",
+    "descendantNul": "",
+    "descendantMapOpen": -1073741790,
+    "childExit": 0,
+    "profileCleanup": 0
+  },
+  "candidatePreviouslyReachedNativeAllocation": false,
+  "candidateGeneratedSourceSha256": "9c66639e4888be6086a19f6c7d506ed71ebdc9d471cac6cfbc90ea1618bba3ec",
+  "candidateHelperSha256": "323976590ca0d355aa73d864af195abf3fd77355a8223608fd04f1dd03bad48e"
+}

@@ -1,0 +1,119 @@
+/* Synthetic native target: ordinary CreateProcessW for child and grandchild. */
+static int observe(const wchar_t *root) {
+  CALLER_STATE state;
+  DWORD error = read_caller(root, &state);
+  if (error) return failure(L"observer", error);
+  fwprintf(stdout, L"observer NUL=%ls drive=%ls map=%ls\n", state.nul, state.drive, state.map);
+  return 0;
+}
+
+static int cleanup_profile(const wchar_t *name) {
+  HRESULT deleted = DeleteAppContainerProfile(name);
+  fwprintf(stdout, L"profile delete=0x%08lx\n", (unsigned long)deleted);
+  if (FAILED(deleted) && deleted != HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)) return 125;
+  PSID sid = NULL;
+  HRESULT recreated = CreateAppContainerProfile(name, name, L"Synthetic cleanup check", NULL, 0, &sid);
+  fwprintf(stdout, L"profile recreate=0x%08lx\n", (unsigned long)recreated);
+  if (sid) FreeSid(sid);
+  if (FAILED(recreated)) return 125;
+  HRESULT final = DeleteAppContainerProfile(name);
+  fwprintf(stdout, L"profile final-delete=0x%08lx\n", (unsigned long)final);
+  return FAILED(final) ? 125 : 0;
+}
+
+static int inspect(int count, wchar_t **args) {
+  if (count != 4) return 125;
+  int depth = _wtoi(args[2]);
+  if (depth < 0 || depth > 2 || wcslen(args[3]) > 96) return 125;
+  wchar_t label[128]; swprintf(label, 128, L"%ls.generation-%d", args[3], depth);
+  fwprintf(stdout, L"inspect-start=%ls pid=%lu\n", label, GetCurrentProcessId());
+  HANDLE token = NULL; DWORD is_app = 0, used = 0; BOOL in_job = FALSE;
+  if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return 125;
+  BOOL queried = GetTokenInformation(token, TokenIsAppContainer, &is_app, sizeof(is_app), &used); CloseHandle(token);
+  if (!queried || !IsProcessInJob(GetCurrentProcess(), NULL, &in_job)) return 125;
+
+  HANDLE nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+  char bytes[256] = {0}; DWORD size = 0; BOOL read = FALSE;
+  DWORD open_error = nul == INVALID_HANDLE_VALUE ? GetLastError() : 0;
+  if (nul != INVALID_HANDLE_VALUE) { read = ReadFile(nul, bytes, 255, &size, NULL); CloseHandle(nul); }
+  char expected[256];
+  if (!WideCharToMultiByte(CP_UTF8, 0, args[3], -1, expected, sizeof(expected), NULL, NULL)) return 125;
+  BOOL routed = read && !strcmp(bytes, expected);
+  fwprintf(stdout, L"%ls appcontainer=%lu in-job=%d routing=%d bytes=%lu open-error=%lu marker=%hs\n",
+    label, is_app, in_job, routed, size, open_error, bytes);
+
+  wchar_t ambient[4096]; DWORD length = GetCurrentDirectoryW(4096, ambient);
+  if (!length || length >= 4096) return 125;
+  wchar_t *last = wcsrchr(ambient, L'\\'); if (!last) return 125; *last = 0;
+  size_t prefix = wcslen(ambient);
+  if (swprintf(ambient + prefix, 4096 - prefix, L"\\ambient-probe") < 0) return 125;
+  HANDLE file = CreateFileW(ambient, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+  DWORD denial = file == INVALID_HANDLE_VALUE ? GetLastError() : 0;
+  if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+  fwprintf(stdout, L"%ls ambient-denial=%lu\n", label, denial);
+
+  query_process_fn query = (query_process_fn)(void *)nt_api("NtQueryInformationProcess");
+  query_object_fn query_object = (query_object_fn)(void *)nt_api("NtQueryObject");
+  if (!query || !query_object) return 125;
+  HANDLE debug = NULL;
+  NTSTATUS status = query(GetCurrentProcess(), (PROCESSINFOCLASS)30, &debug, sizeof(debug), NULL);
+  BOOL control = FALSE, debug_known = FALSE;
+  fwprintf(stdout, L"%ls debug-object-query=0x%08lx handle=%p\n", label, (unsigned long)status, debug);
+  if (status >= 0 && debug) {
+    struct { ULONG attributes, granted, handles, pointers; ULONG reserved[10]; } info;
+    ZeroMemory(&info, sizeof(info)); ULONG returned = 0;
+    NTSTATUS basic = query_object(debug, (OBJECT_INFORMATION_CLASS)0, &info, sizeof(info), &returned);
+    BYTE type_buffer[4096]; ZeroMemory(type_buffer, sizeof(type_buffer));
+    NTSTATUS typed = query_object(debug, (OBJECT_INFORMATION_CLASS)2, type_buffer, sizeof(type_buffer), &returned);
+    UNICODE_STRING *type = (UNICODE_STRING *)type_buffer;
+    debug_known = basic >= 0 && typed >= 0 && type->Buffer &&
+      type->Length == 22 && !wcsncmp(type->Buffer, L"DebugObject", 11);
+    /* WAIT_STATE_CHANGE, ADD_REMOVE_PROCESS and SET_INFORMATION each control
+     * the host debugger. An undecodable returned handle also fails closed. */
+    control = !debug_known || !!(info.granted & (1 | 2 | 4));
+    fwprintf(stdout, L"%ls debug-object-basic=0x%08lx granted=0x%08lx type-status=0x%08lx known=%d\n",
+      label, (unsigned long)basic, info.granted, (unsigned long)typed, debug_known);
+    CloseHandle(debug);
+  } else {
+    /* STATUS_PORT_NOT_SET is the documented no-debug-object result. Access
+     * denial also establishes this self-query did not deliver host authority. */
+    debug_known = (status == (NTSTATUS)0xc0000353 || status == (NTSTATUS)0xc0000022) && !debug;
+    control = !debug_known;
+  }
+  fwprintf(stdout, L"%ls host-debug-control=%d known=%d\n", label, control, debug_known); fflush(stdout);
+  if (depth == 0) {
+    HANDLE ready = CreateFileW(L"ready", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, CREATE_NEW, 0, NULL);
+    if (ready == INVALID_HANDLE_VALUE) return 125;
+    CloseHandle(ready);
+    ULONGLONG deadline = GetTickCount64() + 6000;
+    while (GetFileAttributesW(L"release") == INVALID_FILE_ATTRIBUTES) {
+      if (GetTickCount64() >= deadline) return 125;
+      Sleep(10);
+    }
+  }
+  int child_code = 0;
+  if (depth < 2) {
+    wchar_t image[4096], next[16]; DWORD image_length = GetModuleFileNameW(NULL, image, 4096);
+    if (!image_length || image_length >= 4096) return 125;
+    swprintf(next, 16, L"%d", depth + 1);
+    wchar_t *argv[] = {image, L"inspect", next, args[3]}; wchar_t *line = command_line(4, argv);
+    if (!line) return 125;
+    STARTUPINFOW startup; PROCESS_INFORMATION child;
+    ZeroMemory(&startup, sizeof(startup)); ZeroMemory(&child, sizeof(child));
+    startup.cb = sizeof(startup); startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startup.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE); startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    BOOL created = CreateProcessW(image, line, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &startup, &child);
+    fwprintf(stdout, L"%ls child-created=%d pid=%lu error=%lu\n", label, created, child.dwProcessId, created ? 0 : GetLastError()); fflush(stdout);
+    if (created) {
+      DWORD result = 125;
+      if (WaitForSingleObject(child.hProcess, 10000) != WAIT_OBJECT_0) {
+        TerminateProcess(child.hProcess, 125); WaitForSingleObject(child.hProcess, 1000);
+      }
+      if (!GetExitCodeProcess(child.hProcess, &result) || result == STILL_ACTIVE) result = 125;
+      child_code = (int)result; CloseHandle(child.hThread); CloseHandle(child.hProcess);
+    } else child_code = 125;
+    free(line);
+  }
+  return routed && is_app == 1 && in_job && denial == ERROR_ACCESS_DENIED && !control && !child_code ? 0 : 1;
+}
