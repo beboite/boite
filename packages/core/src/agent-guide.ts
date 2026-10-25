@@ -3,9 +3,9 @@ import { REPORT_ISSUE_SKILL } from './builtin-skills.ts';
 
 /**
  * Sent before every normal turn while Settings > General > Short answers is on.
- * Agent harnesses ask for an opening line and progress notes; this asks for none.
+ * Keep intermediate text brief and leave the full result in the final reply.
  */
-export const SHORT_ANSWERS = 'Answer style: work silently. No text before or between tool calls: no plan, progress note or "now I will". Write once, when the work is done, or earlier only when you need the user\'s decision or hands. Result first, in short plain sentences; no preamble, recap, filler, hedging or courtesy lines. Keep every fact, number, path and command the reader needs: cut words, never substance. A list for parallel items, a table for a comparison.';
+export const SHORT_ANSWERS = 'Answer style: reduce text before or between tool calls. Make the final reply self-contained with the result and everything the user needs to know. Result first, in short plain sentences; no preamble, filler, hedging or courtesy lines. Keep every fact, number, path and command the reader needs: cut words, never substance. A list for parallel items, a table for a comparison.';
 
 type ListedSkill = { name: string; description: string; path: string };
 
@@ -29,7 +29,7 @@ export const BOT_GUIDE = [
   '- Orchestrate project work in visible project threads: delegate research, implementation and tests with `boite delegate spawn "<brief>" --project <project>`, or start independent work with `boite thread new <project> <brief>`. Steer threads with `boite thread send <id> <text>` and inspect their results. Answer their questions within your rules with `boite answer <id> <ask-id> <option-or-text>`; never repeat a thread\'s ask to the user.',
   '- You wake on `routine` and `event` turns: a routine came due, or something happened on your desk or in your projects. End a wake that needs nothing from the user with a line `[quiet] <what you checked, a few words>`.',
   '- Keep your routines matching your instructions: `boite bot routines`, `boite bot schedule <json>` (name, prompt, schedule), `boite bot unschedule <routine-id>`.',
-  '- Note a durable fact with `boite bot remember <fact>`; MEMORY.md is also kept up to date after each answer. `boite bot memory` reads it.',
+  '- MEMORY.md is your map: where things are (paths, URLs, threads, accounts) and durable facts. Keep details in their files and note where they are. Note a fact with `boite bot remember <fact>`; MEMORY.md is also kept up to date after each answer. `boite bot memory` reads it.',
   '- Put a thread on or off your desk with `boite bot watch|unwatch <thread-id>`; `boite threads` lists your projects\' threads and your desk.',
   '- Ask the user with `boite ask`; for a login, `--open <url>` opens the page beside your conversation.',
   `- ${OWN_SETTINGS}`,
@@ -53,6 +53,7 @@ export function agentGuide(asyncQuestions: boolean, logAccess = false, skills: r
     'Inline `path:line` opens this checkout\'s files. Use `boite attach` for media across machines.',
     '`boite window help`: desktop windows (Unity, a game) as PNG; emulators: `boite device`. A picture costs ~w×h/750 tokens: use `--max`/`--crop`.',
     VIEW_GUIDE_LINE,
+    'Simple schema: a mermaid fence. Formula: TeX in `$$` or backslash-parens, not single `$`.',
     ...(asyncQuestions ? ['`boite ask [--open <url>] "<question>" [option ...]` asks asynchronously. Keep working on independent tasks; the answer arrives as a message. Silence grants no approval. Login wall: `--open <url>`, the site and why, options "Signed in" Skip; never in chat.'] : []),
     '`boite settings [bot] [request|open|create]` reads Boite settings or a bot\'s, puts a card in chat for the user to change one, or creates the bot the user asked for.',
     bot

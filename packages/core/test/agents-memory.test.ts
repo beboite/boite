@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameS
 import { join } from 'node:path';
 import { AGENT_MEMORY_MAX } from '@boite/contracts';
 import { connect } from '../src/client.ts';
-import { memoryPrompt, parseMemoryAnswer } from '../src/agents/memory.ts';
+import { MEMORY_TARGET, memoryPrompt, parseMemoryAnswer } from '../src/agents/memory.ts';
 import type { TurnContext } from '../src/drivers/types.ts';
 import { agentValue, echoAccount, makeAgent, scripted, settled, turnsOf } from './agent-fixture.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
@@ -14,10 +14,11 @@ const restores: (() => void)[] = [];
 afterEach(async () => { for (const h of cores.splice(0)) await h.stop(); for (const restore of restores.splice(0)) restore(); });
 
 const PASS = 'You keep the long-term memory of';
+const SHORTEN = 'Your refused rewrite';
 
 /** An agent that answers in words, and a memory pass that answers `pass(prompt)` and stays running until `release`. */
 function script(pass: (prompt: string) => string) {
-  const driver = scripted(ctx => ctx.prompt.includes(PASS) ? { text: pass(ctx.prompt), hold: true } : { text: ctx.prompt.includes('[quiet]-wake') ? '[quiet] nothing new' : 'The release is on Friday.' });
+  const driver = scripted(ctx => ctx.prompt.includes(PASS) || ctx.prompt.includes(SHORTEN) ? { text: pass(ctx.prompt), hold: true } : { text: ctx.prompt.includes('[quiet]-wake') ? '[quiet] nothing new' : 'The release is on Friday.' });
   restores.push(driver.restore);
   return driver;
 }
@@ -54,7 +55,8 @@ test('after an answer a memory pass rewrites MEMORY.md without holding the next 
   await waitFor(() => driver.held.length === 1);
   const prompt = driver.prompts.get(passes(h, threadId)[0]!.id)![0]!;
   expect(prompt).toContain('The release is on Friday.');
-  expect(prompt).toContain(`at most ${AGENT_MEMORY_MAX} characters`);
+  expect(prompt).toContain(`MEMORY.md is Ada's map`);
+  expect(prompt).toContain(`Keep the new one under ${MEMORY_TARGET}; past ${AGENT_MEMORY_MAX} it is refused`);
   const before = turnsOf(h, threadId).length;
   await ask('When is the release?');
   await waitFor(() => turnsOf(h, threadId).length === before + 1 && settled(h, threadId));
@@ -94,12 +96,18 @@ test('a quiet wake starts no pass; a pass that runs past the cap or drops most o
   await waitFor(() => !h.core.workforce.memory.busy());
   expect(h.core.workforce.resident.brain(agent.id).memory).toBe(long);
 
+  // Past the cap, the pass gets its rewrite back once to shorten it; past it again, the old file stays.
   answer = `SUMMARY: Grew\n<memory>\n${'x'.repeat(AGENT_MEMORY_MAX + 10)}\n</memory>`;
   await client.call('turns.start', { threadId, prompt: 'And this?' });
   await waitFor(() => driver.held.length === 1);
+  const pass = passes(h, threadId).find(t => !t.archived)!.id;
+  driver.release();
+  await waitFor(() => driver.held.length === 1);
+  expect(driver.prompts.get(pass)!.at(-1)).toContain(`has ${AGENT_MEMORY_MAX + 11} characters`);
   driver.release();
   await waitFor(() => !h.core.workforce.memory.busy());
   expect(h.core.workforce.resident.brain(agent.id).memory).toBe(long);
+  expect(h.core.workforce.memory.lastPass(agent.id)?.summary).toContain('even when asked to shorten it');
 
   const runtime = await client.call('agents.runtime.get', { agentId: agent.id });
   expect(runtime.autoMemory).toBe(true);
@@ -110,6 +118,23 @@ test('a quiet wake starts no pass; a pass that runs past the cap or drops most o
   await waitFor(() => settled(h, threadId) && turnsOf(h, threadId).at(-1)!.status === 'done');
   await Bun.sleep(300);
   expect(passes(h, threadId)).toHaveLength(count);
+});
+
+test('a rewrite past the cap goes back once to the same pass, and its shorter answer is written', async () => {
+  const driver = script(prompt => prompt.includes(SHORTEN) ? 'SUMMARY: Shortened\n<memory>\n- plan: D:/notes/plan.md\n</memory>' : `SUMMARY: Grew\n<memory>\n${'x'.repeat(AGENT_MEMORY_MAX + 10)}\n</memory>`);
+  const { h, agent, threadId } = await setup();
+  await waitFor(() => driver.held.length === 1);
+  driver.release();
+  await waitFor(() => driver.held.length === 1);
+  driver.release();
+  await waitFor(() => h.core.workforce.memory.lastPass(agent.id)?.status === 'done');
+  expect(h.core.workforce.resident.brain(agent.id).memory).toBe('- plan: D:/notes/plan.md\n');
+  expect(h.core.workforce.memory.lastPass(agent.id)?.summary).toBe('Shortened');
+  // Both turns ran in the one pass thread, archived once it ended.
+  const [pass] = passes(h, threadId);
+  expect(passes(h, threadId)).toHaveLength(1);
+  expect(driver.prompts.get(pass!.id)).toHaveLength(2);
+  expect(pass!.archived).toBe(true);
 });
 
 test('boite bot remember adds a dated line, and is refused once MEMORY.md is full', async () => {

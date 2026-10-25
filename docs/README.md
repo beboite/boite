@@ -31,6 +31,7 @@
 - [Devices](devices.md): iOS Simulators and Android emulators the agent opens in the Device panel.
 - [Windows](windows.md): desktop windows an agent captures as a PNG or contact sheet, or shows in the Window panel, with the owner's consent.
 - [Chat files and previews](chat-files.md): files an agent publishes, file links, inline previews, and the pages an agent draws in its answer.
+- [Diagrams and formulas](diagrams-and-formulas.md): Mermaid blocks and LaTeX formulas drawn in Markdown, loaded on demand and sanitized.
 - [Experiments](experiments.md): bots, contacts, reviewed goals and other unfinished switches.
 - [Pointer interactions](interactions.md): edge scrollbars and loading a thread on the press.
 - [The thread terminal](terminal.md): the shell under the chat, and sign-ins that need one.

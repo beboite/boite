@@ -52,6 +52,7 @@ pub struct AppUpdater {
     busy: AtomicBool,
     preference: PathBuf,
     cache: PathBuf,
+    quiet_restart: PathBuf,
     install: Arc<Mutex<crate::update_stop::InstallState>>,
 }
 struct Operation<'a>(&'a AtomicBool);
@@ -79,6 +80,7 @@ impl AppUpdater {
             current_channel, channel, version: None, notes: None, published_at: None,
             received: 0, total: None, error, supported,
         }), pending: Mutex::new(None), busy: AtomicBool::new(false), preference, cache,
+            quiet_restart: directory.join(crate::autostart::QUIET_RESTART_FILE),
             install: Arc::new(Mutex::new(crate::update_stop::InstallState::Idle)) }
     }
     fn begin(&self) -> Result<Operation<'_>, String> {
@@ -312,8 +314,23 @@ pub async fn app_update_cancel_install(webview: Webview, state: State<'_, AppUpd
 #[tauri::command]
 pub async fn app_update_install(webview: Webview, app: AppHandle, state: State<'_, AppUpdater>) -> Result<(), String> {
     crate::browser::only_main(&webview)?;
+    install(app, state, false).await.map(|_| ())
+}
+
+/// The automatic install (`autoInstallUpdates`): only while the window is in
+/// the tray and the core grants an idle stop, never the handoff that ends
+/// running turns. False when it is not the moment: the release stays ready.
+#[tauri::command]
+pub async fn app_update_install_quietly(webview: Webview, app: AppHandle, state: State<'_, AppUpdater>) -> Result<bool, String> {
+    crate::browser::only_main(&webview)?;
+    install(app, state, true).await
+}
+
+async fn install(app: AppHandle, state: State<'_, AppUpdater>, quiet: bool) -> Result<bool, String> {
     let _operation = state.begin()?;
     if state.snapshot.lock().unwrap().phase != "ready" { return Err("Download and verify an update before installing".into()); }
+    // A window on screen may be in use, even with nothing running: its restart would take it away.
+    if quiet && crate::window::main_window(&app).is_some_and(|window| window.is_visible().unwrap_or(true)) { return Ok(false); }
     let pending = state.pending.lock().unwrap().take().ok_or("No downloaded update")?;
     let bytes = match std::fs::read(pending.path.as_ref().ok_or("Missing update payload")?) {
         Ok(bytes) => bytes,
@@ -325,11 +342,13 @@ pub async fn app_update_install(webview: Webview, app: AppHandle, state: State<'
         state.fail(&app, error.clone()); return Err(error);
     }
     *state.install.lock().unwrap() = crate::update_stop::InstallState::Waiting;
-    state.change(&app, |s| s.phase = "waiting".into());
+    // Nobody waits on an automatic install: it says nothing until the core has agreed to stop.
+    if !quiet { state.change(&app, |s| s.phase = "waiting".into()); }
     let core = app.clone();
     let control = state.install.clone();
     let stopped = tauri::async_runtime::spawn_blocking(move || match core.try_state::<crate::local_core::CoreState>() {
-        Some(engine) => engine.wait_for_install(&control, || {
+        // Checked again right before the core is asked: a window restored from the tray meanwhile calls it off.
+        Some(engine) => engine.wait_for_install(&control, quiet, || !crate::window::main_window(&core).is_some_and(|window| window.is_visible().unwrap_or(true)), || {
             core.state::<AppUpdater>().change(&core, |s| s.phase = "installing".into());
         }),
         None => Err("the shell has no local core state; nothing was installed".into()),
@@ -340,7 +359,7 @@ pub async fn app_update_install(webview: Webview, app: AppHandle, state: State<'
             *state.install.lock().unwrap() = crate::update_stop::InstallState::Idle;
             *state.pending.lock().unwrap() = Some(pending);
             state.change(&app, |s| { s.phase = "ready".into(); s.error = None; });
-            return Ok(());
+            return Ok(false);
         },
         outcome => {
             *state.install.lock().unwrap() = crate::update_stop::InstallState::Idle;
@@ -349,6 +368,7 @@ pub async fn app_update_install(webview: Webview, app: AppHandle, state: State<'
             return Err(error);
         }
     }
+    if quiet { let _ = std::fs::write(&state.quiet_restart, ""); }
     // The in-memory digest ties these exact bytes to the verified download.
     // On Windows Tauri exits once the installer launches. If it cannot
     // launch, the hold is released and the window's next reconnect starts the
@@ -368,6 +388,7 @@ pub async fn app_update_install(webview: Webview, app: AppHandle, state: State<'
         }
         outcome => {
             if let Some(core) = app.try_state::<crate::local_core::CoreState>() { core.release_hold(); }
+            let _ = std::fs::remove_file(&state.quiet_restart);
             *state.install.lock().unwrap() = crate::update_stop::InstallState::Idle;
             let error = match outcome { Ok(Err(e)) => e.to_string(), Err(e) => e.to_string(), _ => unreachable!() };
             state.fail(&app, error.clone());

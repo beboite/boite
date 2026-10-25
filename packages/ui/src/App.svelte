@@ -96,9 +96,8 @@
   $effect(() => {
     const threadId = store.openThread?.id;
     void store.connection;
-    if (!threadId || store.client?.state !== 'ready') return;
-    const devices = watchDevices(store, threadId), windows = watchWindows(store, threadId);
-    return () => { devices(); windows(); };
+    const stops = threadId && store.client?.state === 'ready' ? [watchDevices(store, threadId), watchWindows(store, threadId)] : [];
+    return () => stops.forEach((stop) => stop());
   });
   const narrow = new MediaQuery('(max-width: 720px)');
   let appRoot = $state<HTMLDivElement | undefined>(undefined);
@@ -222,6 +221,9 @@
   });
 
   onMount(installWhipEscape);
+
+  // This computer's own setting decides whether the window's updater installs by itself.
+  $effect(() => { appUpdater.autoInstall = workspace.machines.find((machine) => machine.store.localCore)?.store.settings?.autoInstallUpdates === true; });
 
   onMount(() => {
     const stopViewport = startViewport();

@@ -60,6 +60,15 @@ the home volume; isolated accounts persist in the data volume. See
 [accounts](accounts.md). Install additional system tools in a derived image,
 or user tools under `/home/node/.local`, whose `bin` directory is on `PATH`.
 
+The image ships its agents in `/opt/agents`, owned by root. npm's global prefix
+is `/home/node/.local` (`NPM_CONFIG_PREFIX`), and its `bin` comes before
+`/opt/agents` on `PATH`. An agent update, from the Providers page or the
+agent's own command (`codex update`, `pi update self`), installs there, in the
+home volume, and that copy runs from then on. It outlives an image update, so
+it is the copy Boite updates next. `npm uninstall -g <package>`
+(`npm uninstall -g @openai/codex`) removes its `bin` entry and its
+`lib/node_modules` copy, and the image's runs again.
+
 ### Updates and rollback
 
 Record the current image digest and stop the core before backing up:

@@ -226,7 +226,10 @@ export function registerProbeMethods(core: Core): ProviderProbe {
     // holds until the process has exited; the caller is answered before that.
     const before = lanes.get(lane) ?? Promise.resolve();
     const cleanups: Promise<void>[] = [];
-    const request = before.then(() => {
+    const request = before.then(async () => {
+      // Meta discovery can connect Muse and invalidate its old account catalog.
+      // Settle that change before recording the revision this probe belongs to.
+      if (params.providerId === 'muse') await core.quotas.gateway.read();
       const protocol = core.providers.require(params.providerId).protocol;
       if (params.refresh) refreshProbes(protocol, params.providerId, params.accountId);
       const startedAtRevision = revision;

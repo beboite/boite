@@ -145,7 +145,8 @@ pub fn run() {
         || autostart::restarted_by_installer(std::env::args_os());
     std::env::remove_var(RESTARTED_AFTER_UPDATE);
     // Started by the login entry: the core starts, the window waits in the tray.
-    let at_login = autostart::launched_at_login(std::env::args_os(), restarted);
+    // An update that installed by itself restarts into the tray, as a login start does.
+    let at_login = autostart::starts_unasked(std::env::args_os(), &directory, restarted);
     let _instance = match acquire_after_update(&directory, restarted) {
         Ok(Some(file)) => { start_log(instance_started.elapsed()); Some(file) }
         // Another instance already owns this data directory: it shows its
@@ -220,6 +221,7 @@ pub fn run() {
         updater::app_update_check,
         updater::app_update_download,
         updater::app_update_install,
+        updater::app_update_install_quietly,
         updater::app_update_cancel_install,
         quota_window::quota_window,
         material::window_material,

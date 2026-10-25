@@ -28,7 +28,7 @@ export function gatewayQuotas(ctx: FakeContext): SubscriptionProxyQuotas {
   const window = (id: string, label: string, usedPercent: number, hours: number) => ({ id, label, usedPercent, resetsAt: now + hours * 3600_000 });
   const entry = (id: string, label: string, plan: string | null, windows: QuotaWindow[], more: Partial<GatewayQuotaEntry> = {}): GatewayQuotaEntry =>
     ({ id, label, plan, accounts: 1, status: 'ready', error: null, updatedAt: now, windows, credits: [], ...more });
-  return { status: 'ready', updatedAt: now, checkedAt: now, error: null, providers: [
+  return { status: 'ready', nativeMuse: true, updatedAt: now, checkedAt: now, error: null, providers: [
     { providerId: 'claude', name: 'Claude', display: 'accounts', entries: [
       entry('claude-1', 'Claude Max x20 · chris@…', 'Max 20x', [window('five-hour', '5 hours', 11, 2), window('seven-day', 'Weekly', 64, 70)]),
       entry('claude-2', 'Claude Pro · work@…', 'Pro', [window('five-hour', '5 hours', 100, 1), window('seven-day', 'Weekly', 82, 30)], { status: 'cooldown' }),
@@ -39,6 +39,9 @@ export function gatewayQuotas(ctx: FakeContext): SubscriptionProxyQuotas {
     ] },
     { providerId: 'antigravity', name: 'Antigravity', display: 'average', entries: [
       entry('antigravity', 'Antigravity · 10 comptes', null, [window('gemini-pro', 'Gemini Pro', 42, 4), window('claude', 'Claude', 18, 4)], { accounts: 10 }),
+    ] },
+    { providerId: 'meta', name: 'Muse Code', display: 'accounts', entries: [
+      entry('meta-1', 'Muse Code subscription', null, []),
     ] },
   ] };
 }
@@ -60,7 +63,7 @@ function quotas(ctx: FakeContext): AccountQuota[] {
 
 function accountQuotas(ctx: FakeContext): AccountQuota[] {
   const accounts = ctx.accounts;
-  const proxied = (providerId: string) => subscriptionProxyOf(ctx.settings, ctx.providers.find(provider => provider.id === providerId)) !== null;
+  const proxied = (providerId: string) => subscriptionProxyOf(ctx.settings, ctx.providers.find(provider => provider.id === providerId), gatewayQuotas(ctx)) !== null;
   // As the core: a managed Antigravity account reads its own sign-in, so one
   // not signed in yet reports why instead of limits.
   const signedOut = (account: (typeof accounts)[number]) => account.providerId === 'antigravity'
