@@ -7,7 +7,7 @@ const names = [
   `Boite_${version}_amd64.AppImage`, `Boite_${version}_aarch64.AppImage`,
   `Boite_${version}_amd64.deb`, `Boite_${version}_arm64.deb`,
   `Boite_${version}_x64.app.tar.gz`, `Boite_${version}_aarch64.app.tar.gz`,
-  `boite-server_${version}_x64.zip`, `boite-server_${version}_arm64.zip`,
+  `boite-server_${version}_android.zip`, `boite-server_${version}_x64.zip`, `boite-server_${version}_arm64.zip`,
 ];
 const signed = names.map((file) => ({ file, signature: 'c2lnbmF0dXJl\n' }));
 
@@ -19,6 +19,9 @@ test('manifest binds every platform payload to the exact immutable release tag',
   expect(result.platforms['linux-aarch64-deb']!.url).toEndWith('_arm64.deb');
   expect(result.platforms['linux-aarch64-appimage']!.url).toEndWith('_aarch64.AppImage');
   expect(result.platforms['darwin-x86_64']!.url).toEndWith('_x64.app.tar.gz');
+  // The phone's controller reads this key (apps/android-server/termux/boite-server.ts).
+  expect(result.platforms['android-aarch64-server']!.url).toEndWith('_android.zip');
+  expect(result.platforms['linux-aarch64-server']!.url).toEndWith('_arm64.zip');
   expect(result.notes).toBe('Changes');
 });
 

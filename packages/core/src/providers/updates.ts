@@ -5,6 +5,7 @@ import type { HarnessUpdate, OsProfile, ProviderDescriptor, ProviderId, Provider
 import type { Core } from '../core.ts';
 import { forgetProbes } from '../drivers/index.ts';
 import { notFound, refused } from '../errors.ts';
+import { currentOs } from '../paths.ts';
 import type { InstallOutcome } from './install.ts';
 import { npmCli, npmInstallOf, unwritableDir, type NpmCommand } from './npm.ts';
 import { profileFor, resolveCommand, type ResolvedCommand } from './resolve.ts';
@@ -52,7 +53,7 @@ export { compareVersions } from './install-latest.ts';
 
 /** True when the path sits under that directory, a sibling sharing its first letters left out. */
 export function inside(dir: string, path: string): boolean {
-  const fold = (value: string): string => (process.platform === 'linux' ? value : value.toLowerCase());
+  const fold = (value: string): string => (currentOs() === 'linux' ? value : value.toLowerCase());
   return fold(path).startsWith(fold(dir.endsWith(sep) ? dir : dir + sep));
 }
 

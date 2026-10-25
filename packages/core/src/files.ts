@@ -12,6 +12,7 @@ import { existsSync } from 'node:fs';
 import { opendir, readdir, readFile } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { refused } from './errors.ts';
+import { currentOs } from './paths.ts';
 
 /** How many files a walk keeps before giving up on the rest. */
 export const FILE_CAP = 20_000;
@@ -102,7 +103,7 @@ export async function locateFile(root: string, path: string, cap = FILE_CAP): Pr
   const parts = path.replaceAll('\\', '/').split('/').filter((part) => part.length > 0 && part !== '.');
   if (isAbsolute(path) || parts.length === 0 || parts.includes('..')) return [];
   // Windows and macOS names do not differ by case alone.
-  const fold = process.platform === 'linux' ? (text: string) => text : (text: string) => text.toLowerCase();
+  const fold = currentOs() === 'linux' ? (text: string) => text : (text: string) => text.toLowerCase();
   const tail = fold(parts.join('/'));
   let level = [''];
   let read = 0;

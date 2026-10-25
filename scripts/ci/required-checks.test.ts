@@ -11,6 +11,7 @@ test('a pull request reports the same fixed check names whichever jobs run', () 
   for (const name of names) expect(name).not.toContain('${{');
   expect(names).toEqual([
     'Android / apk',
+    'Android server / apk',
     'Build UI',
     'Bundle size',
     // Written out, not derived from CORE_ALL or PORTABLE_ALL: renaming a runner
