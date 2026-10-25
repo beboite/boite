@@ -664,18 +664,20 @@ function writeCliShim(): void {
 // ---------------------------------------------------------------------------
 // The core
 
-function coreEnv(release: Release, config = readConfig()): NodeJS.ProcessEnv {
-  const name = config.name ?? deviceName();
-  return {
+export function coreEnv(release: Release, config = readConfig(), name = config.name ?? deviceName()): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     PATH: `${PATHS.bin}:${PATHS.cli}:${process.env.PATH ?? `${PREFIX}/bin`}`,
     BOITE_DATA_DIR: PATHS.data,
     BOITE_UI_DIR: join(release.dir, 'ui'),
     BOITE_CLI_DIR: PATHS.cli,
-    // Without it the core takes the host name, `localhost` on every phone.
-    ...(name ? { BOITE_MACHINE_NAME: name } : {}),
     NODE_ENV: 'production',
   };
+  // Without it the core takes the host name, `localhost` on every phone. One
+  // exported in Termux's shell would outlast `config name ""`.
+  if (name) env.BOITE_MACHINE_NAME = name;
+  else delete env.BOITE_MACHINE_NAME;
+  return env;
 }
 
 async function health(url: string): Promise<{ version: string; pid: number } | null> {

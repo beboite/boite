@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { verifyPayload } from '../../../packages/core/src/server-update/release.ts';
 import {
-  bindAddress, bundleName, checkEntries, deviceName, GLIBC_INTERPRETER, loaderLink, newestRelease, offerOf, pairingLinks, parseConfig, patchInterpreter, pickRelease,
+  bindAddress, bundleName, checkEntries, coreEnv, DEFAULT_CONFIG, deviceName, GLIBC_INTERPRETER, loaderLink, newestRelease, offerOf, pairingLinks, parseConfig, patchInterpreter, pickRelease,
   reachableAt, rotateLog, startTimeOf, tailscaleAddress, TARGET, UPDATE_PUBLIC_KEY, verifyFile, withSetting, type Interfaces,
 } from './boite-server.ts';
 
@@ -204,4 +204,17 @@ test('the phone goes by its maker and model, said once when the model already na
   expect(deviceName(props({ 'ro.product.manufacturer': 'Google', 'ro.product.model': 'Pixel 8' }))).toBe('Google Pixel 8');
   expect(deviceName(props({ 'ro.product.manufacturer': 'OnePlus', 'ro.product.model': 'ONEPLUS A6003' }))).toBe('ONEPLUS A6003');
   expect(deviceName(props({}))).toBeNull();
+});
+
+test('the core gets the name boite-server picked, and none exported in the shell when it picked none', () => {
+  const release = { version: '2.0.0', dir: '/releases/2.0.0', bun: { version: '1.4.4', sha256: '' } };
+  const before = process.env.BOITE_MACHINE_NAME;
+  process.env.BOITE_MACHINE_NAME = 'Exported';
+  try {
+    expect(coreEnv(release, DEFAULT_CONFIG, 'OnePlus GM1913').BOITE_MACHINE_NAME).toBe('OnePlus GM1913');
+    expect('BOITE_MACHINE_NAME' in coreEnv(release, DEFAULT_CONFIG, null)).toBe(false);
+  } finally {
+    if (before === undefined) delete process.env.BOITE_MACHINE_NAME;
+    else process.env.BOITE_MACHINE_NAME = before;
+  }
 });
