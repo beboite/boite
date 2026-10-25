@@ -90,16 +90,17 @@
    * state; only rest wears the robot's own colour.
    */
   .avatar-ring { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
-  .avatar-ring circle { fill: none; stroke-width: 2px; transition: stroke var(--dur-3) var(--ease-out-quint); }
-  .track { stroke: color-mix(in srgb, var(--ring-tint) 50%, transparent); stroke-width: 1.5px; }
+  /* Every track keeps the 1.5 px hairline: a whole-pixel width snaps off-centre at fractional zoom (tests/e2e/avatar-rings.test.ts). */
+  .avatar-ring circle { fill: none; stroke-width: 1.5px; transition: stroke var(--dur-3) var(--ease-out-quint); }
+  .track { stroke: color-mix(in srgb, var(--ring-tint) 50%, transparent); }
   [data-ring='working'] .track { stroke: color-mix(in srgb, var(--color-accent) 28%, transparent); }
   /* At work: an arc of the accent turns around the disc. */
-  .arc { stroke: var(--color-accent); stroke-linecap: round; stroke-dasharray: 30 70; transform-box: fill-box; transform-origin: center; animation: spin 1.2s steps(72) infinite var(--loops); }
+  .arc { stroke: var(--color-accent); stroke-linecap: round; stroke-width: 2.5px; stroke-dasharray: 30 70; transform-box: fill-box; transform-origin: center; animation: spin 1.2s steps(72) infinite var(--loops); }
   [data-ring='queued'] .track { stroke: var(--color-accent); stroke-dasharray: 4 6; opacity: 0.7; }
   /* Needs the user: the waiting colour, pulsing. */
-  [data-ring='waiting'] .track { stroke: var(--color-live); stroke-width: 2.25px; animation: pulse 1.6s var(--loop-ease-in-out-48) infinite var(--loops); }
-  [data-ring='error'] .track { stroke: var(--color-danger); stroke-width: 2.25px; }
-  [data-ring='unread'] .track { stroke: var(--color-accent); stroke-width: 2.25px; }
+  [data-ring='waiting'] .track { stroke: var(--color-live); animation: pulse 1.6s var(--loop-ease-in-out-48) infinite var(--loops); }
+  [data-ring='error'] .track { stroke: var(--color-danger); }
+  [data-ring='unread'] .track { stroke: var(--color-accent); }
   [data-ring='asleep'] .track { stroke: var(--color-edge); stroke-dasharray: 2 5; stroke-linecap: round; }
   [data-ring='asleep'] :global(svg.robot) { opacity: 0.7; }
   @media (prefers-reduced-motion: reduce) { .agent-avatar .avatar-ring :is(.arc, .track) { animation: none; } }
