@@ -66,8 +66,9 @@ export const PATHS = {
 export type Channel = 'stable' | 'nightly';
 /** `lan`: every interface, so the Wi-Fi and Tailscale addresses both answer. `tailscale`: the tailnet address alone. `local`: this phone only. */
 export type HostMode = 'lan' | 'tailscale' | 'local';
-export interface Config { channel: Channel; host: HostMode; port: number; autostart: boolean }
-export const DEFAULT_CONFIG: Config = { channel: 'stable', host: 'lan', port: 7337, autostart: true };
+/** `name`: what other machines call the phone, null for its maker and model (`deviceName`). */
+export interface Config { channel: Channel; host: HostMode; port: number; autostart: boolean; name: string | null }
+export const DEFAULT_CONFIG: Config = { channel: 'stable', host: 'lan', port: 7337, autostart: true, name: null };
 
 const CHANNELS: Channel[] = ['stable', 'nightly'];
 const HOSTS: HostMode[] = ['lan', 'tailscale', 'local'];
@@ -81,7 +82,9 @@ export function parseConfig(text: string, file = PATHS.config): Config {
   if (!HOSTS.includes(config.host)) throw new Error(`${file}: host must be ${HOSTS.join(', ')}, got ${JSON.stringify(config.host)}`);
   if (!Number.isInteger(config.port) || config.port < 1024 || config.port > 65535) throw new Error(`${file}: port must be an integer from 1024 to 65535, got ${JSON.stringify(config.port)}`);
   if (typeof config.autostart !== 'boolean') throw new Error(`${file}: autostart must be true or false, got ${JSON.stringify(config.autostart)}`);
-  return { channel: config.channel, host: config.host, port: config.port, autostart: config.autostart };
+  const name = typeof config.name === 'string' ? config.name.trim() : config.name;
+  if (name !== null && (typeof name !== 'string' || name.length > 100)) throw new Error(`${file}: name must be text of at most 100 characters, or null for the phone's own, got ${JSON.stringify(config.name)}`);
+  return { channel: config.channel, host: config.host, port: config.port, autostart: config.autostart, name: name || null };
 }
 
 function readConfig(): Config {
@@ -105,8 +108,27 @@ export function withSetting(config: Config, key: string, value: string): Config 
       const on = ['on', 'true', 'yes', '1'].includes(value) ? true : ['off', 'false', 'no', '0'].includes(value) ? false : value;
       return parseConfig(JSON.stringify({ ...config, autostart: on }), 'autostart');
     }
-    default: throw new Error(`config key must be channel, host, port or autostart, got ${JSON.stringify(key)}`);
+    // An empty name gives the phone its maker and model back.
+    case 'name': return parseConfig(JSON.stringify({ ...config, name: value }), 'name');
+    default: throw new Error(`config key must be channel, host, port, autostart or name, got ${JSON.stringify(key)}`);
   }
+}
+
+/**
+ * The phone's maker and model as Android reports them, `OnePlus GM1913`.
+ * Every app's host name is `localhost`, and the name given to the phone in
+ * its settings is out of Termux's reach.
+ */
+export function deviceName(read: (property: string) => string = getprop): string | null {
+  const maker = read('ro.product.manufacturer').trim();
+  const model = read('ro.product.model').trim();
+  if (!model) return maker || null;
+  return maker && !model.toLowerCase().startsWith(maker.toLowerCase()) ? `${maker} ${model}` : model;
+}
+
+function getprop(property: string): string {
+  const result = spawnSync('getprop', [property], { encoding: 'utf8', timeout: 5_000 });
+  return result.status === 0 ? result.stdout : '';
 }
 
 // ---------------------------------------------------------------------------
@@ -707,8 +729,8 @@ function writeCliShim(): void {
 // ---------------------------------------------------------------------------
 // The core
 
-function coreEnv(release: Release): NodeJS.ProcessEnv {
-  return {
+export function coreEnv(release: Release, config = readConfig(), name = config.name ?? deviceName()): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     PATH: `${PATHS.bin}:${PATHS.cli}:${process.env.PATH ?? `${PREFIX}/bin`}`,
     BOITE_DATA_DIR: PATHS.data,
@@ -716,6 +738,11 @@ function coreEnv(release: Release): NodeJS.ProcessEnv {
     BOITE_CLI_DIR: PATHS.cli,
     NODE_ENV: 'production',
   };
+  // Without it the core takes the host name, `localhost` on every phone. One
+  // exported in Termux's shell would outlast `config name ""`.
+  if (name) env.BOITE_MACHINE_NAME = name;
+  else delete env.BOITE_MACHINE_NAME;
+  return env;
 }
 
 async function health(url: string): Promise<{ version: string; pid: number } | null> {
@@ -779,7 +806,7 @@ async function supervise(): Promise<void> {
       if (stopping || host === null) break;
       rotateLog();
       const core = spawn(join(PATHS.bin, 'bun'), [join(release.dir, 'core', 'main.js'), '--host', host, '--port', String(config.port)], {
-        cwd: HOME, env: coreEnv(release), stdio: ['ignore', 'inherit', 'inherit'],
+        cwd: HOME, env: coreEnv(release, config), stdio: ['ignore', 'inherit', 'inherit'],
       });
       child = core;
       const exited = new Promise<string>((resolve) => {
@@ -1040,7 +1067,7 @@ const USAGE = `usage: boite-server <command> [--json]
   update [--check] [--force] [--bundle <zip>]
   agents                   install or update Claude Code
   sign-in claude|codex     the agent's sign-in, typed in this terminal; Boite then uses it
-  config [<key> <value>]   channel stable|nightly, host lan|tailscale|local, port <n>, autostart on|off
+  config [<key> <value>]   channel stable|nightly, host lan|tailscale|local, port <n>, autostart on|off, name <text> ("" for the phone's own)
   logs [<lines>]
   uninstall [--purge]      --purge also deletes the conversations in ${PATHS.data}`;
 
@@ -1120,7 +1147,8 @@ async function main(argv: string[]): Promise<void> {
         config = withSetting(config, key, value);
         writeJson(PATHS.config, config);
       }
-      return answer({ ok: true, ...config }, Object.entries(config).map(([name, setting]) => `${name} ${setting}`).join('\n'));
+      const shown = { ...config, name: config.name ?? `${deviceName() ?? 'localhost'} (the phone's own)` };
+      return answer({ ok: true, ...config }, Object.entries(shown).map(([name, setting]) => `${name} ${setting}`).join('\n'));
     }
     case 'logs': {
       const count = Number(args.positionals()[0] ?? 80);

@@ -1,4 +1,4 @@
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { existsSync } from 'node:fs';
 import { join, posix, relative, sep } from 'node:path';
 import type { Channel, Os } from '@boite/contracts';
@@ -7,6 +7,15 @@ export function currentOs(): Os {
   if (process.platform === 'win32') return 'windows';
   if (process.platform === 'darwin') return 'macos';
   return 'linux';
+}
+
+/**
+ * What other machines and clients call this one: `BOITE_MACHINE_NAME`, else
+ * the host name. Android tells every app its host is `localhost`, so the
+ * phone's server names the phone itself.
+ */
+export function machineName(env: Record<string, string | undefined> = process.env): string {
+  return env.BOITE_MACHINE_NAME?.trim().slice(0, 100) || hostname();
 }
 
 /**

@@ -24,9 +24,9 @@ import {
   type Settings,
   type ThreadId,
 } from '@boite/contracts';
-import { hostname } from 'node:os';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
+import { machineName } from '../paths.ts';
 import type { Connection } from '../router.ts';
 import {
   adbText,
@@ -342,7 +342,7 @@ export class MobileDevices {
     ]);
     const booting = (device: Located): Located => (this.#boots.has(device.id) && device.state !== 'running' ? { ...device, state: 'booting' } : device);
     return {
-      host: { id: LOCAL_DEVICE_HOST, name: hostname(), platforms: [android.status, ios.status] },
+      host: { id: LOCAL_DEVICE_HOST, name: machineName(), platforms: [android.status, ios.status] },
       devices: [...androidDevices, ...iosDevices].map(booting),
     };
   }
