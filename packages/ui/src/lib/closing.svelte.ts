@@ -80,16 +80,38 @@ export class Closing {
   }
 
   /**
-   * A node the browser is not painting animates nothing, and a test
-   * environment has no animation engine at all, so `animationend` would never
-   * come. One tick after the exit starts, a node with no running animation is
-   * unmounted on the spot.
+   * A test environment has no animation engine, so a node with no running
+   * animation is unmounted one tick after the exit starts. Otherwise
+   * `animationend` is not promised: a cancelled exit sends `animationcancel`
+   * instead, and a page the browser draws no frame of ends nothing (a phone
+   * tour stayed on screen after Done on a busy CI runner). Each exit's own
+   * `finished`, settled either way, unmounts the node, and its length in time
+   * does when no frame comes.
    */
   async #settle(run: number): Promise<void> {
     await tick();
     if (run !== this.#run || this.#raw !== 'closing') return;
     const node = this.#node;
     const running = node && typeof node.getAnimations === 'function' ? node.getAnimations() : [];
-    if (running.length === 0) this.#go('closed');
+    const exits = running.filter((animation) => Number.isFinite(endOf(animation)));
+    if (exits.length > 0) {
+      const length = Math.max(...exits.map(endOf));
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        Promise.allSettled(exits.map((animation) => animation.finished)),
+        new Promise((resolve) => { timer = setTimeout(resolve, length + EXIT_SLACK_MS); })
+      ]);
+      clearTimeout(timer);
+      if (run !== this.#run || this.#raw !== 'closing') return;
+    }
+    this.#go('closed');
   }
+}
+
+/** What a frame or two weighs past an exit's end before the node goes without it. */
+const EXIT_SLACK_MS = 100;
+
+/** When an animation ends, in ms from its start; infinite for one that loops. */
+function endOf(animation: Animation): number {
+  return Number(animation.effect?.getComputedTiming().endTime ?? 0);
 }
