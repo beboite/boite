@@ -5,13 +5,22 @@ how much room the model gives it. The message bar draws a ring beside its send
 controls; the percentage appears in the detail panel. When the agent compacts its
 conversation mid-turn, the
 timeline gets a divider saying how many tokens went. Both come from the agent
-itself: the core never estimates a context size, and a provider whose protocol
-says nothing shows an unfilled ring. Hovering, focusing or tapping the ring
+itself: the core never estimates a context size. The ring stays unfilled when
+there is no usage reading, or when neither a model window nor a compaction
+threshold is known. Hovering, focusing or tapping the ring
 opens exact counts and a separate manual compaction button. The panel opens
 above the message bar, using the available height, and scrolls on short screens.
 Behind the
 `prompt-cache` experiment the meter also carries the
 [prompt cache timer](prompt-cache.md).
+
+When automatic compaction has a token threshold, the ring, percentage, bar and
+remaining capacity use that threshold, capped at the model's reported window.
+The popup explains when the threshold replaces the model window and retains
+the model's full capacity in that note. A known threshold also supplies a limit
+when the agent reports no window. Disabling automatic compaction or choosing no
+size condition restores the model window. The reading itself is unchanged;
+compaction still waits for a selected moment, as described below.
 
 ## What is measured
 
@@ -23,8 +32,10 @@ Behind the
   the next turn starts from. It is not the turn's total usage: a turn of ten
   tool calls makes ten requests, and only the last one is the reading.
 - `window` is the model's context window when the agent names it, else null.
-  With a window the ring shows how full it is and the detail panel includes a
-  percentage; without one the ring stays unfilled and the panel shows the count.
+  The UI treats nonpositive windows as unknown. The ring and detail panel use
+  the lower of the window and the configured compaction threshold. Without a
+  window, a threshold still supplies the limit; with neither, the ring stays
+  unfilled and the panel shows only the count.
 - `at` is when the core wrote it.
 - `breakdown`, when available, contains disjoint input, cached-input and output
   counts. The UI displays a single segmented bar and exact counts. Providers

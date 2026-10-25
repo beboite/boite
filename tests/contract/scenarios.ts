@@ -562,13 +562,22 @@ export const SCENARIOS: Record<string, Scenario> = {
   'threads.markRead on a read thread announces nothing': async (env) => {
     const setup = await echo(env);
     const created = await thread(env, setup);
+    const other = await thread(env, setup, 'another conversation');
     const updates = record(env, ['thread.updated']);
-    await env.call('threads.markRead', { threadId: created.id });
-    await env.call('threads.pin', { threadId: created.id, pinned: true });
-    await until('the pin', () => updates.events.length > 0);
-    updates.stop();
-    const first = updates.events[0]?.payload as ThreadSummary;
-    check(first.pinned, 'threads.markRead announced a thread that was already read');
+    try {
+      // The shared core can announce another conversation while this scenario runs.
+      await env.call('threads.archive', { threadId: other.id, archived: true });
+      await until('the unrelated archive', () => updates.events.some((event) => (event.payload as ThreadSummary).id === other.id));
+      await env.call('threads.markRead', { threadId: created.id });
+      await env.call('threads.pin', { threadId: created.id, pinned: true });
+      await until('the pin', () => updates.events.some((event) => {
+        const thread = event.payload as ThreadSummary;
+        return thread.id === created.id && thread.pinned;
+      }));
+      const own = updates.events.map((event) => event.payload as ThreadSummary).filter((thread) => thread.id === created.id);
+      same(own.length, 1, 'only the pin announces this thread');
+      check(own[0]!.pinned, 'threads.markRead announced a thread that was already read');
+    } finally { updates.stop(); }
   },
   'threads.archive announces the archived thread': async (env) => {
     const setup = await echo(env);
