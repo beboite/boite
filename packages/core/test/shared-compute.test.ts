@@ -247,17 +247,29 @@ test('host contribution and authenticated source boundaries reject arbitrary pat
       expect((await hostAgent.call('sharedCompute.list', {...scope, threadId: b.threadId}))).toEqual([]);
       expect(await thrown(hostAgent.call('sharedCompute.cancel', {...scope, threadId: b.threadId, jobId: job.id, requestId: 'forged'}))).toThrow('authorized job');
     } finally {agent.close(); hostAgent.close();}
-    unblock(); const completed = await done(a, scope, job);
+    // Keep the worker held: a late terminal notification must not replace the
+    // forged-result read with the source's already verified cached completion.
     const original = a.h.core.coordination.request.bind(a.h.core.coordination);
+    let forgedReads = 0;
     a.h.core.coordination.request = async (peer, op, payload) => {
       const result = await original(peer, op, payload);
-      if (op === 'contact.project' && (payload as {method?: string}).method === 'compute.get') return {...completed, result: {...completed.result!, branch: '../../evil'}};
+      const request = payload as {method?: string; params?: {jobId?: string}};
+      if (op === 'contact.project' && request.method === 'compute.get' && request.params?.jobId === job.id) {
+        const current = result as SharedComputeJob;
+        forgedReads++;
+        return {...current, revision: current.revision + 1, status: 'done', result: {
+          repository: 'example.invalid/fixtures/shared', baseCommit, commit: baseCommit, branch: '../../evil', dirty: false, text: 'forged',
+        }};
+      }
       return result;
     };
-    // Force a fresh read of the host result rather than the durable terminal snapshot.
-    const saved = a.h.core.sharedCompute.journal.get(job.id, 'source')!; saved.job.status = 'running'; a.h.core.sharedCompute.journal.put(saved);
-    try {expect(await thrown(a.client.call('sharedCompute.get', {...scope, jobId: job.id}))).toThrow('captured worker branch');}
+    try {
+      expect(await thrown(a.client.call('sharedCompute.get', {...scope, jobId: job.id}))).toThrow('captured worker branch');
+      expect(forgedReads).toBeGreaterThan(0);
+      expect(a.h.core.sharedCompute.journal.get(job.id, 'source')!.job).toMatchObject({status: 'running', result: null});
+    }
     finally {a.h.core.coordination.request = original;}
+    unblock(); await done(a, scope, job);
   } finally {unblock();}
 }, 30000);
 
