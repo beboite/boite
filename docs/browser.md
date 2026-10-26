@@ -188,6 +188,14 @@ the panel never confirms by accident. All are noted in the diagnostics. Download
 [quarantine](#downloads). Archiving or removing the
 conversation closes its tabs.
 
+When a DevTools session detaches, its pending commands fail immediately with
+their method and session identity; commands for the browser or another session
+keep waiting for their own answers. A native click accepts detachment only
+while releasing the mouse on its own tab, as happens when a popup closes itself.
+It sends no remaining double-click input or navigation queries to that page.
+Detachment identifies the lost session, not why it disappeared. Earlier input
+failures, protocol errors and a closed browser connection still fail the click.
+
 ### A tab nobody uses sleeps
 
 The browser runs every tab as shown (`--disable-renderer-backgrounding` and
