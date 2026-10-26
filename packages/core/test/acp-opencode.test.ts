@@ -18,7 +18,8 @@ test('OpenCode 2 accepts both tool-boundary and immediate messages in the same t
   const account = await owner.call('accounts.add', { providerId: 'opencode-v2', label: 'Fixture' });
   const project = await owner.call('projects.add', { path: harness.dataDir, name: 'Fixture' });
   const thread = await owner.call('threads.create', { projectId: project.id, accountId: account.id, providerId: 'opencode-v2' });
-  const boundary = owner.next('turn.toolCompleted', event => event.threadId === thread.id);
+  // The first event includes SDK loading and a server startup allowed 15 seconds.
+  const boundary = owner.next('turn.toolCompleted', event => event.threadId === thread.id, 20_000);
   const turn = await owner.call('turns.start', { threadId: thread.id, prompt: '[tool][slow]' });
   await boundary;
   const submit = (prompt: string, clientRequestId: string) => owner.call('turns.steer', { threadId: thread.id, turnId: turn.id, prompt, clientRequestId });
@@ -36,7 +37,7 @@ test('OpenCode 2 accepts both tool-boundary and immediate messages in the same t
     expect(replyIndex).toBeGreaterThan(userIndex);
   }
   await owner.call('turns.stop', { threadId: thread.id });
-}, 20_000);
+}, 30_000);
 
 test('OpenCode 2 keeps the tool name and plain output when ACP titles change', () => {
   const parts: MessagePart[] = [];
@@ -91,7 +92,7 @@ for (const outcome of ['delivered', 'cancelled'] as const) {
     const account = await owner.call('accounts.add', { providerId: 'opencode-v2', label: 'Fixture' });
     const project = await owner.call('projects.add', { path: harness.dataDir, name: 'Fixture' });
     const thread = await owner.call('threads.create', { projectId: project.id, accountId: account.id, providerId: 'opencode-v2' });
-    const boundary = owner.next('turn.toolCompleted', event => event.threadId === thread.id);
+    const boundary = owner.next('turn.toolCompleted', event => event.threadId === thread.id, 20_000);
     const turn = await owner.call('turns.start', { threadId: thread.id, prompt: `[late-admission][slow]${cancelled ? '[cancelled]' : ''}` });
     await boundary;
     const finished = owner.next('turn.finished', result => result.threadId === thread.id, 20000);
