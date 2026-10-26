@@ -105,10 +105,26 @@ static DWORD ao_access(HANDLE handle, DWORD access, DWORD flags, const wchar_t *
   query_object_fn query = (query_object_fn)(void *)nt_api("NtQueryObject");
   ZeroMemory(&info, sizeof(info));
   NTSTATUS status = query ? query(handle, (OBJECT_INFORMATION_CLASS)0, &info, sizeof(info), &used) : (NTSTATUS)0xc0000002;
-  if (status != 0) return (DWORD)status;
-  if (used != sizeof(info) || info.granted != access || !GetHandleInformation(handle, &actual_flags) || actual_flags != flags)
-    return ERROR_INVALID_DATA;
-  return twin_string(handle, (OBJECT_INFORMATION_CLASS)2, type);
+  DWORD error = 0, flags_error = 0; BOOL flags_queried = FALSE;
+  const wchar_t *check = L"query";
+  if (status != 0) error = (DWORD)status;
+  else if (used != sizeof(info)) {check = L"size"; error = ERROR_INVALID_DATA;}
+  else if (info.granted != access) {check = L"access"; error = ERROR_INVALID_DATA;}
+  else {
+    flags_queried = TRUE;
+    if (!GetHandleInformation(handle, &actual_flags)) {
+      flags_error = GetLastError(); check = L"flags-query"; error = ERROR_INVALID_DATA;
+    } else if (actual_flags != flags) {check = L"flags"; error = ERROR_INVALID_DATA;}
+    else {check = L"type"; error = twin_string(handle, (OBJECT_INFORMATION_CLASS)2, type);}
+  }
+  /* Keep the exact guard and its short-circuit query order. A failed duplicate
+   * must expose the measured mismatch before any setter exists. */
+  if (error) {
+    fwprintf(stderr, L"anchor-handle-check type=%ls check=%ls query=0x%08lx bytes=%lu expected-bytes=%lu requested=0x%08lx granted=0x%08lx attributes=0x%08lx flags-queried=%d flags=%lu expected-flags=%lu flags-error=%lu error=0x%08lx\n",
+      type, check, (unsigned long)status, used, (unsigned long)sizeof(info), access, info.granted,
+      info.attributes, flags_queried, actual_flags, flags, flags_error, error); fflush(stderr);
+  }
+  return error;
 }
 static DWORD ao_topology(const wchar_t *prefix, const wchar_t *phase, const AO_FRAME *frame, ULONGLONG tick_deadline) {
   wchar_t request[4300], release[4300];
@@ -247,7 +263,14 @@ static DWORD anchor_overlap_assign(PROCESS_INFORMATION *root, HANDLE target_job,
     }
     acquired++; duplicated_at[i] = ownership_wall_ms();
     error = ao_access(passed[i], access, HANDLE_FLAG_INHERIT, i ? L"Directory" : L"Process");
-    if (!error && compare(passed[i], i ? *anchor : root->hProcess)) error = ERROR_INVALID_DATA;
+    if (!error) {
+      NTSTATUS compared = compare(passed[i], i ? *anchor : root->hProcess);
+      if (compared) {
+        error = ERROR_INVALID_DATA;
+        fwprintf(stderr, L"anchor-handle-compare type=%ls status=0x%08lx error=%lu\n",
+          i ? L"Directory" : L"Process", (unsigned long)compared, error); fflush(stderr);
+      }
+    }
     if (error) goto end;
   }
   swprintf(process_text, 32, L"%llu", (unsigned long long)(uintptr_t)passed[0]);

@@ -1022,7 +1022,34 @@ worker-owned source hashes match the compile manifest. Parent review confirms
 the final frame-archival delta and unchanged production C; current validators
 also retain the four prior timing and two twin native verdicts. SDK compilation,
 Windows execution, the five native faults, anchor-pair outcomes and runtime
-remain unverified. CAUSE_CONFIRMED=no and productionAccepted=false.
+were not established by those local checks.
+
+Run40256516989 / job121359610880 executes head625b17ea under SDK and MinGW.
+All59 manifest and11 provenance hashes match. All14 new arms stop before setter
+creation: the first process duplicate is acquired and closed, but verification
+returns13 with setter0, files0/0 and exit259. No binary frame or topology proof
+exists, and none of the10 configured fault injections is reached. Both normal
+protocols correctly reject; the pair is inconclusive, not a negative retention
+comparison. All7 original names per compiler remain present post-helper;
+the14 sibling names are absent. These abnormal failure paths provide no normal
+root result or evidence about the overlap interval.
+
+Registry references close1537/1537 SDK and1543/1543 MinGW; transfers balance
+1157/1157 and1163/1163. All64 prior fatal failure labels are preserved, with29
+additional failures per compiler from the invalid new controls. Earlier timing,
+twin, worker, held-reference and14 fault outcomes remain unchanged. Production
+still fails0/7 at NUL error5 per compiler. Independent review confirms
+INVALID_PRE_SETTER and no admissible causal comparison.
+
+The first duplicate's guard currently collapses object-query size, granted mask,
+handle flags, type or object-comparison mismatches to13. The next delta logs
+those actual values and the rejecting stage, preserving the existing strict
+mask, short-circuit query order, native calls, return values and all deadlines.
+No access normalization is accepted without a measured Windows result. Local
+recheck reports54 pass,1 native skip,0 fail and626 assertions; scoped types and
+both strict MinGW compilations pass. Independent static review confirms the
+guard remains unchanged. Native telemetry, successful setter handoff and fault
+coverage remain pending. CAUSE_CONFIRMED=no and productionAccepted=false.
 
 ## Gates still required
 
