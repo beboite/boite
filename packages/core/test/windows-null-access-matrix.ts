@@ -161,6 +161,184 @@ done:
 }
 `;
 
+const accessCheckInstrumentation = String.raw`
+/* DACL-only counterfactual on the actual suspended child's duplicated token.
+ * No token/host ACL mutation. AccessCheck is not a device open or a driver,
+ * namespace, MIC or complete SACL evaluation. Read labels separately if allowed. */
+static DWORD authz_token(HANDLE token, PSID expected_package, const wchar_t *phase) {
+  DWORD bytes = 0, container = 0, kind = 0, level = 0, error = 0;
+  TOKEN_APPCONTAINER_INFORMATION *package = NULL; TOKEN_GROUPS *caps = NULL;
+  PSID *groups = NULL, *sids = NULL; DWORD group_count = 0, sid_count = 0; LPWSTR text = NULL;
+  if (!GetTokenInformation(token, TokenType, &kind, sizeof(kind), &bytes) ||
+      !GetTokenInformation(token, TokenImpersonationLevel, &level, sizeof(level), &bytes) ||
+      !GetTokenInformation(token, TokenIsAppContainer, &container, sizeof(container), &bytes)) return GetLastError();
+  GetTokenInformation(token, TokenCapabilities, NULL, 0, &bytes); caps = calloc(1, bytes);
+  if (!caps) return ERROR_NOT_ENOUGH_MEMORY;
+  if (!GetTokenInformation(token, TokenCapabilities, caps, bytes, &bytes)) {error = GetLastError(); goto done;}
+  BOOL registry = FALSE;
+  if (container) {
+    GetTokenInformation(token, TokenAppContainerSid, NULL, 0, &bytes); package = calloc(1, bytes);
+    if (!package) {error = ERROR_NOT_ENOUGH_MEMORY; goto done;}
+    if (!GetTokenInformation(token, TokenAppContainerSid, package, bytes, &bytes)) {error = GetLastError(); goto done;}
+    if (!expected_package || !EqualSid(package->TokenAppContainer, expected_package)) {error = ERROR_INVALID_SID; goto done;}
+    if (!ConvertSidToStringSidW(package->TokenAppContainer, &text)) {error = GetLastError(); goto done;}
+    typedef BOOL (WINAPI *derive_fn)(LPCWSTR, PSID **, DWORD *, PSID **, DWORD *);
+    derive_fn derive = (derive_fn)(void *)GetProcAddress(GetModuleHandleW(L"kernelbase.dll"), "DeriveCapabilitySidsFromName");
+    if (!derive || !derive(L"registryRead", &groups, &group_count, &sids, &sid_count) || sid_count != 1) {
+      error = GetLastError(); if (!error) error = ERROR_NOT_SUPPORTED; goto done;
+    }
+    registry = caps->GroupCount == 1 && EqualSid(caps->Groups[0].Sid, sids[0]) &&
+      (caps->Groups[0].Attributes & SE_GROUP_ENABLED);
+  }
+  typedef NTSTATUS (NTAPI *query_fn)(HANDLE, PUNICODE_STRING, ULONG, PVOID, ULONG, PULONG);
+  query_fn query = (query_fn)(void *)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQuerySecurityAttributesToken");
+  wchar_t attribute_text[] = L"WIN://NOALLAPPPKG";
+  UNICODE_STRING name = {(USHORT)(wcslen(attribute_text) * 2), (USHORT)sizeof(attribute_text), attribute_text};
+  union {ULONGLONG align; BYTE data[8192];} buffer; ZeroMemory(&buffer, sizeof(buffer));
+  NTSTATUS status = query ? query(token, &name, 1, buffer.data, sizeof(buffer.data), &bytes) : (NTSTATUS)0xc0000002;
+  MATRIX_ATTRIBUTES *info = (MATRIX_ATTRIBUTES *)buffer.data;
+  BOOL lpac = status >= 0 && info->Version == 1 && info->Count == 1 && info->Attributes &&
+    info->Attributes->ValueCount == 1 && (info->Attributes->ValueType == 2 || info->Attributes->ValueType == 6) &&
+    info->Attributes->Values.Uint64 && *info->Attributes->Values.Uint64 == 1;
+  fwprintf(stderr, L"NULL_AUTHZ_TOKEN phase=%ls source=%ls type=%lu level=%lu appcontainer=%lu lpac=%d status=0x%08lx package=%ls capabilities=%lu registry-read=%d\n",
+    phase, expected_package ? L"suspended-child" : L"current-process", kind, level, container, lpac, (DWORD)status,
+    text ? text : L"none", caps->GroupCount, registry);
+  if (kind != TokenImpersonation || level != SecurityIdentification ||
+      (expected_package ? (!container || !lpac || !registry) : (container || lpac || caps->GroupCount))) error = ERROR_INVALID_DATA;
+done:
+  if (text) LocalFree(text);
+  if (package) free(package);
+  if (caps) free(caps);
+  for (DWORD i = 0; i < group_count; i++) LocalFree(groups[i]);
+  if (groups) LocalFree(groups);
+  for (DWORD i = 0; i < sid_count; i++) LocalFree(sids[i]);
+  if (sids) LocalFree(sids);
+  return error;
+}
+
+static DWORD authz_checks(HANDLE child_token, PSID app) {
+  HANDLE device = NULL, host = NULL, tokens[2] = {NULL, NULL}; DWORD error = 0, bytes = 0, cleanup = 0;
+  PSECURITY_DESCRIPTOR original = NULL, label = NULL; PACL dacl = NULL, changed = NULL;
+  BYTE *original_copy = NULL; DWORD original_size = 0;
+  BOOL present = FALSE, defaulted = FALSE; PSID owner = NULL, group = NULL; LPWSTR app_text = NULL;
+  matrix_create_fn create = (matrix_create_fn)(void *)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtCreateFile");
+  matrix_query_object_fn query = (matrix_query_object_fn)(void *)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryObject");
+  if (!create || !query) {error = ERROR_PROC_NOT_FOUND; goto done;}
+  wchar_t object_text[] = L"\\Device\\Null";
+  UNICODE_STRING name = {(USHORT)(wcslen(object_text) * 2), (USHORT)sizeof(object_text), object_text};
+  OBJECT_ATTRIBUTES attributes; ZeroMemory(&attributes, sizeof(attributes));
+  attributes.Length = sizeof(attributes); attributes.ObjectName = &name; attributes.Attributes = 0x40;
+  IO_STATUS_BLOCK io; ZeroMemory(&io, sizeof(io));
+  NTSTATUS status = create(&device, READ_CONTROL | SYNCHRONIZE | FILE_READ_ATTRIBUTES, &attributes, &io,
+    NULL, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, 1, 0x60, NULL, 0);
+  if (status < 0 || !device || device == INVALID_HANDLE_VALUE) {error = ERROR_ACCESS_DENIED; device = NULL; goto done;}
+  union {ULONGLONG align; BYTE data[2048];} object_name; ZeroMemory(&object_name, sizeof(object_name));
+  NTSTATUS name_status = query(device, 1 /* ObjectNameInformation */, object_name.data, sizeof(object_name.data), &bytes);
+  UNICODE_STRING *actual = (UNICODE_STRING *)object_name.data;
+  if (name_status < 0 || !actual->Buffer || actual->Length != name.Length ||
+      wcsncmp(actual->Buffer, object_text, name.Length / sizeof(wchar_t))) {error = ERROR_INVALID_NAME; goto done;}
+  if (GetFileType(device) != FILE_TYPE_CHAR) {error = ERROR_INVALID_DATA; goto done;}
+  error = GetSecurityInfo(device, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+    &owner, &group, &dacl, NULL, &original);
+  if (error) goto done;
+  if (!owner || !group || !GetSecurityDescriptorDacl(original, &present, &dacl, &defaulted) || !present || !dacl) {
+    error = ERROR_INVALID_SECURITY_DESCR; goto done;
+  }
+  original_size = GetSecurityDescriptorLength(original); original_copy = malloc(original_size);
+  if (!original_copy) {error = ERROR_NOT_ENOUGH_MEMORY; goto done;}
+  memcpy(original_copy, original, original_size);
+  fwprintf(stderr, L"NULL_AUTHZ_OBJECT name=DeviceNull verified=1 type=2 desired=0x00120080 options=0x00000060 status=0x%08lx security=0x00000007 owner=1 group=1 dacl-present=1 dacl-null=0 ace-count=%u\n", (DWORD)status, dacl->AceCount);
+  for (DWORD i = 0; i < dacl->AceCount; i++) {
+    void *entry = NULL; if (!GetAce(dacl, i, &entry)) {error = GetLastError(); goto done;}
+    ACE_HEADER *header = entry; LPWSTR sid = NULL; DWORD mask = 0;
+    BOOL simple = header->AceType == ACCESS_ALLOWED_ACE_TYPE || header->AceType == ACCESS_DENIED_ACE_TYPE;
+    if (simple) {
+      ACCESS_ALLOWED_ACE *ace = entry; mask = ace->Mask;
+      if (!ConvertSidToStringSidW(&ace->SidStart, &sid)) {error = GetLastError(); goto done;}
+    }
+    BOOL visible = sid && (!wcscmp(sid, L"S-1-1-0") || !wcscmp(sid, L"S-1-5-12") ||
+      !wcscmp(sid, L"S-1-5-18") || !wcscmp(sid, L"S-1-5-32-544") ||
+      !wcsncmp(sid, L"S-1-15-2-", 9) || !wcsncmp(sid, L"S-1-15-3-", 9));
+    fwprintf(stderr, L"NULL_AUTHZ_ACE index=%lu type=%u flags=0x%08lx mask=0x%08lx sid=%ls\n",
+      i, header->AceType, (DWORD)header->AceFlags, mask, simple ? (visible ? sid : L"redacted") : L"unparsed");
+    if (sid) LocalFree(sid);
+  }
+  DWORD label_error = GetSecurityInfo(device, SE_FILE_OBJECT, LABEL_SECURITY_INFORMATION, NULL, NULL, NULL, NULL, &label);
+  PACL sacl = NULL; BOOL label_present = FALSE, label_defaulted = FALSE; DWORD label_count = 0;
+  if (!label_error && !GetSecurityDescriptorSacl(label, &label_present, &sacl, &label_defaulted)) label_error = GetLastError();
+  if (!label_error && label_present && sacl) for (DWORD i = 0; i < sacl->AceCount; i++) {
+    void *entry = NULL; if (!GetAce(sacl, i, &entry)) {label_error = GetLastError(); break;}
+    ACE_HEADER *header = entry;
+    if (header->AceType == SYSTEM_MANDATORY_LABEL_ACE_TYPE) {
+      SYSTEM_MANDATORY_LABEL_ACE *ace = entry; PSID sid = &ace->SidStart;
+      DWORD count = *GetSidSubAuthorityCount(sid);
+      if (!count) {label_error = ERROR_INVALID_SID; break;}
+      fwprintf(stderr, L"NULL_AUTHZ_MANDATORY index=%lu rid=%lu policy=0x%08lx flags=0x%08lx\n",
+        label_count++, *GetSidSubAuthority(sid, count - 1), ace->Mask, (DWORD)header->AceFlags);
+    }
+  }
+  fwprintf(stderr, L"NULL_AUTHZ_LABEL error=%lu present=%d count=%lu scope=label-only full-sacl=0 driver=0\n", label_error, label_present, label_count);
+  DWORD extra = (DWORD)sizeof(ACCESS_ALLOWED_ACE) - sizeof(DWORD) + GetLengthSid(app);
+  DWORD size = (DWORD)dacl->AclSize + extra;
+  if (size > 65535) {error = ERROR_ALLOTTED_SPACE_EXCEEDED; goto done;}
+  changed = calloc(1, size); if (!changed) {error = ERROR_NOT_ENOUGH_MEMORY; goto done;}
+  if (!InitializeAcl(changed, size, dacl->AclRevision)) {error = GetLastError(); goto done;}
+  BOOL added = FALSE;
+  /* Insert the one explicit allow before inherited ACEs; preserve every old ACE. */
+  for (DWORD i = 0; i < dacl->AceCount; i++) {
+    void *entry = NULL; if (!GetAce(dacl, i, &entry)) {error = GetLastError(); goto done;}
+    ACE_HEADER *header = entry;
+    if (!added && (header->AceFlags & INHERITED_ACE)) {
+      if (!AddAccessAllowedAceEx(changed, dacl->AclRevision, 0, FILE_GENERIC_READ | FILE_GENERIC_WRITE, app)) {error = GetLastError(); goto done;}
+      added = TRUE;
+    }
+    if (!AddAce(changed, dacl->AclRevision, MAXDWORD, entry, header->AceSize)) {error = GetLastError(); goto done;}
+  }
+  if (!added && !AddAccessAllowedAceEx(changed, dacl->AclRevision, 0, FILE_GENERIC_READ | FILE_GENERIC_WRITE, app)) {error = GetLastError(); goto done;}
+  if (!ConvertSidToStringSidW(app, &app_text)) {error = GetLastError(); goto done;}
+  SECURITY_DESCRIPTOR descriptors[2];
+  for (int v = 0; v < 2; v++) if (!InitializeSecurityDescriptor(&descriptors[v], SECURITY_DESCRIPTOR_REVISION) ||
+      !SetSecurityDescriptorOwner(&descriptors[v], owner, FALSE) || !SetSecurityDescriptorGroup(&descriptors[v], group, FALSE) ||
+      !SetSecurityDescriptorDacl(&descriptors[v], TRUE, v ? changed : dacl, defaulted)) {error = GetLastError(); goto done;}
+  if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE, &host) ||
+      !DuplicateTokenEx(host, TOKEN_QUERY, NULL, SecurityIdentification, TokenImpersonation, &tokens[0]) ||
+      !DuplicateTokenEx(child_token, TOKEN_QUERY, NULL, SecurityIdentification, TokenImpersonation, &tokens[1])) {error = GetLastError(); goto done;}
+  for (int p = 0; p < 2; p++) {
+    const wchar_t *phase = p ? L"lpac" : L"host";
+    error = authz_token(tokens[p], p ? app : NULL, phase); if (error) goto done;
+    const DWORD rights[] = {GENERIC_READ, GENERIC_WRITE, GENERIC_READ | GENERIC_WRITE};
+    const wchar_t *modes[] = {L"read", L"write", L"readwrite"};
+    for (int v = 0; v < 2; v++) for (int m = 0; m < 3; m++) {
+      GENERIC_MAPPING mapping = {FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_GENERIC_EXECUTE, FILE_ALL_ACCESS};
+      DWORD mapped = rights[m], granted = 0; BOOL allowed = FALSE;
+      union {ULONGLONG align; BYTE data[1024];} privileges; ZeroMemory(&privileges, sizeof(privileges));
+      DWORD length = sizeof(privileges); MapGenericMask(&mapped, &mapping);
+      SetLastError(0);
+      BOOL api = AccessCheck(&descriptors[v], tokens[p], mapped, &mapping, (PRIVILEGE_SET *)privileges.data, &length, &granted, &allowed);
+      DWORD check_error = api && allowed ? ERROR_SUCCESS : GetLastError();
+      fwprintf(stderr, L"NULL_AUTHZ_CHECK phase=%ls variant=%ls access=%ls requested=0x%08lx mapped=0x%08lx api=%d error=%lu allowed=%d granted=0x%08lx privileges=%lu\n",
+        phase, v ? L"package" : L"original", modes[m], rights[m], mapped, api, check_error, allowed, granted, ((PRIVILEGE_SET *)privileges.data)->PrivilegeCount);
+      if (!api) {error = check_error ? check_error : ERROR_INVALID_DATA; goto done;}
+    }
+  }
+  BOOL unchanged = !memcmp(original_copy, original, original_size);
+  fwprintf(stderr, L"NULL_AUTHZ_VARIANT name=package added=%u sid=%ls mask=0x0012019f inherited=0 original-unchanged=%d\n",
+    changed->AceCount - dacl->AceCount, app_text, unchanged);
+  if (!unchanged) error = ERROR_INVALID_DATA;
+done:
+  for (int i = 0; i < 2; i++) if (tokens[i] && !CloseHandle(tokens[i]) && !cleanup) cleanup = GetLastError();
+  if (host && !CloseHandle(host) && !cleanup) cleanup = GetLastError();
+  if (device && !CloseHandle(device) && !cleanup) cleanup = GetLastError();
+  if (original) LocalFree(original);
+  if (original_copy) free(original_copy);
+  if (label) LocalFree(label);
+  if (changed) free(changed);
+  if (app_text) LocalFree(app_text);
+  fwprintf(stderr, L"NULL_AUTHZ_CLEANUP error=%lu\n", cleanup); fflush(stderr);
+  return error ? error : cleanup;
+}
+`;
+
 function once(source: string, before: string, after: string): string {
   if (source.split(before).length !== 2) throw new Error(`matrix substitution must match once: ${before}`);
   return source.replace(before, after);
@@ -168,11 +346,66 @@ function once(source: string, before: string, after: string): string {
 
 export function matrixSource(source: string): string {
   if (hash(source) !== sourceHash) throw new Error('protected-tool.c changed: review experiment provenance before running');
-  source = once(source, 'static int probe(const wchar_t *path) {', `${instrumentation}\nstatic int probe(const wchar_t *path) {`);
+  source = once(source, 'static int launch(int count, wchar_t **args) {', `${instrumentation}\n${accessCheckInstrumentation}\nstatic int launch(int count, wchar_t **args) {`);
+  source = once(source, 'TOKEN_QUERY | TOKEN_ADJUST_DEFAULT, &child_token', 'TOKEN_QUERY | TOKEN_ADJUST_DEFAULT | TOKEN_DUPLICATE, &child_token');
+  source = once(source, '  DWORD token_error = checked ? 0 : GetLastError();',
+    '  if (checked && is_container) {\n    stage = L"launch.authz-experiment";\n    DWORD authz_error = authz_checks(child_token, app);\n    if (authz_error) {checked = FALSE; SetLastError(authz_error);}\n  }\n  DWORD token_error = checked ? 0 : GetLastError();');
   source = once(source, '  /* Native child runtimes open NUL',
     '  fputws(L"NULL_AMBIENT denied=1\\n", stderr);\n  DWORD matrix_error = null_matrix(L"lpac");\n  if (matrix_error) return failure(L"probe.matrix", matrix_error);\n  /* Native child runtimes open NUL');
   return once(source, '  else if (count == 2 && !wcscmp(args[1], L"--diagnose-null"))',
     '  else if (count == 2 && !wcscmp(args[1], L"--matrix-host")) {DWORD error = null_matrix(L"host"); result = error ? failure(L"matrix.host", error) : 0;}\n  else if (count == 2 && !wcscmp(args[1], L"--diagnose-null"))');
+}
+
+export function completeAccessChecks(text: string): boolean {
+  if (!completeMatrix(text, 'lpac')) return false;
+  const lines = text.split(/\r?\n/).filter(line => line.startsWith('NULL_AUTHZ_'));
+  const rows: Record<string, string>[] = [];
+  for (const line of lines) {
+    const [tag, ...fields] = line.split(' '), entries = fields.map(field => field.split('='));
+    if (entries.some(entry => entry.length !== 2 || !entry[0] || !entry[1] || entry[0] === 'tag')
+      || new Set(entries.map(entry => entry[0])).size !== entries.length) return false;
+    rows.push({tag: tag!, ...Object.fromEntries(entries)});
+  }
+  const records = (tag: string) => rows.filter(row => row.tag === `NULL_AUTHZ_${tag}`);
+  const hex = (value: string | undefined): value is string => !!value && /^0x[0-9a-f]{8}$/.test(value);
+  const decimal = (value: string | undefined): number => value && /^(?:0|[1-9]\d*)$/.test(value) ? Number(value) : NaN;
+  const safeSid = /^(?:redacted|S-1-1-0|S-1-5-12|S-1-5-18|S-1-5-32-544|S-1-15-[23]-\d+(?:-\d+)*)$/;
+  const [object] = records('OBJECT'), [variant] = records('VARIANT'), [label] = records('LABEL'), [cleanup] = records('CLEANUP');
+  if (['OBJECT', 'VARIANT', 'LABEL', 'CLEANUP'].some(tag => records(tag).length !== 1) || !object || !variant || !label || !cleanup) return false;
+  if (object.name !== 'DeviceNull' || object.verified !== '1' || object.type !== '2' || object.desired !== '0x00120080'
+    || object.options !== '0x00000060' || object.status !== '0x00000000' || object.security !== '0x00000007'
+    || object.owner !== '1' || object.group !== '1' || object['dacl-present'] !== '1' || object['dacl-null'] !== '0' || cleanup.error !== '0') return false;
+  const aces = records('ACE'), count = decimal(object['ace-count']);
+  if (!Number.isSafeInteger(count) || aces.length !== count || new Set(aces.map(row => row.index)).size !== count
+    || aces.some(row => !Number.isSafeInteger(decimal(row.index)) || decimal(row.index) >= count
+      || !Number.isSafeInteger(decimal(row.type)) || decimal(row.type) > 255 || !hex(row.flags) || !hex(row.mask)
+      || ([0, 1].includes(decimal(row.type)) ? !safeSid.test(row.sid ?? '') : row.sid !== 'unparsed'))) return false;
+  if (!Number.isSafeInteger(decimal(label.error)) || !['0', '1'].includes(label.present ?? '') || label.scope !== 'label-only'
+    || label['full-sacl'] !== '0' || label.driver !== '0') return false;
+  const mandatory = records('MANDATORY'), labels = decimal(label.count);
+  if (!Number.isSafeInteger(labels) || mandatory.length !== labels || new Set(mandatory.map(row => row.index)).size !== labels
+    || (labels > 0 && label.present !== '1') || mandatory.some(row => !Number.isSafeInteger(decimal(row.index)) || decimal(row.index) >= labels
+      || !Number.isSafeInteger(decimal(row.rid)) || !hex(row.policy) || !hex(row.flags))) return false;
+  const captureToken = text.split(/\r?\n/).find(line => line.startsWith('NULL_TOKEN phase=lpac '))!;
+  const packageSid = Object.fromEntries(captureToken.split(' ').slice(1).map(field => field.split('='))).package;
+  if (variant.name !== 'package' || variant.added !== '1' || variant.sid !== packageSid || variant.mask !== '0x0012019f'
+    || variant.inherited !== '0' || variant['original-unchanged'] !== '1') return false;
+  const tokens = records('TOKEN');
+  if (tokens.length !== 2 || new Set(tokens.map(row => row.phase)).size !== 2 || tokens.some(row => row.type !== '2' || row.level !== '1'
+    || (row.phase === 'host' ? row.source !== 'current-process' || row.appcontainer !== '0' || row.lpac !== '0' || !hex(row.status)
+      || row.package !== 'none' || row.capabilities !== '0' || row['registry-read'] !== '0'
+      : row.phase !== 'lpac' || row.source !== 'suspended-child' || row.appcontainer !== '1' || row.lpac !== '1' || row.status !== '0x00000000'
+        || row.package !== packageSid || row.capabilities !== '1' || row['registry-read'] !== '1'))) return false;
+  const checks = records('CHECK'), rights: Record<string, [string, string]> = {
+    read: ['0x80000000', '0x00120089'], write: ['0x40000000', '0x00120116'], readwrite: ['0xc0000000', '0x0012019f'],
+  };
+  if (checks.length !== 12 || new Set(checks.map(row => `${row.phase}:${row.variant}:${row.access}`)).size !== 12
+    || checks.some(row => !['host', 'lpac'].includes(row.phase ?? '') || !['original', 'package'].includes(row.variant ?? '')
+      || !rights[row.access ?? ''] || row.requested !== rights[row.access!]![0] || row.mapped !== rights[row.access!]![1]
+      || row.api !== '1' || row.privileges !== '0' || !['0', '1'].includes(row.allowed ?? '')
+      || (row.allowed === '1' ? row.error !== '0' || row.granted !== row.mapped : row.error !== '5' || row.granted !== '0x00000000')
+      || (row.phase === 'host' && row.allowed !== '1'))) return false;
+  return rows.every(row => ['OBJECT', 'ACE', 'LABEL', 'MANDATORY', 'VARIANT', 'TOKEN', 'CHECK', 'CLEANUP'].some(tag => row.tag === `NULL_AUTHZ_${tag}`));
 }
 
 export function completeMatrix(text: string, phase: 'host' | 'lpac'): boolean {
@@ -279,7 +512,7 @@ if (import.meta.main) {
           catch (refusal) {if (!String(refusal).includes('revoked')) throw refusal; entry.refusedLaunch = String(refusal);}
         }
         const probe = calls.find(call => (call.args as string[]).includes('--probe'));
-        if (!probe || !completeMatrix(String(probe.stderr), 'lpac') || !String(probe.stderr).includes('NULL_AMBIENT denied=1')) throw new Error('LPAC matrix or original ambient refusal incomplete');
+        if (!probe || !completeAccessChecks(String(probe.stderr)) || !String(probe.stderr).includes('NULL_AMBIENT denied=1')) throw new Error('LPAC matrix, DACL experiment or original ambient refusal incomplete');
         const originalSucceeded = probe.code === 0 && probe.stdout === 'boite-windows-protected 1';
         const originalNulDenied = probe.code === 125 && String(probe.stderr).includes('execution.windows.probe.null-device: native call failed (5)');
         if (!originalSucceeded && !originalNulDenied) throw new Error('original production probe ended unexpectedly');

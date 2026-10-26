@@ -1,5 +1,5 @@
 import {expect, test} from 'bun:test';
-import {completeMatrix} from './windows-null-access-matrix.ts';
+import {completeAccessChecks, completeMatrix} from './windows-null-access-matrix.ts';
 
 function matrix(phase: 'host' | 'lpac', readOnly = false): string {
   const token = phase === 'host'
@@ -138,5 +138,72 @@ test('all fifteen other native host observations still require successful opens'
       .replace(/ granted=0x[0-9a-f]{8} /, ' granted=0x00000000 ').replace('grant-status=0x00000000', 'grant-status=na')
       .replace(/ mode=0x[0-9a-f]{8} /, ' mode=0x00000000 ').replace('mode-status=0x00000000', 'mode-status=na').replace(' type=2 ', ' type=0 ');
     expect(completeMatrix(hostZeroAccessCapture.replace(row, refused), 'host')).toBe(false);
+  }
+});
+
+function accessChecks(originalAllowed = false, packageAllowed = true): string {
+  const lines = [matrix('lpac'),
+    'NULL_AUTHZ_OBJECT name=DeviceNull verified=1 type=2 desired=0x00120080 options=0x00000060 status=0x00000000 security=0x00000007 owner=1 group=1 dacl-present=1 dacl-null=0 ace-count=1',
+    'NULL_AUTHZ_ACE index=0 type=0 flags=0x00000000 mask=0x001201bf sid=S-1-1-0',
+    'NULL_AUTHZ_LABEL error=0 present=0 count=0 scope=label-only full-sacl=0 driver=0',
+    'NULL_AUTHZ_VARIANT name=package added=1 sid=S-1-15-2-123 mask=0x0012019f inherited=0 original-unchanged=1',
+    'NULL_AUTHZ_TOKEN phase=host source=current-process type=2 level=1 appcontainer=0 lpac=0 status=0xc0000225 package=none capabilities=0 registry-read=0',
+    'NULL_AUTHZ_TOKEN phase=lpac source=suspended-child type=2 level=1 appcontainer=1 lpac=1 status=0x00000000 package=S-1-15-2-123 capabilities=1 registry-read=1'];
+  for (const phase of ['host', 'lpac']) for (const variant of ['original', 'package']) {
+    for (const [access, requested, mapped] of [['read', '0x80000000', '0x00120089'], ['write', '0x40000000', '0x00120116'], ['readwrite', '0xc0000000', '0x0012019f']]) {
+      const allowed = phase === 'host' || (variant === 'original' ? originalAllowed : packageAllowed);
+      lines.push(`NULL_AUTHZ_CHECK phase=${phase} variant=${variant} access=${access} requested=${requested} mapped=${mapped} api=1 error=${allowed ? 0 : 5} allowed=${allowed ? 1 : 0} granted=${allowed ? mapped : '0x00000000'} privileges=0`);
+    }
+  }
+  lines.push('NULL_AUTHZ_CLEANUP error=0');
+  return lines.join('\n') + '\n';
+}
+
+test('an open matrix alone cannot claim the new DACL experiment is complete', () => {
+  expect(completeMatrix(matrix('lpac'), 'lpac')).toBe(true);
+  expect(completeAccessChecks(matrix('lpac'))).toBe(false);
+});
+
+test('DACL collection accepts either LPAC verdict without treating a memory grant as an open', () => {
+  for (const original of [false, true]) for (const packageGrant of [false, true]) {
+    expect(completeAccessChecks(accessChecks(original, packageGrant))).toBe(true);
+  }
+  expect(completeAccessChecks(accessChecks().replaceAll('\n', '\r\n'))).toBe(true);
+});
+
+test('optional label reads remain separate from DACL verdicts and retain every returned label', () => {
+  const text = accessChecks();
+  expect(completeAccessChecks(text.replace('NULL_AUTHZ_LABEL error=0', 'NULL_AUTHZ_LABEL error=5'))).toBe(true);
+  const label = 'NULL_AUTHZ_MANDATORY index=0 rid=4096 policy=0x00000001 flags=0x00000000\n';
+  const captured = text.replace('present=0 count=0 scope=label-only', 'present=1 count=1 scope=label-only') + label;
+  expect(completeAccessChecks(captured)).toBe(true);
+  expect(completeAccessChecks(captured.replace(label, ''))).toBe(false);
+  expect(completeAccessChecks(captured + label)).toBe(false);
+  expect(completeAccessChecks(captured.replace('rid=4096', 'rid=unknown'))).toBe(false);
+  expect(completeAccessChecks(captured.replace('full-sacl=0', 'full-sacl=1'))).toBe(false);
+});
+
+test('DACL observations require the real duplicated LPAC identity, mapped rights and API success', () => {
+  const text = accessChecks();
+  for (const [before, after] of [
+    ['owner=1', 'owner=0'], ['group=1', 'group=0'], ['security=0x00000007', 'security=0x00000004'],
+    ['verified=1', 'verified=0'], ['source=suspended-child', 'source=synthetic-token'],
+    ['type=2 level=1 appcontainer=1', 'type=1 level=1 appcontainer=1'], ['lpac=1', 'lpac=0'],
+    ['status=0x00000000 package=', 'status=0xc0000022 package='], ['level=1 appcontainer=1', 'level=0 appcontainer=1'],
+    ['capabilities=1 registry-read=1\nNULL_AUTHZ_CHECK', 'capabilities=2 registry-read=1\nNULL_AUTHZ_CHECK'],
+    ['sid=S-1-15-2-123 mask=', 'sid=S-1-15-2-456 mask='], ['added=1', 'added=2'],
+    ['original-unchanged=1', 'original-unchanged=0'], ['mask=0x0012019f inherited=0', 'mask=0x001f01ff inherited=0'],
+    ['mapped=0x00120089', 'mapped=0x80000000'], ['api=1', 'api=0'], ['privileges=0', 'privileges=1'],
+    ['allowed=0 granted=0x00000000', 'allowed=0 granted=0x00120089'],
+    ['NULL_AUTHZ_CLEANUP error=0', 'NULL_AUTHZ_CLEANUP error=6'],
+    ['sid=S-1-1-0', 'sid=S-1-5-21-123-456-789-1001'],
+    ['api=1', 'api=1 api=1'], ['api=1', 'api=1 tag=NULL_AUTHZ_CHECK'],
+    ['api=1 error=0 allowed=1', 'api=1 error=5 allowed=1'], ['api=1 error=5 allowed=0', 'api=1 error=0 allowed=0'],
+  ]) expect(completeAccessChecks(text.replace(before!, after!)), `${before} -> ${after}`).toBe(false);
+  const rows = text.trimEnd().split('\n');
+  for (const tag of ['NULL_AUTHZ_OBJECT', 'NULL_AUTHZ_ACE', 'NULL_AUTHZ_LABEL', 'NULL_AUTHZ_VARIANT', 'NULL_AUTHZ_TOKEN', 'NULL_AUTHZ_CHECK', 'NULL_AUTHZ_CLEANUP']) {
+    const row = rows.find(line => line.startsWith(tag + ' '))!;
+    expect(completeAccessChecks(rows.filter(line => line !== row).join('\n')), `missing ${tag}`).toBe(false);
+    expect(completeAccessChecks(text + row + '\n'), `duplicate ${tag}`).toBe(false);
   }
 });

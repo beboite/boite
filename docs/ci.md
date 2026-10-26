@@ -267,6 +267,10 @@ opt-in comparison of host and LPAC NUL opens with four requested access masks.
 It derives a pinned copy of the production helper and preserves the original
 admission probe. Its non-blocking result reports experiment completeness;
 the native production suites still decide acceptance.
+It also compares the captured Null descriptor with duplicated host and LPAC
+tokens using AccessCheck; an added package ACE exists only in memory.
+These DACL verdicts do not demonstrate a device open or cover the full SACL
+and driver checks.
 
 A skip passes in a ruleset, so a draft must not satisfy it:
 
