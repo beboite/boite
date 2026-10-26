@@ -271,6 +271,10 @@ It also compares the captured Null descriptor with duplicated host and LPAC
 tokens using AccessCheck; an added package ACE exists only in memory.
 These DACL verdicts do not demonstrate a device open or cover the full SACL
 and driver checks.
+The same capture tests a named suffix under the real Null device, using NT and
+Win32 opens in both host and LPAC phases. It records device characteristics and
+checks EOF and discarded writes on successful Null opens. A complete refusal
+is diagnostic evidence; it does not admit a tool or replace the original probe.
 
 The separate `windows-lpac-parent-spike` artifact records a process-broker
 prerequisite under SDK and MinGW. An opt-in fixture tests host-created children

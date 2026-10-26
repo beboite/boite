@@ -1,5 +1,5 @@
 import {expect, test} from 'bun:test';
-import {completeAccessChecks, completeMatrix} from './windows-null-access-matrix.ts';
+import {completeAccessChecks, completeMatrix, completeSuffix} from './windows-null-access-matrix.ts';
 
 function matrix(phase: 'host' | 'lpac', readOnly = false): string {
   const token = phase === 'host'
@@ -22,6 +22,59 @@ function matrix(phase: 'host' | 'lpac', readOnly = false): string {
   }
   return lines.join('\n') + '\n';
 }
+
+function suffixCapture(phase: 'host' | 'lpac', suffixOpened = false): string {
+  const hex = (value: number) => `0x${(value >>> 0).toString(16).padStart(8, '0')}`;
+  const lines = [matrix(phase), `NULL_SUFFIX_BEGIN phase=${phase} suffix=boite-null-123-456`];
+  for (const path of ['native-sync', 'globalroot']) for (const target of ['bare', 'suffix']) {
+    for (const [access, right] of [['read', 0x80000000], ['write', 0x40000000], ['readwrite', 0xc0000000]] as const) {
+      const native = path === 'native-sync', opened = target === 'bare' ? phase === 'host' : suffixOpened;
+      const read = opened && access !== 'write', write = opened && access !== 'read';
+      lines.push(`NULL_SUFFIX phase=${phase} path=${path} target=${target} access=${access} desired=${hex(right | (native ? 0x100080 : 0))} options=${native ? '0x00000060' : 'na'} opened=${opened ? 1 : 0} error=${native ? 'na' : opened ? '0' : '5'} status=${native ? opened ? '0x00000000' : '0xc0000022' : 'na'} type=${opened ? 2 : 0} type-error=0 query-status=${opened ? '0x00000000' : 'na'} query-bytes=${opened ? 8 : 0} device-type=${hex(opened ? 0x15 : 0)} characteristics=${hex(0)} secure-open=${opened ? 0 : 'na'} reads=${read ? 2 : 0} eof=${read ? 2 : 0} read-bytes=0 read-error=0 writes=${write ? 2 : 0} written=${write ? 8192 : 0} write-error=0 close-error=0`);
+    }
+  }
+  lines.push(`NULL_SUFFIX_END phase=${phase} error=0`);
+  return lines.join('\n') + '\n';
+}
+
+test('suffix collection distinguishes a complete negative experiment from a successful real Null open', () => {
+  for (const phase of ['host', 'lpac'] as const) for (const opened of [false, true]) {
+    expect(completeSuffix(suffixCapture(phase, opened), phase)).toBe(true);
+  }
+  expect(completeSuffix(suffixCapture('lpac', true).replaceAll('\n', '\r\n'), 'lpac')).toBe(true);
+  expect(completeSuffix(matrix('lpac'), 'lpac')).toBe(false);
+});
+
+test('suffix collection rejects partial, duplicate and contradictory observations', () => {
+  const text = suffixCapture('lpac', true), rows = text.trimEnd().split('\n');
+  const protocol = text.slice(text.indexOf('NULL_SUFFIX_BEGIN'));
+  for (const tag of ['NULL_SUFFIX_BEGIN', 'NULL_SUFFIX', 'NULL_SUFFIX_END']) {
+    const row = rows.find(line => line.startsWith(tag + ' '))!;
+    expect(completeSuffix(rows.filter(line => line !== row).join('\n'), 'lpac')).toBe(false);
+    expect(completeSuffix(text + row + '\n', 'lpac')).toBe(false);
+  }
+  for (const [before, after] of [
+    ['suffix=boite-null-123-456', 'suffix=../host'],
+    ['target=bare access=read', 'target=unexpected access=read'],
+    ['desired=0x80100080', 'desired=0x80000000'], ['options=0x00000060', 'options=0x00000040'],
+    ['opened=0 error=na status=0xc0000022', 'opened=0 error=na status=0x00000000'],
+    ['query-status=0x00000000', 'query-status=0xc0000002'], ['device-type=0x00000015', 'device-type=0x00000007'],
+    ['query-bytes=8', 'query-bytes=0'],
+    ['type=2 type-error=0', 'type=1 type-error=0'], ['secure-open=0 reads=', 'secure-open=1 reads='],
+    ['reads=2 eof=2', 'reads=2 eof=1'], ['read-bytes=0 read-error=0 writes=2', 'read-bytes=1 read-error=0 writes=2'],
+    ['written=8192', 'written=4096'], ['write-error=0 close-error=0', 'write-error=5 close-error=0'],
+    ['close-error=0', 'close-error=6'], ['NULL_SUFFIX_END phase=lpac error=0', 'NULL_SUFFIX_END phase=lpac error=13'],
+    ['target=bare', 'target=bare target=bare'],
+  ]) expect(completeSuffix(matrix('lpac') + protocol.replace(before!, after!), 'lpac'), `${before} -> ${after}`).toBe(false);
+  expect(completeSuffix(text.replace('appcontainer=1', 'appcontainer=0'), 'lpac')).toBe(false);
+});
+
+test('a secure-open device or namespace rejection is a measured negative, never missing evidence', () => {
+  const text = suffixCapture('host');
+  const secure = text.replaceAll('characteristics=0x00000000 secure-open=0', 'characteristics=0x00000100 secure-open=1');
+  expect(completeSuffix(secure, 'host')).toBe(true);
+  expect(completeSuffix(text.replaceAll('status=0xc0000022', 'status=0xc0000033').replaceAll('opened=0 error=5 status=na', 'opened=0 error=123 status=na'), 'host')).toBe(true);
+});
 
 test('complete native captures allow both all-denied and read-only LPAC outcomes', () => {
   expect(completeMatrix(matrix('host'), 'host')).toBe(true);

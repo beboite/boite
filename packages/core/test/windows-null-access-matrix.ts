@@ -80,6 +80,91 @@ static DWORD matrix_open(const wchar_t *phase, const wchar_t *path, const wchar_
   return type_error ? type_error : close_error;
 }
 
+/* A namespace open can have different driver security from the bare device.
+ * No alias/map, token, ACL, inherited handle or production probe is changed. */
+static DWORD suffix_open(const wchar_t *phase, const wchar_t *path, const wchar_t *target,
+    const wchar_t *suffix, const wchar_t *mode, ACCESS_MASK rights,
+    matrix_create_fn create, matrix_query_file_fn query_volume) {
+  BOOL native = !wcscmp(path, L"native-sync");
+  ACCESS_MASK desired = rights | (native ? SYNCHRONIZE | FILE_READ_ATTRIBUTES : 0);
+  wchar_t object_text[160], status_text[16] = L"na", error_text[16] = L"na";
+  wchar_t query_text[16] = L"na", secure_text[4] = L"na";
+  BOOL named = !wcscmp(target, L"suffix");
+  swprintf(object_text, 160, L"%ls%ls%ls", native ? L"\\Device\\Null" : L"\\\\?\\GLOBALROOT\\Device\\Null",
+    named ? L"\\" : L"", named ? suffix : L"");
+  HANDLE file = NULL; NTSTATUS status = (NTSTATUS)0xc0000002;
+  DWORD open_error = 0, error = 0, type = 0, type_error = 0, close_error = 0;
+  ULONG_PTR query_bytes = 0;
+  DWORD reads = 0, eof = 0, read_bytes = 0, read_error = 0, writes = 0, written = 0, write_error = 0;
+  struct {ULONG DeviceType, Characteristics;} device; ZeroMemory(&device, sizeof(device));
+  if (native) {
+    UNICODE_STRING name = {(USHORT)(wcslen(object_text) * 2), (USHORT)sizeof(object_text), object_text};
+    OBJECT_ATTRIBUTES attributes; ZeroMemory(&attributes, sizeof(attributes));
+    attributes.Length = sizeof(attributes); attributes.ObjectName = &name; attributes.Attributes = 0x40;
+    IO_STATUS_BLOCK io; ZeroMemory(&io, sizeof(io));
+    status = create(&file, desired, &attributes, &io, NULL, 0, FILE_SHARE_READ | FILE_SHARE_WRITE,
+      1 /* FILE_OPEN */, 0x60 /* NON_DIRECTORY | SYNCHRONOUS_NONALERT */, NULL, 0);
+    swprintf(status_text, 16, L"0x%08lx", (DWORD)status);
+  } else {
+    file = CreateFileW(object_text, desired, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+    open_error = file == INVALID_HANDLE_VALUE ? GetLastError() : 0;
+    swprintf(error_text, 16, L"%lu", open_error);
+  }
+  BOOL opened = file && file != INVALID_HANDLE_VALUE;
+  if (opened) {
+    SetLastError(0); type = GetFileType(file); type_error = type ? 0 : GetLastError();
+    IO_STATUS_BLOCK io; ZeroMemory(&io, sizeof(io));
+    NTSTATUS queried = query_volume(file, &io, &device, sizeof(device), 4 /* FileFsDeviceInformation */);
+    query_bytes = io.Information;
+    swprintf(query_text, 16, L"0x%08lx", (DWORD)queried);
+    if (queried >= 0) swprintf(secure_text, 4, L"%d", !!(device.Characteristics & 0x100 /* FILE_DEVICE_SECURE_OPEN */));
+    /* Verify the real Null device before any data I/O. Never write a path that
+     * only happens to return a character handle or a plausible object name. */
+    if (type != FILE_TYPE_CHAR || type_error || queried != 0 || io.Information != sizeof(device) || device.DeviceType != 0x15 /* FILE_DEVICE_NULL */) {
+      error = ERROR_INVALID_DATA;
+    } else {
+      BYTE data[4096]; memset(data, 0x5a, sizeof(data));
+      for (int round = 0; round < 2; round++) {
+        if (rights & GENERIC_WRITE) {
+          DWORD used = 0; BOOL ok = WriteFile(file, data, sizeof(data), &used, NULL);
+          DWORD observed = ok ? 0 : GetLastError(); writes++; written += used;
+          if (!write_error && observed) write_error = observed;
+        }
+        if (rights & GENERIC_READ) {
+          DWORD used = 0; BOOL ok = ReadFile(file, data, sizeof(data), &used, NULL);
+          DWORD observed = ok ? 0 : GetLastError(); reads++; read_bytes += used;
+          if (!used && (ok || observed == ERROR_HANDLE_EOF)) eof++;
+          else if (!read_error && observed) read_error = observed;
+        }
+      }
+      if (read_bytes || eof != reads || read_error || write_error || written != writes * sizeof(data)) error = ERROR_INVALID_DATA;
+    }
+    if (!CloseHandle(file)) {close_error = GetLastError(); if (!error) error = close_error;}
+  }
+  fwprintf(stderr, L"NULL_SUFFIX phase=%ls path=%ls target=%ls access=%ls desired=0x%08lx options=%ls opened=%d error=%ls status=%ls type=%lu type-error=%lu query-status=%ls query-bytes=%llu device-type=0x%08lx characteristics=0x%08lx secure-open=%ls reads=%lu eof=%lu read-bytes=%lu read-error=%lu writes=%lu written=%lu write-error=%lu close-error=%lu\n",
+    phase, path, target, mode, desired, native ? L"0x00000060" : L"na", opened, error_text, status_text,
+    type, type_error, query_text, (unsigned long long)query_bytes, device.DeviceType, device.Characteristics, secure_text,
+    reads, eof, read_bytes, read_error, writes, written, write_error, close_error);
+  return error;
+}
+
+static DWORD null_suffix(const wchar_t *phase, matrix_create_fn create) {
+  matrix_query_file_fn query_volume = (matrix_query_file_fn)(void *)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryVolumeInformationFile");
+  if (!query_volume) return ERROR_PROC_NOT_FOUND;
+  wchar_t suffix[96]; swprintf(suffix, 96, L"boite-null-%lu-%llu", GetCurrentProcessId(), (unsigned long long)GetTickCount64());
+  fwprintf(stderr, L"NULL_SUFFIX_BEGIN phase=%ls suffix=%ls\n", phase, suffix);
+  const wchar_t *paths[] = {L"native-sync", L"globalroot"}, *targets[] = {L"bare", L"suffix"};
+  const wchar_t *modes[] = {L"read", L"write", L"readwrite"};
+  const ACCESS_MASK rights[] = {GENERIC_READ, GENERIC_WRITE, GENERIC_READ | GENERIC_WRITE};
+  DWORD error = 0;
+  for (int p = 0; p < 2; p++) for (int target = 0; target < 2; target++) for (int mode = 0; mode < 3; mode++) {
+    DWORD observed = suffix_open(phase, paths[p], targets[target], suffix, modes[mode], rights[mode], create, query_volume);
+    if (!error && observed) error = observed;
+  }
+  fwprintf(stderr, L"NULL_SUFFIX_END phase=%ls error=%lu\n", phase, error);
+  return error;
+}
+
 /* Query only this process token; close every successful device open. */
 static DWORD null_matrix(const wchar_t *phase) {
   HANDLE token = NULL; DWORD bytes = 0, appcontainer = 0, error = 0;
@@ -146,6 +231,10 @@ static DWORD null_matrix(const wchar_t *phase) {
     ACCESS_MASK desired = rights[mode] | (p == 3 ? SYNCHRONIZE | FILE_READ_ATTRIBUTES : 0);
     ULONG options = p == 3 ? 0x60 /* NON_DIRECTORY | SYNCHRONOUS_NONALERT */ : 0x40 /* NON_DIRECTORY */;
     DWORD observed = matrix_open(phase, path_names[p], modes[mode], paths[p], desired, options, p >= 2, create, query_object, query_file);
+    if (!error && observed) error = observed;
+  }
+  {
+    DWORD observed = null_suffix(phase, create);
     if (!error && observed) error = observed;
   }
 done:
@@ -408,6 +497,56 @@ export function completeAccessChecks(text: string): boolean {
   return rows.every(row => ['OBJECT', 'ACE', 'LABEL', 'MANDATORY', 'VARIANT', 'TOKEN', 'CHECK', 'CLEANUP'].some(tag => row.tag === `NULL_AUTHZ_${tag}`));
 }
 
+export function completeSuffix(text: string, phase: 'host' | 'lpac'): boolean {
+  if (!completeMatrix(text, phase)) return false;
+  const rows: Record<string, string>[] = [];
+  for (const line of text.split(/\r?\n/).filter(line => /^NULL_SUFFIX(?: |_)/.test(line))) {
+    const [tag, ...fields] = line.split(' '), entries = fields.map(field => field.split('='));
+    if (!['NULL_SUFFIX', 'NULL_SUFFIX_BEGIN', 'NULL_SUFFIX_END'].includes(tag!)
+      || entries.some(entry => entry.length !== 2 || !entry[0] || !entry[1] || entry[0] === 'tag')
+      || new Set(entries.map(entry => entry[0])).size !== entries.length) return false;
+    const row = {tag: tag!, ...Object.fromEntries(entries)};
+    if (!['host', 'lpac'].includes(row.phase ?? '')) return false;
+    if (row.phase === phase) rows.push(row);
+  }
+  const exactFields = (row: Record<string, string>, names: string[]) => {
+    const keys = Object.keys(row).filter(key => key !== 'tag');
+    return keys.length === names.length && names.every(name => keys.includes(name));
+  };
+  const begin = rows.filter(row => row.tag === 'NULL_SUFFIX_BEGIN'), end = rows.filter(row => row.tag === 'NULL_SUFFIX_END');
+  if (begin.length !== 1 || end.length !== 1 || !exactFields(begin[0]!, ['phase', 'suffix'])
+    || !/^boite-null-[1-9]\d*-\d+$/.test(begin[0]!.suffix ?? '')
+    || !exactFields(end[0]!, ['phase', 'error']) || end[0]!.error !== '0') return false;
+  const observations = rows.filter(row => row.tag === 'NULL_SUFFIX');
+  if (observations.length !== 12 || new Set(observations.map(row => `${row.path}:${row.target}:${row.access}`)).size !== 12) return false;
+  const fields = ['phase', 'path', 'target', 'access', 'desired', 'options', 'opened', 'error', 'status', 'type', 'type-error',
+    'query-status', 'query-bytes', 'device-type', 'characteristics', 'secure-open', 'reads', 'eof', 'read-bytes', 'read-error', 'writes', 'written', 'write-error', 'close-error'];
+  const hex = (value: string | undefined): value is string => !!value && /^0x[0-9a-f]{8}$/.test(value);
+  const rights: Record<string, number> = {read: 0x80000000, write: 0x40000000, readwrite: 0xc0000000};
+  let characteristics: string | undefined;
+  return observations.every(row => {
+    if (!exactFields(row, fields) || !['native-sync', 'globalroot'].includes(row.path ?? '')
+      || !['bare', 'suffix'].includes(row.target ?? '') || rights[row.access ?? ''] === undefined
+      || !hex(row.desired) || !hex(row['device-type']) || !hex(row.characteristics)
+      || row['type-error'] !== '0' || row['close-error'] !== '0' || !['0', '1'].includes(row.opened ?? '')) return false;
+    const native = row.path === 'native-sync', opened = row.opened === '1';
+    if (Number.parseInt(row.desired, 16) !== ((rights[row.access!]! | (native ? 0x100080 : 0)) >>> 0)
+      || row.options !== (native ? '0x00000060' : 'na')) return false;
+    if (native ? row.error !== 'na' || !hex(row.status) || (opened ? row.status !== '0x00000000' : Number.parseInt(row.status, 16) < 0x80000000)
+      : row.status !== 'na' || !/^(?:0|[1-9]\d*)$/.test(row.error ?? '') || (row.error === '0') !== opened) return false;
+    if (!opened) return !(phase === 'host' && row.target === 'bare') && row.type === '0' && row['query-status'] === 'na' && row['query-bytes'] === '0'
+      && row['device-type'] === '0x00000000' && row.characteristics === '0x00000000' && row['secure-open'] === 'na'
+      && ['reads', 'eof', 'read-bytes', 'read-error', 'writes', 'written', 'write-error'].every(field => row[field] === '0');
+    if (characteristics !== undefined && row.characteristics !== characteristics) return false;
+    characteristics = row.characteristics;
+    const reads = row.access === 'write' ? '0' : '2', writes = row.access === 'read' ? '0' : '2';
+    return row.type === '2' && row['query-status'] === '0x00000000' && row['query-bytes'] === '8' && row['device-type'] === '0x00000015'
+      && row['secure-open'] === ((Number.parseInt(row.characteristics, 16) & 0x100) ? '1' : '0')
+      && row.reads === reads && row.eof === reads && row['read-bytes'] === '0' && row['read-error'] === '0'
+      && row.writes === writes && row.written === (writes === '2' ? '8192' : '0') && row['write-error'] === '0';
+  });
+}
+
 export function completeMatrix(text: string, phase: 'host' | 'lpac'): boolean {
   const records = (tag: string): Record<string, string>[] => text.split(/\r?\n/)
     .filter(line => line.startsWith(`${tag} `) && line.includes(` phase=${phase} `))
@@ -493,7 +632,7 @@ if (import.meta.main) {
       entry.helperSha256 = hash(readFileSync(helper));
       if (!compileOnly) {
         const baseline = await execute(`host-${compiler.name}`, helper, ['--matrix-host'], 10000); entry.host = baseline;
-        if (baseline.code || baseline.timedOut || !completeMatrix(baseline.err, 'host')) throw new Error('host matrix incomplete or unexpected NUL device');
+        if (baseline.code || baseline.timedOut || !completeSuffix(baseline.err, 'host')) throw new Error('host matrix or suffix experiment incomplete or unexpected NUL device');
         const {WindowsExecutionBoundary} = await import('../src/platform/windows/protected.ts');
         const calls: Record<string, unknown>[] = []; entry.calls = calls;
         const runner = protectionRunner(procs);
@@ -512,10 +651,14 @@ if (import.meta.main) {
           catch (refusal) {if (!String(refusal).includes('revoked')) throw refusal; entry.refusedLaunch = String(refusal);}
         }
         const probe = calls.find(call => (call.args as string[]).includes('--probe'));
-        if (!probe || !completeAccessChecks(String(probe.stderr)) || !String(probe.stderr).includes('NULL_AMBIENT denied=1')) throw new Error('LPAC matrix, DACL experiment or original ambient refusal incomplete');
+        if (!probe || !completeAccessChecks(String(probe.stderr)) || !completeSuffix(String(probe.stderr), 'lpac')
+          || !String(probe.stderr).includes('NULL_AMBIENT denied=1')) throw new Error('LPAC matrix, suffix/DACL experiment or original ambient refusal incomplete');
         const originalSucceeded = probe.code === 0 && probe.stdout === 'boite-windows-protected 1';
         const originalNulDenied = probe.code === 125 && String(probe.stderr).includes('execution.windows.probe.null-device: native call failed (5)');
         if (!originalSucceeded && !originalNulDenied) throw new Error('original production probe ended unexpectedly');
+        const suffixRows = String(probe.stderr).split(/\r?\n/).filter(line => line.startsWith('NULL_SUFFIX phase=lpac ') && line.includes(' target=suffix '));
+        const opened = suffixRows.filter(line => line.includes(' opened=1 ')).length;
+        entry.suffix = {experimentComplete: true, lpacOpened: opened, lpacAttempts: 6, allLpacModesOpened: opened === 6};
         entry.experimentComplete = true;
       }
       console.log(`NULL_ACCESS_MATRIX compiler=${compiler.name} compiled=1 native=${!compileOnly} experimentComplete=${entry.experimentComplete === true} productionAccepted=0`);
