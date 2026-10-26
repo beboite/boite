@@ -298,7 +298,7 @@ grouped problems, threads, log file sizes, the ends of `core-output.log` and
 `shell-error.log`, then the timeline oldest first, one `formatLogLine` per
 record. It covers the last 24 hours by default, at most 20,000 records.
 
-`diagnostics.issue` drafts a GitHub issue for `beboite/boite`: the user's
+`diagnostics.issue` drafts a GitHub issue for `mtsu-dev/boite`: the user's
 description, the environment, the problems and as many of the newest log lines
 as fit. With `submit: true` it runs `gh issue create` under the core's own
 `gh` login and returns the issue URL; without a signed-in `gh` it returns a

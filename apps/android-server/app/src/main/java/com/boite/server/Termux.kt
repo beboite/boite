@@ -30,7 +30,7 @@ object Termux {
 
     /** Pasted once into Termux: it installs Termux's packages, Bun, Boite and Claude Code, then lets this app in. */
     fun installCommand(channel: String): String =
-        "curl -fsSL https://raw.githubusercontent.com/beboite/boite/main/apps/android-server/termux/install.sh | bash -s -- --channel $channel"
+        "curl -fsSL https://raw.githubusercontent.com/mtsu-dev/boite/main/apps/android-server/termux/install.sh | bash -s -- --channel $channel"
 
     fun installed(context: Context): Boolean = try {
         context.packageManager.getPackageInfo(PACKAGE, 0)

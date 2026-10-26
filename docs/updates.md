@@ -2,7 +2,7 @@
 
 ## Downloading Boite
 
-Open the [download page](https://github.com/beboite/boite/releases). New releases
+Open the [download page](https://github.com/mtsu-dev/boite/releases). New releases
 list direct downloads by platform at the top of their notes: the Windows x64
 installer, macOS DMGs for Apple Silicon and Intel, and Linux x64/ARM64 packages.
 Choose `.deb` for Debian or Ubuntu, or AppImage for other supported distributions.

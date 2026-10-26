@@ -11,7 +11,7 @@ const fresh = { elapsedMs: 0 };
 function run(fields: Partial<CiRun> = {}): CiRun {
   return {
     id: 10, head_sha: sha, head_branch: 'main', event: 'push', status: 'completed', conclusion: 'success',
-    run_attempt: 1, html_url: 'https://github.com/beboite/boite/actions/runs/10', ...fields,
+    run_attempt: 1, html_url: 'https://github.com/mtsu-dev/boite/actions/runs/10', ...fields,
   };
 }
 
@@ -98,7 +98,7 @@ test('an older success passes even while a newer run is pending or waiting to re
 // was replaced 12 s later, then two more pushes replaced theirs before
 // 9c974e65's run passed. The night was lost on `ended cancelled`.
 const superseded = (sha: string, id: number, fields: Partial<CiRun> = {}) =>
-  run({ id, head_sha: sha, conclusion: 'cancelled', html_url: `https://github.com/beboite/boite/actions/runs/${id}`, ...fields });
+  run({ id, head_sha: sha, conclusion: 'cancelled', html_url: `https://github.com/mtsu-dev/boite/actions/runs/${id}`, ...fields });
 const night = '30287eeffb74c73a938c8049dba3ca8ac1b5d799';
 const green = '9c974e65'.padEnd(40, '0');
 const nightRuns = [
@@ -147,7 +147,7 @@ async function gate(runs: CiRun[], started: string) {
     const { GITHUB_STEP_SUMMARY: _summary, COMMIT_CI_DRY_RUN: _dry, ...env } = process.env;
     const child = Bun.spawn([process.execPath, join(import.meta.dir, 'commit-ci.ts')], {
       env: {
-        ...env, GITHUB_API_URL: server.url.origin, GITHUB_REPOSITORY: 'beboite/boite', GH_TOKEN: 'test',
+        ...env, GITHUB_API_URL: server.url.origin, GITHUB_REPOSITORY: 'mtsu-dev/boite', GH_TOKEN: 'test',
         GITHUB_SHA: started, COMMIT_CI_FOLLOW: '1', GITHUB_OUTPUT: output,
       },
       stdout: 'pipe', stderr: 'pipe',

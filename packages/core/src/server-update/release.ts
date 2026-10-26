@@ -5,14 +5,14 @@ import { Unzip, UnzipInflate } from 'fflate';
 import shellConfig from '../../../../apps/shell/src-tauri/tauri.conf.json';
 
 export const UPDATE_PUBLIC_KEY = shellConfig.plugins.updater.pubkey;
-const REPOSITORY = 'https://github.com/beboite/boite';
+const REPOSITORY = 'https://github.com/mtsu-dev/boite';
 /**
- * Where a release's files may live. The repository moves from beboite to
- * mtsu-dev: manifests published before the move name the old owner, later ones
- * the new, and GitHub redirects the old addresses.
+ * Where a release's files may live. The repository moved from beboite to
+ * mtsu-dev on 2026-10-26: manifests published before the move name the old
+ * owner, and GitHub redirects the old addresses.
  */
-const OWNERS = ['https://github.com/mtsu-dev/boite', REPOSITORY];
-const API = 'https://api.github.com/repos/beboite/boite/releases?per_page=100';
+const OWNERS = [REPOSITORY, 'https://github.com/beboite/boite'];
+const API = 'https://api.github.com/repos/mtsu-dev/boite/releases?per_page=100';
 const MAX_ARCHIVE_BYTES = 160 * 1024 * 1024;
 const MAX_UNPACKED_BYTES = 400 * 1024 * 1024;
 /** Compressed bytes inflated per step: each step holds the event loop for a few milliseconds. */

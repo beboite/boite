@@ -856,7 +856,7 @@ agent access on. Changing a data-directory flag does not change that.
 and, with `--out`, also writes it relative to the working directory.
 `issue draft` prints the issue body and a prefilled GitHub link without
 sending anything. From the owner's terminal, `issue submit` creates it on
-`beboite/boite` with `gh` when `gh` is signed in, or prints that link and the
+`mtsu-dev/boite` with `gh` when `gh` is signed in, or prints that link and the
 export to attach. Inside a thread, `issue submit` publishes nothing: the
 issue would be public and signed by the owner's GitHub login, so the agent
 gives the user the link and the user submits it, or submits it from
