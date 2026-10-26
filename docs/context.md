@@ -178,6 +178,64 @@ When a merged PR moves a conversation to Done, its last prompt can finish,
 but a compaction turn is stopped. If the provider announces native compaction
 after Done, that turn is stopped too. The history already written is kept.
 
+### Background compaction
+
+`Settings.backgroundCompaction` is an experiment, off by default, that the
+owner turns on under Settings, Experiments (an agent asks with
+`boite settings request backgroundCompaction true --why "..."`). It works
+with the token limit above and does nothing without one. Like `deviceStream`,
+it stays on its machine: the group's settings do not carry it.
+
+When a finished turn leaves the context between 85% of the limit (and at least
+64 000 tokens) and the limit, the core forks the thread's native session at
+the end of that turn and runs `/compact` on the fork, outside the thread
+(`threads/background-compact.ts`). The thread stays free: the user and its
+agents keep working on the original session meanwhile.
+
+| Driver | The copy |
+|---|---|
+| Claude | Resumes at the turn's checkpoint with `resumeSessionAt` and `forkSession`, then compacts. |
+| Codex | `forkSession` at the turn's checkpoint, then compacts the fork. |
+| echo | Names the fork after the turn. |
+| OpenCode 2 | No copy: the setting turns on OpenCode's own `experimental.background_compaction` in `OPENCODE_CONFIG_CONTENT`, for the processes started afterwards. |
+| OpenCode 1, Muse, pi, other ACP | None: the compaction above runs as before. |
+
+At the first pause after the copy finished, under the same conditions as the
+timer above and after the same 2 s, the thread takes the compacted session: a
+new session generation, no model call, its process released, and a divider
+marked `background: true` (`in the background`). It does not wait for the
+limit, because a session changes only between turns and the agents compact by
+themselves, blocking, as soon as a turn crosses it. The thread's next prompt
+carries what was said after the fork point in a `<recent-history>` block
+before the request (`tailInput` in `continuation.ts`); the
+`compaction-tail:<thread>` marker clears once a turn that carried it ends
+`done`.
+
+The copy is dropped, and the compaction above runs at the limit as usual,
+when:
+
+- the thread changed session, generation, agent, account, model or folder,
+  was rewound, archived or compacted, or its context shrank because the agent
+  compacted by itself;
+- the thread grew by more than 30 000 tokens, or a quarter of the limit, since
+  the copy started;
+- background work is running at the swap, since taking the new session closes
+  the process that runs it;
+- the copy failed, named no new session or did not compact; after two failures
+  in a row the thread stops trying until its next swap or a restart. A copy
+  still running after 5 minutes is stopped;
+- the setting was turned off.
+
+A thread that reaches the limit while a matching copy still runs waits for it
+rather than compacting. Delegated agents, incognito threads and a session
+waiting to resume at an entry take no copy.
+
+Limits of the experiment: copies are held in memory, so a restart forgets them
+(the tail marker is persisted). A copy runs outside the scheduler's account
+slots and its usage is recorded on no turn. An unused Claude copy's transcript
+is removed in an account Boite isolated; Codex keeps its unused forks. The
+in-memory client stores the setting but makes no copy.
+
 ## Turns a provider refused
 
 A turn refused because the model was at capacity tries again by itself, and a

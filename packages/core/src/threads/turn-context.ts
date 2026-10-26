@@ -21,7 +21,7 @@ import { nativeSkillFiles } from '../brain.ts';
 import { takesSystemGuide } from '../drivers/index.ts';
 import { contextRulesBlock } from '@boite/contracts';
 import { prepareAttachments, FileReferences } from '../attachments.ts';
-import { continuationInput } from '../continuation.ts';
+import { continuationInput, tailInput } from '../continuation.ts';
 import type { Core } from '../core.ts';
 import type { EmitSink, PermissionTicket, ToolPatch, QuestionAsk, QuestionTicket, SessionContext, TurnContext } from '../drivers/types.ts';
 import { newId } from '../ids.ts';
@@ -30,6 +30,7 @@ import { LazyMcp } from '../mcp/lazy.ts';
 import { noteStderr } from '../drivers/stderr-tail.ts';
 import { watchProviderProcess } from './provider-process-log.ts';
 import type { ThreadStore } from '../threads.ts';
+import { compactionTail } from './background-compact.ts';
 import { nativeCommandPrompt, systemOperation } from './operations.ts';
 import { stoppedInput } from './stopped-input.ts';
 
@@ -324,6 +325,17 @@ export class TurnContexts {
       // The first stopped prompt may never have created a native session or
       // advanced its generation. That fresh start still needs journal history.
       continued = thread.sessionId === null && interrupted !== input ? carry() : interrupted;
+    }
+    // A session swapped in by a background compaction summarizes up to its fork:
+    // the turns since then go with the next prompt the agent reads as such.
+    const kind = turn.execution?.operation;
+    if (!fresh && resumePrompt === undefined && thread.sessionId !== null && kind !== 'compact' && kind !== 'keepalive' && kind !== 'background' && kind !== 'resume'
+      && !nativeCommandPrompt(input.prompt)) {
+      const tail = compactionTail(this.core, thread);
+      if (tail !== null) {
+        continued = tailInput(this.core.journal, threadId, tail.after, turn.id, continued, (part, place) => this.files.of(threadId, part, place));
+        this.threads.backgroundCompact.carried(threadId, turn.id);
+      }
     }
     const prepared = prepareAttachments(this.core.dataDir, continued, provider);
     const operation = turn.execution?.operation;

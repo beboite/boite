@@ -224,8 +224,10 @@ export type MessagePart =
   /**
    * The agent compacted its context mid-turn: what it held before, what is
    * left after when it says so. Drawn as a divider in the timeline.
+   * `background`: the summary was made ahead, on a copy of the session, and
+   * the thread switched to it between turns (`backgroundCompaction`).
    */
-  | { type: 'compaction'; trigger: 'auto' | 'manual'; preTokens: number | null; postTokens: number | null }
+  | { type: 'compaction'; trigger: 'auto' | 'manual'; preTokens: number | null; postTokens: number | null; background?: true }
   /**
    * One of the user's own hooks ended the turn: it blocked the prompt, or told
    * the agent to stop. `event` is the agent's own name for the hook event. A
