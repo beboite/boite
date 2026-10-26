@@ -232,6 +232,8 @@ export const strings = {
     errorTitle: "The agent couldn't continue",
     errorSubscriptionTitle: 'No subscription available',
     errorSubscriptionHint: 'Connect an account or wait for its quota to reset.',
+    errorRateTitle: 'Rate limit reached',
+    errorRateHint: 'The provider is limiting requests for now. Send your message again in a few minutes.',
     errorServerTitle: 'The provider is unavailable',
     errorServerHint: 'Try again in a moment.',
     errorDetails: 'Technical details',

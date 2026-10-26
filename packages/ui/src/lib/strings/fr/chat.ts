@@ -197,6 +197,8 @@ export const fr: Translation = {
     errorTitle: "L'agent n'a pas pu continuer",
     errorSubscriptionTitle: 'Aucun abonnement disponible',
     errorSubscriptionHint: 'Connectez un compte ou attendez la réinitialisation de son quota.',
+    errorRateTitle: 'Limite de débit atteinte',
+    errorRateHint: 'Le fournisseur limite les requêtes pour le moment. Renvoyez votre message dans quelques minutes.',
     errorServerTitle: 'Le fournisseur est indisponible',
     errorServerHint: 'Réessayez dans un instant.',
     errorDetails: 'Détails techniques',

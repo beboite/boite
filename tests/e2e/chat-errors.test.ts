@@ -103,6 +103,15 @@ test('failed automatic turns share one folded group and retain every wake-up, ti
   expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="error-diagnostic"]')).at(-1).textContent`)).toBe(unknown);
   expect(await page.evaluate(`document.querySelector('[data-testid="error-part"] script') === null`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('[data-testid="error-part"]').scrollWidth <= document.querySelector('[data-testid="error-part"]').clientWidth`)).toBe(true);
+  // Codex's own wording for an upstream rate limit is neither a missing subscription nor an outage.
+  const limited = 'exceeded retry limit, last status: 429 Too Many Requests';
+  await page.evaluate(`__boiteTest.workspace.active.openThread.messages.at(-1).parts[0].message = ${JSON.stringify(limited)}`);
+  await page.waitFor(`document.querySelector('[data-testid="error-title"]')?.textContent === 'Rate limit reached'`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="error-part"] .code')?.textContent`)).toBe('429');
+  await capture('rate-limit-phone');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await capture('rate-limit-desktop');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 1000, deviceScaleFactor: 1, mobile: true });
   await page.evaluate(`__boiteTest.workspace.active.openThread.messages.at(-1).parts[0].message = 'HTTP 502 upstream unavailable'`);
   await page.waitFor(`document.querySelector('[data-testid="error-title"]')?.textContent === 'The provider is unavailable'`);
   await page.evaluate(`(async () => { const { setLocaleSetting } = await import('/src/lib/i18n.svelte.ts'); await setLocaleSetting('fr'); })()`);
