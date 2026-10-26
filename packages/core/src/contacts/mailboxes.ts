@@ -28,6 +28,7 @@ export class ContactMailboxes {
   private closed = false;
   private readonly pending = new Set<Promise<unknown>>();
   private readonly busy = new Set<string>();
+  private readonly attempts = new Map<string, number>();
   private readonly off: () => void;
   private prunedAt = 0;
 
@@ -347,8 +348,15 @@ export class ContactMailboxes {
       this.pending.add(job);
     }
     if (!this.mailboxes().length) return;
-    for (const letter of this.rows("direction = 'in' AND json_extract(data, '$.wire.status') = 'received' ORDER BY json_extract(data, '$.wire.createdAt') LIMIT ?", 4 + this.busy.size)) {
+    // A queued provider wake can return an uncertain receipt; refresh it until settled.
+    const letters = this.rows("direction = 'in' AND json_extract(data, '$.wire.status') IN ('received', 'uncertain') ORDER BY json_extract(data, '$.wire.createdAt')");
+    const ids = new Set(letters.map(letter => letter.wire.id));
+    for (const id of this.attempts.keys()) if (!ids.has(id)) this.attempts.delete(id);
+    // Pending receipts must not keep newer replies behind the same oldest batch.
+    const next = letters.sort((a, b) => (this.attempts.get(a.wire.id) ?? 0) - (this.attempts.get(b.wire.id) ?? 0)).slice(0, 4 + this.busy.size);
+    for (const letter of next) {
       if (this.busy.has(letter.wire.id)) continue;
+      this.attempts.set(letter.wire.id, performance.now());
       this.busy.add(letter.wire.id);
       const job = this.forward(letter).finally(() => { this.busy.delete(letter.wire.id); this.pending.delete(job); });
       this.pending.add(job);

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { echoThread, holdAccountTurns, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
 import { ContactMailboxes } from '../src/contacts/mailboxes.ts';
 
@@ -41,7 +41,12 @@ test('a group contact route keeps letters and the wake on the initiating core wi
   const incoming = c.core.coordination.get(recipient).messages.find(letter => letter.id === sent.id)!;
   expect(incoming.from).toMatchObject({ coreId: bi, title: 'Actual initiating thread', agent: sent.from.agent });
   expect(incoming.from.threadId).toMatch(/^cmb_/);
+  const resume = holdAccountTurns(a);
   const response = await c.core.coordination.send({ threadId: recipient, to: incoming.from, replyTo: incoming.id, text: 'Port 8080.', requestId: 'routed-answer' });
+  try {
+    // The gateway polls before the initiating core can submit its queued wake.
+    await waitFor(() => b.core.coordination.mailboxes.received(response.id)?.status === 'uncertain');
+  } finally { resume(); }
   await waitFor(() => a.core.coordination.get(source).messages.some(letter => letter.id === response.id && letter.status === 'delivered'), 12000);
   const returned = a.core.coordination.get(source).messages.find(letter => letter.id === response.id)!;
   expect(returned).toMatchObject({ from: { coreId: ci, threadId: recipient }, to: { coreId: ai, threadId: source }, replyTo: sent.id, contact: { coreId: ci }, text: 'Port 8080.' });
@@ -50,6 +55,29 @@ test('a group contact route keeps letters and the wake on the initiating core wi
   await waitFor(() => c.core.coordination.get(recipient).messages.find(letter => letter.id === response.id)?.status === 'delivered', 10000);
   expect(b.core.journal.listThreads()).toHaveLength(0);
   expect(a.core.coordination.trusted().some(peer => peer.coreId === ci)).toBe(false);
+}, 30000);
+
+test('older uncertain mailbox receipts do not block a new routed reply', async () => {
+  const { a, b, c, ci, ac, source, recipient } = await routed();
+  const sources = [source];
+  for (let i = 0; i < 4; i++) sources.push((await echoThread(a, ac, `Initiating thread ${i}`)).threadId);
+  const resume = holdAccountTurns(a);
+  const responses: { id: string }[] = [];
+  try {
+    for (const [i, threadId] of sources.entries()) {
+      const sent = await a.core.coordination.send({ threadId, to: { coreId: ci, threadId: recipient }, text: `Question ${i}`, requestId: `fair-question-${i}` });
+      await waitFor(() => c.core.coordination.get(recipient).messages.some(letter => letter.id === sent.id));
+      const incoming = c.core.coordination.get(recipient).messages.find(letter => letter.id === sent.id)!;
+      const response = await c.core.coordination.send({ threadId: recipient, to: incoming.from, replyTo: incoming.id, text: `Answer ${i}`, requestId: `fair-answer-${i}` });
+      responses.push(response);
+      if (i < 4) await waitFor(() => b.core.coordination.mailboxes.received(response.id)?.status === 'uncertain');
+    }
+    // All four earlier wakes remain held while the fifth reply crosses the gateway.
+    await waitFor(() => a.core.coordination.get(sources[4]!).messages.some(letter => letter.id === responses[4]!.id));
+    expect(responses.slice(0, 4).every(response => b.core.coordination.mailboxes.received(response.id)?.status === 'uncertain')).toBe(true);
+  } finally { resume(); }
+  await waitFor(() => responses.every(response => c.core.coordination.get(recipient).messages.find(letter => letter.id === response.id)?.status === 'delivered'), 12000);
+  expect(sources.map(threadId => a.core.coordination.get(threadId).wakes)).toEqual([1, 1, 1, 1, 1]);
 }, 30000);
 
 test('a routed ask returns its decision to the initiating thread, including after an automatic pause', async () => {
