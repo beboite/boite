@@ -110,12 +110,14 @@ test('chat search is scoped to the destination project and its current readThrea
   expect((await a.client.call('sharedProjects.search', { ...scope, query: 'confidentialmarker' })).matches).toEqual([]);
   expect((await a.h.core.coordination.search(a.threadId, 'confidentialmarker')).matches).toEqual([]);
   await b.client.call('contacts.grant', { coreId: a.coreId, projectId: b.ref.projectId, readThreads: true });
+  await b.h.core.sharedProjects.flush(a.coreId);
   const matches = (await a.client.call('sharedProjects.search', { ...scope, query: 'confidentialmarker' })).matches;
   expect(matches).toHaveLength(1);
   expect(matches[0]).toMatchObject({ coreId: b.coreId, threadId: b.threadId, sharedThread: { project: b.ref }, matched: ['chat'] });
   expect((await a.h.core.coordination.search(a.threadId, 'confidentialmarker')).matches[0]?.sharedThread?.project).toEqual(b.ref);
   expect((await a.h.core.coordination.read(a.threadId, { coreId: b.coreId, threadId: b.threadId })).entries[0]?.text).toBe('confidentialmarker');
   await b.client.call('contacts.grant', { coreId: a.coreId, projectId: b.ref.projectId, readThreads: false });
+  await b.h.core.sharedProjects.flush(a.coreId);
   expect((await a.client.call('sharedProjects.search', { ...scope, query: 'confidentialmarker' })).matches).toEqual([]);
 }, 30000);
 
