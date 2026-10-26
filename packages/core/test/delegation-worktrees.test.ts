@@ -200,8 +200,21 @@ test.each(['partial checkout', 'branch only', 'reserved ref', 'absent ref', 'ind
     if (leftover === 'index lock' && partial?.record.threadId === id && partial.proc.exitCode === null) {
       // worktree add starts another Git to write the index. Off Windows this
       // captured root leads its own group; kill that group without SIGTERM cleanup.
-      if (process.platform !== 'win32') process.kill(-partial.proc.pid, 'SIGKILL');
-      else partial.proc.kill();
+      try {
+        if (process.platform !== 'win32') process.kill(-partial.proc.pid, 'SIGKILL');
+        else partial.proc.kill();
+      } catch (error) {
+        // RPC deliberately hides internal errors. Keep this fixture's failed signal
+        // visible in CI without changing Stop or suppressing the original failure.
+        console.error('CHECKOUT_FORCED_STOP_FAILED', {
+          platform: process.platform, pid: partial.proc.pid,
+          exitCode: partial.proc.exitCode, signalCode: partial.proc.signalCode,
+          code: (error as NodeJS.ErrnoException).code,
+          syscall: (error as NodeJS.ErrnoException).syscall,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
     }
     return killTree(id);
   });
