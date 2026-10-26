@@ -1108,7 +1108,7 @@ test('a thread whose first message is loaded asks for nothing at the top', async
  * nor the pin; and a scroll reads no slot height, because the spacers come off
  * the running totals instead of a walk over the list.
  */
-test('four hundred messages, two hundred deltas: the window and the pin stay put', async ({ ready }) => {
+test.for([false, true])('four hundred messages, two hundred deltas: the window and the pin stay put (inline view: %s)', { timeout: 20_000 }, async (withView, { ready }) => {
   window.localStorage.clear();
   const { store, client } = await ready({ delayMs: 0, long: true });
   await store.open('t-long');
@@ -1117,6 +1117,12 @@ test('four hundred messages, two hundred deltas: the window and the pin stay put
   while (store.messagesBefore !== null) await store.loadOlder();
   const messages = store.openThread?.messages ?? [];
   expect(messages).toHaveLength(400);
+
+  if (withView) {
+    const previous = messages.at(-3)!;
+    previous.turnId = messages.at(-1)!.turnId;
+    previous.parts = [{ type: 'artifact', id: 'stream-view', name: 'chart.html', mimeType: 'text/html', bytes: 10, view: { title: 'Chart', height: 300, source: 'chart.html' } }];
+  }
 
   stubLayout(messages.length * ESTIMATE);
   const mountedAt = performance.now();
@@ -1130,7 +1136,8 @@ test('four hundred messages, two hundred deltas: the window and the pin stay put
   // The window and its overscan, not the four hundred articles.
   expect(articles().length).toBeGreaterThan(0);
   expect(articles().length).toBeLessThan(40);
-  expect(shownIds().at(-1)).toBe('m-long-399');
+  expect(shownIds()).toContain('m-long-399');
+  expect(shownIds().at(-1)).toBe(withView ? 'm-long-397' : 'm-long-399');
 
   const last = messages.at(-1);
   const part = last?.parts[0];
@@ -1185,14 +1192,13 @@ test('four hundred messages, two hundred deltas: the window and the pin stay put
   expect(scrolls.slots).toBeLessThan(100);
 
   console.log(
-    `[bench] 400 messages: mount ${mounted.toFixed(1)} ms, ` +
+    `[bench] 400 messages (inline view: ${withView}): mount ${mounted.toFixed(1)} ms, ` +
       `200 deltas ${streamed.toFixed(1)} ms (${deltas.recomputes} recomputes, ` +
       `${deltas.slots} slot reads, ${deltas.reads} height reads, ${deltas.writes} scroll writes), ` +
       `10 scroll steps ${scrolled.toFixed(1)} ms (${scrolls.recomputes} recomputes, ` +
       `${scrolls.slots} slot reads), ${articles().length} articles in the DOM`
   );
-  // Shared CI runners need time for the full streaming and scrolling workload.
-}, 20_000);
+});
 
 test('the second receipt waits for the first streamed character of the answer', async ({ ready }) => {
   window.localStorage.clear();

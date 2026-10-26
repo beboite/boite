@@ -605,6 +605,12 @@ export class Connection {
     const questionRead = requests.questionRead(client, 'all');
     const open = s.openThread;
     const reopened = open && s.visible ? s.open(open.id, false, { requests: false }).catch((error: unknown) => { if (current()) this.ctx.fail(error); }) : null;
+    const secretRead = requests.secretRead(client, 'all', async () => {
+      await reopened;
+      const visible = requests.secretParts(s.openThread);
+      const seen = new Set(s.openThread?.messages.flatMap(message => message.parts.flatMap(part => part.type === 'secret_request' ? [part.requestId] : [])));
+      return [...requests.pendingSecrets.filter(row => !seen.has(row.id)), ...visible];
+    });
     // Publish each completed slice immediately. A secondary login snapshot must
     // never hold conversation catch-up or accepted input behind it.
     const slice = <T>(asked: Promise<T>, apply: (value: T) => void, cancel?: () => void): Promise<void> => asked.then(value => {
@@ -636,6 +642,7 @@ export class Connection {
       }),
       slice(permissionRead.promise, rows => permissionRead.apply(rows), permissionRead.cancel),
       slice(questionRead.promise, rows => questionRead.apply(rows), questionRead.cancel),
+      slice(secretRead.promise, rows => secretRead.apply(rows), secretRead.cancel),
       ...(reopened ? [reopened] : [])
     ];
     const secondary = [
@@ -665,7 +672,7 @@ export class Connection {
         if (held || !s.openThread.agentSessionId) void s.loadCoordination(open.id, held && s.coordinationDirectory !== null);
       }
     } finally {
-      projectRead.cancel(); threadRead.cancel(); accountRead.cancel(); permissionRead.cancel(); questionRead.cancel();
+      projectRead.cancel(); threadRead.cancel(); accountRead.cancel(); permissionRead.cancel(); questionRead.cancel(); secretRead.cancel();
     }
   }
 }

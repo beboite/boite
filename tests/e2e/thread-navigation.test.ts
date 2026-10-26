@@ -169,7 +169,14 @@ test('dropping URL text keeps the app open and still inserts text in the compose
     })()`);
     for (const phone of [false, true]) {
       await page.send('Emulation.setDeviceMetricsOverride', { width: phone ? 390 : 1280, height: phone ? 844 : 900, deviceScaleFactor: 1, mobile: phone });
+      // CDP's resize reply precedes the rendered frame used by native drag hit testing.
+      await page.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
       for (const target of ['timeline', 'composer-input']) {
+        await page.waitFor(`(() => {
+          const element = document.querySelector('${id(target)}');
+          const r = element.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 && element.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+        })()`);
         const point = await page.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector('${id(target)}').getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`);
         const data = { items: [{ mimeType: 'text/uri-list', data: text }, { mimeType: 'text/plain', data: text }], dragOperationsMask: 1 };
         for (const type of ['dragEnter', 'dragOver']) await page.send('Input.dispatchDragEvent', { type, ...point, data });

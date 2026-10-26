@@ -812,6 +812,27 @@ describe('codex driver', () => {
     expect(getDriver('codex-appserver').protocol).toBe('codex-appserver');
   });
 
+  test('the independent compaction limit reaches Codex and a warm session reloads changed or disabled limits between turns', async () => {
+    const client = await startCore({ warmProcessMinutes: 5, autoCompact: { tokens: 200_000, moments: [] } });
+    const threadId = await codexThread(client);
+    let sessionId: string | null = null;
+    for (const tokens of [200_000, 250_000, null]) {
+      await client.call('settings.set', { autoCompact: tokens === null ? null : { tokens, moments: [] } });
+      const finished = client.next('turn.finished', turn => turn.threadId === threadId);
+      await client.call('turns.start', { threadId, prompt: 'keep working' });
+      expect((await finished).status).toBe('done');
+      const thread = await client.call('threads.get', { threadId });
+      if (sessionId === null) sessionId = thread.sessionId;
+      expect(thread.sessionId).toBe(sessionId);
+      const configs = fakeLog().split('\n').filter(line => /^config:thread\/(start|resume) /.test(line));
+      const config = JSON.parse(configs.at(-1)!.slice(configs.at(-1)!.indexOf(' ') + 1));
+      if (tokens === null) expect(config).not.toHaveProperty('model_auto_compact_token_limit');
+      else expect(config.model_auto_compact_token_limit).toBe(tokens);
+    }
+    expect(fakeLog().split('\n').filter(line => line === 'initialize')).toHaveLength(3);
+    expect(fakeLog()).not.toContain('turn/interrupt');
+  });
+
   test('native plan tools are enabled on new and resumed sessions and populate activity', async () => {
     const client = await startCore({ warmProcessMinutes: 0 });
     const threadId = await codexThread(client);

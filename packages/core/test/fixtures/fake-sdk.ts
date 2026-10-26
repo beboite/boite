@@ -36,6 +36,8 @@ export interface FakeSdkState {
   clipboard?: string;
   /** The fake scrcpy server sets the clipboard it is sent but never confirms it. */
   clipboardUnconfirmed?: boolean;
+  /** Delays the server's final log and exit, so the core must enforce its shutdown deadline. */
+  scrcpyExitDelayMs?: number;
 }
 
 /** A control message the fake scrcpy server received, decoded. */
@@ -273,6 +275,7 @@ async function scrcpyServer(root: string, serial: string, state: FakeSdkState, a
   }
   video.destroy();
   control.destroy();
+  if (state.scrcpyExitDelayMs) await Bun.sleep(state.scrcpyExitDelayMs);
   log(`exit ${scid}`);
   return 0;
 }

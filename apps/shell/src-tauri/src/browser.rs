@@ -17,6 +17,8 @@
 //! navigation handler refuses it again for a link the page itself followed.
 //! A page's new windows are tabs or popups, as `popups` explains.
 
+#[cfg(windows)]
+mod adopted;
 mod popups;
 
 use popups::{close_popups, follow_surface, new_window};
@@ -166,6 +168,17 @@ enum Event {
         id: String,
         url: String,
     },
+    /// A page of the agent surface `id` opened a window, which is the agent
+    /// surface `popup` now, its `window.opener` still the page that asked.
+    Popup {
+        id: String,
+        popup: String,
+        url: String,
+    },
+    /// The page of an agent's popup called `window.close()`.
+    Closed {
+        id: String,
+    },
 }
 
 /// A slot's place in the window's content area, in logical pixels, which is
@@ -231,6 +244,16 @@ struct Surfaces {
 /// screenshots and records it while nobody looks at it.
 fn is_agent_label(label: &str) -> bool {
     label.strip_prefix(LABEL_PREFIX).is_some_and(crate::browser_control::is_agent_surface)
+}
+
+/// Whether a webview plays no sound: an agent surface and every popup its
+/// pages open. Nobody listens to the pages an agent drives, often out of sight,
+/// and their sound reached the user's headset (2026-10-25). The pages the user
+/// browses keep theirs. A label's kind never changes, so neither does this.
+/// Only WebView2 applies it: an agent drives a surface through WebView2's
+/// devtools channel alone, so off Windows no agent surface plays anything.
+pub(crate) fn muted(label: &str) -> bool {
+    is_agent_label(label) || popups::popup_surface(label).is_some_and(crate::browser_control::is_agent_surface)
 }
 
 /// The viewport an agent surface works in before the UI ever measured a slot for it.
@@ -628,6 +651,49 @@ pub async fn browser_create(
         }
     }
 
+    builder = page_events(builder, &app, id.clone(), profile == Profile::Private);
+
+    // An agent surface is never hidden, so it starts where it waits out of
+    // sight: see `Surfaces::placement`.
+    let agent = is_agent_label(&label);
+    let view = if agent {
+        window.add_child(builder, PhysicalPosition::new(OFF_SCREEN_X, 0), LogicalSize::new(AGENT_SIZE.0, AGENT_SIZE.1))
+    } else {
+        window.add_child(
+            builder,
+            LogicalPosition::new(0.0, 0.0),
+            // A tab first opened by a background agent has no measured UI slot.
+            // Give its hidden page a usable viewport until the panel shows it.
+            LogicalSize::new(1024.0, 768.0),
+        )
+    }
+    .map_err(|error| format!("the browser surface {id:?} could not be created: {error}"))?;
+    if !agent {
+        view.hide()
+            .map_err(|error| format!("the browser surface {id:?} could not be parked: {error}"))?;
+    }
+    #[cfg(windows)]
+    {
+        if let Err(error) = crate::platform::browser_page::surface(&view, muted(&label)).await {
+            let _ = view.close();
+            return Err(format!("the browser surface {id:?} could not be prepared: {error}"));
+        }
+        if let Err(error) = crate::platform::browser_diagnostics::attach(view.clone(), id.clone()).await {
+            crate::platform::browser_diagnostics::remove(&id); let _ = view.close(); return Err(error);
+        }
+        if let Err(error) = view.navigate(start) {
+            crate::platform::browser_diagnostics::remove(&id);
+            let _ = view.close();
+            return Err(error.to_string());
+        }
+    }
+    Ok(())
+}
+
+/// What the page of the surface `id` tells the UI: where it goes, what it is
+/// called, when it loads, and the windows it asks for. An agent's popup is
+/// built with the same handlers as the tab whose page opened it.
+fn page_events(mut builder: WebviewBuilder<tauri::Wry>, app: &AppHandle, id: String, private: bool) -> WebviewBuilder<tauri::Wry> {
     let handle = app.clone();
     let surface = id.clone();
     builder = builder.on_navigation(move |url| {
@@ -734,45 +800,8 @@ pub async fn browser_create(
     });
 
     let handle = app.clone();
-    let surface = id.clone();
-    let private = profile == Profile::Private;
-    builder = builder.on_new_window(move |url, features| new_window(&handle, &surface, private, url, features));
-
-    // An agent surface is never hidden, so it starts where it waits out of
-    // sight: see `Surfaces::placement`.
-    let agent = is_agent_label(&label);
-    let view = if agent {
-        window.add_child(builder, PhysicalPosition::new(OFF_SCREEN_X, 0), LogicalSize::new(AGENT_SIZE.0, AGENT_SIZE.1))
-    } else {
-        window.add_child(
-            builder,
-            LogicalPosition::new(0.0, 0.0),
-            // A tab first opened by a background agent has no measured UI slot.
-            // Give its hidden page a usable viewport until the panel shows it.
-            LogicalSize::new(1024.0, 768.0),
-        )
-    }
-    .map_err(|error| format!("the browser surface {id:?} could not be created: {error}"))?;
-    if !agent {
-        view.hide()
-            .map_err(|error| format!("the browser surface {id:?} could not be parked: {error}"))?;
-    }
-    #[cfg(windows)]
-    {
-        if let Err(error) = crate::platform::browser_page::surface(&view).await {
-            let _ = view.close();
-            return Err(format!("the browser surface {id:?} could not be cleared of the app's scripts: {error}"));
-        }
-        if let Err(error) = crate::platform::browser_diagnostics::attach(view.clone(), id.clone()).await {
-            crate::platform::browser_diagnostics::remove(&id); let _ = view.close(); return Err(error);
-        }
-        if let Err(error) = view.navigate(start) {
-            crate::platform::browser_diagnostics::remove(&id);
-            let _ = view.close();
-            return Err(error.to_string());
-        }
-    }
-    Ok(())
+    let surface = id;
+    builder.on_new_window(move |url, features| new_window(&handle, &surface, private, url, features))
 }
 
 #[tauri::command]
@@ -976,7 +1005,19 @@ pub async fn browser_destroy(app: AppHandle, webview: Webview, id: String) -> Re
 
 #[cfg(test)]
 mod tests {
-    use super::{checked_url, label_of, profile_of, read_selection, webview2_profile, Placement, Profile, SurfaceRect, Surfaces, LABEL_PREFIX, MAIN_LABEL, MAX_SELECTION_CALLBACK_BYTES, PICKS};
+    use super::{checked_url, label_of, muted, profile_of, read_selection, webview2_profile, Placement, Profile, SurfaceRect, Surfaces, LABEL_PREFIX, MAIN_LABEL, MAX_SELECTION_CALLBACK_BYTES, PICKS};
+
+    /// A page an agent opened played its sound in the user's headset
+    /// (2026-10-25): its surface and its popups start muted, the user's do not.
+    #[test]
+    fn agent_surfaces_and_their_popups_are_muted_and_the_users_pages_are_not() {
+        assert!(muted(&label_of("agent-1").unwrap()));
+        assert!(muted("boite-popup:4:agent-1"));
+        assert!(!muted(&label_of("t1").unwrap()));
+        assert!(!muted(&label_of("browser:agent-1").unwrap()));
+        assert!(!muted("boite-popup:5:t1"));
+        assert!(!muted(MAIN_LABEL));
+    }
 
     #[test]
     fn an_agent_surface_out_of_sight_stays_shown_off_screen_at_its_last_size() {

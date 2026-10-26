@@ -39,6 +39,7 @@ import { ThreadBranching } from './threads/branching.ts';
 import { CodeCheckpoints } from './threads/code-checkpoints.ts';
 import { ThreadCards } from './threads/cards.ts';
 import { AUTO_COMPACT_LABEL, AutoCompaction } from './threads/auto-compact.ts';
+import { BackgroundCompaction } from './threads/background-compact.ts';
 import { CacheKeepalive } from './threads/cache-keepalive.ts';
 import { DeferredInput } from './threads/deferred.ts';
 import { MOVE_NOTE_PREFIX, pendingMove, ThreadMove } from './threads/move.ts';
@@ -111,6 +112,8 @@ export class ThreadStore {
   readonly spawns: ThreadSpawns;
   /** The `autoCompact` setting: compactions the core opens between turns. */
   readonly autoCompact: AutoCompaction;
+  /** The experimental `backgroundCompaction` setting: copies compacted ahead of the limit. */
+  readonly backgroundCompact: BackgroundCompaction;
   /** The `cacheKeepalive` setting: pings that keep a waiting thread's prompt cache warm. */
   readonly cacheKeepalive: CacheKeepalive;
   /** Threads a usage limit stopped, resumed once its window resets (`threads/limit-resume.ts`). */
@@ -140,6 +143,7 @@ export class ThreadStore {
     this.moves = new ThreadMove(core, this);
     this.spawns = new ThreadSpawns(core, this);
     this.autoCompact = new AutoCompaction(core, this);
+    this.backgroundCompact = new BackgroundCompaction(core, this);
     this.cacheKeepalive = new CacheKeepalive(core, this);
     this.limitResumes = new LimitResumes(core, this);
     this.autoContinue = new AutoContinues(core, this);
@@ -771,14 +775,17 @@ export class ThreadStore {
     return this.core.journal.queuedTurn(threadId, 'coordination') === null ? false : this.core.scheduler.stop(threadId);
   }
 
-  /** A keepalive takes no steering: what would steer it waits for the turn after it, and a result stops it. */
-  canSteer(threadId: string): boolean { return typeof this.runner.handles.get(threadId)?.steer === 'function' && !this.cacheKeepalive.pinging(threadId); }
+  /** Maintenance takes no steering: results remain in their inbox until the next conversation turn. */
+  canSteer(threadId: string): boolean {
+    const operation = this.core.journal.lastTurn(threadId)?.execution?.operation;
+    return typeof this.runner.handles.get(threadId)?.steer === 'function' && operation !== 'compact' && !this.cacheKeepalive.pinging(threadId);
+  }
 
   async steer(threadId: string, text: string): Promise<boolean> {
     const handle = this.runner.handles.get(threadId);
     if (!handle?.steer || this.runner.steering.has(threadId)) return false;
     const turn = this.core.journal.runningTurn(threadId);
-    if (!turn || turn.execution?.operation === 'keepalive') return false;
+    if (!turn || turn.execution?.operation === 'keepalive' || turn.execution?.operation === 'compact') return false;
     this.runner.steering.add(threadId);
     try {
       const submitted = await handle.steer(text);

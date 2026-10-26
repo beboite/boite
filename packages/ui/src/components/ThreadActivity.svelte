@@ -1,7 +1,7 @@
 <script lang="ts">
   import { errorText } from '../lib/errors';
-  import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleCheck, CircleDot, Hand, ListChecks, ListTodo, MessageCircleQuestionMark, PanelRight, Pause, Play, Repeat, Reply, Settings2, ShieldQuestion, Target, X } from '@lucide/svelte';
-  import type { ThreadSummary } from '@boite/contracts';
+  import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleCheck, CircleDot, Hand, KeyRound, ListChecks, ListTodo, MessageCircleQuestionMark, PanelRight, Pause, Play, Repeat, Reply, Settings2, ShieldQuestion, Target, X } from '@lucide/svelte';
+  import type { MessagePart, QuestionRequest, SecretRequest, ThreadSummary } from '@boite/contracts';
   import { focusComposer } from '../lib/focus';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
@@ -9,6 +9,8 @@
   import { dockRoom, questionDock } from '../lib/question-dock.svelte';
   import { ignoreQuestions, releaseWaiting, replyOf, repliesOf, sendAnswer, writeAnswer } from '../lib/question-reply.svelte';
   import QuestionCard from './QuestionCard.svelte';
+  import SecretCard from './SecretCard.svelte';
+  import InfoTip from './InfoTip.svelte';
   import { openQuestionPage } from '../lib/question-page';
   import SettingRequestCard from './SettingRequestCardLoader.svelte';
   import { settingHeading } from '../lib/setting-requests';
@@ -37,7 +39,20 @@
    * is answered in the child's own conversation.
    */
   let children = $derived(new Map(store.openThread ? store.threads.filter((row) => row.parentThreadId === store.openThread?.id && !row.archived).map((row) => [row.id, row] as const) : []));
-  let asked = $derived(store.openThread ? store.pendingQuestions.filter((question) => (question.async === true && question.threadId === store.openThread?.id) || children.has(question.threadId)).sort((a, b) => a.createdAt - b.createdAt) : []);
+  type DockRequest = QuestionRequest & { secret?: SecretRequest };
+  let asked: DockRequest[] = $derived.by(() => {
+    const threadId = store.openThread?.id;
+    if (!threadId) return [];
+    const questions: DockRequest[] = store.pendingQuestions.filter((question) => (question.async === true && question.threadId === threadId) || children.has(question.threadId));
+    const secrets: DockRequest[] = store.pendingSecrets
+      .filter((request) => request.threadId === threadId || children.has(request.threadId))
+      .map((secret) => ({ id: secret.id, threadId: secret.threadId, turnId: secret.turnId, text: secret.reason, options: [], allowText: false, multiple: false, createdAt: secret.createdAt, secret }));
+    return [...questions, ...secrets].sort((a, b) => a.createdAt - b.createdAt);
+  });
+
+  function secretPart(request: SecretRequest): Extract<MessagePart, { type: 'secret_request' }> {
+    return { type: 'secret_request', requestId: request.id, name: request.name, reason: request.reason, placeholder: request.placeholder, replace: request.replace, status: request.status, ref: request.ref, expiresAt: request.expiresAt };
+  }
   let waits = $derived(store.pendingPermissions.filter((request) => children.has(request.threadId)));
   let shownId = $state<string | null>(null);
   let shown = $derived(asked.find((question) => question.id === shownId) ?? asked[0]);
@@ -190,18 +205,21 @@
 {/snippet}
 
 {#if activity || asked.length > 0 || waits.length > 0}
-  <section class="activity" class:inline class:hidden={!visible} use:measure data-testid="thread-activity" aria-label={shown ? strings.activity.question : strings.activity.tasks} inert={!visible}>
+  <section class="activity" class:inline class:reserved={reserveInComposer} class:hidden={!visible} use:measure data-testid="thread-activity" aria-label={shown ? strings.activity.question : strings.activity.tasks} inert={!visible}>
     {#if shown}
       <div class="questions" data-testid="activity-questions" data-count={asked.length}>
         <div class="activity-row question-row">
-          {#if shown.setting}<Settings2 size={16} />{:else if shown.agentSetting}<Bot size={16} />{:else}<MessageCircleQuestionMark size={16} />{/if}
+          {#if shown.secret}<KeyRound size={16} />{:else if shown.setting}<Settings2 size={16} />{:else if shown.agentSetting}<Bot size={16} />{:else}<MessageCircleQuestionMark size={16} />{/if}
           <button type="button" class="ghost objective question-toggle" aria-expanded={questionOpen}
             title={questionOpen ? strings.activity.questionFold : strings.activity.questionUnfold} data-testid="activity-question-toggle"
             onclick={() => (questionOpen = !questionOpen)}>
-            <span class="question-line ui-label">{questionOpen ? (shown.setting ? settingHeading(shown.setting) : shown.agentSetting ? fill(strings.agentSettingRequest.heading, { name: shown.agentSetting.agentName }) : strings.chat.questionAsyncHeading) : shown.text}</span>
+            <span class="question-line ui-label">{shown.secret ? shown.secret.name : questionOpen ? (shown.setting ? settingHeading(shown.setting) : shown.agentSetting ? fill(strings.agentSettingRequest.heading, { name: shown.agentSetting.agentName }) : strings.chat.questionAsyncHeading) : shown.text}</span>
             <ChevronDown size={16} class={questionOpen ? 'turned' : ''} />
           </button>
-          {#if replyOf(store, shown.id).replying}
+          {#if shown.secret}
+            <InfoTip text={strings.secrets.neverShown} topic={strings.secrets.cardLabel} />
+          {/if}
+          {#if !shown.secret && replyOf(store, shown.id).replying}
             <span data-testid="composer-reply" data-question={shown.id}>
               <button type="button" class="ghost small" data-testid="composer-reply-ignore" title={strings.composer.replyIgnoreHint} onclick={() => ignoreQuestions(store)}>{strings.composer.replyIgnore}</button>
             </span>
@@ -223,7 +241,9 @@
                 {#if child}
                   {@render fromChild(child, 'activity-subagent-question')}
                 {/if}
-                {#if question.agentSetting}
+                {#if question.secret}
+                <SecretCard {store} threadId={question.threadId} part={secretPart(question.secret)} docked />
+                {:else if question.agentSetting}
                 <AgentSettingCard
                   {store}
                   threadId={question.threadId}
@@ -333,7 +353,7 @@
           <div class="blocker" data-testid="activity-goal-blocked">
             <span class="waiting-dot" aria-hidden="true"></span>
             <p><span class="ask">{strings.activity.blocked}</span> <span class="hint">{strings.activity.blockedHint}</span></p>
-            <button type="button" class="small reply" onclick={() => focusComposer()}><Reply size={14} />{strings.activity.reply}</button>
+            <button type="button" class="small reply" onclick={() => focusComposer({ typing: true })}><Reply size={14} />{strings.activity.reply}</button>
           </div>
         {:else if entry.error}<p class="error">{entry.error}</p>{/if}
         </div>
@@ -405,9 +425,14 @@
 <style>
   /* Four pixels of card around every line: the rows and the toggle carry their
      own inline padding, so a hover fill sits inset by the same four pixels on
-     every side and the air above the first line equals the air under the last. */
-  .activity { position: absolute; bottom: calc(100% + 4px); inset-inline: 0; z-index: 5; width: 100%; margin-inline: auto; max-height: 45vh; overflow-y: auto; padding: 4px; border: 1px solid var(--color-border); border-top-color: var(--color-edge); border-radius: var(--radius-lg); background: var(--composer-glaze) var(--color-activity-surface); backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2); box-shadow: var(--shadow-e1); font-size: var(--text-sm); transition: opacity var(--dur-3), transform var(--dur-3); }
+     every side and the air above the first line equals the air under the last.
+     The subagent bar stands between the timeline and the composer: the band
+     rises by the bar's height, which ChatView sets, into the air the bar keeps
+     above itself, and covers no more of the timeline than the reading room
+     reserves. Over queued prompts it stays in the room they leave it. */
+  .activity { position: absolute; bottom: calc(100% + 4px + var(--agent-dock-room, 0px)); inset-inline: 0; z-index: 5; width: 100%; margin-inline: auto; max-height: 45vh; overflow-y: auto; padding: 4px; border: 1px solid var(--color-border); border-top-color: var(--color-edge); border-radius: var(--radius-lg); background: var(--composer-glaze) var(--color-activity-surface); backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2); box-shadow: var(--shadow-e1); font-size: var(--text-sm); transition: opacity var(--dur-3), transform var(--dur-3); }
   .activity.hidden { opacity: 0; transform: translateY(8px); pointer-events: none; }
+  .activity.reserved { bottom: calc(100% + 4px); }
   .activity.inline { position: relative; bottom: auto; inset-inline: auto; z-index: auto; background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; border: none; border-bottom: 1px solid var(--color-border); border-radius: 0; box-shadow: none; padding: 8px 4px 4px; }
   .activity-row { display: flex; align-items: center; gap: 8px; min-height: var(--control); min-width: 0; padding: 0 2px 0 8px; }
   /* The questions sit above the goal, the loop and the tasks, a hairline between. */

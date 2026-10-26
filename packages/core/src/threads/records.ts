@@ -83,7 +83,7 @@ export function withLoad(core: Core, thread: ThreadSummary): ThreadSummary {
  */
 export function backgroundWaitOf(core: Core, thread: ThreadSummary, live: BackgroundTask[]): BackgroundWait | null {
   if (thread.status === 'queued' || !core.threads) return null;
-  const row = core.journal.db.query('SELECT id FROM turns WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1').get(thread.id) as { id: string } | null;
+  const row = core.journal.db.query("SELECT id FROM turns WHERE thread_id = ? AND COALESCE(json_extract(execution, '$.operation'), '') NOT IN ('compact', 'keepalive') ORDER BY rowid DESC LIMIT 1").get(thread.id) as { id: string } | null;
   const lastTurn = row ? core.journal.getTurn(row.id) : null;
   if (lastTurn?.status !== 'done' || lastTurn.finishedAt === null) return null;
   const history = live.length > 0 ? [] : core.threads.agentState.backgroundHistory.endedAfter(thread.id, lastTurn.finishedAt);

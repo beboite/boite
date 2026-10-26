@@ -522,6 +522,7 @@ export class Workflows {
       if (pending.length) setTimeout(() => { for (const run of pending) run.status === 'running' ? this.noticeFailures(run.id) : this.deliver(run.id); }, 0).unref?.();
       return;
     }
+    if (turn.execution?.operation === 'compact' || turn.execution?.operation === 'keepalive') return;
     let correction = false, cut = false;
     this.mutate(entry.runId, run => {
       const inst = this.instance(run, entry.key);
@@ -589,6 +590,7 @@ export class Workflows {
    * that finished, or a run that was stopped or finished, is left alone.
    */
   private adopt(turn: Turn): void {
+    if (turn.execution?.operation === 'compact' || turn.execution?.operation === 'keepalive') return;
     const entry = this.stepOf.get(turn.threadId);
     if (!entry) return;
     let adopted = false;

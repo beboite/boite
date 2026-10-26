@@ -42,6 +42,25 @@ async function bothWidths(selector: string, name: string) {
   await page.waitFor(`document.querySelector('${selector}')?.getBoundingClientRect().width > 0`);
 }
 
+/** The request belongs to the composer, so reading old output cannot move it away. */
+async function staysDocked() {
+  const before = await page.evaluate<number>(`document.querySelector('${PENDING}').getBoundingClientRect().top`);
+  await page.evaluate(`(() => {
+    const timeline = document.querySelector('[data-testid="timeline"]');
+    timeline.scrollTop = 0;
+    timeline.dispatchEvent(new Event('scroll'));
+  })()`);
+  await page.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+  const geometry = await page.evaluate<{ top: number; bottom: number; inputTop: number }>(`(() => {
+    const box = document.querySelector('${PENDING}').getBoundingClientRect();
+    const input = document.querySelector('[data-testid="composer-input"]').getBoundingClientRect();
+    return { top: box.top, bottom: box.bottom, inputTop: input.top };
+  })()`);
+  expect(Math.abs(geometry.top - before)).toBeLessThan(2);
+  expect(geometry.top).toBeGreaterThan(0);
+  expect(geometry.bottom).toBeLessThanOrEqual(geometry.inputTop);
+}
+
 /** Asks from the agent's side; the outcome lands in `window.__secretOutcome`. */
 function ask(params: Record<string, unknown>) {
   return page.evaluate(`(() => {
@@ -68,8 +87,13 @@ test('an agent asks for a key: the card takes it masked, keeps it for the projec
   // Open, with the box unticked: a one-off copy unless the user keeps it.
   await ask({});
   await page.waitFor(`document.querySelector('${PENDING} [data-testid="secret-keep"]')?.checked === false`);
-  expect(await page.text(`${PENDING} [data-testid="secret-name"]`)).toBe('OPENAI_API_KEY');
+  expect(await page.evaluate(`document.querySelector('${PENDING}')?.closest('[data-testid="thread-activity"]') != null`)).toBe(true);
+  expect((await page.text('[data-testid="activity-question-toggle"]')).trim()).toBe('OPENAI_API_KEY');
   await bothWidths(PENDING, 'open-unchecked');
+  await staysDocked();
+  await page.send('Emulation.setDeviceMetricsOverride', PHONE);
+  await staysDocked();
+  await page.send('Emulation.setDeviceMetricsOverride', DESKTOP);
 
   // Typed through the real keyboard path: masked on screen, and no character reaches the composer.
   await page.evaluate(`document.querySelector('${PENDING} [data-testid="secret-field"]').focus()`);

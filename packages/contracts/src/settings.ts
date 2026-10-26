@@ -1,9 +1,26 @@
 import type { BrowserProfile } from './browser';
 import type { AccountId, ProviderId, RequestId } from './ids';
-import type { ClientPreferences, SettingAsk, SettingRequestParams } from './setting-requests.ts';
+import type { ClientPreferences, ExperimentId, SettingAsk, SettingRequestParams } from './setting-requests.ts';
 import type { AutoCompact, CacheKeepalive } from './settings-validation.ts';
 import type { SubscriptionProxy } from './subscription-proxy';
 import type { ThreadSummary } from './threads';
+
+export type CompactionTarget = 'agent' | 'subagent' | 'bot';
+
+/** A complete override; removing the target restores the current common defaults. */
+export interface CompactionPolicy {
+  autoCompact: AutoCompact | null;
+  backgroundCompaction: boolean;
+}
+
+/** Children take precedence, including children started by a resident bot. */
+export function effectiveCompaction(settings: Pick<Settings, 'autoCompact' | 'backgroundCompaction' | 'compactionByType'>, thread: Pick<ThreadSummary, 'parentThreadId' | 'agentSessionId'>): CompactionPolicy {
+  const target: CompactionTarget = thread.parentThreadId ? 'subagent' : thread.agentSessionId ? 'bot' : 'agent';
+  return settings.compactionByType?.[target] ?? {
+    autoCompact: settings.autoCompact ?? null,
+    backgroundCompaction: settings.backgroundCompaction === true,
+  };
+}
 
 /** Per-core consent. Installation identifiers never cross RPC. */
 export interface TelemetryState {
@@ -136,10 +153,22 @@ export interface Settings {
    */
   goalTracker?: GoalTrackerModel | null;
   /**
-   * When the core compacts a conversation by itself, between two turns. Null
-   * or missing: never, each agent keeps its own behaviour. Missing on older cores.
+   * Independent token limit and idle moments for automatic compaction. The
+   * limit reaches native tool boundaries where supported. Null or missing
+   * leaves each agent's own behaviour. Missing on older cores.
    */
   autoCompact?: AutoCompact | null;
+  /**
+   * Experimental: as a thread nears its `autoCompact` token limit, a forked
+   * copy of its session compacts in the background while the conversation
+   * goes on; at its first pause after the copy is done, the thread swaps to it
+   * and its next prompt carries the turns since the fork (docs/context.md, "Background
+   * compaction"). OpenCode V2 gets its own `experimental.background_compaction`.
+   * Missing reads as off.
+   */
+  backgroundCompaction?: boolean;
+  /** Complete policies per thread type. Missing targets follow the live common defaults. */
+  compactionByType?: Partial<Record<CompactionTarget, CompactionPolicy>>;
   /**
    * Experimental: while a thread of the user's waits on its delegated agents
    * or workflows, the core sends a minimal turn before its prompt cache lapses
@@ -249,7 +278,8 @@ export interface SettingsRpcMethods {
   };
 
   'telemetry.state': { params: Record<string, never>; result: TelemetryState };
-  'telemetry.configure': { params: { mode: TelemetryState['mode'] }; result: TelemetryState };
+  /** countChoice reports this explicit selection anonymously, including off. Missing: no choice report. */
+  'telemetry.configure': { params: { mode: TelemetryState['mode']; countChoice?: boolean }; result: TelemetryState };
   'telemetry.export': { params: Record<string, never>; result: Record<string, unknown> };
   'telemetry.retryForget': { params: Record<string, never>; result: TelemetryState };
   'settings.get': { params: Record<string, never>; result: Settings };
@@ -265,12 +295,20 @@ export interface SettingsRpcMethods {
    * The app says its language, the experiments it has on and the names it
    * gives settings, after each hello and on every change. Agents read them
    * from the app the user last used (`agent.settings`), and a card about an
-   * experiment settles when that app reports it changed.
+   * experiment settles when that app reports it changed. `desktop` is what
+   * `client.desktopExperiments` last said, null before any desktop app
+   * reported: a phone follows the computer's switches from its first hello.
    */
-  'client.preferences': { params: ClientPreferences; result: { ok: true } };
+  'client.preferences': { params: ClientPreferences; result: { ok: true; desktop: ExperimentId[] | null } };
 }
 
 export interface SettingsRpcEvents {
   /** The whole settings object, as `settings.set` wrote it. */
   'settings.updated': Settings;
+  /**
+   * The experiments of the desktop app this core follows, once its report
+   * changes them: the app on this machine's loopback, else the last desktop
+   * app to report from elsewhere. Kept in memory, like the reports.
+   */
+  'client.desktopExperiments': { experiments: ExperimentId[] };
 }

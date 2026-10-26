@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { verifyPayload } from '../../../packages/core/src/server-update/release.ts';
 import {
-  bindAddress, bundleName, checkEntries, GLIBC_INTERPRETER, loaderLink, newestRelease, offerOf, pairingLinks, parseConfig, patchInterpreter, pickRelease,
-  reachableAt, rotateLog, startTimeOf, tailscaleAddress, TARGET, UPDATE_PUBLIC_KEY, verifyFile, withSetting, type Interfaces,
+  bindAddress, bundleName, checkEntries, coreEnv, DEFAULT_CONFIG, deviceName, GLIBC_INTERPRETER, loaderLink, newestRelease, offerOf, pairingLinks, parseConfig, patchInterpreter, pickRelease,
+  reachableAt, rotateLog, signIns, startTimeOf, tailscaleAddress, TARGET, UPDATE_PUBLIC_KEY, verifyFile, withSetting, type Interfaces,
 } from './boite-server.ts';
 
 const temporary = () => mkdtempSync(join(tmpdir(), 'boite-android-server-'));
@@ -97,6 +97,16 @@ test('a rotated log keeps receiving what the running supervisor writes', () => {
   }
 });
 
+test('an agent counts as signed in when one of its accounts is, and as signed out with none', () => {
+  const account = (providerId: string, status: string) => ({ id: `${providerId}-${status}`, providerId, label: 'Default', status, isolationDir: null, identity: null, createdAt: 0 });
+  // The owner's own account beside a default one the CLI signed out of; Codex never signed in, so the core holds no account of it.
+  expect(signIns([account('claude', 'unauthenticated'), account('claude', 'ok'), account('pi', 'unknown'), account('pi', 'error')]))
+    .toEqual({ claude: 'ok', pi: 'unknown' });
+  expect(signIns([account('claude', 'unauthenticated'), { providerId: 'codex', status: 'signed-in' }, null])).toEqual({ claude: 'unauthenticated' });
+  expect(signIns([])).toEqual({});
+  expect(() => signIns({ error: 'no core' })).toThrow('no list');
+});
+
 test('an archive entry that would land outside its release directory stops the update', () => {
   expect(() => checkEntries(['core/main.js', 'ui/assets/index.js', 'server-release.json'])).not.toThrow();
   for (const name of ['../boite-server.ts', 'core/../../bin/bun', '/data/data/com.termux/files/usr/bin/sh', 'ui\\..\\x']) {
@@ -182,12 +192,39 @@ test('the core listens and is reached on the Wi-Fi and the tailnet, never on mob
 });
 
 test('a setting is refused with the expected values rather than saved half-valid', () => {
-  expect(parseConfig('{}')).toEqual({ channel: 'stable', host: 'lan', port: 7337, autostart: true });
+  expect(parseConfig('{}')).toEqual({ channel: 'stable', host: 'lan', port: 7337, autostart: true, name: null });
   const config = parseConfig('{"channel":"nightly"}');
   expect(withSetting(config, 'autostart', 'off').autostart).toBe(false);
   expect(withSetting(config, 'port', '8080').port).toBe(8080);
   expect(() => withSetting(config, 'port', '80')).toThrow('1024 to 65535');
   expect(() => withSetting(config, 'host', 'wifi')).toThrow('lan, tailscale, local');
-  expect(() => withSetting(config, 'colour', 'blue')).toThrow('channel, host, port or autostart');
+  expect(() => withSetting(config, 'colour', 'blue')).toThrow('channel, host, port, autostart or name');
   expect(() => parseConfig('[]', 'config.json')).toThrow('config.json must hold a JSON object');
+  // A name the user gives is trimmed; an empty one hands the phone's own back.
+  const named = withSetting(config, 'name', '  OnePlus 7 Pro ');
+  expect(named.name).toBe('OnePlus 7 Pro');
+  expect(withSetting(named, 'name', ' ').name).toBeNull();
+  expect(() => withSetting(config, 'name', 'x'.repeat(101))).toThrow('at most 100 characters');
+  expect(() => parseConfig('{"name":7}', 'config.json')).toThrow('config.json: name must be text');
+});
+
+test('the phone goes by its maker and model, said once when the model already names the maker', () => {
+  const props = (values: Record<string, string>) => (property: string) => values[property] ?? '';
+  expect(deviceName(props({ 'ro.product.manufacturer': 'OnePlus', 'ro.product.model': 'GM1913\n' }))).toBe('OnePlus GM1913');
+  expect(deviceName(props({ 'ro.product.manufacturer': 'Google', 'ro.product.model': 'Pixel 8' }))).toBe('Google Pixel 8');
+  expect(deviceName(props({ 'ro.product.manufacturer': 'OnePlus', 'ro.product.model': 'ONEPLUS A6003' }))).toBe('ONEPLUS A6003');
+  expect(deviceName(props({}))).toBeNull();
+});
+
+test('the core gets the name boite-server picked, and none exported in the shell when it picked none', () => {
+  const release = { version: '2.0.0', dir: '/releases/2.0.0', bun: { version: '1.4.4', sha256: '' } };
+  const before = process.env.BOITE_MACHINE_NAME;
+  process.env.BOITE_MACHINE_NAME = 'Exported';
+  try {
+    expect(coreEnv(release, DEFAULT_CONFIG, 'OnePlus GM1913').BOITE_MACHINE_NAME).toBe('OnePlus GM1913');
+    expect('BOITE_MACHINE_NAME' in coreEnv(release, DEFAULT_CONFIG, null)).toBe(false);
+  } finally {
+    if (before === undefined) delete process.env.BOITE_MACHINE_NAME;
+    else process.env.BOITE_MACHINE_NAME = before;
+  }
 });

@@ -175,7 +175,11 @@ failed update, then one in progress, then one available, then a check in
 progress, then Up to date. A row says nothing until something has answered. A
 Docker, hand-made or too old server says how it updates in a tip on its row.
 This computer goes by its host name while it keeps the default name, and by
-the name it was given once renamed; either way lists add "(you)" after it. **Add a device**, in the card's
+the name it was given once renamed; either way lists add "(you)" after it. A
+core started with `BOITE_MACHINE_NAME` goes by that name instead of its host
+name, on the roster and wherever it names itself (`machineName` in
+`packages/core/src/paths.ts`); the [Android server](android-server.md) sets it,
+since every phone's host name is `localhost`. **Add a device**, in the card's
 header, draws the QR code and offers the link ([groups](groups.md#using-it)).
 
 Once the group has two machines, each machine's row this window controls

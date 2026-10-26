@@ -103,14 +103,52 @@ again when invoked.
 ## Automatic compaction
 
 `Settings.autoCompact` is `{ tokens, moments }` or null, set by the owner under
-Settings, Advanced, or on a phone under Settings, Automatic compaction. Null is
-the default: the core never compacts by itself, and each
-agent keeps its own mid-turn compaction, which this setting does not change.
+Settings, Advanced. A phone connected as owner has an Automatic compaction row
+in its machine settings and can also open the same card through a settings
+link ([phone settings](phone.md#settings-on-a-phone)). Null is
+the default: each agent keeps its own compaction behaviour.
 
-`tokens` is the size the meter must read, between 1000 and 10 000 000, or null
-for no size condition. It is a count and not a share of the window, so one
-number covers every model: a model that never reaches it is never compacted,
-and neither is an agent that reports no reading.
+`Settings.compactionByType` optionally overrides the complete policy for
+`agent` (regular conversation), `subagent` (a thread with `parentThreadId`)
+or `bot` (a resident thread with `agentSessionId`). A child of a bot is a
+subagent. Each override contains `{ autoCompact, backgroundCompaction }`; an
+absent target follows the current common settings, while `autoCompact: null`
+disables Boite's automatic triggers and restores the driver's native policy
+for that target. Removing a target restores live inheritance, without copying
+thresholds. The override map replaces the previous map on `settings.set` and
+follows the group's settings home alongside `autoCompact`. The common
+`backgroundCompaction` experiment stays local to its machine.
+
+All drivers resolve the policy at preparation and before each turn. Idle
+compaction and background copies use the same resolver. A policy change
+cancels a copy made under the previous policy; OpenCode 2 takes the resolved
+background switch in its process environment.
+
+`tokens` is an independent limit, between 1000 and 10 000 000, or null to leave
+only the selected idle moments. Native drivers apply it at safe tool boundaries
+where their protocol supports it. The core also checks the last reported
+reading after a turn: reaching the limit schedules compaction after 2 s,
+regardless of the selected moments. The count belongs to the owner; Boite does
+not substitute a per-model threshold.
+
+| Driver | Token limit during a turn |
+|---|---|
+| Claude | Measures the native output and compaction reserves locally, opens with a calibrated window and verifies the exact threshold before sending the prompt. An unsupported or clamped window keeps native policy and the between-turn fallback. |
+| Codex | Sends the owner's count as `model_auto_compact_token_limit` on thread start and resume; Codex performs compaction in its own loop. |
+| Muse, pi, ACP | Keep their native in-turn policy; Boite checks its limit between turns because these protocols expose no exact token-limit setter. |
+| echo | Checks between turns only. |
+
+Changing the limit during a running Claude or Codex turn applies before the
+next prompt. Claude defers reopening while its native background work still
+holds the query. Boite never interrupts and restarts a running turn to compact it.
+Claude Code 2.1.310 accepts the live window flag without updating its active
+window, so a changed limit reopens the session between turns. Its summary
+context-control request is local and makes no provider token-count call.
+
+`cache-expiry` is independent of this limit: it can compact a smaller context
+before the cache lapses. The optional `turn-end` and `background` moments keep
+their size condition when a token limit is set; without one, they compact at
+each selected moment.
 
 `moments` lists when the core checks. All three sit between two turns, because
 the core cannot cut into a running one:
@@ -123,21 +161,29 @@ the core cannot cut into a running one:
 
 `cache-expiry` tries to compact before the mapped lifetime ends, using the
 current model and account. It can reduce the context a later prompt sends;
-the timer does not guarantee a cache hit or a lower provider bill.
+the timer does not guarantee a cache hit or a lower provider bill. A planned
+compaction takes precedence over a keepalive ping, which would refresh the
+cache and postpone compaction again.
 
-A finished turn arms one timer for its thread, at the first chosen moment that
-applies. Any turn that opens before it fires disarms it, and the 2 s leave a
+A finished turn arms one timer for its thread, for the token limit or the first
+chosen moment that applies. Any turn that opens before it fires disarms it, and the 2 s leave a
 client's queued prompt, a wake and a held answer the time to open theirs. When
 it fires the core checks again and compacts only when all of this holds:
 
 - the turn ended `done`, and was not itself a compaction;
-- the thread is idle, not archived, has a native session, and is not a
-  delegated agent's; a bot's own thread compacts like any other;
-- the reading is at or above `tokens`;
+- the thread is idle, unarchived and on a native session, whether it is a
+  regular conversation, delegated child or resident bot;
+- the token limit was reached, or a selected idle moment applies;
 - the agent can compact, as for the manual button;
-- no goal or loop is active, no delegated agent or workflow of the thread is
-  at work, and no wake or held answer waits: each of those opens a turn by
-  itself, and a compaction in flight would refuse it.
+- no goal or loop is active and no wake, held answer or delegation letter
+  already waits to open the next conversation turn.
+
+Children and workflows can keep working during an idle parent's compaction.
+Their results stay in the inbox until the compaction ends; they never steer
+its native command or enter a compaction tool hook as additional context.
+A child's internal compaction neither sends a final result to its parent nor
+replaces the last task answer. A bot's compaction does not finish routines,
+create memory passes or notify other bots as a task result.
 
 The compaction is the turn `threads.compact` schedules, with
 `execution.automatic: true`. Its opening message is Boite's (`system`,
@@ -145,11 +191,70 @@ The compaction is the turn `threads.compact` schedules, with
 A threshold below what the agent keeps after compacting makes every turn end
 compact again. The timers live in memory: a core restart drops them, and the
 next finished turn arms a new one. The in-memory client implements `turn-end`
-and the threshold only; it has no background work and no cache to wait on.
+and the independent token limit; it has no background work or prompt cache.
 
 When a merged PR moves a conversation to Done, its last prompt can finish,
 but a compaction turn is stopped. If the provider announces native compaction
 after Done, that turn is stopped too. The history already written is kept.
+
+### Background compaction
+
+`Settings.backgroundCompaction` is an experiment, off by default, that the
+owner turns on under Settings, Experiments (an agent asks with
+`boite settings request backgroundCompaction true --why "..."`). It works
+with the token limit above and does nothing without one. Like `deviceStream`,
+it stays on its machine: the group's settings do not carry it.
+
+When a finished turn leaves the context between 85% of the limit (and at least
+64 000 tokens) and the limit, the core forks the thread's native session at
+the end of that turn and runs `/compact` on the fork, outside the thread
+(`threads/background-compact.ts`). The thread stays free: the user and its
+agents keep working on the original session meanwhile.
+
+| Driver | The copy |
+|---|---|
+| Claude | Resumes at the turn's checkpoint with `resumeSessionAt` and `forkSession`, then compacts. |
+| Codex | `forkSession` at the turn's checkpoint, then compacts the fork. |
+| echo | Names the fork after the turn. |
+| OpenCode 2 | No copy: the setting turns on OpenCode's own `experimental.background_compaction` in `OPENCODE_CONFIG_CONTENT`, for the processes started afterwards. |
+| OpenCode 1, Muse, pi, other ACP | None: the compaction above runs as before. |
+
+At the first pause after the copy finished, under the same conditions as the
+timer above and after the same 2 s, the thread takes the compacted session: a
+new session generation, no model call, its process released, and a divider
+marked `background: true` (`in the background`). It does not wait for the
+limit, because a session changes only between turns and the agents compact by
+themselves, blocking, as soon as a turn crosses it. The thread's next prompt
+carries what was said after the fork point in a `<recent-history>` block
+before the request (`tailInput` in `continuation.ts`); the
+`compaction-tail:<thread>` marker clears once a turn that carried it ends
+`done`.
+
+The copy is dropped, and the compaction above runs at the limit as usual,
+when:
+
+- the thread changed session, generation, agent, account, model or folder,
+  was rewound, archived or compacted, or its context shrank because the agent
+  compacted by itself;
+- the thread grew by more than 30 000 tokens, or a quarter of the limit, since
+  the copy started;
+- background work is running at the swap, since taking the new session closes
+  the process that runs it;
+- the copy failed, named no new session or did not compact; after two failures
+  in a row the thread stops trying until its next swap or a restart. A copy
+  still running after 5 minutes is stopped;
+- the effective policy changed, including turning the setting off.
+
+A thread that reaches the limit while a matching copy still runs waits for it
+rather than compacting. Regular conversations, delegated children and resident
+bots use the policy for their own type. Incognito threads and a session
+waiting to resume at an entry take no copy; their token limit still applies.
+
+Limits of the experiment: copies are held in memory, so a restart forgets them
+(the tail marker is persisted). A copy runs outside the scheduler's account
+slots and its usage is recorded on no turn. An unused Claude copy's transcript
+is removed in an account Boite isolated; Codex keeps its unused forks. The
+in-memory client stores the setting but makes no copy.
 
 ## Turns a provider refused
 

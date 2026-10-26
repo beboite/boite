@@ -28,9 +28,10 @@ runnable provider and account. Native provider subagents are separate from
 these Boite subagents, and appear in their own section of the tab. The global
 Bots page holds bots: agents with their own identity, memory and
 routines, each in a thread of its own; it is not the list of children of a
-conversation. Enable it in Settings >
-Experiments to reveal its bottom-left launcher, which opens a dedicated
-interface. It adds no conversation panel or mobile navigation tab.
+conversation. Enable it in Settings > Experiments to show the Threads and
+Bots switch at the top of the desktop sidebar and the Bots tab in the phone's
+bottom navigation. Each bot opens its ordinary conversation, with its desk in
+the right panel ([bots](bots.md)).
 
 A bot delegates project work with `boite delegate spawn "<brief>" --project <project>`.
 The project must be entrusted to that bot. With one entrusted project, delegation
@@ -122,7 +123,8 @@ One button above the composer shows the number of active subagents and running
 workflows, with elapsed time since the oldest active start. It appears for a
 running workflow even before a child starts. Click it to open the team overview,
 then select an agent or workflow to inspect its progress. The panel keeps
-completed results after the button disappears.
+completed results after the button disappears. The button sits right on the
+composer, below any notice; the task overlay floats above it, never over it.
 
 A parent's row in the sidebar, the Recent list and the phone's list carries a
 chip with the number of its subagents at work, in every state of the parent.

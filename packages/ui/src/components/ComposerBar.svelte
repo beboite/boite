@@ -2,7 +2,7 @@
   import { ArrowUp, GitBranch, Mic, MicOff, Paperclip, Square } from '@lucide/svelte';
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import type { PermissionMode, ProviderSummary } from '@boite/contracts';
+  import { effectiveCompaction, type PermissionMode, type ProviderSummary } from '@boite/contracts';
   import { formatTokens, providerName } from '../lib/format';
   import { confirm } from '../lib/confirm.svelte';
   import { switchDropsHistory, switchResetsCache, type CacheKey } from '../lib/switch-warning';
@@ -74,7 +74,7 @@
 
   let bound = $derived(!target && store.openThread !== null);
   // Keep the stored visibility preference and reveal a nearly full context.
-  let showContext = $derived(work.shows('header.context') || contextLevel(store.openThread?.context ? contextPercent(store.openThread.context, store.settings?.autoCompact) : null) === 'full');
+  let showContext = $derived(work.shows('header.context') || contextLevel(store.openThread?.context ? contextPercent(store.openThread.context, store.settings ? effectiveCompaction(store.settings, store.openThread).autoCompact : null) : null) === 'full');
   /** Every agent can read uploaded files through its local tools. */
   let canAttach = $derived(!!target || (provider !== null && provider !== undefined));
 

@@ -3,6 +3,11 @@ import type { AgentCommand, BackgroundTask, ToolDocument, Usage } from '@boite/c
 import type { PromptCacheLife } from '../types.ts';
 import { stringify } from '../tool-text.ts';
 
+/** `api_retry`: the CLI is running a request that failed and will try again. */
+export function isApiRetry(message: SDKMessage): boolean {
+  return message.type === 'system' && message.subtype === 'api_retry';
+}
+
 /** The JSON boundary: the SDK types these through the Anthropic API package. */
 interface ContentBlock {
   type: string;
@@ -21,7 +26,7 @@ export interface StreamEvent {
   index?: number;
   message?: { id?: string; model?: string };
   content_block?: ContentBlock;
-  delta?: { type?: string; text?: string; thinking?: string; partial_json?: string };
+  delta?: { type?: string; text?: string; thinking?: string; partial_json?: string; stop_reason?: string | null };
 }
 
 /** The SDK's `SlashCommand` as the contract's `AgentCommand`: an empty field becomes null. */

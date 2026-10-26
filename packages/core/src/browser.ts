@@ -6,7 +6,6 @@
  * `browser.remoteInput`, from this machine or another. See docs/browser.md.
  */
 import { readdirSync } from 'node:fs';
-import { hostname } from 'node:os';
 import { join } from 'node:path';
 import {
   browserActionError,
@@ -38,6 +37,7 @@ import {
 import type { Core } from './core.ts';
 import type { Connection } from './router.ts';
 import { refused } from './errors.ts';
+import { machineName } from './paths.ts';
 import { findChromium } from './browser/chromium.ts';
 import { PageProbes, PROBE_TIMEOUT_MS, type PageProbe, type ViewCheckOptions } from './browser/probe.ts';
 import { TabRecorder } from './browser/recorder.ts';
@@ -73,7 +73,7 @@ export const DISCARDED_RECORDING_ERROR = "the recording was discarded because th
 
 export class AgentBrowser {
   readonly #core: Core;
-  readonly #machine = hostname();
+  readonly #machine = machineName();
   readonly #engines: BrowserEngines;
   readonly #remote: RemoteDrive;
   readonly #host = new BrowserHost();

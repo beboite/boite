@@ -1,10 +1,12 @@
 <script lang="ts">
-  import { KeyRound } from '@lucide/svelte';
+  import { ChevronRight, KeyRound, LockKeyhole } from '@lucide/svelte';
   import type { MessagePart } from '@boite/contracts';
   import { errorText } from '../lib/errors';
   import { keepFocus } from '../lib/focus';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import { showDockedQuestion } from '../lib/question-dock.svelte';
+  import InfoTip from './InfoTip.svelte';
 
   /**
    * A key the agent asked for with `boite secret ask`. The value goes from this
@@ -12,11 +14,12 @@
    * never drawn again, kept in a draft or handed to the composer. The agent
    * only ever gets a ref.
    */
-  let { store, threadId, part }: {
+  let { store, threadId, part, docked = false }: {
     /** The store of the machine that owns the thread: the answer goes to its core. */
     store: Store;
     threadId: string;
     part: Extract<MessagePart, { type: 'secret_request' }>;
+    docked?: boolean;
   } = $props();
 
   const fieldId = $props.id();
@@ -25,7 +28,8 @@
   /** What is typed, held only until Save sends it. */
   let value = $state('');
   /** Starts ticked when the card replaces the kept key; unticking saves a one-off copy instead. */
-  let keep = $derived(part.replace === true);
+  let keepChoice = $state<{ requestId: string; checked: boolean } | null>(null);
+  const keep = $derived(keepChoice?.requestId === part.requestId ? keepChoice.checked : part.replace === true);
   let busy = $state(false);
   let error = $state<string | null>(null);
   /** Whether this connection may carry a value (`secrets.list`); null until it answers. */
@@ -54,7 +58,7 @@
 
   $effect(() => {
     const client = store.client;
-    if (!open || !client || store.connection !== 'ready') return;
+    if (!docked || !open || !client || store.connection !== 'ready') return;
     let live = true;
     client.call('secrets.list', { threadId }).then(
       (listed) => { if (live) encrypted = listed.encrypted; },
@@ -108,16 +112,20 @@
   }
 </script>
 
-{#if open}
+{#if open && !docked}
+  <button type="button" class="ghost pending-row" data-testid="secret-docked" title={s.cardLabel} onclick={() => showDockedQuestion(part.requestId)}>
+    <KeyRound size={15} strokeWidth={1.75} />
+    <span class="name ui-label" data-testid="secret-name">{part.name}</span>
+    <span class="open-glyph" aria-hidden="true"><ChevronRight size={13} /></span>
+  </button>
+{:else if open}
   <div class="secret" data-testid="secret-card" data-state="pending" role="group" aria-label={s.cardLabel}>
-    <div class="head">
-      <span class="glyph"><KeyRound size={15} strokeWidth={1.75} /></span>
-      <span class="name" data-testid="secret-name">{part.name}</span>
-    </div>
     <p class="reason" data-testid="secret-reason">{part.reason}</p>
     {#if part.replace}
       <p class="muted note" data-testid="secret-replaces">{s.replaces}</p>
     {/if}
+    <div class="field-row">
+    <span class="field-glyph" aria-hidden="true"><LockKeyhole size={16} /></span>
     <input
       id={fieldId}
       class="field"
@@ -141,33 +149,33 @@
       onpaste={own}
       oninput={own}
     />
+    <button
+      type="button"
+      class="primary"
+      data-testid="secret-save"
+      disabled={plain || busy || value.length === 0}
+      onmousedown={keepFocus}
+      onclick={save}><span class="ui-label">{s.save}</span></button
+    >
+    </div>
     {#if plain}
       <p class="warn note" data-testid="secret-plain">{s.plainLink}</p>
-    {/if}
-    {#if project}
-      <label class="keep">
-        <input type="checkbox" data-testid="secret-keep" bind:checked={keep} disabled={plain || busy} />
-        <span class="keep-text">
-          <span class="keep-title">{s.keep}</span>
-          <span class="muted note">{part.replace ? `${s.keepHint} ${s.keepReplaceHint}` : s.keepHint}</span>
-        </span>
-      </label>
     {/if}
     {#if error}
       <p class="error note" role="alert" data-testid="secret-error">{error}</p>
     {/if}
     <div class="actions">
+      {#if project}
+        <div class="keep-row">
+          <label class="keep">
+            <input type="checkbox" data-testid="secret-keep" bind:checked={() => keep, (checked) => keepChoice = { requestId: part.requestId, checked }} disabled={plain || busy} />
+            <span>{s.keep}</span>
+          </label>
+          <InfoTip text={part.replace ? `${s.keepHint} ${s.keepReplaceHint}` : s.keepHint} topic={s.keep} />
+        </div>
+      {/if}
       <button type="button" class="ghost" data-testid="secret-decline" disabled={busy} onmousedown={keepFocus} onclick={decline}
         ><span class="ui-label">{s.decline}</span></button
-      >
-      <span class="muted never">{s.neverShown}</span>
-      <button
-        type="button"
-        class="primary"
-        data-testid="secret-save"
-        disabled={plain || busy || value.length === 0}
-        onmousedown={keepFocus}
-        onclick={save}><span class="ui-label">{s.save}</span></button
       >
     </div>
   </div>
@@ -180,14 +188,10 @@
 
 <style>
   .secret {
-    border: 1px solid var(--color-edge);
-    border-radius: var(--radius-md);
-    background: var(--color-surface);
-    box-shadow: var(--shadow-e1);
-    padding: 8px 12px 10px;
+    padding: 4px 8px 6px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 10px;
     min-width: 0;
   }
 
@@ -202,13 +206,6 @@
     background: transparent;
     box-shadow: none;
     color: var(--color-muted-foreground);
-  }
-
-  .head {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
   }
 
   .glyph {
@@ -227,7 +224,8 @@
     min-width: 0;
     font-family: var(--font-mono);
     font-weight: 600;
-    overflow-wrap: anywhere;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .reason {
@@ -256,6 +254,7 @@
     min-width: 0;
     font-family: var(--font-mono);
     -webkit-text-security: disc;
+    padding-inline-start: 34px;
   }
 
   .field::placeholder {
@@ -264,29 +263,22 @@
 
   .keep {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 8px;
     cursor: pointer;
   }
 
   .keep input {
     flex: none;
-    margin: 3px 0 0;
+    margin: 0;
   }
 
   /* The app's `label > span` is a field caption; here the span is the checkbox's own text. */
-  .keep .keep-text {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
+  .keep > span {
     margin: 0;
     color: var(--color-foreground);
     font-size: inherit;
     min-width: 0;
-  }
-
-  .keep-title {
-    font-weight: 500;
   }
 
   .actions {
@@ -294,15 +286,17 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 6px 10px;
-    margin-top: 2px;
+    justify-content: space-between;
   }
 
-  .never {
-    flex: 1;
-    min-width: 0;
-    font-size: var(--text-xs);
-    text-align: right;
-  }
+  .keep-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+  .actions > button { margin-inline-start: auto; color: var(--color-muted-foreground); }
+  .field-row { display: flex; align-items: center; gap: 8px; position: relative; }
+  .field-row > button { flex: none; }
+  .field-glyph { display: flex; position: absolute; inset-inline-start: 11px; color: var(--color-muted-foreground); pointer-events: none; }
+  .pending-row { display: flex; align-items: center; gap: var(--activity-gap); width: 100%; min-width: 0; min-height: var(--control); padding: var(--activity-padding); color: var(--color-muted-foreground); font-size: var(--text-sm); text-align: left; }
+  .pending-row > :global(svg) { flex: none; color: var(--color-live); }
+  .open-glyph { display: flex; margin-inline-start: auto; flex: none; }
 
   .outcome {
     min-width: 0;

@@ -2,7 +2,7 @@
   import { onMount, untrack } from 'svelte';
   import { Brain, CalendarClock, Check, ChevronDown, ChevronRight, ListTodo, LoaderCircle, Pencil, TriangleAlert } from '@lucide/svelte';
   import type { AgentBrain, AgentWatch } from '@boite/contracts';
-  import { AgentsView, agentOfThread, faceOf, liveState, liveStep, statusOf, waitingOn } from '../../lib/agents.svelte';
+  import { AgentsView, agentOfThread, moodOf, liveState, liveStep, statusOf, waitingOn } from '../../lib/agents.svelte';
   import { budgetMeter, deskOrder, dollars, runningTurn, turnSteps } from '../../lib/agent-desk';
   import { workedTime } from '../../lib/agent-turns';
   import { minuteClock } from '../../lib/clock.svelte';
@@ -122,7 +122,7 @@
   {:else}
     <section class="desk-now" data-state={standing} data-testid="desk-now" aria-live="polite">
       <div class="desk-now-head">
-        <span class="desk-now-robot"><AgentAvatar kind="profile" id={agent.id} name={agent.name} avatar={agent.avatar} status={faceOf(standing)} size={40} ring /></span>
+        <span class="desk-now-robot"><AgentAvatar kind="profile" id={agent.id} name={agent.name} avatar={agent.avatar} mood={moodOf(standing)} size={40} ring /></span>
         <div class="desk-now-text">
           {#if standing === 'working'}
             {#key step}<strong class="desk-now-line" data-testid="desk-now-step">{step ?? strings.agents.state.working}</strong>{/key}

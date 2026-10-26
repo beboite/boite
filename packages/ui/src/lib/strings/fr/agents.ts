@@ -85,9 +85,17 @@ export const fr: Translation = {
     waitingOn: 'Vous attend : {what}', nextWake: 'Prochain réveil : {name}, {when}',
     state: { working: 'Au travail', queued: 'En file', waiting: 'Vous attend', idle: 'Au repos', paused: 'En pause', archived: 'Archivé', error: 'Son dernier tour a échoué' },
     outcome: { done: 'terminé', quiet: 'rien à signaler', error: 'échec', stopped: 'arrêté', skipped: 'sauté' },
+    activity: {
+      thinking: 'Réfléchit', compacting: 'Compacte son contexte', starting: 'Se lance', retrying: 'Relance une requête', provider: 'Attend le modèle', writing: 'Rédige sa réponse',
+      tool: {
+        command: 'Lance une commande', edit: 'Modifie un fichier', write: 'Écrit un fichier', read: 'Lit un fichier', search: 'Cherche dans les fichiers', fetch: 'Lit une page web', web: 'Cherche sur le web',
+        agent: 'Confie du travail à un sous-agent', sleep: 'Patiente un instant', other: 'Utilise {tool}', unnamed: 'Utilise un outil',
+      },
+    },
+    mood: { working: 'Au travail', queued: 'En file', waiting: 'Vous attend', error: 'Échec', unread: 'Nouvelle réponse', idle: 'Au repos', asleep: 'Endormi' },
     robot: {
-      family: 'Style', shape: 'Forme', color: 'Couleur', eyes: 'Yeux', top: 'Accessoire', shuffle: 'Mélanger', customize: 'Personnaliser', done: 'Terminé',
-      option: '{part} {n}', families: { jelly: 'Gelée', bubble: 'Bulle', capsule: 'Capsule', retro: 'Rétro' },
+      family: 'Style', shape: 'Forme', color: 'Couleur', eyes: 'Yeux', mouth: 'Bouche', top: 'Sur la tête', cheeks: 'Joues', gear: 'Accessoire', shuffle: 'Mélanger', customize: 'Personnaliser', done: 'Terminé',
+      option: '{part} {n}', none: 'Aucun', families: { jelly: 'Gelée', bubble: 'Bulle', capsule: 'Capsule', retro: 'Rétro' },
     },
     when: {
       who: 'Bot', pickAgent: 'Choisir un bot', what: 'Que doit-il faire ?', whatPlaceholder: 'Par exemple : résume les nouveaux messages et dis-moi lesquels attendent une réponse.',

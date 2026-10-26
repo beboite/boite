@@ -44,8 +44,9 @@ export function settingsMethods(ctx: FakeContext) {
       return structuredClone(ctx.scheduler);
     },
     'telemetry.state': async () => ({ ...ctx.telemetry }),
-    'telemetry.configure': async ({ mode }) => {
+    'telemetry.configure': async ({ mode, countChoice }) => {
       if (!['off', 'basic', 'enhanced'].includes(mode)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'mode: expected off, basic or enhanced' });
+      if (countChoice !== undefined && typeof countChoice !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'countChoice: expected a boolean' });
       if (ctx.telemetry.mode === 'enhanced' && mode !== 'enhanced') ctx.telemetry.pendingDeletion = true;
       ctx.telemetry.mode = mode;
       return { ...ctx.telemetry };

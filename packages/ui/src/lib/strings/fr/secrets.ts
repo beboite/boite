@@ -5,7 +5,7 @@ export const fr: Translation = {
     cardLabel: "Secret demandé par l'agent",
     replaces: 'Remplace la clé conservée pour ce projet.',
     fieldLabel: 'Valeur de {name}',
-    save: 'Enregistrer en toute sécurité',
+    save: 'Enregistrer',
     neverShown: "Jamais montrée à l'agent",
     decline: 'Refuser',
     keep: 'Conserver pour ce projet',

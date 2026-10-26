@@ -375,7 +375,7 @@ export function requestMethods(ctx: FakeContext) {
       ctx.clientApps.set(checked.preferences.app, checked.preferences);
       ctx.clientPreferences = checked.preferences;
       settleSettings(ctx, ctx.settings, { preferences: checked.preferences, before });
-      return { ok: true };
+      return { ok: true, desktop: ctx.desktopExperiments === null ? null : [...ctx.desktopExperiments] };
     },
     'questions.skip': async (params) => {
       const pending = ctx.pendingQuestions.get(params.questionId);

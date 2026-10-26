@@ -19,13 +19,19 @@ export class ClientPreferencesBook {
   /** Each app's last report by its id, across its sockets. */
   private readonly byApp = new Map<string, ClientPreferences>();
   private latest: { connectionId: string; preferences: ClientPreferences; from: SentFrom | null } | null = null;
+  /** The desktop app phones follow: one on this machine's loopback outranks one reached from elsewhere. */
+  private desktop: { experiments: ExperimentId[]; local: boolean } | null = null;
 
   /**
    * `reported` runs on every report with the experiments that app had at its
    * previous one, null when the core has none: a card settles on a flip, not
-   * on another app's different value.
+   * on another app's different value. `desktopMoved` runs when the followed
+   * desktop app's experiments change.
    */
-  constructor(private readonly reported: (preferences: ClientPreferences, before: readonly ExperimentId[] | null) => void) {}
+  constructor(
+    private readonly reported: (preferences: ClientPreferences, before: readonly ExperimentId[] | null) => void,
+    private readonly desktopMoved: (experiments: ExperimentId[]) => void = () => {},
+  ) {}
 
   report(connection: Connection, params: unknown): void {
     const checked = checkClientPreferences(params);
@@ -42,7 +48,21 @@ export class ClientPreferencesBook {
     // The app agents read stays known once its socket closes, until another app reports.
     const vacant = this.latest === null || !this.byConnection.has(this.latest.connectionId) || this.latest.connectionId === connection.id;
     if (vacant || moved) this.latest = { connectionId: connection.id, ...entry };
+    // A paired device may call itself a shell: only the owner's desktop app is followed.
+    if (entry.from?.client === 'shell' && connection.identity.principal === 'owner') this.follow(preferences.experiments, connection.remote === false);
     this.reported(preferences, before?.experiments ?? null);
+  }
+
+  private follow(experiments: ExperimentId[], local: boolean): void {
+    if (!local && this.desktop?.local === true) return;
+    const changed = this.desktop === null || this.desktop.experiments.join() !== experiments.join();
+    this.desktop = { experiments: [...experiments], local };
+    if (changed) this.desktopMoved([...experiments]);
+  }
+
+  /** The followed desktop app's experiments, or null before one reported. */
+  desktopExperiments(): ExperimentId[] | null {
+    return this.desktop === null ? null : [...this.desktop.experiments];
   }
 
   /** A prompt from this socket: its app is the one the user uses now. */

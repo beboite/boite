@@ -308,6 +308,24 @@ test('an invitation makes two machines members of one group, and a third joins t
   expect(checkRoster(a.core.journal.getSetting('group')).cores).toHaveLength(3);
 });
 
+test('BOITE_MACHINE_NAME names the machine in its info and on the roster the other members hold', async () => {
+  const a = await machine();
+  const b = await machine();
+  await a.core.group.create('Home');
+  const before = process.env.BOITE_MACHINE_NAME;
+  // Android tells every app its host is `localhost`: the phone's server names the phone itself.
+  process.env.BOITE_MACHINE_NAME = '  OnePlus 7 Pro  ';
+  try {
+    expect(b.core.info().hostname).toBe('OnePlus 7 Pro');
+    await join(a, b);
+    await waitFor(() => a.core.group.view('owner')?.cores.find((core) => core.coreId === id(b))?.name === 'OnePlus 7 Pro');
+  } finally {
+    if (before === undefined) delete process.env.BOITE_MACHINE_NAME;
+    else process.env.BOITE_MACHINE_NAME = before;
+  }
+  expect(b.core.info().hostname).not.toBe('OnePlus 7 Pro');
+});
+
 test('an invitation is refused when it is malformed, unknown, or answered by another key', async () => {
   const a = await machine();
   const b = await machine();

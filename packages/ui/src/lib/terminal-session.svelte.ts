@@ -31,6 +31,7 @@ import type { IDecoration, IMarker, Terminal } from '@xterm/xterm';
 import type { RpcEvents, TerminalShell, TerminalState } from '@boite/contracts';
 import { TERMINAL_COMMANDS, isMac } from './keybindings';
 import { openExternal } from './links';
+import { touchScreen } from './device';
 import { readTerminalCursor, readTerminalGpu } from './terminal-cursor';
 import { clearLineKeys, parseConEmuCwd, parsePromptMark } from './terminal-marks';
 import { ShellStatusReader } from './terminal-status';
@@ -255,7 +256,7 @@ export class TerminalSession {
     if (this.#disposed) return;
     this.#host = host;
     this.#onexit = options.onexit;
-    this.#wantsFocus = options.autofocus;
+    this.#wantsFocus = options.autofocus && !touchScreen();
     host.append(this.element);
     if (this.#releaseTimer !== null) clearTimeout(this.#releaseTimer);
     this.#releaseTimer = null;

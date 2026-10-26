@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import type { Account, AccountId, ProviderDescriptor, ProviderId, RpcEvents, TerminalState } from '@boite/contracts';
+import { effectiveCompaction } from '@boite/contracts';
+import type { Account, AccountId, ProviderDescriptor, ProviderId, RpcEvents, TerminalState, ThreadSummary } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { newId } from './ids.ts';
 import { stripAnsi } from './ansi.ts';
@@ -9,6 +10,7 @@ import { runAcpLogin, type AcpLoginRun } from './drivers/acp/login.ts';
 import { antigravityCertificates } from './drivers/antigravity.ts';
 import { loginFolders, publishLoginCatalog } from './account-login.ts';
 import { probeThreadId } from './providers/probe.ts';
+import { openCodeBackgroundCompaction } from './providers/opencode.ts';
 import { activeSubscriptionProxy, subscriptionProxyEnv } from './subscription-proxy.ts';
 import { agentEnv, hostAgentsEnabled, profileFor, resolveExecutable, resolveLaunch } from './providers/resolve.ts';
 import { sqliteHasRows } from './providers/sqlite-login.ts';
@@ -321,7 +323,7 @@ export class AccountStore {
    * with a directory of its own does. Preparing the account is part of it, so
    * the seed files and the browser launcher are on disk before any spawn.
    */
-  accountEnv(account: Account, provider: ProviderDescriptor): Record<string, string> {
+  accountEnv(account: Account, provider: ProviderDescriptor, thread: Pick<ThreadSummary, 'parentThreadId' | 'agentSessionId'> = {}): Record<string, string> {
     const profile = profileFor(provider);
     if (profile === undefined) return {};
     this.prepare(account, provider);
@@ -336,7 +338,8 @@ export class AccountStore {
       env[key] = isolationDir === null ? value : value.split('{isolationDir}').join(isolationDir);
     }
     if (provider.quirks?.includes('antigravity') === true) Object.assign(env, antigravityCertificates(currentOs(), process.env, existsSync));
-    return { ...env, ...subscriptionProxyEnv(this.core, provider) };
+    // OpenCode 2 compacts in the background by itself once asked to; a process started afterwards takes the change.
+    return openCodeBackgroundCompaction(provider.id, effectiveCompaction(this.core.settings.get(), thread).backgroundCompaction, { ...env, ...subscriptionProxyEnv(this.core, provider) });
   }
 
   /**

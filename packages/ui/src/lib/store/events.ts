@@ -15,6 +15,7 @@ import { needsUser } from '../thread-state';
 import { installStatesOf } from './accounts.svelte';
 import { observable } from './connection.svelte';
 import { reportPreferences } from '../client-preferences.svelte';
+import { heardDesktop } from '../experiments';
 import { lightPage } from './reading-pages.svelte';
 import type { StoreContext } from './context';
 import { probeKey } from './models.svelte';
@@ -72,7 +73,8 @@ export function listen(ctx: StoreContext, client: Client): void {
   }
 
   // After the state handler above, so a reconnect has its principal and core first.
-  if (observable(client)) ctx.off.push(reportPreferences(client, current));
+  if (observable(client)) ctx.off.push(reportPreferences(client, current, experiments => heardDesktop(s, experiments, s.core?.coreId ?? null)));
+  on('client.desktopExperiments', ({ experiments }) => heardDesktop(s, experiments, s.core?.coreId ?? null));
 
   on('core.updateChanged', snapshot => ctx.serverUpdater.apply(snapshot));
   on('core.desktopUpdateChanged', ({ status }) => { if (!s.localCore) ctx.serverUpdater.applyDesktop(status); });
@@ -84,7 +86,8 @@ export function listen(ctx: StoreContext, client: Client): void {
   on('terminal.exited', ({ id }) => ctx.terminals.shellEnded(id));
   on('thread.created', (summary) => threads.upsertThread(summary));
   on('thread.updated', (summary) => {
-    const held = threads.threads.find(t => t.id === summary.id);
+    if (summary.archived) requests.dropSecretsOf(summary.id);
+    const held = threads.rowOf(summary.id);
     const turnedToUser = needsUser(summary) && !(held && needsUser(held));
     threads.upsertThread(summary);
     ctx.delegation.patchThread(summary);
@@ -260,6 +263,11 @@ export function listen(ctx: StoreContext, client: Client): void {
   });
   on('question.answered', ({ questionId }) => {
     requests.resolveQuestion(questionId);
+  });
+  on('secret.requested', request => requests.mergeSecret(request));
+  on('secret.resolved', ({ requestId, threadId }) => {
+    threads.invalidateSync(threadId);
+    requests.resolveSecret(requestId);
   });
 
   // An agent's shell loop starts and ends dozens of processes a second. Only

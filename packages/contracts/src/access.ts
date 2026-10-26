@@ -161,6 +161,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // refuses an answer or a deletion over a link that is not encrypted (core secrets/rpc.ts): the value or
   // the decision must not cross a LAN in clear. The list carries names and dates, never a value.
   'secrets.answer', 'secrets.list', 'secrets.delete',
+  'secrets.pending', // Restore open cards independently of history; metadata only, never values.
   // A phone says its own language and experiments, so the agent reads the screen the user reads; nothing the core trusts.
   'client.preferences',
   // Read-only Changes and Files panels on the phone: the thread's own changes and files.
@@ -222,6 +223,8 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   'quotas.updated', 'quotas.progress', 'subscriptionProxy.quotasUpdated', // What quotas.list and subscriptionProxy.quotas answer.
   'quotas.alerted', // One window of a row quotas.list already answers the device.
   'settings.updated', 'keybindings.updated', 'sessions.updated',
+  // Experiment ids of the desktop app, as client.preferences already answers the device.
+  'client.desktopExperiments',
   'group.updated', // Invalidation only; group.get applies the device read policy.
   'providers.updated', 'providers.installProgress', 'providers.probed',
 ]);

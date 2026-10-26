@@ -82,12 +82,13 @@ export const AUTO_COMPACT_TOKENS = { min: 1_000, max: 10_000_000 } as const;
 
 export interface AutoCompact {
   /**
-   * Compact only once the context meter reads at least this many tokens, so a
-   * model whose window is far away, or an agent that reports no reading, is
-   * left alone. Null: no size condition, every chosen moment compacts.
+   * Independent token limit: compact at the next safe native tool boundary
+   * when supported, otherwise between turns, even without a selected idle
+   * moment. Also gates turn-end/background; cache-expiry is independent.
+   * Null leaves only the selected idle moments.
    */
   tokens: number | null;
-  /** At least one, each listed once. */
+  /** Each listed once. Empty is allowed when a token limit supplies its own trigger. */
   moments: AutoCompactMoment[];
 }
 
@@ -103,7 +104,7 @@ export interface CacheKeepalive {
 }
 
 const NUMERIC_KEYS = ['warmProcessMinutes', 'agentCpuCapPercent', 'threadMemoryCapMb', 'agentMemoryBudgetPercent', 'memoryReserveMb'] as const;
-const BOOLEAN_KEYS = ['listenOnLan', 'focusGuard', 'muteAgents', 'reapOrphans', 'memoryProtection', 'autoUpdateHarnesses', 'autoInstallUpdates', 'asyncQuestions', 'shortAnswers', 'toolSummaries', 'agentLogAccess', 'autoResumeLimitedThreads', 'deviceStream', 'groupThreads', 'groupBots'] as const;
+const BOOLEAN_KEYS = ['listenOnLan', 'focusGuard', 'muteAgents', 'reapOrphans', 'memoryProtection', 'autoUpdateHarnesses', 'autoInstallUpdates', 'asyncQuestions', 'shortAnswers', 'toolSummaries', 'agentLogAccess', 'autoResumeLimitedThreads', 'backgroundCompaction', 'deviceStream', 'groupThreads', 'groupBots'] as const;
 /** Keys whose value is a percentage of the machine, so anything past 100 is a mistake. */
 const PERCENT_KEYS = ['agentCpuCapPercent'] as const;
 
@@ -307,11 +308,27 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
     if (!sized) {
       return { ok: false, field: 'autoCompact', message: `autoCompact.tokens must be null or an integer between ${TOKENS.min} and ${TOKENS.max}` };
     }
-    const known = Array.isArray(moments) && moments.length > 0 && moments.every((moment) => MOMENTS.includes(moment));
+    const known = Array.isArray(moments) && (moments.length > 0 || tokens !== null) && moments.every((moment) => MOMENTS.includes(moment));
     if (!known) {
-      return { ok: false, field: 'autoCompact', message: `autoCompact.moments must list at least one of ${MOMENTS.join(', ')}` };
+      return { ok: false, field: 'autoCompact', message: `autoCompact.moments must list only ${MOMENTS.join(', ')}; an empty list requires a token limit` };
     }
     next.autoCompact = { tokens: tokens as number | null, moments: MOMENTS.filter((moment) => moments.includes(moment)) };
+  }
+  if (patch.compactionByType !== undefined) {
+    const policies: unknown = patch.compactionByType;
+    const fail = (message: string): SettingsPatchCheck => ({ ok: false, field: 'compactionByType', message });
+    if (policies === null || typeof policies !== 'object' || Array.isArray(policies)) return fail('compactionByType must be an object keyed by agent, subagent or bot');
+    const normalized: NonNullable<Settings['compactionByType']> = {};
+    for (const [target, raw] of Object.entries(policies)) {
+      if (target !== 'agent' && target !== 'subagent' && target !== 'bot') return fail(`compactionByType.${target}: expected agent, subagent or bot`);
+      if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return fail(`compactionByType.${target}: expected { autoCompact, backgroundCompaction }`);
+      const policy = raw as Record<string, unknown>;
+      if (policy.autoCompact === undefined || typeof policy.backgroundCompaction !== 'boolean') return fail(`compactionByType.${target}: expected autoCompact (a rule or null) and backgroundCompaction (a boolean)`);
+      const checked = checkSettingsPatch({ autoCompact: policy.autoCompact as AutoCompact | null });
+      if (!checked.ok) return fail(`compactionByType.${target}.${checked.message}`);
+      normalized[target] = { autoCompact: checked.patch.autoCompact ?? null, backgroundCompaction: policy.backgroundCompaction };
+    }
+    next.compactionByType = normalized;
   }
   if (patch.cacheKeepalive !== undefined && patch.cacheKeepalive !== null) {
     const { hours } = (typeof patch.cacheKeepalive === 'object' ? patch.cacheKeepalive : {}) as Partial<CacheKeepalive>;

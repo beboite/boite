@@ -310,6 +310,25 @@ for (const providerId of ['opencode', 'opencode-v2'] as const) test(`${providerI
   });
   // The account's whole environment carries it, over the descriptor's own inline configuration.
   expect(harness.core.accounts.accountEnv(harness.core.accounts.require(account.id), provider)['OPENCODE_CONFIG_CONTENT']).toBe(env['OPENCODE_CONFIG_CONTENT']);
+  // The background compaction experiment turns on OpenCode 2's own, beside the gateway; version 1 has none.
+  await owner.call('settings.set', { backgroundCompaction: true });
+  expect(JSON.parse(harness.core.accounts.accountEnv(harness.core.accounts.require(account.id), provider)['OPENCODE_CONFIG_CONTENT']!)).toEqual(providerId === 'opencode'
+    ? JSON.parse(env['OPENCODE_CONFIG_CONTENT']!)
+    : { ...JSON.parse(env['OPENCODE_CONFIG_CONTENT']!), experimental: { background_compaction: true } });
+  await owner.call('settings.set', { compactionByType: {
+    subagent: { autoCompact: null, backgroundCompaction: false },
+    bot: { autoCompact: null, backgroundCompaction: true },
+  } });
+  const accounts = harness.core.accounts;
+  const accountEnv = (thread: { parentThreadId?: string; agentSessionId?: string }) =>
+    JSON.parse(accounts.accountEnv(accounts.require(account.id), provider, thread)['OPENCODE_CONFIG_CONTENT']!);
+  expect(accountEnv({ parentThreadId: 'parent' })).toEqual(JSON.parse(env['OPENCODE_CONFIG_CONTENT']!));
+  expect(accountEnv({ agentSessionId: 'bot' })).toEqual(providerId === 'opencode'
+    ? JSON.parse(env['OPENCODE_CONFIG_CONTENT']!)
+    : { ...JSON.parse(env['OPENCODE_CONFIG_CONTENT']!), experimental: { background_compaction: true } });
+  // A bot's delegated child uses the child policy even if both markers are present.
+  expect(accountEnv({ agentSessionId: 'bot', parentThreadId: 'parent' })).toEqual(JSON.parse(env['OPENCODE_CONFIG_CONTENT']!));
+  await owner.call('settings.set', { backgroundCompaction: false, compactionByType: {} });
 
   // Off, the descriptor's configuration is all that is left, and the account answers for itself again.
   await owner.call('settings.set', { subscriptionProxy: { ...config(url), enabled: false } });

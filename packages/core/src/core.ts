@@ -3,7 +3,6 @@ import { PullRequests } from './pull-requests.ts';
 import { LinkedPullRequests } from './linked-pull-requests.ts';
 import { PullRequestWatches, type WatchTiming } from './pull-request-watch.ts';
 import { existsSync, mkdirSync } from 'node:fs';
-import { hostname } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { PROTOCOL_VERSION } from '@boite/contracts';
 import type { Channel, CoreInfo, CoreLogContext, ThreadId, UiRevealTarget } from '@boite/contracts';
@@ -23,7 +22,7 @@ import { KeybindingStore } from './keybindings.ts';
 import { DiagnosticLogs, type ThreadIdentity } from './logs.ts';
 import { Diagnostics } from './diagnostics.ts';
 import { registerModules } from './modules.ts';
-import { currentOs } from './paths.ts';
+import { currentOs, machineName } from './paths.ts';
 import { lanAddress } from './server/lan.ts';
 import { ProcRegistry } from './procs.ts';
 import { attachResourceLog } from './resource-log.ts';
@@ -348,7 +347,10 @@ export class Core {
     this.#stopMoves = scheduleInlineValueMoves(this.journal, (message) => this.log('error', message));
     this.router = new Router();
     this.settings = new SettingsStore(this);
-    this.clients = new ClientPreferencesBook((preferences, before) => this.threads.cards.settleClient(preferences, before));
+    this.clients = new ClientPreferencesBook(
+      (preferences, before) => this.threads.cards.settleClient(preferences, before),
+      (experiments) => this.bus.emit('client.desktopExperiments', { experiments }),
+    );
     this.providers = new ProviderRegistry(this.dataDir);
     this.providers.loadSwitches(this.journal.getSetting(PROVIDER_SWITCHES));
     this.accounts = new AccountStore(this);
@@ -487,7 +489,7 @@ export class Core {
       protocolVersion: PROTOCOL_VERSION,
       features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true, messagePositions: true, deferredToolParts: true, deviceKeys: true, draftPreparation: true, attachmentUploads: true, revealMachines: true, loadEvents: true, desktopUpdates: true, gatewayMove: true, projectBoard: true, settingsHome: true },
       coreId: this.coordination.card().coreId,
-      hostname: hostname(),
+      hostname: machineName(),
       os: currentOs(),
       channel: this.channel,
       pid: process.pid,
@@ -523,6 +525,7 @@ export class Core {
     this.contacts.beginClose();
     this.activity.close();
     this.threads.autoCompact.close();
+    this.threads.backgroundCompact.close();
     this.threads.cacheKeepalive.close();
     this.threads.limitResumes.close();
     this.threads.autoContinue.close();
@@ -555,6 +558,7 @@ export class Core {
     await this.pullRequestWatches.close();
     this.threads.titles.close();
     this.threads.autoCompact.close();
+    this.threads.backgroundCompact.close();
     this.threads.cacheKeepalive.close();
     this.threads.limitResumes.close();
     this.threads.autoContinue.close();

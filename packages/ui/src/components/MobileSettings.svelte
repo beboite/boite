@@ -1,10 +1,11 @@
 <script lang="ts">
   import TelemetrySettings from './TelemetrySettings.svelte';
-  import { AppWindow, ArchiveRestore, ArrowLeft, Bell, ChevronRight, Coins, FlaskConical, Gauge, KeyRound, Lock, Monitor, Palette, Mic } from '@lucide/svelte';
+  import { AppWindow, ArchiveRestore, ArrowLeft, Bell, ChevronRight, Coins, FlaskConical, Gauge, KeyRound, Lock, Monitor, Palette, Mic, Minimize2 } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
   import { mobileOverlay } from '../lib/mobile-history';
+  import { ScreenSlide } from '../lib/screen-slide.svelte';
   import AppearancePage from './AppearancePage.svelte';
   import ExperimentsPage from './ExperimentsPage.svelte';
   import DiagnosticsPage from './DiagnosticsPage.svelte';
@@ -23,7 +24,7 @@
   import WindowExclusionsCard from './WindowExclusionsCard.svelte';
   import SecretsCard from './SecretsCard.svelte';
   import BrowserProfilesCard from './BrowserProfilesCard.svelte';
-  import AutoCompactSettings from './AutoCompactSettings.svelte';
+  import CompactionSettings from './CompactionSettings.svelte';
   import InfoTip from './InfoTip.svelte';
   import { tick, type Snippet } from 'svelte';
   import { revealSettingsCard } from '../lib/settings-flash';
@@ -53,7 +54,7 @@
   let page = $derived((store.owner && (store.settingsTab === 'brain' || store.settingsTab === 'resources' || store.settingsTab === 'diagnostics')) || store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice' || store.settingsTab === 'usage' || store.settingsTab === 'limits' || store.settingsTab === 'task-manager' || store.settingsTab === 'experiments'
     ? store.settingsTab : phone ? 'phone' : privacy ? 'privacy' : archivePage ? 'archived' : worktreesPage ? 'worktrees' : windowsPage ? 'windows' : secretsPage ? 'secrets' : browserProfilesPage ? 'browser-profiles' : compactPage ? 'auto-compact' : 'home');
   let machine = $derived(workspace.machines.find(machine => machine.store === store));
-  let title = $derived(page === 'brain' ? strings.brain.heading : page === 'phone' ? strings.mobile.settingsPhone
+  const titleOf = (page: string): string => page === 'brain' ? strings.brain.heading : page === 'phone' ? strings.mobile.settingsPhone
     : page === 'privacy' ? strings.mobile.settingsPrivacy
     : page === 'archived' ? strings.settings.archived.heading
     : page === 'worktrees' ? strings.settings.worktrees.heading
@@ -66,21 +67,44 @@
     : page === 'resources' ? strings.settings.tabs.resources
     : page === 'task-manager' ? strings.taskManager.title
     : page === 'diagnostics' ? strings.diagnostics.heading
-    : page === 'experiments' ? strings.settings.tabs.experiments : strings.settings.tabs.machines);
+    : page === 'experiments' ? strings.settings.tabs.experiments : strings.settings.tabs.machines;
   /** The page's own title and its info mark step aside for the bar, so the bar carries the mark. */
-  let info = $derived(page === 'usage' ? `${strings.usage.intro} ${strings.usage.note}`
+  const infoOf = (page: string): string => page === 'usage' ? `${strings.usage.intro} ${strings.usage.note}`
     : page === 'privacy' ? strings.telemetry.description
     : page === 'secrets' ? strings.secrets.info
-    : page === 'experiments' ? strings.settings.experiments.intro : '');
+    : page === 'experiments' ? strings.settings.experiments.intro : '';
   let detail = $derived(page !== 'home');
+
+  /**
+   * A page slides in over the home and back off it, as the conversation does
+   * over the list (MobileNavigation). From one page to another, the two tabs
+   * of Usage included, the page is simply replaced.
+   */
+  const slide = new ScreenSlide();
+  /**
+   * The screen a move to or from the home brought in, slid or not: it shows
+   * without the fade a replaced page plays, which after Safari's own swipe
+   * back would be a second animation.
+   */
+  let arrived = $state<string | null>(null);
+  slide.follow(() => page, (from, to) => {
+    arrived = from === 'home' || to === 'home' ? to : null;
+    return from === 'home' ? 'push' : to === 'home' ? 'pop' : null;
+  });
+  /** During a slide the screen it leaves stays drawn; the one on top comes last, so it paints over the other. */
+  let screens = $derived(slide.direction && slide.from ? (slide.direction === 'push' ? [slide.from, page] : [page, slide.from]) : [page]);
+  /** Which of `app.css`'s screen keyframes plays on a screen, during a slide. */
+  function motionOf(shown: string): string | undefined {
+    if (screens.length < 2) return undefined;
+    if (slide.direction === 'push') return shown === page ? 'in' : 'under-out';
+    return shown === page ? 'under-in' : 'out';
+  }
   $effect(() => { if (detail) return mobileOverlay(back); });
 
   $effect(() => {
     if (page === 'phone' && store.connection === 'ready') void store.loadSessions();
   });
   function back() { phone = false; privacy = false; store.showSettings(); }
-  /** Usage and Limits are one screen on a phone, two tabs of it. */
-  let quota = $derived(page === 'usage' || page === 'limits');
 
   // A settings card in a conversation opened this page to show one card: scroll to it and light it up.
   $effect(() => {
@@ -91,9 +115,10 @@
 </script>
 
 <!-- `settings` gives the detail pages the same grammar as the desktop ones. -->
-<div class="mobile-settings settings" data-testid="settings">
-  {#key page}
-  {#if page === 'home'}
+<div class="mobile-settings settings" class:sliding={screens.length > 1} data-testid="settings" use:slide.attach>
+  {#each screens as shown (shown)}
+  <div class="settings-screen" class:left={shown !== page} class:arrived={shown === arrived} data-slide={motionOf(shown)} inert={shown !== page || slide.direction === 'pop'}>
+  {#if shown === 'home'}
     <!-- The header already says Settings: the screen opens on its two groups, what this phone keeps and what the machine runs. -->
     <div class="home" data-testid="mobile-settings-home">
       <section aria-labelledby="phone-preferences">
@@ -108,7 +133,7 @@
           <button class="ghost row" data-testid="mobile-settings-privacy" onclick={() => { privacy = true; }}>
             <Lock size={20} /><span class="ui-label">{strings.mobile.settingsPrivacy}</span><ChevronRight size={18} />
           </button>
-          <!-- Experiments are kept per device: Bots on the computer leaves the phone's tab bar without them until the phone turns its own on. -->
+          <!-- The phone follows the desktop app's experiments until it flips one here, and can follow it again from this page. -->
           <button class="ghost row" data-testid="settings-tab-experiments" onclick={() => store.showSettings('experiments')}>
             <FlaskConical size={20} /><span class="ui-label">{strings.settings.tabs.experiments}</span><ChevronRight size={18} />
           </button>
@@ -133,6 +158,9 @@
             </button>
           {/if}
           {#if store.owner}
+            <button class="ghost row" data-testid="mobile-settings-compaction" onclick={() => store.showSettings('advanced', 'auto-compact')}>
+              <Minimize2 size={20} /><span class="ui-label">{strings.settings.autoCompact}</span><ChevronRight size={18} />
+            </button>
             <button class="ghost row" data-testid="mobile-settings-windows" onclick={() => store.showSettings('general', 'windows')}>
               <AppWindow size={20} /><span class="ui-label">{strings.windows.settings.allowedHeading}</span><ChevronRight size={18} />
             </button>
@@ -147,22 +175,26 @@
       </section>
     </div>
   {:else}
-    <header class:limits={page === 'limits'}>
+    {@const title = titleOf(shown)}
+    {@const info = infoOf(shown)}
+    <!-- Usage and Limits are one screen on a phone, two tabs of it. -->
+    {@const quota = shown === 'usage' || shown === 'limits'}
+    <header class:limits={shown === 'limits'} data-testid="mobile-settings-header">
       <button class="ghost icon" data-testid="mobile-settings-back" aria-label={strings.mobile.settingsBack} onclick={back}><ArrowLeft size={20} /></button>
-      <h1>{#if page === 'limits'}<QuotaMachineScope store={target} fallback={title} />{:else}{title}{/if}{#if info}<InfoTip topic={title} text={info} testid="mobile-settings-info" />{/if}</h1>
+      <h1>{#if shown === 'limits'}<QuotaMachineScope store={target} fallback={title} />{:else}{title}{/if}{#if info}<InfoTip topic={title} text={info} testid="mobile-settings-info" />{/if}</h1>
     </header>
     <div class="detail" data-testid="mobile-settings-detail">
-      {#if bar && ['brain', 'voice', 'limits', 'resources', 'diagnostics', 'worktrees', 'windows', 'secrets', 'auto-compact', 'archived'].includes(page)}<div class="bar">{@render bar()}</div>{/if}
+      {#if bar && ['brain', 'voice', 'limits', 'resources', 'diagnostics', 'worktrees', 'windows', 'secrets', 'auto-compact', 'archived'].includes(shown)}<div class="bar">{@render bar()}</div>{/if}
       {#key target}
       {#if quota}
         <div class="tabs" role="tablist" aria-label={strings.usage.heading} data-testid="mobile-usage-tabs">
-          <button type="button" role="tab" class="tab" class:on={page === 'usage'} aria-selected={page === 'usage'} data-testid="mobile-usage-tab-usage" onclick={() => store.showSettings('usage')}><Coins size={15} /><span class="ui-label">{strings.usage.heading}</span></button>
-          <button type="button" role="tab" class="tab" class:on={page === 'limits'} aria-selected={page === 'limits'} data-testid="mobile-usage-tab-limits" onclick={() => store.showSettings('limits')}><Gauge size={15} /><span class="ui-label">{strings.usage.limits}</span></button>
+          <button type="button" role="tab" class="tab" class:on={shown === 'usage'} aria-selected={shown === 'usage'} data-testid="mobile-usage-tab-usage" onclick={() => store.showSettings('usage')}><Coins size={15} /><span class="ui-label">{strings.usage.heading}</span></button>
+          <button type="button" role="tab" class="tab" class:on={shown === 'limits'} aria-selected={shown === 'limits'} data-testid="mobile-usage-tab-limits" onclick={() => store.showSettings('limits')}><Gauge size={15} /><span class="ui-label">{strings.usage.limits}</span></button>
         </div>
       {/if}
-      {#if page === 'brain' && target.owner}
+      {#if shown === 'brain' && target.owner}
         <BrainPage store={target} />
-      {:else if page === 'phone'}
+      {:else if shown === 'phone'}
         <div class="page phone-page">
           <!-- Which machine these apply to, once there is a choice, and the connection when it is not working. -->
           {#if workspace.machines.length > 1 || store.connection !== 'ready'}
@@ -170,35 +202,35 @@
           {/if}
           <PhoneSettings {store} showServerSettings={false} />
         </div>
-      {:else if page === 'privacy'}
+      {:else if shown === 'privacy'}
         <div class="page phone-page privacy-page"><TelemetrySettings {store} /></div>
-      {:else if page === 'voice'}
+      {:else if shown === 'voice'}
         <VoiceSettings store={target} readOnly />
-      {:else if page === 'appearance'}
+      {:else if shown === 'appearance'}
         <AppearancePage {store} phone />
-      {:else if page === 'usage'}
+      {:else if shown === 'usage'}
         <UsagePage {store} />
-      {:else if page === 'limits'}
+      {:else if shown === 'limits'}
         <LimitsPage store={target} showTitle={false} />
-      {:else if page === 'task-manager'}
+      {:else if shown === 'task-manager'}
         <TaskManagerLoader {store} {onopenthread} />
-      {:else if page === 'resources' && target.owner}
+      {:else if shown === 'resources' && target.owner}
         <ResourcesPage store={target} />
-      {:else if page === 'experiments'}
+      {:else if shown === 'experiments'}
         <ExperimentsPage {store} />
-      {:else if page === 'diagnostics' && target.owner}
+      {:else if shown === 'diagnostics' && target.owner}
         <DiagnosticsPage store={target} {onopenthread} />
-      {:else if page === 'worktrees'}
+      {:else if shown === 'worktrees'}
         <div class="page"><WorktreesCard store={target} /></div>
-      {:else if page === 'windows'}
+      {:else if shown === 'windows'}
         <div class="page"><WindowAllowlistCard store={target} /><WindowExclusionsCard store={target} /></div>
-      {:else if page === 'secrets'}
+      {:else if shown === 'secrets'}
         <div class="page secrets-page"><SecretsCard store={target} /></div>
-      {:else if page === 'browser-profiles'}
+      {:else if shown === 'browser-profiles'}
         <div class="page"><BrowserProfilesCard /></div>
-      {:else if page === 'auto-compact'}
-        <div class="page"><AutoCompactSettings store={target} /></div>
-      {:else if page === 'archived'}
+      {:else if shown === 'auto-compact'}
+        <div class="page"><CompactionSettings store={target} /></div>
+      {:else if shown === 'archived'}
         <div class="page archived-page">
           <ArchivedThreads store={target} eager />
         </div>
@@ -208,12 +240,24 @@
       {/key}
     </div>
   {/if}
-  {/key}
+  </div>
+  {/each}
 </div>
 
 <style>
   .mobile-settings { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  .mobile-settings.sliding { overflow: hidden; }
+  .settings-screen { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  /* The screen a slide leaves lies over the same box as the one it opens, out of reach (lib/screen-slide.svelte.ts).
+     While a page slides off, the home beneath it is out of reach too: a tap lands on neither. */
+  .settings-screen.left { position: absolute; inset: 0; pointer-events: none; }
+  .settings-screen[data-slide] { background: var(--screen-background, var(--color-background)); animation: screen-in var(--dur-3) var(--ease-slide) both; }
+  .settings-screen:is([data-slide='in'], [data-slide='out']) { box-shadow: var(--shadow-screen); }
+  .settings-screen[data-slide='out'] { animation-name: screen-out; }
+  .settings-screen[data-slide='under-in'] { animation-name: screen-under-in; }
+  .settings-screen[data-slide='under-out'] { animation-name: screen-under-out; }
   .home, .detail { animation: fade var(--dur-2) var(--ease-out-quint); min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .settings-screen:is([data-slide], .arrived) > :is(.home, .detail) { animation: none; }
   .home { padding: 16px; }
   /* The group's first row is the machine itself: its name over its connection. */
   .machine-link { min-height: 64px; }

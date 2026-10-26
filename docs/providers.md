@@ -1202,6 +1202,13 @@ progress messages the CLI sends (`thinking_tokens`, `api_retry`, `status`,
 [trace](trace.md)); `prompt_suggestion` and `rate_limit_event` stay unused by
 the timeline.
 
+Each streamed API request owns its output parts. When Claude Code reports
+`api_retry` after an interrupted response, the driver clears that attempt's
+text, thinking and unexecuted tool cards before the replacement streams.
+Completed requests and their tools remain. A `message_delta` with a stop
+reason confirms completion; `message_stop` alone does not, because the CLI
+also emits it when a stream is interrupted.
+
 ## Claude's MCP servers on demand
 
 Claude Code starts every stdio server of the user's `mcpServers` with each

@@ -1,11 +1,11 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { AGENT_ENV, DEFAULT_DELEGATION_CONFIG, type ThreadId } from '@boite/contracts';
-import { runCli } from '../src/cli.ts';
+import { runCli, watchStatus } from '../src/cli.ts';
 import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { Retirements } from '../src/delegation/retirement.ts';
 import { PullRequestWatches } from '../src/pull-request-watch.ts';
-import { evaluate, initialMemory, mergeChanges, parseDetail, parseRemarks, type Remark, type WatchDetail } from '../src/pull-request-watch-read.ts';
+import { evaluate, initialMemory, mergeChanges, parseDetail, parseRemarks, stillTrue, wakeMessage, type Remark, type WatchDetail } from '../src/pull-request-watch-read.ts';
 import { parseProtection, parseRules, withRequired } from '../src/pull-request-required.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
@@ -56,7 +56,7 @@ test('a failure is told once, a rerun failing again is told again, and passing w
   expect(evaluate(grown.next, detail([{ name: 'lint', required: true }, { name: 'test', required: true }, { name: 'e2e', required: true }, { name: 'docs', conclusion: 'FAILURE' }]), null).changes).toEqual([]);
 });
 
-test('remarks count when someone else wrote them, once each, a bot rewriting one is not news, and a conflict is told once', () => {
+test('remarks count when someone else wrote them, once each, a bot rewriting one is not news, and a conflict or falling behind is told once', () => {
   const memory = initialMemory(since);
   const old = remark('1', 'reviewer', '2026-10-15T08:00:00Z');
   const mine = remark('2', 'meetsu', '2026-10-15T09:30:00Z');
@@ -87,6 +87,21 @@ test('remarks count when someone else wrote them, once each, a bot rewriting one
   expect(conflict.changes).toEqual([{ kind: 'conflict', base: 'main' }]);
   expect(evaluate(conflict.next, { ...detail([]), mergeable: 'UNKNOWN' }, null).next.conflicting).toBe(true);
   expect(evaluate(conflict.next, { ...detail([]), mergeable: 'CONFLICTING' }, null).changes).toEqual([]);
+  // Behind a base that requires branches up to date: told once, kept while GitHub computes, cleared by a clean answer, never while queued.
+  expect(parseDetail(detailJson([], { mergeStateStatus: 'BEHIND' })).behind).toBe(true);
+  expect(parseDetail(detailJson([], { mergeStateStatus: 'UNKNOWN' })).behind).toBeNull();
+  const behind = evaluate(memory, { ...detail([]), behind: true }, null);
+  expect(behind.changes).toEqual([{ kind: 'behind', base: 'main' }]);
+  expect(evaluate(behind.next, { ...detail([]), behind: null }, null).next.behind).toBe(true);
+  expect(evaluate(behind.next, { ...detail([]), behind: true }, null).changes).toEqual([]);
+  expect(evaluate(evaluate(behind.next, { ...detail([]), behind: false }, null).next, { ...detail([]), behind: true }, null).changes).toEqual([{ kind: 'behind', base: 'main' }]);
+  expect(evaluate(memory, { ...detail([]), behind: true, queue: 1 }, null).changes).toEqual([]);
+  // A warning still held when the branch is updated or queued is not told.
+  const queued = evaluate(behind.next, { ...detail([]), behind: true, queue: 1 }, null).next;
+  expect(stillTrue(behind.changes, queued)).toEqual([]);
+  expect(stillTrue(behind.changes, evaluate(behind.next, { ...detail([]), behind: false }, null).next)).toEqual([]);
+  expect(stillTrue(behind.changes, behind.next)).toEqual(behind.changes);
+  expect(wakeMessage([{ number: 7, url: URL, changes: behind.changes }])).toMatchObject({ label: 'Pull request update, #7: behind base' });
 });
 
 // Bodies as CodeRabbit and mtsu-patrol posted them on beboite/boite #441, #567 and #583, trimmed.
@@ -262,6 +277,8 @@ test('a burst folds into one set of changes, and failures of an older head drop 
 interface FakeGitHub {
   state: 'OPEN' | 'CLOSED' | 'MERGED';
   mergeable: string;
+  /** GitHub's merge state, absent where the test does not need it. */
+  mergeState?: string;
   head: string;
   /** Its place in the merge queue, null out of it. */
   queue: number | null;
@@ -306,11 +323,11 @@ async function answer(github: FakeGitHub, args: string[]): Promise<string> {
       timelineItems: { nodes: state === 'CLOSED' ? [{ actor: by }] : [] } } } } });
   }
   const mergeQueueEntry = github.queue === null ? null : { position: github.queue };
-  if (query?.includes('viewer')) return detailJson(github.runs, { state: github.detailState ?? github.state, mergeable: github.mergeable, headRefOid: github.head, mergeQueueEntry });
+  if (query?.includes('viewer')) return detailJson(github.runs, { state: github.detailState ?? github.state, mergeable: github.mergeable, mergeStateStatus: github.mergeState, headRefOid: github.head, mergeQueueEntry });
   if (query) {
     const counts = new Map<string, number>();
     for (const run of github.runs) { const key = run.status && run.status !== 'COMPLETED' ? run.status : run.conclusion ?? 'SUCCESS'; counts.set(key, (counts.get(key) ?? 0) + 1); }
-    return JSON.stringify({ data: { repository: { pullRequest: { state: github.state, mergeable: github.mergeable, headRefOid: github.head, updatedAt: github.updatedAt, mergeQueueEntry,
+    return JSON.stringify({ data: { repository: { pullRequest: { state: github.state, mergeable: github.mergeable, mergeStateStatus: github.mergeState, headRefOid: github.head, updatedAt: github.updatedAt, mergeQueueEntry,
       comments: { totalCount: github.comments.length, nodes: [] }, reviews: { totalCount: github.reviews.length, nodes: [] }, reviewThreads: { totalCount: 0 },
       commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { checkRunCountsByState: [...counts].map(([state, count]) => ({ state, count })), statusContextCountsByState: [] } } } }] } } } } });
   }
@@ -361,7 +378,10 @@ test('a watch reads first without waking, wakes once per change with links, and 
   // A check still runs: the idle row keeps counting from the user's request, like a monitor.
   const summary = () => harness!.core.threads.list({}).find(thread => thread.id === threadId)!;
   expect(summary().requestSince).toBeNumber();
-  expect(github.calls).toEqual(['fingerprint', 'detail', 'rules/branches/main?per_page=100', 'branches/main', 'issues/7/comments?per_page=100&page=1', 'pulls/7/reviews?per_page=100&page=1', 'pulls/7/comments?per_page=100&page=1']);
+  // The pass the watch arms at 0 ms may land before the answer reaches the
+  // client; nothing moved, so it reads only the fingerprint.
+  expect(github.calls.slice(0, 7)).toEqual(['fingerprint', 'detail', 'rules/branches/main?per_page=100', 'branches/main', 'issues/7/comments?per_page=100&page=1', 'pulls/7/reviews?per_page=100&page=1', 'pulls/7/comments?per_page=100&page=1']);
+  expect(github.calls.slice(7).every(call => call === 'fingerprint')).toBe(true);
 
   // Nothing moved: one fingerprint per pass, no detail, no wake.
   github.calls = [];
@@ -404,6 +424,13 @@ test('a watch reads first without waking, wakes once per change with links, and 
   await drive();
   await settled(threadId);
   expect(wakeText(threadId, wakes(threadId)[2]!.id)).toContain('The branch now conflicts with main.');
+  // Resolved, then behind a base that requires it up to date: told, and shown by what the watch saw.
+  github.mergeable = 'MERGEABLE';
+  github.mergeState = 'BEHIND';
+  await drive();
+  await settled(threadId);
+  expect(wakeText(threadId, wakes(threadId)[3]!.id)).toContain('The branch is behind main');
+  expect(watchStatus(harness!.core.pullRequestWatches.of(threadId)[0]!)).toContain('behind main');
 
   // The agent's own merge ends the watch without a wake.
   github.state = 'MERGED';
@@ -411,7 +438,7 @@ test('a watch reads first without waking, wakes once per change with links, and 
   expect(github.calls).toContain('closer');
   expect(harness!.core.pullRequestWatches.of(threadId)).toEqual([]);
   expect(harness!.core.journal.getSetting(`pr-watches:${threadId}`)).toBeUndefined();
-  expect(wakes(threadId)).toHaveLength(3);
+  expect(wakes(threadId)).toHaveLength(4);
 });
 
 test('a check the base branch requires holds "passed" back until it reported', async () => {

@@ -4,7 +4,7 @@ export const strings = {
     cardLabel: 'Secret requested by the agent',
     replaces: 'Replaces the key kept for this project.',
     fieldLabel: 'Value of {name}',
-    save: 'Save securely',
+    save: 'Save',
     neverShown: 'Never shown to the agent',
     decline: 'Decline',
     keep: 'Keep for this project',

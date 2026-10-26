@@ -94,7 +94,8 @@ export function replyTarget(store: Store): QuestionRequest | null {
   const held = repliesOf(store);
   const open = store.pendingQuestions.filter((question) =>
     question.threadId === thread && question.allowText && !held.ignored[question.id] && (!held.waiting[question.id] || question.id === held.chosen));
-  const dockedElsewhere = held.docked !== null && store.pendingQuestions.some((question) => question.id === held.docked && question.threadId !== thread);
+  const dockedElsewhere = held.docked !== null && (store.pendingSecrets.some(request => request.id === held.docked)
+    || store.pendingQuestions.some((question) => question.id === held.docked && question.threadId !== thread));
   return open.find((question) => question.id === held.chosen)
     ?? open.find((question) => question.async !== true)
     ?? open.find((question) => question.id === held.docked)
@@ -141,7 +142,7 @@ export function writeAnswer(store: Store, questionId: string): void {
   delete held.ignored[questionId];
   delete held.waiting[questionId];
   held.chosen = questionId;
-  focusComposer();
+  focusComposer({ typing: true });
 }
 
 /** The composer's way out: the open thread's questions wait, and it sends ordinary messages. */

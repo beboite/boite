@@ -336,6 +336,13 @@ a fixed port:
 ~/.local/lib/boite/boite-core --host <private address> --port <port>
 ```
 
+`BOITE_MACHINE_NAME` sets the name the core reports to clients and its group;
+otherwise it uses the operating system's hostname (`machineName` in
+`packages/core/src/paths.ts`). The value is trimmed and limited to 100
+characters. Set it in the core's environment before starting it, for example
+with an `Environment=BOITE_MACHINE_NAME=build-server` line in the unit below.
+Client-side names and icons in [Machines](machines.md) remain device preferences.
+
 There is no TLS on the socket. Never bind a public address: the key a pairing
 link becomes travels in the first frame, and `ws://` carries it in the clear.
 
@@ -409,6 +416,12 @@ core for a one-time link over its own socket, and prints it on stdout; stderr
 says which role it carries and until when it works. Without `--owner` the link
 is a phone's. `--data-dir` and `--channel` name another core, as they do at
 start.
+
+`boite-core accounts` asks the running core the same way for the agent
+accounts Settings › Providers shows, one line per account with its provider,
+status and label, or the list as JSON with `--json`. `--refresh` first reloads
+the providers, which adopts a login made with an agent's own CLI, then checks
+every account against its agent.
 
 A server that belongs with your other machines joins their [group](groups.md)
 instead, with `boite-core group join`, which reads the invitation on its

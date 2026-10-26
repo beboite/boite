@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ArrowLeft, Brain, Ellipsis, Archive, Pause, Play, LampDesk, Settings2, TriangleAlert } from '@lucide/svelte';
   import type { AgentProfile, AgentStatus, ThreadSummary } from '@boite/contracts';
-  import { faceOf, liveState, liveStep, waitingOn, type AgentsView } from '../../lib/agents.svelte';
+  import { moodOf, liveState, liveStep, waitingOn, type AgentsView } from '../../lib/agents.svelte';
   import { confirm } from '../../lib/confirm.svelte';
   import { dateTime } from '../../lib/schedule';
   import type { AgentPane } from '../../lib/store/layout.svelte';
@@ -77,7 +77,7 @@
     <button type="button" class="ghost icon agent-mobile-back" aria-label={labels.list} title={labels.list} onclick={onback} data-testid="agent-back"><ArrowLeft size={18} strokeWidth={1.75} /></button>
   {/if}
   <button type="button" class="ghost agent-head-identity" onclick={() => onpane('settings')} aria-label={fill(labels.settingsOf, { name: agent.name })}>
-    <span class="agent-head-robot"><AgentAvatar kind="profile" id={agent.id} name={agent.name} avatar={agent.avatar} status={faceOf(state)} size={36} ring /></span>
+    <span class="agent-head-robot"><AgentAvatar kind="profile" id={agent.id} name={agent.name} avatar={agent.avatar} mood={moodOf(state)} size={36} ring /></span>
     <span class="agent-head-text">
       <strong>{agent.name}</strong>
       <span class="agent-live" data-state={state} aria-live="polite" data-testid="agent-live">

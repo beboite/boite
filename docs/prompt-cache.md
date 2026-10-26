@@ -127,6 +127,8 @@ goes when all of these hold:
 
 - the thread is the user's conversation, a bot's included: not
   archived, not a delegated agent, and it has a session to resume;
+- no automatic compaction is planned: compaction takes precedence over a ping
+  so refreshing the cache cannot postpone it indefinitely;
 - one of its delegated agents is queued, running or waiting, or one of its
   workflows runs;
 - its `promptCache` was written by the thread's current model and account, and

@@ -98,6 +98,7 @@ test('the bytecode compiled launcher runs commands and starts a core that shuts 
   for (const [args, code, message] of [
     [['cli', '--help'], 0, 'usage: boite'],
     [['pair', '--data-dir', dataDir], 1, 'boite-core pair: no core has run'],
+    [['accounts', '--json', '--data-dir', dataDir], 1, 'boite-core accounts: no core has run'],
     [['update-apply'], 1, 'boite-core update: update-apply expects'],
   ] as const) {
     const run = Bun.spawnSync([binary, ...args], {

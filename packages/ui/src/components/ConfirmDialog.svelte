@@ -3,7 +3,7 @@
   import { Closing } from '../lib/closing.svelte';
   import { mobileOverlay } from '../lib/mobile-history';
   import { confirm, type ConfirmRequest } from '../lib/confirm.svelte';
-  import { focusedElement, restoreFocus } from '../lib/focus';
+  import { focusInitial, focusedElement, restoreFocus } from '../lib/focus';
 
   const FOCUSABLE = 'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
@@ -35,7 +35,7 @@
     overlay.show();
     void tick().then(() => {
       const target = card?.querySelector<HTMLElement>(current.requiredText !== undefined ? '[data-testid=confirm-name]' : current.danger ? '[data-cancel]' : '[data-confirm]');
-      target?.focus({ preventScroll: true });
+      focusInitial(target, card);
     });
   });
 
@@ -72,7 +72,7 @@
     if (!first || !last) return;
     const active = document.activeElement;
     const inside = active instanceof Node && el.contains(active);
-    if (event.shiftKey ? inside && active !== first : inside && active !== last) return;
+    if (active !== el && (event.shiftKey ? inside && active !== first : inside && active !== last)) return;
     event.preventDefault();
     (event.shiftKey ? last : first).focus({ preventScroll: true });
   }

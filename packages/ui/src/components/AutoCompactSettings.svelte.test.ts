@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import type { AutoCompact, Settings } from '@boite/contracts';
+import type { AutoCompact, CompactionTarget, Settings } from '@boite/contracts';
 import type { Store } from '../lib/store.svelte';
 import AutoCompactSettings from './AutoCompactSettings.svelte';
 import KeyedHost from './AutoCompactSettings.test-host.svelte';
@@ -15,16 +15,16 @@ afterEach(async () => {
 const settle = async () => { for (let i = 0; i < 20; i++) { await Promise.resolve(); flushSync(); } };
 const input = (id: string) => document.querySelector<HTMLInputElement>(`[data-testid="${id}"]`)!;
 
-function render(autoCompact: AutoCompact | null) {
+function render(autoCompact: AutoCompact | null, target?: CompactionTarget, compactionByType?: Settings['compactionByType']) {
   const store = $state({
     owner: true,
-    settings: { autoCompact } as Partial<Settings>,
+    settings: { autoCompact, compactionByType, backgroundCompaction: true } as Partial<Settings>,
     saveSettings: vi.fn(async (patch: Partial<Settings>) => {
       store.settings = { ...store.settings, ...patch };
       return true;
     }),
   });
-  mounted = mount(AutoCompactSettings, { target: document.body, props: { store: store as unknown as Store } });
+  mounted = mount(AutoCompactSettings, { target: document.body, props: { store: store as unknown as Store, target } });
   flushSync();
   return store;
 }
@@ -34,6 +34,20 @@ const flip = async (id: string, checked: boolean) => {
   box.dispatchEvent(new Event('change', { bubbles: true }));
   await settle();
 };
+
+test('a subagent edit preserves common defaults, other types and its background setting', async () => {
+  const store = render({ tokens: 200_000, moments: ['cache-expiry'] }, 'subagent', {
+    subagent: { autoCompact: { tokens: 400_000, moments: ['turn-end'] }, backgroundCompaction: false },
+    bot: { autoCompact: null, backgroundCompaction: true },
+  });
+  expect(input('auto-compact-tokens').value).toBe('400000');
+  await flip('auto-compact-turn-end', false);
+  expect(store.settings.autoCompact?.tokens).toBe(200_000);
+  expect(store.settings.compactionByType).toEqual({
+    subagent: { autoCompact: { tokens: 400_000, moments: [] }, backgroundCompaction: false },
+    bot: { autoCompact: null, backgroundCompaction: true },
+  });
+});
 
 test('switching it on asks for no size, and the last moment switched off turns it all off', async () => {
   const store = render(null);
@@ -49,6 +63,23 @@ test('switching it on asks for no size, and the last moment switched off turns i
   for (const moment of ['turn-end', 'background', 'cache-expiry']) await flip(`auto-compact-${moment}`, false);
   expect(store.settings.autoCompact).toBeNull();
   expect(input('auto-compact-on').checked).toBe(false);
+});
+
+test('the independent token limit survives switching off the last idle moment until its own switch is off', async () => {
+  const store = render({ tokens: 200_000, moments: ['cache-expiry'] });
+  await flip('auto-compact-cache-expiry', false);
+  expect(store.saveSettings).toHaveBeenLastCalledWith({ autoCompact: { tokens: 200_000, moments: [] } });
+  expect(store.settings.autoCompact).toEqual({ tokens: 200_000, moments: [] });
+  expect(input('auto-compact-on').checked).toBe(true);
+  expect(input('auto-compact-threshold').checked).toBe(true);
+  expect(input('auto-compact-tokens').value).toBe('200000');
+  expect(input('auto-compact-cache-expiry').checked).toBe(false);
+
+  await flip('auto-compact-threshold', false);
+  expect(store.saveSettings).toHaveBeenLastCalledWith({ autoCompact: null });
+  expect(store.settings.autoCompact).toBeNull();
+  expect(input('auto-compact-on').checked).toBe(false);
+  expect(input('auto-compact-threshold')).toBeNull();
 });
 
 test('the size is its own switch: on it saves a valid number or a preset, off it goes back to any size', async () => {

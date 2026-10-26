@@ -65,6 +65,77 @@ test('Claude Agent tools reach Team while child text remains on its sidechain', 
 });
 
 describe('claude driver', () => {
+  test('a retried stream discards its incomplete blocks and preserves the preceding tool exchange', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const answer = '{"answer":"complete"}';
+    scripted(fake => {
+      const event = (body: unknown) => fake.emit(streamEvent('sess-retry', body));
+      fake.emit(init('sess-retry'));
+      event({ type: 'message_start', message: { id: 'msg_before' } });
+      event({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
+      event({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Reading fixture.' } });
+      event({ type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'tool_kept', name: 'Read', input: {} } });
+      fake.emit(sdk({ ...assistant('sess-retry', []), message: { id: 'msg_before', content: [{ type: 'tool_use', id: 'tool_kept', name: 'Read', input: { file_path: '/fixture.txt' } }] } }));
+      event({ type: 'message_delta', delta: { stop_reason: 'tool_use' } });
+      event({ type: 'message_stop' });
+      fake.emit(toolResult('sess-retry', 'tool_kept', 'fixture contents'));
+
+      event({ type: 'message_start', message: { id: 'msg_cut' } });
+      event({ type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } });
+      event({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Abandoned reasoning' } });
+      event({ type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } });
+      event({ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: '{"answer":' } });
+      event({ type: 'content_block_start', index: 2, content_block: { type: 'tool_use', id: 'tool_abandoned', name: 'Read', input: {} } });
+      // The real CLI synthesizes stops on interruption, without a successful message_delta.
+      event({ type: 'content_block_stop', index: 2 });
+      event({ type: 'message_stop' });
+      fake.emit(sdk({ type: 'system', subtype: 'api_retry', session_id: 'sess-retry', attempt: 1, max_retries: 10, retry_delay_ms: 500, error_status: null, error: 'unknown' }));
+
+      event({ type: 'message_start', message: { id: 'msg_retry' } });
+      event({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
+      event({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: answer } });
+      fake.emit(sdk({ ...assistant('sess-retry', []), message: { id: 'msg_retry', content: [{ type: 'text', text: answer }] } }));
+      event({ type: 'message_delta', delta: { stop_reason: 'end_turn' } });
+      event({ type: 'message_stop' });
+      fake.emit(success('sess-retry'));
+      fake.end();
+    });
+    expect(await runTurn(client, threadId, 'Read the fixture and return JSON')).toBe('done');
+    const thread = await client.call('threads.get', { threadId });
+    const parts = thread.messages.filter(message => message.role === 'assistant').flatMap(message => message.parts);
+    expect(parts.filter(part => part.type === 'text' && part.text.length > 0)).toEqual([
+      { type: 'text', text: 'Reading fixture.' },
+      { type: 'text', text: answer },
+    ]);
+    expect(parts.filter(part => part.type === 'thinking' && part.text.length > 0)).toHaveLength(0);
+    expect(parts.filter(part => part.type === 'tool')).toEqual([
+      expect.objectContaining({ toolId: 'tool_kept', status: 'done', output: 'fixture contents' }),
+    ]);
+  });
+
+  test('a retry before response headers preserves the completed response of the preceding request', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    scripted(fake => {
+      const event = (body: unknown) => fake.emit(streamEvent('sess-retry-headers', body));
+      fake.emit(init('sess-retry-headers'));
+      event({ type: 'message_start', message: { id: 'msg_complete' } });
+      event({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
+      event({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Keep this response.' } });
+      event({ type: 'message_delta', delta: { stop_reason: 'end_turn' } });
+      event({ type: 'message_stop' });
+      fake.emit(sdk({ type: 'system', subtype: 'api_retry', session_id: 'sess-retry-headers', attempt: 1, max_retries: 10, retry_delay_ms: 500, error_status: 503, error: 'server_error' }));
+      fake.emit(success('sess-retry-headers'));
+      fake.end();
+    });
+    expect(await runTurn(client, threadId, 'Continue')).toBe('done');
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.messages.filter(message => message.role === 'assistant').flatMap(message => message.parts)).toEqual([
+      { type: 'text', text: 'Keep this response.' },
+    ]);
+  });
+
   test('the prompt cache clock starts at the last main-loop request, not at a subagent one or the turn end', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);

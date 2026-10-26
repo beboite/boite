@@ -5,7 +5,7 @@ import { SHORT_ANSWERS } from '../src/agent-guide.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { KEEPALIVE_PING_CAP } from '../src/prompt-cache.ts';
-import { CACHE_KEEPALIVE } from '../src/threads/auto-compact.ts';
+import { AUTO_COMPACT, CACHE_KEEPALIVE } from '../src/threads/auto-compact.ts';
 import { KEEPALIVE_LABEL, KEEPALIVE_PROMPT, missOf } from '../src/threads/cache-keepalive.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
@@ -94,6 +94,46 @@ describe('cache keepalive', () => {
     Object.assign(CACHE_KEEPALIVE, saved);
     (KEEPALIVE_PING_CAP as Record<number, number>)[300] = cap;
     await h.stop();
+  });
+
+  test('an independent cache-expiry compaction takes precedence over an earlier keepalive ping', async () => {
+    const s = await setup(h);
+    const margin = AUTO_COMPACT.cacheMarginMs;
+    try {
+      s.state.lastRequestMs = 0;
+      AUTO_COMPACT.cacheMarginMs = 300_000 - 300;
+      CACHE_KEEPALIVE.marginMs = 300_000 - 100;
+      await s.client.call('settings.set', { cacheKeepalive: { hours: 12 }, autoCompact: { tokens: 100_000, moments: ['cache-expiry'] } });
+      await s.spawn();
+      const maintenance = s.client.next('turn.started', turn => turn.threadId === s.threadId
+        && (turn.execution?.operation === 'compact' || turn.execution?.operation === 'keepalive'));
+      const compacted = s.client.next('turn.finished', turn => turn.threadId === s.threadId && turn.execution?.operation === 'compact');
+      await s.turn();
+      const first = await maintenance;
+      expect((await compacted).status).toBe('done');
+      // A new ping after compaction is valid; the first maintenance turn must compact.
+      expect(first.execution?.operation).toBe('compact');
+      expect(s.prompts.filter(prompt => prompt === '[compact]')).toHaveLength(1);
+    } finally { AUTO_COMPACT.cacheMarginMs = margin; s.restore(); }
+  });
+
+  test('cancelling a planned compaction restores keepalive while the same child still works', async () => {
+    const s = await setup(h);
+    const margin = AUTO_COMPACT.cacheMarginMs;
+    try {
+      s.state.lastRequestMs = 0;
+      AUTO_COMPACT.cacheMarginMs = 300_000 - 500;
+      CACHE_KEEPALIVE.marginMs = 300_000 - 250;
+      await s.client.call('settings.set', { cacheKeepalive: { hours: 12 }, autoCompact: { tokens: 100_000, moments: ['cache-expiry'] } });
+      await s.spawn();
+      await s.turn();
+      expect(h.core.threads.autoCompact.planned(s.threadId)).toBe(true);
+      const pinged = s.client.next('turn.finished', turn => turn.threadId === s.threadId && turn.execution?.operation === 'keepalive');
+      await s.client.call('settings.set', { autoCompact: null });
+      expect((await pinged).status).toBe('done');
+      expect(s.prompts).toContain(KEEPALIVE_PROMPT);
+      expect(s.prompts).not.toContain('[compact]');
+    } finally { AUTO_COMPACT.cacheMarginMs = margin; s.restore(); }
   });
 
   test('a thread pings only while it waits on a child, from its last request, as Boite', async () => {

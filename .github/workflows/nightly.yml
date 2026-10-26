@@ -235,7 +235,7 @@ jobs:
           NIGHTLY_SHA: ${{ needs.ci.outputs.sha }}
         run: |
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > released.json
-          bun scripts/ci/changelog.ts released.json artifacts/release-notes.md
+          bun scripts/ci/changelog.ts released.json artifacts/release-notes.md artifacts android android-server
           bun scripts/ci/updater-manifest.ts artifacts
           existing=$(jq --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)] | first // empty' released.json)
           cd artifacts
@@ -257,7 +257,7 @@ jobs:
               test "$(echo "$existing" | jq -r .target_commitish)" = "$NIGHTLY_SHA"
             fi
             gh release upload "$RELEASE_TAG" "${installers[@]}" "${apks[@]}" ./*.sig latest.json SHA256SUMS.txt --clobber
-            gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
+            gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false --notes-file release-notes.md
           else
             gh release create "$RELEASE_TAG" "${installers[@]}" "${apks[@]}" ./*.sig latest.json SHA256SUMS.txt --target "$NIGHTLY_SHA" --title "boite (de nuit) $RELEASE_TAG" --prerelease --latest=false --notes-file release-notes.md
           fi

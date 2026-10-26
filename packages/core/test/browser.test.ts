@@ -189,12 +189,23 @@ real('a window a page opens joins the conversation as a tab of its own', async (
   expect(tabs.map(tab => tab.url)).toEqual([url(), url('/popup')]);
   // Its first request leaves before the core attaches to it: the browser's own flag names it.
   expect(browserFixture.agents.get('/popup')).toMatch(/ Chrome\/\d+/);
+  // The popup is the active tab, and it keeps its opener: a sign-in window answers the page that opened it.
+  expect(await evaluate('opener !== null && opener.document.title')).toBe('Fixture');
+  const status = async () => ((await agent.call('browser.command', { threadId, action: { kind: 'status' } })).value as { tabs: typeof tabs }).tabs;
+  await agent.call('browser.command', { threadId, action: { kind: 'click', selector: '#shut' } });
+  for (let i = 0; i < 50 && (tabs = await status()).length > 1; i++) await Bun.sleep(100);
+  expect(tabs.map(tab => tab.url)).toEqual([url()]);
+  expect(await evaluate('messages.join()')).toBe('hello from ');
+  // A window opened by a script, with no click behind it, is a tab too: the desktop app's webviews block none.
+  expect(await evaluate(`window.open('/popup?script', 'z', 'width=400,height=300') !== null`)).toBe(true);
+  for (let i = 0; i < 50 && (tabs = await status()).length < 2; i++) await Bun.sleep(100);
+  expect(tabs.map(tab => tab.url)).toEqual([url(), url('/popup?script')]);
 }, 150_000);
 
 real('a burst of windows opened at once stops at the conversation tab limit', async () => {
   const { agent, threadId } = browserFixture;
-  // The desktop app's webviews let a page open many windows; Chromium's own blocker allows one per click.
-  const host = await browserFixture.fakeHost('shell', ['--disable-popup-blocking']);
+  // The desktop app's webviews let a page open many windows, and so does the core's Chromium (`chromiumArgs`).
+  const host = await browserFixture.fakeHost('shell');
   try {
     await host.app.call('browser.hostAttach', {});
     for (let i = 0; i < 7; i++) await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });

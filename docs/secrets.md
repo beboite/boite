@@ -69,6 +69,12 @@ whose erasure failed stays there.
 
 ## The card
 
+Pending secret requests share the question dock above the message box. They
+stay visible while the user reads older output, and the timeline keeps a link
+back to the request. Answered requests leave a one-line receipt. The dock reads
+pending metadata independently of history pages, including after reconnecting;
+no secret value enters that snapshot or the ordinary composer.
+
 A card can be answered once, and only while the turn that asked is running. The
 turn ending, the user pressing Stop, the agent's command being killed, or the
 timeout (10 minutes, `--timeout` up to 60) closes it as `cancelled` or

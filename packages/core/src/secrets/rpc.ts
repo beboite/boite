@@ -7,6 +7,13 @@ import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
 
 export function registerSecretMethods(core: Core): void {
+  core.router.register('secrets.pending', (params) => {
+    if ('threadId' in params) {
+      if (typeof params.threadId !== 'string') throw refused('secrets.pending: threadId must be a string', { field: 'threadId', expected: 'a thread id' });
+      core.threads.require(params.threadId);
+    }
+    return core.secrets.pending(params.threadId);
+  });
   core.router.register('secrets.ask', (params, ctx) => core.secrets.ask(params, ctx.connection));
   core.router.register('secrets.answer', (params, ctx) => core.secrets.answer(params, ctx.connection.encrypted === true));
   core.router.register('secrets.use', (params, ctx) => core.secrets.use(params, ctx.connection));

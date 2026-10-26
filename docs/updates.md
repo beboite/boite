@@ -1,5 +1,24 @@
 # Desktop updates
 
+## Downloading Boite
+
+Open the [download page](https://github.com/beboite/boite/releases). New releases
+list direct downloads by platform at the top of their notes: the Windows x64
+installer, macOS DMGs for Apple Silicon and Intel, and Linux x64/ARM64 packages.
+Choose `.deb` for Debian or Ubuntu, or AppImage for other supported distributions.
+[Installation notes](portability.md#installing-a-release) cover system requirements
+and macOS permissions. The Android client and Boite Server APKs appear when
+attached to that release; [Android setup](android.md) and
+[Android server setup](android-server.md) describe their different roles.
+
+> [!WARNING]
+> Nightly builds are unstable and may contain bugs or unfinished changes. Back up
+> your Boite data before installing or switching channels. Current published
+> builds are nightly prereleases; the Release channel becomes available after
+> the first stable release.
+
+## Finding updates
+
 Settings, Machines and updates opens on one card that folds nothing: the
 version this desktop app runs, the release found with its changelog on GitHub,
 the channel (Nightly or Release), Check for updates and Update

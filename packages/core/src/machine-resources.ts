@@ -1,5 +1,6 @@
-import { cpus, hostname, totalmem } from 'node:os';
+import { cpus, totalmem } from 'node:os';
 import type { MachineResourceSnapshot, Os, ThreadId } from '@boite/contracts';
+import { machineName } from './paths.ts';
 import type { ProcessPlatform } from './platform/types.ts';
 import type { ProcRegistry } from './procs.ts';
 
@@ -85,7 +86,7 @@ export class MachineResources {
     const memory = this.platform.machineMemory();
     return {
       sampledAt: this.now(),
-      hostname: hostname(),
+      hostname: machineName(),
       os: this.os,
       osLabel: this.platform.osLabel?.() ?? null,
       cpu: { model: list[0]?.model.trim() || null, cores: list.length, percent: cpuPercent(before, after) },

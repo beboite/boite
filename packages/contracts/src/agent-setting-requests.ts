@@ -27,8 +27,11 @@ export const AGENT_DOMAIN_MAX = 500;
 export const AGENT_INSTRUCTIONS_MAX = 32000;
 export const AGENT_AVATAR_MAX = 40;
 export const AGENT_STATUSES = ['active', 'paused', 'archived'] as const;
-/** A robot as the Bots page stores it: `bot:<family>.<shape>.<color>.<eyes>.<top>` (ui/src/lib/robots.ts). */
-const ROBOT_CODE = /^bot:[a-d](\.\d{1,2}){4}$/;
+/**
+ * A robot as the Bots page stores it: `bot:<family>.<shape>.<color>.<eyes>.<top>.<mouth>.<cheeks>.<gear>`,
+ * or the four parts a code had before parts were shared across families (ui/src/lib/robots.ts).
+ */
+const ROBOT_CODE = /^bot:[a-d](\.\d{1,2}){4}((\.\d{1,2}){3})?$/;
 
 /** The most projects one agent holds, as `agents.profile.save` allows. */
 export const AGENT_PROJECTS_MAX = 50;
@@ -175,7 +178,7 @@ function agentText(raw: unknown, key: 'domain' | 'instructions', max: number): C
 function agentAvatar(raw: unknown): Checked<string> {
   const value = typeof raw === 'string' ? raw.trim() : undefined;
   const short = value !== undefined && value.length <= AGENT_AVATAR_MAX && [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(value)].length <= 2;
-  return value !== undefined && (short || ROBOT_CODE.test(value)) ? { ok: true, value } : { ok: false, message: 'avatar: expected one or two characters (an emoji, letters), a robot code such as bot:d.1.2.3.4, or "" for the robot its id draws' };
+  return value !== undefined && (short || ROBOT_CODE.test(value)) ? { ok: true, value } : { ok: false, message: 'avatar: expected one or two characters (an emoji, letters), a robot code such as bot:d.1.2.3.4.1.1.0, or "" for the robot its id draws' };
 }
 
 /** A proposed value as the agent's settings would store it, or why it cannot be. */

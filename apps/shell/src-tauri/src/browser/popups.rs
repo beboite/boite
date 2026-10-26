@@ -3,6 +3,12 @@
 //! the same profile, whose `window.opener` is the page that asked. The sign-in
 //! answers through that opener and closes itself. Any other new window becomes
 //! a tab in the same panel, as does a popup past the few one surface may hold.
+//!
+//! On Windows every window a page of an agent's tab opens, sized or not, is
+//! adopted instead: it becomes an agent surface of its own, which the core
+//! drives as a new tab of the same conversation, and keeps its opener
+//! (`adopt`). A popup window the core never heard of was a click that did
+//! nothing for the agent: Gmail's "Send mail as" dialog (2026-10-26).
 
 use super::{announce, checked_url, Event, BLANK, SCHEMES};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -24,7 +30,7 @@ fn popup_label(surface: &str) -> String {
 
 /// The surface a popup belongs to. A surface id may itself carry `:`, so the
 /// number is what is split off.
-fn popup_surface(label: &str) -> Option<&str> {
+pub(super) fn popup_surface(label: &str) -> Option<&str> {
     let (number, surface) = label.strip_prefix(POPUP_PREFIX)?.split_once(':')?;
     number.parse::<u64>().ok().map(|_| surface)
 }
@@ -82,6 +88,17 @@ pub(super) fn new_window(app: &AppHandle, surface: &str, private: bool, url: Url
     if checked_url(surface, url.as_str()).is_err() {
         return NewWindowResponse::Deny;
     }
+    #[cfg(windows)]
+    if crate::browser_control::is_agent_surface(surface) {
+        match super::adopted::adopt(app, surface, private, &url, &features) {
+            Ok(window) => return NewWindowResponse::Create { window },
+            Err(error) => {
+                eprintln!("[shell] agent surface {surface}: the window for {url} opens as a tab without its opener: {error}");
+                announce(app, Event::NewWindow { id: surface.to_owned(), url: url.to_string() });
+                return NewWindowResponse::Deny;
+            }
+        }
+    }
     let sized = features.size().is_some() || features.position().is_some();
     if sized && popups_of(app.webview_windows().keys().map(String::as_str), surface) >= POPUPS_PER_SURFACE {
         eprintln!("[shell] browser surface {surface} already holds {POPUPS_PER_SURFACE} popups: {url} opens as a tab");
@@ -132,7 +149,7 @@ fn open_popup(app: &AppHandle, surface: &str, private: bool, url: &Url, features
     builder = builder.on_new_window(move |url, features| new_window(&handle, &id, private, url, features));
     let window = builder.build().map_err(|error| error.to_string())?;
     #[cfg(windows)]
-    if let Err(error) = crate::platform::browser_page::popup(&window) {
+    if let Err(error) = crate::platform::browser_page::popup(&window, super::muted(&label)) {
         let _ = window.close();
         return Err(error);
     }

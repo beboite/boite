@@ -149,7 +149,8 @@ without writing a thread. Git calls appear in the thread's trace. The header
 shows the recorded branch.
 
 Settings > General > Worktrees offers project storage or an absolute shared
-folder; phone owners reach it through Settings > Worktrees.
+folder. Phone owners open that card from a project's Manage project menu or
+a settings link; it has no row in the phone's settings list.
 `settings.worktreeStorage` stores `{ mode: 'project', directory: null }` or
 `{ mode: 'shared', directory: '<absolute path on the core machine>' }`.
 Shared storage uses `<project-name>-<project-id>/wt-<id>` to separate repositories
@@ -303,8 +304,8 @@ a done date stay retained. Expiry runs at startup and once per minute, skips
 families with pending work or input, and uses the recoverable deletion flow below.
 
 Settings > General > Conversations offers Group working threads,
-stored on this device; phone settings offer the same switch under device
-preferences. The sidebar's Display options panel (`DisplayOptions.svelte`) offers the
+stored on this device. Phones reach the switch through the thread list's
+Display options. The sidebar's Display options panel (`DisplayOptions.svelte`) offers the
 view choice and this switch, each scope behind its "i". In Projects it adds the
 project order choice, once there is a project to order, and the idle-projects switch.
 It stays open while adjusting multiple options.
@@ -383,10 +384,13 @@ waits for processes before hiding it behind persistent markers.
 history and prior archive flags. A paired phone may delete and undo from its
 thread menu; the deleted list and the retention period stay owner-only. Undo toasts last eight seconds.
 The default retention is 30 days; 0 disables purge. Restart and disconnection do
-not erase the markers. Files, branches, worktrees and native transcripts stay
-on disk; project removal purges that project's pending deletions.
+not erase the markers. Files, branches and worktrees stay on disk; project
+removal purges that project's pending deletions. A later purge can remove
+unreferenced Claude transcripts from accounts Boite isolated itself; the
+user's own CLI profiles and other providers' transcripts remain
+([transcripts Boite removes](accounts.md#transcripts-boite-removes)).
 
-Archiving an experimental agent in its Settings requires typing its existing
+Archiving a bot in its Settings requires typing its existing
 name exactly. Cancel, Escape and Back keep it active. Archiving stops its work
 and removes it from the active list; its profile and history remain searchable.
 
@@ -1043,11 +1047,18 @@ zoom; plain browsers keep their native shortcut behavior.
 ### File attachments
 
 Desktop and paired devices can pick, paste or drop files. A turn accepts twenty
-attachments, at most 5 MB each and 10 MB together. Base64 travels in
-`turns.start`; the client rejects a frame above the 16 MB RPC limit before send.
-The total cannot grow without a separate upload channel: the journal keeps a
-message's attachments inline, and `threads.get` cannot page a message heavier
-than its 12 MB page. PNG, JPEG, GIF and WebP use native image input. Other
+attachments, at most 5 MB each and 10 MB together. On a core advertising
+`features.attachmentUploads`, selected files upload before Send through
+`attachments.upload`. Finished uploads replace the corresponding
+`turns.start` attachment bytes with empty data and an `attachmentIds` entry;
+the core resolves those connection-owned leases before validation and
+journalling (`attachment-uploads.ts`). Pending uploads never hold Send:
+their original base64 bytes travel inline, as on older cores. Expired upload
+IDs retry with the original bytes and the same input receipt. These uploads
+do not raise the per-file or per-turn caps, and the client still rejects a
+frame above the 16 MB RPC limit before send. The journal retains the original
+attachments; message reads remain subject to their page budget.
+PNG, JPEG, GIF and WebP use native image input. Other
 files, including PDFs and archives, use `kind: 'file'` and host paths in the
 prompt, and so does an image the provider's agent takes no block of: a GIF for
 Antigravity, whose server reads PNG, JPEG and WebP only. Provider tools decide which formats they can read. Boite neither

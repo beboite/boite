@@ -11,6 +11,10 @@
   import { glides } from '../lib/motion';
   import TypingIndicator from './TypingIndicator.svelte';
   import { selectionClicks } from '../lib/selection-clicks';
+  import { longPress } from '../lib/long-press';
+  import { contextMenu } from '../lib/context-menu.svelte';
+  import { fullPath } from '../lib/chat-links';
+  import { writeClipboardLater } from '../lib/live-input';
   import type { Message } from '@boite/contracts';
   import { answerPieces, viewAt, viewPart, type AnswerPiece } from '../lib/inline-view';
   import InlineView from './InlineView.svelte';
@@ -44,16 +48,44 @@
       return;
     }
     event.preventDefault();
-    const line = anchor.dataset.fileLine;
+    openFile(anchor.dataset.filePath, anchor.dataset.fileLine);
+  }
+  function openFile(written: string, line: string | undefined): void {
     if (opening) return;
     opening = true;
-    void located(anchor.dataset.filePath).then(path => {
+    void located(written).then(path => {
       const directory = localFileDirectory(store, threadId);
       if (directory && (directLinks || (executableLink(path) && !line))) return (directLinks ? openChatFile : openLocalFile)(directory, path);
       selected = { path, ...(line ? { line: Number(line) } : {}) };
     }).catch(reason => {
       store?.reportError(reason, 'minor');
     }).finally(() => { opening = false; });
+  }
+  /**
+   * A file or thread link's own menu, in place of the webview's: its "Copy
+   * link" gave the `#file` placeholder, never the path (#779). The path goes
+   * on the clipboard whole, joined to the thread's folder.
+   */
+  const MENU_LINK = 'a[data-file-path], a[data-thread-address]';
+  const hasMenu = (target: Element) => target.closest(MENU_LINK) !== null;
+  function linkMenu(event: MouseEvent): void {
+    const anchor = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>(MENU_LINK) : null;
+    if (!anchor) return;
+    const thread = anchor.dataset.threadAddress;
+    if (thread) {
+      contextMenu.open(event, [{ id: 'copy', label: strings.chat.copyThreadAddress }], () => void copyText(thread));
+      return;
+    }
+    const written = anchor.dataset.filePath!;
+    const line = anchor.dataset.fileLine;
+    contextMenu.open(event, [{ id: 'open', label: strings.chat.openLink }, { id: 'copy', label: strings.chat.copyPath }], id => {
+      if (id === 'open') openFile(written, line);
+      else void copyText(located(written).then(path => fullPath(path, store?.threads.find(item => item.id === threadId)?.cwd)));
+    });
+  }
+  /** The path is looked up after the pick: the write starts within the gesture, which Safari's clipboard requires. */
+  async function copyText(text: string | Promise<string>): Promise<void> {
+    try { await writeClipboardLater(Promise.resolve(text)); } catch (reason) { store?.reportError(reason, 'minor'); }
   }
   /**
    * The path a file link names in its thread. An agent often writes a file by
@@ -174,7 +206,7 @@
 {#if groups && store && threadId}
   {@const end = groups.at(-1)}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="flow" data-testid="text-part" bind:this={host} use:selectionClicks use:richMarkdown={{ onenlarge: enlarge }} onclick={follow}>
+  <div class="flow" data-testid="text-part" bind:this={host} use:selectionClicks use:longPress={hasMenu} use:richMarkdown={{ onenlarge: enlarge }} onclick={follow} oncontextmenu={linkMenu}>
     {#each groups as group (group.key)}
       {#if group.kind === 'view'}
         <InlineView part={viewPart(group.message)!} {store} {threadId} messageId={group.message.id} partIndex={0} />
@@ -192,7 +224,7 @@
   </div>
 {:else}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="prose" class:live class:answer-bubble={bubble && (blocks.length > 0 || tail.length > 0)} data-testid="text-part" bind:this={host} use:selectionClicks use:richMarkdown={{ onenlarge: enlarge }} onclick={follow}>
+  <div class="prose" class:live class:answer-bubble={bubble && (blocks.length > 0 || tail.length > 0)} data-testid="text-part" bind:this={host} use:selectionClicks use:longPress={hasMenu} use:richMarkdown={{ onenlarge: enlarge }} onclick={follow} oncontextmenu={linkMenu}>
     {#each blocks as block, index (index)}
       <!-- Completed Markdown blocks stay mounted while the pending paragraph changes. -->
       <div class="paragraph" data-testid="paragraph">{@html renderBlock(block, rich)}</div>
@@ -327,6 +359,8 @@
   }
 
   .prose :global(a:hover) { text-decoration-color: currentColor; }
+  /* A long press opens the link's own menu, not the phone's preview of `#file`. */
+  .prose :global(a[data-file-path]), .prose :global(a[data-thread-address]) { -webkit-touch-callout: none; }
 
   .prose :global(ul ul),
   .prose :global(ol ol),
@@ -372,9 +406,10 @@
   }
 
   /* A table is a code well's cousin: the surface-2 ground, hairlines, the head one step up.
-     It takes its content's width up to the column's and scrolls inside itself past
-     that, like a code well: a table box ignores overflow, so it is a block here, or
-     a wide one pans the whole conversation on a phone. */
+     It takes its content's width up to the column's and its cells wrap their text
+     to stay inside it. Only what cannot break, a long path or too many columns,
+     scrolls inside the table: a table box ignores overflow, so it is a block here,
+     or a wide one pans the whole conversation on a phone. */
   .prose :global(table) {
     display: block;
     width: max-content;
@@ -397,6 +432,12 @@
     text-align: left;
     vertical-align: top;
     border-bottom: 1px solid var(--color-border);
+    /* The app's data tables keep a row on one line; an answer's table wraps at
+       spaces. Not inside a word: the reading text's break-word would let the
+       table split a short one to narrow a column, so a path too long for the
+       column scrolls instead. */
+    white-space: normal;
+    word-break: normal;
   }
 
   .prose :global(th) {

@@ -21,14 +21,17 @@ async function connected() {
 
 const load = (processes: number): RpcEvents['thread.load']['load'] => ({ processes, cpuPercent: processes, memoryBytes: 1_000_000 * processes });
 
-test('load samples find their row through the id index, after the list is replaced or grows', async () => {
+test.each(['thread.load', 'thread.updated'] as const)('%s finds its row through the id index, after the list is replaced or grows', async (event) => {
   const fixture = await connected();
   try {
     const { store, emit } = fixture;
     const first = store.threads[0]!;
     // A sample is a lookup, not a scan of every row through the proxy.
     const find = vi.spyOn(Array.prototype, 'find');
-    for (let sample = 1; sample <= 200; sample++) emit('thread.load', { threadId: first.id, load: load(sample) });
+    for (let sample = 1; sample <= 200; sample++) {
+      if (event === 'thread.load') emit(event, { threadId: first.id, load: load(sample) });
+      else emit(event, { ...first, load: load(sample) });
+    }
     expect(find.mock.calls.length).toBeLessThan(20);
     find.mockRestore();
     expect(store.threads.find(row => row.id === first.id)!.load?.processes).toBe(200);

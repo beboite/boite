@@ -258,7 +258,7 @@ export async function group(argv: string[]): Promise<string> {
 }
 
 /** A connection to the core already running on this data directory, as its owner, with the token `core.json` holds. */
-async function ownerClient(argv: string[]): Promise<Awaited<ReturnType<typeof connect>>> {
+export async function ownerClient(argv: string[]): Promise<Awaited<ReturnType<typeof connect>>> {
   const flags = parseFlags(argv);
   const dataDir = resolveDataDir(flags.dataDir, flags.channel);
   const file = join(dataDir, 'core.json');
@@ -350,6 +350,11 @@ export function main(argv: string[]): void {
         process.exit(1);
       },
     );
+    return;
+  }
+  if (argv[0] === 'accounts') {
+    import('./accounts-command.ts').then(({ runAccounts }) => runAccounts(argv.slice(1), ownerClient))
+      .catch(error => { process.stderr.write(`boite-core accounts: ${messageOf(error)}\n`); process.exit(1); });
     return;
   }
   if (argv[0] === 'group') {

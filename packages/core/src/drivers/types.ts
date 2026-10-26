@@ -142,6 +142,8 @@ export interface TurnContext {
   toolSummaries?: boolean;
   /** The agent is asked to stay quiet until its answer (`Settings.shortAnswers`); Claude's own progress reminder goes off. Absent means off. */
   shortAnswers?: boolean;
+  /** The owner's current independent token limit, read without a provider request. Null keeps native defaults. */
+  autoCompactTokens?(): number | null;
   emit: EmitSink;
   log(level: 'info' | 'warn' | 'error', message: string, context?: CoreLogContext): void;
   /**
@@ -223,7 +225,7 @@ export interface TurnContext {
 /** Native session setup without a prompt, a turn or a message sink. */
 export type SessionContext = Pick<TurnContext,
   'thread' | 'account' | 'provider' | 'sessionId' | 'resumeAt' | 'sessionBefore' |
-  'accountEnv' | 'systemGuide' | 'warmProcessMinutes' | 'toolSummaries' | 'shortAnswers' | 'log' | 'diagnostic' | 'authenticationFailed' | 'commands' | 'context' | 'hook' |
+  'accountEnv' | 'systemGuide' | 'warmProcessMinutes' | 'toolSummaries' | 'shortAnswers' | 'autoCompactTokens' | 'log' | 'diagnostic' | 'authenticationFailed' | 'commands' | 'context' | 'hook' |
   'background' | 'backgroundFinished' | 'wake' | 'spawnChild' | 'finishStartup' | 'killTree' | 'quota' | 'lazyMcp'>;
 
 export type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error';

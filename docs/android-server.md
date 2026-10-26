@@ -1,5 +1,8 @@
 # Boite on an Android phone
 
+This is the server, separate from the [Android client app](android.md).
+Installing the client alone does not install Termux, a core or agent CLIs.
+
 `apps/android-server` turns a phone into a Boite machine: the core and the
 agents run on it, and the person's other devices open it like any
 [headless server](server.md). It has two parts:
@@ -65,7 +68,8 @@ Everything lives in `~/.boite-server`: `config.json`, the supervisor's
 | `pair [--owner]` | A one-time link for a phone or browser, or with `--owner` for a desktop app. |
 | `update [--check] [--force] [--bundle <zip>]` | The newest release of the channel. |
 | `agents` | Installs or updates Claude Code. |
-| `config [<key> <value>]` | `channel stable\|nightly`, `host lan\|tailscale\|local`, `port <n>`, `autostart on\|off`. |
+| `sign-in claude\|codex` | Runs the agent's own sign-in in this terminal, then has the core read the accounts again. |
+| `config [<key> <value>]` | `channel stable\|nightly`, `host lan\|tailscale\|local`, `port <n>`, `autostart on\|off`, `name <text>`. |
 | `logs [<lines>]` | The end of `core.log`. |
 | `uninstall [--purge]` | `--purge` also deletes `data/`. |
 
@@ -76,6 +80,14 @@ with `ok` and, when false, `error`.
 Wi-Fi and Tailscale addresses both answer; `tailscale` on the tailnet address
 alone, waiting until the phone joins it; `local` on this phone only. A change
 to `host` or `port` applies on the next start.
+
+`name` is what the other machines of a group and every client call the phone.
+Android gives every app the host name `localhost`, and the name set in the
+phone's own settings is out of Termux's reach, so without one the core goes by
+the maker and model from `getprop` (`OnePlus GM1913`). `boite-server` passes it
+to the core as `BOITE_MACHINE_NAME`; `config name ""` returns to the maker and
+model. A change applies on the next start, and the group's roster then carries
+it to the other machines.
 
 ## Releases and updates
 
@@ -137,6 +149,24 @@ Codex comes from Termux's package, updated with `pkg upgrade codex`.
 
 The core sees `process.platform === 'android'` under Bun's Android build and
 treats it as Linux through `currentOs()`.
+
+## Signing an agent in
+
+A conversation gets no answer until its agent is signed in. `status` reports
+`signIns`, each agent's best account status from `boite-core accounts --json`
+(`ok`, `unknown`, `error` or `unauthenticated`); `status --quick` leaves it
+out. The app's "Agents" section shows it while the core runs.
+
+Its "Sign in" button runs `boite-server sign-in <agent>` in a new Termux
+terminal, which Termux brings forward: `claude auth login` through the
+`claude` wrapper, or `codex login --device-auth`. Each prints a link to open
+and, for Claude, asks for the code the page gives back. The command then runs
+`boite-core accounts --refresh`: the core reloads its providers, which adopts
+the CLI's login as a default account, and checks every account. Coming back to
+the app reads the status again.
+
+A paired desktop app can sign the phone's agents in from its Settings ›
+Providers instead.
 
 ## Pairing
 

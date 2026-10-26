@@ -659,9 +659,18 @@ test('a child that ends its turn on background work waits, wakes on it, then fin
   // The task ends and wakes it: waiting, then running, then done.
   first.ctx.backgroundFinished!('bg-1', 'completed');
   expect(agentOf(h, threadId, childId).thread.backgroundWait).toMatchObject({ state: 'waiting', for: 'test_emotes' });
+  // An idle maintenance turn must not erase the grace period for the pending wake.
+  const compacted = owner.next('turn.finished', turn => turn.threadId === childId && turn.execution?.operation === 'compact');
+  await owner.call('threads.compact', { threadId: childId });
+  const maintenance = runs.get(childId)!;
+  maintenance.finish('');
+  await compacted;
+  expect(agentOf(h, threadId, childId).thread.backgroundWait).toMatchObject({ state: 'waiting', for: 'test_emotes' });
+  expect(agentOf(h, threadId, childId).settlement).toBeUndefined();
+  expect(lettersFrom(h, threadId, childId)).toHaveLength(1);
   const waited = owner.call('delegation.wait', { threadId, agentId: childId, timeoutMs: 5000 });
   first.ctx.wake!('test_emotes finished: 12 passed.');
-  await waitFor(() => runs.get(childId) !== first, 5000);
+  await waitFor(() => runs.get(childId) !== maintenance, 5000);
   expect(h.core.threads.require(childId).status).toBe('running');
   expect(agentOf(h, threadId, childId).thread.backgroundWait ?? null).toBeNull();
   expect(await cli(['delegate', 'list'])).toContain(`${childId} running `);

@@ -342,7 +342,11 @@ export class CodexSession {
     const policy = MODE_POLICY[ctx.thread.permissionMode];
     const model = modelOf(ctx);
     // A context mode without MCP turns the user's servers off by name.
-    const config = await threadConfig(rpc, ctx.thread.cwd, (level, message) => ctx.log(level, message), ctx.thread.contextMode?.mcp === false);
+    const config = { ...await threadConfig(rpc, ctx.thread.cwd, (level, message) => ctx.log(level, message), ctx.thread.contextMode?.mcp === false) };
+    // Codex checks this at its own model/tool boundaries. Its live settings
+    // RPC does not accept it; the session key reopens changed limits between turns.
+    const tokens = ctx.autoCompactTokens?.() ?? null;
+    if (tokens !== null) config.model_auto_compact_token_limit = tokens;
     if (ctx.sessionId !== null) {
       const resumed = await resumeThread(rpc, ctx, {
         threadId: ctx.sessionId,

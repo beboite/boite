@@ -48,6 +48,17 @@
     <string name="busy_restart">Redémarrage en cours. Un tour déjà lancé a jusqu\'à 75 s pour se terminer.</string>
     <string name="busy_other">Opération en cours…</string>
 
+    <!-- Signing the agents in -->
+    <string name="sign_in_title">Agents</string>
+    <string name="sign_in_unknown">Boite n\'a pas indiqué quels agents sont connectés.</string>
+    <string name="nobody_signed_in">Aucun agent connecté</string>
+    <string name="sign_in_hint">Une conversation ne reçoit aucune réponse tant qu\'aucun agent n\'est connecté. Le bouton Se connecter ouvre Termux. Ouvrez le lien affiché, connectez-vous, puis collez le code dans Termux si un code vous est demandé. Vous pouvez aussi appairer une application de bureau Boite ci-dessous et vous connecter depuis Réglages › Fournisseurs.</string>
+    <string name="signed_in">Connecté</string>
+    <string name="signed_out">Non connecté</string>
+    <string name="sign_in_checking">Pas encore vérifié</string>
+    <string name="sign_in_error">Échec de la vérification de connexion</string>
+    <string name="sign_in">Se connecter</string>
+
     <!-- Pairing -->
     <string name="pair_title">Appairer un appareil</string>
     <string name="pair_device">Téléphone ou navigateur</string>

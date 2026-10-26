@@ -83,9 +83,18 @@ export const strings = {
     waitingOn: 'Waiting for you: {what}', nextWake: 'Next: {name}, {when}',
     state: { working: 'Working', queued: 'Queued', waiting: 'Waiting for you', idle: 'Idle', paused: 'Paused', archived: 'Archived', error: 'Its last turn failed' },
     outcome: { done: 'done', quiet: 'nothing to report', error: 'failed', stopped: 'stopped', skipped: 'skipped' },
+    /** The step a bot is on, when its call has no title: by the tool's family, else by the turn's phase. */
+    activity: {
+      thinking: 'Thinking', compacting: 'Compacting its context', starting: 'Getting started', retrying: 'Retrying a request', provider: 'Waiting for the model', writing: 'Writing its answer',
+      tool: {
+        command: 'Running a command', edit: 'Editing a file', write: 'Writing a file', read: 'Reading a file', search: 'Searching the files', fetch: 'Reading a web page', web: 'Searching the web',
+        agent: 'Handing work to a subagent', sleep: 'Waiting a moment', other: 'Using {tool}', unnamed: 'Using a tool',
+      },
+    },
+    mood: { working: 'Working', queued: 'Queued', waiting: 'Needs you', error: 'Failed', unread: 'New answer', idle: 'Resting', asleep: 'Asleep' },
     robot: {
-      family: 'Style', shape: 'Shape', color: 'Color', eyes: 'Eyes', top: 'Accessory', shuffle: 'Shuffle', customize: 'Customize', done: 'Done',
-      option: '{part} {n}', families: { jelly: 'Jelly', bubble: 'Bubble', capsule: 'Capsule', retro: 'Retro' },
+      family: 'Style', shape: 'Shape', color: 'Color', eyes: 'Eyes', mouth: 'Mouth', top: 'Top', cheeks: 'Cheeks', gear: 'Gear', shuffle: 'Shuffle', customize: 'Customize', done: 'Done',
+      option: '{part} {n}', none: 'None', families: { jelly: 'Jelly', bubble: 'Bubble', capsule: 'Capsule', retro: 'Retro' },
     },
     when: {
       who: 'Bot', pickAgent: 'Choose a bot', what: 'What should it do?', whatPlaceholder: 'For example: sum up the new messages and tell me what needs an answer.',

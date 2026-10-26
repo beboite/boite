@@ -45,7 +45,7 @@
   import { ReadingAnchor, type RowAnchor } from '../lib/reading-anchor';
   import { MediaQuery } from 'svelte/reactivity';
   import { MessageReveal } from '../lib/message-reveal.svelte';
-  import { placeViews, turnViews, viewPart } from '../lib/inline-view';
+  import { ViewPlacement, turnViews, viewPart } from '../lib/inline-view';
   import { filesLast, firstAssistantByTurn, firstByTurn, publishedFile, quietKeepalives } from '../lib/message-order';
 
   /** A phone has no room left of the bubbles for the outline rail: it is not drawn there. */
@@ -95,8 +95,9 @@
   let shownViews: ReadonlyMap<string, Message[]> | undefined;
   const views = $derived.by(() => (shownViews = turnViews(grouped.timeline, shownViews)));
   /** A finished turn's published files go after its answer, its pages after them; Boite's cache pings are one line; an agent's own thread folds its finished turns (`lib/agent-turns.ts`). */
-  const agentTimeline = new AgentTimeline();
-  const shaped = $derived(agentTimeline.build(quietKeepalives(placeViews(filesLast(grouped.timeline, shownTurns), shownTurns, views), shownTurns), shownTurns, memoryPassOf(store, threadId)));
+  const agentTimeline = new AgentTimeline(), viewPlacement = new ViewPlacement();
+  const placed = $derived(viewPlacement.build(filesLast(grouped.timeline, shownTurns), shownTurns, views));
+  const shaped = $derived(agentTimeline.build(quietKeepalives(placed, shownTurns), shownTurns, memoryPassOf(store, threadId)));
   const timeline = $derived(shaped.timeline);
   const memoryPlacement = $derived(placeMemoryEvents(messages, store.openThread?.id === threadId ? store.openThread.memoryEvents ?? [] : store.delegationThread?.id === threadId ? store.delegationThread.memoryEvents ?? [] : []));
   const memoryRows = $derived(new Map(memoryPlacement.standalone.map((event, index) => [`memory:${event.at}:${event.kind}:${index}`, event])));
@@ -727,7 +728,7 @@
   const atRest = $derived(branchable && !store.busy && (store.composerStates[threadId]?.queued.length ?? 0) === 0 && !store.composerStates[threadId]?.sending);
 
   async function editMessage(message: Message): Promise<void> {
-    if (await editWhole(store, threadId, message)) focusComposer();
+    if (await editWhole(store, threadId, message)) focusComposer({ typing: true });
   }
 
   /** The last turn again from its own prompt, on screen before the core rewinds (`retryTurn`). */
