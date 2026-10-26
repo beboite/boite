@@ -271,6 +271,9 @@
     void client.call('plugins.list', {}).then(async (rows) => {
       if (disposed) return;
       plugins = rows;
+      for (const plugin of rows) {
+        if (plugin.origin === 'recommended' && plugin.version === null && plugin.updates != null) void checkUpdates(plugin);
+      }
       await Promise.all(rows.filter((plugin) => plugin.status === 'installed' && plugin.pools.length > 0).map((plugin) => loadPools(plugin.id)));
     }).catch((cause) => {
       if (!disposed) error = messageOf(cause);
@@ -335,11 +338,13 @@
           {#if plugin.status === 'error' || (plugin.status === 'rejected' && plugin.origin === 'recommended')}
             <button class="small" data-testid="plugin-retry" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.install')}><RefreshCw size={14} /><span class="ui-label">{plugin.status === 'error' ? strings.common.retry : t.reinstall}</span></button>
           {/if}
-          {#if plugin.updates && plugin.version !== null}
-            {@const looking = plugin.updates.checking || checking[plugin.id] === true}
-            <button class="ghost small icon" class:spinning={looking} data-testid="plugin-check-updates" data-plugin={plugin.id} title={t.checkUpdates} aria-label={t.checkUpdates}
-              disabled={working || looking} onclick={() => void checkUpdates(plugin)}><RefreshCw size={14} /></button>
-          {/if}
+        {/if}
+        {#if plugin.updates && plugin.status !== 'installing'}
+          {@const looking = plugin.updates.checking || checking[plugin.id] === true}
+          <button class="ghost small icon" class:spinning={looking} data-testid="plugin-check-updates" data-plugin={plugin.id} title={t.checkUpdates} aria-label={t.checkUpdates}
+            disabled={working || looking} onclick={() => void checkUpdates(plugin)}><RefreshCw size={14} /></button>
+        {/if}
+        {#if plugin.status !== 'installing' && plugin.status !== 'not-installed'}
           <button class="ghost small" data-testid="plugin-uninstall" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.uninstall')}><span class="ui-label">{t.remove}</span></button>
         {/if}
       </div>
@@ -355,7 +360,7 @@
         <span class="mono">{fill(t.atCommit, { ref: plugin.source.ref, commit: short(plugin.source.commit) })}</span>
       </p>
     {/if}
-    {#if plugin.updates && plugin.version !== null}
+    {#if plugin.updates}
       {@const line = updatesLine(plugin.updates)}
       {#if line}
         <p class="hint" data-testid="plugin-updates" data-plugin={plugin.id} data-available={plugin.updates.available?.version ?? ''}><span data-testid="plugin-updates-line">{line}</span></p>
