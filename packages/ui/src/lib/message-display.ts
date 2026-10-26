@@ -158,6 +158,34 @@ export class ParagraphScan {
   }
 }
 
+/** A fence `lib/rich-markdown.ts` draws, or a formula on lines of its own (`lib/markdown.ts`). */
+const DRAWN_FENCE = /^```(?:mermaid|math|view)\s*$/;
+const DISPLAY_MATH = /^(?:\$\$|\\\[)/;
+
+/**
+ * The paragraph an answer is still writing (`ParagraphScan.pending`), cut
+ * where a diagram, a formula or a view opens outside another fence: what is
+ * written of it would show as source, then jump to a drawing, so a placeholder
+ * stands there (`drawing`) until its paragraph is complete.
+ */
+export function pendingDrawing(tail: string): { text: string; drawing: boolean } {
+  let fence = '';
+  let offset = 0;
+  for (const line of tail.split('\n')) {
+    const trimmed = line.trim();
+    const marker = /^(?:`{3,}|~{3,})/.exec(trimmed)?.[0];
+    if (fence) {
+      if (marker && marker[0] === fence[0] && marker.length >= fence.length && trimmed === marker) fence = '';
+    } else if (DRAWN_FENCE.test(trimmed) || DISPLAY_MATH.test(trimmed)) {
+      return { text: tail.slice(0, offset).trimEnd(), drawing: true };
+    } else if (marker) {
+      fence = marker;
+    }
+    offset += line.length + 1;
+  }
+  return { text: tail, drawing: false };
+}
+
 /** The core's line for a move the agent asked for itself (`boite thread move`), drawn as a marker, not a message. */
 export function movedBy(message: Message): MoveNotice | null {
   if (message.role !== 'system') return null;

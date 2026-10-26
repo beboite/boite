@@ -110,6 +110,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'messages.toolPart', // The whole journalled tool call a phone's page deferred, in a conversation it can already read.
   'messages.attachment', // Only journalled bytes in a conversation already readable from the phone.
   'artifacts.read', // Download only snapshots already published in a visible conversation, never host paths.
+  // Shows an answer's ```view block: the HTML as a page on an opaque origin that loads and calls nothing. No path, nothing stored.
+  'artifacts.viewBlock',
   'threads.update',
   'threads.retitle',
   'threads.compact', // A paired device can request the same session maintenance as the desktop.

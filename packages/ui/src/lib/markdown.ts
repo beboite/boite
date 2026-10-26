@@ -6,11 +6,11 @@ import { BracketLinks, richInline, codeLinkHtml, threadAddress, threadLinkHtml }
  * put in the page. No images: a `data:` picture arrives as a tool document,
  * and an answer never fetches a remote one.
  *
- * A closed ```` ```mermaid ```` block and math between `$$…$$`, `\[…\]`,
- * `\(…\)` or in a ```` ```math ```` block become marked elements that still
- * show their source (`md-mermaid`, `md-math`); `lib/rich-markdown.ts` draws
- * them once they are in the page. A single `$` is never math: prices and
- * `$PATH` stay text.
+ * A closed ```` ```mermaid ```` or ```` ```view ```` block and math between
+ * `$$…$$`, `\[…\]`, `\(…\)` or in a ```` ```math ```` block become marked
+ * elements that hold their source (`md-mermaid`, `md-view`, `md-math`);
+ * `lib/rich-markdown.ts` draws them once they are in the page. A ```` ```html ````
+ * block stays code. A single `$` is never math: prices and `$PATH` stay text.
  */
 
 function escape(text: string): string {
@@ -280,7 +280,7 @@ function readFence(lines: string[], start: number): Block | null {
   }
   const language = fence[1] ? ` data-language="${escape(fence[1])}"` : '';
   const pre = `<pre${language}><code>${escape(source)}</code></pre>`;
-  if (closed && kind === 'mermaid' && source.trim()) return { html: `<div class="md-mermaid" data-source="${escape(source)}">${pre}</div>`, end };
+  if (closed && (kind === 'mermaid' || kind === 'view') && source.trim()) return { html: `<div class="md-${kind}" data-source="${escape(source)}">${pre}</div>`, end };
   return { html: pre, end };
 }
 

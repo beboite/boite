@@ -356,6 +356,13 @@ export interface MessagesRpcMethods {
   'artifacts.view': { params: { threadId: ThreadId; path: string; title?: string }; result: { message: Message; checked: boolean; advice: string[] } };
   /** Render a private draft with the view kit; optionally run an async DOM check at each width. Publishes nothing. */
   'artifacts.viewCheck': { params: { threadId: ThreadId; path: string; script?: string; scheme?: 'dark' | 'light' }; result: { checked: boolean; errors: string[]; advice: string[]; captures: ViewCheckCapture[] } };
+  /**
+   * The address (`VIEW_ROUTE`) where a ```` ```view ```` block of an answer
+   * opens as a page: its HTML, at most `VIEW_BLOCK_MAX_BYTES`, wrapped like a
+   * published view (policy, theme, kit) and held in memory, never on disk or
+   * in the journal. The same HTML keeps its address while the ticket lives.
+   */
+  'artifacts.viewBlock': { params: { html: string }; result: { url: string } };
   'artifacts.preview': { params: { threadId: ThreadId; path: string }; result: { url: string; shown: boolean } };
   'artifacts.previewClose': { params: { threadId: ThreadId; path: string }; result: { ok: true } };
   /** Push credentials are owned by the authenticated pairing, never a caller-supplied session id. */

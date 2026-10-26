@@ -11,6 +11,8 @@
 export const VIEW_ROUTE = '/view';
 /** The page with its local files embedded. Above it the publish is refused. */
 export const VIEW_MAX_BYTES = 4 * 1024 * 1024;
+/** The HTML of one ```` ```view ```` block of an answer, as written. Above it the block is not shown. */
+export const VIEW_BLOCK_MAX_BYTES = 512 * 1024;
 /**
  * The widths a page's content is measured at when it is published: the answer
  * column on a desktop (`--content` less its 4 px rest), then on a 390 px phone.

@@ -493,6 +493,8 @@ export interface HeldBytes {
   name?: string;
   /** Kept by no cache: a picture of an incognito conversation, which leaves nothing behind. */
   noStore?: true;
+  /** A ```view block's page (`viewBlock`): `VIEW_ROUTE` opens it, the file route only downloads it. */
+  view?: true;
 }
 
 interface BytesTicket {

@@ -97,6 +97,10 @@ answer, with no card around it, on the conversation's own background, in the
 app's theme and faces. Every provider can use the command. No setting turns
 it on, and the switch above does not turn it off.
 
+A page small enough to write in the answer can be a ```` ```view ```` block
+instead, with no file and no command: the same frame, kit and theme, drawn
+where the block is ([view blocks](diagrams-and-formulas.md#view-blocks)).
+
 Captures: [a view on desktop](images/inline-view-desktop.png) · [the same on a phone](images/inline-view-phone.png) · [a view placed between two paragraphs](images/inline-view-placed-desktop.png) · [the same on a phone](images/inline-view-placed-phone.png)
 
 ### The app's look

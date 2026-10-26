@@ -673,6 +673,35 @@
 @media (prefers-reduced-motion: reduce) { .typing > span { animation: none; } }
 html[data-motion='reduced'] .typing > span { animation: none; }
 
+/* A diagram, a formula or a view of an answer that is not drawn yet
+   (`lib/rich-markdown.ts`) shows a quiet box where it goes, never its source
+   half drawn; so does one an answer is still writing (`.drawing-pending`,
+   Prose.svelte). Eager, because the drawing code and its styles load later.
+   A block that cannot be drawn shows its source again (`md-source`). */
+.drawing-pending,
+[data-rich-markdown] :is(.md-mermaid, .md-view):not(.md-drawn, .md-source)::after,
+[data-rich-markdown] .md-math[data-display]:not(.md-drawn, .md-source) {
+  display: block;
+  height: var(--drawing-height, 48px);
+  max-height: 70vh;
+  margin: 6px 0 10px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-code-background);
+  animation: pulse 1.6s var(--loop-ease-in-out-48) infinite var(--loops);
+}
+[data-rich-markdown] :is(.md-mermaid, .md-view):not(.md-drawn, .md-source)::after { content: ''; margin: 0; }
+[data-rich-markdown] :is(.md-mermaid, .md-view):not(.md-drawn, .md-source) > pre { display: none; }
+[data-rich-markdown] .md-math:not(.md-drawn, .md-source) { color: transparent; }
+@media (prefers-reduced-motion: reduce) {
+  .drawing-pending,
+  [data-rich-markdown] :is(.md-mermaid, .md-view):not(.md-drawn, .md-source)::after,
+  [data-rich-markdown] .md-math[data-display]:not(.md-drawn, .md-source) { animation: none; }
+}
+html[data-motion='reduced'] .drawing-pending,
+html[data-motion='reduced'] [data-rich-markdown] :is(.md-mermaid, .md-view):not(.md-drawn, .md-source)::after,
+html[data-motion='reduced'] [data-rich-markdown] .md-math[data-display]:not(.md-drawn, .md-source) { animation: none; }
 /* The conversation's width, stamped by `lib/chat-width.ts`: wider for a big
    screen, or the whole window. The reading column stamps nothing. */
 html[data-chat-width='wide'] {

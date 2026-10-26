@@ -2,7 +2,7 @@
   import { tick } from 'svelte';
   import { renderBlock } from '../lib/markdown';
   import { workspace } from '../lib/workspace.svelte';
-  import { ParagraphScan, answerText } from '../lib/message-display';
+  import { ParagraphScan, answerText, pendingDrawing } from '../lib/message-display';
   import { strings } from '../lib/strings';
   import { featureOn } from '../lib/features.svelte';
   import type { Store } from '../lib/store.svelte';
@@ -18,7 +18,7 @@
   import type { Message } from '@boite/contracts';
   import { answerPieces, viewAt, viewPart, type AnswerPiece } from '../lib/inline-view';
   import InlineView from './InlineView.svelte';
-  import { richMarkdown } from '../lib/rich-markdown';
+  import { richMarkdown, type RichMarkdownOptions } from '../lib/rich-markdown';
   import { viewerHost, type Gallery, type MediaItem } from '../lib/media-gallery';
   import Deferred, { parts } from './Deferred.svelte';
 
@@ -131,6 +131,8 @@
   });
   /** A line being written that may yet place a page is not shown as its raw link: the page or the paragraph replaces it once complete. */
   const tail = $derived(views?.length && /^ {0,3}!\[[^\n]*$/.test(pending) ? '' : pending);
+  /** A diagram, formula or view being written shows as a placeholder, not as its source. */
+  const drafting = $derived(pendingDrawing(tail));
 
   let host = $state<HTMLDivElement>();
 
@@ -146,6 +148,11 @@
     if (viewing) URL.revokeObjectURL(viewing.items[0]!.src);
     viewing = { items: [item], index: 0 };
   }
+  /** A `iew block opens as a page the conversation's machine serves. */
+  const drawing = $derived.by((): RichMarkdownOptions => {
+    const owner = store;
+    return { onenlarge: enlarge, viewBlock: owner ? html => owner.viewBlock(html) : undefined };
+  });
   function closeViewer(): void {
     if (viewing) URL.revokeObjectURL(viewing.items[0]!.src);
     viewing = null;
@@ -167,8 +174,8 @@
   });
 
   function hangCopy(pre: HTMLPreElement): void {
-    // A diagram's code has the diagram's own buttons.
-    if (pre.parentElement?.classList.contains('code-block') || pre.parentElement?.classList.contains('md-mermaid')) return;
+    // A diagram's or a view's code has its own buttons.
+    if (pre.parentElement?.matches('.code-block, .md-mermaid, .md-view')) return;
     const wrap = document.createElement('div');
     wrap.className = 'code-block';
     pre.replaceWith(wrap);
@@ -201,12 +208,12 @@
   }
 </script>
 
-{#snippet writing()}{#if tail}<p class="pending" data-testid="paragraph-pending">{tail}</p>{/if}{#if typing && text.trim().length > 0}<TypingIndicator />{/if}{/snippet}
+{#snippet writing()}{#if drafting.text}<p class="pending" data-testid="paragraph-pending">{drafting.text}</p>{/if}{#if drafting.drawing}<div class="drawing-pending" role="status" aria-label={strings.chat.drawingPending} data-testid="drawing-pending"></div>{/if}{#if typing && text.trim().length > 0}<TypingIndicator />{/if}{/snippet}
 
 {#if groups && store && threadId}
   {@const end = groups.at(-1)}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="flow" data-testid="text-part" bind:this={host} use:selectionClicks use:longPress={hasMenu} use:richMarkdown={{ onenlarge: enlarge }} onclick={follow} oncontextmenu={linkMenu}>
+  <div class="flow" data-testid="text-part" bind:this={host} use:selectionClicks use:longPress={hasMenu} use:richMarkdown={drawing} onclick={follow} oncontextmenu={linkMenu}>
     {#each groups as group (group.key)}
       {#if group.kind === 'view'}
         <InlineView part={viewPart(group.message)!} {store} {threadId} messageId={group.message.id} partIndex={0} />
@@ -224,7 +231,7 @@
   </div>
 {:else}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="prose" class:live class:answer-bubble={bubble && (blocks.length > 0 || tail.length > 0)} data-testid="text-part" bind:this={host} use:selectionClicks use:longPress={hasMenu} use:richMarkdown={{ onenlarge: enlarge }} onclick={follow} oncontextmenu={linkMenu}>
+  <div class="prose" class:live class:answer-bubble={bubble && (blocks.length > 0 || tail.length > 0)} data-testid="text-part" bind:this={host} use:selectionClicks use:longPress={hasMenu} use:richMarkdown={drawing} onclick={follow} oncontextmenu={linkMenu}>
     {#each blocks as block, index (index)}
       <!-- Completed Markdown blocks stay mounted while the pending paragraph changes. -->
       <div class="paragraph" data-testid="paragraph">{@html renderBlock(block, rich)}</div>

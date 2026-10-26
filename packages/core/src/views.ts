@@ -9,10 +9,10 @@
 import { mkdir, mkdtemp, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { gzip, type InputType, type ZlibOptions } from 'node:zlib';
 import {
-  RPC_MAX_FRAME_BYTES, VIEW_BLEED, VIEW_DEFAULT_HEIGHT, VIEW_MAX_BYTES, VIEW_NARROW_WIDTH, VIEW_ROUTE, VIEW_TITLE_MAX, VIEW_WIDTH,
+  RPC_MAX_FRAME_BYTES, VIEW_BLEED, VIEW_BLOCK_MAX_BYTES, VIEW_DEFAULT_HEIGHT, VIEW_MAX_BYTES, VIEW_NARROW_WIDTH, VIEW_ROUTE, VIEW_TITLE_MAX, VIEW_WIDTH,
   clampViewHeight, viewDocument, viewTitleOf,
   type InlineView, type Message, type RpcParams, type RpcResult,
 } from '@boite/contracts';
@@ -307,4 +307,37 @@ export async function publishView(core: Core, params: RpcParams<'artifacts.view'
   } finally {
     if (!committed) await Promise.all([unlink(destination), unlink(`${destination}${VIEW_GZIP_SUFFIX}`)].map(removal => removal.catch(() => {})));
   }
+}
+
+/** The ```view blocks a client showed last on this core, newest last: what their tickets serve. */
+const VIEW_BLOCKS_HELD = 64;
+const heldBlocks = new WeakMap<Core, Map<string, Uint8Array>>();
+
+/**
+ * A ```` ```view ```` block of an answer as a page at `VIEW_ROUTE`: its HTML
+ * wrapped like a published view, so it gets the same policy, theme and kit,
+ * and runs under the same sandbox. Nothing is written: the page is held in
+ * memory, the last `VIEW_BLOCKS_HELD` of them, and a ticket whose page is gone
+ * opens nothing. A client asks again when it draws the block again.
+ */
+export function viewBlock(core: Core, params: RpcParams<'artifacts.viewBlock'>): RpcResult<'artifacts.viewBlock'> {
+  if (typeof params.html !== 'string' || !params.html.trim()) throw refused('artifacts.viewBlock html must be the HTML of a view block', { field: 'html', expected: 'non-empty HTML text' });
+  const size = Buffer.byteLength(params.html);
+  if (size > VIEW_BLOCK_MAX_BYTES) throw refused(`artifacts.viewBlock html must be at most ${VIEW_BLOCK_MAX_BYTES / 1024} KB`, { field: 'html', bytes: size, expected: `at most ${VIEW_BLOCK_MAX_BYTES} bytes` });
+  const key = `view-block:${createHash('sha256').update(params.html).digest('base64url')}`;
+  let blocks = heldBlocks.get(core);
+  if (!blocks) heldBlocks.set(core, blocks = new Map());
+  const data = blocks.get(key) ?? Buffer.from(viewDocument(params.html), 'utf8');
+  blocks.delete(key);
+  blocks.set(key, data);
+  for (const oldest of blocks.keys()) {
+    if (blocks.size <= VIEW_BLOCKS_HELD) break;
+    blocks.delete(oldest);
+  }
+  const held = blocks;
+  const ticket = core.fileTickets.mintBytes(key, () => {
+    const page = held.get(key);
+    return page ? { data: page, mime: VIEW_MIME, name: 'view.html', noStore: true, view: true } : null;
+  });
+  return { url: `${VIEW_ROUTE}/${ticket}` };
 }

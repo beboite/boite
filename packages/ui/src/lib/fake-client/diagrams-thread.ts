@@ -4,8 +4,8 @@ import { T0 } from './shared';
 /**
  * A thread whose answer holds what `lib/rich-markdown.ts` draws: a flowchart,
  * a sequence diagram, formulas in the line and on their own, a diagram that
- * does not parse, and a price that stays text. `?fake=1&diagrams=1` seeds it
- * for the captures of docs/diagrams-and-formulas.md.
+ * does not parse, a price that stays text and a ```view block's simulator.
+ * `?fake=1&diagrams=1` seeds it for the captures of docs/diagrams-and-formulas.md.
  */
 export function diagramsThread(): Thread {
   const at = T0 + 1_200_000;
@@ -47,6 +47,27 @@ export function diagramsThread(): Thread {
     '```mermaid',
     'flowchart LR',
     '  A --> ',
+    '```',
+    '',
+    'Move the hit rate to see what a request costs:',
+    '',
+    '```view',
+    '<div class="card stack">',
+    '  <label class="field">Hit rate <input id="rate" type="range" min="0" max="100" value="80"> <output id="out">80 %</output></label>',
+    '  <div class="row">',
+    '    <div class="stat"><span class="label">Cost per request</span><b id="cost">0.28 ¢</b></div>',
+    '    <div class="bar" id="bar" style="--value:28%"></div>',
+    '  </div>',
+    '</div>',
+    '<script>',
+    '  const rate = document.getElementById("rate");',
+    '  rate.oninput = () => {',
+    '    const cost = rate.value / 100 * 0.1 + (1 - rate.value / 100) * 1;',
+    '    document.getElementById("out").value = rate.value + " %";',
+    '    document.getElementById("cost").textContent = cost.toFixed(2) + " ¢";',
+    '    document.getElementById("bar").style.setProperty("--value", cost * 100 + "%");',
+    '  };',
+    '</script>',
     '```'
   ].join('\n');
   const messages: Message[] = [

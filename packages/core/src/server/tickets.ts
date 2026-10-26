@@ -41,14 +41,10 @@ export async function ticketedFile(core: Core, ticket: string, range: string | n
  * call nothing. The snapshot never changes, but its ticket does not outlive
  * ten minutes, so nothing is cached. `publishView` gzipped the snapshot once
  * beside it; a client that reads gzip (`gzip`) gets that copy, and a view
- * published before the copy existed is sent as it is.
+ * published before the copy existed is sent as it is. A ```view block's page
+ * (`viewBlock`) is held in memory and sent under the same headers.
  */
 export async function viewPage(core: Core, ticket: string, gzip: boolean): Promise<Response> {
-  const opened = await core.fileTickets.open(ticket);
-  if (opened === null || !opened.view) {
-    void opened?.handle.close();
-    return new Response('unknown or expired ticket', { status: 404 });
-  }
   const headers: Record<string, string> = {
     'content-type': 'text/html; charset=utf-8',
     'cache-control': 'no-store',
@@ -57,6 +53,13 @@ export async function viewPage(core: Core, ticket: string, gzip: boolean): Promi
     'content-security-policy': `sandbox ${VIEW_SANDBOX}; ${VIEW_CONTENT_POLICY}`,
     vary: 'accept-encoding',
   };
+  const held = core.fileTickets.bytes(ticket);
+  if (held !== null) return held.view ? new Response(held.data as Uint8Array<ArrayBuffer>, { headers }) : new Response('unknown or expired ticket', { status: 404 });
+  const opened = await core.fileTickets.open(ticket);
+  if (opened === null || !opened.view) {
+    void opened?.handle.close();
+    return new Response('unknown or expired ticket', { status: 404 });
+  }
   if (gzip) {
     const compressed = await openViewCopy(`${opened.path}${VIEW_GZIP_SUFFIX}`);
     if (compressed !== null) {

@@ -141,4 +141,12 @@ describe('diagrams and formulas', () => {
     expect(renderMarkdown('```mermaid\nflowchart LR\n  A --> B')).toBe('<pre data-language="mermaid"><code>flowchart LR\n  A --&gt; B</code></pre>');
     expect(renderMarkdown('```mermaid\n```')).toBe('<pre data-language="mermaid"><code></code></pre>');
   });
+
+  test('a closed view block is marked with its HTML; one still being written and an html block stay code', () => {
+    expect(renderMarkdown('```view\n<p class="a">Hi</p>\n```')).toBe(
+      '<div class="md-view" data-source="&lt;p class=&quot;a&quot;&gt;Hi&lt;/p&gt;"><pre data-language="view"><code>&lt;p class=&quot;a&quot;&gt;Hi&lt;/p&gt;</code></pre></div>'
+    );
+    expect(renderMarkdown('```view\n<p>Hi')).toBe('<pre data-language="view"><code>&lt;p&gt;Hi</code></pre>');
+    expect(renderMarkdown('```html\n<p>Hi</p>\n```')).toBe('<pre data-language="html"><code>&lt;p&gt;Hi&lt;/p&gt;</code></pre>');
+  });
 });

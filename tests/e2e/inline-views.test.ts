@@ -191,7 +191,7 @@ test('a view the answer places is drawn between the paragraphs around it, on des
   } finally { await page?.close(); client.close(); await core.stop(); }
 }, 120_000);
 
-test('a view from another machine loads under the shell content security policy', async () => {
+test('a view and a view block from another machine load under the shell content security policy', async () => {
   ensureProductionUi();
   const core = await startCore();
   const client = await connect(core.url, core.token);
@@ -204,7 +204,8 @@ test('a view from another machine loads under the shell content security policy'
     writeFileSync(join(core.dataDir, 'pendulum.html'), VIEW_EXAMPLE);
     await client.call('threads.subscribe', { threadId: thread.id });
     const done = client.next('turn.finished');
-    await client.call('turns.start', { threadId: thread.id, prompt: 'Here is the pendulum.' });
+    // A block's page is asked of the machine that owns the conversation and served like a published one.
+    await client.call('turns.start', { threadId: thread.id, prompt: 'Here is the pendulum.\n\n```view\n<div class="card">Drawn by the machine</div>\n```' });
     await done;
     await client.call('artifacts.view', { threadId: thread.id, path: 'pendulum.html' });
     page = await BrowserPage.launch({ url: pairingUrlOf(core), windowSize: { width: 1280, height: 900 } });
@@ -224,9 +225,12 @@ test('a view from another machine loads under the shell content security policy'
       document.head.append(policy);
     })()`);
     await page.click(`[data-thread-id="${thread.id}"]`);
-    await page.waitFor(READY);
+    await page.waitFor(`${READY} && document.querySelector(".md-view.md-drawn [data-testid=view-block-frame]")?.dataset.ready === ""`);
     expect(await page.evaluate('window.__policyViolations')).toEqual([]);
     expect(new URL(await page.evaluate<string>('document.querySelector("[data-testid=inline-view] iframe").src')).origin).toBe(remote);
+    const block = new URL(await page.evaluate<string>('document.querySelector("[data-testid=view-block-frame]").src'));
+    expect(`${block.origin}${block.pathname.replace(/[^/]+$/, '')}`).toBe(`${remote}/view/`);
+    expect(await page.evaluate('document.querySelector(".md-view pre").checkVisibility()')).toBe(false);
     expect(page.errors()).toEqual([]);
   } finally { await page?.close(); client.close(); await core.stop(); }
 }, 90_000);

@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { ParagraphScan, paragraphBlocks, visibleAnswer } from './message-display';
+import { ParagraphScan, paragraphBlocks, pendingDrawing, visibleAnswer } from './message-display';
 
 const PIECES = ['word ', 'two words ', '\n', '\n\n', '\r\n', '\r\n\r\n', '```', '```ts\n', '~~~', '````\n', '  ', '\t', '[BOITE_GOAL_COMPLETE]', '[BOITE_GOAL_', 'x'];
 
@@ -54,4 +54,14 @@ test('a marker check looks at the last line only and keeps the fenced case', () 
   expect(visibleAnswer(`\`\`\`\n${long}\n[BOITE_GOAL_COMPLETE]`)).toBe(`\`\`\`\n${long}\n[BOITE_GOAL_COMPLETE]`);
   expect(visibleAnswer(`${long}\n[BOITE_GOAL_COMPLETE] and more`)).toBe(`${long}\n[BOITE_GOAL_COMPLETE] and more`);
   expect(visibleAnswer(`${long}\n  [BOITE_GOAL_BLOCKED]\f`)).toBe(`${long}\n`);
+});
+
+test('a paragraph being written stops where a diagram, a formula or a view opens, outside another fence', () => {
+  expect(pendingDrawing('Here it is:\n```view\n<svg viewBox="0 0 10')).toEqual({ text: 'Here it is:', drawing: true });
+  expect(pendingDrawing('```mermaid\nflowchart LR\n  A --> B\n```')).toEqual({ text: '', drawing: true });
+  expect(pendingDrawing('So\n$$\n\\int_0^1')).toEqual({ text: 'So', drawing: true });
+  expect(pendingDrawing('So \\[x')).toEqual({ text: 'So \\[x', drawing: false });
+  // A fence shown as code is written as it comes, even when it quotes a drawable one.
+  expect(pendingDrawing('````md\n```view\n<p>\n````\nafter')).toEqual({ text: '````md\n```view\n<p>\n````\nafter', drawing: false });
+  expect(pendingDrawing('```html\n<p>Hi</p>')).toEqual({ text: '```html\n<p>Hi</p>', drawing: false });
 });
