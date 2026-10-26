@@ -9,6 +9,7 @@ import {serveTopology, traceRows} from './target-topology.ts';
 import {validateWorkerLifetime, type WorkerReport} from './worker-lifetime.ts';
 import {observeHelperJob, type RootProof} from './helper-job.ts';
 import {validateRetirementTiming, type RetirementReport} from './retirement-timing.ts';
+import {validateDirectoryTwin, type DirectoryTwinReport} from './directory-twin.ts';
 
 const native = process.platform === 'win32' && process.env.BOITE_TEST_DEBUG_MAP === '1';
 
@@ -38,9 +39,10 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   const helperJobControls: Record<string, unknown>[] = []; report.helperJobControls = helperJobControls;
   const workerControls: WorkerReport[] = []; report.workerLifetime = workerControls;
   const retirementControls: RetirementReport[] = []; report.retirementTiming = retirementControls;
+  const directoryControls: DirectoryTwinReport[] = []; report.directoryTwin = directoryControls;
   const controls = join(state, 'target-creator-control'); mkdirSync(controls);
   const topologyProofs: unknown[] = []; report.targetCreatorTopology = topologyProofs;
-  const jobs = ['RED', 'A', 'B', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'THREAD-EXITED', 'THREAD-WAITING', 'TARGET-HELPER-HELD', 'RETIRE-LIVE', 'RETIRE-EXITED'].map(label => {
+  const jobs = ['RED', 'A', 'B', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'THREAD-EXITED', 'THREAD-WAITING', 'TARGET-HELPER-HELD', 'RETIRE-LIVE', 'RETIRE-EXITED', 'DIRECTORY-TWIN'].map(label => {
     const root = join(state, label), project = join(root, 'project'), runtime = join(root, 'runtime'), home = join(root, 'home');
     const marker = `TASK_ROUTE_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
     return {label, root, project, runtime, home, marker, profile: `boite.debug.route.${crypto.randomUUID().replaceAll('-', '')}`};
@@ -55,7 +57,8 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   async function execute(id: string, args: string[], home = state, extra: Record<string, string | undefined> = {}, milliseconds?: number) {
     const workerMode = args[0] === 'thread-exited-run' ? 'exited' : args[0] === 'thread-waiting-run' ? 'waiting' : null;
     const workerNonce = crypto.randomUUID().replaceAll('-', '');
-    const retirementMode = args[0] === 'retire-live-run' ? 'live' : args[0] === 'retire-exited-run' ? 'exited' : null;
+    const directoryTwin = args[0] === 'directory-twin-run';
+    const retirementMode = directoryTwin || args[0] === 'retire-live-run' ? 'live' : args[0] === 'retire-exited-run' ? 'exited' : null;
     const retirementNonce = crypto.randomUUID().replaceAll('-', '');
     const helperExited = args[0] === 'target-helper-exited-run';
     const held = id === 'lpac-TARGET-HELPER-HELD';
@@ -112,16 +115,17 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
       const rootPid = Number(result.out.match(/^inspect-start=\S+\.generation-0 pid=(\d+)\r?$/m)?.[1]);
       const root = traceRows(process.env.BOITE_DEBUG_MAP_TRACE!).find(row => row.event === 'owned-membership' &&
         row.role === 'harness-main' && row.threadId === id && row.pid === rootPid);
-      const evidence = validateRetirementTiming(result, {mode: retirementMode, nonce: retirementNonce,
-        helper: {pid: result.pid, created: member?.created ?? ''}, root: {pid: rootPid, created: root?.created ?? ''}, marker: args[6] ?? ''});
-      retirementControls.push(evidence);
+      const expected: Parameters<typeof validateRetirementTiming>[1] = {mode: retirementMode, nonce: retirementNonce,
+        helper: {pid: result.pid, created: member?.created ?? ''}, root: {pid: rootPid, created: root?.created ?? ''}, marker: args[6] ?? ''};
+      const evidence = directoryTwin ? validateDirectoryTwin(result, expected) : validateRetirementTiming(result, expected);
+      if (directoryTwin) directoryControls.push(evidence as DirectoryTwinReport); else retirementControls.push(evidence as RetirementReport);
       if (!evidence.protocolValid) failures.push(`${id} retirement protocol: ${evidence.error}`);
     }
     steps.push({id, ...result});
     writeFileSync(join(output!, `${id}.log`), `pid=${result.pid} exit=${result.code} timedOut=${result.timedOut}\n${result.out}${result.err}`);
     console.log(`${id}: ${JSON.stringify(result)}`); save(); return result;
   }
-  function run(job: typeof jobs[number], debug: boolean, mode?: 'direct-run' | 'setter-run' | 'quiet-run' | 'reopen-run' | 'creator-run' | 'retire-run' | 'retire-named-run' | 'target-exited-run' | 'target-waiting-run' | 'target-helper-exited-run' | 'thread-exited-run' | 'thread-waiting-run' | 'retire-live-run' | 'retire-exited-run') {
+  function run(job: typeof jobs[number], debug: boolean, mode?: 'direct-run' | 'setter-run' | 'quiet-run' | 'reopen-run' | 'creator-run' | 'retire-run' | 'retire-named-run' | 'target-exited-run' | 'target-waiting-run' | 'target-helper-exited-run' | 'thread-exited-run' | 'thread-waiting-run' | 'retire-live-run' | 'retire-exited-run' | 'directory-twin-run') {
     const promise = execute(`lpac-${job.label}`, [mode ?? (debug ? 'debug-run' : 'run'), job.profile, job.project,
       join(job.runtime, 'inspect.exe'), 'inspect', '0', job.marker, ...(debug ? ['forward-check'] : [])], job.home,
       {PATH: `${job.runtime};${process.env.SystemRoot}\\System32`});
@@ -157,7 +161,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
       }),
       verify(`${label} boundary tokens closed`, () => {
         const closures = [...result.err.matchAll(/token-cleanup role=boundary pid=(\d+) success=1 error=0/g)];
-        expect(closures).toHaveLength(label === 'A' || label === 'B' ? 7 : label === 'RETIRE-LIVE' || label === 'RETIRE-EXITED' ? 2 : 1);
+        expect(closures).toHaveLength(label === 'A' || label === 'B' ? 7 : label === 'RETIRE-LIVE' || label === 'RETIRE-EXITED' || label === 'DIRECTORY-TWIN' ? 2 : 1);
         expect(result.err.match(/token-cleanup role=boundary /g)).toHaveLength(closures.length);
       }),
       verify(`${label} owned processes gone`, () => expect(result.err).toContain('cleanup job-active=0')),
@@ -190,12 +194,12 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
         expect(Number(checkpoint?.[2])).toBeGreaterThan(0);
         const targets = checkpoint?.[3]?.split(',') ?? [];
         const inspected = [...result.out.matchAll(/^inspect-start=\S+ pid=(\d+)\r?$/gm)].map(match => match[1]!);
-        expect(new Set(targets)).toEqual(new Set(['RED', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'THREAD-EXITED', 'THREAD-WAITING', 'TARGET-HELPER-HELD', 'RETIRE-LIVE', 'RETIRE-EXITED'].includes(label) ? inspected.slice(0, 1) : inspected));
+        expect(new Set(targets)).toEqual(new Set(['RED', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'THREAD-EXITED', 'THREAD-WAITING', 'TARGET-HELPER-HELD', 'RETIRE-LIVE', 'RETIRE-EXITED', 'DIRECTORY-TWIN'].includes(label) ? inspected.slice(0, 1) : inspected));
         expect(result.err.indexOf('ownership-checkpoint ')).toBeGreaterThan(result.err.indexOf('cleanup map-eventual-open='));
         expect(result.err).toMatch(/cleanup checkpoint-map-open=0x[\da-f]+ absent=[01] closed=1 error=0 wall-ms=\d+/);
       }),
     ];
-    if (['RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'TARGET-HELPER-HELD', 'RETIRE-LIVE', 'RETIRE-EXITED'].includes(label)) {
+    if (['RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'TARGET-HELPER-HELD', 'RETIRE-LIVE', 'RETIRE-EXITED', 'DIRECTORY-TWIN'].includes(label)) {
       for (const phase of ['immediate', 'checkpoint', 'final']) checks.push(
         verify(`${label} replacement absence ${phase}`, () => expect(result.err)
           .toContain(`cleanup retired-open phase=${phase} status=0xc0000034 absent=1 closed=1 error=0`)));
@@ -212,6 +216,13 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     } else checks.push(verify(`${label} no named replacement`, () => {
       expect(result.err).not.toContain('map-retire named '); expect(result.err).not.toContain('cleanup retired-open ');
     }));
+    if (label === 'DIRECTORY-TWIN') checks.push(verify(`${label} complete protocol`, () => expect(directoryControls.at(-1)?.protocolValid).toBe(true)));
+    if (label === 'DIRECTORY-TWIN') for (const phase of ['immediate', 'checkpoint', 'final']) checks.push(
+      verify(`${label} unused absence ${phase}`, () => {
+        const events = directoryControls.at(-1)?.events.filter(e => e.phase === phase && e.role === 'unused');
+        expect(events).toHaveLength(1); expect(events?.[0]?.status).toBe('0xc0000034');
+        expect(events?.[0]?.absent).toBe(1); expect(events?.[0]?.closed).toBe(1);
+      }));
     for (const action of ['station-restore', 'desktop', 'station']) checks.push(
       verify(`${label} window cleanup ${action}`, () => expect(result.err)
         .toContain(`window-cleanup action=${action} success=1 error=0`)));
@@ -265,12 +276,16 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
       .map(match => ({kind: match[1]!, path: match[2]!.replace(/\r$/, '')}));
     for (const match of result.err.matchAll(/^map-retire named path=(.+) create=0x00000000\r?$/gm))
       names.push({kind: 'retired', path: match[1]!.replace(/\r$/, '')});
+    if (label === 'DIRECTORY-TWIN') for (const match of result.err.matchAll(/^directory-twin phase=create role=unused .* path=(\S+) now=\d+ status=0x00000000 /gm))
+      names.push({kind: 'unused', path: match[1]!});
     if (!verify(`${label} owned map name`, () => {
-      expect(names).toHaveLength(['RED', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'TARGET-HELPER-HELD', 'RETIRE-LIVE', 'RETIRE-EXITED'].includes(label) ? 2 : 1);
+      expect(names).toHaveLength(label === 'DIRECTORY-TWIN' ? 3 : ['RED', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'TARGET-HELPER-HELD', 'RETIRE-LIVE', 'RETIRE-EXITED'].includes(label) ? 2 : 1);
       expect(new Set(names.map(name => name.kind)).size).toBe(names.length);
       for (const name of names) expect(name.path).toMatch(new RegExp(
-        `^\\\\(?:Sessions\\\\\\d+\\\\)?BaseNamedObjects\\\\boite\\.route\\.${result.pid}${name.kind === 'swap' ? '\\.swap' : name.kind === 'retired' ? '\\.retired' : ''}$`));
+        `^\\\\(?:Sessions\\\\\\d+\\\\)?BaseNamedObjects\\\\boite\\.route\\.${result.pid}${name.kind === 'swap' ? '\\.swap' : name.kind === 'retired' ? '\\.retired' : name.kind === 'unused' ? '\\.unused' : ''}$`));
     })) { cleanupConfirmed.set(`lpac-${label}`, false); return; }
+    const twin = label === 'DIRECTORY-TWIN' ? directoryControls.at(-1) : undefined;
+    if (twin) {twin.postHelper = []; twin.postHelperAbsencePassed = false;}
     for (const name of names) {
       const observed = await execute(`map-after-exit-${label}${name.kind === 'map' ? '' : `-${name.kind}`}`, ['observe-map', name.path]);
       afterExit.push({label, kind: name.kind, helperPid: result.pid, path: name.path, ...observed}); save();
@@ -279,7 +294,9 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
         verify(`${label} ${name.kind} post-exit map absence`, () => expect(observed.out)
           .toBe(`map-after-helper-exit path=${name.path} open=0xc0000034 absent=1 closed=1 error=0\r\n`))].every(Boolean);
       if (!confirmed) cleanupConfirmed.set(`lpac-${label}`, false);
+      if (twin) twin.postHelper!.push({kind: name.kind, path: name.path, absent: confirmed, code: observed.code, timedOut: observed.timedOut});
     }
+    if (twin) twin.postHelperAbsencePassed = twin.postHelper!.length === 3 && twin.postHelper!.every(row => row.absent);
   }
   try {
     for (const job of jobs) {
@@ -290,7 +307,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     const before = await execute('ordinary-before', ['observe', state]);
     if (!observer('before', before)) throw new Error('ordinary baseline unavailable; no protected task launched');
     // The new owned suffix must not admit a near-match or a nested path.
-    for (const [index, suffix] of ['.retired.extra', '.retired\\child'].entries()) {
+    for (const [index, suffix] of ['.retired.extra', '.retired\\child', '.unused.extra', '.unused\\child'].entries()) {
       const invalid = await execute(`observer-reject-${index}`, ['observe-map',
         `\\BaseNamedObjects\\boite.route.${process.pid}${suffix}`]);
       completed(`observer rejected suffix ${index}`, invalid, 125);
@@ -412,11 +429,11 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     // from RED's A/B/A roundtrip. Helpers stay alive through the fatal gates.
     // These observations cannot make a failed original RED/A/B gate pass.
     if (report.redSafetyPassed === true) {
-      // This independent pair overlaps the unchanged serial controls. Its own
-      // captured tasks remain in tasks and are joined on every cleanup path.
+      // The timing pair and independent twin overlap the serial controls.
+      // Captures and complete continuations join on every cleanup path.
       timingTasks.push(...jobs.slice(16).map(async (job, index) => {
         writeFileSync(join(job.project, 'release'), 'synthetic');
-        const result = await run(job, false, index === 0 ? 'retire-live-run' : 'retire-exited-run');
+        const result = await run(job, false, index === 0 ? 'retire-live-run' : index === 1 ? 'retire-exited-run' : 'directory-twin-run');
         report[job.label.toLowerCase()] = result;
         completed(job.label, result, 1); boundary(job.label, result, job.marker); cleanup(job.label, result);
         await observeAfterExit(job.label, result);
@@ -641,8 +658,8 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     }
   } catch (error) { failures.push(String(error)); }
   finally {
-    // Join the entire pair, including post-exit observers, before stopping its
-    // registry/harness even when the serial phase failed before its normal join.
+    // Join all timing/twin continuations and post-exit observers before registry
+    // shutdown, including when the serial phase fails before its normal join.
     for (const settled of await Promise.allSettled(timingTasks))
       if (settled.status === 'rejected') failures.push(`retirement timing capture: ${settled.reason}`);
     const settled = await Promise.allSettled(tasks);

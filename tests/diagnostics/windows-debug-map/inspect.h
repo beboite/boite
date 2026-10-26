@@ -20,7 +20,7 @@ static int observe_map(const wchar_t *path) {
   if (wcsncmp(tail, prefix, wcslen(prefix))) return failure(L"observer-map.path", ERROR_INVALID_NAME);
   tail += wcslen(prefix); const wchar_t *start = tail;
   while (*tail >= L'0' && *tail <= L'9') tail++;
-  if (tail == start || tail - start > 10 || (*tail && wcscmp(tail, L".swap") && wcscmp(tail, L".retired")) || wcslen(path) >= 256) return failure(L"observer-map.path", ERROR_INVALID_NAME);
+  if (tail == start || tail - start > 10 || (*tail && wcscmp(tail, L".swap") && wcscmp(tail, L".retired") && wcscmp(tail, L".unused")) || wcslen(path) >= 256) return failure(L"observer-map.path", ERROR_INVALID_NAME);
   open_directory_fn open = (open_directory_fn)(void *)nt_api("NtOpenDirectoryObject");
   if (!open) return failure(L"observer-map.api", ERROR_PROC_NOT_FOUND);
   UNICODE_STRING name = {(USHORT)(wcslen(path) * 2), (USHORT)((wcslen(path) + 1) * 2), (PWSTR)path};

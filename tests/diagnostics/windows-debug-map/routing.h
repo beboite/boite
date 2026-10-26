@@ -31,6 +31,8 @@ static BOOL retire_owned_map;
 /* Separate control: name the empty replacement to expose relocated retention. */
 static BOOL retire_named_map, retired_created;
 static wchar_t retired_name[280];
+static BOOL directory_twin_mode;
+static DWORD directory_twin_absence(const wchar_t *phase);
 static DWORD creator_prepare(PSECURITY_DESCRIPTOR security, const wchar_t *target, const wchar_t *root);
 static unsigned int object_count_queries, handle_snapshot_queries;
 /* 0 retains the original RED roundtrip, 1 omits it as a control, 2 also moves
@@ -212,7 +214,8 @@ end:
 /* Observe only our exact replacement name after closing its known handle.
  * Existence is a fatal gate, even when the original working map disappeared. */
 static DWORD retired_absence(const wchar_t *phase) {
-  if (!retire_named_map || !retired_created) return 0;
+  DWORD twin_error = directory_twin_absence(phase);
+  if (!retire_named_map || !retired_created) return twin_error;
   open_directory_fn open = (open_directory_fn)(void *)nt_api("NtOpenDirectoryObject");
   if (!open) return ERROR_PROC_NOT_FOUND;
   UNICODE_STRING name = {(USHORT)(wcslen(retired_name) * 2), (USHORT)sizeof(retired_name), retired_name};
@@ -222,7 +225,7 @@ static DWORD retired_absence(const wchar_t *phase) {
   BOOL closed = !remaining || CloseHandle(remaining); DWORD error = closed ? 0 : GetLastError();
   fwprintf(stderr, L"cleanup retired-open phase=%ls status=0x%08lx absent=%d closed=%d error=%lu path=%ls\n",
     phase, (unsigned long)status, status == (NTSTATUS)0xc0000034, closed, error, retired_name); fflush(stderr);
-  return error ? error : status == (NTSTATUS)0xc0000034 ? 0 : ERROR_INVALID_DATA;
+  return error ? error : status == (NTSTATUS)0xc0000034 ? twin_error : ERROR_INVALID_DATA;
 }
 
 #include "roundtrip.h"

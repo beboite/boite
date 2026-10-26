@@ -37,6 +37,7 @@ export function parseRetirementFrame(line: string): RetirementFrame {
 /** Protocol validity never converts the original fatal absence gates to success. */
 export function validateRetirementTiming(result: Captured, expected: {
   mode: RetirementMode; nonce: string; helper: {pid: number; created: string}; root: {pid: number; created: string}; marker: string;
+  additionalCleanupPassed?: boolean;
 }): RetirementReport {
   const report: RetirementReport = {mode: expected.mode, protocolValid: false, prerequisites: false,
     reproducesBaseline: false, cleanupGatesPassed: false, frames: [], productionAccepted: false, causeConfirmed: false};
@@ -142,7 +143,7 @@ export function validateRetirementTiming(result: Captured, expected: {
     });
     requireValue(result.err.indexOf('retirement-timing phase=complete ') > result.err.indexOf('cleanup retired-open phase=final '), 'completion after all cleanup');
     report.prerequisites = true; report.protocolValid = true; report.reproducesBaseline = originalGates.every(Boolean) && observations.every(v => !v);
-    report.cleanupGatesPassed = originalGates.every(Boolean) && observations.every(Boolean);
+    report.cleanupGatesPassed = originalGates.every(Boolean) && observations.every(Boolean) && expected.additionalCleanupPassed !== false;
     report.outcome = !originalGates.every(Boolean) ? 'original-map-retained' : observations.every(Boolean) ? 'absent-with-helper-alive' : 'retained-during-helper-life';
     requireValue(result.code === (report.cleanupGatesPassed ? 1 : 125), 'fatal gate result preserved');
   } catch (error) {report.protocolValid = false; report.error = String(error);}

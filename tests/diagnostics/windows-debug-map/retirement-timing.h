@@ -147,6 +147,7 @@ end:
   if (!error) {retirement_live_done = TRUE; rt_log(L"assign", 0, 1);}
   return error;
 }
+#include "directory-twin.h"
 static DWORD retirement_final(PROCESS_INFORMATION *root, HANDLE job, PSECURITY_DESCRIPTOR security, PSID app, PSID capability) {
   if (!retirement_timing_mode) return 0;
   RT_FRAME ready; DWORD error;
@@ -167,7 +168,10 @@ static DWORD retirement_final(PROCESS_INFORMATION *root, HANDLE job, PSECURITY_D
   if (previous != 0) return previous == (DWORD)-1 ? GetLastError() : ERROR_INVALID_DATA;
   error = rt_identity(root, TRUE); if (error) return error;
   rt_log(L"suspend", previous, 1);
-  if (retirement_timing_mode == 1) {error = rt_live_replace(root, security); if (error) return error;}
+  if (retirement_timing_mode == 1) {
+    error = directory_twin_mode ? directory_twin_replace(root, security) : rt_live_replace(root, security);
+    if (error) return error;
+  }
   previous = ResumeThread(root->hThread);
   if (previous != 1) return previous == (DWORD)-1 ? GetLastError() : ERROR_INVALID_DATA;
   error = rt_identity(root, TRUE); if (error) return error;

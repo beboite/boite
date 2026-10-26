@@ -911,8 +911,53 @@ retention in this fixture. Equal retention would reject ordering alone as a
 remedy; equal absence would fail to reproduce the retained comparison. None
 repairs DIRECT's original retained map, identifies an internal owner or admits
 production. Missing identity/nonce/normal-exit/closure/deadline proof or a wrong
-suspend/resume count invalidates the control. SDK and native execution remain
-unverified; CAUSE_CONFIRMED=no and productionAccepted=false.
+suspend/resume count invalidates the control.
+
+Run40250246620 / job121340539439 executes head9482eb14 under SDK and MinGW.
+All52 manifest and11 provenance hashes match. All four timing controls validate
+the captured identities, real operation order, suspend0/resume1, unchanged
+original result1 and normal root exit. Both timings retain their replacements
+at immediate/checkpoint/final:12/12 present observations, with every observer
+closed. Original names are absent and all8 names disappear after helper exit.
+The live assignments precede root exit; the exited assignments follow it in
+actual log order, including the same-timestamp MinGW case.
+
+This rejects posttermination assignment as necessary for replacement retention
+in this fixture. Moving it before normal exit is insufficient. It neither
+identifies an internal owner nor proves both timings use the same mechanism.
+Ownership ledgers balance1123/1123 SDK and1129/1129 MinGW; all14 target faults,
+held-reference and worker controls preserve their prior results. Exactly60
+fatal diagnostic failures/compiler preserve52 old failures plus8 new timing
+cleanup failures. Native suites finish in81.74s SDK and80.94s MinGW, without
+changed deadlines. Production remains0/7 per compiler at NUL error5.
+CAUSE_CONFIRMED=no and productionAccepted=false.
+
+## Unattached empty-directory twin
+
+DIRECTORY-TWIN is a separate diagnostic control alongside the unchanged
+LIVE/EXITED baseline. It compares two owned empty siblings
+in one independent LIVE-barrier fixture: attached `.retired` and never-attached
+`.unused`. Both use identical SD bytes, access0xf000f, attributes0x40, NULL
+shadow, creation flags0, no links and noninherited anchors. Matched explicit
+opens are checked against their live owned anchors and closed; only `.retired`
+can enter the single replacement assignment. Both creation anchors must close
+before the root resumes/releases. Collision or identity failure never grants
+ownership or permission to observe the collided name.
+
+The same immediate/checkpoint/final/post-helper observations distinguish
+protocol validity from fatal cleanup gates. Exact suffix validation must admit
+only `.unused`, rejecting near matches. Unused absence with attached retention
+would exclude ordinary creation/open/close alone as sufficient here. Equal
+retention leaves shared helper/namespace or attachment side effects unresolved;
+equal absence fails to reproduce the retained comparison. No result identifies
+an internal reference owner or grants production admission. All old controls,
+deadlines, caller/confinement/cleanup gates and joined-observer requirements
+remain. Local validation reports50 pass,1 native skip,0 fail and535 assertions;
+types, architecture and both strict MinGW compilations pass. All11 worker-owned
+source hashes match the compile manifest. The parent reviewed the final delta
+and revalidated the four prior native timing controls with the shared validator.
+SDK compilation, Windows execution, suffix rejection, twin retention and native
+runtime remain unverified. CAUSE_CONFIRMED=no and productionAccepted=false.
 
 ## Gates still required
 
