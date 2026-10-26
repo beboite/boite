@@ -259,7 +259,8 @@ export interface SettingsRpcMethods {
   };
 
   'telemetry.state': { params: Record<string, never>; result: TelemetryState };
-  'telemetry.configure': { params: { mode: TelemetryState['mode'] }; result: TelemetryState };
+  /** countChoice reports this explicit selection anonymously, including off. Missing: no choice report. */
+  'telemetry.configure': { params: { mode: TelemetryState['mode']; countChoice?: boolean }; result: TelemetryState };
   'telemetry.export': { params: Record<string, never>; result: Record<string, unknown> };
   'telemetry.retryForget': { params: Record<string, never>; result: TelemetryState };
   'settings.get': { params: Record<string, never>; result: Settings };
