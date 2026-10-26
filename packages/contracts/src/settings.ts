@@ -5,6 +5,23 @@ import type { AutoCompact, CacheKeepalive } from './settings-validation.ts';
 import type { SubscriptionProxy } from './subscription-proxy';
 import type { ThreadSummary } from './threads';
 
+export type CompactionTarget = 'agent' | 'subagent' | 'bot';
+
+/** A complete override; removing the target restores the current common defaults. */
+export interface CompactionPolicy {
+  autoCompact: AutoCompact | null;
+  backgroundCompaction: boolean;
+}
+
+/** Children take precedence, including children started by a resident bot. */
+export function effectiveCompaction(settings: Pick<Settings, 'autoCompact' | 'backgroundCompaction' | 'compactionByType'>, thread: Pick<ThreadSummary, 'parentThreadId' | 'agentSessionId'>): CompactionPolicy {
+  const target: CompactionTarget = thread.parentThreadId ? 'subagent' : thread.agentSessionId ? 'bot' : 'agent';
+  return settings.compactionByType?.[target] ?? {
+    autoCompact: settings.autoCompact ?? null,
+    backgroundCompaction: settings.backgroundCompaction === true,
+  };
+}
+
 /** Per-core consent. Installation identifiers never cross RPC. */
 export interface TelemetryState {
   mode: 'off' | 'basic' | 'enhanced';
@@ -150,6 +167,8 @@ export interface Settings {
    * Missing reads as off.
    */
   backgroundCompaction?: boolean;
+  /** Complete policies per thread type. Missing targets follow the live common defaults. */
+  compactionByType?: Partial<Record<CompactionTarget, CompactionPolicy>>;
   /**
    * Experimental: while a thread of the user's waits on its delegated agents
    * or workflows, the core sends a minimal turn before its prompt cache lapses

@@ -96,7 +96,7 @@ export function toSummary(thread: Thread): ThreadSummary {
   const busy = thread.status === 'running' || thread.status === 'waiting';
   const started = thread.turns.filter(turn => turn.status === 'running' && turn.startedAt !== null).map(turn => turn.startedAt as number);
   const tasks = thread.background ?? [];
-  const lastTurn = thread.turns.at(-1) ?? null;
+  const lastTurn = thread.turns.findLast(turn => turn.execution?.operation !== 'compact' && turn.execution?.operation !== 'keepalive') ?? null;
   return {
     ...rest,
     lastUserMessageAt: thread.messages.filter(m => m.role === 'user').at(-1)?.createdAt ?? null,

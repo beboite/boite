@@ -1,7 +1,8 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { CircleCheck, Hourglass, Ruler, Timer } from '@lucide/svelte';
-  import { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, type AutoCompact, type AutoCompactMoment } from '@boite/contracts';
+  import { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, type AutoCompact, type AutoCompactMoment, type CompactionTarget } from '@boite/contracts';
+  import { compactionPatch, compactionPolicy } from '../lib/compaction-settings';
   import { fill, strings } from '../lib/strings';
   import { formatTokens } from '../lib/format';
   import type { Store } from '../lib/store.svelte';
@@ -15,7 +16,7 @@
    * The limit triggers at a safe native tool boundary where supported, otherwise
    * between turns. It also gates turn-end/background moments, never cache expiry.
    */
-  let { store }: { store: Store } = $props();
+  let { store, target, embedded = false }: { store: Store; target?: CompactionTarget; embedded?: boolean } = $props();
   const uid = $props.id();
 
   /** Start with idle moments only and leave the independent token limit off. */
@@ -29,7 +30,7 @@
     { id: 'turn-end', icon: CircleCheck, name: strings.settings.autoCompactTurnEnd, hint: strings.settings.autoCompactTurnEndHint }
   ];
 
-  let rule = $derived(store.settings?.autoCompact ?? null);
+  let rule = $derived(compactionPolicy(store.settings, target).autoCompact);
   /** The field as typed, kept while the token limit is off so switching it back on restores it. */
   let tokens = $state<number | null | undefined>(FIRST_TOKENS);
   let dirty = $state(false);
@@ -43,9 +44,9 @@
   /** Every control builds the whole rule from the saved one, so none moves while a save is on its way. */
   let saving = $state(false);
   let inflight: Promise<boolean> | null = null;
-  async function save(next: AutoCompact | null, input?: HTMLInputElement, target = store) {
+  async function save(next: AutoCompact | null, input?: HTMLInputElement, machine = store, scope = target) {
     saving = true;
-    const sent = inflight = target.saveSettings({ autoCompact: next }).finally(() => { saving = false; if (inflight === sent) inflight = null; });
+    const sent = inflight = machine.saveSettings(compactionPatch(machine.settings, scope, { autoCompact: next })).finally(() => { saving = false; if (inflight === sent) inflight = null; });
     const ok = await sent;
     if (!ok && input) input.checked = !input.checked;
     return ok;
@@ -71,31 +72,35 @@
    * It goes to the machine it was typed for: switching machines flushes it
    * while `store` already reads the next one.
    */
-  let typedFor: Store | null = null;
+  let typedFor: { store: Store; target?: CompactionTarget } | null = null;
   const sizeSave = new Autosave(async () => {
     while (inflight) await inflight.catch(() => false);
-    const target = typedFor ?? store;
-    const current = target.settings?.autoCompact;
+    const destination = typedFor ?? { store, target };
+    const current = compactionPolicy(destination.store.settings, destination.target).autoCompact;
     if (!current || current.tokens === null) { dirty = false; return; }
     const sent = tokens as number;
-    if (current.tokens !== sent) await saved(save({ ...current, tokens: sent }, undefined, target));
+    if (current.tokens !== sent) await saved(save({ ...current, tokens: sent }, undefined, destination.store, destination.target));
     if (tokens === sent) dirty = false;
   }, () => valid ? null : strings.settings.autosave.invalid);
+  export async function flush() {
+    await sizeSave.flush();
+    while (inflight) await inflight.catch(() => false);
+  }
   $effect(() => () => void sizeSave.flush());
   function typeTokens(delay: number, value = tokens) {
     tokens = value;
     dirty = true;
-    typedFor = store;
+    typedFor = { store, target };
     sizeSave.change('', delay);
   }
 </script>
 
 <!-- The core's own behaviour on the owner's machine, so a paired device does not see it. -->
 {#if store.owner}
-  <section class="card" id="settings-auto-compact" data-testid="auto-compact-settings">
+  <section class:card={!embedded} id="settings-auto-compact" data-testid="auto-compact-settings">
     <label for="{uid}-on" class="master">
       <span class="words">
-        <h2 class="ui-label-box"><span class="ui-label" id="{uid}-on-name">{strings.settings.autoCompact}</span><InfoTip topic={strings.settings.autoCompact} text={strings.settings.autoCompactHint} /><SyncMark {store} key="autoCompact" /></h2>
+        <h2 class="ui-label-box"><span class="ui-label" id="{uid}-on-name">{strings.settings.autoCompact}</span><InfoTip topic={strings.settings.autoCompact} text={strings.settings.autoCompactHint} /><SyncMark {store} key={target ? 'compactionByType' : 'autoCompact'} /></h2>
       </span>
       <input id="{uid}-on" aria-labelledby="{uid}-on-name" type="checkbox" role="switch" data-testid="auto-compact-on"
         checked={rule !== null} disabled={!store.settings || saving} onchange={(event) => void save(event.currentTarget.checked ? FIRST : null, event.currentTarget)} />
@@ -157,7 +162,7 @@
 <style>
   .master { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; cursor: pointer; }
   .master .words { display: grid; gap: 6px; flex: 1; min-width: 0; }
-  .card .master h2 { margin: 0; }
+  .master h2 { margin: 0; }
   h3 { margin: 22px 0 10px; color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
   .options { display: grid; gap: 8px; }
   /* Icon, name, help and switch share the first line. */

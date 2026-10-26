@@ -314,6 +314,22 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
     }
     next.autoCompact = { tokens: tokens as number | null, moments: MOMENTS.filter((moment) => moments.includes(moment)) };
   }
+  if (patch.compactionByType !== undefined) {
+    const policies: unknown = patch.compactionByType;
+    const fail = (message: string): SettingsPatchCheck => ({ ok: false, field: 'compactionByType', message });
+    if (policies === null || typeof policies !== 'object' || Array.isArray(policies)) return fail('compactionByType must be an object keyed by agent, subagent or bot');
+    const normalized: NonNullable<Settings['compactionByType']> = {};
+    for (const [target, raw] of Object.entries(policies)) {
+      if (target !== 'agent' && target !== 'subagent' && target !== 'bot') return fail(`compactionByType.${target}: expected agent, subagent or bot`);
+      if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return fail(`compactionByType.${target}: expected { autoCompact, backgroundCompaction }`);
+      const policy = raw as Record<string, unknown>;
+      if (policy.autoCompact === undefined || typeof policy.backgroundCompaction !== 'boolean') return fail(`compactionByType.${target}: expected autoCompact (a rule or null) and backgroundCompaction (a boolean)`);
+      const checked = checkSettingsPatch({ autoCompact: policy.autoCompact as AutoCompact | null });
+      if (!checked.ok) return fail(`compactionByType.${target}.${checked.message}`);
+      normalized[target] = { autoCompact: checked.patch.autoCompact ?? null, backgroundCompaction: policy.backgroundCompaction };
+    }
+    next.compactionByType = normalized;
+  }
   if (patch.cacheKeepalive !== undefined && patch.cacheKeepalive !== null) {
     const { hours } = (typeof patch.cacheKeepalive === 'object' ? patch.cacheKeepalive : {}) as Partial<CacheKeepalive>;
     const HOURS = CACHE_KEEPALIVE_HOURS;
