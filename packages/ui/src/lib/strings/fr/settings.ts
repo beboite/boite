@@ -121,6 +121,8 @@ export const fr: Translation = {
     cacheKeepaliveUnit: 'heures',
     deviceStream: "Flux en direct de l'appareil",
     deviceStreamHint: "Le panneau Appareil affiche en direct la vidéo d'un téléphone Android branché à cette machine via scrcpy, qui transmet aussi les appuis, les glissements, les touches, tout texte et le presse-papiers. Les appuis et la saisie des agents passent aussi par scrcpy tant que le panneau affiche le téléphone. Si l'option est désactivée, le panneau actualise des captures d'écran et pilote le téléphone avec adb input.",
+    backgroundCompaction: 'Compaction en arrière-plan',
+    backgroundCompactionHint: "Fonctionne avec la limite de jetons de Compaction automatique. Dès qu'une conversation atteint 85% de cette limite, une copie de sa session se compacte pendant que vous continuez à travailler. À la prochaine pause, la conversation repart du résumé avec ce qui a été dit depuis, sans attendre. Pour Claude et Codex ; OpenCode 2 active plutôt sa propre compaction. Une copie qui prend du retard est abandonnée et la compaction habituelle prend le relais. Les copies consomment des jetons sur le même compte et ne sont pas comptées dans l'usage.",
     material: 'Matériau de la fenêtre',
     workspace: 'Espace de travail',
     startIn: "L'appli s'ouvre sur",

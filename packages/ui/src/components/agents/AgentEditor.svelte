@@ -15,7 +15,7 @@
   import EffortSlider from '../EffortSlider.svelte';
   import Menu from '../Menu.svelte';
   import SaveStatus from '../SaveStatus.svelte';
-  import { encodeRobot, robotOf, seededRobot } from '../../lib/robots';
+  import { encodeRobot, robotOf, seededRobot, shuffledRobot } from '../../lib/robots';
   import AgentAvatar from './AgentAvatar.svelte';
   import RobotPicker from './RobotPicker.svelte';
 
@@ -221,7 +221,7 @@
       <div class="agent-portrait">
         <AgentAvatar kind="profile" id={profile?.id ?? ''} {name} avatar={robotTouched ? encodeRobot(robot) : profile?.avatar ?? ''} size={72} />
         <div class="agent-portrait-tools">
-          <button type="button" class="ghost icon small" title={labels.robot.shuffle} aria-label={labels.robot.shuffle} onclick={() => { robot = seededRobot(secureId(), robot.family); robotTouched = true; edited(); }} data-testid="robot-shuffle"><Dices size={15} strokeWidth={1.75} /></button>
+          <button type="button" class="ghost icon small" title={labels.robot.shuffle} aria-label={labels.robot.shuffle} onclick={() => { robot = shuffledRobot(secureId(), robot.family); robotTouched = true; edited(); }} data-testid="robot-shuffle"><Dices size={15} strokeWidth={1.75} /></button>
           <button type="button" class="ghost icon small" class:active={dressing} aria-pressed={dressing} title={labels.robot.customize} aria-label={labels.robot.customize} onclick={() => { dressing = !dressing; }} data-testid="robot-customize"><Palette size={15} strokeWidth={1.75} /></button>
         </div>
       </div>

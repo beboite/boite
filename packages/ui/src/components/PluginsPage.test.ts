@@ -201,10 +201,10 @@ test('uninstalling a URL plugin takes its row away; the recommended one goes bac
 
     (row('bots')!.querySelector('[data-testid="plugin-uninstall"]') as HTMLElement).click();
     await vi.waitFor(() => expect(q('[data-testid="plugins-recommended"]')?.contains(row('bots'))).toBe(true));
-    // Not installed: the Install button is all it needs, no state line, no update check.
+    // Not installed: keep Install and the source check, without an installed state line.
     expect(row('bots')?.querySelector('.state')).toBeNull();
-    expect(row('bots')?.querySelector('[data-testid="plugin-updates"]')).toBeNull();
-    expect(row('bots')?.querySelector('[data-testid="plugin-check-updates"]')).toBeNull();
+    expect(row('bots')?.querySelector('[data-testid="plugin-updates"]')).not.toBeNull();
+    expect(row('bots')?.querySelector('[data-testid="plugin-check-updates"]')).not.toBeNull();
 
     (row('bots')!.querySelector('[data-testid="plugin-install"]') as HTMLElement).click();
     await vi.waitFor(() => expect(q('[data-testid="plugins-installed"]')?.contains(row('bots'))).toBe(true), { timeout: 3000 });
@@ -235,6 +235,40 @@ test('a recommended plugin with an update source says what it last found, and a 
   await vi.waitFor(() => expect(bots().getAttribute('data-status')).toBe('installed'), { timeout: 3000 });
   await vi.waitFor(() => expect(bots().querySelector('h3')?.textContent).toContain('v0.1.10'), { timeout: 3000 });
   expect(bots().querySelector('[data-testid="plugin-update"]')).toBeNull();
+});
+
+test('opening recommendations checks their sources without installing or blocking the list', async () => {
+  client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  const call = client.call.bind(client);
+  let finish!: (rows: PluginState[]) => void;
+  const latest = new Promise<PluginState[]>((resolve) => { finish = resolve; });
+  let recommendation!: PluginState;
+  const calls = vi.spyOn(client, 'call').mockImplementation((async (method: string, params: unknown) => {
+    if (method === 'plugins.checkUpdates') return latest;
+    const result = await call(method as never, params as never);
+    if (method === 'plugins.list') {
+      recommendation = (result as PluginState[]).find((plugin) => plugin.id === 'bots')!;
+      Object.assign(recommendation, { version: null, status: 'not-installed', app: null });
+    }
+    return result;
+  }) as never);
+  const store = { client, providers: [] } as unknown as Store;
+  mounted = mount(PluginsPage, { target: document.body, props: { store } });
+
+  await vi.waitFor(() => expect(q('[data-testid="plugins-recommended"]')?.contains(row('bots'))).toBe(true));
+  expect(row('bots')?.querySelector('[data-testid="plugin-install"]')).not.toBeNull();
+  await vi.waitFor(() => expect(calls).toHaveBeenCalledWith('plugins.checkUpdates', { id: 'bots' }));
+  expect(calls.mock.calls.filter(([method]) => method === 'plugins.checkUpdates')).toHaveLength(1);
+  expect(row('bots')?.querySelector('[data-testid="plugin-check-updates"]')).not.toBeNull();
+
+  finish([{ ...recommendation, availableVersion: '0.1.21', updates: {
+    ...recommendation.updates!, checkedAt: Date.now(), available: { version: '0.1.21', commit: 'c'.repeat(40), checkedAt: Date.now() },
+  } }]);
+  await vi.waitFor(() => expect(row('bots')?.querySelector('h3')?.textContent).toContain('v0.1.21'));
+  expect(row('bots')?.querySelector('[data-testid="plugin-updates-line"]')?.textContent).toContain('Found at github.com/Skollheim/bots');
+  expect(calls.mock.calls.some(([method]) => method === 'plugins.install')).toBe(false);
+  expect(q('[data-testid="plugins-recommended"]')?.contains(row('bots'))).toBe(true);
 });
 
 test('an ignored release and a failed check read as quiet notes, never alarms', async () => {

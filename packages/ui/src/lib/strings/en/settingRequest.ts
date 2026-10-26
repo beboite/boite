@@ -56,6 +56,7 @@ export const strings = {
       autoCompact: 'Automatic compaction',
       autoResumeLimitedThreads: 'Resume threads after a usage limit',
       deviceStream: 'Live device stream',
+      backgroundCompaction: 'Background compaction',
       groupThreads: 'Let the other machines start threads here',
       groupBots: 'Let the bots of the other machines look after projects here',
     },

@@ -142,6 +142,15 @@ export interface Settings {
    */
   autoCompact?: AutoCompact | null;
   /**
+   * Experimental: as a thread nears its `autoCompact` token limit, a forked
+   * copy of its session compacts in the background while the conversation
+   * goes on; at its first pause after the copy is done, the thread swaps to it
+   * and its next prompt carries the turns since the fork (docs/context.md, "Background
+   * compaction"). OpenCode V2 gets its own `experimental.background_compaction`.
+   * Missing reads as off.
+   */
+  backgroundCompaction?: boolean;
+  /**
    * Experimental: while a thread of the user's waits on its delegated agents
    * or workflows, the core sends a minimal turn before its prompt cache lapses
    * so their result is read from the cache (`docs/prompt-cache.md`). Null or

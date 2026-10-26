@@ -49,6 +49,22 @@ test('fake agent setting cards: read, request, refusals, apply with an edit and 
   await expect(client.call('agents.settings.apply', { threadId, questionId })).rejects.toMatchObject({ code: RpcErrorCode.NotFound });
 });
 
+test('a bot may propose a robot with every shared part, or a four-part code, and nothing else', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  await agent(client);
+  const thread = async () => {
+    const { id } = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
+    await client.call('turns.start', { threadId: id, prompt: 'hello' });
+    await client.settled();
+    return id;
+  };
+  const threadId = await thread();
+  await expect(client.call('agents.settings.request', { threadId, agent: 'Mira', key: 'avatar', value: 'bot:a.1.2.3.4.5', reason: 'r' })).rejects.toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'value', key: 'avatar' } });
+  const { setting } = await client.call('agents.settings.request', { threadId, agent: 'Mira', key: 'avatar', value: 'bot:d.5.16.12.14.3.2.1', reason: 'A new face' });
+  expect(setting.value).toBe('bot:d.5.16.12.14.3.2.1');
+  expect((await client.call('agents.settings.request', { threadId: await thread(), agent: 'Mira', key: 'avatar', value: 'bot:c.1.2.3.0', reason: 'The old one' })).setting.value).toBe('bot:c.1.2.3.0');
+});
+
 test('fake agent setting cards settle from the agent\'s own settings, and the [agent-settings] marker asks for a project', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
   const mira = await agent(client);

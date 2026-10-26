@@ -122,6 +122,8 @@ export const strings = {
     cacheKeepaliveUnit: 'hours',
     deviceStream: 'Live device stream',
     deviceStreamHint: 'The Device panel plays an Android phone plugged into this machine as live video through scrcpy, and sends touches, drags, keys, any text and the clipboard through it. Agents\' taps and typing go through it too while the panel shows the phone. Off, the panel refreshes screenshots and drives the phone with adb input.',
+    backgroundCompaction: 'Background compaction',
+    backgroundCompactionHint: 'Works with the token limit of Automatic compaction. Once a conversation reaches 85% of it, a copy of its session compacts while you keep working, and at the next pause the conversation takes the summary, with what was said since, without waiting. Claude and Codex; OpenCode 2 turns on its own instead. A copy that falls behind is dropped and the usual compaction runs. Copies spend the same account and are not counted in usage.',
     material: 'Window material',
     workspace: 'Workspace',
     startIn: 'The app opens on',

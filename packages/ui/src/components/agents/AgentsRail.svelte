@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { Plus, Search, Settings2, X } from '@lucide/svelte';
+  import type { Component } from 'svelte';
+  import { Bot, Brain, FilePen, FileText, Globe, Hourglass, Layers, MessageCircleQuestionMark, Moon, PenLine, Play, Plus, RotateCw, Search, Settings2, SquareTerminal, TriangleAlert, Wrench, X } from '@lucide/svelte';
   import type { AgentStatus, ThreadSummary } from '@boite/contracts';
-  import { agentRows, agentsFilter, faceOf, liveStep, previewOf, type AgentRowData, type AgentsView } from '../../lib/agents.svelte';
+  import { agentRows, agentsFilter, liveActivity, previewOf, waitingOn, type ActivityKind, type AgentMood, type AgentRowData, type AgentsView } from '../../lib/agents.svelte';
   import { strings } from '../../lib/strings';
   import { workspace, type Machine } from '../../lib/workspace.svelte';
   import RailFrame from '../RailFrame.svelte';
@@ -55,23 +56,46 @@
   function threadOf(machine: Machine, status: AgentStatus | null): ThreadSummary | null {
     return status?.threadId ? machine.store.threads.find(t => t.id === status.threadId) ?? null : null;
   }
-  /** How the row stands: its thread's row first, the snapshot's status else. */
-  function toneOf(row: AgentRowData, thread: ThreadSummary | null): 'idle' | 'working' | 'waiting' | 'error' {
-    if (row.profile.status === 'paused') return 'idle';
-    if (thread?.status === 'running' || thread?.status === 'queued') return 'working';
-    if (thread?.status === 'waiting') return 'waiting';
+  type Tone = 'idle' | 'working' | 'queued' | 'waiting' | 'error' | 'asleep';
+  /** How the row stands: its thread's row first, the snapshot's status else. Paused, by itself or with every bot, it sleeps between the turns you start. */
+  function toneOf(row: AgentRowData, thread: ThreadSummary | null, asking: boolean): Tone {
+    if (thread?.status === 'running') return asking ? 'waiting' : 'working';
+    if (thread?.status === 'queued') return 'queued';
+    if (thread?.status === 'waiting' || asking) return 'waiting';
     const state = row.status?.state;
-    if (state === 'working' || state === 'queued') return 'working';
+    if (state === 'working') return 'working';
+    if (state === 'queued') return 'queued';
     if (state === 'waiting') return 'waiting';
-    return state === 'error' || row.status?.problem ? 'error' : 'idle';
+    if (state === 'error' || row.status?.problem) return 'error';
+    return row.profile.status === 'paused' || state === 'paused' ? 'asleep' : 'idle';
   }
-  /** What it does this second, what it waits on, else the last thing it said; a new agent shows what it is for. */
-  function detailOf(row: AgentRowData, thread: ThreadSummary | null, tone: ReturnType<typeof toneOf>): string {
-    if (row.profile.status === 'paused') return labels.state.paused;
-    if (tone === 'working') return liveStep(row.status, thread) ?? labels.state.working;
-    if (tone === 'waiting') return labels.state.waiting;
-    if (tone === 'error') return row.status?.problem ?? labels.state.error;
-    return row.status?.last ? previewOf(row.status.last.text) : row.profile.domain;
+  /** The glyph of each kind of step, the way the timeline draws its calls. */
+  const GLYPHS: Record<ActivityKind, Component<{ size?: number; strokeWidth?: number }>> = {
+    command: SquareTerminal, edit: FilePen, write: FilePen, read: FileText, search: Search, fetch: Globe, web: Globe, agent: Bot, other: Wrench,
+    sleep: Hourglass, thinking: Brain, compacting: Layers, starting: Play, retrying: RotateCw, provider: Hourglass, writing: PenLine,
+  };
+  /**
+   * What the row says under the name, with its glyph: the step it is on while
+   * it works, the question it waits on, why it failed, that it sleeps, else
+   * the last thing it said; a new agent shows what it is for.
+   */
+  function lineOf(machine: Machine, row: AgentRowData, thread: ThreadSummary | null, tone: Tone): { text: string; icon?: Component<{ size?: number; strokeWidth?: number }> } {
+    if (tone === 'asleep') return { text: labels.state.paused, icon: Moon };
+    if (tone === 'working') {
+      const step = liveActivity(row.status, thread);
+      return { text: step?.text ?? labels.state.working, icon: GLYPHS[step?.kind ?? 'thinking'] };
+    }
+    if (tone === 'queued') return { text: labels.state.queued, icon: Hourglass };
+    if (tone === 'waiting') return { text: waitingOn(machine.store, row.status?.threadId) ?? labels.state.waiting, icon: MessageCircleQuestionMark };
+    if (tone === 'error') return { text: row.status?.problem ?? labels.state.error, icon: TriangleAlert };
+    return { text: row.status?.last ? previewOf(row.status.last.text) : row.profile.domain };
+  }
+  /** What the ring says: the tone, with answers not read yet over a rest. */
+  function moodOf(tone: Tone, unread: number): AgentMood {
+    return tone === 'idle' && unread > 0 ? 'unread' : tone;
+  }
+  function earliest(a: number | null | undefined, b: number | null | undefined): number | null {
+    return a == null ? b ?? null : b == null ? a : Math.min(a, b);
   }
   /** Narrowing to another machine moves the page there, so a new agent is created where the list shows. */
   function narrow(id: string | null) {
@@ -110,12 +134,15 @@
     <section class="agents-card" aria-label={labels.heading}>
       {#each rows as { machine, view: owner, row } (JSON.stringify([machine.id, row.profile.id]))}
         {@const thread = threadOf(machine, row.status)}
-        {@const tone = toneOf(row, thread)}
-        <AgentRow title={row.profile.name} open={owner === view && active === row.profile.id} unread={row.status?.unread ?? 0} away={machine.store.connection !== 'ready'}
-          at={row.status?.last?.at ?? 0} {now} {tone} detail={detailOf(row, thread, tone)}
+        {@const tone = toneOf(row, thread, !!waitingOn(machine.store, row.status?.threadId))}
+        {@const line = lineOf(machine, row, thread, tone)}
+        {@const unread = row.status?.unread ?? 0}
+        <AgentRow title={row.profile.name} open={owner === view && active === row.profile.id} {unread} away={machine.store.connection !== 'ready'}
+          at={row.status?.last?.at ?? 0} {now} tone={tone === 'queued' ? 'idle' : tone} detail={line.text} icon={line.icon}
+          since={tone === 'working' ? earliest(thread?.requestSince, thread?.runningSince) : null}
           wake={tone === 'idle' && row.profile.status === 'active' && row.status?.nextWake ? row.status.nextWake : null}
           machine={multi ? machine : undefined} testid="agent-entry-{row.profile.id}" onclick={() => onopen(machine, row.profile.id)}>
-          {#snippet picture()}<AgentAvatar kind="profile" id={row.profile.id} name={row.profile.name} avatar={row.profile.avatar} status={faceOf(tone === 'working' ? 'working' : tone === 'waiting' ? 'waiting' : 'idle')} size={30} ring />{/snippet}
+          {#snippet picture()}<AgentAvatar kind="profile" id={row.profile.id} name={row.profile.name} avatar={row.profile.avatar} mood={moodOf(tone, unread)} size={34} ring />{/snippet}
         </AgentRow>
       {/each}
     </section>
@@ -124,7 +151,7 @@
     <section class="agents-card">
       {#each found as entry (JSON.stringify([entry.machine.id, entry.profile.id]))}
         <AgentRow title={entry.profile.name} at={0} {now} detail={labels.state.archived} machine={multi ? entry.machine : undefined} testid="agent-entry-{entry.profile.id}" onclick={() => onopen(entry.machine, entry.profile.id)}>
-          {#snippet picture()}<AgentAvatar kind="profile" id={entry.profile.id} name={entry.profile.name} avatar={entry.profile.avatar} size={30} />{/snippet}
+          {#snippet picture()}<AgentAvatar kind="profile" id={entry.profile.id} name={entry.profile.name} avatar={entry.profile.avatar} size={34} />{/snippet}
           {#snippet aside()}{/snippet}
         </AgentRow>
       {/each}

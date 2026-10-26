@@ -9,6 +9,7 @@ import { thrown } from './settle.ts';
 import { sharedExecutionProtection } from '../src/contacts/compute-policy.ts';
 import { snapshot } from '../src/threads/checkpoint-files.ts';
 import {protectedProviderApi} from './fixtures/protected-provider-api.ts';
+import { COMPACTION_TAIL_PREFIX } from '../src/threads/background-compact.ts';
 
 const cores: TestCore[] = [], dirs: string[] = [];
 afterEach(async () => {
@@ -55,6 +56,30 @@ async function fixture() {
   const agent = await connect(b.h.url, b.h.core.agents.tokenFor(worker.id));
   return {a, b, sharedProjectId, job, worker, agent};
 }
+
+test('shared compaction tails enforce upload policy before materializing historical files', async () => {
+  const {a, b, worker, agent} = await fixture();
+  try {
+    const journal = b.h.core.journal, source = journal.lastTurn(worker.id)!;
+    const history = {...source, id: 'trn_shared_tail_history', status: 'done' as const, finishedAt: Date.now()};
+    const current = {...source, id: 'trn_shared_tail_current', execution: undefined};
+    journal.putTurn(history);
+    journal.putMessage({id: 'msg_shared_tail_file', threadId: worker.id, turnId: history.id, role: 'user', state: 'complete', createdAt: Date.now(),
+      parts: [{type: 'file', name: '.env', mimeType: 'text/plain', data: Buffer.from('ordinary historical bytes').toString('base64')}]});
+    journal.putTurn(current);
+    journal.putMessage({id: 'msg_shared_tail_current', threadId: worker.id, turnId: current.id, role: 'user', state: 'complete', createdAt: Date.now(), parts: [{type: 'text', text: 'continue after compaction'}]});
+    const thread = {...b.h.core.threads.require(worker.id), sessionId: 'shared-compacted-session', sessionGeneration: 1};
+    journal.setSetting(COMPACTION_TAIL_PREFIX + worker.id, {generation: 1, after: source.id});
+    const provider = b.h.core.providers.require(thread.providerId), account = b.h.core.accounts.require(thread.accountId);
+    const context = () => b.h.core.threads.contexts.makeContext(thread, provider, account, current);
+    expect(() => context()).toThrow('shared file policy: secret uploads require publication from an exact authorized host source');
+    journal.setMessagePart('msg_shared_tail_file', 0, {type: 'file', name: 'ordinary-tail.txt', mimeType: 'text/plain', data: Buffer.from('ordinary historical bytes').toString('base64')});
+    const allowed = context();
+    expect(allowed.prompt).toContain('<recent-history>');
+    expect(allowed.prompt).toContain('ordinary-tail.txt');
+    expect(allowed.prompt).toContain('continue after compaction');
+  } finally {agent.close(); a.client.close(); b.client.close();}
+}, 30000);
 
 type NativeProvider = 'claude' | 'codex' | 'muse' | 'opencode' | 'pi';
 const nativePlatforms = ['linux', 'win32'];

@@ -103,6 +103,8 @@ export const strings = {
     compactionNoPost: 'Context compacted from {pre} tokens',
     compactionUnknown: 'Context compacted',
     compactionManual: 'by hand',
+    /** Beside a compaction a copy of the session made while the conversation went on. */
+    compactionBackground: 'in the background',
     /** The accent line on the first message after a move: the agent was told where it works now. */
     moveExplained: 'Move explained to the agent',
     moveShow: 'Show what the agent was told',
