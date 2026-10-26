@@ -956,8 +956,73 @@ remain. Local validation reports50 pass,1 native skip,0 fail and535 assertions;
 types, architecture and both strict MinGW compilations pass. All11 worker-owned
 source hashes match the compile manifest. The parent reviewed the final delta
 and revalidated the four prior native timing controls with the shared validator.
-SDK compilation, Windows execution, suffix rejection, twin retention and native
-runtime remain unverified. CAUSE_CONFIRMED=no and productionAccepted=false.
+Run40252765978 / job121348217179 executes headf04322fe on kernel10.0.26100
+with Bun1.4.3. All56 manifest and11 provenance hashes match. SDK and MinGW
+both strictly compile and validate the18 actual twin operations, nonce, exact
+helper/root/thread identities, rights/noninheritance, suspend0/resume1 and normal
+original result1. The eight twin anchors close successfully across both helpers.
+Never-attached `.unused` is absent in all6 immediate/checkpoint/final observations;
+attached `.retired` remains in all6. All6 exact twin names are absent post-helper.
+The eight invalid-suffix probes reject125/error123 before a native open result.
+
+SDK1190/1190 and MinGW1193/1193 registry process references close; transfers
+balance898/898 and901/901. The14 faults, held-reference, worker and original
+LIVE/EXITED controls retain their earlier outcomes. Each compiler has exactly
+64 fatal diagnostic failures: the60 old failures plus4 twin failures. Production
+remains0/7 at NUL error5. Bun reports native suites81.48s/81.22s, without a
+changed deadline. Both ordinary message-pipe semantic probes pass; LPAC/Bun
+integration remains unverified. Independent review confirms VALID_DIFFERENTIAL
+and no new protocol defect. CAUSE_CONFIRMED=no and productionAccepted=false.
+
+The measured difference associates retention with attachment in this fixture;
+ordinary creation/open/close alone is insufficient here. Name suffix and creation
+order remain coupled to role. The reference owner, full object destruction and
+behavior on other Windows builds remain unknown. No result grants production
+admission or clears any earlier fatal cleanup gate.
+
+## Helper anchor overlap at attachment
+
+A separate matched pair, ANCHOR-EXCLUSIVE / ANCHOR-HELD, is implemented
+at the same LIVE final barrier. Both arms prepare identical empty attached and
+unused siblings. The same suspended trusted setter, outside the private LPAC
+target job, receives only a captured root-process handle and the attached
+directory handle, with the narrow rights already used by SCOPE. The setter alone
+performs this replacement. Parent transfer duplicates and explicit opened
+anchors close before either GO. Existing DIRECTORY-TWIN and SCOPE stay unchanged.
+
+The sole intervention is closure of the helper's attached creation anchor:
+EXCLUSIVE closes it before GO permits Set; HELD closes it after authenticated
+ASSIGNED and before RELEASE permits setter-directory closure. The setter keeps
+its known directory handle until RELEASE, closes its validated handles and exits
+successfully before root resume in both arms. Private nonce-bound proof binds
+helper/setter/root PID and creation, exact names, actual native operation order,
+status and closure to the captured root deadline. Logical phase labels alone do
+not establish the native close/Set order. No PID reopen, foreign-table scan,
+unknown close, global ACL, privilege or caller-map change is permitted.
+
+The setter's5s allowance fits within the original absolute root15s deadline;
+helper40s, checkpoint3s and outer budgets stay unchanged. All prior boundaries,
+normal result1, caller/token/job/window/stream cleanup and exact-name absence
+gates remain fatal. Known setter registry references must close before checkpoint,
+using exact PID plus creation. Every continuation and observer joins before
+registry shutdown on success and failure.
+
+Protocol validity, reproduction by HELD, unused absence and all cleanup gates
+remain separate results. A retained HELD and absent EXCLUSIVE would implicate
+the overlap interval here, without identifying an owner. Both retained rejects
+overlap as necessary in this fixture; both absent fails to reproduce the matched
+positive control. Five concurrent nonce/early-release/assigned/release/stall
+faults require rejection before final root resume, balanced owned closures and
+post-helper absence. All six actual binary protocol frames are archived,
+including partial failure transcripts, for independent native reconciliation.
+
+Local validation reports54 pass,1 native skip,0 fail and626 assertions; scoped
+types, architecture1219 modules and both strict MinGW compilations pass. All12
+worker-owned source hashes match the compile manifest. Parent review confirms
+the final frame-archival delta and unchanged production C; current validators
+also retain the four prior timing and two twin native verdicts. SDK compilation,
+Windows execution, the five native faults, anchor-pair outcomes and runtime
+remain unverified. CAUSE_CONFIRMED=no and productionAccepted=false.
 
 ## Gates still required
 

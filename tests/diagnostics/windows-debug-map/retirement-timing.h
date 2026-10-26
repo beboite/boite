@@ -169,7 +169,7 @@ static DWORD retirement_final(PROCESS_INFORMATION *root, HANDLE job, PSECURITY_D
   error = rt_identity(root, TRUE); if (error) return error;
   rt_log(L"suspend", previous, 1);
   if (retirement_timing_mode == 1) {
-    error = directory_twin_mode ? directory_twin_replace(root, security) : rt_live_replace(root, security);
+    error = directory_twin_mode ? directory_twin_replace(root, job, security) : rt_live_replace(root, security);
     if (error) return error;
   }
   previous = ResumeThread(root->hThread);

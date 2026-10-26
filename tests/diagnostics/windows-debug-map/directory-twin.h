@@ -45,7 +45,8 @@ static DWORD twin_verify(HANDLE object, int role, const wchar_t *phase) {
   return error;
 }
 
-static DWORD directory_twin_replace(PROCESS_INFORMATION *root, PSECURITY_DESCRIPTOR security) {
+#include "anchor-overlap.h"
+static DWORD directory_twin_replace(PROCESS_INFORMATION *root, HANDLE job, PSECURITY_DESCRIPTOR security) {
   typedef NTSTATUS (NTAPI *create_fn)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, HANDLE, ULONG);
   typedef NTSTATUS (NTAPI *set_fn)(HANDLE, PROCESSINFOCLASS, PVOID, ULONG);
   typedef NTSTATUS (NTAPI *compare_fn)(HANDLE, HANDLE);
@@ -99,6 +100,15 @@ static DWORD directory_twin_replace(PROCESS_INFORMATION *root, PSECURITY_DESCRIP
     if (error) goto end;
   }
   error = rt_identity(root, TRUE); if (error) goto end;
+  if (anchor_overlap_mode) {
+    /* The unused control and every explicit open are closed before either GO.
+     * Only the attached creation anchor's overlap with Set differs. */
+    error = close_owned(L"twin-unused-map", &anchors[1]);
+    twin_log(L"close-create", 1, (NTSTATUS)error, !anchors[1], FALSE, 0, 0, 0, 0);
+    anchors[1] = NULL; /* Never retry an undecidable failed close. */
+    if (!error) error = anchor_overlap_assign(root, job, &anchors[0]);
+    goto end;
+  }
   /* The unused anchor is never passed to a process attribute or map API. */
   {
     NTSTATUS status = set(root->hProcess, (PROCESSINFOCLASS)23, &anchors[0], sizeof(anchors[0]));

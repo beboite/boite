@@ -32,6 +32,7 @@ static BOOL retire_owned_map;
 static BOOL retire_named_map, retired_created;
 static wchar_t retired_name[280];
 static BOOL directory_twin_mode;
+static int anchor_overlap_mode; /* 1 exclusive handoff, 2 helper anchor overlaps Set. */
 static DWORD directory_twin_absence(const wchar_t *phase);
 static DWORD creator_prepare(PSECURITY_DESCRIPTOR security, const wchar_t *target, const wchar_t *root);
 static unsigned int object_count_queries, handle_snapshot_queries;

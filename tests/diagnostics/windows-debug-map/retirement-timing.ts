@@ -38,6 +38,7 @@ export function parseRetirementFrame(line: string): RetirementFrame {
 export function validateRetirementTiming(result: Captured, expected: {
   mode: RetirementMode; nonce: string; helper: {pid: number; created: string}; root: {pid: number; created: string}; marker: string;
   additionalCleanupPassed?: boolean;
+  anchorMode?: 'exclusive' | 'held';
 }): RetirementReport {
   const report: RetirementReport = {mode: expected.mode, protocolValid: false, prerequisites: false,
     reproducesBaseline: false, cleanupGatesPassed: false, frames: [], productionAccepted: false, causeConfirmed: false};
@@ -104,8 +105,9 @@ export function validateRetirementTiming(result: Captured, expected: {
     const phase = (name: string) => `retirement-timing phase=${name} `;
     const nativeAssignment = expected.mode === 'live' ? `map-retire live pid=${root} ` : `map-retire pid=${root} `;
     ordered(expected.mode === 'live'
-      ? [phase('ready'), phase('suspend'), 'map-retire named path=', nativeAssignment,
-        'cleanup close=retire-named-map ', phase('assign'), phase('resume'), phase('release'), phase('exit')]
+      ? [phase('ready'), phase('suspend'), 'map-retire named path=',
+        ...(expected.anchorMode === 'exclusive' ? ['cleanup close=retire-named-map ', nativeAssignment] : [nativeAssignment, 'cleanup close=retire-named-map ']),
+        phase('assign'), phase('resume'), phase('release'), phase('exit')]
       : [phase('release'), phase('exit'), 'cleanup job-active=0', `map-retire ready pid=${root} `,
         'map-retire named path=', nativeAssignment, 'cleanup close=retire-named-map ', phase('assign')]);
     for (let depth = 0; depth < 2; depth++) {

@@ -52,7 +52,9 @@ export function validateDirectoryTwin(result: Captured, expected: Parameters<typ
     requireValue(path, 'successfully created original');
     const phases = ['create:attached', 'verify-create:attached', 'create:unused', 'verify-create:unused',
       'open:attached', 'verify-open:attached', 'same:attached', 'open:unused', 'verify-open:unused', 'same:unused',
-      'close-open:attached', 'close-open:unused', 'set:attached', 'close-create:attached', 'close-create:unused',
+      'close-open:attached', 'close-open:unused',
+      ...(expected.anchorMode ? ['close-create:unused', ...(expected.anchorMode === 'exclusive' ? ['close-create:attached', 'set:attached'] : ['set:attached', 'close-create:attached'])]
+        : ['set:attached', 'close-create:attached', 'close-create:unused']),
       'immediate:unused', 'checkpoint:unused', 'final:unused'];
     requireValue(report.events.map(e => `${e.phase}:${e.role}`).join() === phases.join(), 'exact actual operation sequence; unused never assigned');
     const observations = report.events.filter(e => ['immediate', 'checkpoint', 'final'].includes(e.phase));
@@ -80,8 +82,13 @@ export function validateDirectoryTwin(result: Captured, expected: Parameters<typ
       event('open', 'attached'), event('verify-open', 'attached'), event('same', 'attached'),
       event('open', 'unused'), event('verify-open', 'unused'), event('same', 'unused'),
       'cleanup close=twin-attached-open ', event('close-open', 'attached'), 'cleanup close=twin-unused-open ', event('close-open', 'unused'),
-      event('set', 'attached'), `map-retire live pid=${expected.root.pid} `,
-      'cleanup close=retire-named-map ', event('close-create', 'attached'), 'cleanup close=twin-unused-map ', event('close-create', 'unused'),
+      ...(expected.anchorMode ? [
+        'cleanup close=twin-unused-map ', event('close-create', 'unused'),
+        ...(expected.anchorMode === 'exclusive' ? ['cleanup close=retire-named-map ', event('close-create', 'attached')] : []),
+        event('set', 'attached'), `map-retire live pid=${expected.root.pid} `,
+        ...(expected.anchorMode === 'held' ? ['cleanup close=retire-named-map ', event('close-create', 'attached')] : []),
+      ] : [event('set', 'attached'), `map-retire live pid=${expected.root.pid} `,
+        'cleanup close=retire-named-map ', event('close-create', 'attached'), 'cleanup close=twin-unused-map ', event('close-create', 'unused')]),
       'retirement-timing phase=assign ', 'retirement-timing phase=resume ', 'retirement-timing phase=release ', 'retirement-timing phase=exit '];
     const indexes = order.map(position); requireValue(indexes.every((index, i) => !i || index > indexes[i - 1]!), 'native operation/barrier order');
     const suspend = timing.frames.find(f => f.phase === 'suspend')!, assign = timing.frames.find(f => f.phase === 'assign')!;

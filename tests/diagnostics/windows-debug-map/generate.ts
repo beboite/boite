@@ -83,17 +83,20 @@ export function generate(source: string): string {
     '  else if (count == 3 && !wcscmp(args[1], L"cleanup")) result = cleanup_profile(args[2]);\n' +
     '  else if (count > 1 && !wcscmp(args[1], L"inspect")) result = inspect(count, args);\n' +
     '  else if (count > 1 && !wcscmp(args[1], L"assign-map")) result = setter_entry(count, args);\n' +
+    '  else if (count > 1 && !wcscmp(args[1], L"anchor-setter")) result = anchor_setter_entry(count, args);\n' +
     '  else if (count > 1 && !wcscmp(args[1], L"create-map")) result = creator_entry(count, args);\n' +
     '  else if (count > 1 && !wcscmp(args[1], L"create-target")) result = target_creator_entry(count, args);\n' +
     '  else if (count > 4 && (!wcscmp(args[1], L"run") || !wcscmp(args[1], L"debug-run") ||\n' +
     '      !wcscmp(args[1], L"direct-run") || !wcscmp(args[1], L"setter-run") || !wcscmp(args[1], L"quiet-run") ||\n' +
-    '      !wcscmp(args[1], L"reopen-run") || !wcscmp(args[1], L"creator-run") || !wcscmp(args[1], L"retire-run") || !wcscmp(args[1], L"retire-named-run") || !wcscmp(args[1], L"retire-live-run") || !wcscmp(args[1], L"retire-exited-run") || !wcscmp(args[1], L"directory-twin-run") ||\n' +
+    '      !wcscmp(args[1], L"reopen-run") || !wcscmp(args[1], L"creator-run") || !wcscmp(args[1], L"retire-run") || !wcscmp(args[1], L"retire-named-run") || !wcscmp(args[1], L"retire-live-run") || !wcscmp(args[1], L"retire-exited-run") || !wcscmp(args[1], L"directory-twin-run") || !wcscmp(args[1], L"anchor-exclusive-run") || !wcscmp(args[1], L"anchor-held-run") ||\n' +
     '      !wcscmp(args[1], L"target-exited-run") || !wcscmp(args[1], L"target-waiting-run") || !wcscmp(args[1], L"target-helper-exited-run"))) {\n' +
     '    debug_mode = !wcscmp(args[1], L"debug-run");\n' +
     '    reopen_owned_map = !wcscmp(args[1], L"reopen-run");\n' +
     '    external_map_creator = !wcscmp(args[1], L"creator-run");\n' +
     '    target_creator_mode = !wcscmp(args[1], L"target-exited-run") ? 1 : !wcscmp(args[1], L"target-waiting-run") ? 2 : !wcscmp(args[1], L"target-helper-exited-run") ? 3 : 0;\n' +
     '    directory_twin_mode = !wcscmp(args[1], L"directory-twin-run");\n' +
+    '    anchor_overlap_mode = !wcscmp(args[1], L"anchor-exclusive-run") ? 1 : !wcscmp(args[1], L"anchor-held-run") ? 2 : 0;\n' +
+    '    if (anchor_overlap_mode) directory_twin_mode = TRUE;\n' +
     '    retirement_timing_mode = (directory_twin_mode || !wcscmp(args[1], L"retire-live-run")) ? 1 : !wcscmp(args[1], L"retire-exited-run") ? 2 : 0;\n' +
     '    retire_named_map = !wcscmp(args[1], L"retire-named-run") || target_creator_mode || retirement_timing_mode;\n' +
     '    retire_owned_map = !wcscmp(args[1], L"retire-run") || retire_named_map;\n' +
@@ -143,7 +146,7 @@ export function writeSource(output: string): Record<string, string> {
   const source = generate(original);
   writeFileSync(join(output, 'debug-map.c'), source);
   const hashes: Record<string, string> = {'protected-tool.c': sha256(original), 'debug-map.c': sha256(source)};
-  for (const file of ['routing.h', 'inspect.h', 'ownership.h', 'identity.h', 'startup-site.h', 'startup-site.json', 'roundtrip.h', 'setter.h', 'creator.h', 'target-creator.h', 'target-acl.h', 'helper-job.h', 'worker-lifetime.h', 'retirement-timing.h', 'directory-twin.h']) {
+  for (const file of ['routing.h', 'inspect.h', 'ownership.h', 'identity.h', 'startup-site.h', 'startup-site.json', 'roundtrip.h', 'setter.h', 'creator.h', 'target-creator.h', 'target-acl.h', 'helper-job.h', 'worker-lifetime.h', 'retirement-timing.h', 'directory-twin.h', 'anchor-overlap.h']) {
     const bytes = readFileSync(join(import.meta.dir, file));
     writeFileSync(join(output, file), bytes);
     hashes[file] = sha256(bytes);
