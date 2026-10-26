@@ -4,6 +4,15 @@ Boite connects to several cores at once. Each machine owns its projects, files,
 accounts and execution. Opening a thread selects its machine for the chat,
 composer and settings. It does not move the thread or its processes.
 
+Thread links resolve against the machine that owns the rendered answer, including
+archived conversations absent from its active list. An explicit machine or core
+name stays scoped to that owner; unresolved or ambiguous names show an error.
+Navigation made while an address is being resolved takes precedence.
+
+Selecting a thread in the command palette or a saved draft switches directly to
+that destination. A draft retains its ID, project, text and attachments; a machine
+switch without a destination still restores the previous conversation.
+
 ## Connecting a machine
 
 Machines connect through a [group](groups.md): one invitation per machine,

@@ -24,8 +24,7 @@
       : entry.text || strings.sidebar.draft
   );
   async function open() {
-    if (workspace.active !== owner) await workspace.select(owner);
-    owner.startDraft(entry.projectId, { draftId: entry.id });
+    await workspace.select(owner, undefined, entry.projectId, { draftId: entry.id });
     onopen?.();
   }
   function menu(event: MouseEvent) {

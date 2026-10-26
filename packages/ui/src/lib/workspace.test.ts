@@ -812,7 +812,7 @@ test('ui.reveal naming a machine opens its thread on that machine\'s Store, desp
   expect(w.machineOf('nowhere')).toBeNull();
 });
 
-test('a thread link in an answer opens the thread on the machine it names, else where it is', async () => {
+test('thread links prefer their owner and preserve explicit machine identity', async () => {
   const { w, a, b } = await setup();
   const id = a.threads[0]!.id;
   const other = a.threads[1]!.id;
@@ -824,11 +824,13 @@ test('a thread link in an answer opens the thread on the machine it names, else 
   await w.openThreadLink(a, other, 'remote', id);
   expect(w.active).toBe(b);
   expect(b.openThread?.id).toBe(id);
-  // Only one machine lists it: that one, whatever name the agent knew it by.
+  // An unknown explicit name cannot substitute the only machine listing a coincident id.
   a.threads = a.threads.filter(thread => thread.id !== other);
   await w.openThreadLink(a, id, 'm2', other);
   expect(w.active).toBe(b);
-  expect(b.openThread?.id).toBe(other);
+  expect(b.openThread?.id).toBe(id);
+  expect(a.error).toBe('No connected machine has this conversation.');
+  a.error = null;
   await w.select(a, id);
   await w.openThreadLink(a, id, null, 'thr_nowhere0000000000');
   expect(w.active).toBe(a);
