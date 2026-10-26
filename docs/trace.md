@@ -92,6 +92,11 @@ rows and load while remaining in totals, known by their image name or, when
 that read fails on a host caught as it starts, by a command line that starts
 the system's own `conhost.exe`. Terminating a job requires explicit
 exit reconciliation because the port may report only the empty-job event.
+A job nested inside a thread's job, such as the one a test suite's own core
+gives the CLIs it starts, posts no exit to the thread's job when it is
+terminated. Each load sample therefore reads the exit code of every tracked
+handle, and a process that has exited is reported as it would be from its
+exit packet. A packet that arrives later matches no live record.
 
 `process.started` and `process.exited` carry the available PID, parent PID,
 executable, command line, timestamps, exit code, CPU time, peak memory and I/O.

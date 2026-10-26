@@ -461,15 +461,23 @@ export function sampleThreadJob(threadId: string): ProcessSample | null {
 
   let memoryBytes = 0;
   const workingSets: { pid: number; bytes: number; committedBytes: number }[] = [];
+  const ended: [number, TrackedProcess][] = [];
   for (const pid of job.pids) {
     const entry = tracked.get(pid);
     if (entry === undefined || entry.threadId !== threadId) continue;
+    // A job nested in this one and ended by TerminateJobObject (a test suite's
+    // core ending its CLIs) posts no exit here, and the port promises none anyway.
+    if (exitCodeOf(api, entry.handle) !== null) { ended.push([pid, entry]); continue; }
     const memory = workingSetOf(api, entry.handle);
     if (memory === null) continue;
     memoryBytes += memory.workingSet;
     workingSets.push({ pid, bytes: memory.workingSet, committedBytes: memory.committedBytes });
     if (memory.peak > entry.peakMemoryBytes) tracked.set(pid, { ...entry, peakMemoryBytes: memory.peak });
   }
+  // Reported once the registry's sample, which reads its entries, is done. A late packet matches no live record.
+  if (ended.length > 0) queueMicrotask(() => {
+    for (const [pid, entry] of ended) if (tracked.get(pid)?.handle === entry.handle) onProcessExited(threadId, pid);
+  });
 
   return { processes: view.getUint32(OFF_ACTIVE_PROCESSES, true), cpuPercent, memoryBytes, workingSets,
     cpuMeasured, memoryMeasured: workingSets.length > 0 };
