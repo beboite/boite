@@ -223,6 +223,7 @@ export class AgentBrowser {
       preset: null, orientation: 'portrait', colorScheme: 'system', diagnostics: [], dropped: 0, history: [], requests: new Map(),
       recorder: null, discarded: false, frame: null, screen: screenTurns(), off: [], frames: new Set(), acting: false, sleep: sleepState(),
       page: {
+        session: sessionId,
         send: (method, params = {}, timeoutMs) => engine.cdp.send(method, params, sessionId, timeoutMs),
         dialogs: [], dialogPolicy: { accept: true, text: null }, downloads: 0, frameRefs: new Map(),
       },
