@@ -214,7 +214,10 @@ export function completeMatrix(text: string, phase: 'host' | 'lpac'): boolean {
     } else if (row.flags !== '0x00000000' || row.options !== 'na' || row.status !== 'na'
       || !Number.isSafeInteger(decimal(row.error)) || (decimal(row.error) === 0) !== (row.opened === '1')) return false;
     if (row.opened === '1') return row.type === '2' && row['grant-status'] === '0x00000000' && hex(row['mode-status']);
-    return phase === 'lpac' && row.type === '0' && row.granted === '0x00000000' && row['grant-status'] === 'na'
+    // Native Windows also denies the exact asynchronous zero-rights host open.
+    // Retain that observation while requiring every other host open to succeed.
+    const hostZeroAccessRefusal = phase === 'host' && row.path === 'native' && row.access === 'none' && row.status === '0xc0000022';
+    return (phase === 'lpac' || hostZeroAccessRefusal) && row.type === '0' && row.granted === '0x00000000' && row['grant-status'] === 'na'
       && row.mode === '0x00000000' && row['mode-status'] === 'na';
   });
 }

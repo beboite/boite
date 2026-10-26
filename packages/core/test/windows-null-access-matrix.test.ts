@@ -73,3 +73,70 @@ test('direct NT observations require raw status, explicit desired rights and cre
     text.split('\n').filter(line => !line.includes('path=native ')).join('\n'),
   ]) expect(completeMatrix(changed, 'lpac')).toBe(false);
 });
+
+// Authentic SDK/MinGW host capture, Windows Server 2025, commit 0e760ce5.
+const hostZeroAccessCapture = String.raw`NULL_TOKEN phase=host appcontainer=0 flags=0x00002000 capabilities=0 registry-read=0 package=none
+NULL_LPAC phase=host status=0xc0000225 value=0
+NULL_SIDS phase=host normal=15 restricted=0 access-restricted=0 capability=0
+NULL_SID phase=host set=normal index=0 sid=redacted attributes=0x00000000
+NULL_SID phase=host set=normal index=1 sid=redacted attributes=0x00000007
+NULL_SID phase=host set=normal index=2 sid=S-1-1-0 attributes=0x00000007
+NULL_SID phase=host set=normal index=3 sid=redacted attributes=0x00000007
+NULL_SID phase=host set=normal index=4 sid=redacted attributes=0x0000000f
+NULL_SID phase=host set=normal index=5 sid=redacted attributes=0x00000007
+NULL_SID phase=host set=normal index=6 sid=redacted attributes=0x00000007
+NULL_SID phase=host set=normal index=7 sid=redacted attributes=0x00000007
+NULL_SID phase=host set=normal index=8 sid=redacted attributes=0x00000007
+NULL_SID phase=host set=normal index=9 sid=redacted attributes=0x00000007
+NULL_SID phase=host set=normal index=10 sid=redacted attributes=0x00000007
+NULL_SID phase=host set=normal index=11 sid=redacted attributes=0xc0000007
+NULL_SID phase=host set=normal index=12 sid=redacted attributes=0x00000007
+NULL_SID phase=host set=normal index=13 sid=redacted attributes=0x00000007
+NULL_SID phase=host set=normal index=14 sid=redacted attributes=0x00000060
+NULL_ACCESS phase=host path=dos access=none desired=0x00000000 options=na flags=0x00000000 opened=1 error=0 status=na granted=0x00100080 grant-status=0x00000000 mode=0x00000020 mode-status=0x00000000 type=2 type-error=0 close-error=0
+NULL_ACCESS phase=host path=dos access=read desired=0x80000000 options=na flags=0x00000000 opened=1 error=0 status=na granted=0x00120089 grant-status=0x00000000 mode=0x00000020 mode-status=0x00000000 type=2 type-error=0 close-error=0
+NULL_ACCESS phase=host path=dos access=write desired=0x40000000 options=na flags=0x00000000 opened=1 error=0 status=na granted=0x00120196 grant-status=0x00000000 mode=0x00000020 mode-status=0x00000000 type=2 type-error=0 close-error=0
+NULL_ACCESS phase=host path=dos access=readwrite desired=0xc0000000 options=na flags=0x00000000 opened=1 error=0 status=na granted=0x0012019f grant-status=0x00000000 mode=0x00000020 mode-status=0x00000000 type=2 type-error=0 close-error=0
+NULL_ACCESS phase=host path=globalroot access=none desired=0x00000000 options=na flags=0x00000000 opened=1 error=0 status=na granted=0x00100080 grant-status=0x00000000 mode=0x00000020 mode-status=0x00000000 type=2 type-error=0 close-error=0
+NULL_ACCESS phase=host path=globalroot access=read desired=0x80000000 options=na flags=0x00000000 opened=1 error=0 status=na granted=0x00120089 grant-status=0x00000000 mode=0x00000020 mode-status=0x00000000 type=2 type-error=0 close-error=0
+NULL_ACCESS phase=host path=globalroot access=write desired=0x40000000 options=na flags=0x00000000 opened=1 error=0 status=na granted=0x00120196 grant-status=0x00000000 mode=0x00000020 mode-status=0x00000000 type=2 type-error=0 close-error=0
+NULL_ACCESS phase=host path=globalroot access=readwrite desired=0xc0000000 options=na flags=0x00000000 opened=1 error=0 status=na granted=0x0012019f grant-status=0x00000000 mode=0x00000020 mode-status=0x00000000 type=2 type-error=0 close-error=0
+NULL_ACCESS phase=host path=native access=none desired=0x00000000 options=0x00000040 flags=na opened=0 error=na status=0xc0000022 granted=0x00000000 grant-status=na mode=0x00000000 mode-status=na type=0 type-error=0 close-error=0
+NULL_ACCESS phase=host path=native access=read desired=0x80000000 options=0x00000040 flags=na opened=1 error=na status=0x00000000 granted=0x00120089 grant-status=0x00000000 mode=0x00000000 mode-status=0x00000000 type=2 type-error=0 close-error=0
+NULL_ACCESS phase=host path=native access=write desired=0x40000000 options=0x00000040 flags=na opened=1 error=na status=0x00000000 granted=0x00120116 grant-status=0x00000000 mode=0x00000000 mode-status=0x00000000 type=2 type-error=0 close-error=0
+NULL_ACCESS phase=host path=native access=readwrite desired=0xc0000000 options=0x00000040 flags=na opened=1 error=na status=0x00000000 granted=0x0012019f grant-status=0x00000000 mode=0x00000000 mode-status=0x00000000 type=2 type-error=0 close-error=0
+NULL_ACCESS phase=host path=native-sync access=none desired=0x00100080 options=0x00000060 flags=na opened=1 error=na status=0x00000000 granted=0x00100080 grant-status=0x00000000 mode=0x00000020 mode-status=0x00000000 type=2 type-error=0 close-error=0
+NULL_ACCESS phase=host path=native-sync access=read desired=0x80100080 options=0x00000060 flags=na opened=1 error=na status=0x00000000 granted=0x00120089 grant-status=0x00000000 mode=0x00000020 mode-status=0x00000000 type=2 type-error=0 close-error=0
+NULL_ACCESS phase=host path=native-sync access=write desired=0x40100080 options=0x00000060 flags=na opened=1 error=na status=0x00000000 granted=0x00120196 grant-status=0x00000000 mode=0x00000020 mode-status=0x00000000 type=2 type-error=0 close-error=0
+NULL_ACCESS phase=host path=native-sync access=readwrite desired=0xc0100080 options=0x00000060 flags=na opened=1 error=na status=0x00000000 granted=0x0012019f grant-status=0x00000000 mode=0x00000020 mode-status=0x00000000 type=2 type-error=0 close-error=0
+`.replaceAll('\n', '\r\n');
+
+test('native host zero-access refusal remains observable without blocking LPAC collection', () => {
+  expect(completeMatrix(hostZeroAccessCapture, 'host')).toBe(true);
+});
+
+test('the host exception rejects other statuses, request changes and incomplete closure evidence', () => {
+  const row = hostZeroAccessCapture.split('\r\n').find(line => line.includes('path=native access=none'))!;
+  for (const [before, after] of [
+    ['status=0xc0000022', 'status=0xc000000d'], ['desired=0x00000000', 'desired=0x00100080'],
+    ['options=0x00000040', 'options=0x00000060'], ['flags=na', 'flags=0x00000000'],
+    ['granted=0x00000000', 'granted=0x00000001'], ['grant-status=na', 'grant-status=0x00000000'],
+    ['mode=0x00000000', 'mode=0x00000020'], ['mode-status=na', 'mode-status=0x00000000'],
+    ['type=0', 'type=2'], ['type-error=0', 'type-error=5'], ['close-error=0', 'close-error=6'],
+  ]) expect(completeMatrix(hostZeroAccessCapture.replace(row, row.replace(before!, after!)), 'host')).toBe(false);
+  expect(completeMatrix(hostZeroAccessCapture.replace(row + '\r\n', ''), 'host')).toBe(false);
+  expect(completeMatrix(hostZeroAccessCapture + row + '\r\n', 'host')).toBe(false);
+});
+
+test('all fifteen other native host observations still require successful opens', () => {
+  const successful = hostZeroAccessCapture.split('\r\n').filter(line => line.startsWith('NULL_ACCESS ') && line.includes('opened=1'));
+  expect(successful).toHaveLength(15);
+  for (const row of successful) {
+    const native = row.includes(' flags=na ');
+    const refused = row.replace('opened=1', 'opened=0').replace(' error=0 ', ' error=5 ')
+      .replace(' status=0x00000000 ', native ? ' status=0xc0000022 ' : ' status=na ')
+      .replace(/ granted=0x[0-9a-f]{8} /, ' granted=0x00000000 ').replace('grant-status=0x00000000', 'grant-status=na')
+      .replace(/ mode=0x[0-9a-f]{8} /, ' mode=0x00000000 ').replace('mode-status=0x00000000', 'mode-status=na').replace(' type=2 ', ' type=0 ');
+    expect(completeMatrix(hostZeroAccessCapture.replace(row, refused), 'host')).toBe(false);
+  }
+});
