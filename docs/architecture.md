@@ -247,6 +247,13 @@ deletions expire) and 33 by nothing (172 MiB, 0.8 MiB of it untouched for 7
 days, so no sweep of older files was added), read from a read-only copy of its
 journal.
 
+Session imports probe the entered project path before its canonical path and
+retain the entered path as the imported thread's working directory. Shared
+transcript files appear once, with an explicit account choice when several
+accounts can read them. The journal reserves current native session IDs while
+conversations remain recoverable in the trash, including deleted children;
+imports keep their existing global refusal of an already owned session ID.
+
 The journal does not replace a provider's native transcript. A turn resumes the
 selected account's `sessionId`. An account change starts a fresh session seeded
 with bounded journal excerpts. A confirmed missing native session permits one
