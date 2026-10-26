@@ -194,8 +194,9 @@ row. Schema 36 moves the lines of older rows there in paced batches. The same
 background passes cut a thread's trace back to what it keeps once it holds 500
 rows past the 2,000 it keeps, one thread at a time and again daily, and delete
 the lines only the deleted rows named ([trace](trace.md)).
-A daily-prune date ahead of the current clock permits a pass to resume from
-its stored cursor; completion replaces that date with the current time.
+A daily-prune date ahead of the current clock is removed before a pass resumes
+from its stored cursor. The date stays absent during the incomplete pass;
+completion records the current time and removes the cursor.
 
 `native_agent_messages` names the messages holding an Agent, Task or subagent
 call, or a `nativeAgents` list, so `delegation.get` parses those messages only.

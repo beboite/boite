@@ -71,13 +71,23 @@ test('a future trace prune date resumes its cursor, while a valid recent pass st
   expect(journal.getSetting(through)).toBe('thr_a');
   expect(journal.getSetting(PRUNED_AT)).toBe(now - 60_000);
 
-  journal.setSetting(PRUNED_AT, now + DAY);
-  for (let ticks = 0; ticks < 40; ticks++) if (await step(now) === 'done') break;
+  journal.setSetting(PRUNED_AT, now + 100);
+  expect(await step(now)).toBe('more');
+  expect(journal.getSetting(through)).toBe('thr_a');
+  // The next scheduler tick crosses the invalid date while the trace is still being scanned.
+  expect(await step(now + 250)).toBe('more');
+  expect(journal.getSetting(PRUNED_AT)).toBeUndefined();
+  expect(journal.getSetting(through)).toBe('thr_a');
+  let finishedAt = now + 250;
+  for (let ticks = 2; ticks < 40; ticks++) {
+    finishedAt = now + ticks * 250;
+    if (await step(finishedAt) === 'done') break;
+  }
   expect(count('thr_b')).toBe(2_000);
   expect(count('thr_a')).toBe(2_601);
-  expect(journal.getSetting(PRUNED_AT)).toBe(now);
+  expect(journal.getSetting(PRUNED_AT)).toBe(finishedAt);
   expect(journal.getSetting(through)).toBeUndefined();
-  expect(await step(now + DAY - 1)).toBe('done');
+  expect(await step(finishedAt + DAY - 1)).toBe('done');
   expect(count('thr_a')).toBe(2_601);
 });
 

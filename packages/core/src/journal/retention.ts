@@ -164,6 +164,7 @@ async function rowPass(journal: Journal, key: string, run: (after: number) => Pa
  */
 function dailyPass(journal: Journal, now: number, atKey: string, throughKey: string, run: (after: unknown) => { through: unknown; more: boolean }): Step {
   const at = journal.getSetting(atKey) as number | undefined;
+  if (at !== undefined && at > now) journal.deleteSetting(atKey);
   if (at !== undefined && at <= now && now - at < DAILY_MS) return 'done';
   const { through, more } = run(journal.getSetting(throughKey));
   if (more) {
