@@ -262,6 +262,12 @@ and keeps the ordinary Windows core suite. No extra required check name is added
 Other drafts leave Windows out. macOS, desktop packages, E2E, stress, Docker and
 the APKs wait: their checks skip.
 
+The Windows job also archives `windows-null-access-matrix`: a standalone,
+opt-in comparison of host and LPAC NUL opens with four requested access masks.
+It derives a pinned copy of the production helper and preserves the original
+admission probe. Its non-blocking result reports experiment completeness;
+the native production suites still decide acceptance.
+
 A skip passes in a ruleset, so a draft must not satisfy it:
 
 - The planning job reports `Plan and repository checks (draft)` and the

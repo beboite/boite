@@ -200,6 +200,29 @@ jobs:
           Get-FileHash "$env:RUNNER_TEMP\protected-tool*.exe" -Algorithm SHA256 | Format-List
           & "$env:RUNNER_TEMP\protected-tool.exe" --diagnose-null
           "BOITE_WINDOWS_SANDBOX_PATH=$env:RUNNER_TEMP\protected-tool.exe" >> $env:GITHUB_ENV
+      - name: NUL access matrix (non-acceptance)
+        if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        continue-on-error: true
+        env:
+          BOITE_TEST_NULL_ACCESS_MATRIX: '1'
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          bun packages/core/test/windows-null-access-matrix.ts "$env:RUNNER_TEMP\null-access-matrix"
+          $matrixExit = $LASTEXITCODE
+          Write-Host "NUL access matrix exit=$matrixExit; not production acceptance"
+          exit $matrixExit
+      - name: Preserve NUL access matrix evidence
+        if: always() && runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-null-access-matrix
+          path: ${{ runner.temp }}/null-access-matrix/
+          retention-days: 3
+          if-no-files-found: error
       - name: Diagnostic DEBUG_PROCESS descendant marker routing (non-acceptance)
         if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
         continue-on-error: true
