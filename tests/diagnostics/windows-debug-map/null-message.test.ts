@@ -7,7 +7,7 @@ const complete: Captured = {pid: 123, code: 0, timedOut: false, err: '',
 
 test('ordinary pipe evidence requires completed I/O and no production admission', () => {
   expect(acceptsNullMessageProbe(complete)).toBe(true);
-  expect(acceptsNullMessageProbe({...complete, out: complete.out.replace('\n', '\r\n')})).toBe(true);
+  expect(acceptsNullMessageProbe({...complete, out: complete.out.replaceAll('\n', '\r\n')})).toBe(true);
   for (const patch of [{code: 1}, {code: null}, {timedOut: true}, {err: 'incomplete I/O'},
     {out: complete.out + complete.out}, {out: 'semanticAccepted=1\n'}])
     expect(acceptsNullMessageProbe({...complete, ...patch})).toBe(false);
