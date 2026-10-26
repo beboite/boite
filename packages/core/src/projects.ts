@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import { TECH_ICON_IDS, type Project, type ProjectIcon, type ProjectId, type TechIconId } from '@boite/contracts';
+import { PROJECT_NAME_MAX, TECH_ICON_IDS, type Project, type ProjectIcon, type ProjectId, type TechIconId } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { newId } from './ids.ts';
 import { folderGone, messageOf, notFound, refused } from './errors.ts';
@@ -379,13 +379,14 @@ export class ProjectStore {
 
   rename(projectId: ProjectId, name: string): Project {
     const project = this.require(projectId);
-    if (typeof name !== 'string' || !name.trim()) {
-      throw refused('projects.rename.name must be a non-empty string', { field: 'name', expected: 'a non-empty string' });
+    const trimmed = typeof name === 'string' ? name.trim() : '';
+    if (!trimmed || trimmed.length > PROJECT_NAME_MAX) {
+      const expected = `a string of 1 to ${PROJECT_NAME_MAX} characters after trimming`;
+      throw refused(`projects.rename.name must be ${expected}`, { field: 'name', expected });
     }
     if (this.isDrafts(project)) {
       throw refused('the drafts project has a localized system name', { field: 'projectId', projectId, expected: 'a project other than the drafts' });
     }
-    const trimmed = name.trim();
     if (project.name === trimmed) return project;
     this.core.journal.append({ type: 'project.renamed', threadId: null, version: 1, payload: { projectId, name: trimmed } }, () => {
       this.core.journal.putProject({ ...project, name: trimmed });

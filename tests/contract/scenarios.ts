@@ -9,6 +9,7 @@
  */
 import {
   GROUP_INVITE_PREFIX,
+  PROJECT_NAME_MAX,
   RpcErrorCode,
   type Account,
   type Project,
@@ -553,11 +554,13 @@ export const SCENARIOS: Record<string, Scenario> = {
       same([again.id, again.name], [project.id, 'My project'], 'reopening the same folder');
       const listed = (await env.call('projects.list', {})).find(p => p.id === project.id);
       same(listed?.name, 'My project', 'the listed name');
+      const longest = 'x'.repeat(PROJECT_NAME_MAX);
+      same((await env.call('projects.rename', { projectId: project.id, name: `  ${longest}  ` })).name, longest, 'the maximum trimmed name');
     } finally { updates.stop(); }
   },
   'projects.rename refuses invalid names, missing projects and the system drafts project': async (env) => {
     const project = await env.call('projects.add', { path: await env.newFolder(), name: 'before' });
-    for (const name of ['  ', 42 as unknown as string]) {
+    for (const name of ['  ', 42 as unknown as string, 'x'.repeat(PROJECT_NAME_MAX + 1)]) {
       const data = await refusedWith(env.call('projects.rename', { projectId: project.id, name }), RpcErrorCode.Refused, ['field', 'expected']);
       same(data.field, 'name', 'the refused field');
     }

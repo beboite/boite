@@ -1,5 +1,5 @@
 /** Projects, their files and the Claude Code sessions they can import. */
-import { RpcErrorCode, type Project, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { PROJECT_NAME_MAX, RpcErrorCode, type Project, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { missingFolder, pathKey } from './checks';
 import { FAKE_FILES, scoreFakeFile } from './files';
@@ -17,13 +17,14 @@ export function projectMethods(ctx: FakeContext) {
     'projects.rename': async (params) => {
       const project = ctx.projects.find(p => p.id === params.projectId);
       if (!project) throw ctx.notFound('project', params.projectId);
-      if (typeof params.name !== 'string' || !params.name.trim()) {
-        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'projects.rename.name must be a non-empty string', data: { field: 'name', expected: 'a non-empty string' } });
+      const name = typeof params.name === 'string' ? params.name.trim() : '';
+      if (!name || name.length > PROJECT_NAME_MAX) {
+        const expected = `a string of 1 to ${PROJECT_NAME_MAX} characters after trimming`;
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: `projects.rename.name must be ${expected}`, data: { field: 'name', expected } });
       }
       if (project.kind === 'drafts') {
         throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the drafts project has a localized system name', data: { field: 'projectId', projectId: project.id, expected: 'a project other than the drafts' } });
       }
-      const name = params.name.trim();
       if (project.name !== name) {
         project.name = name;
         ctx.emit('project.updated', describedProject(ctx, project));

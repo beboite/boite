@@ -116,8 +116,9 @@ resulting client credential are retained. See [machines](machines.md) and
 A project's action menu offers Rename on desktop and phone. It changes the
 display name through `projects.rename`, retains the folder and conversations,
 and broadcasts `project.updated` to other clients. Paired devices may rename
-too. Names are trimmed and must be non-empty. The system drafts project keeps
-its localized name.
+too. Trimmed names must contain 1 to 1024 UTF-16 code units; the core rejects
+larger names before journaling or broadcasting. The system drafts project
+keeps its localized name.
 
 Owners open a folder through the project dialog by selecting its machine and
 browsing or typing an absolute path. `projects.browse` is owner-only; the native
