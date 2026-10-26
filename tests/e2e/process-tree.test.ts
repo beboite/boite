@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { rejection } from '../../packages/core/test/settle.ts';
 import { windowsProcessTree } from './lib/process-tree.ts';
 
 // A shell's diagnosis lists WebView2's processes under it with their `--type`.
@@ -40,5 +41,6 @@ test('a process-tree observation revoked while FFI loads cancels before native a
   let authorized = true;
   const sampling = windowsProcessTree(process.pid, () => authorized);
   authorized = false;
-  await expect(sampling).rejects.toMatchObject({ code: 'ABORT_ERR' });
+  const failure = await rejection(sampling);
+  expect(failure.reason).toMatchObject({ code: 'ABORT_ERR' });
 });
