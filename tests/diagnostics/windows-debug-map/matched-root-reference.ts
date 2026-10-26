@@ -5,11 +5,13 @@ import {parseRootRequest,observeRootBatch,validateRootObservations,otherRootRefe
 type Arm='held'|'released';
 type Rows=(LedgerRow&{error?:number;wallMs?:number})[];
 export interface MatchedArmInput {request:RootRequest;helper:Captured;postHelper:RootObservation[];priorCleanupPassed:boolean}
-export interface MatchedArmRecord extends MatchedArmInput {held?:RootReply;verified?:RootReply;released?:RootReply;baseline:RootObservation[];comparison:RootObservation[];final:RootObservation[]}
-export interface MatchedRootRecord {
- arms:Record<Arm,MatchedArmRecord>;deadline:number;comparisonWindow?:{begin:number;end:number};
+export interface RootWindowArm {request:RootRequest;held?:RootReply;verified?:RootReply;released?:RootReply;baseline:RootObservation[];comparison:RootObservation[];final:RootObservation[]}
+export interface MatchedArmRecord extends MatchedArmInput,RootWindowArm {}
+export interface RootWindowRecord {
+ arms:Record<Arm,RootWindowArm>;deadline:number;comparisonWindow?:{begin:number;end:number};
  otherReferencesDrained:boolean;finalDrained:boolean;protocolValid:boolean;outcome:string;error?:string;causeConfirmed:false;productionAccepted:false;
 }
+export interface MatchedRootRecord extends RootWindowRecord {arms:Record<Arm,MatchedArmRecord>}
 export interface MatchedDependencies {
  now():number;rows():Rows;exchange(r:RootRequest):Promise<RootReply>;
  observe(r:RootRequest,path:string,phase:string,deadline:number):Promise<RootObservation>;
@@ -19,7 +21,7 @@ const pause=()=>new Promise<void>(resolve=>setTimeout(resolve,5));
 function check(value:unknown,error:string):asserts value {if(!value)throw Error('matched root reference: '+error);}
 /** The original assigned failure/cleanup prerequisites remain independent of
  * later observations and cannot clear earlier fatal absence flags. */
-function assignedFailure(input:MatchedArmInput):void {
+export function validateAssignedFailure(input:MatchedArmInput):void {
  const r=input.request,h=input.helper,raw=h.err;
  check(h.pid===r.helper.pid&&h.code===125&&!h.timedOut,'completed assigned helper');
  const frame=raw.match(/^retirement-timing phase=start mode=live nonce=(\w+) helper=(\d+) helper-created=(\d+) root=(\d+) created=(\d+) /m);
@@ -38,7 +40,7 @@ function sameJob(a:RootReply,b:RootReply):boolean {
  return !!a.sample&&!!b.sample&&a.sample.id!==b.sample.id&&
   (['owner','threadId','threadJob','jobKey','globalJob','nestingRefused'] as const).every(k=>a.sample![k]===b.sample![k]);
 }
-function actualClose(arm:MatchedArmRecord,rows:Rows,after:number):void {
+function actualClose(arm:RootWindowArm,rows:Rows,after:number):void {
  const proof=arm.released?.close,sample=arm.held?.sample;
  check(proof&&sample&&proof.id===sample.id&&proof.success&&proof.error===0,'owned close proof');
  const matches=rows.filter(r=>r.event==='close-result'&&r.id===sample.id),row=matches[0];
@@ -50,7 +52,14 @@ function actualClose(arm:MatchedArmRecord,rows:Rows,after:number):void {
 export async function measureMatchedRootReferences(inputs:Record<Arm,MatchedArmInput>,deps:MatchedDependencies):Promise<MatchedRootRecord> {
  const record:MatchedRootRecord={arms:{held:{...inputs.held,baseline:[],comparison:[],final:[]},released:{...inputs.released,baseline:[],comparison:[],final:[]}},
   deadline:inputs.held.request.deadline,otherReferencesDrained:false,finalDrained:false,protocolValid:false,outcome:'inconclusive',causeConfirmed:false,productionAccepted:false};
- const both=async<T>(action:(arm:MatchedArmRecord,key:Arm)=>Promise<T>)=>{
+ return measureOwnedRootWindow(record,deps,()=>{
+  const now=deps.now();for(const key of arms){const arm=record.arms[key];parseRootRequest(JSON.stringify(arm.request),now);check(arm.request.label===`ASSIGNED-PAIR-${key.toUpperCase()}`,'fixed pair role');validateAssignedFailure(arm);}
+ });
+}
+/** Shared observer/drainage/owned-close protocol; each caller supplies its own
+ * admission, without converting live helpers into completed captures. */
+export async function measureOwnedRootWindow<T extends RootWindowRecord>(record:T,deps:MatchedDependencies,admit:()=>void):Promise<T> {
+ const both=async<T>(action:(arm:RootWindowArm,key:Arm)=>Promise<T>)=>{
   const settled=await Promise.allSettled(arms.map(key=>action(record.arms[key],key)));
   const errors=settled.filter(s=>s.status==='rejected').map(s=>(s as PromiseRejectedResult).reason);
   check(!errors.length,'both arms joined: '+errors.map(String).join('; '));
@@ -64,8 +73,8 @@ export async function measureMatchedRootReferences(inputs:Record<Arm,MatchedArmI
   }});
  });
  try {
-  const now=deps.now();for(const key of arms){const arm=record.arms[key];parseRootRequest(JSON.stringify(arm.request),now);check(arm.request.label===`ASSIGNED-PAIR-${key.toUpperCase()}`,'fixed pair role');assignedFailure(arm);}
-  const a=inputs.held.request,b=inputs.released.request;
+  admit();
+  const a=record.arms.held.request,b=record.arms.released.request;
   check(a.deadline===b.deadline&&a.compiler===b.compiler&&a.compilerNonce===b.compilerNonce&&a.nonce!==b.nonce&&
    new Set([a.helper.pid,a.root.pid,b.helper.pid,b.root.pid]).size===4,'distinct matched contexts and one deadline');
   await both(async arm=>{arm.held=await deps.exchange(arm.request);check(arm.held.sample,'initial custody');});

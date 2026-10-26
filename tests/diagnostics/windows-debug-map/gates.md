@@ -1190,6 +1190,53 @@ C remain identical to b777bbf6. SDK compilation, actual paired Windows execution
 and the complete observer schedule inside the unchanged3s bound remain pending.
 CAUSE_CONFIRMED=no and productionAccepted=false.
 
+## Matched root reference native result and live helper control
+
+Run40266608186 / job121390457293 executes head1b2bb76b. All65 manifest
+and13 provenance entries match. Both SDK/MinGW matched ASSIGNED pairs are
+valid:30 total observations,12 during the shared comparison windows and four
+exact successful root-reference closes. RELEASED.retired is absent while
+HELD.retired remains present throughout the same window. HELD closes only after
+all six comparison observers join; its final three names are then absent.
+The complete schedules take817ms SDK and645ms MinGW inside the unchanged3s.
+All ten old release controls remain valid; SDK1933/1933 and MinGW1940/1940
+references close, with transfers1439/1439 and1446/1446. Parent and independent
+audits agree. This establishes a reference-release effect in the matched fault
+protocol; the internal owner and general retention cause remain unestablished.
+
+Eight normal ANCHOR/RETIRE arms still retain retired after all four known
+C/registry root handles close. The old77 failures per compiler remain, plus
+two new helpers' original retired-post-exit absence failures; no flag is repaired
+by the later differential. Production remains0/7 per compiler at NUL error5.
+Linux, UI/types and CodeQL pass; Windows is red. No readiness or production
+admission follows from the matched result.
+
+The separate live pair keeps the same ASSIGNED fault but parks both helpers
+at an authenticated final pre-return fence, after every existing body cleanup,
+caller/final-map check and creator cleanup. Only the two explicit live labels
+use live-fence authorization; completed-helper admission stays strict. Both
+helpers must remain exactly captured and live across baseline, release and the
+shared comparison, with one bound no later than either autonomous3s fence or
+the existing root15s deadline. Root closure remains reportExit-only. All raw
+captures, unchanged failure results and original post-exit observers join before
+cleanup; no old flag, right, job or deadline changes. READY requires successful
+native root/thread/job, stream and window cleanup (mask0x1ff). Its fixed232-byte
+receipt binds both captured incarnations and the original result125; later real
+captures and complete cleanup evidence remain required. Progressive startup and
+all acquired continuations join even if the second helper fails to start.
+
+Local Bun1.4.3:90 pass,1 native skip,0 fail,1544 assertions, including15 live
+protocol tests. Scoped and generated-copy typing, architecture1219 modules,
+strict MinGW cross compilation of both programs and diff-check pass. The
+reviewed compile-only snapshot has64/64 matching manifest entries and14/14
+generated-owner provenance entries, including live-root-fence.ts. Production
+sources remain byte-identical to1b2bb76b. Archived data replays preserve all ten
+old controls and both completed-helper pairs without native operations. Red/green
+regressions cover partial startup, failed cleanup, publication clock sampling
+and changed helper-reference custody. SDK compilation, the actual live Windows
+schedule and its fit inside the original shared3s bound remain unverified.
+CAUSE_CONFIRMED=no for general retention; productionAccepted=false.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:

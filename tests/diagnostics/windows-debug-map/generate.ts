@@ -15,7 +15,7 @@ function once(source: string, before: string, after: string): string {
 export function generate(source: string): string {
   if (sha256(source) !== sourceHash) throw new Error('protected-tool.c changed: review and repin the diagnostic before running');
   source = once(source, 'static int launch(int count, wchar_t **args) {',
-    '#include "routing.h"\n#include "inspect.h"\n#include "setter.h"\n#include "creator.h"\n#include "target-creator.h"\n#include "retirement-timing.h"\n\nstatic int launch(int count, wchar_t **args) {');
+    '#include "routing.h"\n#include "inspect.h"\n#include "setter.h"\n#include "creator.h"\n#include "target-creator.h"\n#include "retirement-timing.h"\n#include "live-root-fence.h"\n\nstatic int launch(int count, wchar_t **args) {');
   source = once(source, 'CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT, NULL, args[3]',
     'CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT | (debug_mode ? DEBUG_PROCESS : 0), NULL, args[3]');
   source = once(source, '  if (!CreateProcessW(args[4], line, &child_security, &child_security, TRUE, EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED |',
@@ -54,26 +54,28 @@ export function generate(source: string): string {
     '  if (child.hThread) CloseHandle(child.hThread);');
   // Keep the production cleanup order. Observe our own returned handles only;
   // debug-event process/thread handles still belong to Windows.
-  for (const [field, label] of [['child.hThread', 'root-thread'], ['child.hProcess', 'root-process'], ['job', 'job']]) {
+  for (const [index, [field, label]] of [['child.hThread', 'root-thread'], ['child.hProcess', 'root-process'], ['job', 'job']].entries()) {
     source = once(source, `  if (${field}) CloseHandle(${field});`,
-      `  { DWORD cleanup = close_owned(L"${label}", &${field}); if (cleanup && !error) { error = cleanup; stage = L"routing.cleanup.${label}"; } }`);
+      `  { BOOL owned = ${field} != NULL; DWORD cleanup = close_owned(L"${label}", &${field}); if (owned && !cleanup) lf_cleanup_mask |= 1UL << ${index}; if (cleanup && !error) { error = cleanup; stage = L"routing.cleanup.${label}"; } }`);
   }
   // Capture the existing calls once, in their original order, before logging
   // can overwrite GetLastError. No new USER32 call precedes desktop creation.
-  for (const [guard, call, label] of [
+  for (const [index, [guard, call, label]] of [
     ['station', 'SetProcessWindowStation(original_station)', 'station-restore'],
     ['desktop', 'CloseDesktop(desktop)', 'desktop'],
     ['station', 'CloseWindowStation(station)', 'station'],
-  ]) {
+  ].entries()) {
     source = once(source, `  if (${guard}) ${call};`,
       `  if (${guard}) {\n    BOOL ok = ${call}; DWORD native_error = ok ? 0 : GetLastError();\n` +
       `    fwprintf(stderr, L"window-cleanup action=${label} success=%d error=%lu\\n", ok, native_error); fflush(stderr);\n` +
+      `    if (ok) lf_cleanup_mask |= 1UL << ${index + 3};\n` +
       `    if (!ok && !error) { error = native_error ? native_error : ERROR_INVALID_DATA; stage = L"routing.cleanup.${label}"; }\n  }`);
   }
   source = once(source, '  for (int i = 0; i < 3; i++) if (streams[i]) CloseHandle(streams[i]);',
     '  for (int i = 0; i < 3; i++) if (streams[i]) {\n' +
     '    BOOL ok = CloseHandle(streams[i]); DWORD native_error = ok ? 0 : GetLastError();\n' +
     '    fwprintf(stderr, L"stream-cleanup index=%d success=%d error=%lu\\n", i, ok, native_error); fflush(stderr);\n' +
+    '    if (ok) lf_cleanup_mask |= 1UL << (i + 6);\n' +
     '    if (!ok && !error) { error = native_error ? native_error : ERROR_INVALID_DATA; stage = L"routing.cleanup.stream"; }\n  }');
   source = once(source, '  for (DWORD i = 0; i < group_count; i++)',
     '  { DWORD cleanup = map_close(); if (cleanup && !error) { error = cleanup; stage = L"routing.cleanup.map"; } }\n  for (DWORD i = 0; i < group_count; i++)');
@@ -120,7 +122,8 @@ export function generate(source: string): string {
     '      if (creator_closed) result = failure(L"routing.cleanup.creator-registry", creator_closed);\n' +
     '      DWORD creator_map = creator_closed ? creator_closed : target_creator_absence();\n' +
     '      if (creator_map) result = failure(L"routing.cleanup.creator-exited-map", creator_map);\n' +
-    '    }\n  }');
+    '    }\n' +
+    '    (void)live_root_fence(result);\n  }');
   // Share exactly the generated DIRECT body with both worker arms. Other arms
   // retain their existing inline body and selectors.
   const bodyStart = source.indexOf('    DWORD before = caller_snapshot(args[3], FALSE);');
@@ -146,7 +149,7 @@ export function writeSource(output: string): Record<string, string> {
   const source = generate(original);
   writeFileSync(join(output, 'debug-map.c'), source);
   const hashes: Record<string, string> = {'protected-tool.c': sha256(original), 'debug-map.c': sha256(source)};
-  for (const file of ['routing.h', 'inspect.h', 'ownership.h', 'identity.h', 'startup-site.h', 'startup-site.json', 'roundtrip.h', 'setter.h', 'creator.h', 'target-creator.h', 'target-acl.h', 'helper-job.h', 'worker-lifetime.h', 'retirement-timing.h', 'directory-twin.h', 'anchor-overlap.h']) {
+  for (const file of ['routing.h', 'inspect.h', 'ownership.h', 'identity.h', 'startup-site.h', 'startup-site.json', 'roundtrip.h', 'setter.h', 'creator.h', 'target-creator.h', 'target-acl.h', 'helper-job.h', 'worker-lifetime.h', 'retirement-timing.h', 'directory-twin.h', 'anchor-overlap.h', 'live-root-fence.h']) {
     const bytes = readFileSync(join(import.meta.dir, file));
     writeFileSync(join(output, file), bytes);
     hashes[file] = sha256(bytes);

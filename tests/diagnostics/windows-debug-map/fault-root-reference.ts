@@ -1,15 +1,16 @@
 import {existsSync,readFileSync,writeFileSync,readdirSync,statSync,renameSync} from 'node:fs';
+import {isLiveLabel,validateLiveProof,type LiveProof} from './live-root-fence.ts';
 import {join} from 'node:path';
 import type {LedgerRow,ProcessIdentity,Membership} from './target-topology.ts';
 
-export type FaultLabel='NONCE'|'EARLY-RELEASE'|'ASSIGNED'|'RELEASE'|'STALL'|'ASSIGNED-PAIR-HELD'|'ASSIGNED-PAIR-RELEASED';
+export type FaultLabel='NONCE'|'EARLY-RELEASE'|'ASSIGNED'|'RELEASE'|'STALL'|'ASSIGNED-PAIR-HELD'|'ASSIGNED-PAIR-RELEASED'|'ASSIGNED-LIVE-HELD'|'ASSIGNED-LIVE-RELEASED';
 export interface RootCustody {owner:string;id:string;threadId:string;threadJob:string;jobKey:number;globalJob:string;nestingRefused:boolean}
 export interface RootRequest {version:1;compiler:string;compilerNonce:string;nonce:string;label:FaultLabel;phase:'held'|'verified'|'release';helper:ProcessIdentity;root:ProcessIdentity;names:{map:string;retired:string;unused:string};deadline:number;reference:RootCustody|null}
 export interface RootClose {id:string;success:boolean;error:number;wallMs:number}
-export interface RootReply {request:RootRequest;sample:RootCustody|null;close:RootClose|null;at:number;error:string|null}
+export interface RootReply {request:RootRequest;sample:RootCustody|null;close:RootClose|null;at:number;error:string|null;live?:LiveProof}
 export interface RootOwned extends RootCustody {handle:number;pid:number;created:string;exitCode:number|null;role:string;complete:boolean;closeFailed:boolean;stage:string}
-export interface RootOwnerDependencies {compiler:string;compilerNonce:string;now():number;current(pid:number):RootOwned|undefined;removed(pid:number):boolean;authorize(request:RootRequest,sample:RootOwned):void;retire(sample:RootOwned):RootClose|undefined}
-const labels=['NONCE','EARLY-RELEASE','ASSIGNED','RELEASE','STALL','ASSIGNED-PAIR-HELD','ASSIGNED-PAIR-RELEASED'];
+export interface RootOwnerDependencies {compiler:string;compilerNonce:string;now():number;current(pid:number):RootOwned|undefined;removed(pid:number):boolean;authorize(request:RootRequest,sample:RootOwned):void;authorizeLive?(request:RootRequest,sample:RootOwned):LiveProof;retire(sample:RootOwned):RootClose|undefined}
+const labels=['NONCE','EARLY-RELEASE','ASSIGNED','RELEASE','STALL','ASSIGNED-PAIR-HELD','ASSIGNED-PAIR-RELEASED','ASSIGNED-LIVE-HELD','ASSIGNED-LIVE-RELEASED'];
 function requireValue(value:unknown,error:string):asserts value {if(!value)throw new Error('fault root reference: '+error);}
 function keys(value:unknown,expected:string[]):asserts value is Record<string,unknown> {requireValue(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join()===expected.sort().join(),'exact fields');}
 function identity(value:unknown):asserts value is ProcessIdentity {keys(value,['pid','created']);requireValue(Number.isSafeInteger(value.pid)&&Number(value.pid)>0&&Number(value.pid)<=0xffffffff&&typeof value.created==='string'&&/^[1-9]\d{0,19}$/.test(value.created),'identity');}
@@ -29,7 +30,7 @@ const sampleOf=(r:RootOwned):RootCustody=>({owner:r.owner,id:r.id,threadId:r.thr
  * crosses the transport and reportExit remains the sole closure path. */
 export class FaultRootOwner {
  private rejected=new Set<string>();
- private sessions=new Map<string,{binding:string;held:RootOwned;phase:string;attempted:boolean}>();
+ private sessions=new Map<string,{binding:string;held:RootOwned;phase:string;attempted:boolean;liveHelper?:LiveProof['helper']}>();
  constructor(private deps:RootOwnerDependencies){}
  private read(r:RootRequest):RootOwned {
   const x=this.deps.current(r.root.pid);
@@ -38,26 +39,33 @@ export class FaultRootOwner {
  handle(value:RootRequest):RootReply {
   try{return this.dispatch(value);}catch(error){if(value&&typeof value.label==='string'&&typeof value.nonce==='string')this.rejected.add(value.label+':'+value.nonce);throw error;}
  }
+ private authorize(r:RootRequest,x:RootOwned):LiveProof|undefined {
+  if(!isLiveLabel(r.label)){this.deps.authorize(r,x);return undefined;}
+  requireValue(this.deps.authorizeLive,'separate live admission unavailable');
+  const proof=this.deps.authorizeLive(r,x);validateLiveProof(r,proof,this.deps.now());return proof;
+ }
  private dispatch(value:RootRequest):RootReply {
   const r=parseRootRequest(JSON.stringify(value),this.deps.now());requireValue(r.compiler===this.deps.compiler&&r.compilerNonce===this.deps.compilerNonce,'active compiler');
   const key=r.label+':'+r.nonce;requireValue(!this.rejected.has(key),'previous invalid operation');let s=this.sessions.get(key);
   if(r.phase==='held'){
-   requireValue(!s,'replayed initial sample');const held=this.read(r);this.deps.authorize(r,held);
+   requireValue(!s,'replayed initial sample');const held=this.read(r);this.authorize(r,held);
    s={binding:binding(r),held:{...held},phase:'held',attempted:false};this.sessions.set(key,s);
   }else requireValue(s&&s.binding===binding(r)&&!s.attempted&&JSON.stringify(r.reference)===JSON.stringify(sampleOf(s.held)),'same authenticated reference');
-  const current=this.read(r);requireValue(JSON.stringify(current)===JSON.stringify(s!.held),'custody changed');this.deps.authorize(r,current);
+  const current=this.read(r);requireValue(JSON.stringify(current)===JSON.stringify(s!.held),'custody changed');let live=this.authorize(r,current);
+  if(live){if(s!.liveHelper)requireValue(JSON.stringify(s!.liveHelper)===JSON.stringify(live.helper),'live helper custody changed');else s!.liveHelper=live.helper;}
   let close:RootClose|null=null;
   if(r.phase==='release'){
    requireValue(s!.phase==='verified','release before observed sample');s!.attempted=true;
    const exact=this.read(r);requireValue(JSON.stringify(exact)===JSON.stringify(s!.held),'identity changed immediately before release');
+   if(isLiveLabel(r.label)){live=this.authorize(r,exact);requireValue(JSON.stringify(s!.liveHelper)===JSON.stringify(live?.helper),'live helper custody changed immediately before release');}
    close=this.deps.retire(exact)??null;
    requireValue(close&&close.id===exact.id&&close.success&&close.error===0&&close.wallMs>=this.deps.now()-3000&&close.wallMs<r.deadline&&this.deps.removed(r.root.pid),'actual reportExit closure and slot removal');
   }else if(r.phase==='verified'){requireValue(s!.phase==='held','replayed observation');s!.phase='verified';}
   requireValue(this.deps.now()<r.deadline,'late operation');
-  return {request:r,sample:sampleOf(current),close,at:this.deps.now(),error:null};
+  return {request:r,sample:sampleOf(current),close,at:this.deps.now(),error:null,...(live?{live}:{})};
  }
 }
-export function validateFaultNativeEvidence(r:RootRequest,x:RootOwned,raw:string,rows:(LedgerRow&Partial<Membership>&{exitCode?:number})[]):void {
+export function validateFaultNativeEvidence(r:RootRequest,x:RootCustody,raw:string,rows:(LedgerRow&Partial<Membership>&{exitCode?:number})[]):void {
  requireValue(raw.startsWith(`pid=${r.helper.pid} exit=125 timedOut=false\n`)&&raw.includes('cleanup job-active=0')&&!raw.includes('anchor-forced-incomplete'),'completed helper job zero');
  const frame=raw.match(/^retirement-timing phase=start .* nonce=(\w+) helper=(\d+) helper-created=(\d+) root=(\d+) created=(\d+) /m);
  requireValue(frame&&frame[1]===r.nonce&&Number(frame[2])===r.helper.pid&&frame[3]===r.helper.created&&Number(frame[4])===r.root.pid&&frame[5]===r.root.created,'native captured topology identity');
@@ -80,7 +88,7 @@ function readBounded(path:string):string {requireValue(statSync(path).size<=1638
 export function startFaultRootService(directory:string,owner:FaultRootOwner,preserve:Preserve) {
  let stopped=false;const consumed=new Set<string>();
  const done=(async()=>{while(!stopped){preserve(()=>{
-  for(const file of readdirSync(directory).filter(f=>/^(?:NONCE|EARLY-RELEASE|ASSIGNED|RELEASE|STALL|ASSIGNED-PAIR-HELD|ASSIGNED-PAIR-RELEASED)\.(?:held|verified|release)\.request\.json$/.test(f))){
+  for(const file of readdirSync(directory).filter(f=>/^(?:NONCE|EARLY-RELEASE|ASSIGNED|RELEASE|STALL|ASSIGNED-PAIR-HELD|ASSIGNED-PAIR-RELEASED|ASSIGNED-LIVE-HELD|ASSIGNED-LIVE-RELEASED)\.(?:held|verified|release)\.request\.json$/.test(f))){
    if(consumed.has(file))continue;consumed.add(file);const path=join(directory,file);let request:RootRequest|undefined;
    try{request=parseRootRequest(readBounded(path),Date.now());requireValue(file===`${request.label}.${request.phase}.request.json`,'request filename');const reply=owner.handle(request);publish(path.replace('.request.json','.response.json'),JSON.stringify(reply));}
    catch(error){publish(path.replace('.request.json','.response.json'),JSON.stringify({request:request??null,sample:null,close:null,error:String(error),at:Date.now()}));}
@@ -93,8 +101,9 @@ export async function requestRootReference(directory:string,r:RootRequest,preser
  const path=join(directory,`${r.label}.${r.phase}.response.json`);
  while(Date.now()<r.deadline){
   const text=preserve(()=>existsSync(path)?readBounded(path):undefined);
-  if(text!==undefined){const reply=JSON.parse(text);keys(reply,['request','sample','close','at','error']);requireValue(JSON.stringify(reply.request)===JSON.stringify(r)&&Number.isSafeInteger(reply.at)&&Number(reply.at)<r.deadline&&Number(reply.at)>=r.deadline-3000&&Number(reply.at)<=Date.now(),'authenticated reply');if(reply.error!==null){requireValue(typeof reply.error==='string'&&reply.sample===null&&reply.close===null,'strict error response');throw new Error(reply.error);}custody(reply.sample);requireValue(r.phase==='held'||JSON.stringify(reply.sample)===JSON.stringify(r.reference),'same response custody');
+  if(text!==undefined){const reply=JSON.parse(text);keys(reply,['request','sample','close','at','error',...(isLiveLabel(r.label)&&reply.error===null?['live']:[])]);requireValue(JSON.stringify(reply.request)===JSON.stringify(r)&&Number.isSafeInteger(reply.at)&&Number(reply.at)<r.deadline&&Number(reply.at)>=r.deadline-3000&&Number(reply.at)<=Date.now(),'authenticated reply');if(reply.error!==null){requireValue(typeof reply.error==='string'&&reply.sample===null&&reply.close===null,'strict error response');throw new Error(reply.error);}custody(reply.sample);requireValue(r.phase==='held'||JSON.stringify(reply.sample)===JSON.stringify(r.reference),'same response custody');
    if(r.phase==='release'){keys(reply.close,['id','success','error','wallMs']);requireValue(reply.close.id===r.reference?.id&&reply.close.success===true&&reply.close.error===0&&Number.isSafeInteger(reply.close.wallMs)&&Number(reply.close.wallMs)<r.deadline,'close proof');}else requireValue(reply.close===null,'early closure');
+   if(isLiveLabel(r.label))validateLiveProof(r,reply.live,Date.now());
    return reply as unknown as RootReply;}
   await pause();
  }throw new Error('fault root reference absolute deadline');
