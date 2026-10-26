@@ -770,7 +770,8 @@ export class Workspace {
     // An offline source can open an explicit ready target, but cannot resolve another address.
     if (owner.connection !== 'ready') return;
     // An unqualified address can still name the sole known remote holder after local NotFound.
-    const holders = connected.filter(machine => machine.store.threads.some(thread => thread.id === threadId));
+    const holders = this.machines.filter(machine => machine.store.connection === 'ready'
+      && machine.store.threads.some(thread => thread.id === threadId));
     if (where === null && holders.length === 1) { await this.select(holders[0]!.store, threadId); return; }
     if (client && from) {
       try {

@@ -197,6 +197,48 @@ test.each(['thread', 'draft', 'machine'] as const)('a delayed archive resolution
   } finally { release(); await opening; }
 });
 
+test.each(['current', 'thread', 'draft', 'machine', 'disconnection'] as const)(
+  'a delayed local NotFound only selects a still-ready sole holder after %s navigation', async next => {
+    const { a, b, ca, cb } = await setup();
+    await thread(cb, b, targetId);
+    const call = ca.call.bind(ca);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let reading = false;
+    vi.spyOn(ca, 'call').mockImplementation(async (method, params) => {
+      if (method === 'threads.get' && (params as { threadId?: string }).threadId === targetId) {
+        reading = true;
+        await gate;
+      }
+      return call(method, params);
+    });
+    const opening = workspace.openThreadLink(a, undefined, null, targetId);
+    try {
+      await vi.waitFor(() => expect(reading).toBe(true));
+      if (next === 'thread') await a.open('t-scheduler');
+      else if (next === 'draft') {
+        a.startDraft('p-boite', { fresh: true });
+        a.editComposerText('draft', 'A newer draft');
+        a.composerStates.draft!.attachments = [{ kind: 'file', name: 'notes.txt', mimeType: 'text/plain',
+          data: btoa('draft attachment') }];
+      } else if (next === 'machine') await workspace.select(b, 't-descriptors');
+      else if (next === 'disconnection') cb.drop();
+      const remote = vi.spyOn(cb, 'call');
+      release();
+      await opening;
+      expect(workspace.active).toBe(next === 'current' || next === 'machine' ? b : a);
+      expect(a.openThread?.id ?? null).toBe(next === 'thread' ? 't-scheduler' : next === 'draft' ? null : 't-trace');
+      expect(b.openThread?.id ?? null).toBe(next === 'current' ? targetId : next === 'machine' ? 't-descriptors' : null);
+      expect(a.error).toBe(next === 'disconnection' ? strings.agentMessages.threadMissing : null);
+      if (next !== 'current') expect(remote).not.toHaveBeenCalled();
+      if (next === 'draft') {
+        expect(a.composerStates.draft?.text).toBe('A newer draft');
+        expect(a.composerStates.draft?.attachments).toMatchObject([{ name: 'notes.txt', data: btoa('draft attachment') }]);
+      }
+    } finally { release(); await opening; }
+  }
+);
+
 test.each(['agents', 'settings'] as const)('palette remote selection leaves source %s history untouched', async page => {
   setExperiment('resident-agents', true);
   const { a, b, ca } = await setup();
