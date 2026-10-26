@@ -2,14 +2,14 @@ import {existsSync,readFileSync,writeFileSync,readdirSync,statSync,renameSync} f
 import {join} from 'node:path';
 import type {LedgerRow,ProcessIdentity,Membership} from './target-topology.ts';
 
-export type FaultLabel='NONCE'|'EARLY-RELEASE'|'ASSIGNED'|'RELEASE'|'STALL';
+export type FaultLabel='NONCE'|'EARLY-RELEASE'|'ASSIGNED'|'RELEASE'|'STALL'|'ASSIGNED-PAIR-HELD'|'ASSIGNED-PAIR-RELEASED';
 export interface RootCustody {owner:string;id:string;threadId:string;threadJob:string;jobKey:number;globalJob:string;nestingRefused:boolean}
 export interface RootRequest {version:1;compiler:string;compilerNonce:string;nonce:string;label:FaultLabel;phase:'held'|'verified'|'release';helper:ProcessIdentity;root:ProcessIdentity;names:{map:string;retired:string;unused:string};deadline:number;reference:RootCustody|null}
 export interface RootClose {id:string;success:boolean;error:number;wallMs:number}
 export interface RootReply {request:RootRequest;sample:RootCustody|null;close:RootClose|null;at:number;error:string|null}
 export interface RootOwned extends RootCustody {handle:number;pid:number;created:string;exitCode:number|null;role:string;complete:boolean;closeFailed:boolean;stage:string}
 export interface RootOwnerDependencies {compiler:string;compilerNonce:string;now():number;current(pid:number):RootOwned|undefined;removed(pid:number):boolean;authorize(request:RootRequest,sample:RootOwned):void;retire(sample:RootOwned):RootClose|undefined}
-const labels=['NONCE','EARLY-RELEASE','ASSIGNED','RELEASE','STALL'];
+const labels=['NONCE','EARLY-RELEASE','ASSIGNED','RELEASE','STALL','ASSIGNED-PAIR-HELD','ASSIGNED-PAIR-RELEASED'];
 function requireValue(value:unknown,error:string):asserts value {if(!value)throw new Error('fault root reference: '+error);}
 function keys(value:unknown,expected:string[]):asserts value is Record<string,unknown> {requireValue(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join()===expected.sort().join(),'exact fields');}
 function identity(value:unknown):asserts value is ProcessIdentity {keys(value,['pid','created']);requireValue(Number.isSafeInteger(value.pid)&&Number(value.pid)>0&&Number(value.pid)<=0xffffffff&&typeof value.created==='string'&&/^[1-9]\d{0,19}$/.test(value.created),'identity');}
@@ -80,7 +80,7 @@ function readBounded(path:string):string {requireValue(statSync(path).size<=1638
 export function startFaultRootService(directory:string,owner:FaultRootOwner,preserve:Preserve) {
  let stopped=false;const consumed=new Set<string>();
  const done=(async()=>{while(!stopped){preserve(()=>{
-  for(const file of readdirSync(directory).filter(f=>/^(?:NONCE|EARLY-RELEASE|ASSIGNED|RELEASE|STALL)\.(?:held|verified|release)\.request\.json$/.test(f))){
+  for(const file of readdirSync(directory).filter(f=>/^(?:NONCE|EARLY-RELEASE|ASSIGNED|RELEASE|STALL|ASSIGNED-PAIR-HELD|ASSIGNED-PAIR-RELEASED)\.(?:held|verified|release)\.request\.json$/.test(f))){
    if(consumed.has(file))continue;consumed.add(file);const path=join(directory,file);let request:RootRequest|undefined;
    try{request=parseRootRequest(readBounded(path),Date.now());requireValue(file===`${request.label}.${request.phase}.request.json`,'request filename');const reply=owner.handle(request);publish(path.replace('.request.json','.response.json'),JSON.stringify(reply));}
    catch(error){publish(path.replace('.request.json','.response.json'),JSON.stringify({request:request??null,sample:null,close:null,error:String(error),at:Date.now()}));}
@@ -111,17 +111,22 @@ function exactRootObservation(r:RootObservation,path:string):boolean {
  const cleanup=r.err.match(/^cleanup object=map-post-exit-observer handle=([0-9a-fA-F]{16}) query=0x00000000 attributes=0x00000000 granted=0x00000001 handles=[1-9]\d* pointers=[1-9]\d*\r\ncleanup close=map-post-exit-observer closed=1 error=0\r\n$/);
  return !!cleanup&&BigInt('0x'+cleanup[1])>0n;
 }
-export async function measureFaultRootReference(request:RootRequest,deps:{exchange(r:RootRequest):Promise<RootReply>;observe(path:string,phase:string,deadline:number):Promise<RootObservation>;rows(): (LedgerRow&{error?:number})[];now():number}):Promise<RootControlRecord> {
- const record:RootControlRecord={request,before:[],after:[],otherReferencesDrained:false,protocolValid:false,outcome:'inconclusive',causeConfirmed:false,productionAccepted:false};
- const observations=async(phase:string)=>{
+export function validateRootObservations(names:RootRequest['names'],result:RootObservation[]):void {
+ requireValue(result.length===3,'three owned observers');
+ for(const [i,r] of result.entries())requireValue(exactRootObservation(r,Object.values(names)[i]!),'exact observer output');
+}
+export async function observeRootBatch(request:RootRequest,phase:string,deps:{observe(path:string,phase:string,deadline:number):Promise<RootObservation>;now():number}):Promise<RootObservation[]> {
   requireValue(deps.now()<request.deadline,'observer deadline');
   const settled=await Promise.allSettled(Object.values(request.names).map(path=>deps.observe(path,phase,request.deadline)));
   const result:RootObservation[]=[];
   for(const r of settled){if(r.status==='fulfilled')result.push(r.value);}
   requireValue(settled.every(r=>r.status==='fulfilled')&&result.length===3,'all observers joined successfully');
-  for(const [i,r] of result.entries())requireValue(exactRootObservation(r,Object.values(request.names)[i]!),'exact observer output');
+  validateRootObservations(request.names,result);
   requireValue(deps.now()<request.deadline,'late observer');return result;
- };
+}
+export async function measureFaultRootReference(request:RootRequest,deps:{exchange(r:RootRequest):Promise<RootReply>;observe(path:string,phase:string,deadline:number):Promise<RootObservation>;rows(): (LedgerRow&{error?:number})[];now():number}):Promise<RootControlRecord> {
+ const record:RootControlRecord={request,before:[],after:[],otherReferencesDrained:false,protocolValid:false,outcome:'inconclusive',causeConfirmed:false,productionAccepted:false};
+ const observations=(phase:string)=>observeRootBatch(request,phase,deps);
  try {
   record.held=await deps.exchange(request);requireValue(record.held.sample,'held custody');
   while(deps.now()<request.deadline&&!otherRootReferencesDrained(request,record.held.sample,deps.rows()))await pause();

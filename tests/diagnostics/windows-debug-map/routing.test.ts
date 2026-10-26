@@ -12,6 +12,7 @@ import {validateRetirementTiming, type RetirementReport} from './retirement-timi
 import {validateDirectoryTwin, type DirectoryTwinReport} from './directory-twin.ts';
 import {validateAnchorOverlap, corroborateAnchorRegistry, compareAnchorPair, type AnchorReport} from './anchor-overlap.ts';
 import {measureFaultRootReference,requestRootReference,type RootRequest,type RootControlRecord} from './fault-root-reference.ts';
+import {measureMatchedRootReferences,type MatchedArmInput} from './matched-root-reference.ts';
 import {sha256} from './generate.ts';
 
 const native = process.platform === 'win32' && process.env.BOITE_TEST_DEBUG_MAP === '1';
@@ -50,9 +51,10 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   const anchorTopology: unknown[] = []; report.anchorTopology = anchorTopology;
   const anchorFrames: unknown[] = []; report.anchorFrames = anchorFrames;
   const faultRootReferences: RootControlRecord[] = []; report.faultRootReferences = faultRootReferences;
+  const matchedFaultHelpers: {label:string;fault:string;protocol:AnchorReport;cleanup?:boolean}[] = []; report.matchedFaultHelpers = matchedFaultHelpers;
   const controls = join(state, 'target-creator-control'); mkdirSync(controls);
   const topologyProofs: unknown[] = []; report.targetCreatorTopology = topologyProofs;
-  const jobs = ['RED', 'A', 'B', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'THREAD-EXITED', 'THREAD-WAITING', 'TARGET-HELPER-HELD', 'RETIRE-LIVE', 'RETIRE-EXITED', 'DIRECTORY-TWIN', 'ANCHOR-EXCLUSIVE', 'ANCHOR-HELD', ...anchorFaults.map(f => `ANCHOR-FAULT-${f.toUpperCase()}`)].map(label => {
+  const jobs = ['RED', 'A', 'B', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'THREAD-EXITED', 'THREAD-WAITING', 'TARGET-HELPER-HELD', 'RETIRE-LIVE', 'RETIRE-EXITED', 'DIRECTORY-TWIN', 'ANCHOR-EXCLUSIVE', 'ANCHOR-HELD', ...anchorFaults.map(f => `ANCHOR-FAULT-${f.toUpperCase()}`), 'ANCHOR-FAULT-ASSIGNED-PAIR-HELD', 'ANCHOR-FAULT-ASSIGNED-PAIR-RELEASED'].map(label => {
     const root = join(state, label), project = join(root, 'project'), runtime = join(root, 'runtime'), home = join(root, 'home');
     const marker = `TASK_ROUTE_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
     return {label, root, project, runtime, home, marker, profile: `boite.debug.route.${crypto.randomUUID().replaceAll('-', '')}`};
@@ -156,7 +158,9 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
           if (!corroborateAnchorRegistry(evidence, traceRows(process.env.BOITE_DEBUG_MAP_TRACE!), anchorProofs))
             failures.push(`${id} anchor registry: ${evidence.registryError}`);
         } else {
-          anchorFaultControls.push({fault: anchorFault, protocol: evidence});
+          if (id === 'lpac-ANCHOR-FAULT-ASSIGNED-PAIR-HELD' || id === 'lpac-ANCHOR-FAULT-ASSIGNED-PAIR-RELEASED')
+            matchedFaultHelpers.push({label:id.slice(5),fault:anchorFault,protocol:evidence});
+          else anchorFaultControls.push({fault: anchorFault, protocol: evidence});
           if (evidence.protocolValid) failures.push(`${id} deliberate anchor fault accepted`);
         }
       } else {
@@ -477,7 +481,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     if (report.redSafetyPassed === true) {
       // The timing pair and independent twin overlap the serial controls.
       // Captures and complete continuations join on every cleanup path.
-      timingTasks.push(...jobs.slice(16).map(async (job, index) => {
+      timingTasks.push(...jobs.slice(16, -2).map(async (job, index) => {
         writeFileSync(join(job.project, 'release'), 'synthetic');
         const fault = index >= 5 ? anchorFaults[index - 5] : undefined;
         const mode = index === 0 ? 'retire-live-run' : index === 1 ? 'retire-exited-run' : index === 2 ? 'directory-twin-run' : index === 4 ? 'anchor-held-run' : 'anchor-exclusive-run';
@@ -527,6 +531,57 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
         const ordinary = await execute(`ordinary-after-${job.label.toLowerCase()}`, ['observe', state]);
         observer(`after ${job.label}`, ordinary, before); save();
       }));
+      // Additional invocations of the same assigned fault. The entire pair,
+      // including post-exit observers, joins before cleanup on every path.
+      timingTasks.push((async()=>{
+        const prepared=await Promise.allSettled(jobs.slice(-2).map(async job=>{
+          writeFileSync(join(job.project,'release'),'synthetic');
+          const result=await run(job,false,'anchor-exclusive-run','assigned');report[job.label.toLowerCase()]=result;
+          const checks=[completed(job.label,result,125),verify(`${job.label} bounded failure cleanup`,()=>{
+            expect(result.err).toContain('cleanup job-active=0');expect(result.err).not.toContain('anchor-forced-incomplete');
+            for(const phase of ['assign','resume','release'])expect(result.err).not.toContain(`retirement-timing phase=${phase} `);
+            const cleanup=result.err.match(/anchor-cleanup setter=\d+ created=\d+ acquired=(\d+) closed=(\d+) files-acquired=(\d+) files-closed=(\d+) forced=[01] exit=125 error=13/);
+            expect(Number(cleanup?.[1])).toBe(5);expect(cleanup?.[2]).toBe(cleanup?.[1]);
+            expect(Number(cleanup?.[3])).toBeGreaterThan(0);expect(cleanup?.[4]).toBe(cleanup?.[3]);
+            for(const slot of ['root-thread','root-process','job','link','map','retire-named-map','twin-unused-map','twin-attached-open','twin-unused-open'])
+              expect(result.err).toContain(`cleanup close=${slot} closed=1 error=0`);
+            expect(result.err).toMatch(/caller snapshot=after .* unchanged=1/);
+          })];
+          cleanupConfirmed.set(`lpac-${job.label}`,checks.every(Boolean));
+          await observeAfterExit(job.label,result);
+          const priorCleanupPassed=checks.every(Boolean)&&cleanupConfirmed.get(`lpac-${job.label}`)===true;
+          const evidence=matchedFaultHelpers.find(r=>r.label===job.label);if(evidence)evidence.cleanup=priorCleanupPassed;
+          const frame=result.err.match(/^retirement-timing phase=start .* nonce=(\w+) helper=(\d+) helper-created=(\d+) root=(\d+) created=(\d+) /m);
+          const map=result.err.match(/^private-map path=(.+) create=0x00000000/m)?.[1]?.replace(/\r$/,'');
+          if(!checks.every(Boolean)||!frame||!map)throw Error(`${job.label} matched helper prerequisites missing`);
+          const postHelper=afterExit.filter(r=>r.label===job.label).map(r=>({path:r.path as string,pid:r.pid as number,code:r.code as number|null,out:r.out as string,err:r.err as string,timedOut:r.timedOut as boolean}));
+          return {label:job.label,frame,map,result,postHelper,priorCleanupPassed};
+        }));
+        const errors=prepared.filter(r=>r.status==='rejected').map(r=>(r as PromiseRejectedResult).reason);
+        if(errors.length){report.matchedFaultRootReference={protocolValid:false,outcome:'inconclusive',causeConfirmed:false,productionAccepted:false,error:errors.map(String).join('; ')};throw Error(`matched helpers: ${errors.map(String).join('; ')}`);}
+        const directory=process.env.BOITE_ROOT_REFERENCE_DIRECTORY;
+        if(!directory)throw Error('matched root reference private directory missing');
+        const deadline=Date.now()+3000;
+        const ready=prepared.flatMap(result=>result.status==='fulfilled'?[result.value]:[]);
+        const armInputs:MatchedArmInput[]=ready.map((p,index)=>{
+          const request:RootRequest={version:1,compiler:process.env.BOITE_ROOT_REFERENCE_COMPILER!,compilerNonce:process.env.BOITE_ROOT_REFERENCE_NONCE!,nonce:p.frame[1]!,label:index===0?'ASSIGNED-PAIR-HELD':'ASSIGNED-PAIR-RELEASED',phase:'held',helper:{pid:Number(p.frame[2]),created:p.frame[3]!},root:{pid:Number(p.frame[4]),created:p.frame[5]!},names:{map:p.map,retired:p.map+'.retired',unused:p.map+'.unused'},deadline,reference:null};
+          return {request,helper:p.result,postHelper:p.postHelper,priorCleanupPassed:p.priorCleanupPassed};
+        });
+        if(armInputs.length!==2)throw Error('matched root reference requires both completed helpers');
+        const inputs={held:armInputs[0]!,released:armInputs[1]!};
+        const control=await measureMatchedRootReferences(inputs,{
+          now:()=>Date.now(),rows:()=>ownershipTrace.preserve(()=>traceRows(process.env.BOITE_DEBUG_MAP_TRACE!)),
+          exchange:r=>requestRootReference(directory,r,action=>ownershipTrace.preserve(action)),
+          observe:async(r,path,phase,limit)=>{
+            const remaining=limit-Date.now();if(remaining<=0)throw Error('matched root reference observer deadline');
+            const result=await execute(`matched-root-${r.label.toLowerCase()}-${phase}-${path.endsWith('.retired')?'retired':path.endsWith('.unused')?'unused':'map'}`,['observe-map',path],state,{},remaining);
+            return {path,...result};
+          },
+        });
+        report.matchedFaultRootReference=control;
+        if(!control.protocolValid)failures.push(`matched root reference control: ${control.error}`);
+        save();
+      })());
       for (const promise of timingTasks) void promise.catch(() => {});
       for (const [index, mode] of (['direct-run', 'setter-run', 'quiet-run', 'reopen-run', 'creator-run', 'retire-run', 'retire-named-run', 'target-exited-run', 'target-waiting-run', 'target-helper-exited-run', 'thread-exited-run', 'thread-waiting-run', 'target-helper-exited-run'] as const).entries()) {
         const job = jobs[index + 3]!;

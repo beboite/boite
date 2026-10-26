@@ -1151,6 +1151,45 @@ pass the held-observation parser in a replay that performs no native release.
 Corrected SDK/MinGW native service and release observations remain pending;
 CAUSE_CONFIRMED=no and productionAccepted=false.
 
+Run40264036895 / job121382549194 executes headb777bbf6. All63 manifest
+and13 provenance entries match. The corrected parser permits all ten complete
+held/verified/release protocols:30 raw phases,10 exact successful native closes
+and60 complete observers. One name per fault is retained before release;
+all30 names are absent afterward. Other known root references drain before
+the baseline, and the selected reference closes between the two observation
+batches. SDK1710/1710 and MinGW1716/1716 references close successfully. The
+native close event and its returned proof use separate wall-clock samples;
+one differs by1ms, both within the authenticated phase interval.
+
+This is a positive fault-specific intervention differential. The eight normal
+ANCHOR/RETIRE-LIVE/RETIRE-EXITED roots still retain their retired names after
+their two known registry process references and the C root-thread/root-process
+handles close. The fault result therefore does not explain normal retention.
+All77 older failures per compiler remain fatal, including old fault cleanup;
+production remains0/7 per compiler at NUL error5. Elapsed-time/asynchronous
+cleanup is not excluded by the single-reference before/after control.
+
+## Matched fault root reference pair
+
+The next diagnostic compares two additional instances of the existing ASSIGNED
+fault, with distinct private fixtures/nonces and one shared absolute3s bound.
+Both exact exited roots authenticate and drain other references before a shared
+baseline. After both verified samples, only one owned launcher reference closes
+through reportExit. Both arms then use the same observer window; the held arm's
+reference must remain owned until every observer has joined, then close through
+the same original owner. Missing custody or natural early closure invalidates
+the pair. No unknown handle, new native right or C/production change is involved.
+
+The separate result cannot repair old fault flags or grant production admission.
+Local implementation passes75 tests/869 assertions, with one native skip;
+scoped types, architecture1219 modules and strict MinGW compilation of both
+programs pass. Parent review confirms the shared parser preserves all ten old
+controls in an archived-data replay (30 replies), with no native operation.
+The two new modules are in the manifest; all20 C/header sources and generated
+C remain identical to b777bbf6. SDK compilation, actual paired Windows execution
+and the complete observer schedule inside the unchanged3s bound remain pending.
+CAUSE_CONFIRMED=no and productionAccepted=false.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:
