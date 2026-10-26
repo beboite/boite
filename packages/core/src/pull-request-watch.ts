@@ -449,7 +449,7 @@ const rulesKey = (record: WatchRecord, base: string) => `${record.host} ${record
 
 function seenOf(detail: WatchDetail, memory: WatchMemory, now: number): PullRequestWatchSeen {
   return {
-    checkedAt: now, head: detail.head.slice(0, 7), base: detail.base, conflicting: memory.conflicting,
+    checkedAt: now, head: detail.head.slice(0, 7), base: detail.base, conflicting: memory.conflicting, behind: memory.behind === true,
     queue: detail.queue === null ? null : { position: detail.queue },
     checks: { total: detail.checks.length, running: detail.checks.filter(check => check.status === 'pending').length, failed: detail.checks.filter(check => check.status === 'failed').length },
   };

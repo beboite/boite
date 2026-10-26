@@ -1,6 +1,6 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { AGENT_ENV, DEFAULT_DELEGATION_CONFIG, type ThreadId } from '@boite/contracts';
-import { runCli } from '../src/cli.ts';
+import { runCli, watchStatus } from '../src/cli.ts';
 import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { Retirements } from '../src/delegation/retirement.ts';
@@ -277,6 +277,8 @@ test('a burst folds into one set of changes, and failures of an older head drop 
 interface FakeGitHub {
   state: 'OPEN' | 'CLOSED' | 'MERGED';
   mergeable: string;
+  /** GitHub's merge state, absent where the test does not need it. */
+  mergeState?: string;
   head: string;
   /** Its place in the merge queue, null out of it. */
   queue: number | null;
@@ -321,11 +323,11 @@ async function answer(github: FakeGitHub, args: string[]): Promise<string> {
       timelineItems: { nodes: state === 'CLOSED' ? [{ actor: by }] : [] } } } } });
   }
   const mergeQueueEntry = github.queue === null ? null : { position: github.queue };
-  if (query?.includes('viewer')) return detailJson(github.runs, { state: github.detailState ?? github.state, mergeable: github.mergeable, headRefOid: github.head, mergeQueueEntry });
+  if (query?.includes('viewer')) return detailJson(github.runs, { state: github.detailState ?? github.state, mergeable: github.mergeable, mergeStateStatus: github.mergeState, headRefOid: github.head, mergeQueueEntry });
   if (query) {
     const counts = new Map<string, number>();
     for (const run of github.runs) { const key = run.status && run.status !== 'COMPLETED' ? run.status : run.conclusion ?? 'SUCCESS'; counts.set(key, (counts.get(key) ?? 0) + 1); }
-    return JSON.stringify({ data: { repository: { pullRequest: { state: github.state, mergeable: github.mergeable, headRefOid: github.head, updatedAt: github.updatedAt, mergeQueueEntry,
+    return JSON.stringify({ data: { repository: { pullRequest: { state: github.state, mergeable: github.mergeable, mergeStateStatus: github.mergeState, headRefOid: github.head, updatedAt: github.updatedAt, mergeQueueEntry,
       comments: { totalCount: github.comments.length, nodes: [] }, reviews: { totalCount: github.reviews.length, nodes: [] }, reviewThreads: { totalCount: 0 },
       commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { checkRunCountsByState: [...counts].map(([state, count]) => ({ state, count })), statusContextCountsByState: [] } } } }] } } } } });
   }
@@ -422,6 +424,13 @@ test('a watch reads first without waking, wakes once per change with links, and 
   await drive();
   await settled(threadId);
   expect(wakeText(threadId, wakes(threadId)[2]!.id)).toContain('The branch now conflicts with main.');
+  // Resolved, then behind a base that requires it up to date: told, and shown by what the watch saw.
+  github.mergeable = 'MERGEABLE';
+  github.mergeState = 'BEHIND';
+  await drive();
+  await settled(threadId);
+  expect(wakeText(threadId, wakes(threadId)[3]!.id)).toContain('The branch is behind main');
+  expect(watchStatus(harness!.core.pullRequestWatches.of(threadId)[0]!)).toContain('behind main');
 
   // The agent's own merge ends the watch without a wake.
   github.state = 'MERGED';
@@ -429,7 +438,7 @@ test('a watch reads first without waking, wakes once per change with links, and 
   expect(github.calls).toContain('closer');
   expect(harness!.core.pullRequestWatches.of(threadId)).toEqual([]);
   expect(harness!.core.journal.getSetting(`pr-watches:${threadId}`)).toBeUndefined();
-  expect(wakes(threadId)).toHaveLength(3);
+  expect(wakes(threadId)).toHaveLength(4);
 });
 
 test('a check the base branch requires holds "passed" back until it reported', async () => {
