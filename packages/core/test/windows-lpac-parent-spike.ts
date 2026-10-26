@@ -346,8 +346,9 @@ static DWORD sp_driver(PROCESS_INFORMATION root, const wchar_t *exe, const wchar
   for (DWORD level = 0; level < 3; level++) {
     SP_NODE *node = &sp_nodes[level]; SP_COMMAND command; SP_REPLY reply; ZeroMemory(&command, sizeof(command));
     command.Magic = SP_MAGIC; command.Level = level; command.HostPid = GetCurrentProcessId(); command.Restricted = sp_restricted;
-    if (wcslen(cwd) >= 1024) return ERROR_BUFFER_OVERFLOW;
-    wcscpy(command.Cwd, cwd);
+    size_t cwd_length = wcslen(cwd);
+    if (cwd_length >= 1024) return ERROR_BUFFER_OVERFLOW;
+    memcpy(command.Cwd, cwd, (cwd_length + 1) * sizeof(wchar_t));
     command.Included = node->Inherited[3]; command.Omitted = node->OmittedRemote;
     if (level < 2) {
       memcpy(command.Own, sp_nodes[level + 1].ParentHandles, sizeof(command.Own));
