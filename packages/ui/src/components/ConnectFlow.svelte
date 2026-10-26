@@ -5,6 +5,7 @@
   import ProviderLogo from './ProviderLogo.svelte';
   import { Closing } from '../lib/closing.svelte';
   import { mobileOverlay } from '../lib/mobile-history';
+  import { focusInitial } from '../lib/focus';
   import { bytes, percent } from '../lib/format';
   import { nextAccountLabel, setupStep, signInTarget, type SetupStep } from '../lib/provider-setup';
   import { fill, strings } from '../lib/strings';
@@ -60,7 +61,7 @@
   async function focusFirst(unlessInside = false) {
     await tick();
     if (unlessInside && dialog?.contains(document.activeElement)) return;
-    dialog?.querySelector<HTMLElement>('.body button:not(:disabled), .body a, .body input')?.focus({ preventScroll: true });
+    focusInitial(dialog?.querySelector<HTMLElement>('.body button:not(:disabled), .body a, .body input'), dialog);
   }
 
   // A step that replaces the pressed button hands the keyboard to its own first control, not to the page behind.

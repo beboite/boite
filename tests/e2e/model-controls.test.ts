@@ -24,6 +24,7 @@ async function resetPicker() {
     await page.waitFor(`document.querySelector('[data-testid=mobile-tabs]')`);
   }
   await page.waitFor(`!history.state?.boiteOverlay`);
+  await page.send('Emulation.setTouchEmulationEnabled', { enabled: false });
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await page.navigate(url);
 }
@@ -68,12 +69,14 @@ test.each([1440, 390])('paired devices discover, refresh and select native model
 
 test.each([1440, 390])('search finds legacy and OpenCode models without changing provider defaults at %ipx', async width => {
   await page.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 720 });
+  await page.send('Emulation.setTouchEmulationEnabled', { enabled: width < 720 });
   await page.navigate(url);
   if (width < 720) await newMobileThread(page); else await page.click('[data-testid=new-thread]');
   const defaults = await page.evaluate(`JSON.stringify(globalThis.__boiteTest.workspace.active.modelDefaults)`);
   await page.click('[data-testid=composer-picker]');
   await page.click('[data-provider=claude]');
   await page.waitFor(`document.querySelector('[data-testid=picker-search]') && document.querySelector('[data-testid=picker-legacy]')`);
+  expect(await page.evaluate(`matchMedia('(pointer: coarse)').matches`)).toBe(width < 720);
   if (width < 720) expect(await page.evaluate(`document.activeElement !== document.querySelector('[data-testid=picker-search]')`)).toBe(true);
   await page.type('[data-testid=picker-search]', 'opus 4.8');
   await page.waitFor(`document.querySelector('[data-testid=composer-picker-menu] [data-model="claude-opus-4-8"]')`);

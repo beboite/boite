@@ -4,6 +4,7 @@
   import { ArrowUp, ChevronDown, ChevronRight, Folder, FolderOpen, Monitor, X } from '@lucide/svelte';
   import { Closing } from '../lib/closing.svelte';
   import { mobileOverlay } from '../lib/mobile-history';
+  import { focusInitial, restoreFocus } from '../lib/focus';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -34,7 +35,7 @@
     previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     overlay.show();
     void untrack(() => browse());
-    void tick().then(() => input?.focus({ preventScroll: true }));
+    void tick().then(() => focusInitial(input, card));
   });
 
   async function browse(target?: string) {
@@ -57,7 +58,7 @@
   function close() {
     ++revision;
     store.projectPickerOpen = false;
-    previous?.focus({ preventScroll: true });
+    restoreFocus(previous);
   }
   async function machine(id: string) {
     if (id === 'manage') { close(); store.showSettings('machines'); return; }

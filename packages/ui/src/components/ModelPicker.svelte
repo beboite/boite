@@ -8,6 +8,7 @@
   import ProviderLogo from './ProviderLogo.svelte';
   import ProviderTiles from './ProviderTiles.svelte';
   import { floating } from '../lib/floating';
+  import { focusInitial } from '../lib/focus';
   import { Closing } from '../lib/closing.svelte';
   import { fill, strings } from '../lib/strings';
   import { FIRST_MODELS, favoriteIds, firstModels, groupModels, modelSource } from '../lib/model-list';
@@ -230,8 +231,8 @@
 
   // Desktop can type immediately. Phones keep their keyboard closed until tapped.
   $effect(() => {
-    if (!popover.open || !searchable || window.matchMedia('(max-width: 720px)').matches) return;
-    searchBox?.focus();
+    if (!popover.open || !searchable) return;
+    focusInitial(searchBox, menu);
   });
 
   function toggle(event: MouseEvent) {
@@ -449,7 +450,7 @@
               {/each}
             {/each}
             {#if capped}
-              <button type="button" class="row fold small" data-row data-testid="picker-show-all" onclick={() => { expandedFor = shown?.id ?? null; searchBox?.focus(); }}><span class="ui-label">{fill(strings.composer.showAllModels, { count: String(filteredCurrent.length) })}</span></button>
+              <button type="button" class="row fold small" data-row data-testid="picker-show-all" onclick={() => { expandedFor = shown?.id ?? null; focusInitial(searchBox, menu); }}><span class="ui-label">{fill(strings.composer.showAllModels, { count: String(filteredCurrent.length) })}</span></button>
             {/if}
           {:else}
             {#each filteredCurrent as model (model.id)}
