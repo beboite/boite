@@ -1,5 +1,5 @@
 /** Projects, their files and the Claude Code sessions they can import. */
-import { PROJECT_NAME_MAX, RpcErrorCode, type Project, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { PROJECT_NAME_MAX, RpcErrorCode, type ImportableSession, type Project, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { missingFolder, pathKey } from './checks';
 import { FAKE_FILES, scoreFakeFile } from './files';
@@ -8,6 +8,14 @@ import { FAKE_DRAFTS_PATH, toSummary } from './shared';
 import { putAway } from './threads';
 import { archiveProject, describedProject, requireFakeFolder } from './project-archive';
 import type { FakeContext, FakeMethods } from './context';
+
+/** The fake's roots are its account directories, never host paths. */
+function importAccounts(ctx: FakeContext, session: ImportableSession): string[] {
+  if (session.accountIds) return session.accountIds;
+  const owner = ctx.accounts.find(account => account.id === session.accountId);
+  if (!owner) return [session.accountId];
+  return ctx.accounts.filter(account => account.providerId === owner.providerId && account.isolationDir === owner.isolationDir).map(account => account.id);
+}
 
 export function projectMethods(ctx: FakeContext) {
   return {
@@ -168,13 +176,13 @@ export function projectMethods(ctx: FakeContext) {
         ctx.importable
           .filter((session) => session.projectId === params.projectId)
           .sort((a, b) => b.updatedAt - a.updatedAt)
-          .map(({ projectId: _p, ...session }) => session)
+          .map(({ projectId: _p, ...session }) => ({ ...session, accountIds: importAccounts(ctx, session) }))
       );
     },
     'imports.run': async (params) => {
       const project = ctx.projects.find((p) => p.id === params.projectId);
       if (!project) throw ctx.notFound('project', params.projectId);
-      const session = ctx.importable.find((entry) => entry.projectId === params.projectId && entry.sessionId === params.sessionId);
+      const session = ctx.importable.find((entry) => entry.projectId === params.projectId && entry.sessionId === params.sessionId && importAccounts(ctx, entry).includes(params.accountId));
       if (!session) {
         throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `no transcript for session ${params.sessionId}`, data: { sessionId: params.sessionId } });
       }

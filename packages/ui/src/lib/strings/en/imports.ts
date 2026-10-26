@@ -7,6 +7,8 @@ export const strings = {
     loading: 'Looking for sessions',
     empty: 'No Claude Code session for this folder.',
     imported: 'Imported',
+    chooseAccount: 'Choose an account for {title}',
+    accounts: '{count} accounts',
     importing: 'Importing',
   }
 } as const;

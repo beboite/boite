@@ -3,8 +3,9 @@
 Changes land through squash-merged pull requests. The repository's merge policy
 requires every check a pull request reports ([check names](#check-names)),
 `PR title` included, forbids direct pushes, force pushes and
-deletion of `main`, and permits admin bypass only when merging a PR. CODEOWNERS
-requests reviews; approval is not required. The `release tags` policy protects
+deletion of `main`, and permits admin bypass only when merging a PR. No review
+is requested or required: the repository has no CODEOWNERS, whose automatic
+requests mailed the owner every event of each contributor's pull request. The `release tags` policy protects
 `v*` tags from movement and deletion while allowing their creation.
 
 `PR title` runs `scripts/ci/pr-title.ts` on title edits. The squash title is
