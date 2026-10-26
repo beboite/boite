@@ -200,6 +200,29 @@ jobs:
           Get-FileHash "$env:RUNNER_TEMP\protected-tool*.exe" -Algorithm SHA256 | Format-List
           & "$env:RUNNER_TEMP\protected-tool.exe" --diagnose-null
           "BOITE_WINDOWS_SANDBOX_PATH=$env:RUNNER_TEMP\protected-tool.exe" >> $env:GITHUB_ENV
+      - name: LPAC parent creation prerequisite (non-acceptance)
+        if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        continue-on-error: true
+        env:
+          BOITE_TEST_LPAC_PARENT_SPIKE: '1'
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          bun packages/core/test/windows-lpac-parent-spike.ts "$env:RUNNER_TEMP\lpac-parent-spike"
+          $spikeExit = $LASTEXITCODE
+          Write-Host "LPAC parent prerequisite exit=$spikeExit; not production acceptance"
+          exit $spikeExit
+      - name: Preserve LPAC parent prerequisite evidence
+        if: always() && runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-lpac-parent-spike
+          path: ${{ runner.temp }}/lpac-parent-spike/
+          retention-days: 3
+          if-no-files-found: error
       - name: NUL access matrix (non-acceptance)
         if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
         continue-on-error: true

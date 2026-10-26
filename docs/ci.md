@@ -272,6 +272,13 @@ tokens using AccessCheck; an added package ACE exists only in memory.
 These DACL verdicts do not demonstrate a device open or cover the full SACL
 and driver checks.
 
+The separate `windows-lpac-parent-spike` artifact records a process-broker
+prerequisite under SDK and MinGW. An opt-in fixture tests host-created children
+with an LPAC parent, the same job and kernel child-process restrictions.
+Its non-blocking result decides only this attribute combination, including
+parent identity, inherited client handles and the child's own creation refusal.
+It neither brokers NUL nor changes the blocking production admission probe.
+
 A skip passes in a ruleset, so a draft must not satisfy it:
 
 - The planning job reports `Plan and repository checks (draft)` and the
