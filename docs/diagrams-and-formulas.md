@@ -92,7 +92,9 @@ visual: a diagram, a chart or a formula needs no command and no help
 to read. It names the Mermaid headers worth knowing (`flowchart`,
 `sequenceDiagram`, `xychart-beta` for bars and lines, `pie`, `gantt`,
 `timeline`, `quadrantChart`, `sankey-beta`, `mindmap`) and the TeX delimiters,
-and asks for a picture whenever one explains better than text. Only a
+and asks for a picture whenever one explains better than text. It asks for
+quoted `xychart-beta` labels: Pele rejects a bare label with an accent, such
+as `x-axis [Jan, Fév]`. Only a
 simulator, an animation or a custom page goes to `boite view`
 ([chat files](chat-files.md#what-the-agent-is-told)).
 

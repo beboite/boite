@@ -61,7 +61,7 @@ test('the session guide sends a visual to the chat\'s own Mermaid and TeX first,
   const guide = agentGuide(true);
   // A diagram, a chart or a formula needs no command and no help to read: the guide names the blocks chat draws.
   expect(guide).toContain(CHAT_VISUALS);
-  for (const header of ['```mermaid', 'flowchart', 'sequenceDiagram', 'xychart-beta', 'pie', 'gantt', 'timeline', 'quadrantChart', 'sankey-beta', 'mindmap', '`$$`', 'never single `$`']) expect(CHAT_VISUALS).toContain(header);
+  for (const header of ['```mermaid', 'flowchart', 'sequenceDiagram', 'xychart-beta with "quoted" labels', 'pie', 'gantt', 'timeline', 'quadrantChart', 'sankey-beta', 'mindmap', '`$$`', 'never single `$`']) expect(CHAT_VISUALS).toContain(header);
   expect(CHAT_VISUALS).toMatch(/when asked for a visual or when a picture explains better than text/);
   // Then the page, for what Mermaid cannot draw: its help is read before a page, not before every visual.
   expect(guide.indexOf(CHAT_VISUALS)).toBeLessThan(guide.indexOf(VIEW_GUIDE_LINE));

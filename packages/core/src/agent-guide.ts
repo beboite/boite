@@ -10,9 +10,10 @@ export const SHORT_ANSWERS = 'Answer style: reduce text before or between tool c
 /**
  * What chat draws by itself (docs/diagrams-and-formulas.md): the first choice
  * for a visual, since it costs the agent no command and no help to read. Each
- * Mermaid header named is one Pele draws.
+ * Mermaid header named is one Pele draws. Pele's xychart lexer rejects a bare
+ * label with an accent (`x-axis [Jan, Fév]`), the one slip a live run made.
  */
-export const CHAT_VISUALS = 'Visuals need no command: chat draws a ```mermaid fence (flowchart, sequenceDiagram, xychart-beta, pie, gantt, timeline, quadrantChart, sankey-beta, mindmap) and TeX in `$$` or backslash-parens, never single `$`. Use them when asked for a visual or when a picture explains better than text.';
+export const CHAT_VISUALS = 'Visuals need no command: chat draws a ```mermaid fence (flowchart, sequenceDiagram, xychart-beta with "quoted" labels, pie, gantt, timeline, quadrantChart, sankey-beta, mindmap) and TeX in `$$` or backslash-parens, never single `$`. Use them when asked for a visual or when a picture explains better than text.';
 
 type ListedSkill = { name: string; description: string; path: string };
 
