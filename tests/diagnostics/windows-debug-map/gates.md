@@ -860,8 +860,59 @@ Absence while this exited helper reference is held excludes deletion of its
 process object as necessary in this fixture. Retention while held followed
 by absence after closure implicates that known reference lifetime, subject to
 the separately recorded baseline timings. Neither outcome identifies the
-internal map owner or establishes a unique cause. The new control awaits
-native SDK and MinGW execution; CAUSE_CONFIRMED=no and productionAccepted=false.
+internal map owner or establishes a unique cause.
+
+Run40247292488 / job121331632325 executes head7dde2949 under Windows10.0.26100
+and Bun1.4.3. All49 manifest and11 provenance hashes match. SDK and MinGW each
+validate four held observations: both names are absent while the exact helper
+process reference remains open, the helper has exited125 and the creator is
+alive in the same job with two active processes. The retained reference closes
+exactly once after the last observation, successfully; both names remain absent
+after that close and after creator release. Complete ledgers balance1027/1027
+SDK references and1033/1033 MinGW references. All14 target-creator fault trials
+retain their required proofs and cleanup.
+
+This excludes final helper-process-object deletion as necessary for namespace
+disappearance here. It does not identify the process-termination resource
+rundown that releases the remaining state. Each compiler retains52 diagnostic
+failures, the previous48 plus four fatal cleanup failures from the new arm.
+Production remains0/7 per compiler at NUL error5. CAUSE_CONFIRMED=no and
+productionAccepted=false.
+
+## Replacement before versus after normal root exit
+
+`RETIRE-LIVE` and `RETIRE-EXITED` compare the ordering of one replacement
+assignment across normal root termination. Both add the same final nonce-bound
+barrier after inspector work, descendant joins and owned child-handle closure,
+with the original result frozen. The helper verifies the captured root and
+original main thread through their existing handles, including creation times,
+thread ownership, live process state and the unchanged LPAC/job boundary.
+Both arms suspend that owned main thread with previous count0 and resume with
+previous count1; the cooperative barrier supplies synchronization. Other root
+threads are not claimed to be suspended.
+
+LIVE installs and closes the known empty named replacement while the root is
+live and parked, then releases it to normal exit. It must never install another
+replacement after exit. EXITED performs the same park, suspend, resume and
+release without a live assignment, then uses the existing exited-only
+retirement path. Its preconditions remain unchanged for every old arm.
+The new pair runs in independent fixtures alongside the existing serial
+controls; no existing deadline or fatal assertion is relaxed.
+The validator requires the actual directory creation, assignment and anchor
+closure lines to appear on the selected side of root exit, in addition to the
+phase frames. Child-closure evidence must precede READY. All parallel
+continuations, including their post-exit observers, join before the registry
+and harness stop on success or failure.
+
+Immediate, checkpoint, final and post-helper namespace observations stay
+separate from protocol validity. A retained EXITED replacement and absent LIVE
+replacement would implicate posttermination attachment in replacement-name
+retention in this fixture. Equal retention would reject ordering alone as a
+remedy; equal absence would fail to reproduce the retained comparison. None
+repairs DIRECT's original retained map, identifies an internal owner or admits
+production. Missing identity/nonce/normal-exit/closure/deadline proof or a wrong
+suspend/resume count invalidates the control. SDK and native execution remain
+unverified; CAUSE_CONFIRMED=no and productionAccepted=false.
 
 ## Gates still required
 

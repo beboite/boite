@@ -15,6 +15,8 @@ typedef struct {
   DWORD pid, main_tid, parent; uintptr_t initial, native_base;
   BOOL consumed, exited, auxiliary, child_seen, console_seen;
 } ROUTE_RECORD;
+static BOOL retirement_enabled(void);
+static DWORD retirement_inspector_final(int result);
 static HANDLE probe_map, probe_link;
 static wchar_t probe_name[256];
 static DWORD probe_root_pid;

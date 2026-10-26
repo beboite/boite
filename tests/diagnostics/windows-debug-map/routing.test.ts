@@ -8,6 +8,7 @@ import {verifyOwnershipPlatform, ownedMembershipReader, ownedJobReader, ownedHel
 import {serveTopology, traceRows} from './target-topology.ts';
 import {validateWorkerLifetime, type WorkerReport} from './worker-lifetime.ts';
 import {observeHelperJob, type RootProof} from './helper-job.ts';
+import {validateRetirementTiming, type RetirementReport} from './retirement-timing.ts';
 
 const native = process.platform === 'win32' && process.env.BOITE_TEST_DEBUG_MAP === '1';
 
@@ -36,14 +37,16 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   const readJob = await ownedJobReader();
   const helperJobControls: Record<string, unknown>[] = []; report.helperJobControls = helperJobControls;
   const workerControls: WorkerReport[] = []; report.workerLifetime = workerControls;
+  const retirementControls: RetirementReport[] = []; report.retirementTiming = retirementControls;
   const controls = join(state, 'target-creator-control'); mkdirSync(controls);
   const topologyProofs: unknown[] = []; report.targetCreatorTopology = topologyProofs;
-  const jobs = ['RED', 'A', 'B', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'THREAD-EXITED', 'THREAD-WAITING', 'TARGET-HELPER-HELD'].map(label => {
+  const jobs = ['RED', 'A', 'B', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'THREAD-EXITED', 'THREAD-WAITING', 'TARGET-HELPER-HELD', 'RETIRE-LIVE', 'RETIRE-EXITED'].map(label => {
     const root = join(state, label), project = join(root, 'project'), runtime = join(root, 'runtime'), home = join(root, 'home');
     const marker = `TASK_ROUTE_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
     return {label, root, project, runtime, home, marker, profile: `boite.debug.route.${crypto.randomUUID().replaceAll('-', '')}`};
   });
   const tasks: Promise<Captured>[] = [];
+  const timingTasks: Promise<void>[] = [];
   const profileCleanup: Captured[] = [];
   const cleanupConfirmed = new Map<string, boolean>();
   const creatorFaultCleanup: boolean[] = [];
@@ -52,6 +55,8 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   async function execute(id: string, args: string[], home = state, extra: Record<string, string | undefined> = {}, milliseconds?: number) {
     const workerMode = args[0] === 'thread-exited-run' ? 'exited' : args[0] === 'thread-waiting-run' ? 'waiting' : null;
     const workerNonce = crypto.randomUUID().replaceAll('-', '');
+    const retirementMode = args[0] === 'retire-live-run' ? 'live' : args[0] === 'retire-exited-run' ? 'exited' : null;
+    const retirementNonce = crypto.randomUUID().replaceAll('-', '');
     const helperExited = args[0] === 'target-helper-exited-run';
     const held = id === 'lpac-TARGET-HELPER-HELD';
     const reference = held ? await ownedHelperReference() : undefined;
@@ -61,7 +66,8 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
       env: selectedEnvironment({HOME: home, USERPROFILE: home, APPDATA: home, LOCALAPPDATA: home,
         TEMP: home, TMP: home, BOITE_DEBUG_MAP_OWNERSHIP: '1',
         ...(targetCreator ? {BOITE_TARGET_CREATOR_BARRIER: prefix} : {}),
-        ...(workerMode ? {BOITE_DIAGNOSTIC_WORKER_NONCE: workerNonce} : {}), ...extra})});
+        ...(workerMode ? {BOITE_DIAGNOSTIC_WORKER_NONCE: workerNonce} : {}),
+        ...(retirementMode ? {BOITE_DIAGNOSTIC_RETIRE_NONCE: retirementNonce} : {}), ...extra})});
     let stopped = false;
     const topology = targetCreator ? serveTopology(prefix, child.record.pid, process.env.BOITE_DEBUG_MAP_TRACE!,
       readMembership, () => stopped, topologyProofs, helperExited, reference?.arm).catch(error => {failures.push(`${id} topology: ${error}`);}) : undefined;
@@ -100,11 +106,22 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
       workerControls.push(evidence);
       if (!evidence.protocolValid) failures.push(`${id} worker protocol: ${evidence.error}`);
     }
+    if (retirementMode) {
+      const member = traceRows(process.env.BOITE_DEBUG_MAP_TRACE!).find(row => row.event === 'owned-membership' &&
+        row.role === 'harness-main' && row.threadId === id && row.pid === result.pid);
+      const rootPid = Number(result.out.match(/^inspect-start=\S+\.generation-0 pid=(\d+)\r?$/m)?.[1]);
+      const root = traceRows(process.env.BOITE_DEBUG_MAP_TRACE!).find(row => row.event === 'owned-membership' &&
+        row.role === 'harness-main' && row.threadId === id && row.pid === rootPid);
+      const evidence = validateRetirementTiming(result, {mode: retirementMode, nonce: retirementNonce,
+        helper: {pid: result.pid, created: member?.created ?? ''}, root: {pid: rootPid, created: root?.created ?? ''}, marker: args[6] ?? ''});
+      retirementControls.push(evidence);
+      if (!evidence.protocolValid) failures.push(`${id} retirement protocol: ${evidence.error}`);
+    }
     steps.push({id, ...result});
     writeFileSync(join(output!, `${id}.log`), `pid=${result.pid} exit=${result.code} timedOut=${result.timedOut}\n${result.out}${result.err}`);
     console.log(`${id}: ${JSON.stringify(result)}`); save(); return result;
   }
-  function run(job: typeof jobs[number], debug: boolean, mode?: 'direct-run' | 'setter-run' | 'quiet-run' | 'reopen-run' | 'creator-run' | 'retire-run' | 'retire-named-run' | 'target-exited-run' | 'target-waiting-run' | 'target-helper-exited-run' | 'thread-exited-run' | 'thread-waiting-run') {
+  function run(job: typeof jobs[number], debug: boolean, mode?: 'direct-run' | 'setter-run' | 'quiet-run' | 'reopen-run' | 'creator-run' | 'retire-run' | 'retire-named-run' | 'target-exited-run' | 'target-waiting-run' | 'target-helper-exited-run' | 'thread-exited-run' | 'thread-waiting-run' | 'retire-live-run' | 'retire-exited-run') {
     const promise = execute(`lpac-${job.label}`, [mode ?? (debug ? 'debug-run' : 'run'), job.profile, job.project,
       join(job.runtime, 'inspect.exe'), 'inspect', '0', job.marker, ...(debug ? ['forward-check'] : [])], job.home,
       {PATH: `${job.runtime};${process.env.SystemRoot}\\System32`});
@@ -140,7 +157,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
       }),
       verify(`${label} boundary tokens closed`, () => {
         const closures = [...result.err.matchAll(/token-cleanup role=boundary pid=(\d+) success=1 error=0/g)];
-        expect(closures).toHaveLength(label === 'A' || label === 'B' ? 7 : 1);
+        expect(closures).toHaveLength(label === 'A' || label === 'B' ? 7 : label === 'RETIRE-LIVE' || label === 'RETIRE-EXITED' ? 2 : 1);
         expect(result.err.match(/token-cleanup role=boundary /g)).toHaveLength(closures.length);
       }),
       verify(`${label} owned processes gone`, () => expect(result.err).toContain('cleanup job-active=0')),
@@ -173,12 +190,12 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
         expect(Number(checkpoint?.[2])).toBeGreaterThan(0);
         const targets = checkpoint?.[3]?.split(',') ?? [];
         const inspected = [...result.out.matchAll(/^inspect-start=\S+ pid=(\d+)\r?$/gm)].map(match => match[1]!);
-        expect(new Set(targets)).toEqual(new Set(['RED', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'THREAD-EXITED', 'THREAD-WAITING', 'TARGET-HELPER-HELD'].includes(label) ? inspected.slice(0, 1) : inspected));
+        expect(new Set(targets)).toEqual(new Set(['RED', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'THREAD-EXITED', 'THREAD-WAITING', 'TARGET-HELPER-HELD', 'RETIRE-LIVE', 'RETIRE-EXITED'].includes(label) ? inspected.slice(0, 1) : inspected));
         expect(result.err.indexOf('ownership-checkpoint ')).toBeGreaterThan(result.err.indexOf('cleanup map-eventual-open='));
         expect(result.err).toMatch(/cleanup checkpoint-map-open=0x[\da-f]+ absent=[01] closed=1 error=0 wall-ms=\d+/);
       }),
     ];
-    if (['RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'TARGET-HELPER-HELD'].includes(label)) {
+    if (['RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'TARGET-HELPER-HELD', 'RETIRE-LIVE', 'RETIRE-EXITED'].includes(label)) {
       for (const phase of ['immediate', 'checkpoint', 'final']) checks.push(
         verify(`${label} replacement absence ${phase}`, () => expect(result.err)
           .toContain(`cleanup retired-open phase=${phase} status=0xc0000034 absent=1 closed=1 error=0`)));
@@ -249,7 +266,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     for (const match of result.err.matchAll(/^map-retire named path=(.+) create=0x00000000\r?$/gm))
       names.push({kind: 'retired', path: match[1]!.replace(/\r$/, '')});
     if (!verify(`${label} owned map name`, () => {
-      expect(names).toHaveLength(['RED', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'TARGET-HELPER-HELD'].includes(label) ? 2 : 1);
+      expect(names).toHaveLength(['RED', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'TARGET-HELPER-HELD', 'RETIRE-LIVE', 'RETIRE-EXITED'].includes(label) ? 2 : 1);
       expect(new Set(names.map(name => name.kind)).size).toBe(names.length);
       for (const name of names) expect(name.path).toMatch(new RegExp(
         `^\\\\(?:Sessions\\\\\\d+\\\\)?BaseNamedObjects\\\\boite\\.route\\.${result.pid}${name.kind === 'swap' ? '\\.swap' : name.kind === 'retired' ? '\\.retired' : ''}$`));
@@ -395,6 +412,18 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     // from RED's A/B/A roundtrip. Helpers stay alive through the fatal gates.
     // These observations cannot make a failed original RED/A/B gate pass.
     if (report.redSafetyPassed === true) {
+      // This independent pair overlaps the unchanged serial controls. Its own
+      // captured tasks remain in tasks and are joined on every cleanup path.
+      timingTasks.push(...jobs.slice(16).map(async (job, index) => {
+        writeFileSync(join(job.project, 'release'), 'synthetic');
+        const result = await run(job, false, index === 0 ? 'retire-live-run' : 'retire-exited-run');
+        report[job.label.toLowerCase()] = result;
+        completed(job.label, result, 1); boundary(job.label, result, job.marker); cleanup(job.label, result);
+        await observeAfterExit(job.label, result);
+        const ordinary = await execute(`ordinary-after-${job.label.toLowerCase()}`, ['observe', state]);
+        observer(`after ${job.label}`, ordinary, before); save();
+      }));
+      for (const promise of timingTasks) void promise.catch(() => {});
       for (const [index, mode] of (['direct-run', 'setter-run', 'quiet-run', 'reopen-run', 'creator-run', 'retire-run', 'retire-named-run', 'target-exited-run', 'target-waiting-run', 'target-helper-exited-run', 'thread-exited-run', 'thread-waiting-run', 'target-helper-exited-run'] as const).entries()) {
         const job = jobs[index + 3]!;
         writeFileSync(join(job.project, 'release'), 'synthetic');
@@ -549,6 +578,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
         observer(`after ${job.label}`, afterScope, before);
         save();
       }
+      await Promise.allSettled(timingTasks);
       // Each failure must leave the target suspended, reap only the captured
       // creator/job and remove the unassigned exact object name. These probes
       // cannot substitute for any successful CREATOR or original routing gate.
@@ -611,6 +641,10 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     }
   } catch (error) { failures.push(String(error)); }
   finally {
+    // Join the entire pair, including post-exit observers, before stopping its
+    // registry/harness even when the serial phase failed before its normal join.
+    for (const settled of await Promise.allSettled(timingTasks))
+      if (settled.status === 'rejected') failures.push(`retirement timing capture: ${settled.reason}`);
     const settled = await Promise.allSettled(tasks);
     for (const result of settled) if (result.status === 'rejected') failures.push(`task capture: ${result.reason}`);
     // Stop only processes belonging to this fresh harness, including on a failed assertion.

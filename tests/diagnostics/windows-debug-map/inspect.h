@@ -170,11 +170,17 @@ static int inspect(int count, wchar_t **args) {
         TerminateProcess(child.hProcess, 125); WaitForSingleObject(child.hProcess, 1000);
       }
       if (!GetExitCodeProcess(child.hProcess, &result) || result == STILL_ACTIVE) result = 125;
-      child_code = (int)result; CloseHandle(child.hThread); CloseHandle(child.hProcess);
+      child_code = (int)result;
+      BOOL thread_closed = CloseHandle(child.hThread), process_closed = CloseHandle(child.hProcess);
+      if (retirement_enabled()) {
+        fwprintf(stderr, L"retirement-child-closed pid=%lu depth=%d child=%lu thread=%d process=%d\n", GetCurrentProcessId(), depth, child.dwProcessId, thread_closed, process_closed); fflush(stderr);
+        if (!thread_closed || !process_closed) return 125;
+      }
     } else child_code = 125;
     free(line);
   }
   int result = routed && is_app == 1 && in_job && denial == ERROR_ACCESS_DENIED && !control && !child_code && !forced ? 0 : 1;
   fwprintf(stdout, L"%ls inspect-exit=%d child-exit=%d forced=%d\n", label, result, child_code, forced); fflush(stdout);
+  if (depth == 0 && retirement_inspector_final(result)) return 125;
   return result;
 }
