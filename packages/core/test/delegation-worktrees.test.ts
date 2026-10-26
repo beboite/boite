@@ -175,6 +175,14 @@ test.each(['partial checkout', 'branch only', 'reserved ref', 'absent ref', 'ind
   let partial: SpawnedProcess | SpawnedPipedProcess | undefined;
   let foreignLock: { fd: number; path: string } | undefined;
   let indexLockedAtStop = false;
+  const started = performance.now();
+  // Read only the captured checkout's group/session, immediately before its signal.
+  const libc = leftover === 'index lock' && process.platform !== 'win32'
+    ? (await import('bun:ffi')).dlopen(process.platform === 'darwin' ? '/usr/lib/libSystem.B.dylib' : 'libc.so.6', {
+      getpgid: { args: ['i32'], returns: 'i32' }, getsid: { args: ['i32'], returns: 'i32' },
+      getuid: { args: [], returns: 'u32' }, geteuid: { args: [], returns: 'u32' },
+    }) : undefined;
+  let checkoutOwner: { pid: number; uid: number; startedAt: number | null; sampledMs: number } | undefined;
   if (leftover === 'index lock') {
     const filter = join(s.h.dataDir, 'checkout-filter.cjs');
     writeFileSync(filter, `
@@ -202,7 +210,19 @@ test.each(['partial checkout', 'branch only', 'reserved ref', 'absent ref', 'ind
       // worktree add starts another Git to write the index. Off Windows this
       // captured root leads its own group; kill that group without SIGTERM cleanup.
       try {
-        if (process.platform !== 'win32') process.kill(-partial.proc.pid, 'SIGKILL');
+        if (process.platform !== 'win32') {
+          const pid = partial.proc.pid;
+          const identity = { pid, pgid: libc!.symbols.getpgid(pid), sid: libc!.symbols.getsid(pid),
+            uid: libc!.symbols.getuid(), euid: libc!.symbols.geteuid(),
+            runningSince: s.h.core.procs.platform.runningSince(pid),
+            sampledOwner: checkoutOwner, ms: performance.now() - started };
+          console.error('CHECKOUT_SIGNAL_IDENTITY', JSON.stringify(identity));
+          // Never send a group signal after the fixture lost proof of ownership.
+          if (identity.pgid !== pid || checkoutOwner?.pid !== pid || checkoutOwner.uid !== identity.euid) {
+            throw new Error('the captured checkout no longer proves ownership of its process group');
+          }
+          process.kill(-pid, 'SIGKILL');
+        }
         else partial.proc.kill();
       } catch (error) {
         // RPC deliberately hides internal errors. Keep this fixture's failed signal
@@ -261,6 +281,14 @@ test.each(['partial checkout', 'branch only', 'reserved ref', 'absent ref', 'ind
       // must avoid that shared lock, publishing its index before the filter runs.
       expect(existsSync(index)).toBe(!locked);
       console.error(`CHECKOUT_INDEX_AT_STOP index=${existsSync(index)} lock=${locked}`);
+      if (process.platform !== 'win32') {
+        const pid = partial!.proc.pid;
+        // No global ps: this is one captured, fixture-owned PID, with no command line.
+        const identity = spawn(s.threadId, 'ps', ['-p', String(pid), '-o', 'uid=']);
+        const [uid, error, code] = await Promise.all([new Response(identity.proc.stdout).text(), new Response(identity.proc.stderr).text(), identity.exited]);
+        if (code !== 0 || !/^\s*\d+\s*$/.test(uid)) throw new Error(`cannot read the captured checkout UID: ${code}, ${error}`);
+        checkoutOwner = { pid, uid: Number(uid.trim()), startedAt: s.h.core.procs.platform.runningSince(pid), sampledMs: performance.now() - started };
+      }
     }
     const first = s.h.core.journal.runningTurn(id)!;
     expect(await s.client.call('turns.stop', { threadId: id })).toEqual({ stopped: true });
@@ -349,5 +377,6 @@ test.each(['partial checkout', 'branch only', 'reserved ref', 'absent ref', 'ind
     await partial?.exited;
     await waitFor(() => s.h.core.scheduler.state().running.length === 0, SLOW_GIT_MS);
     checkpoints.mockRestore(); intercepted.mockRestore(); piped.mockRestore(); forcedStop.mockRestore();
+    libc?.close();
   }
 }, 90_000);
