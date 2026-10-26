@@ -177,7 +177,8 @@ real('an agent drives a page with agent-browser commands: refs, forms, dialogs a
   expect(await thrown(command({ kind: 'wait', selector: '#never', timeoutMs: 300 }))).toThrow('wait timed out after 300 ms');
 }), 150_000);
 
-real('a window a page opens joins the conversation as a tab of its own', async () => {
+// Trace click 1 opens #pop; click 2 closes #shut. Keep the native click and popup lifecycle visible on failure.
+real('a window a page opens joins the conversation as a tab of its own', () => traceBrowserCommands(async () => {
   const { agent, threadId } = browserFixture;
   await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
   await agent.call('browser.command', { threadId, action: { kind: 'click', selector: '#pop' } });
@@ -200,7 +201,7 @@ real('a window a page opens joins the conversation as a tab of its own', async (
   expect(await evaluate(`window.open('/popup?script', 'z', 'width=400,height=300') !== null`)).toBe(true);
   for (let i = 0; i < 50 && (tabs = await status()).length < 2; i++) await Bun.sleep(100);
   expect(tabs.map(tab => tab.url)).toEqual([url(), url('/popup?script')]);
-}, 150_000);
+}), 150_000);
 
 real('a burst of windows opened at once stops at the conversation tab limit', async () => {
   const { agent, threadId } = browserFixture;

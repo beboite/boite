@@ -104,6 +104,10 @@ table that has none, reading about 400 rows per index; the open itself analyzes
 nothing. It then deletes events older than 30 days in paced batches while
 retaining the latest agents revision, and after each prune it rebuilds the
 statistics that prune made stale, the same way.
+An event-retention error keeps the pending statement and pass state for a
+retry after 30 s. Waiting for the WAL to catch up uses the same delay before
+any statistics or pruning work, without changing the batch size. Stopping
+retention or closing the journal prevents further ticks.
 Project removal explicitly clears thread-keyed tables; foreign keys are disabled.
 A newer journal schema is refused before writing, with the file and both versions.
 
@@ -190,6 +194,9 @@ row. Schema 36 moves the lines of older rows there in paced batches. The same
 background passes cut a thread's trace back to what it keeps once it holds 500
 rows past the 2,000 it keeps, one thread at a time and again daily, and delete
 the lines only the deleted rows named ([trace](trace.md)).
+A daily-prune date ahead of the current clock is removed before a pass resumes
+from its stored cursor. The date stays absent during the incomplete pass;
+completion records the current time and removes the cursor.
 
 `native_agent_messages` names the messages holding an Agent, Task or subagent
 call, or a `nativeAgents` list, so `delegation.get` parses those messages only.
