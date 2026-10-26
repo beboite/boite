@@ -12,7 +12,8 @@ function walk(path: string): void {
 walk('docs');
 const broken: string[] = [];
 for (const file of files) {
-  const source = readFileSync(file, 'utf8').replace(/```[\s\S]*?```/g, '');
+  // A fence opens a line: a ```` ```view ```` span in a sentence is no code block.
+  const source = readFileSync(file, 'utf8').replace(/^[ \t]*(`{3,}|~{3,})[^`\n]*\n[\s\S]*?^[ \t]*\1[ \t]*$/gm, '');
   const links = [...source.matchAll(/\]\(([^)]+)\)|(?:href|src)="([^"]+)"/g)];
   for (const link of links) {
     const value = (link[1] ?? link[2]!).split(/\s+"/)[0]!.replace(/^<|>$/g, '');
