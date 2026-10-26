@@ -223,4 +223,4 @@ export {
   type InlineView, type ViewCheckCapture, type ViewTheme, type ViewHostMessage, type ViewPageMessage,
 } from './view.ts';
 
-export { effectiveCompaction, type CompactionTarget, type CompactionPolicy } from './settings-compaction';
+export { effectiveCompaction, type CompactionTarget, type CompactionPolicy } from './settings';
