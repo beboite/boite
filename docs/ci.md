@@ -283,6 +283,16 @@ Its non-blocking result decides only this attribute combination, including
 parent identity, inherited client handles and the child's own creation refusal.
 It neither brokers NUL nor changes the blocking production admission probe.
 
+The opt-in `windows-null-broker-spike` artifact tests a different primitive:
+the host opens the fixed real Null device afresh for each request and duplicates
+only that handle into a captured LPAC process. A task-local debugger adapter
+exercises ordinary native and Bun callers, ordinary descendants, file modes,
+denials, output-pointer failures and cleanup. It requires an exact verified
+x64 ntdll image and startup site; an unsupported image or partial capture leaves
+the experiment incomplete. Both compiler outcomes must agree. This diagnostic
+always reports `productionAccepted=false`; its non-blocking CI step does not
+replace the original blocking native protection tests.
+
 A skip passes in a ruleset, so a draft must not satisfy it:
 
 - The planning job reports `Plan and repository checks (draft)` and the

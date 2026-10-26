@@ -246,6 +246,29 @@ jobs:
           path: ${{ runner.temp }}/null-access-matrix/
           retention-days: 3
           if-no-files-found: error
+      - name: Real Null per-open broker falsifier (non-acceptance)
+        if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        continue-on-error: true
+        env:
+          BOITE_TEST_NULL_BROKER: '1'
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          bun packages/core/test/windows-null-broker-spike.ts "$env:RUNNER_TEMP\null-broker-spike"
+          $brokerExit = $LASTEXITCODE
+          Write-Host "Real Null broker falsifier exit=$brokerExit; not production acceptance"
+          exit $brokerExit
+      - name: Preserve real Null broker evidence
+        if: always() && runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-null-broker-spike
+          path: ${{ runner.temp }}/null-broker-spike/
+          retention-days: 3
+          if-no-files-found: error
       - name: Diagnostic DEBUG_PROCESS descendant marker routing (non-acceptance)
         if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
         continue-on-error: true
