@@ -26,6 +26,8 @@ const MINUTE = 60_000;
  *   page to open beside the conversation.
  * - Mira rests until its 20:00 routine; its history holds a picture it
  *   attached and yesterday's routine, which had nothing to report.
+ * - Bolt cannot run: its account was removed. Pixel is paused. Each wears a
+ *   robot it picked, so the list shows every ring.
  */
 export function seedAgentsDemo(ctx: FakeContext): void {
   const account = ctx.accounts.find(a => a.providerId === 'echo') ?? ctx.accounts[0];
@@ -109,6 +111,15 @@ export function seedAgentsDemo(ctx: FakeContext): void {
   ctx.agents.seedRuntime(nova.agent.id, { dailyBudgetUsd: 2 });
   ctx.agents.seedSpend(nova.agent.id, 1.35);
   ctx.agents.seedMemoryPass(nova.agent.id, { threadId: 't-agents-demo-memory-nova', status: 'done', summary: 'PR #482 fails its e2e redirect test; the upload test only timed out.', at: now - 37 * MINUTE });
+
+  // Bolt, whose provider left: its last turn could not run.
+  const bolt = ctx.agents.seedAgent({ name: 'Bolt', domain: 'Dependency updates', instructions: 'Every Monday, update the dependencies and open one pull request.', avatar: 'bot:b.4.13.2.11.11.0.0', selection, status: 'active', projectIds: [] }, now - 5 * 86_400_000);
+  exchange(ctx, ctx.thread(bolt.threadId), { at: now - 2 * 86_400_000, prompt: 'Update the dependencies.', answer: 'Opened #470 with the 14 updates; the lockfile is regenerated.' });
+  ctx.agents.seedProblem(bolt.agent.id, 'Its account was removed: pick another in Settings');
+
+  // Pixel, paused: nothing wakes it.
+  const pixel = ctx.agents.seedAgent({ name: 'Pixel', domain: 'Screenshot reviewer', instructions: 'Check the store screenshots before each release.', avatar: 'bot:c.1.15.12.12.2.1.0', selection, status: 'paused', projectIds: [] }, now - 9 * 86_400_000);
+  exchange(ctx, ctx.thread(pixel.threadId), { at: now - 4 * 86_400_000, prompt: 'Are the store screenshots current?', answer: 'Yes: all six match 2.0.3. I will look again before the next release.' });
 }
 
 /** A finished turn: the prompt (or a wake's label), then the agent's answer. */

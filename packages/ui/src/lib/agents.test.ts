@@ -2,7 +2,7 @@ import { expect, vi } from 'vitest';
 import { RpcErrorCode, type AgentsSnapshot } from '@boite/contracts';
 import { RpcFailure } from './rpc-error';
 import { test } from '../test/fake-client';
-import { AgentsView, agentOfThread, agentRows, liveStep, openAgent, previewOf, avatarText } from './agents.svelte';
+import { AgentsView, agentOfThread, agentRows, liveActivity, liveStep, openAgent, previewOf, avatarText } from './agents.svelte';
 import { AgentDirectory, agentDirectory } from './agent-directory.svelte';
 import { setExperiment } from './experiments';
 import { FakeAgents } from './fake-agents';
@@ -112,6 +112,21 @@ test('the list puts the agent that spoke last first, leaves archived agents out 
   const row = agentRows(snapshot)[0]!;
   expect(liveStep(row.status, null)).toBe('Run the tests');
   expect(liveStep(row.status, { status: 'running', progress: { turnId: 'x', phase: 'tool', detail: 'Read App.svelte', at: 0 } } as never)).toBe('Read App.svelte');
+});
+
+test('a working row says what the step does, not the bare name of the tool it runs', () => {
+  const status = (activity: string | null) => ({ agentId: 'a', threadId: 't', state: 'working' as const, activity, problem: null, nextWake: null, unread: 0, last: null, today: { turns: 0, wakes: 0, quiet: 0, costUsd: 0 } });
+  const running = (phase: string, detail: string | null) => ({ status: 'running', progress: { turnId: 'x', phase, detail, at: 0 } }) as never;
+  // The driver reports "Bash"; the snapshot carries the call's title.
+  expect(liveActivity(status('Run the UI tests'), running('tool', 'Bash'))).toEqual({ kind: 'command', text: 'Run the UI tests' });
+  // A call with no title reads as what it is about, its tool as the glyph.
+  expect(liveActivity(status('Bash: git status'), running('tool', 'Bash'))).toEqual({ kind: 'command', text: 'git status' });
+  // Nothing more than the name yet: the family says it in words.
+  expect(liveActivity(status(null), running('tool', 'Read'))).toEqual({ kind: 'read', text: 'Reading a file' });
+  expect(liveActivity(status(null), running('tool', 'Sleep'))).toEqual({ kind: 'sleep', text: 'Waiting a moment' });
+  // Between calls the turn's phase speaks.
+  expect(liveActivity(status('Run the UI tests'), running('thinking', null))).toEqual({ kind: 'thinking', text: 'Thinking' });
+  expect(liveActivity(status(null), null)).toBeNull();
 });
 
 test('previews drop markdown and avatars fall back to initials', () => {

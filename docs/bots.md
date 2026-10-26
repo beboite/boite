@@ -51,9 +51,25 @@ conversation full screen, with the desk and the browser in its panel.
 The header of a bot's thread shows its robot, its name and one live line:
 the step it is on (`AgentStatus.activity`) while it works, what it waits on,
 else its next routine or Idle. A `problem` shows as a warning with its fix.
-The header menu holds Settings, Brain, Pause or Resume and Archive. The robot
-wears a thin ring in its own colour, in the header and in the list, that
-breathes while the bot works; hue elsewhere says status only. A routine
+The header menu holds Settings, Brain, Pause or Resume and Archive.
+
+In the list, a bot's row is its robot beside two lines, the messenger way:
+its name over what it does this second, with a glyph for the kind of step
+(a command, a file read or edited, a search, the web, a subagent, thinking,
+a pause). That line is in the accent while it works and the right side
+counts the time it has worked; it shows the question in the waiting colour
+while it needs the user, the failure in danger, Paused asleep, else the last
+thing it said, bold while unread. A driver that reports only the running
+tool's name ("Bash") reads as the call's title from the snapshot, else as
+the tool's family in words (`liveActivity`, `lib/agents.svelte.ts`).
+
+The ring around the robot, in the list, the header and the desk, says how the
+bot stands (`AgentMood`): an accent arc turning while it works, a dashed
+accent ring while queued, the waiting colour pulsing while it needs the user,
+danger after a failure, a full accent ring over answers not read, a dashed
+grey ring asleep (paused), a hairline in the robot's own colour at rest. The
+face moves with it.
+A routine
 or event turn opens with a thin divider across the column (its icon, label and
 time); a quiet turn, done (a failed or stopped wake keeps its error in view),
 folds to one such divider, `Nothing to report · <reason> · N steps`, that
@@ -97,24 +113,40 @@ runs live.
 
 ### Robots
 
-A bot's picture is a small robot drawn in SVG (`RobotFace.svelte`). It has
-a style, a shape, one of nine colours, a face and a top. The default style is
-Jelly: a blob on two small feet with a shine and rosy cheeks, in one of six
-shapes (round, drop, puddle, two bumps, pear, cloud), eight faces (black or
-white eyes, smiling, sleepy, surprised, singing, winking) and eight tops
-(nothing, a curl, a flower, antennae, a loop, a sprout, three hairs, a bow).
-Its colours are `--jelly-1` to `--jelly-9` in `app.css`, livelier than the
-pastel `--robot-1` to `--robot-9` that Bubble, Capsule and Retro share.
+A bot's picture is a small robot drawn in SVG (`RobotFace.svelte`). Its
+style is only its body: Jelly (a blob on two small feet with a shine), Bubble
+(a round body rising from the bottom of the disc), Capsule (a light face
+plate, tilted, on a coloured ground) and Retro (a head with a dark screen, on
+a neck, with ears), six shapes each. Every other part is shared by every
+style: each body gives a rig, where its eyes, mouth, cheeks, crown and sides
+sit, and the part is drawn there. On a Retro screen the face is lit in the
+LED colour rather than inked. A part added once fits every style.
+
+| Part | Choices |
+| --- | --- |
+| Colour | 18: the lively `--jelly-1` to `--jelly-9`, then the pastel `--robot-1` to `--robot-9` |
+| Eyes | 16: beans, sparkles, dots, pills, googly, happy, sleepy, glancing, winking, stars, hearts, a visor, anime, determined, dizzy, bored |
+| Mouth | 12: none, smile, small smile, laugh, surprised, cat, smirk, tongue, flat, fang, singing, grin |
+| Top | 18: none, antenna, antennae, curl, loop, flower, sprout, three hairs, tuft, bow, halo, headphones, propeller, beanie, crown, cat ears, party hat, side pods |
+| Cheeks | 4: none, blush, freckles, hearts |
+| Gear | 5: none, round glasses, shades, monocle, bandage |
 
 The robot is stored in the existing `avatar` field as
-`bot:<style>.<shape>.<colour>.<face>.<top>`, for example `bot:d.0.0.0.0` for a
-round yellow jelly. An empty avatar draws the jelly the bot's id gives, the
-same on every client; one or two characters (an emoji, initials) stay text,
-and a code this build cannot read stays text too. Shuffle draws a new robot in
-the same style; Customize opens one row per part, each choice drawn on the
-robot. The face moves with the bot: it blinks at rest, a jelly squishes on
-the spot while it works (the other styles glance from side to side), and every
-style hops while it waits on the user. Reduced motion stills it.
+`bot:<style>.<shape>.<colour>.<eyes>.<top>.<mouth>.<cheeks>.<gear>`, for example
+`bot:d.0.0.0.0.1.1.0` for a round yellow smiling jelly. A four-part code
+written before parts were shared (`bot:<style>.<shape>.<colour>.<face>.<top>`)
+keeps its look: its face becomes the eyes and mouth it drew, its top the
+shared top (a Bubble's glasses become gear), its colour the set it wore. An
+empty avatar draws the jelly the bot's id gives, the same on every client
+and the same as before the change; one or two characters (an emoji,
+initials) stay text, and a code this build cannot read stays text too, so an
+older client shows a new code as initials. Shuffle draws every part anew in
+the same style, dizzy eyes aside, gear and freckles kept rare; Customize opens
+one row per part, each choice drawn on the robot. The face moves with the
+bot: it blinks at rest, a jelly squishes on the spot while it works (the
+other styles glance from side to side), every style hops while it waits on
+the user, shuts its eyes and breathes slowly asleep, and goes dizzy after a
+failure. Reduced motion stills it.
 
 ## Wakes
 
