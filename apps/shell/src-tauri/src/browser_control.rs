@@ -3,8 +3,11 @@ use serde_json::Value;
 use std::time::{Duration, Instant};
 use tauri::{ipc::{Channel, InvokeResponseBody}, AppHandle, Webview};
 
+/// The id prefix of a surface the core's agent browser drives through the UI.
+pub const AGENT_SURFACE_PREFIX: &str = "agent-";
+
 /// A surface the core's agent browser drives through the UI, by its id's prefix.
-pub fn is_agent_surface(id: &str) -> bool { id.starts_with("agent-") }
+pub fn is_agent_surface(id: &str) -> bool { id.starts_with(AGENT_SURFACE_PREFIX) }
 
 /// What the UI may send to a surface the user browses: the panel's own needs.
 const SURFACE_METHODS: [&str; 9] = ["Runtime.evaluate", "Page.captureScreenshot", "Input.dispatchMouseEvent", "Input.dispatchKeyEvent", "Input.insertText", "Emulation.setDeviceMetricsOverride", "Emulation.clearDeviceMetricsOverride", "Emulation.setEmulatedMedia", "Boite.diagnostics"];

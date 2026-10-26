@@ -34,7 +34,14 @@ export type BrowserEvent =
   | { type: 'loading'; id: string; loading: boolean }
   | { type: 'failed'; id: string; reason: string }
   /** A page asked for a window of its own. It gets a tab in the same panel. */
-  | { type: 'new-window'; id: string; url: string };
+  | { type: 'new-window'; id: string; url: string }
+  /**
+   * A page of the agent surface `id` opened a window, which the shell made the
+   * live agent surface `popup`, its `window.opener` still that page.
+   */
+  | { type: 'popup'; id: string; popup: string; url: string }
+  /** The page of an agent's popup called `window.close()`: the bridge destroys the surface. */
+  | { type: 'closed'; id: string };
 
 export interface BrowserBridge {
   /** Whether this bridge paints anything at all. False keeps the slot's muted line. */

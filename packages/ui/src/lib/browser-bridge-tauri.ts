@@ -298,6 +298,9 @@ export class TauriBridge implements BrowserBridge {
       if (event.loading) this.#loaded.delete(event.id);
       else this.#loaded.add(event.id);
     }
+    // The shell made the popup's webview itself: it is live before anyone hears of it.
+    if (event.type === 'popup') this.#live.add(event.popup);
+    if (event.type === 'closed') { this.destroy(event.id); return; }
     for (const handler of this.#handlers) handler(event);
   }
 }
