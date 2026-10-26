@@ -46,6 +46,7 @@ async function setup(work: (ctx: TurnContext) => void = () => {}) {
   const repo = join(h.dataDir, 'repo');
   mkdirSync(repo, { recursive: true });
   git(repo, 'init', '-q');
+  git(repo, 'config', 'core.autocrlf', 'false');
   git(repo, 'commit', '-q', '--allow-empty', '-m', 'init');
   const project = await client.call('projects.add', { path: repo, name: 'repo' });
   const accountId = (await client.call('accounts.list', {})).find(entry => entry.providerId === 'echo')!.id;
