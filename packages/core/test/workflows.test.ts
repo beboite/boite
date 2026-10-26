@@ -175,6 +175,8 @@ const fencedOutput = (value: unknown) => '```json\n' + JSON.stringify(value) + '
 
 test.each([
   ['backticks inside a JSON string', fencedOutput(FENCED_TEXT), { value: FENCED_TEXT }],
+  ['U+2028 around backticks inside a JSON string', fencedOutput({ text: 'Before\u2028```\u2028after' }), { value: { text: 'Before\u2028```\u2028after' } }],
+  ['U+2029 around backticks inside a JSON string', fencedOutput({ text: 'Before\u2029```\u2029after' }), { value: { text: 'Before\u2029```\u2029after' } }],
   ['CRLF and an indented closing fence', '```json \r\n' + JSON.stringify(FENCED_TEXT) + '\r\n  ``` \t\r\n', { value: FENCED_TEXT }],
   ['raw JSON', JSON.stringify(FENCED_TEXT), { value: FENCED_TEXT }],
   ['the last valid block', fencedOutput({ text: 'Earlier' }) + '\nThen:\n' + fencedOutput(FENCED_TEXT), { value: FENCED_TEXT }],
@@ -185,8 +187,9 @@ test.each([
 });
 
 test('fenced workflow output preserves backticks in a JSON string without a correction', async () => {
+  const output = { text: 'Keep \u2028```\u2028 and \u2029```\u2029 inside the JSON string.' };
   const { prompts } = scripted(ctx => taskOf(ctx.prompt) === 'Produce text.'
-    ? fencedOutput(FENCED_TEXT)
+    ? fencedOutput(output)
     : 'noted');
   const { h, owner, threadId } = await setup();
   const run = await owner.call('workflows.start', {
@@ -198,12 +201,12 @@ test('fenced workflow output preserves backticks in a JSON string without a corr
   const done = await settled(h, threadId, run.id);
   expect([done.status, done.error]).toEqual(['done', null]);
   const source = done.nodes[0]!.instances[0]!;
-  expect(source.output).toEqual(FENCED_TEXT);
+  expect(source.output).toEqual(output);
   expect(source.attempts).toBe(1);
   expect(h.core.journal.listTurns(source.threadId!)).toHaveLength(1);
   expect(prompts.some(prompt => prompt.prompt.includes('does not match this workflow step'))).toBe(false);
   const use = done.nodes[1]!.instances[0]!;
-  const expectedTask = `Use ${FENCED_TEXT.text}`;
+  const expectedTask = `Use ${output.text}`;
   expect(use.task).toBe(expectedTask);
   expect(prompts.filter(prompt => prompt.threadId === use.threadId).map(prompt => taskOf(prompt.prompt))).toEqual([expectedTask]);
 });

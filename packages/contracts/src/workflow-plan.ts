@@ -270,7 +270,8 @@ export function shapeMismatch(value: unknown, shape: WorkflowShape, path = 'outp
 
 /** The last valid fenced JSON block, or the whole answer when it is JSON. */
 export function extractJson(answer: string): { value: unknown } | null {
-  const blocks = [...answer.matchAll(/```(?:json)?[ \t]*\r?\n([\s\S]*?)^[ \t]*```[ \t]*\r?$/gm)];
+  // JSON strings can contain U+2028/U+2029, which multiline anchors also treat as line breaks.
+  const blocks = [...answer.matchAll(/```(?:json)?[ \t]*\r?\n([\s\S]*?)(?<=\n)[ \t]*```[ \t]*\r?(?=\n|$)/g)];
   const candidates = [...blocks.reverse().map(m => m[1]!), answer.trim()];
   for (const candidate of candidates) {
     try {
