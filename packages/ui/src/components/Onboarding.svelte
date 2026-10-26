@@ -113,7 +113,7 @@
 <svelte:window onkeydowncapture={onkeydown} />
 {#if overlay.shown}
   <div class="scrim" class:shell={inShell} class:closing={overlay.closing} role="presentation" data-testid="onboarding">
-    <div class="panel" class:closing={overlay.closing} role="dialog" aria-modal="true" aria-labelledby="onboarding-title" tabindex="-1" bind:this={panel} use:overlay.attach onanimationend={overlay.end}>
+    <div class="panel" class:privacy={step === 'privacy'} class:closing={overlay.closing} role="dialog" aria-modal="true" aria-labelledby="onboarding-title" tabindex="-1" bind:this={panel} use:overlay.attach onanimationend={overlay.end}>
       <header><BoiteMark size={18} /><span class="ui-label">{strings.onboarding.label}</span><button class="ghost icon" data-testid="onboarding-skip" aria-label={strings.onboarding.skip} onclick={finish}><X size={16} /></button></header>
       {#key step}
         <div class="screen" data-testid="onboarding-step" data-step={step}>
@@ -217,11 +217,14 @@
    * Every screen fits it in both languages; only a window shorter than the panel scrolls.
    */
   .panel { display: flex; flex-direction: column; width: min(600px, 100%); height: min(600px, calc(100dvh - 32px)); background: var(--color-surface); border: 1px solid var(--color-edge); border-radius: var(--radius-xl); box-shadow: var(--shadow-e3); animation: pop var(--dur-3) var(--ease-out-quint); }
+  .panel.privacy { width: min(680px, 100%); }
   .panel:focus, h1:focus { outline: none; }
   .panel.closing { animation: pop-out var(--dur-2) var(--ease-out-quint); }
   header { display: flex; align-items: center; gap: 8px; padding: 8px 16px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   header button { margin-left: auto; }
   .screen { flex: 1; overflow-y: auto; min-height: 0; padding: 8px 28px 16px; }
+  .screen[data-step=privacy] { display: flex; flex-direction: column; }
+  .screen[data-step=privacy] h1 { flex: none; }
   h1 { font-size: var(--text-lg); line-height: 1.35; margin: 0 0 6px; }
   h1.soul { text-align: center; font-size: var(--text-xl); font-weight: 900; letter-spacing: .08em; animation: soul 10s linear forwards; }
   @keyframes soul {
@@ -272,6 +275,9 @@
   @media (max-width: 480px) {
     .panel { height: min(640px, calc(100dvh - 32px)); }
     .scrim.shell .panel { height: min(640px, calc(100dvh - 32px - var(--titlebar))); }
+    /* The last step has three consent choices, so use the phone's available height. */
+    .panel.privacy { height: calc(100dvh - 32px); }
+    .scrim.shell .panel.privacy { height: calc(100dvh - 32px - var(--titlebar)); }
     .examples button { flex-direction: column; gap: 6px; min-height: 72px; padding: 10px 8px; }
     .screen { padding: 8px 18px 18px; } .preference { flex-wrap: wrap; } .segmented { flex-basis: 100%; } .segmented button { flex: 1; }
     footer { padding: 12px; gap: 4px; } .dot { width: 20px; } .dot::after { left: 7px; } .dot.on::after { left: 3px; } .dot { height: var(--touch-target); } .dot::after { top: 19px; }

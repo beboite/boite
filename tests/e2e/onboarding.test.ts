@@ -102,10 +102,11 @@ test('seven screens fit both languages and widths, without leaving the tour', as
         await page.click(`[data-testid=onboarding-dot-${step}]`);
         await page.waitFor(`document.querySelector('[data-testid=onboarding-step]')?.dataset.step === '${step}'`);
         await capture(`tour-${locale}-${width}-${step}.png`);
-        if (width > 390) expect(await page.evaluate(FITS)).toBe(true);
+        if (width > 390 || step === 'privacy') expect(await page.evaluate(FITS)).toBe(true);
         const height = await page.evaluate<number>(`document.querySelector('[data-testid=onboarding] [role=dialog]').getBoundingClientRect().height`);
-        expect(height).toBeLessThanOrEqual(width === 390 ? 640 : 600);
-        if (panelHeight !== undefined) expect(height).toBe(panelHeight);
+        expect(height).toBeLessThanOrEqual(width === 390 ? step === 'privacy' ? 868 : 640 : 600);
+        // Privacy is the final action, and uses the phone's height to expose every choice.
+        if (panelHeight !== undefined && !(width === 390 && step === 'privacy')) expect(height).toBe(panelHeight);
         panelHeight = height;
         if (step !== 'profile' && step !== 'privacy') {
           // The measures come with a failure: the controls' place depends on the pointer the machine reports.
