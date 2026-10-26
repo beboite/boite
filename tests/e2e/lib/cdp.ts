@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -7,6 +7,7 @@ import type { Subprocess } from 'bun';
 import { E2E_DIR_PREFIX, killProcessTreeAsync, removeDirectory, watchParentDeath, type ParentDeathWatch } from './cleanup.ts';
 import { reportOnHang } from './hang-report.ts';
 import { uiServerSide } from './ui-requests.ts';
+import { windowsProcessTree } from './process-tree.ts';
 import { TextSocket } from '../../../packages/core/src/ws-client.ts';
 
 /**
@@ -211,6 +212,67 @@ async function stopBrowser(proc: Subprocess, userDataDir: string | null, watch: 
   if (userDataDir !== null) await removeDirectory(userDataDir);
 }
 
+/** Only error codes: filesystem errors can contain arbitrary caller paths. */
+function diagnosticError(error: unknown): string {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return typeof code === 'string' && /^[A-Z0-9_]+$/.test(code) ? code : 'unavailable';
+}
+
+function executableMetadata(selected: string): object {
+  try {
+    const resolved = realpathSync(Bun.which(selected) ?? selected);
+    const info = statSync(resolved);
+    return { selected, resolved, size: info.size, modifiedAt: info.mtimeMs };
+  } catch (error) { return { selected, error: diagnosticError(error) }; }
+}
+
+/** Caller-owned profiles are never inspected; owned ones expose metadata only. */
+function profileMarkers(profile: string): Record<string, object> {
+  return Object.fromEntries(['First Run', 'SingletonLock', 'SingletonCookie', 'DevToolsActivePort'].map(name => {
+    try {
+      const path = join(profile, name);
+      const info = lstatSync(path);
+      const marker: { kind: string; size: number; modifiedAt: number; port?: number; error?: string } = {
+        kind: info.isSymbolicLink() ? 'symlink' : info.isFile() ? 'file' : 'directory', size: info.size, modifiedAt: info.mtimeMs,
+      };
+      // Never follow a marker symlink or read the WebSocket endpoint on line 2.
+      if (name === 'DevToolsActivePort' && !info.isSymbolicLink()) {
+        if (!info.isFile()) marker.error = 'EISDIR';
+        else {
+          const fd = openSync(path, 'r');
+          try {
+            const byte = Buffer.alloc(1);
+            let line = '';
+            for (let offset = 0; offset < 7; offset++) {
+              if (readSync(fd, byte, 0, 1, offset) === 0 || byte[0] === 10) break;
+              line += byte.toString('ascii');
+            }
+            line = line.trim();
+            if (/^\d{1,5}$/.test(line) && Number(line) > 0 && Number(line) <= 65535) marker.port = Number(line);
+          } finally { closeSync(fd); }
+        }
+      }
+      return [name, marker];
+    } catch (error) { return [name, { error: diagnosticError(error) }]; }
+  }));
+}
+
+/** No raw command line, URL, or arbitrary switch value leaves the native helper. */
+async function startupProcessTree(pid: number, profile: string, port: number): Promise<object[]> {
+  return (await windowsProcessTree(pid)).map(proc => {
+    const command = proc.CommandLine ?? '';
+    const type = /(?:^|\s)--type=([a-z-]+)(?:\s|$)/.exec(command)?.[1];
+    const knownType = ['renderer', 'gpu-process', 'utility', 'crashpad-handler'].includes(type ?? '') ? type : undefined;
+    return {
+      pid: proc.ProcessId, parentPid: proc.ParentProcessId, image: proc.Name, type: knownType,
+      // Exact value matches are observations, not proof of process incarnation.
+      port: new RegExp(`(?:^|\\s)--remote-debugging-port=${port}(?:\\s|$)`).test(command) ? port : undefined,
+      profileMatches: command.includes(`--user-data-dir="${profile}"`) || command.includes(`"--user-data-dir=${profile}"`)
+        || command.split(/\s+/).includes(`--user-data-dir=${profile}`),
+    };
+  });
+}
+
 export class BrowserPage {
   #socket: TextSocket;
   #proc: Subprocess | null;
@@ -285,23 +347,25 @@ export class BrowserPage {
    */
   static async launch(options: BrowserOptions): Promise<BrowserPage> {
     try {
-      return await BrowserPage.#start(options);
+      return await BrowserPage.#start(options, 1);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       if (!STARTUP_STALLS.some((stall) => reason.startsWith(stall))) throw error;
       console.warn(`[e2e] the browser did not start, launching it once more: ${reason.split('\n', 1)[0]}`);
-      return BrowserPage.#start(options);
+      return BrowserPage.#start(options, 2);
     }
   }
 
-  static async #start(options: BrowserOptions): Promise<BrowserPage> {
+  static async #start(options: BrowserOptions, attempt: number): Promise<BrowserPage> {
     const executable = options.executable ?? findBrowser();
     const ownsUserDataDir = options.userDataDir === undefined;
     const userDataDir = options.userDataDir ?? mkdtempSync(join(tmpdir(), `${E2E_DIR_PREFIX}browser-`));
     const port = options.debugPort ?? (await freePort());
     const size = options.windowSize ?? { width: 1440, height: 900 };
 
-    const proc = Bun.spawn({
+    const startedAt = Date.now();
+    const executableInfo = executableMetadata(executable);
+    const launch = {
       cmd: [
         executable,
         '--headless=new',
@@ -334,10 +398,11 @@ export class BrowserPage {
         ...(options.args ?? []),
         'about:blank',
       ],
-      stdout: 'ignore',
-      stderr: 'pipe',
+      stdout: 'ignore' as const,
+      stderr: 'pipe' as const,
       windowsHide: true,
-    });
+    };
+    const proc = Bun.spawn(launch);
     // Linux and macOS: a test process killed outright still takes its browser
     // and profile with it. Windows keeps the tree kill of `stopBrowser`.
     const watch = watchParentDeath(proc.pid, ownsUserDataDir ? userDataDir : null);
@@ -354,9 +419,25 @@ export class BrowserPage {
     })();
     void drainErrors.catch(() => undefined);
 
+    let exitedAt: number | null = null;
+    void proc.exited.then(() => { exitedAt = Date.now(); }, () => undefined);
+    let native: Record<string, unknown> = { status: process.platform === 'win32' ? 'not-started' : 'unsupported' };
+    let observing = true;
+    const collectLate = () => {
+      if (!observing || native.status !== 'not-started') return;
+      const requestedAt = Date.now();
+      native = { status: 'pending', requestedAt };
+      // The FFI helper cannot be preempted while synchronous native work runs.
+      // Its promise is handled, but startup/cleanup never awaits it.
+      void startupProcessTree(proc.pid, userDataDir, port).then(tree => {
+        if (observing) native = { status: 'collected', requestedAt, completedAt: Date.now(), tree, incarnationVerified: false };
+      }, error => {
+        if (observing) native = { status: 'failed', requestedAt, completedAt: Date.now(), error: diagnosticError(error) };
+      });
+    };
     let page: BrowserPage | null = null;
     try {
-      const target = await waitForPageTarget(port, '', proc, true);
+      const target = await waitForPageTarget(port, '', proc, true, collectLate);
       const socket = await openSocket(target);
       page = new BrowserPage(socket, target, proc, ownsUserDataDir ? userDataDir : null, watch);
       page.#debugPort = port;
@@ -381,16 +462,40 @@ export class BrowserPage {
         width: size.width, height: size.height, deviceScaleFactor: 1, mobile: false,
       });
       await page.navigate(options.url);
+      observing = false;
       return page;
     } catch (error) {
+      observing = false;
+      const failedAt = Date.now();
+      const log = join(import.meta.dir, '..', '.artifacts', `browser-${proc.pid}.log`);
+      const diagnostic = join(dirname(log), `browser-${proc.pid}-attempt-${attempt}.json`);
+      let unavailable = '';
+      // Freeze and persist before cleanup can change exit state or delete markers.
+      try {
+        const report = {
+          attempt, startedAt, failedAt, elapsedMs: failedAt - startedAt, pid: proc.pid, port,
+          executable: executableInfo,
+          profile: { path: userDataDir, owned: ownsUserDataDir, markers: ownsUserDataDir ? profileMarkers(userDataDir) : undefined },
+          flags: launch.cmd.filter(arg => ['--headless=new', '--mute-audio', '--disable-gpu', '--enable-gpu', '--disable-software-rasterizer',
+            '--use-gl=angle', '--use-angle=d3d11', '--use-angle=gl-egl'].includes(arg)),
+          wrapper: { exitCode: proc.exitCode, signalCode: proc.signalCode, exitedAt },
+          native: { ...native, ageMs: typeof native.completedAt === 'number' ? failedAt - native.completedAt : null }, stderr,
+        };
+        mkdirSync(dirname(log), { recursive: true });
+        writeFileSync(diagnostic, JSON.stringify(report, null, 2));
+      } catch (failure) {
+        unavailable = `\nStartup diagnostic unavailable: ${diagnosticError(failure)}`;
+        console.warn(`[e2e]${unavailable}`);
+      }
       if (page !== null) await page.close();
       else await stopBrowser(proc, ownsUserDataDir ? userDataDir : null, watch);
       await drainErrors.catch(() => undefined);
-      const log = join(import.meta.dir, '..', '.artifacts', `browser-${proc.pid}.log`);
-      mkdirSync(dirname(log), { recursive: true });
-      writeFileSync(log, stderr);
+      try {
+        mkdirSync(dirname(log), { recursive: true });
+        writeFileSync(log, stderr);
+      } catch (failure) { unavailable += `\nBrowser stderr log unavailable: ${diagnosticError(failure)}`; }
       const reason = error instanceof Error ? error.message : String(error);
-      throw new Error(`${reason}\nBrowser stderr: ${log}\n${stderr}`, { cause: error });
+      throw new Error(`${reason}\nBrowser stderr: ${log}\n${stderr}${unavailable}`, { cause: error });
     }
   }
 
@@ -921,7 +1026,7 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
   }
 }
 
-async function waitForPageTarget(port: number, urlIncludes = '', proc?: Subprocess, allowBlank = false): Promise<TargetInfo> {
+async function waitForPageTarget(port: number, urlIncludes = '', proc?: Subprocess, allowBlank = false, collectLate?: () => void): Promise<TargetInfo> {
   const started = Date.now();
   const deadline = started + CONNECT_TIMEOUT_MS;
   let last = 'the debugging port never answered';
@@ -931,6 +1036,8 @@ async function waitForPageTarget(port: number, urlIncludes = '', proc?: Subproce
   const answers = new Map<string, { count: number; first: number; last: number }>();
   for (;;) {
     if (proc && proc.exitCode !== null) throw new Error(`the browser exited before opening CDP with code ${proc.exitCode}`);
+    const elapsed = Date.now() - started;
+    if (elapsed >= CONNECT_TIMEOUT_MS - PROBE_TIMEOUT_MS && elapsed < CONNECT_TIMEOUT_MS) collectLate?.();
     try {
       const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(1_000) });
       const targets = (await response.json()) as TargetInfo[];
