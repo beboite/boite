@@ -5,7 +5,7 @@ import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { Retirements } from '../src/delegation/retirement.ts';
 import { PullRequestWatches } from '../src/pull-request-watch.ts';
-import { evaluate, initialMemory, mergeChanges, parseDetail, parseRemarks, type Remark, type WatchDetail } from '../src/pull-request-watch-read.ts';
+import { evaluate, initialMemory, mergeChanges, parseDetail, parseRemarks, wakeMessage, type Remark, type WatchDetail } from '../src/pull-request-watch-read.ts';
 import { parseProtection, parseRules, withRequired } from '../src/pull-request-required.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
@@ -56,7 +56,7 @@ test('a failure is told once, a rerun failing again is told again, and passing w
   expect(evaluate(grown.next, detail([{ name: 'lint', required: true }, { name: 'test', required: true }, { name: 'e2e', required: true }, { name: 'docs', conclusion: 'FAILURE' }]), null).changes).toEqual([]);
 });
 
-test('remarks count when someone else wrote them, once each, a bot rewriting one is not news, and a conflict is told once', () => {
+test('remarks count when someone else wrote them, once each, a bot rewriting one is not news, and a conflict or falling behind is told once', () => {
   const memory = initialMemory(since);
   const old = remark('1', 'reviewer', '2026-10-15T08:00:00Z');
   const mine = remark('2', 'meetsu', '2026-10-15T09:30:00Z');
@@ -87,6 +87,16 @@ test('remarks count when someone else wrote them, once each, a bot rewriting one
   expect(conflict.changes).toEqual([{ kind: 'conflict', base: 'main' }]);
   expect(evaluate(conflict.next, { ...detail([]), mergeable: 'UNKNOWN' }, null).next.conflicting).toBe(true);
   expect(evaluate(conflict.next, { ...detail([]), mergeable: 'CONFLICTING' }, null).changes).toEqual([]);
+  // Behind a base that requires branches up to date: told once, kept while GitHub computes, cleared by a clean answer, never while queued.
+  expect(parseDetail(detailJson([], { mergeStateStatus: 'BEHIND' })).behind).toBe(true);
+  expect(parseDetail(detailJson([], { mergeStateStatus: 'UNKNOWN' })).behind).toBeNull();
+  const behind = evaluate(memory, { ...detail([]), behind: true }, null);
+  expect(behind.changes).toEqual([{ kind: 'behind', base: 'main' }]);
+  expect(evaluate(behind.next, { ...detail([]), behind: null }, null).next.behind).toBe(true);
+  expect(evaluate(behind.next, { ...detail([]), behind: true }, null).changes).toEqual([]);
+  expect(evaluate(evaluate(behind.next, { ...detail([]), behind: false }, null).next, { ...detail([]), behind: true }, null).changes).toEqual([{ kind: 'behind', base: 'main' }]);
+  expect(evaluate(memory, { ...detail([]), behind: true, queue: 1 }, null).changes).toEqual([]);
+  expect(wakeMessage([{ number: 7, url: URL, changes: behind.changes }])).toMatchObject({ label: 'Pull request update, #7: behind base' });
 });
 
 // Bodies as CodeRabbit and mtsu-patrol posted them on beboite/boite #441, #567 and #583, trimmed.
