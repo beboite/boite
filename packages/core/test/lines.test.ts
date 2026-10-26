@@ -86,19 +86,21 @@ describe('LineSplitter', () => {
     // Repeatedly scanning a growing buffer would search over 8 GiB here.
     const indexOf = String.prototype.indexOf;
     let searched = 0;
-    let lines: string[];
+    const lines: string[] = [];
+    const splitter = new LineSplitter(line => lines.push(line));
     try {
       String.prototype.indexOf = function (search: string, fromIndex = 0): number {
         if (search === '\n') searched += Math.max(0, this.length - fromIndex);
         return indexOf.call(this, search, fromIndex);
       };
-      ({ lines } = split(chunks));
+      for (const chunk of chunks) splitter.feed(chunk);
+      splitter.end();
     } finally {
       String.prototype.indexOf = indexOf;
     }
     expect(lines).toHaveLength(1);
     expect(lines[0]).toBe(huge);
-    expect(searched).toBeLessThanOrEqual(huge.length + 1);
+    expect(searched).toBe(huge.length + 1);
   });
 });
 

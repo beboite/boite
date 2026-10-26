@@ -49,26 +49,49 @@ function changed(ctx: FakeContext, projectId: ProjectId): void {
 }
 
 /** Rewrites the card where it is drawn, tells every client and wakes the `ask`, as the core's `#settle`. */
-function settle(ctx: FakeContext, thread: Thread, card: FakeSecretCard, status: SecretAskOutcome, ref: string | null, kept: boolean): void {
+function settle(ctx: FakeContext, thread: Thread | undefined, card: FakeSecretCard, status: SecretAskOutcome, ref: string | null, kept: boolean): void {
   if (ctx.pendingSecrets.get(card.request.id) !== card) return;
   ctx.pendingSecrets.delete(card.request.id);
   clearTimeout(card.timer);
   const drawn = card.message.parts[0] as SecretPart;
   const part: SecretPart = { ...drawn, status, ref, ...(kept ? { kept: true } : {}) };
   card.message.parts[0] = part;
-  ctx.emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: card.message.id, partIndex: 0, part: structuredClone(part) });
-  ctx.emit('secret.resolved', { requestId: card.request.id, threadId: thread.id, status, ref });
-  if (thread.turns.some((turn) => turn.id === card.request.turnId && turn.status === 'running')) {
+  const threadId = card.request.threadId;
+  ctx.emitToThread(threadId, 'message.part', { threadId, messageId: card.message.id, partIndex: 0, part: structuredClone(part) });
+  ctx.emit('secret.resolved', { requestId: card.request.id, threadId, status, ref });
+  if (thread && !thread.archived && thread.turns.some((turn) => turn.id === card.request.turnId && turn.status === 'running')) {
     thread.status = 'running';
     ctx.touch(thread);
   }
   card.resolve({ requestId: card.request.id, outcome: status, ref, storage: STORAGE });
 }
 
+/** Lifecycle events close cards even when no client is subscribed to their history. */
+export function cancelSecretCards(ctx: FakeContext, threadId: string, turnId?: string): void {
+  for (const card of [...ctx.pendingSecrets.values()]) {
+    if (card.request.threadId !== threadId || (turnId !== undefined && card.request.turnId !== turnId)) continue;
+    const thread = ctx.threads.get(threadId);
+    settle(ctx, thread, card, 'cancelled', null, false);
+  }
+}
+
 export function secretMethods(ctx: FakeContext) {
   // What a closed card answered, so a retry with its id gets it again, as the core's `#settled`.
   const settled = new Map<string, { threadId: Thread['id']; result: RpcResult<'secrets.ask'> }>();
   return {
+    'secrets.pending': async (params) => {
+      if ('threadId' in params) {
+        if (typeof params.threadId !== 'string') throw refused('secrets.pending: threadId must be a string', { field: 'threadId', expected: 'a thread id' });
+        ctx.thread(params.threadId);
+      }
+      const rows: SecretRequest[] = [];
+      for (const card of [...ctx.pendingSecrets.values()]) {
+        if (params.threadId !== undefined && card.request.threadId !== params.threadId) continue;
+        if (card.request.expiresAt <= Date.now()) settle(ctx, ctx.thread(card.request.threadId), card, 'timed_out', null, false);
+        else rows.push(structuredClone(card.request));
+      }
+      return rows;
+    },
     'secrets.ask': async (params) => {
       const thread = ctx.thread(params.threadId);
       if (thread.archived) throw refused('cannot ask for a secret on an archived conversation', { threadId: thread.id, field: 'archived', expected: false });

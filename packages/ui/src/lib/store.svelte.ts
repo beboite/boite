@@ -179,6 +179,7 @@ export class Store {
 
   detach(): void {
     const ctx = this.#ctx;
+    ctx.requests.resetSecrets();
     ctx.clientGeneration++;
     ctx.settings.brainCommands = [];
     ctx.models.flushModels();
@@ -658,6 +659,7 @@ export class Store {
   get permissionRequests() { return this.#ctx.requests.permissionRequests; }
   set permissionRequests(value) { this.#ctx.requests.permissionRequests = value; }
   get pendingQuestions() { return this.#ctx.requests.pendingQuestions; }
+  get pendingSecrets() { return this.#ctx.requests.pendingSecrets; }
   set pendingQuestions(value) { this.#ctx.requests.pendingQuestions = value; }
   get questionRequests() { return this.#ctx.requests.questionRequests; }
   set questionRequests(value) { this.#ctx.requests.questionRequests = value; }

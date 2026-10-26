@@ -3,14 +3,19 @@ import { flushSync, mount, tick, unmount } from 'svelte';
 import type { MessagePart } from '@boite/contracts';
 import { FakeClient, type FakeClientOptions } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
+import { replyTarget } from '../lib/question-reply.svelte';
 import AssistantMessage from './AssistantMessage.svelte';
+import ThreadActivity from './ThreadActivity.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
+let dock: ReturnType<typeof mount> | undefined;
 const closers: (() => void)[] = [];
 
 afterEach(async () => {
   if (mounted) await unmount(mounted);
+  if (dock) await unmount(dock);
   mounted = undefined;
+  dock = undefined;
   for (const close of closers.splice(0)) close();
   document.body.innerHTML = '';
 });
@@ -43,6 +48,7 @@ async function asked(options: FakeClientOptions = {}, ask: { replace?: boolean; 
   const message = store.openThread!.messages.find((entry) => entry.parts[0]?.type === 'secret_request');
   if (!message) throw new Error('the card was not drawn');
   mounted = mount(AssistantMessage, { target: document.body, props: { store, threadId: 't-trace', message, signedOut: null, showModel: false } });
+  dock = mount(ThreadActivity, { target: document.body, props: { store } });
   await settle();
   return { store, client, outcome, part: () => message.parts[0] as Extract<MessagePart, { type: 'secret_request' }> };
 }
@@ -146,6 +152,44 @@ test('over a link nobody encrypts the field and Save are off, Decline still answ
   expect(query('[data-testid=secret-outcome]').textContent).toBe('OPENAI_API_KEY declined');
 });
 
+test('a pending secret stays in the question dock and leaves only a link in the timeline', async () => {
+  await asked();
+  const field = query('[data-testid=secret-field]');
+  expect(field.closest('[data-testid=thread-activity]')).not.toBeNull();
+  expect(document.querySelectorAll('[data-testid=secret-field]')).toHaveLength(1);
+  expect(query('[data-testid=secret-docked]').querySelector('input')).toBeNull();
+});
+
+test.each([false, true])('new requests keep the current secret, input and storage choice (replace=%s); the timeline link reopens its place in the pager', async (replace) => {
+  const { client, store, part } = await asked({}, { replace });
+  type(SECRET);
+  const keep = query<HTMLInputElement>('[data-testid=secret-keep]');
+  expect(keep.checked).toBe(replace);
+  keep.click();
+  await settle();
+  expect(keep.checked).toBe(!replace);
+  const second = client.call('secrets.ask', { threadId: 't-trace', name: 'DEPLOY_TOKEN', reason: 'Deploy the preview.' });
+  second.catch(() => undefined);
+  await settle();
+  expect(query<HTMLInputElement>('[data-testid=activity-question]:not([hidden]) [data-testid=secret-field]').value).toBe(SECRET);
+  expect(keep.checked).toBe(!replace);
+  expect(query('[data-testid=activity-question-index]').textContent).toBe('1 of 2');
+  query<HTMLButtonElement>('[data-testid=activity-question-next]').click();
+  await settle();
+  expect(query('[data-testid=activity-question]:not([hidden]) [data-testid=secret-reason]').textContent).toBe('Deploy the preview.');
+  expect(query<HTMLInputElement>('[data-testid=activity-question]:not([hidden]) [data-testid=secret-field]').value).toBe('');
+  expect(query<HTMLInputElement>('[data-testid=activity-question]:not([hidden]) [data-testid=secret-keep]').checked).toBe(false);
+  query<HTMLButtonElement>('[data-testid=activity-question-toggle]').click();
+  await settle();
+  query<HTMLButtonElement>('[data-testid=secret-docked]').click();
+  await settle();
+  expect(query('[data-testid=activity-question-toggle]').getAttribute('aria-expanded')).toBe('true');
+  expect(query('[data-testid=activity-question]:not([hidden])').getAttribute('data-question')).toBe(part().requestId);
+  expect(query<HTMLInputElement>('[data-testid=activity-question]:not([hidden]) [data-testid=secret-field]').value).toBe(SECRET);
+  expect(keep.checked).toBe(!replace);
+  expect(JSON.stringify(store.composerStates)).not.toContain(SECRET);
+});
+
 test('a refused answer shows the core\'s message and leaves the field empty', async () => {
   const { client } = await asked();
   const real = client.call.bind(client);
@@ -159,4 +203,15 @@ test('a refused answer shows the core\'s message and leaves the field empty', as
   await settle();
   expect(query('[data-testid=secret-error]').textContent).toContain('the windows vault did not store the value');
   expect(query('[data-testid=secret-card]').getAttribute('data-state')).toBe('pending');
+});
+
+test('a visible secret keeps the composer from answering a different hidden question', async () => {
+  const { store } = await asked();
+  store.pendingQuestions = [{ id: 'hidden-question', threadId: 't-trace', turnId: 'turn', text: 'Choose the next action', options: [], allowText: true, multiple: false, async: true, createdAt: Date.now() + 1000 }];
+  await settle();
+  expect(query('[data-testid=activity-question]:not([hidden]) [data-testid=secret-field]')).toBeTruthy();
+  expect(replyTarget(store)).toBeNull();
+  query<HTMLButtonElement>('[data-testid=activity-question-next]').click();
+  await settle();
+  expect(replyTarget(store)?.id).toBe('hidden-question');
 });

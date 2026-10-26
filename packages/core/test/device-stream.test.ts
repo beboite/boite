@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -62,6 +62,7 @@ describe('the Device panel live stream', () => {
     await open();
   });
   afterEach(async () => {
+    mock.restore();
     agent.close();
     owner.close();
     await harness.stop();
@@ -213,9 +214,32 @@ describe('the Device panel live stream', () => {
     }
   }, 30_000);
 
-  test('closing the panel, turning the setting off, unplugging and stopping the core each end the session', async () => {
+  for (const loaded of [false, true]) test(`closing the panel refuses a stream call still awaiting its ${loaded ? 'loaded' : 'loading'} module`, async () => {
     await owner.call('settings.set', { deviceStream: true });
-    const ended = async (count: number) => waitFor(() => sdk.servers().filter((line) => !line.startsWith('start')).length >= count, 5000);
+    if (loaded) await owner.call('devices.stream', { threadId, deviceId: PHONE });
+    const starts = () => sdk.calls().filter((call) => call.includes('app_process')).length;
+    const before = starts();
+    const pending = thrown(harness.core.devices.stream({ threadId, deviceId: PHONE }));
+    await harness.core.devices.close({ threadId, deviceId: PHONE });
+    expect(await pending).toThrow('is not open in this conversation');
+    expect(starts()).toBe(before);
+  });
+
+  test('closing the panel, turning the setting off, unplugging and stopping the core each end the session', async () => {
+    sdk.set({ scrcpyExitDelayMs: 6000 });
+    const spawn = harness.core.procs.spawn.bind(harness.core.procs);
+    let servers = 0, exits = 0;
+    spyOn(harness.core.procs, 'spawn').mockImplementation((...args) => {
+      const child = spawn(...args);
+      if (args[2].includes('com.genymobile.scrcpy.Server')) {
+        servers++;
+        void child.exited.then(() => { exits++; });
+      }
+      return child;
+    });
+    await owner.call('settings.set', { deviceStream: true });
+    // A slow server may be killed before its final log: wait for the owned process instead.
+    const ended = async (count: number) => waitFor(() => exits >= count, 5000);
     let desk = watch(owner);
     await desk.live();
     await agent.call('devices.close', { threadId, deviceId: PHONE });
@@ -234,6 +258,8 @@ describe('the Device panel live stream', () => {
     await owner.call('settings.set', { deviceStream: true });
     desk = watch(owner);
     await desk.live();
+    // Let the fake adb finish rewriting state before the test unplugs the phone.
+    await waitFor(() => Object.keys(sdk.state().reverses ?? {}).length === 0);
     sdk.set({ physical: [] });
     await waitFor(() => desk.answers.at(-1)?.state === 'failed', 5000);
     expect(desk.answers.at(-1)!.reason).toContain('device offline');
@@ -248,6 +274,7 @@ describe('the Device panel live stream', () => {
     await desk.stop();
     await harness.core.devices.stop();
     await ended(4);
+    expect(servers).toBe(4);
     // Each tunnel was removed once, the unplugged phone's too (adb itself drops those when a device goes).
     const added = sdk.calls().flatMap((call) => /^adb -s \S+ reverse (\S+) tcp:\d+$/.exec(call)?.[1] ?? []);
     expect(added).toHaveLength(4);

@@ -5,7 +5,11 @@ import { Store } from './store.svelte';
 
 /** Holds every call to `method` (on `threadId` when given) until the test settles it; the rest go to the fake core. */
 function hold(client: FakeClient, method: string, threadId?: string) {
-  const real = client.call.bind(client);
+  // A second hold reuses the spy; capture its implementation before replacing it.
+  const implementation = vi.isMockFunction(client.call)
+    ? vi.mocked(client.call).getMockImplementation() ?? client.call
+    : client.call;
+  const real = implementation.bind(client);
   const held: { params: Record<string, unknown>; resolve: (value: unknown) => void; reject: (error: unknown) => void; real: () => void }[] = [];
   const spy = vi.spyOn(client, 'call').mockImplementation(((name: string, params: Record<string, unknown>) => {
     if (name !== method || (threadId !== undefined && params.threadId !== threadId)) return real(name as never, params as never);

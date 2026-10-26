@@ -121,6 +121,19 @@ export class SecretStore {
     return false;
   }
 
+  /** Open request metadata only: no vault access and no history page dependency. */
+  pending(threadId?: ThreadId): SecretRequest[] {
+    const now = this.now();
+    const requests: SecretRequest[] = [];
+    for (const pending of [...this.#pending.values()]) {
+      const request = pending.request;
+      if (threadId !== undefined && request.threadId !== threadId) continue;
+      if (request.expiresAt <= now) this.#settle(pending, 'timed_out', null, false);
+      else requests.push({ ...request });
+    }
+    return requests;
+  }
+
   #projectOf(threadId: ThreadId): ProjectId | null {
     if (!this.#projects.has(threadId)) this.#projects.set(threadId, this.core.journal.getThread(threadId)?.projectId ?? null);
     return this.#projects.get(threadId)!;
