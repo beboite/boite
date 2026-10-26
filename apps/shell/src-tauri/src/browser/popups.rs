@@ -24,7 +24,7 @@ fn popup_label(surface: &str) -> String {
 
 /// The surface a popup belongs to. A surface id may itself carry `:`, so the
 /// number is what is split off.
-fn popup_surface(label: &str) -> Option<&str> {
+pub(super) fn popup_surface(label: &str) -> Option<&str> {
     let (number, surface) = label.strip_prefix(POPUP_PREFIX)?.split_once(':')?;
     number.parse::<u64>().ok().map(|_| surface)
 }
@@ -132,7 +132,7 @@ fn open_popup(app: &AppHandle, surface: &str, private: bool, url: &Url, features
     builder = builder.on_new_window(move |url, features| new_window(&handle, &id, private, url, features));
     let window = builder.build().map_err(|error| error.to_string())?;
     #[cfg(windows)]
-    if let Err(error) = crate::platform::browser_page::popup(&window) {
+    if let Err(error) = crate::platform::browser_page::popup(&window, super::muted(&label)) {
         let _ = window.close();
         return Err(error);
     }

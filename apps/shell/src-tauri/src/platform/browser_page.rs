@@ -5,13 +5,14 @@
 //! a surface cannot run a shell command (see `browser.rs`), but the opener
 //! plugin's script still caught every `target="_blank"` link and handed it to
 //! the command the page is refused, so the link did nothing. `plain` takes all
-//! of it back out before the first page loads.
+//! of it back out before the first page loads. An agent's surface and its
+//! popups are also muted there, by the host, where no page can turn it back on.
 use std::sync::mpsc;
 use std::time::Duration;
 use tauri::{Manager, Runtime, Webview, WebviewWindow};
-use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2;
+use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2, ICoreWebView2_8};
 use webview2_com::{AddScriptToExecuteOnDocumentCreatedCompletedHandler, WindowCloseRequestedEventHandler};
-use windows::core::HSTRING;
+use windows::core::{Interface, HSTRING};
 
 /// How many document scripts before the probe are taken out. Tauri 2.11 and
 /// its plugins add about fifteen to a webview, all while it is being built.
@@ -56,11 +57,26 @@ fn plain(webview: &ICoreWebView2) -> Result<(), String> {
     Ok(())
 }
 
-/// Makes a new surface plain before it leaves about:blank.
-pub(crate) async fn surface(view: &Webview) -> Result<(), String> {
+/// Mutes the whole webview, frames and media alike. WebView2 keeps it for the
+/// webview's life, across navigations; a page has no call that changes it. A
+/// webview starts with its sound, so the user's pages are left alone.
+fn mute(webview: &ICoreWebView2) -> Result<(), String> {
+    let audio = webview.cast::<ICoreWebView2_8>()
+        .map_err(|error| format!("this WebView2 runtime cannot mute a page: {error}"))?;
+    unsafe { audio.SetIsMuted(true) }.map_err(|error| error.to_string())
+}
+
+/// Makes a new surface plain, and muted when `muted`, before it leaves about:blank.
+pub(crate) async fn surface(view: &Webview, muted: bool) -> Result<(), String> {
     let (sender, receiver) = mpsc::channel();
     view.with_webview(move |platform| {
-        let made = unsafe { platform.controller().CoreWebView2() }.map_err(|error| error.to_string()).and_then(|webview| plain(&webview));
+        let made = unsafe { platform.controller().CoreWebView2() }.map_err(|error| error.to_string())
+            .and_then(|webview| {
+                plain(&webview).map_err(|error| format!("it could not be cleared of the app's scripts: {error}"))?;
+                // Fails closed: an agent page left with its sound is the bug this prevents.
+                if muted { mute(&webview).map_err(|error| format!("its sound could not be muted: {error}"))?; }
+                Ok(())
+            });
         let _ = sender.send(made);
     }).map_err(|error| error.to_string())?;
     tauri::async_runtime::spawn_blocking(move || receiver.recv_timeout(Duration::from_secs(10))
@@ -68,12 +84,12 @@ pub(crate) async fn surface(view: &Webview) -> Result<(), String> {
         .await.map_err(|error| error.to_string())?
 }
 
-/// Makes a popup plain, and closes its window when the page calls
+/// Makes a popup plain, muted when `muted`, and closes its window when the page calls
 /// `window.close()`: wry only destroys the webview inside it, which left an
 /// empty window behind once a sign-in popup had answered its opener. Called in
 /// the new-window handler, on the main thread, before WebView2 is handed the
 /// popup, so its first document already finds it plain.
-pub(crate) fn popup<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
+pub(crate) fn popup<R: Runtime>(window: &WebviewWindow<R>, muted: bool) -> Result<(), String> {
     let (sender, receiver) = mpsc::channel();
     let app = window.app_handle().clone();
     let label = window.label().to_owned();
@@ -81,6 +97,7 @@ pub(crate) fn popup<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String>
         let made = (|| -> Result<(), String> {
             let webview = unsafe { platform.controller().CoreWebView2() }.map_err(|error| error.to_string())?;
             plain(&webview)?;
+            if muted { mute(&webview).map_err(|error| format!("its sound could not be muted: {error}"))?; }
             let handler = WindowCloseRequestedEventHandler::create(Box::new(move |_, _| {
                 // Closed later, off this WebView2 callback, which must not
                 // destroy the webview it is running in.

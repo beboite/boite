@@ -215,6 +215,10 @@ export const strings = {
     planSaveHint: "Write the plan as a markdown file at the root of this thread's folder",
     planSaved: 'Saved as {name}',
     copyMessage: 'Copy message',
+    /** The menu of a file, folder or thread link in an answer, opened by a right click or a long press. */
+    openLink: 'Open',
+    copyPath: 'Copy path',
+    copyThreadAddress: 'Copy thread address',
     editMessage: 'Edit and send again from here',
     retry: 'Retry this answer',
     fork: 'Fork from here',

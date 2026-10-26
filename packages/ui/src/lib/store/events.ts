@@ -87,7 +87,7 @@ export function listen(ctx: StoreContext, client: Client): void {
   on('thread.created', (summary) => threads.upsertThread(summary));
   on('thread.updated', (summary) => {
     if (summary.archived) requests.dropSecretsOf(summary.id);
-    const held = threads.threads.find(t => t.id === summary.id);
+    const held = threads.rowOf(summary.id);
     const turnedToUser = needsUser(summary) && !(held && needsUser(held));
     threads.upsertThread(summary);
     ctx.delegation.patchThread(summary);
