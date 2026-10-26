@@ -1092,7 +1092,8 @@ The core validates bytes and writes sanitized, content-addressed copies under
 `<dataDir>/attachments/`. Copies survive resume and are currently not removed
 by archive or project removal. A copy the core wrote or compared is not read
 again while its size, mtime and inode stay the same; an agent's edit changes
-them, and the next reference gets a fresh copy. Timeline cards download those copies. Composer
+them, and the next reference gets a fresh copy. A different size rejects the
+old copy without reading its contents. Timeline cards download those copies. Composer
 `[Image N]` references follow attachment order, preview inline and renumber after
 removal. A tile opens its picture large above the box; a second click on the
 tile, or a click on the large picture, puts it away. Copying or cutting a reference carries its picture
@@ -1116,6 +1117,11 @@ The shell resolves symlinks, checks thread containment and rejects browsed-webvi
 callers. Remote cores, browsers and phones retain preview/download behavior.
 Published snapshots from `boite attach` use the separate safe download/open rules
 in [CLI](cli.md); they do not authorize executing an uploaded file.
+
+File tickets and compressed view copies open without waiting for a FIFO writer
+on POSIX, then check the opened handle's type. A ticket body truncated after its
+size was checked errors instead of completing with fewer bytes than advertised.
+Download names use RFC 8187 encoding for both file and byte tickets.
 
 Inline text previews use the conversation's vertical scroll, including when
 the pointer is over the file contents. Long lines scroll horizontally inside
