@@ -49,11 +49,11 @@
     return () => { active = false; };
   });
 
-  async function choose(mode: TelemetryState['mode']): Promise<boolean> {
+  async function choose(mode: TelemetryState['mode'], countChoice = true): Promise<boolean> {
     const client = store.client;
     if (!client) return false;
     busy = true; error = '';
-    try { consent = await store.configureTelemetry(mode); consentFrom = client; return store.client === client; }
+    try { consent = await store.configureTelemetry(mode, countChoice); consentFrom = client; return store.client === client; }
     catch (reason) { if (store.client === client) error = String(reason); return false; }
     finally { busy = false; }
   }
@@ -79,7 +79,7 @@
     const saved = await savedMode();
     if (!saved) return;
     // A replay never turns counters back on after a saved opt-out.
-    if (!await choose(saved === 'off' ? 'off' : 'basic')) return;
+    if (!await choose(saved === 'off' ? 'off' : 'basic', saved !== 'off')) return;
     if (reduced) { onchosen(); return; }
     // The clip swaps at the size the first one had, so the rows do not jump.
     const box = clip?.getBoundingClientRect();
@@ -108,6 +108,9 @@
     <p class="intro">{strings.onboarding.privacy.intro}</p>
   </div>
   <p class="question">{strings.onboarding.privacy.question}<InfoTip topic={strings.onboarding.privacy.doc} text={strings.onboarding.privacy.details} testid="onboarding-telemetry-details" /></p>
+  {#if consent?.configured !== false}
+    <p class="intro" data-testid="telemetry-choice-notice">{strings.telemetry.choiceNotice}</p>
+  {/if}
   <div class="rows">
     <button class="row no" class:refused={refusing} disabled={busy || refusing || !consent} data-testid="onboarding-telemetry-basic" onclick={() => void enough()}>
       <span class="label">{strings.onboarding.privacy.basic}<small>{strings.onboarding.privacy.basicDefault}</small></span>

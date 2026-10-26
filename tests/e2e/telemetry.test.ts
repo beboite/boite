@@ -17,6 +17,7 @@ test('owner controls consent on desktop and phone; captures both layouts', async
   await page.waitFor(`document.querySelector('[data-testid="onboarding-next"]')`);
   await page.click('[data-testid="onboarding-dot-privacy"]');
   await page.waitFor(`document.querySelector('[data-testid="onboarding-telemetry-enhanced"]')`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="telemetry-choice-notice"]').textContent`)).toContain('without an installation ID');
   await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => { a.finish(); return a.finished.catch(() => {}); })])`);
   await page.screenshot(join(import.meta.dir, '.artifacts/onboarding-telemetry-desktop.png'));
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
@@ -24,6 +25,8 @@ test('owner controls consent on desktop and phone; captures both layouts', async
   await page.click('[data-testid="onboarding-locale-fr"]');
   await page.click('[data-testid="onboarding-dot-privacy"]');
   await page.waitFor(`document.querySelector('[data-testid="onboarding-telemetry-enhanced"]')`);
+  await page.waitFor(`document.querySelector('[data-testid="telemetry-choice-notice"]')?.textContent.includes("sans identifiant d'installation")`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="telemetry-choice-notice"]').textContent`)).toContain("sans identifiant d'installation");
   await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => { a.finish(); return a.finished.catch(() => {}); })])`);
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
   expect(await page.evaluate(`(() => { const panel = document.querySelector('[data-testid="onboarding"] .panel').getBoundingClientRect(); const row = document.querySelector('[data-testid="onboarding-telemetry-enhanced"]').getBoundingClientRect(); return row.left >= panel.left && row.right <= panel.right; })()`)).toBe(true);
@@ -34,6 +37,7 @@ test('owner controls consent on desktop and phone; captures both layouts', async
   await page.click('[data-testid="nav-settings"]');
   await page.click('[data-testid="settings-tab-general"]');
   await page.waitFor(`document.querySelector('${card} input')`);
+  expect(await page.evaluate(`document.querySelector('${card} [data-testid="telemetry-choice-notice"]').textContent`)).toContain("sans identifiant d'installation");
   expect(await page.evaluate(`Array.from(document.querySelectorAll('${card} input')).map(x => x.checked)`)).toEqual([true, false]);
   await page.click(`${card} input`);
   await page.waitFor(`!document.querySelector('${card} input').checked`);
