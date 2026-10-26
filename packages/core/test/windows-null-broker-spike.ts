@@ -315,13 +315,21 @@ console.error('NB_BUN pid='+process.pid+' ignore='+Number(ignore)+' pipe='+Numbe
 if(!ignore||!pipe||!denied||nativeCode!==0||!network) process.exit(1);
 `;
 
-async function nativeCases(procs: ProcRegistry, helper: string, scratch: string, output: string, compiler: string) {
-  const project = join(scratch, 'view'), runtime = join(scratch, 'runtime'), home = join(scratch, 'home'), host = join(scratch, 'host-project');
+export function createBrokerFixture(scratch: string) {
+  // setup replaces this directory's DACL and propagates inherited ACL changes.
+  // Keep host controls and the open journal outside that subtree.
+  const boundary = join(scratch, 'boundary'); mkdirSync(boundary);
+  const project = join(boundary, 'view'), runtime = join(boundary, 'runtime'), home = join(boundary, 'home'), host = join(scratch, 'host-project');
   for (const path of [project,runtime,home,join(home,'temp'),host]) mkdirSync(path);
   writeFileSync(join(project,'ordinary.txt'),'ordinary synthetic fixture');
   writeFileSync(join(host,'ordinary.txt'),'SYNTHETIC_HOST');
   const excluded = join(host,'.env'); writeFileSync(excluded,'SYNTHETIC_EXCLUDED');
   writeFileSync(join(project,'bun-fixture.js'),bunFixture);
+  return {boundary, project, runtime, home, host, excluded, ambient: join(boundary,'ambient-probe')};
+}
+
+async function nativeCases(procs: ProcRegistry, helper: string, scratch: string, output: string, compiler: string) {
+  const {boundary, project, runtime, home, host, excluded, ambient} = createBrokerFixture(scratch);
   const capturedNative = join(runtime,'null-broker-fixture.exe'), capturedBun = join(runtime,'bun.exe');
   copyFileSync(helper,capturedNative); copyFileSync(process.execPath,capturedBun);
   const capturedImages = {native: hash(readFileSync(capturedNative)), bun: hash(readFileSync(capturedBun))};
@@ -350,15 +358,21 @@ async function nativeCases(procs: ProcRegistry, helper: string, scratch: string,
     credential = kernel.symbols.CreateFileW(ptr(Buffer.from(`${excluded}\0`,'utf16le')),0x80000000,7,ptr(security),3,0,null);
     if (!credential || Number(credential) === -1) throw new Error('synthetic credential open failed');
     prepared = true;
-    const setup = await run('setup',['setup',profile,scratch,project,runtime,home]);
-    if (setup.code !== 0 || setup.out !== 'protected-native-prepared' || setup.timedOut || setup.overflow) throw new Error('original setup incomplete');
-    const windows = process.env.SystemRoot || 'C:\\Windows', ambient = join(scratch,'ambient-probe');
+    const windows = process.env.SystemRoot || 'C:\\Windows';
     const env = {PATH:`${runtime};${join(windows,'System32')}`,SystemRoot:windows,WINDIR:windows,
       COMSPEC:join(windows,'System32','cmd.exe'),HOME:home,USERPROFILE:home,APPDATA:home,LOCALAPPDATA:home,TEMP:join(home,'temp'),TMP:join(home,'temp'),
       CI:'1',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'NUL'};
     const targetArgs = (scenario: string) => ['--broker-fixture',scenario,'root',ambient,excluded,join(host,'ordinary.txt'),String(credential),String(process.pid),String(listener.port),'synthetic'];
-    const hostPath = await run('host-path',targetArgs('host-path'));
-    if (hostPath.code !== 0 || hostPath.timedOut || hostPath.overflow || hostPath.err.trim() !== 'NB_HOST_PATH status=0x00000000 content=1') throw new Error('exact native host-path control incomplete');
+    const checkHostPath = async (phase: 'before' | 'after') => {
+      const hostPath = await run(`host-path-${phase}`,targetArgs('host-path'));
+      if (hostPath.code !== 0 || hostPath.timedOut || hostPath.overflow || hostPath.err.trim() !== 'NB_HOST_PATH status=0x00000000 content=1') {
+        throw new Error(`exact native host-path ${phase} setup incomplete: code=${hostPath.code} ${hostPath.err.trim()}`);
+      }
+    };
+    await checkHostPath('before');
+    const setup = await run('setup',['setup',profile,boundary,project,runtime,home]);
+    if (setup.code !== 0 || setup.out !== 'protected-native-prepared' || setup.timedOut || setup.overflow) throw new Error('original setup incomplete');
+    await checkHostPath('after');
     for (const scenario of ['off','pointers','rollback','native','handled','unhandled','root-exit','bun']) {
       const command = scenario === 'off' ? 'run-off' : scenario === 'rollback' ? 'run-rollback' : 'run-broker';
       const target = scenario === 'bun' ? capturedBun : capturedNative;

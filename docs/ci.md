@@ -292,6 +292,10 @@ x64 ntdll image and startup site; an unsupported image or partial capture leaves
 the experiment incomplete. Both compiler outcomes must agree. This diagnostic
 always reports `productionAccepted=false`; its non-blocking CI step does not
 replace the original blocking native protection tests.
+The setup ACL root contains only the private view, runtime and home. Synthetic
+host files and the process journal stay outside that subtree so inherited ACL
+changes cannot invalidate the host control or prevent journal cleanup. The same
+native host-path read must succeed both before and after setup.
 
 A skip passes in a ruleset, so a draft must not satisfy it:
 

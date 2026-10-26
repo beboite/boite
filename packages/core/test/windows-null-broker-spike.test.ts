@@ -1,6 +1,8 @@
 import {describe, expect, test} from 'bun:test';
-import {readFileSync} from 'node:fs';
-import {brokerSource, classifyBroker, combineVerdicts, runLocalContracts, type BrokerVerdict} from './windows-null-broker-spike.ts';
+import {mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {isAbsolute, join, relative, sep} from 'node:path';
+import {createBrokerFixture, brokerSource, classifyBroker, combineVerdicts, runLocalContracts, type BrokerVerdict} from './windows-null-broker-spike.ts';
 
 const bind = 'NB_BIND pid=10 parent=1 generation=root package=S-1-15-2-1-2-3 lpac=1 capabilities=1 registry=1 job=1 dup=1';
 const end = 'NB_END error=0 active=0 owned=0 suspended=0 pending=0 delegations=0';
@@ -135,4 +137,20 @@ test('Bun evidence binds its exact runtime, ordinary children and complete nativ
     expect(classifyBroker(partial,'bun',false,expectedImages).experimentComplete).toBe(false);
   }
   for (const [a,b] of [['NB_BUN pid=10','NB_BUN pid=20'],['sha='+nativeSha,'sha='+bunSha],['parent=10 generation=child','parent=20 generation=child']]) expect(classifyBroker(capture.replace(a!,b!),'bun',false,expectedImages).experimentComplete).toBe(false);
+});
+
+
+test('setup ACL propagation cannot reach synthetic host controls or the process journal', () => {
+  const scratch = mkdtempSync(join(tmpdir(),'boite-null-layout-'));
+  try {
+    const journal = join(scratch,'journal.db'); writeFileSync(journal,'synthetic control state');
+    const fixture = createBrokerFixture(scratch);
+    const inside = (path: string) => {const part=relative(fixture.boundary,path);return !isAbsolute(part)&&part!=='..'&&!part.startsWith('..'+sep);};
+    for (const path of [fixture.host,fixture.excluded,journal]) expect(inside(path)).toBe(false);
+    for (const path of [fixture.project,fixture.runtime,fixture.home,fixture.ambient]) expect(inside(path)).toBe(true);
+    expect(readFileSync(join(fixture.host,'ordinary.txt'),'utf8')).toBe('SYNTHETIC_HOST');
+    expect(readFileSync(fixture.excluded,'utf8')).toBe('SYNTHETIC_EXCLUDED');
+    expect(readFileSync(journal,'utf8')).toBe('synthetic control state');
+    expect(readdirSync(fixture.boundary).sort()).toEqual(['home','runtime','view']);
+  } finally {rmSync(scratch,{recursive:true,force:true});}
 });
