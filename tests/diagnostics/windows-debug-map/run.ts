@@ -4,8 +4,9 @@ import {isAbsolute, join} from 'node:path';
 import {capture, type Captured} from './capture.ts';
 import {selectedEnvironment} from './environment.ts';
 import {sha256, sourceHash, sourcePath, writeSource} from './generate.ts';
-import {installOwnership, prepareOwnership, ownershipTestArgs, verifyOwnershipPlatform} from './ownership-generate.ts';
+import {installOwnership, prepareOwnership, ownershipTestArgs, verifyOwnershipPlatform, ownedFaultRootReference} from './ownership-generate.ts';
 import {summarizeOwnership} from './ownership-summary.ts';
+import {startFaultRootService} from './fault-root-reference.ts';
 import {acceptsNullMessageProbe} from './null-message.ts';
 
 const [output, mode] = process.argv.slice(2);
@@ -54,7 +55,7 @@ try {
   if (ownership) for (const file of ['jobs.ts', 'jobs-worker.ts', 'preload.ts', 'provenance.json'])
     hashes[`ownership-source/${file}`] = sha256(readFileSync(join(ownership.directory, file)));
   for (const file of ['generate.ts', 'run.ts', 'routing.test.ts', 'environment.ts', 'capture.ts', 'gates.md', 'target-topology.ts', 'target-topology.test.ts', 'target-topology-export.txt', 'helper-job.ts', 'helper-job.test.ts', 'helper-reference.ts', 'helper-reference.test.ts', 'helper-reference-export.txt', 'worker-lifetime.ts', 'worker-lifetime.test.ts', 'retirement-timing.ts', 'retirement-timing.test.ts', 'directory-twin.ts', 'directory-twin.test.ts', 'retirement-fixture.ts', 'anchor-overlap.ts', 'anchor-overlap.test.ts', 'target-acl.test.ts', 'target-acl-cases.c',
-    'anchor-access-cases.c', 'ownership-generate.ts', 'ownership-ledger.ts', 'ownership-trace.ts', 'ownership-summary.ts', 'ownership.test.ts', 'null-message.ts', 'null-message.test.ts']) {
+    'fault-root-reference.ts', 'fault-root-reference.test.ts', 'fault-root-reference-export.txt', 'anchor-access-cases.c', 'ownership-generate.ts', 'ownership-ledger.ts', 'ownership-trace.ts', 'ownership-summary.ts', 'ownership.test.ts', 'null-message.ts', 'null-message.test.ts']) {
     hashes[file] = sha256(readFileSync(join(import.meta.dir, file)));
   }
   writeFileSync(join(output, 'sha256.json'), JSON.stringify(hashes, null, 2) + '\n'); save();
@@ -78,6 +79,7 @@ try {
       trace.start(traceDirectory);
       await verifyOwnershipPlatform();
     }
+    let rootService: ReturnType<typeof startFaultRootService> | undefined;
     const journal = new Journal(join(scratch, `${compiler.name}.db`));
     procs = new ProcRegistry(journal, new Bus());
     try {
@@ -91,12 +93,18 @@ try {
       if (compiled.code !== 0 || compiled.timedOut) throw new Error(`strict compile failed: ${compiler.name}`);
       hashes[`${compiler.name}/debug-map.exe`] = sha256(readFileSync(helper));
       if (!compileOnly) {
-        const tested: Captured = await execute(`native-${compiler.name}`, process.execPath,
+        const rootDirectory = join(directory, 'fault-root-control'), rootNonce = crypto.randomUUID().replaceAll('-', '');
+        mkdirSync(rootDirectory, {mode: 0o700});
+        rootService = startFaultRootService(rootDirectory, await ownedFaultRootReference(compiler.name, rootNonce, directory, traceDirectory), action => trace!.preserve(action));
+        let tested: Captured;
+        try {tested = await execute(`native-${compiler.name}`, process.execPath,
           ownershipTestArgs(ownership!.preload, join(import.meta.dir, 'routing.test.ts')), selectedEnvironment({
+            BOITE_ROOT_REFERENCE_DIRECTORY: rootDirectory, BOITE_ROOT_REFERENCE_NONCE: rootNonce, BOITE_ROOT_REFERENCE_COMPILER: compiler.name,
             BOITE_TEST_DEBUG_MAP: '1', BOITE_DEBUG_MAP_HELPER: helper, BOITE_DEBUG_MAP_OUTPUT: directory,
             BOITE_DEBUG_MAP_OWNERSHIP: '1', BOITE_DEBUG_MAP_OWNER: 'harness', BOITE_DEBUG_MAP_TRACE: traceDirectory,
             HOME: scratch, USERPROFILE: scratch, APPDATA: scratch, LOCALAPPDATA: scratch,
           }));
+        } finally {const service = rootService; rootService = undefined; await service?.stop();}
         entry.native = tested;
         if (tested.code !== 0 || tested.timedOut) exitCode = 1;
         if (!existsSync(join(directory, 'results.json'))) { entry.missingNativeResults = true; exitCode = 1; }
@@ -125,6 +133,7 @@ try {
       }
     } catch (error) { entry.error = String(error); exitCode = 1; }
     finally {
+      try {await rootService?.stop();} catch (error) {entry.rootServiceError = String(error); exitCode = 1;}
       try {await procs.killAll(); await procs.close(); journal.close();}
       catch (error) {entry.cleanupError = String(error); exitCode = 1;}
       procs = undefined; trace?.stop();

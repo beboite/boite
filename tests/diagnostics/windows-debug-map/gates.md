@@ -1083,6 +1083,51 @@ SDK compilation, corrected native handoff, five actual fault injections and the
 anchor retention comparison remain pending. CAUSE_CONFIRMED=no and
 productionAccepted=false.
 
+Run40259396602 / job121368480507 executes head9dd94b7d under SDK and MinGW.
+All60 manifest and11 provenance hashes match the reviewed sources and generated
+C. The corrected grant guard passes. All four normal ANCHOR arms are valid,
+with24 authenticated binary frames and exact setter-registry closure before
+checkpoint. Both closure orders retain the attached map at all12 observations;
+the unused sibling is absent12/12. All12 normal pair names are absent after
+helper exit. This is a matched negative for helper-anchor overlap as necessary
+here, not an identified owner or unique retention cause.
+
+All ten injections reach their intended rejection before final root resume.
+All ten fault-cleanup gates still fail: assigned/release retain the replacement;
+nonce/early-release/stall retain the original name after helper exit. Final
+references balance1562/1562 SDK and1571/1571 MinGW, but final totals do not prove
+closure before an earlier observation. For every fault root, the exact
+launcher-main registry reference remains owned throughout that observation
+and closes only at final teardown. Independent native review and a separate
+parent audit confirm this10/10. All64 older failure labels remain, total77 per
+compiler; production still fails0/7 at NUL error5.
+
+## Fault root reference release control
+
+A separate follow-up uses those same five fault arms. Existing observations and
+fatal cleanup flags remain unchanged. Within one absolute3s control deadline,
+the harness observes the owned names while the root reference remains held,
+requests its release through the actual launcher registry, then observes again.
+Other exact-incarnation registry references and transfers must drain before
+the held observations and remain reconciled afterward. Private compiler/nonce
+bound request and response files preserve the actual custody and close result.
+
+Only the exact captured exited125 root with matching PID, creation, owner,
+ledger ID and current compiler job can reach the existing reportExit close
+path. The registry removes its tracked slot so late events and teardown cannot
+close it again. No incoming numeric handle, new process open, duplicate,
+unknown close, job close, rights change or production edit is involved.
+The existing inspection handle lacks SYNCHRONIZE; terminal state uses its
+GetExitCodeProcess result plus the helper's existing job-zero evidence.
+No additional wait right is requested. Services and observers join before
+registry teardown on errors as well as success.
+
+A later absence never repairs the old fault flags. The new record can associate
+a disappearance with this known reference's release, or reject its sufficiency;
+it cannot explain the normal matched pair or grant production admission.
+SDK/native execution of this follow-up remains pending. CAUSE_CONFIRMED=no and
+productionAccepted=false.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:

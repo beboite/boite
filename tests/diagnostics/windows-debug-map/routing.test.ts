@@ -11,6 +11,7 @@ import {observeHelperJob, type RootProof} from './helper-job.ts';
 import {validateRetirementTiming, type RetirementReport} from './retirement-timing.ts';
 import {validateDirectoryTwin, type DirectoryTwinReport} from './directory-twin.ts';
 import {validateAnchorOverlap, corroborateAnchorRegistry, compareAnchorPair, type AnchorReport} from './anchor-overlap.ts';
+import {measureFaultRootReference,requestRootReference,type RootRequest,type RootControlRecord} from './fault-root-reference.ts';
 import {sha256} from './generate.ts';
 
 const native = process.platform === 'win32' && process.env.BOITE_TEST_DEBUG_MAP === '1';
@@ -48,6 +49,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   const anchorFaultControls: {fault: string; protocol: AnchorReport; cleanup?: boolean}[] = []; report.anchorFaults = anchorFaultControls;
   const anchorTopology: unknown[] = []; report.anchorTopology = anchorTopology;
   const anchorFrames: unknown[] = []; report.anchorFrames = anchorFrames;
+  const faultRootReferences: RootControlRecord[] = []; report.faultRootReferences = faultRootReferences;
   const controls = join(state, 'target-creator-control'); mkdirSync(controls);
   const topologyProofs: unknown[] = []; report.targetCreatorTopology = topologyProofs;
   const jobs = ['RED', 'A', 'B', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'THREAD-EXITED', 'THREAD-WAITING', 'TARGET-HELPER-HELD', 'RETIRE-LIVE', 'RETIRE-EXITED', 'DIRECTORY-TWIN', 'ANCHOR-EXCLUSIVE', 'ANCHOR-HELD', ...anchorFaults.map(f => `ANCHOR-FAULT-${f.toUpperCase()}`)].map(label => {
@@ -500,6 +502,24 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
           const confirmed = checks.every(Boolean) && cleanupConfirmed.get(`lpac-${job.label}`) === true;
           anchorFaultCleanup.push(confirmed);
           const record = anchorFaultControls.find(r => r.fault === fault); if (record) record.cleanup = confirmed;
+          // Separate follow-up: no later observation changes any old fault flag.
+          const frame = result.err.match(/^retirement-timing phase=start .* nonce=(\w+) helper=(\d+) helper-created=(\d+) root=(\d+) created=(\d+) /m);
+          const map = result.err.match(/^private-map path=(.+) create=0x00000000/m)?.[1]?.replace(/\r$/, '');
+          const directory = process.env.BOITE_ROOT_REFERENCE_DIRECTORY;
+          if (frame && map && directory && !result.timedOut && result.code === 125) {
+            const request: RootRequest = {version:1,compiler:process.env.BOITE_ROOT_REFERENCE_COMPILER!,compilerNonce:process.env.BOITE_ROOT_REFERENCE_NONCE!,nonce:frame[1]!,label:fault.toUpperCase() as RootRequest['label'],phase:'held',helper:{pid:Number(frame[2]),created:frame[3]!},root:{pid:Number(frame[4]),created:frame[5]!},names:{map,retired:map+'.retired',unused:map+'.unused'},deadline:Date.now()+3000,reference:null};
+            const control = await measureFaultRootReference(request, {
+              exchange: r => requestRootReference(directory,r,action=>ownershipTrace.preserve(action)),
+              rows: () => ownershipTrace.preserve(()=>traceRows(process.env.BOITE_DEBUG_MAP_TRACE!)), now:()=>Date.now(),
+              observe: async(path,phase,deadline)=>{
+                const remaining=deadline-Date.now();if(remaining<=0)throw new Error('root reference observer deadline');
+                const r=await execute(`root-reference-${fault}-${phase}-${path.endsWith('.retired')?'retired':path.endsWith('.unused')?'unused':'map'}`,['observe-map',path],state,{},remaining);
+                return {path,...r};
+              },
+            });
+            faultRootReferences.push(control);
+            if(!control.protocolValid)failures.push(`${job.label} root reference control: ${control.error}`);
+          } else failures.push(`${job.label} root reference control prerequisites missing`);
           save(); return;
         }
         completed(job.label, result, 1); boundary(job.label, result, job.marker); cleanup(job.label, result);
