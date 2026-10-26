@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
+import { makeAgent } from './agent-fixture.ts';
 import type { CoreClient } from '../src/client.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { AUTO_COMPACT } from '../src/threads/auto-compact.ts';
@@ -121,6 +123,43 @@ describe('background compaction', () => {
       expect(await compacted).toMatchObject({ status: 'done', execution: { automatic: true } });
       const thread = await client.call('threads.get', { threadId });
       expect(thread.messages.flatMap(m => m.parts).some(p => p.type === 'compaction' && p.background === true)).toBe(false);
+    } finally { restore(); client.close(); }
+  });
+
+  test('per-type background switches cover real children and bots, and a policy change cancels the old copy', async () => {
+    const copies: TurnContext[] = [];
+    let stops = 0;
+    const restore = setDriver('echo', { ...echoDriver, startTurn(ctx) {
+      if (!isCopy(ctx)) return echoDriver.startTurn({ ...ctx, context: use => ctx.context({ ...use, tokens: 860 }) });
+      copies.push(ctx);
+      const held = Promise.withResolvers<Awaited<ReturnType<typeof echoDriver.startTurn>['done']>>();
+      return { done: held.promise, stop() { stops++; held.resolve({ status: 'stopped', sessionId: ctx.sessionId, usage: null }); } };
+    } });
+    const client = await h.connect();
+    try {
+      const parentId = await setUp(client);
+      await client.call('settings.set', { autoCompact: null, backgroundCompaction: false });
+      const { threadId: botId } = await makeAgent(h, client);
+      const { accountId, model } = h.core.threads.require(parentId);
+      await client.call('delegation.configure', { threadId: parentId, config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true,
+        profiles: [{ id: 'worker', name: 'Worker', providerId: 'echo', accountId, model: model!, effort: null }] } });
+      const child = await client.call('delegation.spawn', { threadId: parentId, profileId: 'worker', task: 'initialize', requestId: 'background-child' });
+      await waitFor(() => h.core.threads.require(child.thread.id).status === 'idle' && h.core.threads.require(parentId).status === 'idle');
+      const policy = { autoCompact: { tokens: 1000, moments: [] }, backgroundCompaction: true };
+      await client.call('settings.set', { compactionByType: { subagent: policy, bot: { ...policy, backgroundCompaction: false } } });
+      await turn(client, child.thread.id, 'x'.repeat(760));
+      await turn(client, botId, 'x'.repeat(760));
+      await Bun.sleep(100);
+      expect(copies.map(ctx => ctx.thread.id)).toEqual([`${child.thread.id}~compact`]);
+      // The copy is maintenance: it carries no native threshold or parent delivery callback.
+      expect(copies[0]!.autoCompactTokens?.()).toBeNull();
+      await client.call('settings.set', { compactionByType: { subagent: { ...policy, autoCompact: { tokens: 2000, moments: [] } }, bot: policy } });
+      expect(stops).toBe(1);
+      await turn(client, botId, 'x'.repeat(760));
+      await waitFor(() => copies.length === 2);
+      expect(copies[1]!.thread.id).toBe(`${botId}~compact`);
+      await client.call('settings.set', { compactionByType: {} });
+      expect(stops).toBe(2);
     } finally { restore(); client.close(); }
   });
 

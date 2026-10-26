@@ -4,7 +4,7 @@
   import InfoTip from './InfoTip.svelte';
   import SaveStatus from './SaveStatus.svelte';
   import { Autosave, typed } from '../lib/autosave.svelte';
-  import AutoCompactSettings from './AutoCompactSettings.svelte';
+  import CompactionSettings from './CompactionSettings.svelte';
   import SchedulerSettings from './SchedulerSettings.svelte';
   import PhoneSettings from './PhoneSettings.svelte';
   import { strings } from '../lib/strings';
@@ -41,7 +41,7 @@
   </header>
 
   <SchedulerSettings {store} />
-  <AutoCompactSettings {store} />
+  <CompactionSettings {store} />
 
   <PhoneSettings {store} />
 

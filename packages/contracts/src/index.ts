@@ -226,3 +226,5 @@ export {
   clampViewHeight, viewFrameHeight, viewThemeFragment, readViewMessage, viewDocument, viewTitleOf,
   type InlineView, type ViewCheckCapture, type ViewTheme, type ViewHostMessage, type ViewPageMessage,
 } from './view.ts';
+
+export { effectiveCompaction, type CompactionTarget, type CompactionPolicy } from './settings';

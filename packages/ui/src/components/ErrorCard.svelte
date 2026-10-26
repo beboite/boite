@@ -6,11 +6,13 @@
   let { message, reconnect, history }: { message: string; reconnect?: () => void; history?: Snippet } = $props();
 
   // Prefer the specific refusal over the provider's generic server-error prefix.
+  const code = /\b(?:API Error|HTTP(?: status)?|status)[\s:]+([45]\d{2})\b/i;
+  const status = $derived(message.match(code)?.[1]);
   const kind = $derived(/\bno available subscription\b/i.test(message) ? 'subscription'
-    : /\b(?:API Error|HTTP(?: status)?)[\s:]+5\d{2}\b|returned a server error|\boverloaded_error\b|\bserverOverloaded\b/i.test(message) ? 'server' : 'other');
-  const status = $derived(message.match(/\b(?:API Error|HTTP(?: status)?)[\s:]+([45]\d{2})\b/i)?.[1]);
-  const title = $derived(kind === 'subscription' ? strings.chat.errorSubscriptionTitle : kind === 'server' ? strings.chat.errorServerTitle : strings.chat.errorTitle);
-  const description = $derived(kind === 'subscription' ? strings.chat.errorSubscriptionHint : kind === 'server' ? strings.chat.errorServerHint : message.trim().split('\n')[0]);
+    : status === '429' || /\bToo Many Requests\b|\brate[_ ]limit(?:_exceeded|ed)?\b/i.test(message) ? 'rate'
+    : status?.startsWith('5') || /returned a server error|\boverloaded_error\b|\bserverOverloaded\b/i.test(message) ? 'server' : 'other');
+  const title = $derived(kind === 'subscription' ? strings.chat.errorSubscriptionTitle : kind === 'rate' ? strings.chat.errorRateTitle : kind === 'server' ? strings.chat.errorServerTitle : strings.chat.errorTitle);
+  const description = $derived(kind === 'subscription' ? strings.chat.errorSubscriptionHint : kind === 'rate' ? strings.chat.errorRateHint : kind === 'server' ? strings.chat.errorServerHint : message.trim().split('\n')[0]);
   const detailed = $derived(kind !== 'other' || message.includes('\n') || message.length > 240);
 </script>
 

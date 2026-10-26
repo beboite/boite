@@ -65,7 +65,7 @@ export class SideQuestions {
       try {
         answer = await driver.sideQuestion!({
           thread: source, provider, question: question.trim(), prompt,
-          accountEnv: this.core.accounts.accountEnv(account, provider), signal: controller.signal,
+          accountEnv: this.core.accounts.accountEnv(account, provider, source), signal: controller.signal,
           spawnChild: this.threads.contexts.leasedSpawnChild(threadId, provider),
           log: (level, message) => this.core.log(level, message),
         });

@@ -40,7 +40,7 @@ export async function toolFreeInference(core: Core, route: InferenceRoute, promp
     if (signal.aborted) abort();
     const answer = await Promise.race([cancelled.promise, driver.sideQuestion({
       thread, provider, prompt, question: prompt, signal,
-      accountEnv: withoutBoiteCredentials(core.accounts.accountEnv(account, provider)) as Record<string, string>,
+      accountEnv: withoutBoiteCredentials(core.accounts.accountEnv(account, provider, thread)) as Record<string, string>,
       spawnChild: (cmd, args, opts) => {
         signal.throwIfAborted();
         const child = core.procs.spawnChild(procId, cmd, args, {...opts, env: withoutBoiteCredentials(opts?.env ?? process.env)});

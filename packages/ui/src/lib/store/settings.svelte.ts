@@ -202,8 +202,8 @@ export class CoreSettings {
     return this.#telemetryCall('telemetry.state', {});
   }
 
-  configureTelemetry(mode: TelemetryState['mode']): Promise<TelemetryState> {
-    return this.#telemetryCall('telemetry.configure', { mode });
+  configureTelemetry(mode: TelemetryState['mode'], countChoice = true): Promise<TelemetryState> {
+    return this.#telemetryCall('telemetry.configure', { mode, countChoice });
   }
 
   retryTelemetryDeletion(): Promise<TelemetryState> {

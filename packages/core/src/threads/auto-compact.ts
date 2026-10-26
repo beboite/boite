@@ -1,3 +1,4 @@
+import { effectiveCompaction } from '@boite/contracts';
 import type { AutoCompact, AutoCompactMoment, ThreadId, ThreadSummary, Turn } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf } from '../errors.ts';
@@ -42,7 +43,7 @@ export class AutoCompaction {
     this.threads.backgroundCompact.turnFinished(thread, turn);
     // A stop or a failure is the user's to look at; a compaction never chains into another.
     if (turn.status !== 'done' || turn.execution?.operation === 'compact') return;
-    const rule = this.core.settings.get().autoCompact;
+    const rule = effectiveCompaction(this.core.settings.get(), thread).autoCompact;
     if (!rule || this.refusal(thread) !== null) return;
     const due = this.due(thread, rule);
     if (due !== null) this.arm(thread.id, due.delay);
@@ -114,16 +115,15 @@ export class AutoCompaction {
   /** Why this thread is not compacted now, or null. */
   private refusal(thread: ThreadSummary): string | null {
     if (thread.archived) return 'archived';
-    // A delegated agent answers its parent and ends.
-    if (thread.parentThreadId) return 'not a conversation of the user';
     return this.threads.compactRefusal(thread);
   }
 
   private fire(threadId: ThreadId): void {
     if (this.core.stopping || this.core.journal.isClosed()) return;
-    const rule = this.core.settings.get().autoCompact;
     const thread = this.core.journal.getThread(threadId);
-    if (!rule || thread === null || thread.status !== 'idle') return;
+    if (thread === null) return;
+    const rule = effectiveCompaction(this.core.settings.get(), thread).autoCompact;
+    if (!rule || thread.status !== 'idle') return;
     if (this.threads.runner.handles.has(threadId) || this.threads.runner.steering.has(threadId)) return;
     if (this.refusal(thread) !== null || this.expected(threadId)) return;
     // The setting or the background work may have changed since the timer was

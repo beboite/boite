@@ -3,6 +3,12 @@
 //! the same profile, whose `window.opener` is the page that asked. The sign-in
 //! answers through that opener and closes itself. Any other new window becomes
 //! a tab in the same panel, as does a popup past the few one surface may hold.
+//!
+//! On Windows every window a page of an agent's tab opens, sized or not, is
+//! adopted instead: it becomes an agent surface of its own, which the core
+//! drives as a new tab of the same conversation, and keeps its opener
+//! (`adopt`). A popup window the core never heard of was a click that did
+//! nothing for the agent: Gmail's "Send mail as" dialog (2026-10-26).
 
 use super::{announce, checked_url, Event, BLANK, SCHEMES};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -81,6 +87,17 @@ pub(super) fn close_popups<R: Runtime>(app: &AppHandle<R>, surface: Option<&str>
 pub(super) fn new_window(app: &AppHandle, surface: &str, private: bool, url: Url, features: NewWindowFeatures) -> NewWindowResponse<tauri::Wry> {
     if checked_url(surface, url.as_str()).is_err() {
         return NewWindowResponse::Deny;
+    }
+    #[cfg(windows)]
+    if crate::browser_control::is_agent_surface(surface) {
+        match super::adopted::adopt(app, surface, private, &url, &features) {
+            Ok(window) => return NewWindowResponse::Create { window },
+            Err(error) => {
+                eprintln!("[shell] agent surface {surface}: the window for {url} opens as a tab without its opener: {error}");
+                announce(app, Event::NewWindow { id: surface.to_owned(), url: url.to_string() });
+                return NewWindowResponse::Deny;
+            }
+        }
     }
     let sized = features.size().is_some() || features.position().is_some();
     if sized && popups_of(app.webview_windows().keys().map(String::as_str), surface) >= POPUPS_PER_SURFACE {

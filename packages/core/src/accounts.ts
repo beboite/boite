@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import type { Account, AccountId, ProviderDescriptor, ProviderId, RpcEvents, TerminalState } from '@boite/contracts';
+import { effectiveCompaction } from '@boite/contracts';
+import type { Account, AccountId, ProviderDescriptor, ProviderId, RpcEvents, TerminalState, ThreadSummary } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { newId } from './ids.ts';
 import { stripAnsi } from './ansi.ts';
@@ -322,7 +323,7 @@ export class AccountStore {
    * with a directory of its own does. Preparing the account is part of it, so
    * the seed files and the browser launcher are on disk before any spawn.
    */
-  accountEnv(account: Account, provider: ProviderDescriptor): Record<string, string> {
+  accountEnv(account: Account, provider: ProviderDescriptor, thread: Pick<ThreadSummary, 'parentThreadId' | 'agentSessionId'> = {}): Record<string, string> {
     const profile = profileFor(provider);
     if (profile === undefined) return {};
     this.prepare(account, provider);
@@ -338,7 +339,7 @@ export class AccountStore {
     }
     if (provider.quirks?.includes('antigravity') === true) Object.assign(env, antigravityCertificates(currentOs(), process.env, existsSync));
     // OpenCode 2 compacts in the background by itself once asked to; a process started afterwards takes the change.
-    return openCodeBackgroundCompaction(provider.id, this.core.settings.get().backgroundCompaction === true, { ...env, ...subscriptionProxyEnv(this.core, provider) });
+    return openCodeBackgroundCompaction(provider.id, effectiveCompaction(this.core.settings.get(), thread).backgroundCompaction, { ...env, ...subscriptionProxyEnv(this.core, provider) });
   }
 
   /**
