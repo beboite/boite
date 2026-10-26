@@ -128,7 +128,7 @@
     <p class="status" class:offer={app?.phase === 'available' || app?.phase === 'ready'} class:error={app?.phase === 'error'} role="status" aria-live="polite" data-testid="app-update-status">
       <span>{status()}</span>
       {#if supported && updater.lastCheckedAt !== null && app!.phase !== 'checking'}<span class="subtle">{fill(strings.appUpdate.lastChecked, { time: time(updater.lastCheckedAt) })}</span>{/if}
-      {#if found}<a class="changelog" href={`https://github.com/beboite/boite/releases/tag/v${encodeURIComponent(found)}`} target="_blank" rel="noopener noreferrer" data-testid="app-update-changelog"><span class="ui-label">{strings.appUpdate.changelog}</span><ExternalLink size={12} /></a>{/if}
+      {#if found}<a class="changelog" href={`https://github.com/mtsu-dev/boite/releases/tag/v${encodeURIComponent(found)}`} target="_blank" rel="noopener noreferrer" data-testid="app-update-changelog"><span class="ui-label">{strings.appUpdate.changelog}</span><ExternalLink size={12} /></a>{/if}
     </p>
     <div class="actions">
       <button type="button" class="small" data-testid="updates-check-all" disabled={checking || app?.phase === 'checking' || (!connected && !supported)} aria-busy={checking || app?.phase === 'checking'} onclick={() => void check()}>

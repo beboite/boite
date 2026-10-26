@@ -68,7 +68,7 @@ test('nothing folded: the version, the release found, the channel with Release c
   expect(document.querySelector('details, [aria-expanded]')).toBeNull();
   expect(one('updates-version')!.textContent).toContain('2.0.0-nightly.20261022.1');
   expect(one('updates-found')!.textContent).toBe('2.0.0-nightly.20261022.2');
-  expect(one<HTMLAnchorElement>('app-update-changelog')!.href).toBe('https://github.com/beboite/boite/releases/tag/v2.0.0-nightly.20261022.2');
+  expect(one<HTMLAnchorElement>('app-update-changelog')!.href).toBe('https://github.com/mtsu-dev/boite/releases/tag/v2.0.0-nightly.20261022.2');
   expect(one('app-update-status')!.textContent).toContain(strings.harnessUpdates.availableShort);
   const [nightlyButton, release] = [one<HTMLButtonElement>('app-update-nightly')!, one<HTMLButtonElement>('app-update-stable')!];
   expect([nightlyButton.getAttribute('aria-pressed'), nightlyButton.disabled]).toEqual(['true', false]);
