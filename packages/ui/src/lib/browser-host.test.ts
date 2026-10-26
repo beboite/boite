@@ -110,6 +110,11 @@ test('the app answers the core as a browser: a target is a webview, its session 
   // One whose opener the relay does not drive is closed at once.
   shell.emit({ type: 'popup', id: 'agent-gone', popup: 'agent-popup-1-1', url: 'about:blank' });
   expect(shell.destroyed).toContain('agent-popup-1-1');
+  // One that closes itself before its events are subscribed is never announced as a page left open.
+  shell.emit({ type: 'popup', id: targetId, popup: 'agent-popup-1-2', url: 'about:blank' });
+  shell.emit({ type: 'destroyed', id: 'agent-popup-1-2' });
+  await settle(); await settle();
+  expect(core.replies('work').filter(reply => reply.method === 'Target.targetCreated' && reply.params.targetInfo.targetId === 'agent-popup-1-2')).toEqual([]);
 
   // A throwaway context is a private webview, still answering on the profile that asked.
   const { result: { browserContextId } } = await core.answer('work', core.send('work', 'Target.createBrowserContext'));

@@ -233,13 +233,15 @@ export class BrowserHostRelay {
     } else if (event.type === 'new-window') {
       // A window the shell could not keep with its opener: a webview of the same profile, adopted by the core as a tab of the opener's conversation.
       void this.#open(target.relay, target.profile, event.url, target.context).then(popup => {
-        this.#send(target.relay, { method: 'Target.targetCreated', params: { targetInfo: this.#info(popup, target.id) } });
+        // A page closed while its events were subscribed is already gone for the core.
+        if (this.#targets.has(popup.id)) this.#send(target.relay, { method: 'Target.targetCreated', params: { targetInfo: this.#info(popup, target.id) } });
       }, () => {});
     } else if (event.type === 'popup') {
       // A popup the shell already made, its `window.opener` the page that asked: adopted the same way.
       const popup: Target = { id: event.popup, relay: target.relay, profile: target.profile, context: target.context, url: event.url, title: '', off: null };
       void this.#track(popup).then(() => {
-        this.#send(target.relay, { method: 'Target.targetCreated', params: { targetInfo: this.#info(popup, target.id) } });
+        // A sign-in that closes itself at once may be destroyed before it is announced.
+        if (this.#targets.has(popup.id)) this.#send(target.relay, { method: 'Target.targetCreated', params: { targetInfo: this.#info(popup, target.id) } });
       }, () => {});
     }
   }

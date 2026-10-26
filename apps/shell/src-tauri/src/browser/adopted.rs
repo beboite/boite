@@ -126,10 +126,13 @@ async fn settle(app: AppHandle, opener: String, id: String, url: String) {
         Ok(view) => crate::platform::browser_diagnostics::attach(view, id.clone()).await,
         Err(error) => Err(error),
     };
-    let closed = pending().remove(&id).unwrap_or(true);
+    // Held until the UI is told: a `window.close()` in between would otherwise be announced before the popup.
+    let mut waiting = pending();
+    let closed = waiting.remove(&id).unwrap_or(true);
     match outcome {
         Ok(()) if !closed => announce(&app, Event::Popup { id: opener, popup: id, url }),
         outcome => {
+            drop(waiting);
             if let Err(error) = outcome {
                 eprintln!("[shell] the window agent surface {opener} opened for {url} is closed: {error}");
             }
