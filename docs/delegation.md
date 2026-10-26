@@ -100,7 +100,8 @@ unknown unless the current process registry confirms it is still running.
 Windows records descendant starts and exits through its process jobs. When the
 job never reports an exit, for example after a nested job is terminated, the
 next load sample finds it within four seconds and the active count drops.
-Linux and macOS record only direct processes, so a CLI launched inside another
+A CLI that Boite or its job ended exits with code 9 and reads Stopped; any
+other nonzero code reads Failed. Linux and macOS record only direct processes, so a CLI launched inside another
 shell can remain outside this view. Provider-native agents and Boite-managed
 children use their existing lifecycle on every platform.
 

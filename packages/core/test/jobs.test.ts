@@ -314,7 +314,7 @@ describeWindows('windows job objects', () => {
     expect(harness.core.procs.liveOf(threadId).map(record => record.pid)).not.toContain(pid);
     // The journal alone, as a restarted core or a client that reconnects reads it.
     const ended = nativeAgents(harness.core.journal, threadId).find(agent => agent.id === running!.id);
-    expect(ended?.status).toBe('error');
+    expect(ended?.status).toBe('stopped');
     expect(ended?.finishedAt).toBeGreaterThanOrEqual(running!.startedAt);
 
     writeFileSync(join(workDir, 'exit'), '');

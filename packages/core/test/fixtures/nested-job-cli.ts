@@ -9,10 +9,10 @@
 import { dlopen, FFIType } from 'bun:ffi';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { KILL_EXIT_CODE } from '@boite/contracts';
 
 const PROCESS_TERMINATE = 0x0001;
 const PROCESS_SET_QUOTA = 0x0100;
-const KILL_EXIT_CODE = 9;
 
 const k32 = dlopen('kernel32.dll', {
   CreateJobObjectW: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },

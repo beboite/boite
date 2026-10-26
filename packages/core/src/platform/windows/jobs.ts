@@ -10,7 +10,7 @@
 import { cpus, totalmem } from 'node:os';
 import { dlopen, FFIType, ptr } from 'bun:ffi';
 import type { Pointer } from 'bun:ffi';
-import type { TraceCapability } from '@boite/contracts';
+import { KILL_EXIT_CODE, type TraceCapability } from '@boite/contracts';
 import type { JobsWorkerMessage, JobsWorkerStart } from './jobs-worker.ts';
 import { describeWorkerError, workerEntry } from './worker-entry.ts';
 import { resolveMemoryLimits } from '../../memory-limits.ts';
@@ -61,7 +61,6 @@ const PROCESS_QUERY_INFORMATION = 0x400;
 /** What OpenProcess says for a pid no process holds any more. */
 const ERROR_INVALID_PARAMETER = 87;
 const STILL_ACTIVE = 259;
-const KILL_EXIT_CODE = 9;
 
 /** JOBOBJECT_BASIC_ACCOUNTING_INFORMATION.TotalUserTime, in 100 ns units. */
 const OFF_TOTAL_USER_TIME = 0;
