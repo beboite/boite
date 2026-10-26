@@ -546,7 +546,7 @@
     state.editing = null;
     state.attachments = [];
     state.previewReferences = [];
-    recall = null;
+    recall = null; recallRead = null;
     put('');
     box?.focus({ preventScroll: true });
   }
@@ -697,7 +697,7 @@
       // question away with the turn. Skip and the stop button still end it.
       event.preventDefault();
       if (target) target.stop?.(); else void store.stop();
-    } else if (event.key === 'Escape' && composer?.editing) {
+    } else if (event.key === 'Escape' && (composer?.editing || recallRead !== null)) {
       event.preventDefault();
       cancelEdit();
     }

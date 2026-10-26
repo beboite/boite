@@ -58,3 +58,42 @@ test('Send waits for the newest recall instead of rewinding the previous one', a
   await waitFor(() => input.value === 'Older with file');
   expect(query<HTMLButtonElement>('[data-testid=composer-send]').disabled).toBe(false);
 });
+
+for (const draft of [null, 'My replacement draft'] as const) test(`Escape cancels the first deferred recall: ${draft ? 'Send is free before the read finishes' : 'a late response cannot enter edit mode'}`, async ({ app: _app }) => {
+  await store.open('t-trace');
+  const client = store.client!;
+  await client.call('turns.start', { threadId: 't-trace', prompt: 'Recall with a delayed file', attachments: [{ kind: 'file', name: 'notes.txt', mimeType: 'text/plain', data: btoa('notes') }] });
+  await waitFor(() => !store.busy);
+  await store.open('t-trace');
+  const message = store.openThread!.messages.findLast(row => row.role === 'user')!;
+  const part = message.parts.find(part => part.type === 'file')!;
+  if (part.type !== 'file') throw new Error('missing file');
+  part.data = ''; part.dataDeferred = true;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const call = client.call.bind(client);
+  const read = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'messages.attachment') await gate;
+    return call(method, params);
+  });
+  const startEdit = vi.spyOn(store, 'startEdit');
+  const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  input.focus(); press('ArrowUp');
+  try {
+    await waitFor(() => read.mock.calls.some(([method]) => method === 'messages.attachment'));
+    expect(store.composerStates['t-trace']?.editing).toBeFalsy();
+    press('Escape');
+    if (draft) {
+      // A Store draft update does not send an input event that independently exits recall.
+      store.restoreDraft('t-trace', draft, [], []);
+      await waitFor(() => input.value === draft);
+      expect(query<HTMLButtonElement>('[data-testid=composer-send]').disabled).toBe(false);
+    }
+  } finally { release(); }
+  await waitFor(() => !part.dataDeferred);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(startEdit).not.toHaveBeenCalled();
+  expect(store.composerStates['t-trace']?.editing).toBeFalsy();
+  expect(input.value).toBe(draft ?? '');
+  expect(read.mock.calls.some(([method]) => method === 'threads.rewind')).toBe(false);
+});
