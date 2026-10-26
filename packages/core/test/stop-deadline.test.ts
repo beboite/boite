@@ -221,6 +221,10 @@ test.each([true, false])('worktree Git failure preserves an accepted stop (%s) a
     expect(checkpoint).not.toHaveBeenCalled();
     expect(harness.core.journal.listMessages(threadId).some(message => message.role === 'user'
       && message.parts.some(part => part.type === 'text' && part.text === 'Accepted before worktree Git'))).toBe(true);
+    // The subprocess wrapper can exit before the native event retires its record.
+    record('before-registry-wait', { live: harness.core.procs.liveOf(threadId).map(({ pid, parentPid, startedAt }) => ({ pid, parentPid, startedAt })) });
+    await harness.core.procs.waitForExit(threadId);
+    record('after-registry-wait');
     record('before-live-assertion', { live: harness.core.procs.liveOf(threadId).map(({ pid, parentPid, startedAt, exitedAt, exitCode }) => ({
       pid, parentPid, startedAt, exitedAt, exitCode, runningSince: harness.core.procs.platform.runningSince(pid),
     })) });

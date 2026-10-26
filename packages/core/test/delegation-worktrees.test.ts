@@ -204,9 +204,11 @@ test.each(['partial checkout', 'branch only', 'reserved ref', 'absent ref', 'ind
     return child;
   });
   const killTree = s.h.core.procs.killTree.bind(s.h.core.procs);
+  // Record identity belongs to this captured spawn, even before Bun reports exit.
+  const forcedCheckouts = new WeakSet<SpawnedProcess['record']>();
   const forcedStop = spyOn(s.h.core.procs, 'killTree').mockImplementation(id => {
     // Model the forced Job termination with a captured process, not a name/pattern kill.
-    if (leftover === 'index lock' && partial?.record.threadId === id && partial.proc.exitCode === null) {
+    if (leftover === 'index lock' && partial?.record.threadId === id && partial.proc.exitCode === null && !forcedCheckouts.has(partial.record)) {
       // worktree add starts another Git to write the index. Off Windows this
       // captured root leads its own group; kill that group without SIGTERM cleanup.
       try {
@@ -224,6 +226,7 @@ test.each(['partial checkout', 'branch only', 'reserved ref', 'absent ref', 'ind
           process.kill(-pid, 'SIGKILL');
         }
         else partial.proc.kill();
+        forcedCheckouts.add(partial.record);
       } catch (error) {
         // RPC deliberately hides internal errors. Keep this fixture's failed signal
         // visible in CI without changing Stop or suppressing the original failure.
@@ -308,6 +311,11 @@ test.each(['partial checkout', 'branch only', 'reserved ref', 'absent ref', 'ind
         })),
       }));
     }
+    // Wrapper exit precedes native descendant events; wait for registry retirement.
+    const waitingAt = performance.now();
+    await s.h.core.procs.waitForExit(id);
+    console.error('CHECKOUT_REGISTRY_RETIRED', JSON.stringify({ leftover, ms: performance.now() - started,
+      waitedMs: performance.now() - waitingAt, live: s.h.core.procs.liveCount(id) }));
     expect(s.h.core.procs.liveCount(id)).toBe(0);
     if (leftover === 'index lock') expect(existsSync(git(path, 'rev-parse', '--git-path', 'index') + '.lock')).toBe(indexLockedAtStop);
     // Files created while preparation was paused must survive the recovery too.
