@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp';
-import { startDevUi } from './lib/ui';
+import { startUi } from './lib/ui';
 
 let server: { close(): Promise<void> };
 let page: BrowserPage;
@@ -9,7 +9,7 @@ const diagnostic = 'Claude returned a server error. API Error: 503 no available 
 
 beforeAll(async () => {
   const port = await freePort();
-  server = await startDevUi(port);
+  server = await startUi(port);
   page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent`, windowSize: { width: 1280, height: 1000 } });
   await page.waitFor('globalThis.__boiteTest?.workspace.active.openThread');
   await page.evaluate(`(() => {
@@ -105,7 +105,7 @@ test('failed automatic turns share one folded group and retain every wake-up, ti
   expect(await page.evaluate(`document.querySelector('[data-testid="error-part"]').scrollWidth <= document.querySelector('[data-testid="error-part"]').clientWidth`)).toBe(true);
   await page.evaluate(`__boiteTest.workspace.active.openThread.messages.at(-1).parts[0].message = 'HTTP 502 upstream unavailable'`);
   await page.waitFor(`document.querySelector('[data-testid="error-title"]')?.textContent === 'The provider is unavailable'`);
-  await page.evaluate(`(async () => { const { setLocaleSetting } = await import('/src/lib/i18n.svelte.ts'); await setLocaleSetting('fr'); })()`);
+  await page.evaluate(`__boiteTest.setLocaleSetting('fr')`);
   await page.waitFor(`document.querySelector('[data-testid="error-title"]')?.textContent === 'Le fournisseur est indisponible'`);
   expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="error-diagnostic"]')).at(-1).textContent`)).toBe('HTTP 502 upstream unavailable');
   expect(await page.evaluate(`document.querySelector('[data-testid="turn-finished-at"]').textContent`)).toMatch(/^échec à /);
