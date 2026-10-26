@@ -231,7 +231,7 @@
 </header>
 
 {#if tabbed || leaving}
-  <MobileTabs {store} screen={listScreen} waiting={waiting.length} navigate={show} onnew={() => void newThread()} newDisabled={draftOwner.connection !== 'ready'} />
+  <MobileTabs {store} screen={listScreen} waiting={waiting.length} navigate={show} onnew={() => void newThread()} newDisabled={draftOwner.connection !== 'ready'} inert={leaving} />
 {/if}
 
 {#snippet contacts()}

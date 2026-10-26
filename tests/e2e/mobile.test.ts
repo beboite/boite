@@ -610,6 +610,8 @@ test('a finger slides a row left to uncover Pin and Archive; a vertical drag sta
 }, 30_000);
 
 test('screens slide over the one they open from, the panel and sheets from their edge, and nothing moves twice after the browser\'s own swipe', async () => {
+  // A runner's own reduced-motion setting must not decide it: Windows runners turn animations off.
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
   const origin = await page.evaluate<string>('location.origin');
   await page.navigate(`${origin}/?fake=1&open=recent`);
   await page.waitFor(`document.querySelector('[data-testid=composer-input]')`);
@@ -630,12 +632,12 @@ test('screens slide over the one they open from, the panel and sheets from their
   await page.waitFor(`document.querySelector('[data-testid=mobile-list] .thread') && ${still}`);
   await moves();
   // The conversation comes over the list, which shifts under it with the bar and takes no tap meanwhile.
-  const during = await page.evaluate<{ slide?: string; inert?: boolean }>(`(async () => {
+  const during = await page.evaluate<{ slide?: string; inert?: boolean; tabs?: boolean }>(`(async () => {
     document.querySelector('[data-testid=mobile-list] .thread').click();
     await new Promise(resolve => setTimeout(resolve));
-    return { slide: document.querySelector('[data-testid=mobile-header]').dataset.slide, inert: document.querySelector('[data-testid=mobile-list]')?.inert };
+    return { slide: document.querySelector('[data-testid=mobile-header]').dataset.slide, inert: document.querySelector('[data-testid=mobile-list]')?.inert, tabs: document.querySelector('[data-testid=mobile-tabs]')?.inert };
   })()`);
-  expect(during).toEqual({ slide: 'push', inert: true });
+  expect(during).toEqual({ slide: 'push', inert: true, tabs: true });
   await page.waitFor(`!document.querySelector('[data-testid=mobile-list]') && document.querySelector('[data-testid=chat]') && ${still}`);
   expect(await moves()).toEqual(['screen-in', 'screen-under-out', 'screen-under-out']);
 
@@ -680,8 +682,15 @@ test('screens slide over the one they open from, the panel and sheets from their
   await page.waitFor(`document.querySelector('[data-testid=mobile-usage-tab-limits]')?.getAttribute('aria-selected') === 'true'`);
   await frames();
   expect(await moves()).toEqual([]);
-  await page.click('[data-testid=mobile-settings-back]');
+  // The page sliding off takes no tap, and neither does the home beneath it, which a tap through the page would reach.
+  const leavingPage = await page.evaluate<boolean[]>(`(async () => {
+    document.querySelector('[data-testid=mobile-settings-back]').click();
+    await new Promise(resolve => setTimeout(resolve));
+    return [...document.querySelectorAll('.settings-screen')].map(screen => screen.inert);
+  })()`);
+  expect(leavingPage).toEqual([true, true]);
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]') && !document.querySelector('[data-testid=mobile-settings-detail]') && ${still}`);
+  expect(await page.evaluate(`document.querySelector('.settings-screen').inert`)).toBe(false);
   expect(await moves()).toEqual(['screen-out', 'screen-under-in']);
   await page.click('[data-testid=settings-tab-appearance]');
   await page.waitFor(`!document.querySelector('[data-testid=mobile-settings-home]') && ${still}`);
@@ -699,7 +708,7 @@ test('screens slide over the one they open from, the panel and sheets from their
     await frames();
     expect(await moves()).toEqual([]);
   } finally {
-    await page.send('Emulation.setEmulatedMedia', { features: [] });
+    await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
   }
 
   // Nor wider than a phone.
@@ -713,6 +722,7 @@ test('screens slide over the one they open from, the panel and sheets from their
     expect(await moves()).toEqual([]);
   } finally {
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await page.send('Emulation.setEmulatedMedia', { features: [] });
   }
   expect(page.errors()).toEqual([]);
 }, 60_000);

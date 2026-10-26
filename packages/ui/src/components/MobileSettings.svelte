@@ -117,7 +117,7 @@
 <!-- `settings` gives the detail pages the same grammar as the desktop ones. -->
 <div class="mobile-settings settings" class:sliding={screens.length > 1} data-testid="settings" use:slide.attach>
   {#each screens as shown (shown)}
-  <div class="settings-screen" class:left={shown !== page} class:arrived={shown === arrived} data-slide={motionOf(shown)} inert={shown !== page}>
+  <div class="settings-screen" class:left={shown !== page} class:arrived={shown === arrived} data-slide={motionOf(shown)} inert={shown !== page || slide.direction === 'pop'}>
   {#if shown === 'home'}
     <!-- The header already says Settings: the screen opens on its two groups, what this phone keeps and what the machine runs. -->
     <div class="home" data-testid="mobile-settings-home">
@@ -248,7 +248,8 @@
   .mobile-settings { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
   .mobile-settings.sliding { overflow: hidden; }
   .settings-screen { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-  /* The screen a slide leaves lies over the same box as the one it opens, out of reach (lib/screen-slide.svelte.ts). */
+  /* The screen a slide leaves lies over the same box as the one it opens, out of reach (lib/screen-slide.svelte.ts).
+     While a page slides off, the home beneath it is out of reach too: a tap lands on neither. */
   .settings-screen.left { position: absolute; inset: 0; pointer-events: none; }
   .settings-screen[data-slide] { background: var(--screen-background, var(--color-background)); animation: screen-in var(--dur-3) var(--ease-slide) both; }
   .settings-screen:is([data-slide='in'], [data-slide='out']) { box-shadow: var(--shadow-screen); }

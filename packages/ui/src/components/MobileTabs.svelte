@@ -13,7 +13,7 @@
    * and pages on either side of a new conversation. A conversation, a draft
    * and an open keyboard hide the bar; the list's header names the machine.
    */
-  let { store, screen, waiting, navigate, onnew, newDisabled = false }: {
+  let { store, screen, waiting, navigate, onnew, newDisabled = false, inert = false }: {
     store: Store;
     screen: 'chat' | 'threads' | 'activity';
     /** Conversations waiting on the user, on every machine: Activity carries their count. */
@@ -21,6 +21,8 @@
     navigate: (screen: 'threads' | 'activity') => void;
     onnew: () => void;
     newDisabled?: boolean;
+    /** Out of reach, to the keyboard and assistive tech too: under a conversation sliding in over it. */
+    inert?: boolean;
   } = $props();
   const current = $derived(store.page === 'settings' ? 'settings' : store.page === 'agents' ? 'agents' : store.page === 'home' ? 'contacts' : screen === 'activity' ? 'activity' : 'threads');
   const page = (place: string) => current === place ? 'page' as const : undefined;
@@ -32,7 +34,7 @@
   followAgentDirectories(() => stores, () => bots);
 </script>
 
-<nav class="mobile-tabs" data-testid="mobile-tabs" aria-label={strings.mobile.navigation}>
+<nav class="mobile-tabs" data-testid="mobile-tabs" aria-label={strings.mobile.navigation} {inert}>
   <button type="button" class="tab" data-testid="mobile-conversations" aria-current={page('threads')} onclick={() => navigate('threads')}>
     <span class="glyph"><MessageSquare size={20} /></span><span class="name ui-label">{strings.mobile.threads}</span>
   </button>
