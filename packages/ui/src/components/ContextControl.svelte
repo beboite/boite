@@ -2,7 +2,7 @@
   import { onDestroy } from 'svelte';
   import { Clock, Info, Minimize2, ScanEye } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
-  import { threadActive, type ThreadCapabilities } from '@boite/contracts';
+  import { effectiveCompaction, threadActive, type ThreadCapabilities } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import { contextLimit, contextPercent, contextLevel } from '../lib/tokens';
   import { count, time } from '../lib/format';
@@ -20,7 +20,7 @@
   let leave: ReturnType<typeof setTimeout> | undefined;
   const thread = $derived(store.openThread);
   const context = $derived(thread?.context ?? null);
-  const autoCompact = $derived(store.settings?.autoCompact);
+  const autoCompact = $derived(store.settings && thread ? effectiveCompaction(store.settings, thread).autoCompact : null);
   const modelWindow = $derived(context ? contextLimit(context) : null);
   const limit = $derived(context ? contextLimit(context, autoCompact) : null);
   const compactLimit = $derived(limit !== null && (modelWindow === null || limit < modelWindow));

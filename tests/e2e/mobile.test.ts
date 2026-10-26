@@ -48,15 +48,24 @@ test('phone settings expose browser profiles and allowed windows only to owners 
   await navigateMobile('mobile-settings');
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
   const rows = `[...document.querySelectorAll('[data-testid=mobile-settings-home] .row')].map(row => row.dataset.testid)`;
-  const expected = ['mobile-settings-phone', 'settings-tab-appearance', 'mobile-settings-privacy', 'settings-tab-experiments', 'mobile-settings-connection', 'settings-tab-usage', 'settings-tab-voice', 'mobile-settings-browser-profiles', 'mobile-settings-windows', 'mobile-settings-archived', 'mobile-settings-secrets'];
+  const expected = ['mobile-settings-phone', 'settings-tab-appearance', 'mobile-settings-privacy', 'settings-tab-experiments', 'mobile-settings-connection', 'settings-tab-usage', 'settings-tab-voice', 'mobile-settings-browser-profiles', 'mobile-settings-compaction', 'mobile-settings-windows', 'mobile-settings-archived', 'mobile-settings-secrets'];
   expect(await page.evaluate<string[]>(rows)).toEqual(expected);
   expect(await page.evaluate(`document.querySelector('[data-testid=settings-tab-resources]') === null && document.querySelector('[data-testid=settings-tab-keyboard]') === null`)).toBe(true);
   await page.evaluate(`(() => { const store=__boiteTest.workspace.active; store.client.becomes('session'); store.principal='session'; })()`);
   await page.waitFor(`__boiteTest.workspace.active.owner === false`);
-  expect(await page.evaluate<string[]>(rows)).toEqual(expected.filter(row => row !== 'mobile-settings-browser-profiles' && row !== 'mobile-settings-windows'));
+  expect(await page.evaluate<string[]>(rows)).toEqual(expected.filter(row => row !== 'mobile-settings-browser-profiles' && row !== 'mobile-settings-compaction' && row !== 'mobile-settings-windows'));
   await page.evaluate(`(() => { const store=__boiteTest.workspace.active; store.client.becomes('owner'); store.principal='owner'; })()`);
   await page.waitFor(`__boiteTest.workspace.active.owner === true`);
   expect(await page.evaluate<string[]>(rows)).toEqual(expected);
+  await page.click('[data-testid=mobile-settings-compaction]');
+  await page.waitFor(`document.querySelector('[data-testid=compaction-target-common]')`);
+  for (const type of ['common', 'agent', 'subagent', 'bot']) {
+    await page.click(`[data-testid=compaction-target-${type}]`);
+    await page.waitFor(`document.querySelector('[data-testid=compaction-target-${type}]')?.getAttribute('aria-pressed') === 'true'`);
+  }
+  expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  await page.click('[data-testid=mobile-settings-back]');
+  await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
   await capture('phone-settings-home-dark.png');
   await page.click('[data-testid=mobile-settings-phone]');
   await page.waitFor(`document.querySelector('[data-testid=phone-settings]')`);

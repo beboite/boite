@@ -19,7 +19,7 @@ import { agentEnvOf } from '../agent.ts';
 import { agentGuide, SHORT_ANSWERS } from '../agent-guide.ts';
 import { nativeSkillFiles } from '../brain.ts';
 import { takesSystemGuide } from '../drivers/index.ts';
-import { contextRulesBlock } from '@boite/contracts';
+import { effectiveCompaction, contextRulesBlock } from '@boite/contracts';
 import { prepareAttachments, FileReferences } from '../attachments.ts';
 import { continuationInput, tailInput } from '../continuation.ts';
 import type { Core } from '../core.ts';
@@ -93,12 +93,12 @@ export class TurnContexts {
       sessionId: thread.sessionId,
       resumeAt: thread.sessionResumeAt ?? null,
       sessionBefore: this.sessionBefore(thread, ''),
-      accountEnv: this.core.accounts.accountEnv(account, provider),
+      accountEnv: this.core.accounts.accountEnv(account, provider, thread),
       systemGuide: this.systemGuide(thread, provider),
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
       toolSummaries: this.core.settings.get().toolSummaries === true,
       shortAnswers: this.core.settings.get().shortAnswers !== false,
-      autoCompactTokens: () => this.core.settings.get().autoCompact?.tokens ?? null,
+      autoCompactTokens: () => effectiveCompaction(this.core.settings.get(), this.core.journal.getThread(threadId) ?? thread).autoCompact?.tokens ?? null,
       log: (level, message, context) => {
         if (context?.kind === 'provider-output') noteStderr(threadId, message);
         this.core.log(level, message, { ...context, source: provider.id, threadId });
@@ -128,7 +128,7 @@ export class TurnContexts {
   ): TurnContext {
     const threadId = thread.id;
     const backgroundOwner = { providerId: provider.id, sessionGeneration: thread.sessionGeneration ?? 0, parentTurnId: turn.id };
-    const env = this.core.accounts.accountEnv(account, provider);
+    const env = this.core.accounts.accountEnv(account, provider, thread);
     // When each tool card first showed up and when it stopped running, by slot.
     const toolTimes = new Map<string, { startedAt: number; finishedAt: number | null }>();
     const partProgress = new Map<string, { phase: import('@boite/contracts').ThreadProgress['phase']; detail: string | null }>();
@@ -399,7 +399,7 @@ export class TurnContexts {
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
       toolSummaries: this.core.settings.get().toolSummaries === true,
       shortAnswers: this.core.settings.get().shortAnswers !== false,
-      autoCompactTokens: () => this.core.settings.get().autoCompact?.tokens ?? null,
+      autoCompactTokens: () => effectiveCompaction(this.core.settings.get(), this.core.journal.getThread(threadId) ?? thread).autoCompact?.tokens ?? null,
       emit,
       reportProgress: progress,
       reportProviderEvent: () => this.threads.progress.contact(threadId, turn.id),

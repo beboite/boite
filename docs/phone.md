@@ -63,8 +63,11 @@ day, provider and model; Limits draws the core's subscription bars, read-only
 CLIProxyAPI gateway on or off
 ([providers](providers.md#switching-the-gateway-from-limits)).
 
+Owner sessions have an Automatic compaction row with common defaults and
+independent settings for conversations, subagents and bots.
+
 Provider accounts, keyboard shortcuts, plugins, resource limits, the brain,
-the task manager, worktrees, automatic compaction, diagnostics, the tour and
+the task manager, worktrees, diagnostics, the tour and
 server configuration have no row in the phone's settings list. A link or a
 card can still open a supported detail page, subject to its permissions;
 `MobileSettings.svelte` defines those pages. Project management is available

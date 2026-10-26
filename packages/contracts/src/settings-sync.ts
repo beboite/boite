@@ -19,6 +19,7 @@ export const SYNCED_SETTINGS = [
   'shortAnswers',
   'toolSummaries',
   'autoCompact',
+  'compactionByType',
   'cacheKeepalive',
   // How the user wants Boite kept current, not what one machine can do: a
   // server as default machine carries it to every desktop of the group.
@@ -42,6 +43,7 @@ export const SYNCED_DEFAULTS: { [K in SyncedSetting]-?: Exclude<Settings[K], und
   shortAnswers: true,
   toolSummaries: false,
   autoCompact: null,
+  compactionByType: {},
   cacheKeepalive: null,
   autoInstallUpdates: false
 };

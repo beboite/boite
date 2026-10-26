@@ -1,3 +1,4 @@
+import { effectiveCompaction } from '@boite/contracts';
 import type { Account, ContextUse, Message, MessagePart, ProviderDescriptor, ThreadId, ThreadSummary, Turn, TurnId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { getDriver, releaseThread } from '../drivers/index.ts';
@@ -47,6 +48,8 @@ interface Source {
 
 interface Copy {
   source: Source;
+  /** The effective policy at the fork; a changed policy cancels this copy. */
+  policy: string;
   protocol: ProviderDescriptor['protocol'];
   handle: TurnHandle | null;
   /** Set when the copy is no longer wanted; a running one is stopped. */
@@ -80,6 +83,13 @@ export class BackgroundCompaction {
 
   constructor(private readonly core: Core, private readonly threads: ThreadStore) {
     core.bus.onCommitted((name, payload) => {
+      if (name === 'settings.updated') {
+        for (const [threadId, copy] of this.copies) {
+          const thread = core.journal.getThread(threadId);
+          if (thread === null || this.policy(thread) !== copy.policy) this.drop(threadId, 'the compaction policy changed');
+        }
+        return;
+      }
       if (name !== 'thread.removed') return;
       const threadId = (payload as { threadId: ThreadId }).threadId;
       this.drop(threadId);
@@ -88,9 +98,13 @@ export class BackgroundCompaction {
     });
   }
 
+  private policy(thread: ThreadSummary): string {
+    return JSON.stringify(effectiveCompaction(this.core.settings.get(), thread));
+  }
+
   /** The token limit a copy works toward, or null when the setting or the limit is off. */
-  private limit(): number | null {
-    const settings = this.core.settings.get();
+  private limit(thread: ThreadSummary): number | null {
+    const settings = effectiveCompaction(this.core.settings.get(), thread);
     return settings.backgroundCompaction === true ? settings.autoCompact?.tokens ?? null : null;
   }
 
@@ -100,7 +114,7 @@ export class BackgroundCompaction {
       this.carrying.delete(thread.id);
       if (turn.status === 'done') this.core.journal.deleteSetting(`${COMPACTION_TAIL_PREFIX}${thread.id}`);
     }
-    const limit = this.limit();
+    const limit = this.limit(thread);
     const copy = this.copies.get(thread.id);
     if (copy !== undefined) {
       // A compaction rewrote the context the copy was made from.
@@ -129,7 +143,7 @@ export class BackgroundCompaction {
   due(thread: ThreadSummary): 'swapped' | 'waiting' | null {
     const copy = this.copies.get(thread.id);
     if (copy === undefined) return null;
-    const limit = this.limit();
+    const limit = this.limit(thread);
     const stale = limit === null ? 'the setting is off' : this.stale(thread, copy, limit);
     if (stale !== null) { this.drop(thread.id, stale); return null; }
     if (copy.ready === null) return 'waiting';
@@ -154,6 +168,7 @@ export class BackgroundCompaction {
   /** Why the copy cannot replace the thread's session now, or null. */
   private stale(thread: ThreadSummary, copy: Copy, limit: number): string | null {
     const { source } = copy;
+    if (this.policy(thread) !== copy.policy) return 'the compaction policy changed';
     if (thread.archived) return 'the thread is archived';
     if (thread.sessionId !== source.sessionId || (thread.sessionGeneration ?? 0) !== source.generation || (thread.sessionResumeAt ?? null) !== null) return 'the session changed';
     if (thread.providerId !== source.providerId || thread.accountId !== source.accountId || thread.model !== source.model || thread.cwd !== source.cwd) return 'the thread changed agent, account, model or folder';
@@ -168,8 +183,8 @@ export class BackgroundCompaction {
     if (this.closed || this.core.stopping) return;
     const tokens = thread.context?.tokens ?? null;
     if (tokens === null || tokens >= limit || tokens < Math.max(BACKGROUND_COMPACT.minTokens, BACKGROUND_COMPACT.startRatio * limit)) return;
-    // The user's conversations only, on a session the turn itself ran on.
-    if (thread.archived || thread.parentThreadId || thread.incognito || thread.sessionId === null || (thread.sessionResumeAt ?? null) !== null) return;
+    // Only a session the turn itself ran on.
+    if (thread.archived || thread.incognito || thread.sessionId === null || (thread.sessionResumeAt ?? null) !== null) return;
     if ((this.failures.get(thread.id) ?? 0) >= BACKGROUND_COMPACT.maxFailures || this.threads.compactRefusal(thread) !== null) return;
     const execution = turn.execution;
     if (!execution || execution.operation === 'compact' || execution.operation === 'keepalive' || execution.operation === 'background') return;
@@ -185,6 +200,7 @@ export class BackgroundCompaction {
         sessionId: thread.sessionId, generation: thread.sessionGeneration ?? 0, providerId: thread.providerId, accountId: thread.accountId,
         model: thread.model, cwd: thread.cwd, turnId: turn.id, tokens,
       },
+      policy: this.policy(thread),
       protocol: provider.protocol,
       handle: null,
       dropped: false,
@@ -263,7 +279,7 @@ export class BackgroundCompaction {
     copy.ready = { sessionId: made, postTokens, window: reading?.window ?? null };
     copy.handle = null;
     const current = this.core.journal.getThread(thread.id);
-    const limit = this.limit();
+    const limit = current === null ? null : this.limit(current);
     const stale = current === null ? 'the thread is gone' : limit === null ? 'the setting is off' : this.stale(current, copy, limit);
     if (stale !== null) { this.drop(thread.id, stale); return; }
     this.threads.autoCompact.recheck(thread.id);

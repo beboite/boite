@@ -1,5 +1,5 @@
 /** The turn engine: start, stream and stop a turn, the way the echo driver answers. */
-import { previewPrompt, RpcErrorCode, threadActive, type AgentLetter, type Attachment, type Message, type MessagePart, type PreviewReference, type Thread, type ThreadId, type Turn, type TurnInFlightData, type Usage } from '@boite/contracts';
+import { effectiveCompaction, previewPrompt, RpcErrorCode, threadActive, type AgentLetter, type Attachment, type Message, type MessagePart, type PreviewReference, type Thread, type ThreadId, type Turn, type TurnInFlightData, type Usage } from '@boite/contracts';
 import { decodedBytes } from '../attachments';
 import { RpcFailure } from '../client';
 import { DIFF_NEW, DIFF_OLD, DIFF_PATH, DOC_TEXT, DOC_TITLE, IMAGE_BASE64, ASYNC_QUESTION_OPTIONS, ASYNC_QUESTION_TEXT, SETTING_MARKERS, SPAWN_MARKER, AGENT_SETTING_MARKER, AGENT_SETTING_REASON } from './conversation';
@@ -439,13 +439,13 @@ export const FAKE_AUTO_COMPACT_SETTLE_MS = 400;
 function autoCompact(ctx: FakeContext, thread: Thread, turn: Turn): void {
   // Checked when the turn ends and again when the timer fires, on the setting and the thread as they are then.
   const wanted = (now: Thread): boolean => {
-    const rule = ctx.settings.autoCompact;
+    const rule = effectiveCompaction(ctx.settings, now).autoCompact;
     if (!rule) return false;
     const reachedLimit = rule.tokens !== null && (now.context?.tokens ?? 0) >= rule.tokens;
     if (!reachedLimit && !(rule.tokens === null && rule.moments.includes('turn-end'))) return false;
     return now.activity?.goal?.status !== 'active' && now.activity?.loop?.status !== 'active';
   };
-  if (turn.status !== 'done' || turn.execution?.operation === 'compact' || thread.parentThreadId || !wanted(thread)) return;
+  if (turn.status !== 'done' || turn.execution?.operation === 'compact' || !wanted(thread)) return;
   setTimeout(() => {
     // A closed client keeps its threads for a reconnection: nothing is added to them meanwhile.
     if (ctx.bus.state === 'closed') return;

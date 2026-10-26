@@ -1,6 +1,6 @@
 <script lang="ts">
   import TelemetrySettings from './TelemetrySettings.svelte';
-  import { AppWindow, ArchiveRestore, ArrowLeft, Bell, ChevronRight, Coins, FlaskConical, Gauge, KeyRound, Lock, Monitor, Palette, Mic } from '@lucide/svelte';
+  import { AppWindow, ArchiveRestore, ArrowLeft, Bell, ChevronRight, Coins, FlaskConical, Gauge, KeyRound, Lock, Monitor, Palette, Mic, Minimize2 } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
@@ -24,7 +24,7 @@
   import WindowExclusionsCard from './WindowExclusionsCard.svelte';
   import SecretsCard from './SecretsCard.svelte';
   import BrowserProfilesCard from './BrowserProfilesCard.svelte';
-  import AutoCompactSettings from './AutoCompactSettings.svelte';
+  import CompactionSettings from './CompactionSettings.svelte';
   import InfoTip from './InfoTip.svelte';
   import { tick, type Snippet } from 'svelte';
   import { revealSettingsCard } from '../lib/settings-flash';
@@ -158,6 +158,9 @@
             </button>
           {/if}
           {#if store.owner}
+            <button class="ghost row" data-testid="mobile-settings-compaction" onclick={() => store.showSettings('advanced', 'auto-compact')}>
+              <Minimize2 size={20} /><span class="ui-label">{strings.settings.autoCompact}</span><ChevronRight size={18} />
+            </button>
             <button class="ghost row" data-testid="mobile-settings-windows" onclick={() => store.showSettings('general', 'windows')}>
               <AppWindow size={20} /><span class="ui-label">{strings.windows.settings.allowedHeading}</span><ChevronRight size={18} />
             </button>
@@ -226,7 +229,7 @@
       {:else if shown === 'browser-profiles'}
         <div class="page"><BrowserProfilesCard /></div>
       {:else if shown === 'auto-compact'}
-        <div class="page"><AutoCompactSettings store={target} /></div>
+        <div class="page"><CompactionSettings store={target} /></div>
       {:else if shown === 'archived'}
         <div class="page archived-page">
           <ArchivedThreads store={target} eager />
