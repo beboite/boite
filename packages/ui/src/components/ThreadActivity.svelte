@@ -205,7 +205,7 @@
 {/snippet}
 
 {#if activity || asked.length > 0 || waits.length > 0}
-  <section class="activity" class:inline class:hidden={!visible} use:measure data-testid="thread-activity" aria-label={shown ? strings.activity.question : strings.activity.tasks} inert={!visible}>
+  <section class="activity" class:inline class:reserved={reserveInComposer} class:hidden={!visible} use:measure data-testid="thread-activity" aria-label={shown ? strings.activity.question : strings.activity.tasks} inert={!visible}>
     {#if shown}
       <div class="questions" data-testid="activity-questions" data-count={asked.length}>
         <div class="activity-row question-row">
@@ -425,9 +425,14 @@
 <style>
   /* Four pixels of card around every line: the rows and the toggle carry their
      own inline padding, so a hover fill sits inset by the same four pixels on
-     every side and the air above the first line equals the air under the last. */
-  .activity { position: absolute; bottom: calc(100% + 4px); inset-inline: 0; z-index: 5; width: 100%; margin-inline: auto; max-height: 45vh; overflow-y: auto; padding: 4px; border: 1px solid var(--color-border); border-top-color: var(--color-edge); border-radius: var(--radius-lg); background: var(--composer-glaze) var(--color-activity-surface); backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2); box-shadow: var(--shadow-e1); font-size: var(--text-sm); transition: opacity var(--dur-3), transform var(--dur-3); }
+     every side and the air above the first line equals the air under the last.
+     The subagent bar stands between the timeline and the composer: the band
+     rises by the bar's height, which ChatView sets, into the air the bar keeps
+     above itself, and covers no more of the timeline than the reading room
+     reserves. Over queued prompts it stays in the room they leave it. */
+  .activity { position: absolute; bottom: calc(100% + 4px + var(--agent-dock-room, 0px)); inset-inline: 0; z-index: 5; width: 100%; margin-inline: auto; max-height: 45vh; overflow-y: auto; padding: 4px; border: 1px solid var(--color-border); border-top-color: var(--color-edge); border-radius: var(--radius-lg); background: var(--composer-glaze) var(--color-activity-surface); backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2); box-shadow: var(--shadow-e1); font-size: var(--text-sm); transition: opacity var(--dur-3), transform var(--dur-3); }
   .activity.hidden { opacity: 0; transform: translateY(8px); pointer-events: none; }
+  .activity.reserved { bottom: calc(100% + 4px); }
   .activity.inline { position: relative; bottom: auto; inset-inline: auto; z-index: auto; background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; border: none; border-bottom: 1px solid var(--color-border); border-radius: 0; box-shadow: none; padding: 8px 4px 4px; }
   .activity-row { display: flex; align-items: center; gap: 8px; min-height: var(--control); min-width: 0; padding: 0 2px 0 8px; }
   /* The questions sit above the goal, the loop and the tasks, a hairline between. */
