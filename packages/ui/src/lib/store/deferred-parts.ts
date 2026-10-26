@@ -65,10 +65,10 @@ export class DeferredParts {
     return loading;
   }
 
-  readonly #attachments = new Map<string, { client: NonNullable<StoreContext['client']>; visit: number; promise: Promise<string> }>();
+  readonly #attachments = new Map<string, { client: NonNullable<StoreContext['client']>; visit: number; promise: Promise<string | null> }>();
 
-  /** Share duplicate downloads and hydrate only the visit that requested the bytes. */
-  attachment(threadId: ThreadId, messageId: string, partIndex: number): Promise<string> {
+  /** Share duplicate downloads; null cancels a visit that no longer wants the bytes. */
+  attachment(threadId: ThreadId, messageId: string, partIndex: number): Promise<string | null> {
     const client = this.ctx.client;
     if (!client) return Promise.reject(new Error(strings.connection.unavailable));
     const visit = this.#visit, generation = this.ctx.clientGeneration;
@@ -78,15 +78,17 @@ export class DeferredParts {
     const promise = client.call('messages.attachment', { threadId, messageId, partIndex }).catch(async error => {
       if (!(error instanceof RpcFailure) || error.code !== RpcErrorCode.MethodNotFound) throw error;
       const message = await fullMessage(client, this.threads.threadSnapshots(threadId), threadId, messageId, () => this.ctx.client === client && visit === this.#visit);
+      // Leaving during the fallback walk cancels the download, just like a tool disclosure.
+      if (!this.ctx.currentClient(client, generation) || visit !== this.#visit) return null;
       const part = message?.parts[partIndex];
       if (part?.type !== 'file' && part?.type !== 'image') throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `part ${partIndex} is not an attachment of message ${messageId}` });
       return { data: part.data };
-    }).then(({ data }) => {
-      if (this.ctx.currentClient(client, generation) && this.#visit === visit) {
-        for (const message of this.threads.messages(threadId, messageId)) {
-          const part = message.parts[partIndex];
-          if ((part?.type === 'file' || part?.type === 'image') && part.dataDeferred) { part.data = data; delete part.dataDeferred; }
-        }
+    }).then(full => {
+      if (!full || !this.ctx.currentClient(client, generation) || this.#visit !== visit) return null;
+      const { data } = full;
+      for (const message of this.threads.messages(threadId, messageId)) {
+        const part = message.parts[partIndex];
+        if ((part?.type === 'file' || part?.type === 'image') && part.dataDeferred) { part.data = data; delete part.dataDeferred; }
       }
       return data;
     }).finally(() => { if (this.#attachments.get(key)?.promise === promise) this.#attachments.delete(key); });

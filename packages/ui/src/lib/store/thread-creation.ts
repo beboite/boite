@@ -18,6 +18,7 @@ export function createWithPreparation(client: Client, input: RpcParams<'threads.
     const reason = error instanceof RpcFailure ? (error.data as { reason?: string } | undefined)?.reason : undefined;
     if (!input.preparationId || !reason?.startsWith('draft-preparation-') || !current()) throw error;
     await client.call('drafts.release', { preparationId: input.preparationId }).catch(() => undefined);
+    if (!current()) throw error;
     const { preparationId: _preparationId, ...ordinary } = input;
     return client.call('threads.create', ordinary);
   });

@@ -331,7 +331,7 @@ test('paired phone sessions prepare and upload with their existing creation auth
 });
 
 
-test('incompatible prepared creation releases its resource before the ordinary fallback', async ({ ready }) => {
+for (const lifecycle of ['current', 'detach', 'reconnect'] as const) test(`incompatible prepared creation after release: ${lifecycle}`, async ({ ready }) => {
   visible();
   const { store, client } = await ready();
   const call = client.call.bind(client);
@@ -354,11 +354,13 @@ test('incompatible prepared creation releases its resource before the ordinary f
   const sending = store.submit('Fallback cleanly', choice);
   await vi.waitFor(() => expect(callsOf(spy, 'drafts.release')).toContainEqual(['drafts.release', { preparationId: id }]));
   expect(callsOf(spy, 'threads.create')).toHaveLength(1);
+  if (lifecycle === 'detach') store.detach();
+  if (lifecycle === 'reconnect') { client.drop(); await client.restore(); }
   release();
-  expect(await sending).toBe(true);
-  expect(callsOf(spy, 'threads.create')).toHaveLength(2);
+  expect(await sending).toBe(lifecycle !== 'detach');
+  expect(callsOf(spy, 'threads.create')).toHaveLength(lifecycle === 'detach' ? 1 : 2);
   expect(callsOf(spy, 'drafts.release')).toContainEqual(['drafts.release', { preparationId: id }]);
-  expect(callsOf(spy, 'threads.create')[1]![1]).not.toHaveProperty('preparationId');
+  if (lifecycle !== 'detach') expect(callsOf(spy, 'threads.create')[1]![1]).not.toHaveProperty('preparationId');
 });
 
 test('fake uploads reject malformed bytes, count overflow and invalid reference slots', async ({ ready }) => {

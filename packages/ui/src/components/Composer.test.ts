@@ -367,24 +367,24 @@ test('ArrowUp recalls the sent prompts of this thread and ArrowDown comes back',
 
   input().focus();
   expect(press('ArrowUp')).toBe(false);
-  expect(input().value).toBe('the newer one');
+  await waitFor(() => input().value === 'the newer one');
   // The caret sits at the end of what was recalled.
   expect(input().selectionStart).toBe('the newer one'.length);
 
   press('ArrowUp');
-  expect(input().value).toBe('the older one');
+  await waitFor(() => input().value === 'the older one');
 
   // One older again is the prompt the thread was seeded with.
   press('ArrowUp');
-  expect(input().value).toBe('What does the trace tab need from the core?');
+  await waitFor(() => input().value === 'What does the trace tab need from the core?');
   // Nothing older: the oldest stays, and the caret does not run off.
   press('ArrowUp');
   expect(input().value).toBe('What does the trace tab need from the core?');
 
   press('ArrowDown');
-  expect(input().value).toBe('the older one');
+  await waitFor(() => input().value === 'the older one');
   press('ArrowDown');
-  expect(input().value).toBe('the newer one');
+  await waitFor(() => input().value === 'the newer one');
   // Past the newest the composer is empty again.
   press('ArrowDown');
   expect(input().value).toBe('');
@@ -397,7 +397,7 @@ test('ArrowUp recalls the sent prompts of this thread and ArrowDown comes back',
   expect(input().value).toBe('something of my own');
   await type('');
   press('ArrowUp');
-  expect(input().value).toBe('the newer one');
+  await waitFor(() => input().value === 'the newer one');
 });
 
 test('Ctrl+S folds the sidebar without stashing, and Ctrl+Shift+S stashes and restores the composer', async ({ app: _app }) => {

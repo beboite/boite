@@ -57,6 +57,7 @@
     const owner = store, threadId = message.threadId, messageId = message.id, index = message.parts.indexOf(part);
     try {
       const data = part.dataDeferred ? await owner.loadMessageAttachment(threadId, messageId, index) : part.data;
+      if (data === null) return;
       if (window.__TAURI_INTERNALS__ === undefined) browserDownload(`data:application/octet-stream;base64,${data}`, part.name ?? strings.composer.attachAlt);
       else await saveAttachment(part.name ?? strings.composer.attachAlt, decodeBase64(data), true);
     } catch (error) {
@@ -124,7 +125,9 @@
       opening = index;
       try {
         // A message the store holds gets its bytes too; one drawn from elsewhere opens from the answer.
-        shown = { ...image, data: await store.loadMessageAttachment(message.threadId, message.id, index), dataDeferred: undefined };
+        const data = await store.loadMessageAttachment(message.threadId, message.id, index);
+        if (data === null) return;
+        shown = { ...image, data, dataDeferred: undefined };
       } catch (error) {
         store.reportError(error, 'minor');
         return;

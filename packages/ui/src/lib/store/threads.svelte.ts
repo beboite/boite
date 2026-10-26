@@ -575,7 +575,7 @@ export class Threads {
 
   /** Hydrate only a card the reader opened (`store/deferred-parts.ts`). */
   loadToolOutput(threadId: ThreadId, messageId: MessageId, toolId: string): Promise<void> { return this.parts.toolOutput(threadId, messageId, toolId); }
-  loadMessageAttachment(threadId: ThreadId, messageId: string, partIndex: number): Promise<string> { return this.parts.attachment(threadId, messageId, partIndex); }
+  loadMessageAttachment(threadId: ThreadId, messageId: string, partIndex: number): Promise<string | null> { return this.parts.attachment(threadId, messageId, partIndex); }
 
   async createThread(input: {
     projectId: ProjectId;

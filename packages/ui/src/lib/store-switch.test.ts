@@ -86,6 +86,30 @@ test('a cached attachment remains downloadable after reconnecting to an older co
   } finally { spy.mockRestore(); }
 });
 
+for (const cancelled of [false, true]) test(`older-core attachment fallback ${cancelled ? 'cancels quietly after navigation' : 'reports a real missing attachment'}`, async ({ ready }) => {
+  const { store, client } = await ready();
+  await store.open('t-bench');
+  const message = store.openThread!.messages.at(-1)!;
+  const call = client.call.bind(client);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'messages.attachment') throw new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: 'older core' });
+    if (method === 'threads.get' && (params as { threadId: string }).threadId === 't-bench') await gate;
+    return call(method, params);
+  });
+  const loading = store.loadMessageAttachment('t-bench', message.id, 999);
+  // Observe the rejection immediately, before releasing the response barrier.
+  const outcome = loading.then(value => ({ value }), error => ({ error }));
+  try {
+    await vi.waitFor(() => expect(spy.mock.calls.some(([method]) => method === 'threads.get')).toBe(true));
+    if (cancelled) await store.open('t-trace');
+    release();
+    if (cancelled) expect(await outcome).toEqual({ value: null });
+    else expect(await outcome).toMatchObject({ error: { code: RpcErrorCode.NotFound } });
+  } finally { release(); await outcome; spy.mockRestore(); }
+});
+
 test('revalidation refreshes JSON input when an array becomes an object with numeric keys', async ({ ready }) => {
   const { store, client } = await ready({ delayMs: 0 });
   await store.open('t-trace');

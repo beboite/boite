@@ -73,13 +73,27 @@ export function pullOlder(store: Store, box: HTMLElement, reach: number, head: s
   });
 }
 
+const editRequests = new WeakMap<Store, object>();
+
 /**
  * Edit of a sent prompt, once the pictures and files a light page left on
  * the core are back: the composer sends what the message holds. False, with
  * the failure shown, when one of them could not be read.
  */
-export async function editWhole(store: Store, threadId: string, message: Message): Promise<boolean> {
+export async function editWhole(store: Store, threadId: string, message: Message, current: () => boolean = () => true): Promise<boolean> {
+  const request = {};
+  editRequests.set(store, request);
+  const client = store.client, thread = store.openThread;
+  const state = store.composerStates[threadId];
+  const text = state?.text, editing = state?.editing;
+  const attachments = [...state?.attachments ?? []], references = [...state?.previewReferences ?? []];
   if (!(await store.loadAttachments(threadId, message))) return false;
+  // A late read belongs to the visit and draft that asked, never to text typed meanwhile.
+  const now = store.composerStates[threadId];
+  if (editRequests.get(store) !== request || store.client !== client || store.openThread !== thread || !current() ||
+    now !== state || now?.text !== text || now?.editing !== editing ||
+    (now?.attachments.length ?? 0) !== attachments.length || attachments.some((part, index) => now?.attachments[index] !== part) ||
+    (now?.previewReferences?.length ?? 0) !== references.length || references.some((reference, index) => now?.previewReferences?.[index] !== reference)) return false;
   store.startEdit(threadId, message);
   return true;
 }

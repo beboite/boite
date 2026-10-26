@@ -1,4 +1,4 @@
-import type { Attachment, Message, PreviewReference } from '@boite/contracts';
+import { attachmentError, previewReferencesError, type Attachment, type Message, type PreviewReference } from '@boite/contracts';
 import { emptyBox, returnPrompt, sentPrompt, type ComposerState } from './composer-queue';
 import type { Store } from './store.svelte';
 import { strings } from './strings';
@@ -16,6 +16,11 @@ export async function rewindComposerEdit(
   const editing = state.editing;
   if (!editing) return { local: null };
   if (state.queued.length) { store.error = strings.composer.editingQueued; return false; }
+  const thread = store.openThread;
+  const provider = thread?.id === key ? store.providerOf(thread.providerId) : null;
+  if (!provider) return false;
+  const invalid = attachmentError(attachments, provider)?.message ?? previewReferencesError(previewReferences, prompt);
+  if (invalid) { store.reportError(invalid); return false; }
   const local = store.stageSend(key, prompt, attachments, previewReferences);
   emptyBox(state);
   state.editing = null;
