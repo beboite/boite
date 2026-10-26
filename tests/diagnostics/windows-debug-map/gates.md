@@ -1128,6 +1128,29 @@ it cannot explain the normal matched pair or grant production admission.
 SDK/native execution of this follow-up remains pending. CAUSE_CONFIRMED=no and
 productionAccepted=false.
 
+Run40262987885 / job121379334706 executes headf751c4c5. All63 manifest
+and13 provenance hashes match; generated C is unchanged. All ten owner-held
+replies authenticate and other root references drain, but all ten controls
+reject their held observers before verified/release. Successful retained-name
+observers emit their object query and close records on stderr; the new
+validator incorrectly required empty stderr. No controlled release occurred.
+Their ten original launcher references close only at teardown, after the
+control deadlines. Final references balance1651/1651 SDK and1659/1659 MinGW.
+All77 earlier failures per compiler remain, plus five invalid controls each;
+production remains0/7 per compiler at NUL error5. This result establishes no
+release effect or retention cause.
+
+The parser correction requires the exact successful query-only object record
+and matching successful close record for a retained name, with no other stderr.
+Absent-name observers still require empty stderr. Exact stdout, exit, timeout,
+identity, custody, registry and deadline checks remain. The existing transport
+regression fails on the captured native stderr before correction and passes
+afterward; failed queries/closes, missing or foreign records and extra output
+remain rejected without releasing the root. All30 archived native outputs now
+pass the held-observation parser in a replay that performs no native release.
+Corrected SDK/MinGW native service and release observations remain pending;
+CAUSE_CONFIRMED=no and productionAccepted=false.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:

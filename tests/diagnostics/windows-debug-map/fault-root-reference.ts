@@ -102,6 +102,15 @@ export async function requestRootReference(directory:string,r:RootRequest,preser
 
 export interface RootObservation {path:string;code:number|null;timedOut:boolean;out:string;err:string}
 export interface RootControlRecord {request:RootRequest;held?:RootReply;verified?:RootReply;released?:RootReply;before:RootObservation[];after:RootObservation[];otherReferencesDrained:boolean;protocolValid:boolean;outcome:string;error?:string;causeConfirmed:false;productionAccepted:false}
+function exactRootObservation(r:RootObservation,path:string):boolean {
+ if(r.path!==path||r.code!==0||r.timedOut)return false;
+ if(r.out===`map-after-helper-exit path=${path} open=0xc0000034 absent=1 closed=1 error=0\r\n`)return r.err==='';
+ if(r.out!==`map-after-helper-exit path=${path} open=0x00000000 absent=0 closed=1 error=0\r\n`)return false;
+ // A successful open emits object_counts and close_owned evidence on stderr.
+ // Accept only those exact successful records, including the query-only grant.
+ const cleanup=r.err.match(/^cleanup object=map-post-exit-observer handle=([0-9a-fA-F]{16}) query=0x00000000 attributes=0x00000000 granted=0x00000001 handles=[1-9]\d* pointers=[1-9]\d*\r\ncleanup close=map-post-exit-observer closed=1 error=0\r\n$/);
+ return !!cleanup&&BigInt('0x'+cleanup[1])>0n;
+}
 export async function measureFaultRootReference(request:RootRequest,deps:{exchange(r:RootRequest):Promise<RootReply>;observe(path:string,phase:string,deadline:number):Promise<RootObservation>;rows(): (LedgerRow&{error?:number})[];now():number}):Promise<RootControlRecord> {
  const record:RootControlRecord={request,before:[],after:[],otherReferencesDrained:false,protocolValid:false,outcome:'inconclusive',causeConfirmed:false,productionAccepted:false};
  const observations=async(phase:string)=>{
@@ -110,7 +119,7 @@ export async function measureFaultRootReference(request:RootRequest,deps:{exchan
   const result:RootObservation[]=[];
   for(const r of settled){if(r.status==='fulfilled')result.push(r.value);}
   requireValue(settled.every(r=>r.status==='fulfilled')&&result.length===3,'all observers joined successfully');
-  for(const [i,r] of result.entries())requireValue(r.path===Object.values(request.names)[i]&&r.code===0&&!r.timedOut&&r.err===''&&[0,1].some(absent=>r.out===`map-after-helper-exit path=${r.path} open=${absent?'0xc0000034':'0x00000000'} absent=${absent} closed=1 error=0\r\n`),'exact observer output');
+  for(const [i,r] of result.entries())requireValue(exactRootObservation(r,Object.values(request.names)[i]!),'exact observer output');
   requireValue(deps.now()<request.deadline,'late observer');return result;
  };
  try {
