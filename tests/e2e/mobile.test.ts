@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
 import { startUi } from './lib/ui.ts';
-import { mobileAction, newMobileThread as newThreadFromList, openMobilePanel } from './lib/mobile.ts';
+import { mobileAction, newMobileThread as newThreadFromList, openMobilePanel, screensSettled } from './lib/mobile.ts';
 
 let server: { close(): Promise<void> };
 let page: BrowserPage;
@@ -202,7 +202,8 @@ test('model sheets stay on screen and browser Back closes the sheet without losi
   await capture('model-menu-resized-desktop.png');
   // Narrowing again restores the sheet, its backdrop and browser Back handling.
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-  await page.waitFor(`document.querySelector('[data-testid=composer-picker-menu]')?.dataset.mobileSheet === 'true'`);
+  // Becoming a sheet again, it rises from the bottom edge: the tap goes where it stops.
+  await page.waitFor(`document.querySelector('[data-testid=composer-picker-menu]')?.dataset.mobileSheet === 'true' && ${screensSettled}`);
   const search = await page.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector('[data-testid=picker-search]').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
   await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...search, button: 'left', clickCount: 1 });
   await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...search, button: 'left', clickCount: 1 });
@@ -607,3 +608,121 @@ test('a finger slides a row left to uncover Pin and Archive; a vertical drag sta
     await page.send('Emulation.setTouchEmulationEnabled', { enabled: false });
   }
 }, 30_000);
+
+test('screens slide over the one they open from, the panel and sheets from their edge, and nothing moves twice after the browser\'s own swipe', async () => {
+  // A runner's own reduced-motion setting must not decide it: Windows runners turn animations off.
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+  const origin = await page.evaluate<string>('location.origin');
+  await page.navigate(`${origin}/?fake=1&open=recent`);
+  await page.waitFor(`document.querySelector('[data-testid=composer-input]')`);
+  // The keyframes of a slide or a sheet started since the last read (lib/screen-slide.svelte.ts, app.css).
+  await page.evaluate(`(() => { window.__moves = []; document.addEventListener('animationstart', event => { if (/^(screen|sheet)-/.test(event.animationName)) window.__moves.push(event.animationName); }, true); return null; })()`);
+  const moves = async () => (await page.evaluate<string[]>('window.__moves.splice(0)')).sort();
+  const still = `!document.querySelector('[data-testid=mobile-header][data-slide]') && document.querySelectorAll('.settings-screen').length < 2`;
+  const frames = () => page.evaluate<null>('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(null))))');
+  // Safari 18 and Chrome 118 say on a Back whether they animated it; this stands for Safari's swipe from the edge.
+  const swipeBack = async (shown: string) => {
+    await page.evaluate(`(() => { window.__drawn = Object.getOwnPropertyDescriptor(PopStateEvent.prototype, 'hasUAVisualTransition'); Object.defineProperty(PopStateEvent.prototype, 'hasUAVisualTransition', { configurable: true, get: () => true }); history.back(); return null; })()`);
+    await page.waitFor(shown);
+    await frames();
+    await page.evaluate(`(() => { if (window.__drawn) Object.defineProperty(PopStateEvent.prototype, 'hasUAVisualTransition', window.__drawn); else delete PopStateEvent.prototype.hasUAVisualTransition; return null; })()`);
+  };
+
+  await navigateMobile('mobile-conversations');
+  await page.waitFor(`document.querySelector('[data-testid=mobile-list] .thread') && ${still}`);
+  await moves();
+  // The conversation comes over the list, which shifts under it with the bar and takes no tap meanwhile.
+  const during = await page.evaluate<{ slide?: string; inert?: boolean; tabs?: boolean }>(`(async () => {
+    document.querySelector('[data-testid=mobile-list] .thread').click();
+    await new Promise(resolve => setTimeout(resolve));
+    return { slide: document.querySelector('[data-testid=mobile-header]').dataset.slide, inert: document.querySelector('[data-testid=mobile-list]')?.inert, tabs: document.querySelector('[data-testid=mobile-tabs]')?.inert };
+  })()`);
+  expect(during).toEqual({ slide: 'push', inert: true, tabs: true });
+  await page.waitFor(`!document.querySelector('[data-testid=mobile-list]') && document.querySelector('[data-testid=chat]') && ${still}`);
+  expect(await moves()).toEqual(['screen-in', 'screen-under-out', 'screen-under-out']);
+
+  // The title's menu rises as a sheet and goes back down; the panel it opens comes in from the right edge and leaves by it.
+  await page.click('[data-testid=thread-menu-trigger]');
+  await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger-menu]')?.dataset.mobileSheet === 'true' && ${screensSettled}`);
+  expect(await moves()).toEqual(['sheet-up']);
+  await page.click('[data-testid=thread-menu-trigger-menu] [data-value=panel]');
+  await page.waitFor(`document.querySelector('[data-testid=right-panel]')`);
+  await page.waitFor(screensSettled);
+  expect(await moves()).toEqual(['screen-in', 'sheet-down']);
+  await page.evaluate('history.back()');
+  await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
+  expect(await moves()).toEqual(['screen-out']);
+  // After the browser's own swipe it leaves at once.
+  await openMobilePanel(page);
+  await page.waitFor(screensSettled);
+  await moves();
+  await swipeBack(`!document.querySelector('[data-testid=right-panel]')`);
+  expect(await moves()).toEqual([]);
+
+  // The app's Back: the conversation leaves by the right edge over the list coming back.
+  await page.click('[data-testid=mobile-back]');
+  await page.waitFor(`document.querySelector('[data-testid=mobile-list] .thread') && ${still}`);
+  expect(await moves()).toEqual(['screen-out', 'screen-under-in', 'screen-under-in']);
+  // The browser's swipe already slid the list in: the conversation is simply gone.
+  await page.click('[data-testid=mobile-list] .thread');
+  await page.waitFor(`!document.querySelector('[data-testid=mobile-list]') && ${still}`);
+  await moves();
+  await swipeBack(`document.querySelector('[data-testid=mobile-list] .thread')`);
+  expect(await moves()).toEqual([]);
+  expect(await page.evaluate(`document.querySelector('[data-testid=mobile-header]').dataset.slide ?? null`)).toBe(null);
+
+  // A Settings page comes over the home and goes back off it; between the two tabs of Usage it is only replaced.
+  await navigateMobile('mobile-settings');
+  await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]') && ${still} && ${screensSettled}`);
+  await moves();
+  await page.click('[data-testid=settings-tab-usage]');
+  await page.waitFor(`document.querySelector('[data-testid=mobile-settings-detail]') && !document.querySelector('[data-testid=mobile-settings-home]') && ${still}`);
+  expect(await moves()).toEqual(['screen-in', 'screen-under-out']);
+  await page.click('[data-testid=mobile-usage-tab-limits]');
+  await page.waitFor(`document.querySelector('[data-testid=mobile-usage-tab-limits]')?.getAttribute('aria-selected') === 'true'`);
+  await frames();
+  expect(await moves()).toEqual([]);
+  // The page sliding off takes no tap, and neither does the home beneath it, which a tap through the page would reach.
+  const leavingPage = await page.evaluate<boolean[]>(`(async () => {
+    document.querySelector('[data-testid=mobile-settings-back]').click();
+    await new Promise(resolve => setTimeout(resolve));
+    return [...document.querySelectorAll('.settings-screen')].map(screen => screen.inert);
+  })()`);
+  expect(leavingPage).toEqual([true, true]);
+  await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]') && !document.querySelector('[data-testid=mobile-settings-detail]') && ${still}`);
+  expect(await page.evaluate(`document.querySelector('.settings-screen').inert`)).toBe(false);
+  expect(await moves()).toEqual(['screen-out', 'screen-under-in']);
+  await page.click('[data-testid=settings-tab-appearance]');
+  await page.waitFor(`!document.querySelector('[data-testid=mobile-settings-home]') && ${still}`);
+  await moves();
+  await swipeBack(`document.querySelector('[data-testid=mobile-settings-home]') && document.querySelectorAll('.settings-screen').length === 1`);
+  expect(await moves()).toEqual([]);
+
+  // Under reduced motion nothing slides.
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  try {
+    await page.click('[data-testid=settings-tab-appearance]');
+    await page.waitFor(`document.querySelector('[data-testid=mobile-settings-detail]') && document.querySelectorAll('.settings-screen').length === 1`);
+    await page.click('[data-testid=mobile-settings-back]');
+    await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]') && document.querySelectorAll('.settings-screen').length === 1`);
+    await frames();
+    expect(await moves()).toEqual([]);
+  } finally {
+    await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+  }
+
+  // Nor wider than a phone.
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  try {
+    await page.click('[data-testid=settings-back]');
+    await page.waitFor(`document.querySelectorAll('[data-testid=thread-row]').length > 1`);
+    await page.evaluate(`(() => { document.querySelectorAll('[data-testid=thread-row]')[1].click(); return null; })()`);
+    await page.waitFor(screensSettled);
+    await frames();
+    expect(await moves()).toEqual([]);
+  } finally {
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await page.send('Emulation.setEmulatedMedia', { features: [] });
+  }
+  expect(page.errors()).toEqual([]);
+}, 60_000);

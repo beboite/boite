@@ -376,6 +376,23 @@ list it was opened from. Each of those owns one history entry
 never lands on something already closed. The conversation the app opens on has
 no list behind it, and Back from there leaves the app as before.
 
+Screens move as a phone's own do (`lib/screen-slide.svelte.ts`). A
+conversation slides in from the right edge over the list it opens from, which
+shifts a quarter of the width left under it, and slides back out on the way
+back; a Settings page does the same over the Settings home. The right panel
+comes in from the right edge and leaves by it, and a bottom sheet rises from
+the bottom edge and goes back down. Only transforms move, over `--dur-3` with
+`--ease-slide`, and the conversation keeps its full height on the way, so
+nothing inside it reflows. Between the bottom bar's places, from one Settings
+page to another and wider than 720 px nothing slides; under reduced motion
+nothing moves. Safari's swipe from the edge, and Chrome's where it draws one,
+already slides a picture of the screen underneath before the Back lands: what
+that Back closes, a conversation, a page, the panel or a sheet, then leaves at
+once instead of sliding a second time. The browser says so on the
+`popstate` event (`hasUAVisualTransition`, Safari 18 and Chrome 118); on an
+older one, a Back within a second of a finger lifted from the screen's edge
+counts as the browser's. The app's own Back, from its buttons, always slides.
+
 Every button on the chat, the list, the panel and Appearance registers a tap
 19 px from its centre on either axis, and `--touch-target` is 44 px. Some controls
 keep a small look and get a larger hit box, such as the machine's name in the

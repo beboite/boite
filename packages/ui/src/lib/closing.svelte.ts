@@ -1,4 +1,5 @@
 import { tick } from 'svelte';
+import { browserAnimatedBack } from './mobile-history';
 
 type Phase = 'closed' | 'open' | 'closing';
 
@@ -8,7 +9,9 @@ type Phase = 'closed' | 'open' | 'closing';
  * `shown` stays true one `--dur-2` after `hide()`, `closing` is on while the
  * reverse animation plays, and the node leaves the DOM on `animationend`.
  * Opening again inside that window cancels the exit instead of queueing a
- * second one: the animation name flips back and restarts.
+ * second one: the animation name flips back and restarts. Closed by a Back the
+ * browser animated itself (Safari's swipe slid it away with the page), it
+ * leaves at once.
  *
  * Usage on the node that carries the animation:
  *
@@ -48,8 +51,12 @@ export class Closing {
 
   hide(): void {
     if (this.#raw !== 'open') return;
-    this.#go('closing');
     this.#run += 1;
+    if (browserAnimatedBack()) {
+      this.#go('closed');
+      return;
+    }
+    this.#go('closing');
     void this.#settle(this.#run);
   }
 
