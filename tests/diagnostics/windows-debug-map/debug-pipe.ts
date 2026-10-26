@@ -40,12 +40,12 @@ export function validateDebugPipe(h:Captured,marker:string,role:1|2){
  const starts=[...h.out.matchAll(new RegExp('^inspect-start='+marker+'\\.generation-([012]) pid=([1-9]\\d*)\\r$','gm'))];
  check(starts.length===3&&starts.every((m,i)=>Number(m[1])===i),'three ordered target generations');
  const pids=starts.map(m=>Number(m[2]));check(pids[0]===root&&new Set([...pids,helper]).size===4,'root and child identities');
- const expected:string[]=[];
+ const stdoutLines=h.out.split('\r\n'),expected:string[]=[];
  for(let i=0;i<3;i++){
   const label=marker+'.generation-'+i;
-  const status=h.out.match(new RegExp('^'+label.replace(/\./g,'\\.')+' debug-object-query=(0xc0000353|0xc0000022) handle=0000000000000000\\r$','m'));
+  const status=['0xc0000353','0xc0000022'].find(value=>stdoutLines.includes(`${label} debug-object-query=${value} handle=0000000000000000`));
   check(status,'no host debugger authority');
-  expected.push(`inspect-start=${label} pid=${pids[i]}`,`${label} appcontainer=1 in-job=1 routing=1 bytes=${Buffer.byteLength(marker)} open-error=0 marker=${marker}`,`${label} ambient-denial=5`,`${label} debug-object-query=${status[1]} handle=0000000000000000`,`${label} host-debug-control=0 known=1`,`${label} application-exception-forwarded=1 handler-removed=1`);
+  expected.push(`inspect-start=${label} pid=${pids[i]}`,`${label} appcontainer=1 in-job=1 routing=1 bytes=${Buffer.byteLength(marker)} open-error=0 marker=${marker}`,`${label} ambient-denial=5`,`${label} debug-object-query=${status} handle=0000000000000000`,`${label} host-debug-control=0 known=1`,`${label} application-exception-forwarded=1 handler-removed=1`);
   if(i<2)expected.push(`${label} child-created=1 pid=${pids[i+1]} error=0`);
  }
  for(let i=2;i>=0;i--)expected.push(`${marker}.generation-${i} inspect-exit=0 child-exit=0 forced=0`);

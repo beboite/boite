@@ -1644,6 +1644,39 @@ and preserve the2s map wait,3s checkpoint,150s test and170s outer capture bounds
 These are diagnostic-only changes; Windows effect, SDK execution and native
 budget for this new normal-path control remain unverified.
 
+## Normal DEBUG closure result and literal transcript checks
+
+Run40297536540 / job121487480273 executes95e46d5f. Both SDK and MinGW
+normal DEBUG CLOSED helpers exit0: the original private map is absent immediately
+(elapsed0,attempts1), at the unchanged3s checkpoint and after helper exit.
+HELD retains it immediately, through the2s wait and3s checkpoint, exits125,
+then the map disappears after helper exit. Native ordered mask511 traces prove
+successful stdoutfd1-only closure before map_close; stdin/stderr stay open and
+three-generation stdout contains no new helper bytes. All six process exits and
+both DEBUG drains remain successful. This establishes the bounded normal-path
+closure effect, not the Windows internal mechanism or production NUL support.
+
+The archived audit reconciles100 hashes,22 owner provenances,14 prior pairs,
+72 receipts,264 observations and4 new DEBUG captures. Each compiler closes
+3094/3094 references and reconciles2286/2286 transfers. All91 prior and81
+historical fatal entries remain, plus three HELD failures:94 per compiler.
+Production still rejects all7 scenarios with NUL error5 per compiler.
+Six observer reportExit/close callbacks follow their narrow comparison-window
+end by46-63ms; authentic terminal-zero observations stay within those windows,
+and all observation references close before the original common deadline.
+The audit records terminal observations and later reference closure separately.
+No source admission or deadline changes.
+
+CodeQL99 flagged dot-only regex escaping in the transcript validator. Its
+existing marker grammar excludes backslashes, but literal line membership now
+removes the unnecessary escaping. Both allowed debugger statuses and malformed
+labels are covered by the existing scenario. The suite passes143 tests with
+one native skip and3405 assertions; scoped types pass. Current validators replay
+all4 archived DEBUG captures and108 shared DEBUG gates with232 assertions.
+GPT-6.1 Sol approved this two-file diff in one round; the broader prior review
+remains skipped503. The live CodeQL rescan remains pending. This change leaves
+generated C, production sources, all prior controls and their bounds intact.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:

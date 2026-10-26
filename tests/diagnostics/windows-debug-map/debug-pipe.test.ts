@@ -45,8 +45,11 @@ function fixture(role:1|2):{h:Captured;marker:string}{
 test('normal cleanup authenticates exact stdout, fd1-only closure and its position before map cleanup',()=>{
  for(const role of [1,2] as const){const {h,marker}=fixture(role);const proof=validateDebugPipe(h,marker,role);expect(proof.streams.filter(s=>s.closed).map(s=>s.fd)).toEqual(role===1?[]:[1]);expect(proof.productionAccepted).toBe(false);}
  const {h,marker}=fixture(2);
+ expect(validateDebugPipe({...h,out:h.out.replaceAll('debug-object-query=0xc0000022','debug-object-query=0xc0000353')},marker,2).role).toBe(2);
  const reject=(next:Captured)=>expect(()=>validateDebugPipe(next,marker,2)).toThrow('normal DEBUG stdout cleanup:');
  reject({...h,timedOut:true});reject({...h,pid:12});reject({...h,code:null});
+ for(const label of [marker+'Xgeneration-0',marker+'\\generation-0',marker+'.generation-00'])reject({...h,out:h.out.replace(marker+'.generation-0 debug-object-query',label+' debug-object-query')});
+ reject({...h,out:h.out.replace('debug-object-query=0xc0000022','debug-object-query=0x00000000')});
  reject({...h,out:h.out+'!'});reject({...h,out:h.out.replace('ambient-denial=5','ambient-denial=0')});
  for(const [before,after] of [
   ['helper=11','helper=12'],['root=21','root=24'],['mask=511','mask=510'],['error=0\r\ncleanup object=','error=5\r\ncleanup object='],
