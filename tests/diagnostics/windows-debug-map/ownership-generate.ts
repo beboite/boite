@@ -12,6 +12,7 @@ const runtime = pathToFileURL(join(import.meta.dir, 'ownership-trace.ts')).href;
 const ledger = pathToFileURL(join(import.meta.dir, 'ownership-ledger.ts')).href;
 const reference = pathToFileURL(join(import.meta.dir, 'helper-reference.ts')).href;
 const liveFence = pathToFileURL(join(import.meta.dir, 'live-root-fence.ts')).href;
+const liveDrain = pathToFileURL(join(import.meta.dir, 'live-root-drain.ts')).href;
 const faultRoot = pathToFileURL(join(import.meta.dir, 'fault-root-reference.ts')).href;
 const topology = pathToFileURL(join(import.meta.dir, 'target-topology.ts')).href;
 function once(source: string, before: string, after: string): string {
@@ -62,12 +63,14 @@ export function instrumentJobs(source: string, generatedWorker: string): string 
     `import {HelperReferenceSlot, type HelperReferenceControl} from ${JSON.stringify(reference)};\n` +
     `import {proveTopology, traceRows} from ${JSON.stringify(topology)};\n` +
     `import {authorizeLiveFence} from ${JSON.stringify(liveFence)};\n` +
+    `import {LiveRootDrainer} from ${JSON.stringify(liveDrain)};\n` +
     `import {FaultRootOwner, validateFaultNativeEvidence} from ${JSON.stringify(faultRoot)};\n` +
     `import {readFileSync} from "node:fs"; import {join} from "node:path";\n` + source +
     '\nexport const ownershipTraceInstalled = true;\n' +
     readFileSync(join(import.meta.dir, 'target-topology-export.txt'), 'utf8') + '\n' +
     readFileSync(join(import.meta.dir, 'helper-reference-export.txt'), 'utf8') + '\n' +
-    readFileSync(join(import.meta.dir, 'fault-root-reference-export.txt'), 'utf8');
+    readFileSync(join(import.meta.dir, 'fault-root-reference-export.txt'), 'utf8') + '\n' +
+    readFileSync(join(import.meta.dir, 'live-root-drain-export.txt'), 'utf8');
 }
 export function instrumentWorker(source: string): string {
   if (sha256(source) !== workerHash) throw new Error('jobs-worker.ts source drift: review and repin ownership trace');
@@ -102,7 +105,7 @@ export function prepareOwnership(directory: string): PreparedOwnership {
     [jobs]: sha256(generatedJobs), [worker]: sha256(generatedWorker),
     [preload]: sha256(readFileSync(preload)),
   };
-  for (const name of ['ownership-generate.ts', 'ownership-ledger.ts', 'ownership-trace.ts', 'target-topology-export.txt', 'helper-reference.ts', 'helper-reference-export.txt', 'fault-root-reference.ts', 'fault-root-reference-export.txt', 'live-root-fence.ts'])
+  for (const name of ['ownership-generate.ts', 'ownership-ledger.ts', 'ownership-trace.ts', 'target-topology-export.txt', 'helper-reference.ts', 'helper-reference-export.txt', 'fault-root-reference.ts', 'fault-root-reference-export.txt', 'live-root-fence.ts', 'live-root-drain.ts', 'live-root-drain-export.txt'])
     hashes[join(import.meta.dir, name)] = sha256(readFileSync(join(import.meta.dir, name)));
   writeFileSync(join(directory, 'provenance.json'), JSON.stringify({jobsPath, workerPath, hashes}, null, 2) + '\n');
   return {directory, jobs, worker, preload, hashes};
@@ -160,4 +163,10 @@ export async function ownedFaultRootReference(compiler:string,nonce:string,direc
  const canonical=await import(pathToFileURL(jobsPath).href);
  if(canonical.ownershipTraceInstalled!==true||typeof canonical.ownershipFaultRootReference!=='function')throw new Error('fault root owner export missing');
  return canonical.ownershipFaultRootReference(compiler,nonce,directory,trace,controlDirectory);
+}
+
+export async function ownedLiveRootDrainer(compiler:string,nonce:string,directory:string,trace:string):Promise<import('./live-root-drain.ts').LiveRootDrainer> {
+ const canonical=await import(pathToFileURL(jobsPath).href);
+ if(canonical.ownershipTraceInstalled!==true||typeof canonical.ownershipDrainLiveRoot!=='function')throw new Error('live harness drain owner export missing');
+ return canonical.ownershipDrainLiveRoot(compiler,nonce,directory,trace);
 }

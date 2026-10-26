@@ -5,10 +5,12 @@ import {traceRows} from './target-topology.ts';
 import {requestRootReference,type RootRequest,type RootObservation} from './fault-root-reference.ts';
 import {parseLiveReceipt,encodeLiveReceipt,boundLiveReceipt,type LiveReceipt} from './live-root-fence.ts';
 import {measureLiveRootReferences,type LiveArmInput} from './live-root-reference.ts';
+import type {LiveDrainProof} from './live-root-drain.ts';
 interface Job {label:string;project:string}
 interface HarnessDependencies<J extends Job> {
  directory:string;compiler:string;compilerNonce:string;trace:string;preserve<T>(f:()=>T):T;
  start(job:J,env:Record<string,string>,spawned:(pid:number)=>void):Promise<Captured>;
+ drainHarness(r:RootRequest):Promise<LiveDrainProof>;
  observe(r:RootRequest,path:string,phase:string,deadline:number):Promise<RootObservation>;
  finish(job:J,request:RootRequest|undefined,capture:Captured):Promise<{postHelper:RootObservation[];priorCleanupPassed:boolean}>;
 }
@@ -52,7 +54,7 @@ export async function runLiveRootHarness<J extends Job>(jobs:J[],deps:HarnessDep
   const prepared=await Promise.allSettled(started.map(s=>s.preparation));check(prepared.every(r=>r.status==='fulfilled'),'both final READY receipts');
   const deadline=controlDeadline=Math.min(Date.now()+3000,...[...samples.values()].map(s=>s.receipt.deadline));
   const inputs=Object.fromEntries(started.map((s,i)=>{const sample=samples.get(s.label)!;const request=context(sample.receipt,deadline);return [i?'released':'held',{request,ready:sample.bytes,capturedPid:sample.pid,readyObservedAt:sample.observedAt,capture:s.capture}];})) as unknown as Record<'held'|'released',LiveArmInput>;
-  record=await measureLiveRootReferences(inputs,{now:Date.now,rows:()=>deps.preserve(()=>traceRows(deps.trace)),exchange:r=>requestRootReference(deps.directory,r,deps.preserve),observe:deps.observe,
+  record=await measureLiveRootReferences(inputs,{now:Date.now,rows:()=>deps.preserve(()=>traceRows(deps.trace)),exchange:r=>requestRootReference(deps.directory,r,deps.preserve),observe:deps.observe,drainHarness:deps.drainHarness,
    releaseHelper:async r=>release(r),readReturn:r=>deps.preserve(()=>readFileSync(join(deps.directory,r.label+'.return.bin'))),finish});
  }catch(error){record={protocolValid:false,outcome:'inconclusive',error:String(error),causeConfirmed:false,productionAccepted:false,preparation:[...samples].map(([label,s])=>({label,receipt:s.receipt,bytes:s.bytes.toString('base64'),pid:s.pid,observedAt:s.observedAt})),helpers:[]};}
  finally{

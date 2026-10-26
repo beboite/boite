@@ -27,12 +27,15 @@ test('private final receipt binds its bytes, nonce, exact identities, role, fina
 function fixture(separateDirectories=false){
  const artifactDirectory=mkdtempSync(join(tmpdir(),'boite-live-root-')),directory=separateDirectories?join(artifactDirectory,'fault-root-control'):artifactDirectory;
  if(separateDirectories)mkdirSync(directory);
- const rows:any[]=[],roots=new Map<number,RootOwned>(),helpers=new Map<number,RootOwned>(),closures:number[]=[],events:string[]=[],returns=new Map<string,Buffer>();
+ const rows:any[]=[],roots=new Map<number,RootOwned>(),helpers=new Map<number,RootOwned>(),harness=new Map<number,RootOwned>(),closures:number[]=[],events:string[]=[],returns=new Map<string,Buffer>();
  const started=Date.now(),ready=[context(1,started),context(2,started)],resolve=new Map<string,(value:any)=>void>();
  const arms=Object.fromEntries(ready.map(f=>{
   const request=req(f);roots.set(f.root,owned(f.root,f.rootCreated,125));helpers.set(f.helper,owned(f.helper,f.helperCreated,259));
-  rows.push(...members(request),{event:'acquired',owner:'owner',role:'launcher-main',pid:f.root,incarnation:f.rootCreated,id:'ref/'+f.root},
-   {event:'acquired',owner:'harness',role:'harness-main',pid:f.root,incarnation:f.rootCreated,id:'other/'+f.root},{event:'close-result',owner:'harness',role:'harness-main',pid:f.root,incarnation:f.rootCreated,id:'other/'+f.root,success:true,error:0,wallMs:started-1});
+  rows.push(...members(request),{event:'acquired',owner:'owner',role:'launcher-main',pid:f.root,incarnation:f.rootCreated,id:'ref/'+f.root});
+  for(const [p,created,exitCode] of [[f.helper,f.helperCreated,259],[f.root,f.rootCreated,125]] as const){
+   const x={...owned(p,created,exitCode),owner:'harness',id:'other/'+p,role:'harness-main',threadId:'lpac-ANCHOR-FAULT-'+request.label,threadJob:String(100+f.role),jobKey:100+f.role};harness.set(p,x);
+   rows.push({event:'acquired',...x,incarnation:created},{event:'owned-membership',...x,threadMember:1});
+  }
   const bytes=encodeLiveReceipt(f);writeFileSync(join(directory,request.label+'.ready.bin'),bytes);
   const capture=new Promise<any>(r=>resolve.set(request.label,r));return [f.role===1?'held':'released',{request,ready:bytes,capturedPid:f.helper,readyObservedAt:started,capture}];
  })) as any;
@@ -57,11 +60,28 @@ function fixture(separateDirectories=false){
    `live-fence phase=return label=${r.label} nonce=${r.nonce} helper=${r.helper.pid} helper-created=${r.helper.created} root=${r.root.pid} created=${r.root.created} result=125 now=${parseLiveReceipt(ret).at} acquired=3 closed=3 error=0`].join('\r\n').replaceAll('\\r\\n','\r\n')+'\r\n';
   resolve.get(r.label)!({pid:r.helper.pid,code:125,timedOut:false,out:'',err});return {bytes,publishStartedAt:at,publishFinishedAt:Date.now()};
  };
- let joined=0;const deps={now:Date.now,rows:()=>rows,exchange:async(r:RootRequest)=>owner.handle(r),
+ let joined=0,drainer:any;const deps={now:Date.now,rows:()=>rows,exchange:async(r:RootRequest)=>owner.handle(r),
+  drainHarness:async(r:RootRequest)=>{
+   const {LiveRootDrainer}=await import('./live-root-drain.ts');
+   drainer??=new LiveRootDrainer({compiler:'sdk',compilerNonce:'a'.repeat(32),now:Date.now,current:(p:number)=>harness.get(p),ready:(r:RootRequest)=>readFileSync(join(directory,r.label+'.ready.bin')),rows:()=>rows,removed:(p:number)=>!harness.has(p),retire:(x:RootOwned)=>{harness.delete(x.pid);const close={id:x.id,success:true,error:0,wallMs:Date.now()};rows.push({event:'close-result',...close,owner:x.owner,role:x.role,pid:x.pid,incarnation:x.created,stage:'tracked'});events.push('drain:'+x.pid);return close;}});
+   return drainer.drain(r);
+  },
   observe:async(r:RootRequest,path:string,phase:string)=>{try{await new Promise(res=>setTimeout(res,2));expect(helpers.get(11)!.exitCode).toBe(259);expect(helpers.get(12)!.exitCode).toBe(259);events.push('observe:'+phase);return observed(path,path!==r.names.retired||!roots.has(r.root.pid));}finally{joined++;}},
   releaseHelper,readReturn:(r:RootRequest)=>returns.get(r.label)!,finish:async(r:RootRequest)=>({postHelper:Object.values(r.names).map(path=>observed(path,true)),priorCleanupPassed:false})};
- return {artifactDirectory,directory,arms,deps,roots,helpers,rows,closures,events,resolve,owner,nativeClose,get joined(){return joined;},cleanup(){rmSync(artifactDirectory,{recursive:true,force:true});}};
+ return {artifactDirectory,directory,arms,deps,roots,helpers,harness,rows,closures,events,resolve,owner,nativeClose,get joined(){return joined;},cleanup(){rmSync(artifactDirectory,{recursive:true,force:true});}};
 }
+test('live comparison drains both harness references while helpers stay alive instead of waiting for helper exit',async()=>{
+ const f=fixture();let drains=0;const drain=f.deps.drainHarness;f.deps.drainHarness=async r=>{drains++;return drain(r);};
+ for(const a of Object.values(f.arms) as any[])a.request.deadline=Date.now()+150;
+ const timeout=setTimeout(()=>{for(const [label,resolve] of f.resolve)resolve({pid:label.endsWith('-HELD')?11:12,code:125,timedOut:false,out:'',err:'native autonomous fence expired'});},200);
+ try{const r=await measureLiveRootReferences(f.arms,f.deps);expect(drains).toBe(2);expect(r.protocolValid).toBe(true);expect(f.events.filter(x=>x.startsWith('drain:'))).toHaveLength(2);expect(f.events.findIndex(x=>x.startsWith('observe:'))).toBeGreaterThan(f.events.lastIndexOf('drain:22'));expect(f.closures).toEqual([22,21]);expect(r.deadline).toBe(f.arms.held.request.deadline);}finally{clearTimeout(timeout);f.cleanup();}
+});
+test('both harness drain proofs are rechecked on a fresh snapshot before the first baseline observer',async()=>{
+ const f=fixture(),drain=f.deps.drainHarness,exchange=f.deps.exchange,proofs=new Map();
+ f.deps.drainHarness=async r=>{const p=await drain(r);proofs.set(r.label,p);return p;};
+ f.deps.exchange=async r=>{const reply=await exchange(r);if(r.phase==='held'&&r.label.endsWith('-RELEASED'))proofs.get(r.label).removed=false;return reply;};
+ try{const r=await measureLiveRootReferences(f.arms,f.deps);expect(r.protocolValid).toBe(false);expect(f.joined).toBe(0);expect(f.closures).toEqual([]);expect(f.events.filter(e=>e.startsWith('drain:'))).toHaveLength(2);expect(r.helpersJoined).toBe(true);}finally{f.cleanup();}
+});
 test('live shared comparison closes roots before either authenticated helper fence release',async()=>{
  const f=fixture();try{const r=await measureLiveRootReferences(f.arms,f.deps);expect(r.error).toBeUndefined();expect(r.protocolValid).toBe(true);expect(r.outcome).toBe('held-retained-released-absent');expect(f.closures).toEqual([22,21]);expect(f.joined).toBe(15);expect(r.arms.held.helper!.code).toBe(125);expect(r.arms.held.priorCleanupPassed).toBe(false);expect(r.causeConfirmed).toBe(false);expect(r.productionAccepted).toBe(false);expect(f.events.indexOf('helper-release:11')).toBeGreaterThan(f.events.lastIndexOf('observe:final'));expect(r.arms.held.held!.live!.helper.exitCode).toBe(259);}finally{f.cleanup();}
 });
@@ -113,8 +133,8 @@ test('shared control rejects extra observer output and a failed unique root clos
  }
 });
 test('other root references drain before baseline and no deadline may be restarted',async()=>{
- const f=fixture(),observe=f.deps.observe,closed=f.rows.find(r=>r.id==='other/21'&&r.event==='close-result');
- f.rows.splice(f.rows.indexOf(closed),1);const timer=setTimeout(()=>f.rows.push(closed),15);
+ const f=fixture(),observe=f.deps.observe,closed={event:'close-result',id:'extra/21',owner:'harness',role:'harness-main',pid:21,incarnation:'201',success:true,error:0,wallMs:Date.now()};
+ f.rows.push({...closed,event:'acquired'});const timer=setTimeout(()=>{closed.wallMs=Date.now();f.rows.push(closed);},15);
  f.deps.observe=async(r,path,phase)=>{expect(f.rows.includes(closed)).toBe(true);return observe(r,path,phase);};
  try{const r=await measureLiveRootReferences(f.arms,f.deps);expect(r.protocolValid).toBe(true);expect(r.deadline).toBe(f.arms.held.request.deadline);}finally{clearTimeout(timer);f.cleanup();}
  const g=fixture(),exchange=g.deps.exchange;g.deps.exchange=async r=>exchange(r.phase==='verified'?{...r,deadline:r.deadline+1}:r);
@@ -142,7 +162,7 @@ test('a refused second start joins progressive preparations, first capture and p
     starts++;if(starts===2)throw Error('second startup refused');spawned(11);
     setTimeout(()=>writeFileSync(join(directory,'ASSIGNED-LIVE-HELD.ready.bin'),encodeLiveReceipt(context(1))),5);
     return new Promise(resolve=>setTimeout(()=>{released=existsSync(join(directory,'ASSIGNED-LIVE-HELD.release.bin'));joined++;resolve({pid:11,code:125,timedOut:false,out:'',err:'bounded native diagnostic'});},30));
-   },observe:async()=>{throw Error('must not observe an incomplete pair');},finish:async()=>{await new Promise(r=>setTimeout(r,5));finished++;return {postHelper:[],priorCleanupPassed:false};}});
+   },drainHarness:async()=>{throw Error('must not drain an incomplete pair');},observe:async()=>{throw Error('must not observe an incomplete pair');},finish:async()=>{await new Promise(r=>setTimeout(r,5));finished++;return {postHelper:[],priorCleanupPassed:false};}});
   expect(record.protocolValid).toBe(false);expect(record.error).toContain('second startup refused');expect(starts).toBe(2);expect(joined).toBe(1);expect(finished).toBe(1);expect(released).toBe(true);
   await new Promise(r=>setTimeout(r,10));expect(joined).toBe(1);expect(finished).toBe(1);
  }finally{rmSync(directory,{recursive:true,force:true});}

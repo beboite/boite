@@ -1265,6 +1265,48 @@ C helper, rights, cleanup gates or deadline changes. Corrected native admission
 and the actual live comparison remain unverified. CAUSE_CONFIRMED=no;
 productionAccepted=false.
 
+## Live helper native drainage prerequisite
+
+Run40271156948 / job121404229365 executesf2aae697. All70 manifest and14
+generated-owner provenance hashes match. Corrected private-directory routing
+admits all four held samples with exact READY bytes, cleanup mask511, live
+helpers259 and terminal roots125. No baseline, comparison, verified or release
+phase follows. All four native fences expire with1460, preserve exit125 and
+join without capture timeout; no RELEASE/RETURN receipt is produced.
+
+The harness still owns one registry reference to each terminal root. Its
+pre-READY snapshots already read125, but its original close occurs after the
+common deadline: SDK+100/+22ms and MinGW+11/+50ms. The SDK rejects drainage;
+MinGW records drainage only after the deadline, then rejects before spawning
+observers. Neither compiler supplies a valid live comparison. Launcher
+references remain owned until later teardown, not a controlled release.
+
+The diagnostic now explicitly drains the two harness references symmetrically
+through their own reportExit before the shared comparison. Exact READY,
+nonces, captured PID/creation identities, terminal root125, live helper259,
+ledger custody and each harness job remain prerequisites. Closure evidence
+must be unique and the original slot removed; retries cannot replace failed
+closure. The strict other-reference drain still precedes baseline. This
+intervention changes only the common harness prerequisite, preserving the
+launcher HELD/RELEASED variable and original3s/native bounds. Actual corrected
+Windows feasibility and effect remain unverified.
+
+Ten old release controls and two completed-helper pairs remain valid. All84
+fatal failures per compiler remain, including79 previous gates; SDK2034/2034
+and MinGW2044/2044 references close, transfers1516/1516 and1526/1526. Production
+remains0/7 per compiler at NUL5. No C, production or requested access changes.
+CAUSE_CONFIRMED=no for general retention; productionAccepted=false.
+
+Local Bun1.4.3 regression first fails with0/2 harness drains, then passes with
+both original owner closures before baseline. The full diagnostic suite passes
+97 tests/1692 assertions, with one native skip and zero failures. Scoped and
+generated-copy typing, architecture1219 modules and strict MinGW cross
+compilation of both programs pass. Generated-owner provenance now covers16
+entries. Rejections cover changed identity, custody, job, helper lifetime,
+private receipts and failed closure without retry. Both serialized drain proofs
+are rechecked on one fresh snapshot before any baseline observer. No corrected
+Windows execution or shared-window performance is claimed by these local checks.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:

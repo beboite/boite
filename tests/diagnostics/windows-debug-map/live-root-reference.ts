@@ -2,10 +2,12 @@ import type {Captured} from './capture.ts';
 import {parseRootRequest,validateRootObservations,validateFaultNativeEvidence,type RootRequest,type RootObservation} from './fault-root-reference.ts';
 import {measureOwnedRootWindow,validateAssignedFailure,type RootWindowRecord,type RootWindowArm,type MatchedDependencies} from './matched-root-reference.ts';
 import {boundLiveReceipt,parseLiveReceipt,validateLiveProof,receiptArtifact,type LiveProof} from './live-root-fence.ts';
+import {validateLiveDrain,type LiveDrainProof} from './live-root-drain.ts';
 export interface LiveArmInput {request:RootRequest;ready:Buffer;capturedPid:number;readyObservedAt:number;capture:Promise<Captured>}
-interface LiveArmRecord extends RootWindowArm {capturedPid:number;readyObservedAt:number;ready:ReturnType<typeof receiptArtifact>;helper?:Captured;captureFinishedAt?:number;helperRelease?:{receipt:ReturnType<typeof receiptArtifact>;publishStartedAt:number;publishFinishedAt:number};returned?:ReturnType<typeof receiptArtifact>;postHelper:RootObservation[];priorCleanupPassed?:boolean}
+interface LiveArmRecord extends RootWindowArm {capturedPid:number;readyObservedAt:number;ready:ReturnType<typeof receiptArtifact>;harnessDrain?:LiveDrainProof;helper?:Captured;captureFinishedAt?:number;helperRelease?:{receipt:ReturnType<typeof receiptArtifact>;publishStartedAt:number;publishFinishedAt:number};returned?:ReturnType<typeof receiptArtifact>;postHelper:RootObservation[];priorCleanupPassed?:boolean}
 export interface LiveRootRecord extends RootWindowRecord {arms:Record<'held'|'released',LiveArmRecord>;observationsFinishedAt?:number;helpersJoined:boolean}
 export interface LiveDependencies extends MatchedDependencies {
+ drainHarness(r:RootRequest):Promise<LiveDrainProof>;
  releaseHelper(r:RootRequest):Promise<{bytes:Buffer;publishStartedAt:number;publishFinishedAt:number}>;readReturn(r:RootRequest):Buffer;
  finish(r:RootRequest,helper:Captured):Promise<{postHelper:RootObservation[];priorCleanupPassed:boolean}>;
 }
@@ -38,15 +40,23 @@ export async function measureLiveRootReferences(inputs:Record<'held'|'released',
  // Capture rejections cannot become unhandled while observers are running.
  for(const capture of captures)void capture.catch(()=>{});
  const live=()=>{check(!completed.size,'helper returned before observation/final release');check(deps.now()<record.deadline,'one live deadline');};
+ const admit=()=>{
+  live();for(const k of roles){const arm=record.arms[k];parseRootRequest(JSON.stringify(arm.request),deps.now());check(arm.request.label===`ASSIGNED-LIVE-${k.toUpperCase()}`&&arm.capturedPid===arm.request.helper.pid,'exact live role/captured helper');check(arm.readyObservedAt>=arm.ready.receipt.ready&&arm.readyObservedAt<=deps.now(),'observed native READY');boundLiveReceipt(arm.request,inputs[k].ready,deps.now());}
+ };
+ const validateDrains=()=>{const rows=deps.rows(),now=deps.now();for(const k of roles)validateLiveDrain(record.arms[k].request,record.arms[k].harnessDrain!,inputs[k].ready,rows,now);};
+ let baselineChecked=false;
  let windowValid=false;
  try {
   for(const k of roles)record.arms[k].ready=receiptArtifact(inputs[k].ready);
+  admit();
+  const drained=await Promise.allSettled(roles.map(async k=>{live();record.arms[k].harnessDrain=await deps.drainHarness(record.arms[k].request);live();}));
+  check(drained.every(r=>r.status==='fulfilled'),'both harness owner drains joined: '+drained.flatMap(r=>r.status==='rejected'?[String(r.reason)]:[]).join('; '));
   await measureOwnedRootWindow(record,{...deps,
    exchange:async r=>{live();const reply=await deps.exchange(r);live();validateLiveProof(r,reply.live,deps.now());check(reply.live.ready===inputs[r.label.endsWith('-HELD')?'held':'released'].ready.toString('base64'),'original private READY');
     const previous=proofs.get(r.label);if(previous)check(JSON.stringify(previous.helper)===JSON.stringify(reply.live.helper),'same live helper custody');proofs.set(r.label,reply.live);return reply;},
-   observe:async(r,path,phase,deadline)=>{live();const result=await deps.observe(r,path,phase,deadline);live();return result;},
+   observe:async(r,path,phase,deadline)=>{live();if(phase==='baseline'&&!baselineChecked){validateDrains();baselineChecked=true;}const result=await deps.observe(r,path,phase,deadline);live();return result;},
   },()=>{
-   live();for(const k of roles){const arm=record.arms[k];parseRootRequest(JSON.stringify(arm.request),deps.now());check(arm.request.label===`ASSIGNED-LIVE-${k.toUpperCase()}`&&arm.capturedPid===arm.request.helper.pid,'exact live role/captured helper');check(arm.readyObservedAt>=arm.ready.receipt.ready&&arm.readyObservedAt<=deps.now(),'observed native READY');boundLiveReceipt(arm.request,inputs[k].ready,deps.now());}
+   admit();validateDrains();
   });
   windowValid=record.protocolValid;record.protocolValid=false;record.observationsFinishedAt=deps.now();
   if(!windowValid)errors.push(record.error??'invalid shared window');

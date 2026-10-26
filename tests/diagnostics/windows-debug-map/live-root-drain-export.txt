@@ -1,0 +1,22 @@
+// Runs only in the hash-pinned harness owner; no handle crosses its boundary.
+export function ownershipDrainLiveRoot(compiler: string, compilerNonce: string, controlDirectory: string, traceDirectory: string) {
+  const current = (pid: number) => ownershipTrace.preserve(() => {
+    const entry = tracked.get(pid), job = entry && threadJobs.get(entry.threadId);
+    const ref = entry && ownershipTrace.reference(entry.handle);
+    if (!entry || !job || !ref || ref.entry.pid !== pid || ref.entry.incarnation !== entry.identity?.incarnation || ref.identity.pid !== pid || entry.identity?.incarnation !== ref.identity.incarnation) return undefined;
+    return {handle: entry.handle, pid, created: ref.identity.incarnation ?? '', exitCode: ref.identity.exitCode,
+      owner: ownershipTrace.owner, role: ownershipTrace.role, id: ref.entry.id, threadId: entry.threadId,
+      threadJob: String(job.handle), jobKey: job.key, globalJob: String(globalJob), nestingRefused,
+      complete: ref.complete, closeFailed: !!ref.entry.closeFailed, stage: ref.entry.stage};
+  });
+  return new LiveRootDrainer({compiler, compilerNonce, now: () => Date.now(), current,
+    ready: request => ownershipTrace.preserve(() => readFileSync(join(controlDirectory, `${request.label}.ready.bin`))),
+    rows: () => ownershipTrace.preserve(() => traceRows(traceDirectory)), removed: pid => !tracked.has(pid),
+    retire: (sample, helper) => ownershipTrace.preserve(() => {
+      const exact = current(sample.pid), live = current(helper.pid);
+      if (!exact || !live || JSON.stringify(exact) !== JSON.stringify(sample) || JSON.stringify(live) !== JSON.stringify(helper)) throw new Error('live harness custody changed immediately before reportExit');
+      reportExit(sample.threadId, sample.pid);
+      return ownershipTrace.closeResult(sample.id);
+    }),
+  });
+}

@@ -4,7 +4,7 @@ import {tmpdir, release} from 'node:os';
 import {join} from 'node:path';
 import {capture, type Captured} from './capture.ts';
 import {selectedEnvironment} from './environment.ts';
-import {verifyOwnershipPlatform, ownedMembershipReader, ownedJobReader, ownedHelperReference} from './ownership-generate.ts';
+import {verifyOwnershipPlatform, ownedMembershipReader, ownedJobReader, ownedHelperReference, ownedLiveRootDrainer} from './ownership-generate.ts';
 import {serveTopology, traceRows} from './target-topology.ts';
 import {validateWorkerLifetime, type WorkerReport} from './worker-lifetime.ts';
 import {observeHelperJob, type RootProof} from './helper-job.ts';
@@ -592,8 +592,10 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
       timingTasks.push((async()=>{
         const directory=process.env.BOITE_ROOT_REFERENCE_DIRECTORY;
         if(!directory)throw Error('live root private controller directory missing');
+        const drainer=await ownedLiveRootDrainer(process.env.BOITE_ROOT_REFERENCE_COMPILER!,process.env.BOITE_ROOT_REFERENCE_NONCE!,directory,process.env.BOITE_DEBUG_MAP_TRACE!);
         const control=await runLiveRootHarness(jobs.filter(j=>livePairLabels.includes(j.label)),{
           directory,compiler:process.env.BOITE_ROOT_REFERENCE_COMPILER!,compilerNonce:process.env.BOITE_ROOT_REFERENCE_NONCE!,trace:process.env.BOITE_DEBUG_MAP_TRACE!,preserve:action=>ownershipTrace.preserve(action),
+          drainHarness:async request=>ownershipTrace.preserve(()=>drainer.drain(request)),
           start:(job,env,spawned)=>run(job,false,'anchor-exclusive-run','assigned',{env,spawned}),
           observe:async(r,path,phase,deadline)=>{const remaining=deadline-Date.now();if(remaining<=0)throw Error('live root observer deadline');return {path,...await execute(`live-root-${r.label.toLowerCase()}-${phase}-${path.endsWith('.retired')?'retired':path.endsWith('.unused')?'unused':'map'}`,['observe-map',path],state,{},remaining)};},
           finish:async(job,_request,result)=>{
