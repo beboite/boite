@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CoreClient } from '../src/client.ts';
 import { notifiesOnFinish } from '@boite/contracts';
-import { AgentRuntime, isAgentHeld } from '../src/agents/runtime.ts';
+import { AgentRuntime, isAgentHeld, NOTICES_PER_HOUR } from '../src/agents/runtime.ts';
 import { agentGuide, BOT_GUIDE } from '../src/agent-guide.ts';
 import { agentContext } from '../src/agents/context.ts';
 import { costing, makeAgent, scripted, settled, turnsOf } from './agent-fixture.ts';
@@ -314,6 +314,25 @@ test('scheduled-only bots retain facts across runtime restart and failed admissi
   runtime().tick();
   expect(events()).toHaveLength(before);
 }, 15_000);
+
+test('deferred arrivals leave the automatic event allowance available after re-enabling wakes', async () => {
+  const { agent, threadId } = await makeAgent(h, client);
+  const config = await client.call('agents.runtime.get', { agentId: agent.id });
+  const save = (eventWakes: boolean) => client.call('agents.runtime.configure', {
+    agentId: agent.id, expectedRevision: h.core.workforce.records.get('profile', agent.id).revision, config: { ...config, eventWakes },
+  });
+  await save(false);
+  for (let i = 0; i < NOTICES_PER_HOUR; i++) h.core.agentRuntime.fact(agent.id, { key: `deferred:${i}`, text: `Deferred ${i}.`, threadIds: [] });
+  expect(h.core.agentRuntime.start(agent, { kind: 'routine', label: 'Morning', prompt: 'Catch up.' })).toBeDefined();
+  await waitFor(() => settled(h, threadId));
+  expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(0);
+  await save(true);
+  for (let i = 0; i < NOTICES_PER_HOUR; i++) {
+    expect(h.core.agentRuntime.fact(agent.id, { key: `automatic:${i}`, text: `Automatic ${i}.`, threadIds: [] })).toBe(true);
+  }
+  expect(h.core.agentRuntime.fact(agent.id, { key: 'over-cap', text: 'Over cap.', threadIds: [] })).toBe(false);
+  expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(NOTICES_PER_HOUR);
+});
 
 test('routine fact consumption rolls back before any driver starts and commits before delivery, without request replay', async () => {
   const delivered: { prompt: string; inTransaction: boolean }[] = [];

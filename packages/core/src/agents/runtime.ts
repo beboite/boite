@@ -277,7 +277,7 @@ export class AgentRuntime {
       this.dropped(agentId, sent, `Event dropped: more than ${NOTICES_PER_HOUR} arrived this hour. ${about(fact.text)}`);
       return false;
     }
-    sent.at.push(now);
+    if (eventWakes) sent.at.push(now);
     let facts = [...pending.facts, { key: fact.key, text: fact.text, at: now, notBefore: now + (fact.delay ?? NOTICE_BATCH_MS), ...(fact.threadIds ? { threadIds: [...fact.threadIds] } : {}) }];
     while (eventWakes && facts.length > 1 && this.eventPrompt(facts).length > EVENT_PROMPT_MAX) {
       this.dropped(agentId, sent, `Event dropped to keep the next wake under ${EVENT_PROMPT_MAX} characters. ${about(facts[0]!.text)}`);
