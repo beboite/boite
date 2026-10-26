@@ -270,6 +270,15 @@ test.each(['partial checkout', 'branch only', 'reserved ref', 'absent ref', 'ind
     expect(checkpoints.mock.calls.filter(([thread]) => thread.id === id)).toHaveLength(0);
     expect(s.h.core.journal.listMessages(id).some(message => message.turnId === first.id
       && message.parts.some(part => part.type === 'text' && part.text.includes('Accepted before checkout')))).toBe(true);
+    if (s.h.core.procs.liveCount(id) !== 0) {
+      console.error('CHECKOUT_STOP_LIVE_PROCESSES', JSON.stringify({
+        leftover, platform: process.platform,
+        stopped: { pid: partial!.proc.pid, exitCode: partial!.proc.exitCode, signalCode: partial!.proc.signalCode },
+        live: s.h.core.procs.liveOf(id).map(record => ({
+          ...record, runningSince: s.h.core.procs.platform.runningSince(record.pid),
+        })),
+      }));
+    }
     expect(s.h.core.procs.liveCount(id)).toBe(0);
     if (leftover === 'index lock') expect(existsSync(git(path, 'rev-parse', '--git-path', 'index') + '.lock')).toBe(indexLockedAtStop);
     // Files created while preparation was paused must survive the recovery too.
@@ -316,7 +325,18 @@ test.each(['partial checkout', 'branch only', 'reserved ref', 'absent ref', 'ind
       expect(readFileSync(join(path, 'first.txt'), 'utf8')).toBe('useful edit before recovery\n');
     } else {
       expect(next).toMatchObject({ status: 'done', error: null });
-      expect(filesAtDriver).toEqual([[noFolder ? 'first tracked file\n' : 'useful edit before recovery\n', 'second tracked file\n']]);
+      const expectedFiles = [[noFolder ? 'first tracked file\n' : 'useful edit before recovery\n', 'second tracked file\n']];
+      if (process.platform === 'win32' || JSON.stringify(filesAtDriver) !== JSON.stringify(expectedFiles)) {
+        console.error('CHECKOUT_CONTENT_BYTES', JSON.stringify({
+          leftover, platform: process.platform,
+          actualHex: filesAtDriver.map(files => files.map(text => Buffer.from(text).toString('hex'))),
+          expectedHex: expectedFiles.map(files => files.map(text => Buffer.from(text).toString('hex'))),
+          autocrlf: git(path, 'config', '--get', '--default', 'unset', 'core.autocrlf'),
+          eol: git(path, 'config', '--get', '--default', 'unset', 'core.eol'),
+          attributes: git(path, 'check-attr', 'text', 'eol', '--', 'first.txt', 'nested/second.txt'),
+        }));
+      }
+      expect(filesAtDriver).toEqual(expectedFiles);
       expect(git(path, 'rev-parse', 'HEAD')).toBe(base);
       expect(s.h.core.delegation.worktrees.get(id)).toMatchObject({ state: 'kept', base, dirty: true });
     }
