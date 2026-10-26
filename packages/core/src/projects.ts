@@ -377,6 +377,22 @@ export class ProjectStore {
     return answered;
   }
 
+  rename(projectId: ProjectId, name: string): Project {
+    const project = this.require(projectId);
+    if (typeof name !== 'string' || !name.trim()) {
+      throw refused('projects.rename.name must be a non-empty string', { field: 'name', expected: 'a non-empty string' });
+    }
+    if (this.isDrafts(project)) {
+      throw refused('the drafts project has a localized system name', { field: 'projectId', projectId, expected: 'a project other than the drafts' });
+    }
+    const trimmed = name.trim();
+    if (project.name === trimmed) return project;
+    this.core.journal.append({ type: 'project.renamed', threadId: null, version: 1, payload: { projectId, name: trimmed } }, () => {
+      this.core.journal.putProject({ ...project, name: trimmed });
+    });
+    return this.announce(projectId);
+  }
+
   /**
    * Puts a project away or brings it back. Only the flag moves: its threads,
    * their processes and its folder stay as they are, so a restore is exact.
@@ -567,6 +583,7 @@ export function registerProjectMethods(core: Core): void {
   });
   core.router.register('projects.list', () => core.projects.listFresh());
   core.router.register('projects.add', (params) => core.projects.add(params.path, params.name));
+  core.router.register('projects.rename', (params) => core.projects.rename(params.projectId, params.name));
   core.router.register('projects.drafts', () => core.projects.drafts());
   core.router.register('projects.icon', (params) => core.projects.iconImage(params.projectId));
   core.router.register('projects.refreshIcon', (params) => core.projects.refreshIcon(params.projectId));

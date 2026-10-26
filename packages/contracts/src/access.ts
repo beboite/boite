@@ -66,6 +66,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'projects.drafts',
   // Putting a project away only hides it from the sidebar, like archiving a thread; nothing on disk moves.
   'projects.archive',
+  // Renaming changes only a listed project's display name; it never moves or writes to its folder.
+  'projects.rename',
   // What a thread needs to name its agent.
   'providers.list',
   // Read or refresh the configured account's native catalog, including ACP

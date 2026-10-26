@@ -96,6 +96,8 @@ export interface ProjectsRpcMethods {
 
   'projects.list': { params: Record<string, never>; result: Project[] };
   'projects.add': { params: { path: string; name?: string }; result: Project };
+  /** Change a project's display name without moving its folder. Paired devices may rename too. Refused for the system drafts project. */
+  'projects.rename': { params: { projectId: ProjectId; name: string }; result: Project };
   /** Owner-only folder navigation on the machine running this core. */
   'projects.browse': {
     params: { path?: string };
@@ -149,6 +151,6 @@ export interface ProjectsRpcEvents {
   'project.added': Project;
   /** A project `projects.remove` deleted, after the `thread.removed` of each of its threads. */
   'project.removed': { projectId: ProjectId };
-  /** A project archived or restored, one whose count of archived threads moved, or one whose icon changed. */
+  /** A project renamed, archived or restored, one whose count of archived threads moved, or one whose icon changed. */
   'project.updated': Project;
 }

@@ -14,6 +14,22 @@ export function projectMethods(ctx: FakeContext) {
     'projects.list': async (params) => {
       return ctx.projects.map((project) => describedProject(ctx, project));
     },
+    'projects.rename': async (params) => {
+      const project = ctx.projects.find(p => p.id === params.projectId);
+      if (!project) throw ctx.notFound('project', params.projectId);
+      if (typeof params.name !== 'string' || !params.name.trim()) {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'projects.rename.name must be a non-empty string', data: { field: 'name', expected: 'a non-empty string' } });
+      }
+      if (project.kind === 'drafts') {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the drafts project has a localized system name', data: { field: 'projectId', projectId: project.id, expected: 'a project other than the drafts' } });
+      }
+      const name = params.name.trim();
+      if (project.name !== name) {
+        project.name = name;
+        ctx.emit('project.updated', describedProject(ctx, project));
+      }
+      return describedProject(ctx, project);
+    },
     'projects.setAutoArchiveMergedPr': async (params) => {
       const project = ctx.projects.find(project => project.id === params.projectId);
       if (!project) throw ctx.notFound('project', params.projectId);
