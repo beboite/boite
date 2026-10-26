@@ -276,21 +276,34 @@ test('leaving a long conversation right after a scroll returns to that scroll', 
   expect(Math.abs(restoredAnchor.offset - anchor.offset)).toBeLessThan(10);
 }, 15_000);
 
-test('a wide markdown table scrolls inside itself and leaves the conversation still', async () => {
+test('a markdown table wraps its text and scrolls inside itself only for what cannot break', async () => {
   const origin = await page.evaluate<string>('location.origin');
   await page.navigate(`${origin}/?fake=1&open=recent`);
+  const prose = '| Idea | What it changes |\n|---|---|\n| Chart block | The agent writes a few lines of data straight into its answer and Boite draws the chart the way it draws a diagram, so nobody pans sideways to read it |';
   const table = '| File | Status | Lines | Owner | Notes |\n|---|---|---|---|---|\n| packages/ui/src/components/ThreadHeader.svelte | modified | 229 | ui | header row on phones |';
-  await page.type('[data-testid=composer-input]', table);
+  await page.type('[data-testid=composer-input]', `${prose}\n\n${table}`);
   await page.evaluate(`document.querySelector('[data-testid=composer-input]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`);
-  await page.waitFor(`document.querySelector('[data-testid=timeline] table')?.textContent.includes('header row on phones')`, 20_000);
-  await page.evaluate(`document.querySelector('[data-testid=timeline] table').scrollIntoView({ block: 'center', inline: 'end' })`);
-  const sizes = await page.evaluate<{ timeline: [number, number, number]; table: [number, number] }>(`(() => {
-    const t = document.querySelector('[data-testid=timeline]'), table = t.querySelector('table');
-    return { timeline: [t.scrollWidth, t.clientWidth, t.scrollLeft], table: [table.scrollWidth, table.clientWidth] };
+  await page.waitFor(`document.querySelectorAll('[data-testid=timeline] table')[1]?.textContent.includes('header row on phones')`, 20_000);
+  await page.evaluate(`document.querySelectorAll('[data-testid=timeline] table')[1].scrollIntoView({ block: 'center', inline: 'end' })`);
+  const sizes = await page.evaluate<{ timeline: [number, number, number]; prose: [number, number]; table: [number, number]; split: string[] }>(`(() => {
+    const t = document.querySelector('[data-testid=timeline]'), [prose, table] = t.querySelectorAll('table');
+    // A word drawn on more than one line box was split to narrow its column.
+    const split = [...prose.querySelectorAll('th, td')].flatMap(cell => {
+      const text = cell.firstChild, range = document.createRange();
+      return [...text.data.matchAll(/\\S+/g)].filter(word => {
+        range.setStart(text, word.index);
+        range.setEnd(text, word.index + word[0].length);
+        return new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size > 1;
+      }).map(word => word[0]);
+    });
+    return { timeline: [t.scrollWidth, t.clientWidth, t.scrollLeft], prose: [prose.scrollWidth, prose.clientWidth], table: [table.scrollWidth, table.clientWidth], split };
   })()`);
   await capture('mobile-table.png');
   expect(sizes.timeline[0]).toBeLessThanOrEqual(sizes.timeline[1]);
   expect(sizes.timeline[2]).toBe(0);
+  // A sentence wraps inside its cell, at spaces: the whole row is read without panning.
+  expect(sizes.prose[0]).toBeLessThanOrEqual(sizes.prose[1]);
+  expect(sizes.split).toEqual([]);
   // The table itself holds what did not fit.
   expect(sizes.table[0]).toBeGreaterThan(sizes.table[1]);
 }, 30_000);

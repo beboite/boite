@@ -2,19 +2,26 @@
 
 A phone is a device of a [group](groups.md): added once on any machine of the
 group, it reaches all of them with one key of its own. It opens the UI served by
-a machine and connects over authenticated WebSockets. Agents and the journal
-remain on the machines.
+a machine or the [app's own address](#the-app-on-its-own-address) and connects
+over authenticated WebSockets. Agents and the journal remain on the machine
+hosting the core. The [Android client app](android.md) opens this same UI;
+the separate [Android server](android-server.md) can host a core and agents on
+the phone itself in Termux.
 
 ## Settings on a phone
 
-The list's header holds the machine and project picker, whose last row adds a
-project, the new-thread `+` and a menu with the machine, Conversations,
-Activity, with its count, and Settings. There is no bottom navigation bar. A
-conversation's header holds Back, which carries a mark while another thread
-waits on the user, and its title, whose menu is the only one there. The thread
+The bottom bar opens Conversations, Activity and Settings, with a central
+`+` for a new thread. The Bots and Contacts experiments add their own tabs.
+The list's header opens the machine's connection settings and the project
+picker, whose last row adds a project for owner connections. A conversation
+hides the bottom bar; its header holds Back, which carries a mark while
+another thread waits on the user, the title menu and a Browser button. The thread
 list opens on its search field, with the display options at its right end:
-the view, by project or recent, and the grouping switches. The project order
-and a project's own switches stay on the desktop. The composer stays at the
+the view, by project or recent, and the grouping switches. Choosing recent
+or custom project ordering stays on the desktop. Project cards have a menu
+for their archived conversations and management; an existing custom order
+also adds Move up and Move down. Actions follow the
+connection's owner or paired-device permissions. The composer stays at the
 bottom of the available viewport, above the keyboard when it is open. A touch
 keyboard has no Shift+Enter, so where the primary pointer is coarse
 (`pointer: coarse`, the question the app's other touch rules ask) plain Enter
@@ -32,8 +39,9 @@ Experiments, which follow the computer's desktop app until the phone flips one
 of its own: Bots on the computer brings the phone's Bots tab with it
 ([experiments](experiments.md)).
 Machine: the
-machine itself with its connection, which opens Machines, then Usage, Voice and
-Archived threads. Each opens a screen of its own; the back button or browser
+machine itself with its connection, which opens Machines, then Usage, Voice,
+Archived threads and Secrets. Owner connections also show Browser profiles
+and Allowed windows. Each opens a screen of its own; the back button or browser
 Back returns to the list. Theme and accent belong to the current device;
 Appearance also holds the chat's files and previews switch, and leaves the
 column width, the terminal, the workspace and the header's buttons to the
@@ -55,12 +63,14 @@ day, provider and model; Limits draws the core's subscription bars, read-only
 CLIProxyAPI gateway on or off
 ([providers](providers.md#switching-the-gateway-from-limits)).
 
-Provider accounts, keyboard shortcuts, plugins, resource limits, the brain, the
-task manager, worktrees, automatic compaction, diagnostics, the
-tour, adding and removing devices and server configuration stay in desktop
-settings; a link or a card in a conversation that names one of those pages
-still opens it. Project management stays on the desktop too. This smaller
-phone menu also applies to owner sessions; it does not change RPC permissions.
+Provider accounts, keyboard shortcuts, plugins, resource limits, the brain,
+the task manager, worktrees, automatic compaction, diagnostics, the tour and
+server configuration have no row in the phone's settings list. A link or a
+card can still open a supported detail page, subject to its permissions;
+`MobileSettings.svelte` defines those pages. Project management is available
+from each project card's menu. This smaller phone menu also applies to owner
+sessions; it does not change RPC permissions. A paired device's Machines
+page lists devices but leaves adding and removing them to the owner.
 
 Device sessions receive only events corresponding to the state they may read.
 Account login output, process traces, plugin state and core diagnostics
@@ -315,20 +325,20 @@ link scanned or pasted in the app asks nothing either: the owner just showed it.
 
 ## The app on the phone
 
-The browser uses mobile navigation under 720 px. A bar along the bottom edge
+The browser uses mobile navigation at 720 px and below. A bar along the bottom edge
 (`MobileTabs.svelte`) holds the places: Conversations, Activity, a filled +
-that starts a thread, Agents and Contacts when they are on, and Settings.
+that starts a thread, Bots and Contacts when they are on, and Settings.
 Activity's tab counts the conversations waiting for you; Bots counts the bots
 at work on every machine, as the desktop's switch does, in the waiting colour
 once one needs you. Conversations lists
 threads across connected machines; Activity puts waiting requests first,
 followed by running and queued turns. Each list's header shows the machine,
 which opens its connection settings, over the screen's name, and the project
-the + starts in, whose sheet also adds a project. A conversation, an agent's
+the + starts in, whose sheet also adds a project for owners. A conversation, a bot's
 page and an open keyboard hide the bar; the conversation's header shows its
 title over its project, and its machine once there are two.
 
-Each row in the list leads with who runs the thread, the agent's picture or the
+Each row in the list leads with who runs the thread, the bot's picture or the
 provider's logo. A finger that slides a row left uncovers Pin and Archive
 (`lib/swipe-row.ts`); a vertical drag stays the list's scroll and one row is
 open at a time. A phone has no right-click, so the actions a desktop finds
@@ -373,7 +383,7 @@ the bottom navigation hides. Closing the keyboard restores the mode's height;
 a shorter viewport reported during an iPhone app launch does not leave a gap
 below the navigation.
 Safe-area insets keep controls clear of the home indicator and screen cutouts:
-the chat header, the full-screen right panel, and the Agents and Settings pages
+the chat header, the full-screen right panel, and the Bots and Settings pages
 all start below the status bar of an installed app on a notched iPhone.
 
 Draft text stays with its conversation. Four recent timelines are retained in
@@ -668,7 +678,7 @@ Each device chooses the kinds it gets, all on by default: Approvals
 to apply a change), Questions (an agent's questions, `boite ask`, a delegated
 agent's), Finished, Errors and Limits (the alerts set on an account in
 Settings, Limits, [usage](usage.md#alerts)). The rows sit under the notifications switch, in
-General on the desktop and in App & notifications on the phone, and dim while
+General on the desktop and in Notifications on the phone, and dim while
 the switch is off. The choice lives in the page's `localStorage`: the kinds
 turned off under `boite.notifications.muted`, so a kind added later starts on.
 Local toasts read it (`shouldNotify` in `lib/notify.ts`). For Web Push the core

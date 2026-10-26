@@ -41,7 +41,7 @@ test('a quiet revalidation retains message objects', async ({ ready }) => {
   await store.open('t-long', false);
   expect(store.openThread).toBe(thread);
   expect(store.openThread!.messages).toBe(messages);
-  expect(asked.mock.calls.map(([method]) => method)).toEqual(['threads.get']);
+  expect(asked.mock.calls.map(([method]) => method)).toEqual(['threads.get', 'secrets.pending']);
   const snapshot = await asked.mock.results[0]!.value;
   expect(snapshot.messages).toEqual([]);
   expect(snapshot.messagesUnchanged).toBe(true);

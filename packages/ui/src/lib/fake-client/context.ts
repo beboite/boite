@@ -3,7 +3,7 @@ import type { FakeArchiveState, MergedPrFixture } from './merged-pr-archive';
 /** The state one fake core keeps, and the plumbing every domain module shares. */
 import { observeProgress } from './progress';
 import type { FakeRoster } from './group';
-import type { FakeSecretCard, FakeSecretKey } from './secrets';
+import { cancelSecretCards, type FakeSecretCard, type FakeSecretKey } from './secrets';
 import {
   type ClientPreferences,
   type ExperimentId,
@@ -483,6 +483,15 @@ export class FakeContext {
   }
 
   emit<E extends RpcEventName>(event: E, payload: RpcEvents[E]): void {
+    if (event === 'thread.removed') cancelSecretCards(this, (payload as RpcEvents['thread.removed']).threadId);
+    if (event === 'thread.updated') {
+      const thread = payload as RpcEvents['thread.updated'];
+      if (thread.archived) cancelSecretCards(this, thread.id);
+    }
+    if (event === 'turn.finished') {
+      const turn = payload as RpcEvents['turn.finished'];
+      cancelSecretCards(this, turn.threadId, turn.id);
+    }
     if (event === 'core.log') {
       const log = payload as RpcEvents['core.log'];
       const bounded = (value: string): string => normalizeCoreLogText(value).replace(/[\r\n\t]/g, ' ').slice(0, 200);

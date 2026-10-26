@@ -26,7 +26,7 @@ export interface StreamEvent {
   index?: number;
   message?: { id?: string; model?: string };
   content_block?: ContentBlock;
-  delta?: { type?: string; text?: string; thinking?: string; partial_json?: string };
+  delta?: { type?: string; text?: string; thinking?: string; partial_json?: string; stop_reason?: string | null };
 }
 
 /** The SDK's `SlashCommand` as the contract's `AgentCommand`: an empty field becomes null. */

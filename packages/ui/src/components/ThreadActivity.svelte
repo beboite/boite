@@ -1,7 +1,7 @@
 <script lang="ts">
   import { errorText } from '../lib/errors';
-  import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleCheck, CircleDot, Hand, ListChecks, ListTodo, MessageCircleQuestionMark, PanelRight, Pause, Play, Repeat, Reply, Settings2, ShieldQuestion, Target, X } from '@lucide/svelte';
-  import type { ThreadSummary } from '@boite/contracts';
+  import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleCheck, CircleDot, Hand, KeyRound, ListChecks, ListTodo, MessageCircleQuestionMark, PanelRight, Pause, Play, Repeat, Reply, Settings2, ShieldQuestion, Target, X } from '@lucide/svelte';
+  import type { MessagePart, QuestionRequest, SecretRequest, ThreadSummary } from '@boite/contracts';
   import { focusComposer } from '../lib/focus';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
@@ -9,6 +9,8 @@
   import { dockRoom, questionDock } from '../lib/question-dock.svelte';
   import { ignoreQuestions, releaseWaiting, replyOf, repliesOf, sendAnswer, writeAnswer } from '../lib/question-reply.svelte';
   import QuestionCard from './QuestionCard.svelte';
+  import SecretCard from './SecretCard.svelte';
+  import InfoTip from './InfoTip.svelte';
   import { openQuestionPage } from '../lib/question-page';
   import SettingRequestCard from './SettingRequestCardLoader.svelte';
   import { settingHeading } from '../lib/setting-requests';
@@ -37,7 +39,20 @@
    * is answered in the child's own conversation.
    */
   let children = $derived(new Map(store.openThread ? store.threads.filter((row) => row.parentThreadId === store.openThread?.id && !row.archived).map((row) => [row.id, row] as const) : []));
-  let asked = $derived(store.openThread ? store.pendingQuestions.filter((question) => (question.async === true && question.threadId === store.openThread?.id) || children.has(question.threadId)).sort((a, b) => a.createdAt - b.createdAt) : []);
+  type DockRequest = QuestionRequest & { secret?: SecretRequest };
+  let asked: DockRequest[] = $derived.by(() => {
+    const threadId = store.openThread?.id;
+    if (!threadId) return [];
+    const questions: DockRequest[] = store.pendingQuestions.filter((question) => (question.async === true && question.threadId === threadId) || children.has(question.threadId));
+    const secrets: DockRequest[] = store.pendingSecrets
+      .filter((request) => request.threadId === threadId || children.has(request.threadId))
+      .map((secret) => ({ id: secret.id, threadId: secret.threadId, turnId: secret.turnId, text: secret.reason, options: [], allowText: false, multiple: false, createdAt: secret.createdAt, secret }));
+    return [...questions, ...secrets].sort((a, b) => a.createdAt - b.createdAt);
+  });
+
+  function secretPart(request: SecretRequest): Extract<MessagePart, { type: 'secret_request' }> {
+    return { type: 'secret_request', requestId: request.id, name: request.name, reason: request.reason, placeholder: request.placeholder, replace: request.replace, status: request.status, ref: request.ref, expiresAt: request.expiresAt };
+  }
   let waits = $derived(store.pendingPermissions.filter((request) => children.has(request.threadId)));
   let shownId = $state<string | null>(null);
   let shown = $derived(asked.find((question) => question.id === shownId) ?? asked[0]);
@@ -194,14 +209,17 @@
     {#if shown}
       <div class="questions" data-testid="activity-questions" data-count={asked.length}>
         <div class="activity-row question-row">
-          {#if shown.setting}<Settings2 size={16} />{:else if shown.agentSetting}<Bot size={16} />{:else}<MessageCircleQuestionMark size={16} />{/if}
+          {#if shown.secret}<KeyRound size={16} />{:else if shown.setting}<Settings2 size={16} />{:else if shown.agentSetting}<Bot size={16} />{:else}<MessageCircleQuestionMark size={16} />{/if}
           <button type="button" class="ghost objective question-toggle" aria-expanded={questionOpen}
             title={questionOpen ? strings.activity.questionFold : strings.activity.questionUnfold} data-testid="activity-question-toggle"
             onclick={() => (questionOpen = !questionOpen)}>
-            <span class="question-line ui-label">{questionOpen ? (shown.setting ? settingHeading(shown.setting) : shown.agentSetting ? fill(strings.agentSettingRequest.heading, { name: shown.agentSetting.agentName }) : strings.chat.questionAsyncHeading) : shown.text}</span>
+            <span class="question-line ui-label">{shown.secret ? shown.secret.name : questionOpen ? (shown.setting ? settingHeading(shown.setting) : shown.agentSetting ? fill(strings.agentSettingRequest.heading, { name: shown.agentSetting.agentName }) : strings.chat.questionAsyncHeading) : shown.text}</span>
             <ChevronDown size={16} class={questionOpen ? 'turned' : ''} />
           </button>
-          {#if replyOf(store, shown.id).replying}
+          {#if shown.secret}
+            <InfoTip text={strings.secrets.neverShown} topic={strings.secrets.cardLabel} />
+          {/if}
+          {#if !shown.secret && replyOf(store, shown.id).replying}
             <span data-testid="composer-reply" data-question={shown.id}>
               <button type="button" class="ghost small" data-testid="composer-reply-ignore" title={strings.composer.replyIgnoreHint} onclick={() => ignoreQuestions(store)}>{strings.composer.replyIgnore}</button>
             </span>
@@ -223,7 +241,9 @@
                 {#if child}
                   {@render fromChild(child, 'activity-subagent-question')}
                 {/if}
-                {#if question.agentSetting}
+                {#if question.secret}
+                <SecretCard {store} threadId={question.threadId} part={secretPart(question.secret)} docked />
+                {:else if question.agentSetting}
                 <AgentSettingCard
                   {store}
                   threadId={question.threadId}

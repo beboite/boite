@@ -41,6 +41,29 @@ export function chatLink(raw: string): ChatLink | null {
   return { kind: 'file', target, ...(line ? { line: Number(line[1] ?? line[2]) } : {}) };
 }
 
+/**
+ * The path a file link names, whole, as it goes on the clipboard: a relative
+ * one joined to the thread's folder, `.` and `..` resolved, written with
+ * Windows separators when it is a Windows path, since `chatLink` turned them
+ * all into `/`.
+ */
+export function fullPath(path: string, cwd: string | null | undefined): string {
+  const inFolder = !cwd || /^(?:[a-z]:)?[\\/]/i.test(path) ? null : `${cwd}/${path}`;
+  const whole = (inFolder ?? path).replaceAll('\\', '/');
+  // The root stays whole: a share's `//server/share`, a drive's `C:/` or `/`. Nothing climbs above it.
+  const root = /^\/\/[^/]+\/[^/]+\/?|^[a-z]:\/?|^\//i.exec(whole)?.[0] ?? '';
+  const parts: string[] = [];
+  for (const part of whole.slice(root.length).split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..' && parts.length > 0 && parts.at(-1) !== '..') parts.pop();
+    else if (part !== '..' || !root) parts.push(part);
+  }
+  const base = root && !root.endsWith('/') ? `${root}/` : root;
+  const joined = base + parts.join('/') + (parts.length > 0 && whole.endsWith('/') ? '/' : '') || '.';
+  // An absolute POSIX path keeps its `/` even beside a Windows folder; only a path joined to that folder takes its `\\`.
+  return /^(?:\/\/|[a-z]:\/)/i.test(joined) || (inFolder !== null && cwd!.includes('\\')) ? joined.replaceAll('/', '\\') : joined;
+}
+
 // Ratios and dates can have path separators without naming a file.
 const NUMERIC_PATH = /^[\\/]?\d[\d.,\\/]*$/;
 

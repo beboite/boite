@@ -343,6 +343,7 @@ export class Threads {
     const summaryRead = preloaded?.summaryRead ?? this.ctx.threadReads.begin(threadId);
     let permissionRead: ReturnType<StoreContext['requests']['permissionRead']> | undefined;
     let questionRead: ReturnType<StoreContext['requests']['questionRead']> | undefined;
+    let secretRead: ReturnType<StoreContext['requests']['secretRead']> | undefined;
     try {
       const previous = this.subscribedThreadId;
       // Everything this open needs leaves in one burst, in the order the core
@@ -357,11 +358,13 @@ export class Threads {
       if (options.requests !== false) {
         permissionRead = this.ctx.requests.permissionRead(client, threadId, bundledRequests ? () => fetched.then(thread => thread.opened?.permissions ?? []) : undefined);
         questionRead = this.ctx.requests.questionRead(client, threadId, bundledRequests ? () => fetched.then(thread => thread.opened?.questions ?? []) : undefined);
+        secretRead = this.ctx.requests.secretRead(client, threadId, () => fetched.then(thread => this.ctx.requests.secretParts(thread)));
       }
       const permissionsAsked = permissionRead?.promise ?? Promise.resolve([]);
       const questionsAsked = questionRead?.promise ?? Promise.resolve([]);
+      const secretsAsked = secretRead?.promise ?? Promise.resolve([]);
       // A run that a newer click overtakes returns early and never awaits these.
-      for (const asked of [fetched, permissionsAsked, questionsAsked]) asked.catch(() => undefined);
+      for (const asked of [fetched, permissionsAsked, questionsAsked, secretsAsked]) asked.catch(() => undefined);
       await (subscribed ?? fetched);
       if (!newest()) {
         // A newer click took over while this one was in flight. Its own thread
@@ -409,10 +412,12 @@ export class Threads {
       // and may have had one settled where this client could not hear it.
       const permissions = await permissionsAsked;
       const questions = await questionsAsked;
+      const secrets = await secretsAsked;
       await unsubscribed;
       if (!newest()) return;
       permissionRead?.apply(permissions);
       questionRead?.apply(questions);
+      secretRead?.apply(secrets);
       // Its sub-agents asking the user show in its dock: their requests are read the same way.
       if (options.requests !== false) this.ctx.requests.readChildren(client, threadId);
       if (thread.unread) {
@@ -443,6 +448,7 @@ export class Threads {
       summaryRead.cancel();
       permissionRead?.cancel();
       questionRead?.cancel();
+      secretRead?.cancel();
       if (newest()) { this.loadingThreadId = null; this.loadingBytes = null; }
       await deselected;
     }

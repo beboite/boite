@@ -112,6 +112,11 @@ export type SecretUseResult =
   | { action: 'run' | 'pipe'; exitCode: number | null; stdout: string; stderr: string; truncated: boolean; timedOut: boolean };
 
 export interface SecretsRpcMethods {
+  /** Open cards, independent of history paging. Owner and paired devices read metadata only. */
+  'secrets.pending': {
+    params: { threadId?: ThreadId };
+    result: SecretRequest[];
+  };
   /**
    * The agent of a thread asks for a key: a masked card in its running turn,
    * the thread `waiting` until the user answers. Resolves with the outcome once

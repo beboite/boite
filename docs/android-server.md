@@ -1,5 +1,8 @@
 # Boite on an Android phone
 
+This is the server, separate from the [Android client app](android.md).
+Installing the client alone does not install Termux, a core or agent CLIs.
+
 `apps/android-server` turns a phone into a Boite machine: the core and the
 agents run on it, and the person's other devices open it like any
 [headless server](server.md). It has two parts:

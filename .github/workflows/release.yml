@@ -105,7 +105,7 @@ jobs:
           RELEASE_ANNOUNCEMENT: ${{ inputs.announcement }}
         run: |
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > released.json
-          bun scripts/ci/changelog.ts released.json artifacts/release-notes.md
+          bun scripts/ci/changelog.ts released.json artifacts/release-notes.md artifacts
           bun scripts/ci/updater-manifest.ts artifacts
           # Persist unsigned tested-digest provenance with the reviewed draft;
           # publication also checks this exact run's completed jobs via the API.
@@ -125,6 +125,7 @@ jobs:
               test "$(echo "$existing" | jq -r .target_commitish)" = "$GITHUB_SHA"
             fi
             gh release upload "$RELEASE_TAG" "${installers[@]}" ./*.sig latest.json SHA256SUMS.txt server-images.json --clobber
+            gh release edit "$RELEASE_TAG" --notes-file release-notes.md
           else
             # A manual dispatch creates the version tag only after all checks.
             if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then

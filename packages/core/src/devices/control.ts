@@ -267,6 +267,8 @@ export class MobileDevices {
     const streams = await this.#loadStreams();
     // The setting may have gone off while stream.ts loaded.
     if (this.#closed || !this.#streaming()) return { deviceId, state: 'off', reason: STREAM_OFF, chunks: [] };
+    // The panel may also have closed while the stream module was awaited.
+    this.#ready(threadId, deviceId, connection);
     return streams.stream({ id: target.id, serial: target.serial, name: target.name }, connection?.id ?? 'core', { maxSize, after }, connection?.onClose?.bind(connection));
   }
 
