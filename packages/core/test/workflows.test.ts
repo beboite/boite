@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode } from '@boite/contracts';
+import { DEFAULT_DELEGATION_CONFIG, extractJson, RpcErrorCode } from '@boite/contracts';
 import type { DelegationConfig, Turn, WorkflowPlan, WorkflowRun } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
@@ -168,6 +168,44 @@ test('plans are refused by field before anything starts', async () => {
   expect(await thrown(bad({ name: 'x', limits: { maxSteps: 500 }, steps: [{ id: 'a', profile: 'fast', task: 't' }] }))).toThrow('limits.maxSteps: expected an integer from 1 to 64');
   expect(await thrown(bad({ name: 'x', steps: [{ id: 'a', profile: 'fast', task: 't', context: { drop: ['memory'] } }] }))).toThrow('steps[0].context.drop: expected a list of instructions, guides, mcp, hooks');
   expect(await bad(REVIEW)).toEqual({ levels: [['scan'], ['review'], ['fix'], ['report']] });
+});
+
+const FENCED_TEXT = { text: 'Keep ``` inside the JSON string.' };
+const fencedOutput = (value: unknown) => '```json\n' + JSON.stringify(value) + '\n```';
+
+test.each([
+  ['backticks inside a JSON string', fencedOutput(FENCED_TEXT), { value: FENCED_TEXT }],
+  ['CRLF and an indented closing fence', '```json \r\n' + JSON.stringify(FENCED_TEXT) + '\r\n  ``` \t\r\n', { value: FENCED_TEXT }],
+  ['raw JSON', JSON.stringify(FENCED_TEXT), { value: FENCED_TEXT }],
+  ['the last valid block', fencedOutput({ text: 'Earlier' }) + '\nThen:\n' + fencedOutput(FENCED_TEXT), { value: FENCED_TEXT }],
+  ['an invalid final block', fencedOutput(FENCED_TEXT) + '\n```json\n{"text":}\n```', { value: FENCED_TEXT }],
+  ['malformed JSON', '```json\n{"text":}\n```', null],
+] as const)('workflow JSON extraction: %s', (_name, answer, expected) => {
+  expect(extractJson(answer)).toEqual(expected);
+});
+
+test('fenced workflow output preserves backticks in a JSON string without a correction', async () => {
+  const { prompts } = scripted(ctx => taskOf(ctx.prompt) === 'Produce text.'
+    ? fencedOutput(FENCED_TEXT)
+    : 'noted');
+  const { h, owner, threadId } = await setup();
+  const run = await owner.call('workflows.start', {
+    threadId, requestId: 'backtick-output', plan: { name: 'Backtick output', steps: [
+      { id: 'source', profile: 'fast', task: 'Produce text.', output: { text: 'string' } },
+      { id: 'use', profile: 'fast', task: 'Use {{source.text}}' },
+    ] },
+  });
+  const done = await settled(h, threadId, run.id);
+  expect([done.status, done.error]).toEqual(['done', null]);
+  const source = done.nodes[0]!.instances[0]!;
+  expect(source.output).toEqual(FENCED_TEXT);
+  expect(source.attempts).toBe(1);
+  expect(h.core.journal.listTurns(source.threadId!)).toHaveLength(1);
+  expect(prompts.some(prompt => prompt.prompt.includes('does not match this workflow step'))).toBe(false);
+  const use = done.nodes[1]!.instances[0]!;
+  const expectedTask = `Use ${FENCED_TEXT.text}`;
+  expect(use.task).toBe(expectedTask);
+  expect(prompts.filter(prompt => prompt.threadId === use.threadId).map(prompt => taskOf(prompt.prompt))).toEqual([expectedTask]);
 });
 
 test('a mismatched output is asked for once more, then the step fails and retry runs it again', async () => {

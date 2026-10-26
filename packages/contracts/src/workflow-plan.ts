@@ -268,9 +268,9 @@ export function shapeMismatch(value: unknown, shape: WorkflowShape, path = 'outp
   return null;
 }
 
-/** The last fenced ```json block of an answer, or the whole answer when it is JSON. */
+/** The last valid fenced JSON block, or the whole answer when it is JSON. */
 export function extractJson(answer: string): { value: unknown } | null {
-  const blocks = [...answer.matchAll(/```(?:json)?[ \t]*\r?\n([\s\S]*?)```/g)];
+  const blocks = [...answer.matchAll(/```(?:json)?[ \t]*\r?\n([\s\S]*?)^[ \t]*```[ \t]*\r?$/gm)];
   const candidates = [...blocks.reverse().map(m => m[1]!), answer.trim()];
   for (const candidate of candidates) {
     try {
