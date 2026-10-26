@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CoreClient } from '../src/client.ts';
 import { notifiesOnFinish } from '@boite/contracts';
-import { isAgentHeld } from '../src/agents/runtime.ts';
+import { AgentRuntime, isAgentHeld } from '../src/agents/runtime.ts';
 import { agentGuide, BOT_GUIDE } from '../src/agent-guide.ts';
 import { agentContext } from '../src/agents/context.ts';
 import { costing, makeAgent, scripted, settled, turnsOf } from './agent-fixture.ts';
@@ -268,6 +268,116 @@ test('facts gather into one event turn once the thread is free and the first is 
   expect(line.parts[0]).toMatchObject({ displayText: '2 project events' });
   expect(line.parts[0]!.type === 'text' && line.parts[0]!.text).toContain('- [turn:one] Thread one finished.\n- [turn:two] Thread two finished.');
   expect(h.core.agentRuntime.facts(agent.id)).toEqual([]);
+});
+
+test('scheduled-only bots retain facts across runtime restart and failed admission, then deliver once with a routine', async () => {
+  const driver = scripted(() => ({ text: 'Caught up.' })); restore = driver.restore;
+  const { agent, threadId } = await makeAgent(h, client);
+  const config = await client.call('agents.runtime.get', { agentId: agent.id });
+  await client.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: agent.revision, config: { ...config, eventWakes: false } });
+  const runtime = () => h.core.agentRuntime as unknown as Omit<AgentRuntime, 'tick'> & { tick(): void };
+  const events = () => turnsOf(h, threadId).filter(t => t.execution?.operation === 'event');
+  const before = events().length;
+  expect(runtime().fact(agent.id, { key: 'saved:0', text: 'MARKER_0', threadIds: [], delay: 0 })).toBe(true);
+  runtime().tick();
+  expect(events()).toHaveLength(before);
+  for (let i = 1; i < 65; i++) expect(runtime().fact(agent.id, { key: `saved:${i}`, text: `MARKER_${i} ${'x'.repeat(300)}`, threadIds: [], delay: 0 })).toBe(true);
+  runtime().fact(agent.id, { key: 'revoked', text: 'REVOKED_FACT', threadIds: ['thr_inaccessible'], delay: 0 });
+  await runtime().close();
+  // Reconstruct from the durable journal, as startup does, with no event wake.
+  (h.core as { agentRuntime: AgentRuntime }).agentRuntime = new AgentRuntime(h.core);
+  runtime().tick();
+  expect(runtime().facts(agent.id)).toHaveLength(66);
+  expect(events()).toHaveLength(before);
+  const wake = { kind: 'routine' as const, label: 'Morning', prompt: 'Catch up on the projects.' };
+  const begin = h.core.threads.startTurn;
+  h.core.threads.startTurn = () => { throw new Error('Admission unavailable'); };
+  try { expect(runtime().attempt(agent, wake)).toEqual({ held: 'failed' }); }
+  finally { h.core.threads.startTurn = begin; }
+  expect(runtime().facts(agent.id)).toHaveLength(66);
+  await client.call('turns.start', { threadId, prompt: 'Direct question still works.' });
+  await waitFor(() => settled(h, threadId));
+  expect(runtime().facts(agent.id)).toHaveLength(66);
+  const saved = await routine(agent.id);
+  due(saved.id);
+  runtime().tick();
+  await waitFor(() => read(saved.id).lastOutcome === 'done');
+  const message = h.core.journal.listMessages(threadId).find(m => m.turnId === read(saved.id).lastTurnId && m.role === 'system')!;
+  const text = message.parts[0]?.type === 'text' ? message.parts[0].text : '';
+  expect(text).toContain('MARKER_0');
+  expect(text).toContain('MARKER_64');
+  expect(text).not.toContain('REVOKED_FACT');
+  expect(runtime().facts(agent.id)).toHaveLength(0);
+  const next = runtime().attempt(agent, wake).turn!;
+  expect(h.core.journal.listMessages(threadId).find(m => m.turnId === next.id && m.role === 'system')!.parts[0]).toMatchObject({ text: wake.prompt });
+  await waitFor(() => settled(h, threadId));
+  runtime().tick();
+  expect(events()).toHaveLength(before);
+}, 15_000);
+
+test('routine fact consumption rolls back before any driver starts and commits before delivery, without request replay', async () => {
+  const delivered: { prompt: string; inTransaction: boolean }[] = [];
+  const driver = scripted(ctx => {
+    delivered.push({ prompt: ctx.prompt, inTransaction: h.core.journal.db.inTransaction });
+    return { text: 'Seen.' };
+  }); restore = driver.restore;
+  const { agent, threadId } = await makeAgent(h, client);
+  const config = await client.call('agents.runtime.get', { agentId: agent.id });
+  await client.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: agent.revision, config: { ...config, eventWakes: false } });
+  h.core.agentRuntime.fact(agent.id, { key: 'durable', text: 'DURABLE_FACT', threadIds: [], delay: 0 });
+  const before = turnsOf(h, threadId).length;
+  const calls = delivered.length;
+  const remove = h.core.journal.deleteSetting;
+  h.core.journal.deleteSetting = key => {
+    if (key === `agents:pending:${agent.id}`) throw new Error('Storage unavailable');
+    return remove.call(h.core.journal, key);
+  };
+  const wake = { kind: 'routine' as const, label: 'Morning', prompt: 'Review the news.', requestId: 'routine-durable' };
+  try { expect(h.core.agentRuntime.attempt(agent, wake)).toEqual({ held: 'failed' }); }
+  finally { h.core.journal.deleteSetting = remove; }
+  expect(delivered).toHaveLength(calls);
+  expect(turnsOf(h, threadId)).toHaveLength(before);
+  expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(1);
+  expect(h.core.journal.getSetting(`agents:pending:${agent.id}`)).toMatchObject({ facts: [{ key: 'durable' }] });
+  expect(h.core.journal.turnRequest(threadId, wake.requestId)).toBeNull();
+  await h.core.agentRuntime.close();
+  (h.core as { agentRuntime: AgentRuntime }).agentRuntime = new AgentRuntime(h.core);
+  expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(1);
+  const turn = h.core.agentRuntime.attempt(agent, wake).turn!;
+  await waitFor(() => settled(h, threadId));
+  expect(delivered.at(-1)).toEqual({ prompt: expect.stringContaining('DURABLE_FACT'), inTransaction: false });
+  expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(0);
+  expect(h.core.journal.getSetting(`agents:pending:${agent.id}`)).toBeUndefined();
+  h.core.agentRuntime.fact(agent.id, { key: 'later', text: 'LATER_FACT', threadIds: [], delay: 0 });
+  expect(h.core.agentRuntime.attempt(agent, wake).turn?.id).toBe(turn.id);
+  expect(h.core.agentRuntime.facts(agent.id).map(f => f.key)).toEqual(['later']);
+  expect(delivered).toHaveLength(calls + 1);
+  expect(turnsOf(h, threadId)).toHaveLength(before + 1);
+});
+
+test('default event wakes still spend facts skipped for budget or failed admission, without a later retry', async () => {
+  const driver = scripted(() => ({ text: 'Seen.', usage: costing(0.5) })); restore = driver.restore;
+  const { agent, threadId } = await makeAgent(h, client);
+  const config = await client.call('agents.runtime.get', { agentId: agent.id });
+  const save = (dailyBudgetUsd: number | null) => client.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: h.core.workforce.records.get('profile', agent.id).revision, config: { ...config, dailyBudgetUsd } });
+  const tick = () => (h.core.agentRuntime as unknown as { tick(): void }).tick();
+  const before = turnsOf(h, threadId).length;
+  await save(0.4);
+  h.core.agentRuntime.fact(agent.id, { key: 'budget', text: 'Over budget.', delay: 0, threadIds: [] });
+  tick();
+  expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(0);
+  await save(null);
+  tick();
+  expect(turnsOf(h, threadId)).toHaveLength(before);
+  const begin = h.core.threads.startTurn;
+  h.core.threads.startTurn = () => { throw new Error('Admission unavailable'); };
+  try {
+    h.core.agentRuntime.fact(agent.id, { key: 'failed', text: 'Failed admission.', delay: 0, threadIds: [] });
+    tick();
+    expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(0);
+  } finally { h.core.threads.startTurn = begin; }
+  tick();
+  expect(turnsOf(h, threadId)).toHaveLength(before);
 });
 
 test('changed instructions wake the agent once to review its routines', async () => {

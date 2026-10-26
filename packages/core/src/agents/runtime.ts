@@ -34,7 +34,7 @@ export function isAgentHeld(error: unknown): boolean {
   return error instanceof RpcFailure && (error.data as { reason?: unknown } | undefined)?.reason === AGENT_HELD;
 }
 
-/** A fact for the agent's next `event` turn, gathered with the others that arrive meanwhile. */
+/** A fact for the agent's next event wake, or its next routine when event wakes are off. */
 export interface AgentFact {
   /** Makes it land once: `turn:<id>`, `question:<id>`. */
   key: string;
@@ -55,7 +55,7 @@ const BUDGET_NOTED = 'agents:budget-noted:';
 const HOUR = 3_600_000;
 /** Facts that arrive within this delay join one turn, so a burst wakes the agent once. */
 export const NOTICE_BATCH_MS = 30_000;
-/** Facts one agent receives in a rolling hour; past it, the rest are dropped with a line in its thread. */
+/** Facts for automatic event wakes in a rolling hour; past it, the rest are dropped with a line in its thread. */
 export const NOTICES_PER_HOUR = 60;
 /** An event turn's prompt stops growing here; older facts give way to newer ones. */
 export const EVENT_PROMPT_MAX = 16_000;
@@ -258,7 +258,7 @@ export class AgentRuntime {
   }
 
   /**
-   * A fact for the agent's next event turn. It joins the facts already
+   * A fact for the agent's next event wake, or routine when event wakes are off. It joins the facts already
    * waiting, and the turn starts once the thread is free and the oldest is
    * `delay` old. False when it was dropped (over the hourly cap) or is already there.
    */
@@ -267,18 +267,19 @@ export class AgentRuntime {
     const now = Date.now();
     const pending = this.held(agentId);
     if (pending.facts.some(f => f.key === fact.key)) return false;
+    const eventWakes = this.store.resident.config(agentId).eventWakes !== false;
     const sent = this.sent.get(agentId) ?? { at: [], told: [] };
     sent.at = sent.at.filter(at => at > now - HOUR);
     sent.told = sent.told.filter(at => at > now - HOUR);
     this.sent.set(agentId, sent);
-    if (sent.at.length >= NOTICES_PER_HOUR) {
+    if (eventWakes && sent.at.length >= NOTICES_PER_HOUR) {
       this.core.log('warn', `agent ${agentId}: more than ${NOTICES_PER_HOUR} events this hour; dropped ${fact.key}`);
       this.dropped(agentId, sent, `Event dropped: more than ${NOTICES_PER_HOUR} arrived this hour. ${about(fact.text)}`);
       return false;
     }
     sent.at.push(now);
     let facts = [...pending.facts, { key: fact.key, text: fact.text, at: now, notBefore: now + (fact.delay ?? NOTICE_BATCH_MS), ...(fact.threadIds ? { threadIds: [...fact.threadIds] } : {}) }];
-    while (facts.length > 1 && this.eventPrompt(facts).length > EVENT_PROMPT_MAX) {
+    while (eventWakes && facts.length > 1 && this.eventPrompt(facts).length > EVENT_PROMPT_MAX) {
       this.dropped(agentId, sent, `Event dropped to keep the next wake under ${EVENT_PROMPT_MAX} characters. ${about(facts[0]!.text)}`);
       facts = facts.slice(1);
     }
@@ -344,7 +345,29 @@ export class AgentRuntime {
   }
 
   private begin(thread: ThreadSummary, wake: AgentWake): Turn {
-    return this.core.threads.startTurn(thread.id, wake.prompt, [], undefined, wake.kind, undefined, wake.requestId, wake.label);
+    // A routine retried after restart already owns its original prompt and facts.
+    const prior = wake.kind === 'routine' && wake.requestId ? this.core.journal.turnRequest(thread.id, wake.requestId) : null;
+    if (prior) return this.core.journal.getTurn(prior.turn_id)!;
+    const agent = this.store.agentOfThread(thread.id);
+    const pending = agent && wake.kind === 'routine' && this.store.resident.config(agent.id).eventWakes === false ? this.held(agent.id) : null;
+    if (!pending?.facts.length) return this.core.threads.startTurn(thread.id, wake.prompt, [], undefined, wake.kind, undefined, wake.requestId, wake.label);
+    const facts = pending?.facts.filter(f => this.factThreads(f).every(id => this.store.projects.mayHear(agent!, id))) ?? [];
+    const prompt = facts.length ? `${wake.prompt}\n\n${this.eventPrompt(facts)}` : wake.prompt;
+    const keys = new Set(pending.facts.map(f => f.key));
+    // Acceptance journals the facts with the routine and consumes the durable queue
+    // in the same transaction. Failed admission leaves the queue intact.
+    return this.core.threads.startTurn(thread.id, prompt, [], undefined, wake.kind, undefined, wake.requestId, wake.label, [], undefined, null, () => {
+      const held = this.held(agent!.id);
+      const next = { ...held, facts: held.facts.filter(f => !keys.has(f.key)) };
+      const empty = next.facts.length === 0 && next.events.length === 0;
+      if (empty) this.core.journal.deleteSetting(`${PENDING}${agent!.id}`);
+      else this.core.journal.setSetting(`${PENDING}${agent!.id}`, next);
+      return () => {
+        if (empty) this.pending.delete(agent!.id);
+        else this.pending.set(agent!.id, next);
+        this.store.changed();
+      };
+    });
   }
 
   /** What the agent's thread spent today, in API-equivalent dollars, through the partial index `turns_by_thread_queue`. */
@@ -399,7 +422,7 @@ export class AgentRuntime {
         this.save(agentId, { ...this.held(agentId), events: this.held(agentId).events.filter(e => e !== event && e.key !== event.key) });
         continue;
       }
-      if (pending.facts.length === 0 || Math.min(...pending.facts.map(f => f.notBefore)) > now) continue;
+      if (this.store.resident.config(agentId).eventWakes === false || pending.facts.length === 0 || Math.min(...pending.facts.map(f => f.notBefore)) > now) continue;
       // What the agent may hear is read again now: a project taken back since a fact arrived takes the fact with it.
       const facts = pending.facts.filter(fact => this.factThreads(fact).every(id => this.store.projects.mayHear(agent, id)));
       if (facts.length < pending.facts.length) {

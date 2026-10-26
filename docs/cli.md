@@ -738,11 +738,18 @@ MCP tools `boite_settings` and `boite_settings_request` do the same.
 `settings bot [key]` reads a bot's settings a card may change: `name`,
 `domain` (its role), `instructions`, `avatar`, `status` (`active`, `paused`,
 `archived`), `projects` (those entrusted to it), `model`, `effort`,
-`autoMemory` (the memory pass), `subagents` and `dailyBudget` (dollars a day,
+`autoMemory` (the memory pass), `eventWakes` (automatic project and desk wakes),
+`subagents` and `dailyBudget` (dollars a day,
 or `null` for none). It prints the bot's name, each value and, for status,
 projects, models and efforts, the choices; the listing cuts long instructions
 to their start, one key or `--json` prints them whole. `--bot <name or id>`
 names the bot; in a bot's own conversation it defaults to that bot.
+`eventWakes` defaults to `true`. Setting it to `false` keeps the bot active for
+user messages and routines while project and desk facts wait durably for the
+next admitted routine. Permission checks run again before delivery. Facts are
+journaled with that routine once, including after a restart; failed admission
+keeps them queued. Creation and instruction-change wakes keep their behavior.
+
 `settings bot request <key> <value> --why <text>` draws the card. `name`,
 `domain`, `instructions`, `avatar` and `status` take the words as typed
 (`name Gargouille (Sécurité)`), and `instructions --instructions-file <path>`

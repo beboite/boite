@@ -101,8 +101,8 @@ export class FakeAgents {
   private runtime(id: string): AgentRuntimeConfig {
     const agent = this.profile(id), saved = this.configs.get(id);
     // As on the core, the profile owns the default route: a profile save is what the runtime reads next.
-    if (saved) return structuredClone({ ...saved, defaultRoute: agent.selection });
-    return structuredClone({ defaultRoute: agent.selection, allowedRoutes: [{ ...agent.selection, model: agent.selection.model ?? 'default', id: 'default', name: 'Default' }], subagents: { enabled: true, paused: false, profiles: [], anyModel: true }, autoMemory: true, dailyBudgetUsd: null });
+    if (saved) return structuredClone({ ...saved, eventWakes: saved.eventWakes !== false, defaultRoute: agent.selection });
+    return structuredClone({ defaultRoute: agent.selection, allowedRoutes: [{ ...agent.selection, model: agent.selection.model ?? 'default', id: 'default', name: 'Default' }], subagents: { enabled: true, paused: false, profiles: [], anyModel: true }, autoMemory: true, eventWakes: true, dailyBudgetUsd: null });
   }
   private threadOf(agentId: string): string | null { return [...this.sessions.values()].find(s => s.agentId === agentId)?.threadId ?? null; }
 
@@ -336,10 +336,11 @@ export class FakeAgents {
     for (const route of [...p.config.allowedRoutes, ...p.config.subagents.profiles]) { const grant = this.grants.find(g => g.accountId === route.accountId); if (grant?.agentIds && !grant.agentIds.includes(agent.id)) this.refuse('account is not granted to this agent'); }
     const invalid = (message: string): never => { throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message }); };
     for (const route of p.config.allowedRoutes) if (typeof route.name !== 'string' || !route.name.trim() || route.name.length > 100) invalid('route.name: expected 1 to 100 characters');
+    if (p.config.eventWakes !== undefined && typeof p.config.eventWakes !== 'boolean') invalid('eventWakes: expected true or false');
     const budget = p.config.dailyBudgetUsd;
     if (budget !== undefined && budget !== null && (typeof budget !== 'number' || !Number.isFinite(budget) || budget <= 0)) invalid('dailyBudgetUsd: expected a positive number of dollars, or null for no cap');
     const saved = this.saveProfile({ id: agent.id, expectedRevision: p.expectedRevision, value: { ...agent, selection: p.config.defaultRoute } }, false);
-    this.configs.set(agent.id, structuredClone({ ...p.config, allowedRoutes: p.config.allowedRoutes.map(route => ({ ...route, name: route.name.trim() })) }));
+    this.configs.set(agent.id, structuredClone({ ...p.config, eventWakes: p.config.eventWakes ?? previous.eventWakes ?? true, allowedRoutes: p.config.allowedRoutes.map(route => ({ ...route, name: route.name.trim() })) }));
     return saved;
   }
   private setAccounts(p: RpcParams<'agents.accounts.set'>): RpcResult<'agents.accounts.set'> {
