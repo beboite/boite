@@ -728,7 +728,7 @@
   const atRest = $derived(branchable && !store.busy && (store.composerStates[threadId]?.queued.length ?? 0) === 0 && !store.composerStates[threadId]?.sending);
 
   async function editMessage(message: Message): Promise<void> {
-    if (await editWhole(store, threadId, message)) focusComposer();
+    if (await editWhole(store, threadId, message)) focusComposer({ typing: true });
   }
 
   /** The last turn again from its own prompt, on screen before the core rewinds (`retryTurn`). */

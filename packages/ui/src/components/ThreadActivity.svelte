@@ -353,7 +353,7 @@
           <div class="blocker" data-testid="activity-goal-blocked">
             <span class="waiting-dot" aria-hidden="true"></span>
             <p><span class="ask">{strings.activity.blocked}</span> <span class="hint">{strings.activity.blockedHint}</span></p>
-            <button type="button" class="small reply" onclick={() => focusComposer()}><Reply size={14} />{strings.activity.reply}</button>
+            <button type="button" class="small reply" onclick={() => focusComposer({ typing: true })}><Reply size={14} />{strings.activity.reply}</button>
           </div>
         {:else if entry.error}<p class="error">{entry.error}</p>{/if}
         </div>

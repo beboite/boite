@@ -3,7 +3,7 @@
   import type { DiagnosticsIssue } from '@boite/contracts';
   import { Closing } from '../lib/closing.svelte';
   import { mobileOverlay } from '../lib/mobile-history';
-  import { focusedElement, restoreFocus } from '../lib/focus';
+  import { focusInitial, focusedElement, restoreFocus } from '../lib/focus';
   import { openExternal } from '../lib/links';
   import { errorText } from '../lib/errors';
   import { fill, strings } from '../lib/strings';
@@ -37,7 +37,7 @@
 
   overlay.show();
   $effect(() => mobileOverlay(close));
-  $effect(() => { void tick().then(() => card?.querySelector<HTMLElement>('input')?.focus({ preventScroll: true })); });
+  $effect(() => { void tick().then(() => focusInitial(card?.querySelector<HTMLElement>('input'), card)); });
 
   function close() {
     overlay.hide();

@@ -33,6 +33,14 @@ keyboard connected to such a device, so that keyboard's Enter writes a new
 line too. A touchscreen laptop whose primary pointer is a mouse keeps Enter's
 send.
 
+Opening a conversation or draft, browsing projects and models, and dismissing
+an overlay keep the touch keyboard closed. Automatic focus returns to the
+composer frame or the dialog instead of a text field. This follows
+`pointer: coarse`, including landscape phones and tablets. Tapping a field,
+choosing Answer in writing, editing a message, or opening search explicitly
+still starts typing. A terminal opens on its output and waits for a tap before
+taking the keyboard. Desktop autofocus stays available.
+
 At phone widths, Settings opens a list in two groups. This phone:
 Notifications, Appearance, Privacy, the two analytics switches, and
 Experiments, which follow the computer's desktop app until the phone flips one

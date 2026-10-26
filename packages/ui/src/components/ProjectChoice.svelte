@@ -3,7 +3,7 @@
   import { Check, FolderOpen, Search } from '@lucide/svelte';
   import type { Project, ProjectId } from '@boite/contracts';
   import { Closing } from '../lib/closing.svelte';
-  import { focusComposer } from '../lib/focus';
+  import { focusComposer, focusInitial } from '../lib/focus';
   import { mobileOverlay } from '../lib/mobile-history';
   import { homePath, projectName } from '../lib/format';
   import { scoreFields, type SearchField } from '../lib/palette';
@@ -161,7 +161,8 @@
   $effect(() => {
     if (!popover.open) return;
     void tick().then(() => {
-      if (byKeyboard || !window.matchMedia('(max-width: 720px)').matches) input?.focus({ preventScroll: true });
+      if (byKeyboard) input?.focus({ preventScroll: true });
+      else focusInitial(input, input?.closest<HTMLElement>('[role=dialog]'));
       const at = order.findIndex((id) => shown.some((group) => group.rows.some((row) => row.id === id && row.active)));
       if (at >= 0) move(at);
     });

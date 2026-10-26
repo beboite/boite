@@ -142,7 +142,7 @@ export function writeAnswer(store: Store, questionId: string): void {
   delete held.ignored[questionId];
   delete held.waiting[questionId];
   held.chosen = questionId;
-  focusComposer();
+  focusComposer({ typing: true });
 }
 
 /** The composer's way out: the open thread's questions wait, and it sends ordinary messages. */
