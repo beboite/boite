@@ -361,7 +361,10 @@ test('a watch reads first without waking, wakes once per change with links, and 
   // A check still runs: the idle row keeps counting from the user's request, like a monitor.
   const summary = () => harness!.core.threads.list({}).find(thread => thread.id === threadId)!;
   expect(summary().requestSince).toBeNumber();
-  expect(github.calls).toEqual(['fingerprint', 'detail', 'rules/branches/main?per_page=100', 'branches/main', 'issues/7/comments?per_page=100&page=1', 'pulls/7/reviews?per_page=100&page=1', 'pulls/7/comments?per_page=100&page=1']);
+  // The pass the watch arms at 0 ms may land before the answer reaches the
+  // client; nothing moved, so it reads only the fingerprint.
+  expect(github.calls.slice(0, 7)).toEqual(['fingerprint', 'detail', 'rules/branches/main?per_page=100', 'branches/main', 'issues/7/comments?per_page=100&page=1', 'pulls/7/reviews?per_page=100&page=1', 'pulls/7/comments?per_page=100&page=1']);
+  expect(github.calls.slice(7).every(call => call === 'fingerprint')).toBe(true);
 
   // Nothing moved: one fingerprint per pass, no detail, no wake.
   github.calls = [];
