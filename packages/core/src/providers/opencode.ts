@@ -18,6 +18,28 @@ export function isOpenCode(providerId: ProviderId): boolean {
 }
 
 /**
+ * A process environment of `providerId` with OpenCode 2's own background
+ * compaction switched on in its inline configuration (`OPENCODE_CONFIG_CONTENT`)
+ * when the `backgroundCompaction` experiment is (`enabled`). Everything else
+ * the configuration carries is kept; one that is not a JSON object is left
+ * unchanged, since OpenCode refuses it either way. Other providers pass through.
+ */
+export function openCodeBackgroundCompaction(providerId: ProviderId, enabled: boolean, env: Record<string, string>): Record<string, string> {
+  if (!enabled || providerId !== OPENCODE_V2) return env;
+  let config: unknown;
+  try {
+    config = JSON.parse(env['OPENCODE_CONFIG_CONTENT'] ?? '{}');
+  } catch {
+    return env;
+  }
+  if (config === null || typeof config !== 'object' || Array.isArray(config)) return env;
+  const base = config as Record<string, unknown>;
+  const declared = base['experimental'];
+  const experimental = declared !== null && typeof declared === 'object' && !Array.isArray(declared) ? declared as Record<string, unknown> : {};
+  return { ...env, OPENCODE_CONFIG_CONTENT: JSON.stringify({ ...base, experimental: { ...experimental, background_compaction: true } }) };
+}
+
+/**
  * The API key OpenCode 2 stored for one integration (`opencode-go`), null when
  * there is none. `dataHome` is the account's `XDG_DATA_HOME`. The value column
  * is JSON, `{ "type": "key", "key": "..." }` for a key sign-in.

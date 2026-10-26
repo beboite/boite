@@ -310,6 +310,12 @@ for (const providerId of ['opencode', 'opencode-v2'] as const) test(`${providerI
   });
   // The account's whole environment carries it, over the descriptor's own inline configuration.
   expect(harness.core.accounts.accountEnv(harness.core.accounts.require(account.id), provider)['OPENCODE_CONFIG_CONTENT']).toBe(env['OPENCODE_CONFIG_CONTENT']);
+  // The background compaction experiment turns on OpenCode 2's own, beside the gateway; version 1 has none.
+  await owner.call('settings.set', { backgroundCompaction: true });
+  expect(JSON.parse(harness.core.accounts.accountEnv(harness.core.accounts.require(account.id), provider)['OPENCODE_CONFIG_CONTENT']!)).toEqual(providerId === 'opencode'
+    ? JSON.parse(env['OPENCODE_CONFIG_CONTENT']!)
+    : { ...JSON.parse(env['OPENCODE_CONFIG_CONTENT']!), experimental: { background_compaction: true } });
+  await owner.call('settings.set', { backgroundCompaction: false });
 
   // Off, the descriptor's configuration is all that is left, and the account answers for itself again.
   await owner.call('settings.set', { subscriptionProxy: { ...config(url), enabled: false } });

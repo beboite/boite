@@ -99,7 +99,7 @@ const DIRECTIVE =
 export function parsePrompt(prompt: string): Segment[] {
   const segments: Segment[] = [];
   // Historical directives are data: a stopped sleep or tool must not run again.
-  const history = [...prompt.matchAll(/<(conversation-history|interrupted-user-messages)>\n[\s\S]*?\n<\/\1>/g)];
+  const history = [...prompt.matchAll(/<(conversation-history|interrupted-user-messages|recent-history)>\n[\s\S]*?\n<\/\1>/g)];
   let last = 0;
   DIRECTIVE.lastIndex = 0;
   for (let match = DIRECTIVE.exec(prompt); match !== null; match = DIRECTIVE.exec(prompt)) {
@@ -235,7 +235,8 @@ export const echoDriver: Driver = {
 };
 
 async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
-  const sessionId = ctx.sessionId ?? `echo-${ctx.thread.id}`;
+  // Resuming at an entry forks, as Claude does: the copy is named after the cut.
+  const sessionId = ctx.sessionId !== null && ctx.resumeAt ? `${ctx.sessionId}~${ctx.resumeAt}` : ctx.sessionId ?? `echo-${ctx.thread.id}`;
   const messageId: MessageId = ctx.emit.startMessage('assistant');
   let nextIndex = 0;
   let textIndex: number | null = null;

@@ -205,6 +205,7 @@
                   .replace('{pre}', formatTokens(part.preTokens))
                   .replace('{post}', formatTokens(part.postTokens))}
             {#if part.trigger === 'manual'}({strings.chat.compactionManual}){/if}
+            {#if part.background}({strings.chat.compactionBackground}){/if}
           </span>
           <span class="rule"></span>
         </div>

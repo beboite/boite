@@ -9,6 +9,7 @@ import { runAcpLogin, type AcpLoginRun } from './drivers/acp/login.ts';
 import { antigravityCertificates } from './drivers/antigravity.ts';
 import { loginFolders, publishLoginCatalog } from './account-login.ts';
 import { probeThreadId } from './providers/probe.ts';
+import { openCodeBackgroundCompaction } from './providers/opencode.ts';
 import { activeSubscriptionProxy, subscriptionProxyEnv } from './subscription-proxy.ts';
 import { agentEnv, hostAgentsEnabled, profileFor, resolveExecutable, resolveLaunch } from './providers/resolve.ts';
 import { sqliteHasRows } from './providers/sqlite-login.ts';
@@ -336,7 +337,8 @@ export class AccountStore {
       env[key] = isolationDir === null ? value : value.split('{isolationDir}').join(isolationDir);
     }
     if (provider.quirks?.includes('antigravity') === true) Object.assign(env, antigravityCertificates(currentOs(), process.env, existsSync));
-    return { ...env, ...subscriptionProxyEnv(this.core, provider) };
+    // OpenCode 2 compacts in the background by itself once asked to; a process started afterwards takes the change.
+    return openCodeBackgroundCompaction(provider.id, this.core.settings.get().backgroundCompaction === true, { ...env, ...subscriptionProxyEnv(this.core, provider) });
   }
 
   /**

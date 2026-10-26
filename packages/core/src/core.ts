@@ -525,6 +525,7 @@ export class Core {
     this.contacts.beginClose();
     this.activity.close();
     this.threads.autoCompact.close();
+    this.threads.backgroundCompact.close();
     this.threads.cacheKeepalive.close();
     this.threads.limitResumes.close();
     this.threads.autoContinue.close();
@@ -557,6 +558,7 @@ export class Core {
     await this.pullRequestWatches.close();
     this.threads.titles.close();
     this.threads.autoCompact.close();
+    this.threads.backgroundCompact.close();
     this.threads.cacheKeepalive.close();
     this.threads.limitResumes.close();
     this.threads.autoContinue.close();
