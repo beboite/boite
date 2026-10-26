@@ -366,3 +366,37 @@ test('import refuses only foreign cwd candidates before creation, but accepts an
   expect(await client.call('imports.list', { projectId })).toHaveLength(1);
   expect((await client.call('imports.run', params)).cwd).toBe(harness.core.projects.require(projectId).path);
 });
+
+for (const canonicalFallback of [false, true]) {
+  test(`an alias with no initial cwd stays importable ${canonicalFallback ? 'before its canonical fallback' : 'without a fallback candidate'}`, async () => {
+    const client = await harness.connect();
+    const canonical = join(harness.dataDir, 'canonical');
+    const alias = join(harness.dataDir, 'alias');
+    mkdirSync(canonical);
+    symlinkSync(canonical, alias, 'junction');
+    const project = await client.call('projects.add', { path: alias });
+    const account = await client.call('accounts.add', { providerId: 'claude', label: 'initial cwd' });
+    const folder = join(account.isolationDir!, 'projects', claudeProjectFolder(alias));
+    mkdirSync(folder, { recursive: true });
+    const file = join(folder, `${FIXTURE_SESSION_ID}.jsonl`);
+    // Only the first prompt lacks cwd; a later prompt records another directory.
+    const body = claudeSessionFixture(join(harness.dataDir, 'foreign'), { aiTitle: 'Alias without initial cwd' })
+      .trim().split('\n').map(line => {
+        const record = JSON.parse(line);
+        if (record.uuid === 'u1') delete record.cwd;
+        return JSON.stringify(record);
+      }).join('\n') + '\n';
+    writeFileSync(file, body);
+    if (canonicalFallback) {
+      const fallback = join(account.isolationDir!, 'projects', claudeProjectFolder(canonical));
+      mkdirSync(fallback, { recursive: true });
+      writeFileSync(join(fallback, `${FIXTURE_SESSION_ID}.jsonl`), claudeSessionFixture(canonical, { aiTitle: 'Canonical fallback' }));
+    }
+    const rows = await client.call('imports.list', { projectId: project.id });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ file, title: 'Alias without initial cwd', threadId: null });
+    const imported = await client.call('imports.run', { projectId: project.id, accountId: account.id, sessionId: FIXTURE_SESSION_ID });
+    expect(imported).toMatchObject({ title: 'Alias without initial cwd', cwd: alias });
+    expect((await client.call('threads.get', { threadId: imported.id })).turns).toHaveLength(2);
+  });
+}
