@@ -87,7 +87,7 @@ export class ChildWorktrees {
         return this.mark(threadId, { ...record, state: 'active' });
       }
       if (record.state === 'pending' && record.base !== null) {
-        await this.core.worktrees.resumePreparation(threadId, project, record.branch, record.path, assertActive);
+        await this.core.worktrees.resumePreparation(threadId, project, record.branch, record.path, record.base, assertActive);
         return this.mark(threadId, { ...record, state: 'active' });
       }
       const base = await this.core.worktrees.head(threadId, parent.projectId === thread.projectId ? parent.cwd : project.path);
