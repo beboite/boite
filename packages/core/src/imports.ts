@@ -9,13 +9,14 @@
  * the session id so the next turn resumes where the CLI left off.
  */
 
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Account, AccountId, ImportableSession, Project, ProjectId, ThreadSummary } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { notFound, refused } from './errors.ts';
 import { claudeProjectFolder, listTranscript, readTranscript } from './imports/claude.ts';
 import type { TranscriptListing } from './imports/claude.ts';
+import { sessionThreads } from './journal/thread-rows.ts';
 import { currentOs } from './paths.ts';
 import { titleFromPrompt } from './titles.ts';
 
@@ -28,6 +29,11 @@ function sameFolder(a: string, b: string): boolean {
     return currentOs() === 'windows' ? slashed.toLowerCase() : slashed;
   };
   return norm(a) === norm(b);
+}
+
+/** Resolve aliases when present, retaining a usable input when the directory is gone. */
+function resolved(path: string): string {
+  try { return realpathSync(path); } catch { return path; }
 }
 
 export class ImportStore {
@@ -62,8 +68,9 @@ export class ImportStore {
     return out;
   }
 
-  private sessionFile(dir: string, project: Project, sessionId: string): string {
-    return join(dir, 'projects', claudeProjectFolder(project.path), `${sessionId}.jsonl`);
+  private folders(dir: string, project: Project): string[] {
+    // Match agentShape: prefer the entered path before its canonical variant.
+    return [...new Set([project.path, resolved(project.path)])].map(path => join(dir, 'projects', claudeProjectFolder(path)));
   }
 
   list(projectId: ProjectId): Promise<ImportableSession[]> {
@@ -77,48 +84,60 @@ export class ImportStore {
   private async scan(projectId: ProjectId): Promise<ImportableSession[]> {
     const project = this.core.projects.require(projectId);
     const known = new Map<string, string>();
-    for (const thread of this.core.journal.listThreads()) {
-      if (thread.sessionId !== null) known.set(thread.sessionId, thread.id);
+    for (const thread of sessionThreads(this.core.journal.db)) {
+      known.set(thread.sessionId, thread.id);
     }
-    const out: ImportableSession[] = [];
+    const out = new Map<string, ImportableSession>();
+    const cwd = resolved(project.path);
     for (const { account, dir } of this.roots()) {
-      const folder = join(dir, 'projects', claudeProjectFolder(project.path));
-      if (!existsSync(folder)) {
-        this.listed.delete(folder);
-        continue;
-      }
-      const before = this.listed.get(folder);
-      const now = new Map<string, { size: number; mtimeMs: number; listing: TranscriptListing | null }>();
-      for (const name of readdirSync(folder)) {
-        if (!name.endsWith('.jsonl')) continue;
-        const sessionId = name.slice(0, -'.jsonl'.length);
-        const file = join(folder, name);
-        const stat = statSync(file);
-        if (!stat.isFile()) continue;
-        const kept = before?.get(name);
-        const head =
-          kept !== undefined && kept.size === stat.size && kept.mtimeMs === stat.mtimeMs ? kept.listing : await listTranscript(file);
-        now.set(name, { size: stat.size, mtimeMs: stat.mtimeMs, listing: head });
-        if (head === null) continue;
-        if (head.cwd !== null && !sameFolder(head.cwd, project.path)) {
-          this.core.log('warn', `import: ${file} was recorded in ${head.cwd}, not ${project.path}; skipped`);
+      const seen = new Set<string>();
+      for (const folder of this.folders(dir, project)) {
+        if (!existsSync(folder)) {
+          this.listed.delete(folder);
           continue;
         }
-        out.push({
-          providerId: account.providerId,
-          accountId: account.id,
-          sessionId,
-          file,
-          title: head.agentTitle ?? titleFromPrompt(head.prompt),
-          startedAt: head.promptAt,
-          updatedAt: stat.mtimeMs,
-          bytes: stat.size,
-          threadId: known.get(sessionId) ?? null,
-        });
+        const before = this.listed.get(folder);
+        const now = new Map<string, { size: number; mtimeMs: number; listing: TranscriptListing | null }>();
+        for (const name of readdirSync(folder)) {
+          if (!name.endsWith('.jsonl')) continue;
+          const sessionId = name.slice(0, -'.jsonl'.length);
+          if (seen.has(sessionId)) continue;
+          const file = join(folder, name);
+          const stat = statSync(file);
+          if (!stat.isFile()) continue;
+          const kept = before?.get(name);
+          const head =
+            kept !== undefined && kept.size === stat.size && kept.mtimeMs === stat.mtimeMs ? kept.listing : await listTranscript(file);
+          now.set(name, { size: stat.size, mtimeMs: stat.mtimeMs, listing: head });
+          if (head === null) continue;
+          if (head.cwd !== null && !sameFolder(resolved(head.cwd), cwd)) {
+            this.core.log('warn', `import: ${file} was recorded in ${head.cwd}, not ${project.path}; skipped`);
+            continue;
+          }
+          seen.add(sessionId);
+          const key = resolved(file);
+          const existing = out.get(key);
+          if (existing !== undefined) {
+            if (!existing.accountIds!.includes(account.id)) existing.accountIds!.push(account.id);
+            continue;
+          }
+          out.set(key, {
+            providerId: account.providerId,
+            accountId: account.id,
+            accountIds: [account.id],
+            sessionId,
+            file,
+            title: head.agentTitle ?? titleFromPrompt(head.prompt),
+            startedAt: head.promptAt,
+            updatedAt: stat.mtimeMs,
+            bytes: stat.size,
+            threadId: known.get(sessionId) ?? null,
+          });
+        }
+        this.listed.set(folder, now);
       }
-      this.listed.set(folder, now);
     }
-    return out.sort((a, b) => b.updatedAt - a.updatedAt);
+    return [...out.values()].sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
   async run(params: { projectId: ProjectId; accountId: AccountId; sessionId: string }): Promise<ThreadSummary> {
@@ -138,13 +157,30 @@ export class ImportStore {
     this.checkFree(params.sessionId);
     const dir = account.isolationDir ?? this.core.accounts.defaultLocation(provider);
     if (dir === null) throw refused('this account has no transcript directory', { accountId: account.id });
-    const file = this.sessionFile(dir, project, params.sessionId);
-    if (!existsSync(file)) throw notFound(`no transcript at ${file}`, { file, sessionId: params.sessionId });
+    const paths = this.folders(dir, project).map(folder => join(folder, `${params.sessionId}.jsonl`));
+    const files = paths.filter(path => existsSync(path));
+    if (files.length === 0) throw notFound(`no transcript at ${paths[0]}`, { file: paths[0], sessionId: params.sessionId });
 
     this.running.add(params.sessionId);
     try {
-      const transcript = await readTranscript(file);
-      if (transcript.turns.length === 0) throw refused('this transcript has no prompt to import', { file });
+      let file = files[0]!;
+      let transcript: Awaited<ReturnType<typeof readTranscript>> | null = null;
+      let foreign: { file: string; cwd: string } | undefined;
+      for (const candidate of files) {
+        const read = await readTranscript(candidate);
+        if (read.cwd !== null && !sameFolder(resolved(read.cwd), resolved(project.path))) {
+          foreign = { file: candidate, cwd: read.cwd };
+          continue;
+        }
+        if (read.turns.length === 0) continue;
+        file = candidate;
+        transcript = read;
+        break;
+      }
+      if (transcript === null) {
+        if (foreign) throw refused(`transcript cwd: expected ${project.path}`, { ...foreign, field: 'cwd', expected: project.path });
+        throw refused('this transcript has no prompt to import', { file });
+      }
       const first = transcript.turns[0]!;
       const summary = this.core.threads.createImported(
         {
@@ -175,7 +211,7 @@ export class ImportStore {
 
   /** Refuses a session already imported, one being imported right now, and one whose transcript is being removed. */
   private checkFree(sessionId: string): void {
-    const taken = this.core.journal.listThreads().find((thread) => thread.sessionId === sessionId);
+    const taken = sessionThreads(this.core.journal.db).find((thread) => thread.sessionId === sessionId);
     if (taken !== undefined) {
       throw refused('this session is already a thread', { sessionId, threadId: taken.id });
     }

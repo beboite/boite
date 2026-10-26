@@ -1,4 +1,4 @@
-import { mobileAction } from './lib/mobile.ts';
+import { mobileAction, screensSettled } from './lib/mobile.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
@@ -161,7 +161,8 @@ test('phone reorders a project from its group on a short screen and manages no p
   // Projects are managed on the desktop: the phone's header holds the picker, + and the menu.
   expect(await page.evaluate(`document.querySelector('${id('mobile-project-actions')}') === null`)).toBe(true);
   await page.click(`${id('mobile-project-group')} ${id('mobile-project-order')}`);
-  await page.waitFor(`document.querySelector('${id('mobile-project-order-menu')} [data-value=down]')`);
+  // The sheet rises from the bottom edge: measured where it stops.
+  await page.waitFor(`document.querySelector('${id('mobile-project-order-menu')} [data-value=down]') && ${screensSettled}`);
   expect(await page.evaluate(`(() => { const r = document.querySelector('${id('mobile-project-order-menu')}').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })()`)).toBe(true);
   await capture('project-management-short-phone.png');
   await page.click(`${id('mobile-project-order-menu')} [data-value=down]`);

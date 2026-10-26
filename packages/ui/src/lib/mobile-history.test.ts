@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { mobileOverlay } from './mobile-history';
+import { browserAnimatedBack, mobileOverlay } from './mobile-history';
 
 /** jsdom lands a `history.back()` in a later task, as a browser does. */
 const landed = () => new Promise<void>((resolve) => window.addEventListener('popstate', () => setTimeout(resolve, 0), { once: true }));
@@ -62,6 +62,59 @@ describe('mobileOverlay', () => {
     expect(closed).toEqual(['top']);
     // Landed on the buried entry, which is dead, so it went one further.
     expect(history.state?.boiteDepth ?? 0).toBe(before - 2);
+  });
+
+  test('a Back the browser animated reaches what it closes as one, until the next task', async () => {
+    // Safari 18 and Chrome 118 say so on the event.
+    Object.defineProperty(PopStateEvent.prototype, 'hasUAVisualTransition', { configurable: true, get: () => true });
+    try {
+      const seen: boolean[] = [];
+      const close: () => void = mobileOverlay(() => { seen.push(browserAnimatedBack()); close(); });
+      const back = landed();
+      history.back();
+      await back;
+      expect(seen).toEqual([true]);
+      expect(browserAnimatedBack()).toBe(false);
+    } finally {
+      delete (PopStateEvent.prototype as { hasUAVisualTransition?: boolean }).hasUAVisualTransition;
+    }
+  });
+
+  test('without the browser saying so, a Back right after a swipe from the edge counts, and the app\'s own never does', async () => {
+    const touch = (type: string, x?: number) => {
+      const event = new Event(type);
+      Object.defineProperty(event, 'touches', { value: x === undefined ? [] : [{ clientX: x }] });
+      window.dispatchEvent(event);
+    };
+    const seen: boolean[] = [];
+    const close: () => void = mobileOverlay(() => { seen.push(browserAnimatedBack()); close(); });
+    touch('touchstart', 4);
+    touch('touchend');
+    let back = landed();
+    history.back();
+    await back;
+    // A tap in the middle of the screen, then Back: the browser drew nothing.
+    const again: () => void = mobileOverlay(() => { seen.push(browserAnimatedBack()); again(); });
+    touch('touchstart', 200);
+    touch('touchend');
+    back = landed();
+    history.back();
+    await back;
+    expect(seen).toEqual([true, false]);
+    // A close button at the edge pops the app's entry itself.
+    const sheet = mobileOverlay(() => seen.push(true));
+    touch('touchstart', 4);
+    touch('touchend');
+    const during: boolean[] = [];
+    const record = () => during.push(browserAnimatedBack());
+    window.addEventListener('popstate', record);
+    back = landed();
+    sheet();
+    await back;
+    window.removeEventListener('popstate', record);
+    expect(during).toEqual([false]);
+    expect(seen).toEqual([true, false]);
+    touch('touchstart', 200);
   });
 
   test('a desktop width pushes nothing', () => {

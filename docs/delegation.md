@@ -123,7 +123,8 @@ One button above the composer shows the number of active subagents and running
 workflows, with elapsed time since the oldest active start. It appears for a
 running workflow even before a child starts. Click it to open the team overview,
 then select an agent or workflow to inspect its progress. The panel keeps
-completed results after the button disappears.
+completed results after the button disappears. The button sits right on the
+composer, below any notice; the task overlay floats above it, never over it.
 
 A parent's row in the sidebar, the Recent list and the phone's list carries a
 chip with the number of its subagents at work, in every state of the parent.

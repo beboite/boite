@@ -104,6 +104,10 @@ table that has none, reading about 400 rows per index; the open itself analyzes
 nothing. It then deletes events older than 30 days in paced batches while
 retaining the latest agents revision, and after each prune it rebuilds the
 statistics that prune made stale, the same way.
+An event-retention error keeps the pending statement and pass state for a
+retry after 30 s. Waiting for the WAL to catch up uses the same delay before
+any statistics or pruning work, without changing the batch size. Stopping
+retention or closing the journal prevents further ticks.
 Project removal explicitly clears thread-keyed tables; foreign keys are disabled.
 A newer journal schema is refused before writing, with the file and both versions.
 
@@ -190,6 +194,9 @@ row. Schema 36 moves the lines of older rows there in paced batches. The same
 background passes cut a thread's trace back to what it keeps once it holds 500
 rows past the 2,000 it keeps, one thread at a time and again daily, and delete
 the lines only the deleted rows named ([trace](trace.md)).
+A daily-prune date ahead of the current clock is removed before a pass resumes
+from its stored cursor. The date stays absent during the incomplete pass;
+completion records the current time and removes the cursor.
 
 `native_agent_messages` names the messages holding an Agent, Task or subagent
 call, or a `nativeAgents` list, so `delegation.get` parses those messages only.
@@ -247,6 +254,13 @@ deletions expire) and 33 by nothing (172 MiB, 0.8 MiB of it untouched for 7
 days, so no sweep of older files was added), read from a read-only copy of its
 journal.
 
+Session imports probe the entered project path before its canonical path and
+retain the entered path as the imported thread's working directory. Shared
+transcript files appear once, with an explicit account choice when several
+accounts can read them. The journal reserves current native session IDs while
+conversations remain recoverable in the trash, including deleted children;
+imports keep their existing global refusal of an already owned session ID.
+
 The journal does not replace a provider's native transcript. A turn resumes the
 selected account's `sessionId`. An account change starts a fresh session seeded
 with bounded journal excerpts. A confirmed missing native session permits one
@@ -269,6 +283,24 @@ Independent conversations start immediately, including on the same account.
 There is no global or per-account interactive turn ceiling. A conversation has
 one in-flight turn and can stay queued while its account is being configured or
 its team is paused. Process resource guards are separate from admission.
+
+Stop is accepted from the start of turn setup, including while entering a
+delegated worktree. A stop received there is retained through setup and settles
+the turn as stopped before its first code checkpoint or native preparation.
+If Stop kills a preparation process and worktree entry rejects, the turn still
+ends stopped. A preparation failure without an accepted Stop remains an error.
+A delegated worktree records its base before mutation and reserves its ref with
+an atomic ownership reflog, as draft preparation does. If Stop preceded that
+transaction, a pending retry reserves the still-absent ref at its saved base,
+not the parent's later HEAD. Read errors and foreign refs are refused.
+Preparation registers the worktree without checkout. Git builds a missing
+index in an exclusively allocated temporary directory; after Git exits, the
+core publishes it synchronously under the ordinary exclusive index lock.
+Stop can therefore kill Git without stranding a lock on the shared index.
+An existing index or foreign lock stays untouched. Recovery accepts only
+the owned ref and registered path and checks out absent indexed files without
+overwriting existing edits, notes or staging.
+The accepted input remains in history, and the next turn starts normally.
 
 After an unplanned restart, an ordinary queued prompt that never started stays
 held with its original turn, input receipt and execution selection. Desktop and

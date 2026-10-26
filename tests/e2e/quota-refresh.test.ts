@@ -61,7 +61,7 @@ test('limits identify the owning machine in the desktop glance and desktop and p
       await page.click('[data-testid="limits-glance-page"]');
     }
     await page.waitFor(`document.querySelector('[data-testid="limits-page"]')`);
-    const heading = width === 1280 ? '[data-testid="limits-page"] h1' : '[data-testid="settings"] > header h1';
+    const heading = width === 1280 ? '[data-testid="limits-page"] h1' : '[data-testid="mobile-settings-header"] h1';
     expect((await page.text(heading)).trim()).toBe('Account limits for Builder');
     expect(await page.evaluate(`document.querySelector('${heading}')?.getClientRects().length > 0`)).toBe(true);
     // A renamed machine remains identifiable even on a narrow phone.

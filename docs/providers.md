@@ -1310,12 +1310,22 @@ are bounded to 16 * 1024 * 1024 UTF-16 code units. A final line without a newlin
 is processed before EOF. Non-JSON or invalid object records produce a fixed
 protocol diagnostic without copying their raw output into diagnostic logs.
 
-Oversized stdout, failed reads/writes, closed pipes or a throwing message handler
+Oversized stdout, failed reads/writes, stdout closure or a throwing message handler
 close the transport and reject all pending requests once. The session marks
 that captured child non-reusable, gives its exit diagnostic a 500 ms grace and
 settles any active notification-driven turn even if the prompt response already
 arrived. User Stop wins over a subsequent fault or exit. Callbacks from a retired
 child cannot mutate a replacement; unrelated sessions continue running.
+
+A clean stdin close makes the captured session non-reusable and refuses new
+writes while already sent requests can still receive stdout responses, including
+the final record at EOF. Their existing cancellation and expiry remain active.
+Drainage ends at stdout EOF/close, an
+explicit failure, a read/write error or the existing 500 ms exit grace, whichever
+comes first. Stdout termination or drain expiry invokes the session fault
+callback; with a live child and stdout that never closes, requests settle after
+500 ms and session
+teardown can take a further 500 ms for its exit diagnostic.
 
 Request cancellation and explicit expiry remove the pending request, so late
 responses cannot update its result. Prompts and reported active model runs have

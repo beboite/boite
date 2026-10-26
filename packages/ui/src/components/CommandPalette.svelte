@@ -147,9 +147,8 @@
   function pick(item: PaletteItem) {
     close();
     if (item.kind === 'thread') {
-      store.showChat();
       if (workspace.machines.length) void workspace.openNotification(item.id.slice('thread:'.length));
-      else void store.open(item.id.slice('thread:'.length));
+      else { store.showChat(); void store.open(item.id.slice('thread:'.length)); }
       return;
     }
     if (item.kind === 'project') {

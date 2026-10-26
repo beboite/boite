@@ -46,7 +46,8 @@
 {/if}
 
 <style>
-  .dock { width: min(calc(100% - 40px), var(--content)); margin: 0 auto 8px; }
+  /* The air above the bar matches the composer's: the band of tasks floats there, clear of the bar. */
+  .dock { width: min(calc(100% - 40px), var(--content)); margin: 0 auto; padding: 8px 0; }
   .activity { max-width: 100%; min-height: 32px; height: auto; gap: 6px; font-size: var(--text-xs); border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
   .counts { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; text-align: left; }
   .activity :global(.elapsed) { flex: none; color: var(--color-muted-foreground); }

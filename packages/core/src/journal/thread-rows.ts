@@ -17,6 +17,11 @@ export function threadsWhere(db: Database, filter: string, ...params: string[]):
   return (db.query(`${VISIBLE_THREADS} ${filter} ORDER BY rowid`).all(...params) as ThreadRow[]).map(toThread);
 }
 
+/** Current native sessions remain reserved while deleted threads are recoverable, children included. */
+export function sessionThreads(db: Database): { id: string; sessionId: string }[] {
+  return db.query('SELECT id, session_id AS sessionId FROM threads WHERE session_id IS NOT NULL').all() as { id: string; sessionId: string }[];
+}
+
 export function writeThread(db: Database, thread: ThreadSummary): void {
   db.query(
     `INSERT OR REPLACE INTO threads

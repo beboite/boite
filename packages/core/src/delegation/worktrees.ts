@@ -52,7 +52,7 @@ export class ChildWorktrees {
    * Before a turn of a child: its worktree exists and it is marked in use.
    * Null when there is nothing to wait for, so other turns start as before.
    */
-  enter(threadId: ThreadId): Promise<void> | null {
+  enter(threadId: ThreadId, assertActive: () => void = () => {}): Promise<void> | null {
     const record = this.get(threadId);
     if (!record) return null;
     const settling = this.settling.get(threadId);
@@ -62,7 +62,7 @@ export class ChildWorktrees {
     }
     return (async () => {
       if (settling) await settling;
-      await this.make(threadId);
+      await this.make(threadId, assertActive);
     })();
   }
 
@@ -72,7 +72,7 @@ export class ChildWorktrees {
     this.changed(threadId);
   }
 
-  private async make(threadId: ThreadId): Promise<void> {
+  private async make(threadId: ThreadId, assertActive: () => void): Promise<void> {
     const record = this.get(threadId);
     if (!record) return;
     const thread = this.core.threads.require(threadId);
@@ -86,11 +86,22 @@ export class ChildWorktrees {
         await this.core.worktrees.ensure(threadId, project, record.branch, record.path);
         return this.mark(threadId, { ...record, state: 'active' });
       }
+      if (record.state === 'pending' && record.base !== null) {
+        await this.core.worktrees.resumePreparation(threadId, project, record.branch, record.path, record.base, assertActive);
+        return this.mark(threadId, { ...record, state: 'active' });
+      }
       const base = this.core.sharedCompute?.journal.worker(threadId)?.input.baseCommit ?? await this.core.worktrees.head(threadId, parent.projectId === thread.projectId ? parent.cwd : project.path);
-      await this.core.worktrees.add(threadId, project, record.branch, record.path, undefined, base);
+      await this.core.worktrees.add(threadId, project, record.branch, record.path, {
+        assertActive,
+        beforeMutation: () => {
+          this.save(threadId, { ...record, base, state: 'pending' });
+          return () => this.save(threadId, record);
+        },
+      }, base);
+      assertActive();
       this.mark(threadId, { branch: record.branch, path: record.path, base, state: 'active' });
     } catch (error) {
-      this.save(threadId, { ...record, error: messageOf(error) });
+      this.save(threadId, { ...(this.get(threadId) ?? record), error: messageOf(error) });
       this.changed(threadId);
       throw refused(`could not make the subagent's worktree ${record.path} on ${record.branch}: ${messageOf(error)}`, { path: record.path, branch: record.branch });
     }

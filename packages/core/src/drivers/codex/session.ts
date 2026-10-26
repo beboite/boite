@@ -445,6 +445,8 @@ export class CodexSession {
   }
 
   private watch(child: SpawnedChild, ctx: SessionContext, rpc: CodexRpc): void {
+    // Refuse warm reuse without interrupting drainage; initialize owns SQLite retries.
+    child.stdin.once('close', () => { if (this.child === child && !this.initializing) this.closing = true; });
     let closed: () => void = () => undefined;
     this.processClosed = new Promise<void>(resolve => { closed = resolve; });
     child.stderr.setEncoding('utf8');

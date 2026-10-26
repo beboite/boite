@@ -41,9 +41,24 @@
   import { needsUser } from '../lib/thread-state';
   import { minuteClock } from '../lib/clock.svelte';
   import { contactsShown } from '../lib/contacts-rail.svelte';
+  import { ScreenSlide } from '../lib/screen-slide.svelte';
 
   let { store, recover = false, screen = $bindable('chat'), tabbed = $bindable(false) }: { store: Store; recover?: boolean; screen: 'chat' | 'threads' | 'activity'; tabbed?: boolean } = $props();
   const narrow = new MediaQuery('(max-width: 720px)');
+  /**
+   * A conversation slides in over the list it opens from, and back off it to
+   * the list; between the bottom bar's places, or to a page, nothing slides.
+   * The stage is the app's grid, around this header: the conversation is its `.body`.
+   */
+  const slide = new ScreenSlide();
+  slide.follow(() => narrow.current && store.page === 'chat' && !recover ? (screen === 'chat' ? 'chat' : 'list') : null, (_, to) => to === 'chat' ? 'push' : 'pop');
+  let header = $state<HTMLElement>();
+  $effect(() => { if (header?.parentElement) return slide.watch(header.parentElement); });
+  /** The list a conversation opens from stays under it, as it was, while the conversation slides in. */
+  let lastList = $state<'threads' | 'activity'>('threads');
+  $effect.pre(() => { if (screen !== 'chat') lastList = screen; });
+  const leaving = $derived(slide.direction === 'push');
+  const listScreen = $derived(leaving ? lastList : screen);
   // The contacts under the projects, loaded with their experiment; a desktop window shows them in the column on the right.
   let SidebarContacts = $state<typeof import('./home/SidebarContacts.svelte').default>();
   let ContactRequestNotice = $state<typeof import('./home/ContactRequestNotice.svelte').default>();
@@ -67,7 +82,7 @@
     if (!measuredRows.has(key)) measuredRows.set(key, new Map());
     return measuredRows.get(key)!;
   }
-  const listKey = $derived(`${screen}:${workspace.view}:${projectView.filter}`);
+  const listKey = $derived(`${listScreen}:${workspace.view}:${projectView.filter}`);
   $effect(() => { if (narrow.current && scrollRoot) { const saved = scrollPositions.get(listKey) ?? 0; void tick().then(() => { if (scrollRoot) scrollRoot.scrollTop = saved; }); } });
   /** The clock the rows' times read: a minute's precision is all they show. */
   const now = $derived(minuteClock.now);
@@ -81,7 +96,7 @@
   let sections = $derived(projectSections(groups, recentPreferences.groupOtherProjects, recentPreferences.groupWorking));
   let shelved = $derived(machines.flatMap(machine => machine.store.projects.filter(project => project.archived === true).map(project => ({ machine, project }))));
   let selected = $derived(projectView.selected(groups));
-  let draftOwner = $derived(screen === 'threads' && workspace.view === 'recent' && selected ? selected.machine.store : store);
+  let draftOwner = $derived(listScreen === 'threads' && workspace.view === 'recent' && selected ? selected.machine.store : store);
   let entries = $derived(machines.flatMap(machine => {
     const byId = new Map(machine.store.projects.map(p => [p.id, p]));
     return machine.store.threads.filter(t => !t.archived && !t.incognito).map(thread => ({ machine, thread, project: thread.projectId === null ? undefined : byId.get(thread.projectId) }));
@@ -90,17 +105,17 @@
   /** What waits on the user besides the conversation on screen: Back carries its mark. */
   let elsewhere = $derived(waiting.filter(e => !(e.machine.store === store && e.thread.id === store.openThread?.id)).length);
   let active = $derived(entries.filter(e => needsUser(e.thread) || ['running', 'queued'].includes(e.thread.status)));
-  let rows = $derived((screen === 'activity' ? active : entries)
+  let rows = $derived((listScreen === 'activity' ? active : entries)
     .filter(e => !query || [e.thread.title, projectName(e.project), e.thread.branch, e.machine.label].some(value => value?.toLocaleLowerCase().includes(query)))
-    .filter(e => screen === 'activity' || (!e.thread.parentThreadId && !e.project?.archived && (workspace.view !== 'recent' || !selected || (e.machine.id === selected.machine.id && e.thread.projectId === selected.project.id))))
-    .sort((a, b) => screen === 'activity'
+    .filter(e => listScreen === 'activity' || (!e.thread.parentThreadId && !e.project?.archived && (workspace.view !== 'recent' || !selected || (e.machine.id === selected.machine.id && e.thread.projectId === selected.project.id))))
+    .sort((a, b) => listScreen === 'activity'
       ? (Number(needsUser(b.thread)) - Number(needsUser(a.thread))) || b.thread.updatedAt - a.thread.updatedAt
       : compareThreads(a.thread, b.thread)));
   let projects = $derived([...machines.flatMap(m => m.store.projects.filter(p => p.archived !== true).map(p => ({
     id: JSON.stringify([m.id, p.id]), label: projectName(p), hint: several ? m.label : '', projectTile: { project: p, store: m.store },
     active: m.store === store && p.id === project?.id
   }))), ...(store.owner ? [separator('add-sep'), { id: 'add-project', label: strings.sidebar.addProject, hint: '', active: false, glyph: FolderPlus }] : [])]);
-  const inRecent = $derived(screen === 'threads' && workspace.view === 'recent');
+  const inRecent = $derived(listScreen === 'threads' && workspace.view === 'recent');
   /** Recent shows one project or all of them: the filter's choices. */
   const filterItems = $derived([
     { id: 'all', label: strings.sidebar.allProjects, active: !selected },
@@ -141,7 +156,7 @@
   }
   /** A phone's row menu: the thread's lifecycle, as in its header (`threadMenuItems`' phone set). */
   function rowItems(owner: Store, thread: ThreadSummary): MenuItem[] {
-    return threadMenuItems(owner, thread, { showDone: screen === 'threads', phone: true });
+    return threadMenuItems(owner, thread, { showDone: listScreen === 'threads', phone: true });
   }
   /** Thread ids can collide between machines: the row's own store acts, and its pickers hang under the row's own trigger. */
   function rowAction(owner: Store, thread: ThreadSummary, action: string, machineId: string) {
@@ -188,7 +203,7 @@
   const laterLists = ['archived'] as const;
 </script>
 
-<header class="mobile-header" class:chatting class:settings={store.page !== 'chat'} data-testid="mobile-header">
+<header class="mobile-header" class:chatting class:settings={store.page !== 'chat'} data-testid="mobile-header" data-slide={slide.direction} bind:this={header}>
   {#if chatting}
     <!-- The only way out of a conversation on a phone: it carries the mark of a thread that waits on the user elsewhere. -->
     <button class="ghost icon back" data-testid="mobile-back" aria-label={elsewhere ? `${strings.mobile.threads}, ${fill(strings.mobile.waitingElsewhere, { count: String(elsewhere) })}` : strings.mobile.threads} onclick={() => show('threads')}><ArrowLeft size={20} />{#if elsewhere}<span class="waiting-mark" data-testid="mobile-back-waiting"></span>{/if}</button>
@@ -215,23 +230,23 @@
   {#if narrow.current && ContactRequestNotice && contactsShown(store)}<ContactRequestNotice {store} />{/if}
 </header>
 
-{#if tabbed}
-  <MobileTabs {store} {screen} waiting={waiting.length} navigate={show} onnew={() => void newThread()} newDisabled={draftOwner.connection !== 'ready'} />
+{#if tabbed || leaving}
+  <MobileTabs {store} screen={listScreen} waiting={waiting.length} navigate={show} onnew={() => void newThread()} newDisabled={draftOwner.connection !== 'ready'} inert={leaving} />
 {/if}
 
 {#snippet contacts()}
   {#if SidebarContacts && contactsShown(store)}<div class="contacts-slot"><SidebarContacts {store} {machines} /></div>{/if}
 {/snippet}
 
-{#if narrow.current && store.page === 'chat' && (screen !== 'chat' || recover)}
-  <section class="mobile-list" class:recent={inRecent} class:tabbed bind:this={scrollRoot} onscroll={() => { if (scrollRoot) scrollPositions.set(listKey, scrollRoot.scrollTop); }} data-testid="mobile-list" aria-label={screen === 'activity' ? strings.mobile.activity : strings.mobile.threads}>
+{#if narrow.current && store.page === 'chat' && (screen !== 'chat' || recover || leaving)}
+  <section class="mobile-list" class:recent={inRecent} class:tabbed={tabbed || leaving} inert={leaving} bind:this={scrollRoot} onscroll={() => { if (scrollRoot) scrollPositions.set(listKey, scrollRoot.scrollTop); }} data-testid="mobile-list" aria-label={listScreen === 'activity' ? strings.mobile.activity : strings.mobile.threads}>
     {#if recover && narrow.current}
       <MobileConnect {store} onpaired={() => show('threads')} />
     {:else}
     <!-- The header says where this is: the list opens on its search, the display options at its end. -->
     <div class="list-heading">
       <div class="search"><Search size={17} /><input type="search" bind:value={search} aria-label={strings.mobile.search} placeholder={strings.mobile.search} data-testid="mobile-search" />{#if search}<button class="ghost icon" aria-label={strings.mobile.clearSearch} onclick={() => search = ''}><X size={16} /></button>{/if}
-        {#if screen === 'threads' && groups.length}<span class="display"><DisplayOptions entries={groups} target={undefined} owner={store} prefix="mobile-" compact /></span>{/if}
+        {#if listScreen === 'threads' && groups.length}<span class="display"><DisplayOptions entries={groups} target={undefined} owner={store} prefix="mobile-" compact /></span>{/if}
       </div>
       {#if (inRecent && groups.length) || atWorkRows.length > 0}
         <div class="filters">
@@ -269,7 +284,7 @@
         </div>
       </div>
     {/snippet}
-    {#if screen === 'threads' && workspace.view === 'projects'}
+    {#if listScreen === 'threads' && workspace.view === 'projects'}
       {#snippet projectRows(projects: ProjectEntry[], later = false)}
       {#each projects as group (projectKey(group))}
         {@const groupRows = rows.filter(row => row.machine.id === group.machine.id && row.thread.projectId === group.project.id)}
@@ -334,7 +349,7 @@
         {#snippet row(entry)}{@render threadRow(entry)}{/snippet}
       </WindowList>
     {:else}
-      <WindowList items={attention} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements(atWorkShown ? 'at-work' : screen)}>
+      <WindowList items={attention} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements(atWorkShown ? 'at-work' : listScreen)}>
         {#snippet row(entry)}{@render threadRow(entry)}{/snippet}
       </WindowList>
       {#if inRecent && !atWorkShown}
@@ -352,12 +367,12 @@
         {#if !query}{@render contacts()}{/if}
       {/if}
     {/if}
-    {#if rows.length === 0 && (query || screen === 'activity' || workspace.view === 'recent' || groups.length === 0) && !(inRecent && !query && recentGroups.some(entry => entry.project.archivedThreads))}
+    {#if rows.length === 0 && (query || listScreen === 'activity' || workspace.view === 'recent' || groups.length === 0) && !(inRecent && !query && recentGroups.some(entry => entry.project.archivedThreads))}
       <div class="empty-state">
-        <span class="empty-icon">{#if screen === 'activity'}<Activity size={24} />{:else}<MessageSquare size={24} />{/if}</span>
-        <h2>{screen === 'activity' ? strings.mobile.emptyActivity : entries.length ? strings.mobile.noThreads : strings.mobile.emptyTitle}</h2>
-        <p>{screen === 'activity' ? strings.mobile.noActivity : entries.length ? strings.mobile.search : strings.mobile.emptyBody}</p>
-        {#if screen === 'threads' && !entries.length}<button class="primary" data-testid="mobile-first-thread" disabled={draftOwner.connection !== 'ready'} onclick={newThread}><Plus size={16} /><span class="ui-label">{strings.sidebar.newThread}</span></button>{/if}
+        <span class="empty-icon">{#if listScreen === 'activity'}<Activity size={24} />{:else}<MessageSquare size={24} />{/if}</span>
+        <h2>{listScreen === 'activity' ? strings.mobile.emptyActivity : entries.length ? strings.mobile.noThreads : strings.mobile.emptyTitle}</h2>
+        <p>{listScreen === 'activity' ? strings.mobile.noActivity : entries.length ? strings.mobile.search : strings.mobile.emptyBody}</p>
+        {#if listScreen === 'threads' && !entries.length}<button class="primary" data-testid="mobile-first-thread" disabled={draftOwner.connection !== 'ready'} onclick={newThread}><Plus size={16} /><span class="ui-label">{strings.sidebar.newThread}</span></button>{/if}
       </div>
     {/if}
     {/if}
@@ -441,6 +456,15 @@
     .empty-state p { color: var(--color-muted-foreground); line-height: 1.6; max-width: 280px; margin: 0 0 20px; }
     .mobile-header { grid-row: 1; grid-column: 1; }
     .mobile-list { grid-row: 2; grid-column: 1; position: relative; z-index: 1; min-height: 0; }
+    /* A conversation slides over the list it opens from, and off it on the way back (lib/screen-slide.svelte.ts). The
+       conversation, the app's `.body`, spans the bottom bar's row too, as tall all the way as it is once open, so nothing
+       inside rewraps; the list and the bar shift under it, and the header stays, raised over its shadow. */
+    .mobile-header[data-slide] { z-index: 4; }
+    .mobile-header[data-slide] > :global(*) { animation: fade var(--dur-3) var(--ease-out-quint); }
+    :global(.app:not(.shell)) > .mobile-header[data-slide] ~ :global(.body) { grid-row: 2 / 4; z-index: 3; visibility: visible; content-visibility: visible; background: var(--screen-background, var(--color-background)); box-shadow: var(--shadow-screen); animation: screen-in var(--dur-3) var(--ease-slide) both; }
+    :global(.app:not(.shell)) > .mobile-header[data-slide='pop'] ~ :global(.body) { animation-name: screen-out; }
+    .mobile-header[data-slide='push'] ~ .mobile-list, .mobile-header[data-slide='push'] ~ :global(.mobile-tabs) { pointer-events: none; animation: screen-under-out var(--dur-3) var(--ease-slide) both; }
+    .mobile-header[data-slide='pop'] ~ .mobile-list, .mobile-header[data-slide='pop'] ~ :global(.mobile-tabs) { animation: screen-under-in var(--dur-3) var(--ease-slide) both; }
     .mobile-list.recent { display: flex; flex-direction: column; }
     .mobile-list.recent > :global(*) { flex-shrink: 0; }
     .recent-folds { margin-top: auto; padding-top: 16px; }
