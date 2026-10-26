@@ -119,7 +119,7 @@ test('the phone settings hold this phone\'s three screens and the machine\'s ess
   await waitFor(home);
   expect([...document.querySelectorAll<HTMLElement>('[data-testid=mobile-settings-home] .row')].map(row => row.dataset.testid)).toEqual([
     'mobile-settings-phone', 'settings-tab-appearance', 'mobile-settings-privacy', 'settings-tab-experiments',
-    'mobile-settings-connection', 'settings-tab-usage', 'settings-tab-voice', 'mobile-settings-browser-profiles', 'mobile-settings-windows', 'mobile-settings-archived',
+    'mobile-settings-connection', 'settings-tab-usage', 'settings-tab-voice', 'mobile-settings-browser-profiles', 'mobile-settings-compaction', 'mobile-settings-windows', 'mobile-settings-archived',
     'mobile-settings-secrets'
   ]);
   // The header already says Settings, and the list's display options group the threads.
@@ -136,6 +136,17 @@ test('the phone settings hold this phone\'s three screens and the machine\'s ess
 
   query<HTMLButtonElement>('[data-testid=mobile-settings-browser-profiles]').click();
   await waitFor(() => document.querySelector('[data-testid=browser-profiles-card]') !== null);
+  await back();
+
+  Element.prototype.scrollIntoView ??= vi.fn();
+  query<HTMLButtonElement>('[data-testid=mobile-settings-compaction]').click();
+  await waitFor(() => document.querySelector('[data-testid=compaction-settings]') !== null);
+  for (const type of ['common', 'agent', 'subagent', 'bot']) {
+    expect(document.querySelector(`[data-testid=compaction-target-${type}]`)).not.toBeNull();
+  }
+  query<HTMLButtonElement>('[data-testid=compaction-target-subagent]').click();
+  await waitFor(() => document.querySelector('[data-testid=compaction-inherited]') !== null);
+  expect(query<HTMLInputElement>('[data-testid=compaction-customize]').checked).toBe(false);
   await back();
 
   // The analytics switches have a screen of their own, out of the notifications.
