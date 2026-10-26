@@ -202,6 +202,21 @@ real('a window a page opens joins the conversation as a tab of its own', async (
   expect(tabs.map(tab => tab.url)).toEqual([url(), url('/popup?script')]);
 }, 150_000);
 
+real('a target that moves away from the native pointer is not clicked, and the next command can reach it', async () => {
+  const { agent, threadId } = browserFixture;
+  await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
+  await evaluate(`document.body.innerHTML = '<button id="moving">Move</button>';
+    window.clicks = [];
+    document.addEventListener('click', event => clicks.push(event.isTrusted));
+    window.escapePointer = event => { if (event.isTrusted) moving.style.transform = 'translateX(300px)'; };
+    moving.addEventListener('pointermove', escapePointer); true`);
+  expect(await thrown(agent.call('browser.command', { threadId, action: { kind: 'click', selector: '#moving' } }))).toThrow('did not receive native pointer movement');
+  expect(await evaluate('clicks')).toEqual([]);
+  await evaluate(`moving.removeEventListener('pointermove', escapePointer); moving.style.transform = ''; true`);
+  await agent.call('browser.command', { threadId, action: { kind: 'click', selector: '#moving' } });
+  expect(await evaluate('clicks')).toEqual([true]);
+}, 150_000);
+
 real('a burst of windows opened at once stops at the conversation tab limit', async () => {
   const { agent, threadId } = browserFixture;
   // The desktop app's webviews let a page open many windows, and so does the core's Chromium (`chromiumArgs`).

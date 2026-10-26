@@ -155,4 +155,20 @@ real('a click in a frame lands where the frame is drawn, and goes through the DO
     expect(covered.clicks).toBe(1);
     expect(String(covered.note)).toContain('covered by button Overlay');
   }
+  // A frame can move after its button receives the pointer: its local hit-test
+  // still succeeds, but pressing at the old page coordinates would miss it.
+  await command({ kind: 'open', url: `http://127.0.0.1:${checkout.port}/placed/covered` });
+  await command({ kind: 'wait', load: 'load' });
+  await command({ kind: 'evaluate', expression: `document.querySelector('button').remove();
+    const frame = document.querySelector('iframe');
+    frame.contentDocument.querySelector('button').addEventListener('pointermove', event => {
+      if (event.isTrusted) frame.style.left = '660px';
+    }); true` });
+  const tree = String((await command({ kind: 'snapshot', interactive: true })).text);
+  const moved = `@${/button "Pay" \[ref=(e\d+)\]/.exec(tree)![1]}`;
+  expect(await thrown(command({ kind: 'click', selector: moved }))).toThrow('did not receive native pointer movement');
+  expect(await command({ kind: 'evaluate', expression: 'inputs.filter(event => event.type === "pointerdown").length' }) as unknown).toBe(0);
+  expect((await command({ kind: 'click', selector: moved })).note).toBeUndefined();
+  expect(await command({ kind: 'evaluate', expression: 'window.result' }) as unknown).toBe('clicked true');
+  expect(await command({ kind: 'evaluate', expression: 'window.clicks' }) as unknown).toBe(1);
 }, 120_000);

@@ -255,6 +255,12 @@ reports where the page went. Clicks, keys and text are native input; an element
 something covers is clicked through the DOM, and the agent hears what covered
 it.
 
+Before pressing, a native click waits up to two seconds for trusted pointer
+movement in the target's document and checks that the target and every enclosing
+iframe still receive that point. This also works in popups whose CSS `:hover` state stays unset.
+If movement misses the target, the command fails without pressing; it never
+retries the click.
+
 ## Frames from other origins
 
 The page kit reads a frame of its own origin through the iframe, and measures

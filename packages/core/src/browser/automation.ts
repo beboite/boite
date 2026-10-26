@@ -253,12 +253,20 @@ export async function press(page: FrameChannel, combo: string): Promise<void> {
 async function nativeClick(page: FrameChannel, scope: Scope, selector: string, point: { x: number; y: number }, count: 1 | 2): Promise<void> {
   // A newly drawn cross-process frame can still route input to its iframe.
   // Confirm the native move reached the target before pressing, never retry a click.
-  for (const end = Date.now() + 2000;;) {
-    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point, button: 'none' });
-    if (await run<boolean>(scope.channel, `return K.hovered(${js(selector)})`)) break;
-    if (Date.now() >= end) throw new Error('the element did not receive native pointer movement; wait for the page to finish drawing, then try again');
-    await sleep(16);
-  }
+  await run(scope.channel, `K.watchPointer(${js(selector)})`);
+  try {
+    for (const end = Date.now() + 2000;;) {
+      await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point, button: 'none' });
+      let local: Point = point;
+      for (const { parent, owner } of scope.path) {
+        if (!local) break;
+        local = await run<Point>(parent, `return K.into(${js(owner)}, ${local.x}, ${local.y})`);
+      }
+      if (local && await run<boolean>(scope.channel, `return K.pointerMoved(${local.x}, ${local.y})`)) break;
+      if (Date.now() >= end) throw new Error('the element did not receive native pointer movement; wait for the page to finish drawing, then try again');
+      await sleep(16);
+    }
+  } finally { await run(scope.channel, 'K.stopPointer()').catch(() => {}); }
   for (let click = 1; click <= count; click++) {
     await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', buttons: 1, clickCount: click });
     await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: click });

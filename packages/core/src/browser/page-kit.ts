@@ -45,6 +45,7 @@ function agentKit() {
   const boxed = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
   // A control styled away to nothing is operated through a label the user sees.
   const operable = el => (visible(el) && boxed(el)) || !el.labels ? el : Array.from(el.labels).find(label => visible(label) && boxed(label)) ?? el;
+  const hits = (el, hit) => hit?.nodeType === 1 && (el.contains(hit) || (hit.tagName === 'LABEL' && hit.control === el) || (el.tagName === 'LABEL' && el.control === hit));
   const labelled = el => {
     const ids = el.getAttribute('aria-labelledby');
     if (ids) { const text = ids.split(/\s+/).map(id => el.ownerDocument.getElementById(id)?.innerText ?? '').join(' ').trim(); if (text) return text; }
@@ -215,7 +216,7 @@ function agentKit() {
     const x = Math.max(0, Math.min(view.innerWidth - 1, r.left + r.width / 2));
     const y = Math.max(0, Math.min(view.innerHeight - 1, r.top + r.height / 2));
     const hit = doc.elementFromPoint(x, y);
-    const reached = hit && (el.contains(hit) || (hit.tagName === 'LABEL' && hit.control === el) || (el.tagName === 'LABEL' && el.control === hit));
+    const reached = hits(el, hit);
     if (typing) {
       el.focus();
       if (el.isContentEditable) { const range = doc.createRange(); range.selectNodeContents(el); if (mode === 'type') range.collapse(false); const sel = view.getSelection(); sel.removeAllRanges(); sel.addRange(range); }
@@ -236,13 +237,17 @@ function agentKit() {
    * that holds the iframe, and what native input there would meet instead of
    * the frame: something drawn over it, or nothing when the point is out of
    * view. A scale or translation of the iframe moves and scales the point.
+   * In reverse, maps a parent point into the frame, checking that same hit.
    */
-  const through = (frame, x, y) => {
+  const through = (frame, x, y, reverse = false) => {
     const r = frame.getBoundingClientRect(), view = frame.ownerDocument.defaultView ?? window, style = view.getComputedStyle(frame);
     const sx = frame.offsetWidth ? r.width / frame.offsetWidth : 1, sy = frame.offsetHeight ? r.height / frame.offsetHeight : 1;
-    const point = { x: r.left + (frame.clientLeft + parseFloat(style.paddingLeft) + x) * sx, y: r.top + (frame.clientTop + parseFloat(style.paddingTop) + y) * sy };
-    if (point.x < 0 || point.y < 0 || point.x >= view.innerWidth || point.y >= view.innerHeight) return { ...point, covered: 'the edge of the frame it is in' };
-    const root = frame.getRootNode(), hit = (typeof root.elementFromPoint === 'function' ? root : frame.ownerDocument).elementFromPoint(point.x, point.y);
+    const point = reverse
+      ? { x: (x - r.left) / sx - frame.clientLeft - parseFloat(style.paddingLeft), y: (y - r.top) / sy - frame.clientTop - parseFloat(style.paddingTop) }
+      : { x: r.left + (frame.clientLeft + parseFloat(style.paddingLeft) + x) * sx, y: r.top + (frame.clientTop + parseFloat(style.paddingTop) + y) * sy };
+    const at = reverse ? { x, y } : point;
+    if (at.x < 0 || at.y < 0 || at.x >= view.innerWidth || at.y >= view.innerHeight) return { ...point, covered: 'the edge of the frame it is in' };
+    const root = frame.getRootNode(), hit = (typeof root.elementFromPoint === 'function' ? root : frame.ownerDocument).elementFromPoint(at.x, at.y);
     return hit === frame ? point : { ...point, covered: hit ? named(hit) : 'nothing over its frame' };
   };
   // From `view`'s viewport out to this window's, through each frame of this origin between them.
@@ -253,6 +258,17 @@ function agentKit() {
       covered ??= point.covered;
     }
     return { x: point.x, y: point.y, ...(covered ? { covered } : {}) };
+  };
+  // Recheck a fixed viewport point through the current frame positions, without scrolling.
+  const inward = (view, x, y) => {
+    const frames = [];
+    for (let inner = view; inner !== window && inner.frameElement; inner = inner.parent) frames.push(inner.frameElement);
+    let point = { x, y };
+    for (const frame of frames.reverse()) {
+      point = through(frame, point.x, point.y, true);
+      if (point.covered) return null;
+    }
+    return point;
   };
   const fire = (el, type, init = {}) => el.dispatchEvent(new (type.startsWith('pointer') ? (window.PointerEvent ?? MouseEvent) : type.startsWith('key') ? KeyboardEvent : type === 'input' ? (window.InputEvent ?? Event) : type === 'change' ? Event : MouseEvent)(type, { bubbles: true, cancelable: true, composed: true, ...init }));
   const setValue = (el, value) => {
@@ -351,7 +367,32 @@ function agentKit() {
   K.scroll = (x, y, target) => { const el = target ? K.find(target) : null; if (el) el.scrollBy(x, y); else scrollBy(x, y); return { x: scrollX, y: scrollY }; };
   K.scrollIntoView = target => { K.find(target).scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }); return true; };
   K.focus = target => { K.find(target).focus(); return true; };
-  K.hovered = target => operable(K.find(target)).matches(':hover');
+  // A popup can receive native input while Chromium leaves its CSS :hover unset.
+  // Observe this command's trusted movement in the target's own document instead.
+  K.watchPointer = target => {
+    const el = operable(K.find(target)), doc = el.ownerDocument;
+    let received = false;
+    const moved = event => {
+      if (event.isTrusted) received = event.composedPath().some(hit => hits(el, hit));
+    };
+    doc.addEventListener('pointermove', moved, true);
+    K.pointerMoved = (x, y) => {
+      if (!received || !el.isConnected || operable(K.find(target)) !== el) return false;
+      const point = inward(doc.defaultView ?? window, x, y);
+      return !!point && hits(el, doc.elementFromPoint(point.x, point.y));
+    };
+    K.stopPointer = () => {
+      doc.removeEventListener('pointermove', moved, true);
+      delete K.pointerMoved;
+      delete K.stopPointer;
+    };
+  };
+  K.into = (target, x, y) => {
+    const frame = K.find(target), point = inward(frame.ownerDocument.defaultView ?? window, x, y);
+    if (!point) return null;
+    const inner = through(frame, point.x, point.y, true);
+    return inner.covered ? null : inner;
+  };
   // A point of the document iframe `target` shows, in this window's viewport, and what covers the way there.
   K.through = (target, x, y) => {
     const frame = K.find(target), point = through(frame, x, y), out = outward(frame.ownerDocument.defaultView ?? window, point.x, point.y);
