@@ -3,6 +3,7 @@ import {readFileSync} from 'node:fs';
 import {generate, sourcePath} from './generate.ts';
 import type {Captured} from './capture.ts';
 import {parseRetirementFrame, validateRetirementTiming, type RetirementMode} from './retirement-timing.ts';
+import {runControlBatches} from './control-schedule.ts';
 
 import {expected, path, fixture} from './retirement-fixture.ts';
 
@@ -90,19 +91,21 @@ test('serial failure cleanup joins delayed timing/twin observers before killAll 
   const source = readFileSync(new URL('./routing.test.ts', import.meta.url), 'utf8');
   const start = source.lastIndexOf('  finally {') + '  finally {'.length;
   const end = source.indexOf('    for (const job of jobs)', start);
-  const cleanup = new Function('timingTasks', 'tasks', 'failures', 'procs',
+  const cleanup = new Function('runControlBatches', 'timingTasks', 'pairedTasks', 'tasks', 'failures', 'procs',
     `return (async () => {${source.slice(start, end)}})();`) as
-    (pair: Promise<void>[], captures: Promise<unknown>[], failures: string[], procs: {killAll(): Promise<void>}) => Promise<void>;
+    (schedule:typeof runControlBatches, pair:Promise<void>[], batches:(()=>Promise<void>)[], captures:Promise<unknown>[], failures:string[], procs:{killAll():Promise<void>})=>Promise<void>;
   const events: string[] = [], failures: string[] = [];
   let release!: () => void;
   const barrier = new Promise<void>(resolve => {release = resolve;});
   const continuation = (async () => {await barrier; events.push('observer-finished'); throw new Error('late observer failure');})();
-  const finished = cleanup([continuation], [Promise.resolve()], failures, {async killAll() {events.push('killAll');}});
+  const finished = cleanup(runControlBatches,[continuation],[async()=>{events.push('paired-finished');throw Error('paired failure');}], [Promise.resolve()], failures, {async killAll() {events.push('killAll');}});
   try {
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(events).toEqual([]);
   } finally {release();}
   await finished;
-  expect(events).toEqual(['observer-finished', 'killAll']);
-  expect(failures).toHaveLength(1); expect(failures[0]).toContain('late observer failure');
+  expect(events.filter(e=>e!=='paired-finished')).toEqual(['observer-finished', 'killAll']);
+  expect(events).toEqual(['observer-finished','paired-finished','killAll']);
+  expect(failures).toHaveLength(2); expect(failures[0]).toContain('late observer failure');
+  expect(failures[1]).toContain('paired control capture: Error: paired failure');
 });

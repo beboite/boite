@@ -17,10 +17,9 @@ import {runLiveRootHarness} from './live-root-harness.ts';
 import {runStdioRootHarness} from './stdio-root-reference.ts';
 import {runStdoutHarness} from './stdout-write-reference.ts';
 import {runZeroHarness} from './stdout-zero-reference.ts';
+import {runControlBatches} from './control-schedule.ts';
 import {sha256} from './generate.ts';
-
 const native = process.platform === 'win32' && process.env.BOITE_TEST_DEBUG_MAP === '1';
-
 test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC debugger marker routing', async () => {
   const helper = process.env.BOITE_DEBUG_MAP_HELPER, output = process.env.BOITE_DEBUG_MAP_OUTPUT;
   if (!helper || !output) throw new Error('diagnostic requires BOITE_DEBUG_MAP_HELPER and BOITE_DEBUG_MAP_OUTPUT');
@@ -73,7 +72,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     return {label, root, project, runtime, home, marker, profile: `boite.debug.route.${crypto.randomUUID().replaceAll('-', '')}`};
   });
   const tasks: Promise<Captured>[] = [];
-  const timingTasks: Promise<void>[] = [];
+  const timingTasks: Promise<void>[] = [], pairedTasks:(()=>Promise<void>)[]=[];
   const profileCleanup: Captured[] = [];
   const cleanupConfirmed = new Map<string, boolean>();
   const creatorFaultCleanup: boolean[] = [];
@@ -549,9 +548,9 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
         const ordinary = await execute(`ordinary-after-${job.label.toLowerCase()}`, ['observe', state]);
         observer(`after ${job.label}`, ordinary, before); save();
       }));
-      // Additional invocations of the same assigned fault. The entire pair,
-      // including post-exit observers, joins before cleanup on every path.
-      timingTasks.push((async()=>{
+      // Isolate paired windows from other work; both arms remain concurrent.
+      // Each pair, including post-exit observers, joins before cleanup.
+      pairedTasks.push(async()=>{
         const prepared=await Promise.allSettled(jobs.filter(j=>completedPairLabels.includes(j.label)).map(async job=>{
           writeFileSync(join(job.project,'release'),'synthetic');
           const result=await run(job,false,'anchor-exclusive-run','assigned');report[job.label.toLowerCase()]=result;
@@ -599,8 +598,8 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
         report.matchedFaultRootReference=control;
         if(!control.protocolValid)failures.push(`matched root reference control: ${control.error}`);
         save();
-      })());
-      timingTasks.push((async()=>{
+      });
+      pairedTasks.push(async()=>{
         const directory=process.env.BOITE_ROOT_REFERENCE_DIRECTORY;
         if(!directory)throw Error('live root private controller directory missing');
         const drainer=await ownedLiveRootDrainer(process.env.BOITE_ROOT_REFERENCE_COMPILER!,process.env.BOITE_ROOT_REFERENCE_NONCE!,directory,process.env.BOITE_DEBUG_MAP_TRACE!);
@@ -621,12 +620,12 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
           },
         });
         report.liveMatchedFaultRootReference=control;if(!control.protocolValid)failures.push(`live matched root reference control: ${control.error}`);save();
-      })());
+      });
       for(const stream of [
         {labels:stdioPairLabels,harness:runStdioRootHarness<typeof jobs[number]>,mode:'anchor-stdio-run',prefix:'stdio-root',key:'stdioRootReference',evidence:stdioHelpers},
         {labels:stdoutPairLabels,harness:runStdoutHarness<typeof jobs[number]>,mode:'anchor-stdout-run',prefix:'stdout-root',key:'stdoutRootReference',evidence:stdoutHelpers},
         {labels:zeroPairLabels,harness:runZeroHarness<typeof jobs[number]>,mode:'anchor-zero-run',prefix:'zero-root',key:'zeroRootReference',evidence:zeroHelpers},
-      ] as const)timingTasks.push((async()=>{
+      ] as const)pairedTasks.push(async()=>{
         const directory=process.env.BOITE_ROOT_REFERENCE_DIRECTORY;if(!directory)throw Error('stdio private controller directory missing');
         const drainer=await ownedLiveRootDrainer(process.env.BOITE_ROOT_REFERENCE_COMPILER!,process.env.BOITE_ROOT_REFERENCE_NONCE!,directory,process.env.BOITE_DEBUG_MAP_TRACE!);
         const control=await stream.harness(jobs.filter(j=>stream.labels.includes(j.label)),{
@@ -642,7 +641,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
           },
         });
         report[stream.key]=control;if(!control.protocolValid)failures.push(`${stream.key} control: ${control.error}`);save();
-      })());
+      });
       for (const promise of timingTasks) void promise.catch(() => {});
       for (const [index, mode] of (['direct-run', 'setter-run', 'quiet-run', 'reopen-run', 'creator-run', 'retire-run', 'retire-named-run', 'target-exited-run', 'target-waiting-run', 'target-helper-exited-run', 'thread-exited-run', 'thread-waiting-run', 'target-helper-exited-run'] as const).entries()) {
         const job = jobs[index + 3]!;
@@ -867,6 +866,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     // shutdown, including when the serial phase fails before its normal join.
     for (const settled of await Promise.allSettled(timingTasks))
       if (settled.status === 'rejected') failures.push(`retirement timing capture: ${settled.reason}`);
+    for(const result of await runControlBatches(tasks,pairedTasks))if(result.status==='rejected')failures.push(`paired control capture: ${result.reason}`);
     const settled = await Promise.allSettled(tasks);
     for (const result of settled) if (result.status === 'rejected') failures.push(`task capture: ${result.reason}`);
     // Stop only processes belonging to this fresh harness, including on a failed assertion.

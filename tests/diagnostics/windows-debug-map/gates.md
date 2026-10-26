@@ -1456,6 +1456,53 @@ receipts, four stdout captures, two SDK STDIO captures,30 active proofs and10
 drain proofs. The original MinGW STDIO timeout remains invalid. These checks
 run no Windows process and establish no zero-byte retention effect.
 
+## Native zero-byte result and isolated paired scheduling
+
+Run40282349237 / job121438451815 executes503efe41. Parent reconciliation
+matches87 manifest entries and20 owner provenances, including generated C.
+Eight raw424-byte zero READY/failed frames preserve exact helper/root identity,
+open original streams, balanced private I/O and immutable operation metadata.
+Both WRITE calls return TRUE with transferred0/error0; SILENT records no call.
+Twelve baseline observations validate with launcher references held, retaining
+the retired names. Neither compiler admits a complete comparison; zero-byte
+retention effect remains unknown. Four native zero fences expire with1460.
+
+SDK attempts six comparison observers, but its time guards reject the batch.
+Both SDK and both MinGW raw launcher release responses prove successful exact
+root closes before their deadlines. The MinGW clients expire before admitting
+those replies, so finalDrained=false does not prove a remaining reference.
+All five paired families are inconclusive in this run; no prior positive or
+negative paired result is promoted to a current valid observation. These logs
+establish missed windows, not the internal owner of the timing delay.
+
+SDK2628/2628 and MinGW2620/2620 registered references close exactly once;
+transfers1944/1944 and1940/1940 reconcile. Each compiler retains92 fatal entries.
+The production protected-tools gate still fails0/7 at NUL error5; later Windows
+provider/core suites are skipped after that failure. Linux, UI/types and CodeQL
+pass. No production fix or causal zero-byte effect is established.
+
+The diagnostic previously started all five pairs alongside legacy timing and
+serial scenarios on the same harness. Paired callbacks are now lazy: legacy
+timing continuations and existing captures join first, then each complete pair
+joins its captures and post-helper observations before the next pair starts.
+Both native arms within each pair remain concurrent. Every existing scenario,
+fatal assertion, ownership/admission rule and deadline stays in place, including
+the3s windows and150s suite timeout. Failed background work or a synchronous
+batch refusal cannot skip later pairs; errors remain fatal before registry
+cleanup. This scheduling change tests isolation from unrelated harness work;
+it does not establish that contention caused the previous native delay.
+
+Local Bun1.4.3 regression first starts both pairs before a pending capture,
+then passes with neither admitted early. The test runs the real stream root
+controller/export fixtures and requires both concurrent baseline arms, all12
+observers joined, unchanged3s deadlines and the first pair's final capture
+before the second admission. A synchronous batch refusal is preserved while a
+following real pair completes. The actual routing finally prefix also retains
+delayed-observer and paired-batch failures before killAll. The complete suite
+passes127 tests, one native skip, zero failures and2653 assertions; scoped
+typing and architecture pass. No isolated Windows schedule or budget result
+has been verified locally.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:
