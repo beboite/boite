@@ -293,6 +293,7 @@ export class FakeContext {
   /** Open cards and synthetic transit metadata: never a value or a project key. */
   readonly pendingSecrets = new Map<string, FakeSecretCard>();
   readonly secretTransits = new Map<string, FakeSecretTransit>();
+  readonly settledSecrets = new Map<string, { threadId: Thread['id']; result: RpcResult<'secrets.ask'> }>();
   readonly inFlight = new Map<ThreadId, { cancelled: boolean; done: Promise<void>; steered?: { prompt: string; attachments: Attachment[] }[] }>();
   private readonly toolBoundaries = new Set<string>();
   /** Async answers waiting for the thread to be free, oldest first. */

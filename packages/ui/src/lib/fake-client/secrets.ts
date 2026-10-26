@@ -57,6 +57,7 @@ function forget(ctx: FakeContext, ref: string): void {
 export function closeSecrets(ctx: FakeContext): void {
   for (const threadId of new Set([...ctx.pendingSecrets.values()].map(card => card.request.threadId))) cancelSecretCards(ctx, threadId);
   for (const ref of ctx.secretTransits.keys()) forget(ctx, ref);
+  ctx.settledSecrets.clear();
 }
 
 /** Rewrites the card where it is drawn, tells every client and wakes the `ask`, as the core's `#settle`. */
@@ -91,7 +92,7 @@ export function cancelSecretCards(ctx: FakeContext, threadId: string, turnId?: s
 
 export function secretMethods(ctx: FakeContext) {
   // What a closed card answered, so a retry with its id gets it again, as the core's `#settled`.
-  const settled = new Map<string, { threadId: Thread['id']; result: RpcResult<'secrets.ask'> }>();
+  const settled = ctx.settledSecrets;
   return {
     'secrets.pending': async (params) => {
       if ('threadId' in params) {

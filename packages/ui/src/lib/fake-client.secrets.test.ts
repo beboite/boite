@@ -75,9 +75,21 @@ test.for(['expiry', 'turn', 'close'] as const)('temporary refs are unavailable a
       await client.call('turns.start', { threadId: request.threadId, prompt: 'Synthetic next turn.' });
       await client.settled();
     } else {
+      const pending = client.call('secrets.ask', { ...request, requestId: 'pending-at-close' });
+      pending.catch(() => undefined);
+      await vi.waitFor(async () => expect(await client.call('secrets.pending', {})).toHaveLength(1));
       client.close();
       await client.connect();
     }
     await expect(client.call('secrets.use', { threadId: request.threadId, ref, use })).rejects.toMatchObject({ code: RpcErrorCode.NotFound });
+    if (closure === 'close') {
+      for (const requestId of ['lifecycle', 'pending-at-close']) {
+        const retried = client.call('secrets.ask', { ...request, requestId });
+        retried.catch(() => undefined);
+        await vi.waitFor(async () => expect(await client.call('secrets.pending', {})).toMatchObject([{ id: requestId }]));
+        await client.call('secrets.answer', { threadId: request.threadId, requestId, declined: true });
+        expect(await retried).toMatchObject({ outcome: 'declined', ref: null });
+      }
+    }
   } finally { clock?.mockRestore(); }
 });
