@@ -79,7 +79,8 @@ const RULE = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/;
 const ITEM = /^(\s*)(?:[-*+]|\d+[.)])\s+(.*)$/;
 const BULLET_MARK = /^\s*[-*+]\s/;
 const TASK = /^\[([ xX])\]\s+(.*)$/;
-const QUOTE = /^\s*>\s?(.*)$/;
+/** A quoted line: its text is a document of its own once the mark is off (`readQuote`). */
+export const QUOTE = /^\s*>\s?(.*)$/;
 const TABLE_DELIMITER = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/;
 
 interface ListItem {

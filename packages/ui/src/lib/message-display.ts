@@ -1,5 +1,5 @@
 import type { Message, MessagePart, MoveNotice, ThreadLink, ThreadSummary } from '@boite/contracts';
-import { FENCE } from './markdown';
+import { FENCE, QUOTE } from './markdown';
 
 /** Older cores journalled the whole goal instruction as a user message. */
 export function visibleUserText(text: string): string {
@@ -167,25 +167,40 @@ const DISPLAY_MATH = /^(?:\$\$|\\\[)/;
  * The paragraph an answer is still writing (`ParagraphScan.pending`), cut
  * where a diagram, a formula or a view opens outside another fence: what is
  * written of it would show as source, then jump to a drawing, so a placeholder
- * stands there (`drawing`) until its paragraph is complete. Fences are
- * read as `renderMarkdown` reads them (`FENCE`), so what is held back is
- * what it draws.
+ * stands there (`drawing`) until its paragraph is complete.
  */
 export function pendingDrawing(tail: string): { text: string; drawing: boolean } {
+  const lines = tail.split(/\r?\n/);
+  const at = drawingLine(lines);
+  return at < 0 ? { text: tail, drawing: false } : { text: lines.slice(0, at).join('\n').trimEnd(), drawing: true };
+}
+
+/**
+ * The first of `lines` where a drawing opens, or -1. They are read as
+ * `renderMarkdown` reads them: a fence on `FENCE` lines, and a quote as a
+ * document of its own once its marks are off, so what is held back is what
+ * it draws.
+ */
+function drawingLine(lines: string[]): number {
   let open = false;
-  let offset = 0;
-  for (const line of tail.split('\n')) {
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!;
     const fence = FENCE.exec(line);
     if (open) {
       if (fence) open = false;
     } else if (DRAWN.has(fence?.[1]?.toLowerCase() ?? '') || DISPLAY_MATH.test(line.trim())) {
-      return { text: tail.slice(0, offset).trimEnd(), drawing: true };
+      return index;
     } else if (fence) {
       open = true;
+    } else if (QUOTE.test(line)) {
+      let end = index;
+      while (end < lines.length && QUOTE.test(lines[end]!)) end++;
+      const inner = drawingLine(lines.slice(index, end).map(text => QUOTE.exec(text)![1]!));
+      if (inner >= 0) return index + inner;
+      index = end - 1;
     }
-    offset += line.length + 1;
   }
-  return { text: tail, drawing: false };
+  return -1;
 }
 
 /** The core's line for a move the agent asked for itself (`boite thread move`), drawn as a marker, not a message. */

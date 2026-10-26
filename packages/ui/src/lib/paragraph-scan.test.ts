@@ -71,4 +71,7 @@ test('a paragraph being written stops where a diagram, a formula or a view opens
   expect(renderMarkdown('   ```view\n<p>Hi</p>\n   ```')).not.toContain('md-view');
   expect(pendingDrawing('```Mermaid\nflowchart LR')).toEqual({ text: '', drawing: true });
   expect(renderMarkdown('```Mermaid\nflowchart LR\n```')).toContain('md-mermaid');
+  // A quote is drawn as a document of its own, so a view opened in it is held back from its first line.
+  expect(pendingDrawing('Look:\n> Here:\n> ```view\n> <svg')).toEqual({ text: 'Look:\n> Here:', drawing: true });
+  expect(renderMarkdown('> ```view\n> <p>Hi</p>\n> ```')).toContain('md-view');
 });
