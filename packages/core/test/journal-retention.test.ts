@@ -117,7 +117,9 @@ test('a failed ANALYZE is retried before the next statement and retention comple
   for (let ticks = 0; ticks < 40 && clock.delays[0] !== DAY; ticks++) await clock.tick();
   expect(clock.delays).toEqual([DAY]);
   expect(journal.countEvents()).toBe(0);
-  expect(journal.staleStatistics(true)).toEqual([]);
+  expect(attempts.slice(1, pending.length + 1)).toEqual(pending);
+  // Pruning can populate settings after the startup snapshot; only normal stale statistics run afterward.
+  expect(journal.staleStatistics()).toEqual([]);
 });
 
 test('a failed prune retries shortly without rebuilding completed startup statistics', async () => {
