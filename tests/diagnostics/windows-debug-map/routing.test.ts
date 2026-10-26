@@ -16,7 +16,7 @@ import {measureMatchedRootReferences,type MatchedArmInput} from './matched-root-
 import {runLiveRootHarness} from './live-root-harness.ts';
 import {runStdioRootHarness} from './stdio-root-reference.ts';
 import {runStdoutHarness} from './stdout-write-reference.ts';
-import {runZeroHarness} from './stdout-zero-reference.ts';
+import {runByteHarness} from './stdout-byte-reference.ts'; import {runZeroHarness} from './stdout-zero-reference.ts';
 import {runControlBatches} from './control-schedule.ts';
 import {sha256} from './generate.ts';
 const native = process.platform === 'win32' && process.env.BOITE_TEST_DEBUG_MAP === '1';
@@ -56,17 +56,16 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   const faultRootReferences: RootControlRecord[] = []; report.faultRootReferences = faultRootReferences;
   const matchedFaultHelpers: {label:string;fault:string;protocol:AnchorReport;cleanup?:boolean}[] = []; report.matchedFaultHelpers = matchedFaultHelpers;
   const liveMatchedHelpers: typeof matchedFaultHelpers = []; report.liveMatchedFaultHelpers = liveMatchedHelpers;
-  const stdioHelpers: typeof matchedFaultHelpers = []; report.stdioHelpers = stdioHelpers;
-  const stdioPairLabels=['ANCHOR-FAULT-ASSIGNED-STDIO-HELD','ANCHOR-FAULT-ASSIGNED-STDIO-CLOSED'];
-  const stdoutHelpers: typeof matchedFaultHelpers = []; report.stdoutHelpers = stdoutHelpers;
-  const stdoutPairLabels=['ANCHOR-FAULT-ASSIGNED-STDOUT-SILENT','ANCHOR-FAULT-ASSIGNED-STDOUT-WRITE'];
+  const stdioHelpers: typeof matchedFaultHelpers = []; report.stdioHelpers = stdioHelpers; const stdioPairLabels=['ANCHOR-FAULT-ASSIGNED-STDIO-HELD','ANCHOR-FAULT-ASSIGNED-STDIO-CLOSED'];
+  const stdoutHelpers: typeof matchedFaultHelpers = []; report.stdoutHelpers = stdoutHelpers; const stdoutPairLabels=['ANCHOR-FAULT-ASSIGNED-STDOUT-SILENT','ANCHOR-FAULT-ASSIGNED-STDOUT-WRITE'];
+  const byteHelpers: typeof matchedFaultHelpers = []; report.byteHelpers=byteHelpers; const bytePairLabels=['ANCHOR-FAULT-ASSIGNED-BYTE-SILENT','ANCHOR-FAULT-ASSIGNED-BYTE-WRITE'];
   const zeroHelpers: typeof matchedFaultHelpers = []; report.zeroHelpers=zeroHelpers; const zeroPairLabels=['ANCHOR-FAULT-ASSIGNED-ZERO-SILENT','ANCHOR-FAULT-ASSIGNED-ZERO-WRITE'];
   const completedPairLabels=['ANCHOR-FAULT-ASSIGNED-PAIR-HELD','ANCHOR-FAULT-ASSIGNED-PAIR-RELEASED'];
   const livePairLabels=['ANCHOR-FAULT-ASSIGNED-LIVE-HELD','ANCHOR-FAULT-ASSIGNED-LIVE-RELEASED'];
   const legacyTimingLabels=['RETIRE-LIVE','RETIRE-EXITED','DIRECTORY-TWIN','ANCHOR-EXCLUSIVE','ANCHOR-HELD',...anchorFaults.map(f=>`ANCHOR-FAULT-${f.toUpperCase()}`)];
   const controls = join(state, 'target-creator-control'); mkdirSync(controls);
   const topologyProofs: unknown[] = []; report.targetCreatorTopology = topologyProofs;
-  const jobs = ['RED', 'A', 'B', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'THREAD-EXITED', 'THREAD-WAITING', 'TARGET-HELPER-HELD', 'RETIRE-LIVE', 'RETIRE-EXITED', 'DIRECTORY-TWIN', 'ANCHOR-EXCLUSIVE', 'ANCHOR-HELD', ...anchorFaults.map(f => `ANCHOR-FAULT-${f.toUpperCase()}`), ...completedPairLabels, ...livePairLabels, ...stdioPairLabels, ...stdoutPairLabels, ...zeroPairLabels].map(label => {
+  const jobs = ['RED', 'A', 'B', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'THREAD-EXITED', 'THREAD-WAITING', 'TARGET-HELPER-HELD', 'RETIRE-LIVE', 'RETIRE-EXITED', 'DIRECTORY-TWIN', 'ANCHOR-EXCLUSIVE', 'ANCHOR-HELD', ...anchorFaults.map(f => `ANCHOR-FAULT-${f.toUpperCase()}`), ...completedPairLabels, ...livePairLabels, ...stdioPairLabels, ...stdoutPairLabels, ...zeroPairLabels, ...bytePairLabels].map(label => {
     const root = join(state, label), project = join(root, 'project'), runtime = join(root, 'runtime'), home = join(root, 'home');
     const marker = `TASK_ROUTE_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
     return {label, root, project, runtime, home, marker, profile: `boite.debug.route.${crypto.randomUUID().replaceAll('-', '')}`};
@@ -81,7 +80,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   async function execute(id: string, args: string[], home = state, extra: Record<string, string | undefined> = {}, milliseconds?: number, spawned?: (pid:number)=>void) {
     const workerMode = args[0] === 'thread-exited-run' ? 'exited' : args[0] === 'thread-waiting-run' ? 'waiting' : null;
     const workerNonce = crypto.randomUUID().replaceAll('-', '');
-    const anchorMode = args[0] === 'anchor-exclusive-run' || args[0] === 'anchor-stdio-run' || args[0] === 'anchor-stdout-run' || args[0] === 'anchor-zero-run' ? 'exclusive' : args[0] === 'anchor-held-run' ? 'held' : null;
+    const anchorMode = args[0] === 'anchor-exclusive-run' || args[0] === 'anchor-stdio-run' || args[0] === 'anchor-stdout-run' || args[0] === 'anchor-zero-run' || args[0] === 'anchor-byte-run' ? 'exclusive' : args[0] === 'anchor-held-run' ? 'held' : null;
     const anchorFault = extra.BOITE_DIAGNOSTIC_ANCHOR_FAULT;
     const anchorProofs: unknown[] = [];
     if (anchorMode) anchorTopology.push({id, proofs: anchorProofs});
@@ -174,7 +173,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
           if (id === 'lpac-ANCHOR-FAULT-ASSIGNED-PAIR-HELD' || id === 'lpac-ANCHOR-FAULT-ASSIGNED-PAIR-RELEASED')
             matchedFaultHelpers.push({label:id.slice(5),fault:anchorFault,protocol:evidence});
           else if (livePairLabels.includes(id.slice(5))) liveMatchedHelpers.push({label:id.slice(5),fault:anchorFault,protocol:evidence});
-          else if(zeroPairLabels.includes(id.slice(5))) zeroHelpers.push({label:id.slice(5),fault:anchorFault,protocol:evidence});
+          else if(bytePairLabels.includes(id.slice(5))) byteHelpers.push({label:id.slice(5),fault:anchorFault,protocol:evidence}); else if(zeroPairLabels.includes(id.slice(5))) zeroHelpers.push({label:id.slice(5),fault:anchorFault,protocol:evidence});
           else if(stdoutPairLabels.includes(id.slice(5))) stdoutHelpers.push({label:id.slice(5),fault:anchorFault,protocol:evidence});
           else if(stdioPairLabels.includes(id.slice(5))) stdioHelpers.push({label:id.slice(5),fault:anchorFault,protocol:evidence});
           else anchorFaultControls.push({fault: anchorFault, protocol: evidence});
@@ -190,7 +189,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     writeFileSync(join(output!, `${id}.log`), `pid=${result.pid} exit=${result.code} timedOut=${result.timedOut}\n${result.out}${result.err}`);
     console.log(`${id}: ${JSON.stringify(result)}`); save(); return result;
   }
-  function run(job: typeof jobs[number], debug: boolean, mode?: 'direct-run' | 'setter-run' | 'quiet-run' | 'reopen-run' | 'creator-run' | 'retire-run' | 'retire-named-run' | 'target-exited-run' | 'target-waiting-run' | 'target-helper-exited-run' | 'thread-exited-run' | 'thread-waiting-run' | 'retire-live-run' | 'retire-exited-run' | 'directory-twin-run' | 'anchor-exclusive-run' | 'anchor-held-run' | 'anchor-stdio-run' | 'anchor-stdout-run' | 'anchor-zero-run', fault?: string, live?: {env:Record<string,string>;spawned(pid:number):void}) {
+  function run(job: typeof jobs[number], debug: boolean, mode?: 'direct-run' | 'setter-run' | 'quiet-run' | 'reopen-run' | 'creator-run' | 'retire-run' | 'retire-named-run' | 'target-exited-run' | 'target-waiting-run' | 'target-helper-exited-run' | 'thread-exited-run' | 'thread-waiting-run' | 'retire-live-run' | 'retire-exited-run' | 'directory-twin-run' | 'anchor-exclusive-run' | 'anchor-held-run' | 'anchor-stdio-run' | 'anchor-stdout-run' | 'anchor-zero-run' | 'anchor-byte-run', fault?: string, live?: {env:Record<string,string>;spawned(pid:number):void}) {
     const promise = execute(`lpac-${job.label}`, [mode ?? (debug ? 'debug-run' : 'run'), job.profile, job.project,
       join(job.runtime, 'inspect.exe'), 'inspect', '0', job.marker, ...(debug ? ['forward-check'] : [])], job.home,
       {PATH: `${job.runtime};${process.env.SystemRoot}\\System32`, ...(fault ? {BOITE_DIAGNOSTIC_ANCHOR_FAULT: fault} : {}), ...live?.env}, undefined, live?.spawned);
@@ -625,6 +624,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
         {labels:stdioPairLabels,harness:runStdioRootHarness<typeof jobs[number]>,mode:'anchor-stdio-run',prefix:'stdio-root',key:'stdioRootReference',evidence:stdioHelpers},
         {labels:stdoutPairLabels,harness:runStdoutHarness<typeof jobs[number]>,mode:'anchor-stdout-run',prefix:'stdout-root',key:'stdoutRootReference',evidence:stdoutHelpers},
         {labels:zeroPairLabels,harness:runZeroHarness<typeof jobs[number]>,mode:'anchor-zero-run',prefix:'zero-root',key:'zeroRootReference',evidence:zeroHelpers},
+        {labels:bytePairLabels,harness:runByteHarness<typeof jobs[number]>,mode:'anchor-byte-run',prefix:'byte-root',key:'byteRootReference',evidence:byteHelpers},
       ] as const)pairedTasks.push(async()=>{
         const directory=process.env.BOITE_ROOT_REFERENCE_DIRECTORY;if(!directory)throw Error('stdio private controller directory missing');
         const drainer=await ownedLiveRootDrainer(process.env.BOITE_ROOT_REFERENCE_COMPILER!,process.env.BOITE_ROOT_REFERENCE_NONCE!,directory,process.env.BOITE_DEBUG_MAP_TRACE!);

@@ -59,6 +59,7 @@ try {
     'stdio-root-fence.ts', 'live-fence-dispatch.ts', 'stdio-root-reference.ts', 'stdio-root-reference.test.ts', 'stdio-stream-cases.c', 'stdio-stream-cases.test.ts',
     'stdout-write-fence.ts', 'stdout-write-reference.ts', 'stdout-write-reference.test.ts', 'stdio-reference-fixture.ts',
     'stdout-zero-fence.ts', 'stdout-zero-reference.ts', 'stdout-zero-reference.test.ts',
+    'stdout-byte-fence.ts', 'stdout-byte-reference.ts', 'stdout-byte-reference.test.ts',
     'control-schedule.ts', 'control-schedule.test.ts',
     'anchor-access-cases.c', 'ownership-generate.ts', 'ownership-ledger.ts', 'ownership-trace.ts', 'ownership-summary.ts', 'ownership.test.ts', 'null-message.ts', 'null-message.test.ts']) {
     hashes[file] = sha256(readFileSync(join(import.meta.dir, file)));

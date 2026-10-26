@@ -7,13 +7,14 @@ function check(v:unknown,s:string):asserts v {if(!v)throw Error('stdout write re
 /** The inherited child output remains part of the capture. Reconstruct its
  * complete three-generation transcript from the exact job marker and PID chain;
  * no arbitrary prefix, extra line or suffix is ignored. */
-export function validateAssignedStdout(arm:LiveArmRecord,barrier:string,experiment:'stdout-write'|'stdout-zero'='stdout-write'):void {
+export function validateAssignedStdout(arm:LiveArmRecord,barrier:string,experiment:'stdout-write'|'stdout-zero'|'stdout-byte'='stdout-write'):void {
  const h=arm.helper!,marker=arm.stdoutMarker,r=arm.request;
  check(typeof marker==='string'&&marker.startsWith('TASK_ROUTE_ANCHOR-FAULT-'+r.label+'_')&&/^TASK_ROUTE_[A-Z-]+_[a-f0-9]{32}$/.test(marker)&&marker.length<=96,'exact launch marker');
- const zero=experiment==='stdout-zero';check(experiment==='stdout-write'||zero,'explicit transcript experiment');
- check(zero?['ASSIGNED-ZERO-SILENT','ASSIGNED-ZERO-WRITE'].includes(r.label):stdoutLabels.some(l=>l===r.label),'selected transcript labels');
- const write=!zero&&r.label===stdoutLabels[1],prefixName=zero?'zero':'stdout';
- const prefix=write?h.out.slice(0,-barrier.length-2):h.out;
+ const zero=experiment==='stdout-zero',byte=experiment==='stdout-byte';check(experiment==='stdout-write'||zero||byte,'explicit transcript experiment');
+ check(byte?['ASSIGNED-BYTE-SILENT','ASSIGNED-BYTE-WRITE'].includes(r.label):zero?['ASSIGNED-ZERO-SILENT','ASSIGNED-ZERO-WRITE'].includes(r.label):stdoutLabels.some(l=>l===r.label),'selected transcript labels');
+ const write=experiment==='stdout-write'&&r.label===stdoutLabels[1],suffix=byte&&r.label==='ASSIGNED-BYTE-WRITE'?'!':'',prefixName=byte?'byte':zero?'zero':'stdout';
+ check(!suffix||h.out.endsWith(suffix),'exact raw one-byte stdout suffix');
+ const prefix=write?h.out.slice(0,-barrier.length-2):suffix?h.out.slice(0,-1):h.out;
  check(write?h.out===prefix+barrier+'\r\n'&&!prefix.includes(prefixName+'-fence '):!h.out.includes(prefixName+'-fence '),'only WRITE emits one final stdout barrier');
  const escaped=marker.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
  const starts=[...prefix.matchAll(new RegExp('^inspect-start='+escaped+'\\.generation-([0-2]) pid=([1-9]\\d*)\\r$','gm'))];

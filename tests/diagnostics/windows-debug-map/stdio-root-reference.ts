@@ -16,7 +16,7 @@ export function validateStreamCapture(arm:LiveArmRecord,rows:ReturnType<LiveDepe
  check(Number.isSafeInteger(arm.captureFinishedAt)&&arm.captureFinishedAt!<r.deadline,'actual captured return before original deadline');
  const release=arm.helperRelease!,released=protocol.parse(Buffer.from(release.receipt.bytes,'base64'));
  validateAssignedFailure({request:r,helper:h,postHelper:arm.postHelper,priorCleanupPassed:arm.priorCleanupPassed!});
- validateFaultNativeEvidence(r,arm.held!.sample!,`pid=${h.pid} exit=${h.code} timedOut=${h.timedOut}\n${h.out}${h.err}`,rows);
+ validateFaultNativeEvidence(r,arm.held!.sample!,`pid=${h.pid} exit=${h.code} timedOut=${h.timedOut}\n${h.out}\n${h.err}`,rows);
  check(arm.priorCleanupPassed===false,'original fatal cleanup stays false');
  check(ret.phase===3&&JSON.stringify({...ret,phase:1,at:ready.at,acquired:1,closed:1})===JSON.stringify(ready),'exact native RETURN');
  check(released.phase===2&&JSON.stringify({...released,phase:1,at:ready.at})===JSON.stringify(ready)&&release.publishStartedAt===released.at&&release.publishFinishedAt>=released.at&&ret.at>=released.at&&ret.at<=arm.captureFinishedAt!,'ordered private release/RETURN');

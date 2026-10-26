@@ -105,7 +105,7 @@ export function prepareOwnership(directory: string): PreparedOwnership {
     [jobs]: sha256(generatedJobs), [worker]: sha256(generatedWorker),
     [preload]: sha256(readFileSync(preload)),
   };
-  for (const name of ['ownership-generate.ts', 'ownership-ledger.ts', 'ownership-trace.ts', 'target-topology-export.txt', 'helper-reference.ts', 'helper-reference-export.txt', 'fault-root-reference.ts', 'fault-root-reference-export.txt', 'live-root-fence.ts', 'live-root-drain.ts', 'live-root-drain-export.txt', 'live-fence-dispatch.ts', 'stdio-root-fence.ts', 'stdout-write-fence.ts', 'stdout-zero-fence.ts'])
+  for (const name of ['ownership-generate.ts', 'ownership-ledger.ts', 'ownership-trace.ts', 'target-topology-export.txt', 'helper-reference.ts', 'helper-reference-export.txt', 'fault-root-reference.ts', 'fault-root-reference-export.txt', 'live-root-fence.ts', 'live-root-drain.ts', 'live-root-drain-export.txt', 'live-fence-dispatch.ts', 'stdio-root-fence.ts', 'stdout-write-fence.ts', 'stdout-zero-fence.ts', 'stdout-byte-fence.ts'])
     hashes[join(import.meta.dir, name)] = sha256(readFileSync(join(import.meta.dir, name)));
   writeFileSync(join(directory, 'provenance.json'), JSON.stringify({jobsPath, workerPath, hashes}, null, 2) + '\n');
   return {directory, jobs, worker, preload, hashes};

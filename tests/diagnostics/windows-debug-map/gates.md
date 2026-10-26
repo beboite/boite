@@ -1503,6 +1503,58 @@ passes127 tests, one native skip, zero failures and2653 assertions; scoped
 typing and architecture pass. No isolated Windows schedule or budget result
 has been verified locally.
 
+## Isolated native result and one-byte raw stdout control
+
+Run40285568173 / job121448537661 executes8025e955. Parent reconciliation
+matches89 manifest hashes and20 owner provenances. All five paired families
+complete under both SDK and MinGW within their original bounds. Forty-eight
+private frames and192 observations reconcile with raw files and exact tracked
+thread/PID/creation identities. All81 legacy fatal entries remain; each compiler
+has87 failures. Registered references close2652/2652 for SDK and2659/2659 for
+MinGW; transfers1960/1960 and1967/1967 reconcile. The protected-tools production
+gate still fails0/7 at NUL error5; later Windows provider/core suites are skipped.
+
+The completed-helper pair retains HELD and removes RELEASED after the exact
+owned root close. The live pair retains both. STDIO removes both, while the
+stdout marker pair retains SILENT and removes WRITE. The zero-byte pair retains
+both despite successful zero-byte API calls in each compiler. Its twelve held
+baselines and twelve comparisons validate; the successful call has no observed
+retirement effect in these windows. Live/stream post-helper names disappear;
+completed-pair post-helper observations precede controlled launcher release and
+still retain their retired names. Isolation yields admissible comparisons here;
+it does not prove the internal cause of the earlier scheduling delay or the map
+retention. The stdout contrast remains limited to these matched diagnostics.
+
+An additional BYTE pair compares silence against one synchronous native
+WriteFile on the exact original stdout handle, with one ASCII exclamation byte.
+Both arms keep every original stream open, use the same CRT preflight, common
+stderr marker and output flushes, then the existing private protocol. The WRITE
+call follows those flushes and precedes READY; there is no CRT stdout write.
+Distinct424-byte receipts authenticate the actual BOOL, transferred1/error0 and
+timestamp through READY, release and RETURN. SILENT records no call. Captured
+stdout must be the exact original three-generation inspect transcript, followed
+by precisely one exclamation byte only for WRITE. Raw captures remain unchanged;
+the topology validation view inserts a newline between separate stdout/stderr
+streams because the new raw byte has no newline.
+
+The existing owners, reportExit close path, fresh harness drain and both-released
+strategy apply through explicit BYTE admission. The new consumed fence enters
+owner provenance. The sixth pair joins after the five existing lazy pairs; its
+two arms remain concurrent. No original assertion, scenario, permission or bound
+changes, including3s windows,15s root and150s routing timeout. No production
+source changes. This tests one native byte separately from CRT conversion and
+the longer stdout marker; its effect and native budget remain unverified.
+
+Local regression rejects the new experiment before implementation, then passes
+the actual codec, generated owner export, private transport and controller.
+The compiled verbatim stream guard accepts count1/payload exclamation and rejects
+count0 or a different character after successful compilation. Failed/partial
+calls, stale sentinels, altered metadata, suffixes and identities remain refused.
+The complete Bun1.4.3 suite passes133 tests, one native skip, zero failures and
+2942 assertions; scoped types and architecture pass. Current validators replay
+all48 archived232/400/424-byte frames,12 stream captures and48 owner proofs.
+Windows, SDK, native timing and the internal mechanism are not verified locally.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:

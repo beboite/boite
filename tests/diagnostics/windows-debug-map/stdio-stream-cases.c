@@ -3,6 +3,7 @@
 #include <string.h>
 #include <wchar.h>
 typedef unsigned char BYTE;typedef uint32_t DWORD;typedef int32_t LONG;typedef uint64_t ULONGLONG;typedef uintptr_t ULONG_PTR;typedef int BOOL;typedef void *HANDLE;
+#define TRUE 1
 #define ERROR_INVALID_DATA 13
 #define ERROR_INVALID_HANDLE 6
 #define ERROR_WRITE_FAULT 29
@@ -25,8 +26,8 @@ static intptr_t _get_osfhandle(int fd){return mode==3&&fd==0?999:100+fd;}
 static DWORD GetFileType(HANDLE h){(void)h;return mode==4?1:3;}
 static BOOL GetHandleInformation(HANDLE h,DWORD *flags){int i=(int)(uintptr_t)h-100;*flags=0;if(mode==8)return 0;if(i>=0&&i<3&&closed[i]&&mode!=7){last_error=6;return 0;}return 1;}
 static DWORD GetLastError(void){last_error_reads++;return (DWORD)last_error;}
-BOOL WriteFile(HANDLE h,const void *buffer,DWORD bytes,DWORD *used,void *overlapped){raw_calls++;operations[operation_count++]='w';if(h!=(HANDLE)(uintptr_t)101||!buffer||bytes!=0||overlapped)raw_bad=1;
- if(mode==9){*used=0;last_error=5;return 0;}if(mode==10){*used=1;return 1;}if(mode!=11)*used=0;return 1;}
+BOOL WriteFile(HANDLE h,const void *buffer,DWORD bytes,DWORD *used,void *overlapped){raw_calls++;operations[operation_count++]='w';if(h!=(HANDLE)(uintptr_t)101||!buffer||bytes!=(DWORD)(mode>=12?1:0)||overlapped||(mode>=12&&*(const BYTE*)buffer!='!'))raw_bad=1;
+ if(mode==9){*used=0;last_error=5;return 0;}if(mode==10){*used=1;return 1;}if(mode==16){*used=1;return 2;}if(mode==13){*used=0;return 1;}if(mode==14)return 1;if(mode==15){*used=0;last_error=5;return 0;}if(mode!=11)*used=mode>=12?1:0;return 1;}
 static ULONGLONG ownership_wall_ms(void){return (ULONGLONG)(1000+nclose);}
 static int emit(const wchar_t *s,FILE *f){(void)s;operations[operation_count++]=(char)('a'+index_of(f));nwrite++;return 0;}
 static int flush(FILE *f){int i=index_of(f);operations[operation_count++]=(char)('x'+i);flushes[i]++;return mode==5&&i==1?-1:0;}
@@ -64,7 +65,7 @@ int main(void){
   CHECK("stdout only flushes output",flushes[0]==0&&flushes[1]==1&&flushes[2]==1);
   for(int i=0;i<3;i++)CHECK("stdout never records a closure",f.streams[i].close_attempted==0&&f.streams[i].invalid==0&&f.streams[i].invalid_error==0&&f.streams[i].close_at==0);
  }
- reset(0);SF_FRAME invalid={0};invalid.base.role=1;CHECK("unknown experiment never writes",sf_streams(&invalid,L"barrier\n",3)!=0&&nwrite==0&&nclose==0);
+ reset(0);SF_FRAME invalid={0};invalid.base.role=1;CHECK("unknown experiment never writes",sf_streams(&invalid,L"barrier\n",4)!=0&&nwrite==0&&nclose==0);
  for(int role=1;role<=2;role++){reset(0);SF_FRAME f={0};SF_ZERO zero={0};f.base.role=(DWORD)role;last_error=123;
   CHECK("zero selected native path succeeds",sf_prepare_streams(&f,&zero,L"barrier\n",2)==0);
   CHECK("zero selected write actually called once",raw_calls==(role==2?1:0));
@@ -80,6 +81,19 @@ int main(void){
   if(bad==9)CHECK("zero failed BOOL preserves native error",zero.attempted==1&&zero.result==0&&zero.error==5&&zero.transferred==0&&last_error_reads==1);
   if(bad==10)CHECK("zero nonzero transfer preserved",zero.result==1&&zero.transferred==1);
   if(bad==11)CHECK("zero untouched sentinel refused",zero.result==1&&zero.transferred==0xffffffff);
+ }
+ for(int role=1;role<=2;role++){reset(12);SF_FRAME f={0};SF_ZERO call={0};f.base.role=(DWORD)role;last_error=123;
+  CHECK("byte actual native path succeeds",sf_prepare_streams(&f,&call,L"barrier\n",3)==0);
+  CHECK("byte exact original stdout valid exclamation count one synchronous",raw_bad==0&&raw_calls==(role==2?1:0));
+  CHECK("byte common stderr and flush before raw write",!strcmp(operations,role==1?"cyz":"cyzw"));
+  CHECK("byte never closes originals",nclose==0&&attempts[0]==0&&attempts[1]==0&&attempts[2]==0);
+  CHECK("byte authentic BOOL count and timestamp",role==1?(call.attempted==0&&call.result==0&&call.transferred==0&&call.error==0&&call.at==0):(call.attempted==1&&call.result==1&&call.transferred==1&&call.error==0&&call.at==1000));
+  CHECK("byte success does not read stale last error",last_error_reads==0);
+ }
+ for(int bad=13;bad<=16;bad++){reset(bad);SF_FRAME f={0};SF_ZERO call={0};f.base.role=2;
+  CHECK("byte partial untouched sentinel or failed call refused",sf_prepare_streams(&f,&call,L"barrier\n",3)!=0);
+  CHECK("byte refusal never retries or closes",raw_calls==1&&raw_bad==0&&nclose==0);
+  CHECK("byte failed BOOL preserves error",bad!=15||(call.result==0&&call.error==5&&last_error_reads==1));
  }
  printf("STDIO_STREAM_GUARDS_PASS cases=%d native=false\n",cases);return 0;
 }
