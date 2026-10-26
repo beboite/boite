@@ -389,13 +389,16 @@ export class SecretStore {
     }
     const ids = new Set([...this.index.data.transit, ...this.index.data.kept].map(entry => entry.id));
     for (const id of (await vault.ids?.()) ?? []) ids.add(id);
+    const failures: unknown[] = [];
     for (const id of ids) {
-      await vault.delete(id);
+      try { await vault.delete(id); }
+      catch (error) { failures.push(error); continue; }
       this.index.update(data => {
         data.transit = data.transit.filter(entry => entry.id !== id);
         data.kept = data.kept.filter(entry => entry.id !== id);
       });
     }
+    if (failures.length > 0) throw failures[0];
     this.index.update(data => { data.version = 2; });
     if (ids.size > 0) this.core.logs.info(`Erased ${ids.size} legacy secrets`, { source: 'secrets', event: 'secret.swept', data: { erased: ids.size } });
   }

@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,6 +6,7 @@ import { startTestCore, echoThread, removeDir, waitFor, type TestCore } from './
 import { holdTurn, openCard, saveSecret, secretValue, SpyVault, stopTurn } from './secret-fixture.ts';
 import { thrown } from './settle.ts';
 import { DpapiVault } from '../src/platform/windows/dpapi-vault.ts';
+import { KeychainVault, SecretServiceVault } from '../src/platform/posix-vault.ts';
 
 let h: TestCore;
 afterEach(async () => { await h?.stop(); });
@@ -89,24 +90,38 @@ test('legacy project keys and transit copies are erased at startup without readi
 test('a failed legacy deletion keeps its cleanup record and retries without exposing or reusing the key', async () => {
   let unavailable = true;
   let attempts = 0;
-  h = await startTestCore({ secretVault: async () => ({
-    kind: 'keychain', persistent: true,
-    delete: async () => { attempts += 1; if (unavailable) throw new Error('keyring locked'); },
-  }) });
+  h = await startTestCore({ secretVault: async () => new SecretServiceVault() });
   const owner = await h.connect();
   const { threadId } = await echoThread(h, owner);
   const projectId = h.core.threads.get(threadId).projectId!;
   h.core.secrets.index.update(data => {
     data.version = 1;
-    data.kept.push({ id: 'key_retry12345678', projectId, name: 'API_KEY', createdAt: Date.now(), lastUsedAt: null });
+    for (const id of ['key_retry12345678', 'key_other12345678']) {
+      data.kept.push({ id, projectId, name: 'API_KEY', createdAt: Date.now(), lastUsedAt: null });
+    }
   });
-  expect(await thrown(h.core.secrets.sweep(false))).toThrow('keyring locked');
-  expect(h.core.secrets.index.data.kept).toHaveLength(1);
-  expect((await owner.call('secrets.list', { projectId })).secrets).toEqual([]);
-  unavailable = false;
-  await h.core.secrets.sweep(false);
-  expect(attempts).toBe(2);
-  expect(h.core.secrets.index.data).toMatchObject({ version: 2, kept: [], transit: [] });
+  const spawn = Bun.spawn;
+  const helper = spyOn(Bun, 'spawn').mockImplementation(((...args: unknown[]) => {
+    const options = args[0] as { cmd?: string[] };
+    if (options?.cmd?.[0] === 'secret-tool' || options?.cmd?.[0] === 'security') {
+      const linux = options.cmd[0] === 'secret-tool';
+      if (linux) attempts += 1;
+      // Neither native helper runs: a locked Linux keyring exits silently; macOS reports a missing item.
+      const code = linux ? (unavailable && options.cmd.at(-1) === 'key_retry12345678' ? 1 : 0) : 44;
+      return Reflect.apply(spawn, Bun, [{ ...options, cmd: [process.execPath, '-e', `process.exit(${code})`] }]);
+    }
+    return Reflect.apply(spawn, Bun, args);
+  }) as typeof Bun.spawn);
+  try {
+    expect(await thrown(h.core.secrets.sweep(false))).toThrow('secret-tool could not erase a legacy secret (exit 1)');
+    expect(h.core.secrets.index.data).toMatchObject({ version: 1, kept: [{ id: 'key_retry12345678' }] });
+    expect((await owner.call('secrets.list', { projectId })).secrets).toEqual([]);
+    await new KeychainVault().delete('key_missing12345678');
+    unavailable = false;
+    await h.core.secrets.sweep(false);
+    expect(attempts).toBe(3);
+    expect(h.core.secrets.index.data).toMatchObject({ version: 2, kept: [], transit: [] });
+  } finally { helper.mockRestore(); }
 });
 
 test('legacy Windows blobs are deleted without decryption and unrelated files remain', async () => {

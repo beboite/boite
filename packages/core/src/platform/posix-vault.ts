@@ -4,13 +4,13 @@ import type { SecretVault } from './types.ts';
 const SERVICE = 'boite-secret';
 const TOOL_TIMEOUT_MS = 15_000;
 
-async function erase(cmd: string[], missingCode: number): Promise<void> {
+async function erase(cmd: string[], missingCode?: number): Promise<void> {
   const child = Bun.spawn({ cmd, stdin: 'ignore', stdout: 'ignore', stderr: 'pipe' });
   const timer = setTimeout(() => child.kill(), TOOL_TIMEOUT_MS);
   try {
-    const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
-    // secret-tool returns 1 for no match, but also for D-Bus/keyring failures (which explain on stderr).
-    if (code === 0 || (code === missingCode && (missingCode === 44 || stderr.trim() === ''))) return;
+    const [code] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    // An absent Keychain item is already erased; secret-tool has no separate missing-entry status.
+    if (code === 0 || code === missingCode) return;
     throw new Error(`${cmd[0]} could not erase a legacy secret (exit ${code}); cleanup will retry`);
   } finally {
     clearTimeout(timer);
@@ -34,6 +34,6 @@ export class SecretServiceVault implements SecretVault {
   readonly kind = 'libsecret' as const;
   readonly persistent = true;
   async delete(id: string): Promise<void> {
-    await erase(['secret-tool', 'clear', 'service', SERVICE, 'id', checkId(id)], 1);
+    await erase(['secret-tool', 'clear', 'service', SERVICE, 'id', checkId(id)]);
   }
 }
