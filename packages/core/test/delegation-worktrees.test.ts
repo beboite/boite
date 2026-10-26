@@ -1,9 +1,10 @@
-import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { afterEach, expect, spyOn, test } from 'bun:test';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_DELEGATION_CONFIG, checkSteps } from '@boite/contracts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
+import type { SpawnedProcess } from '../src/procs.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
 import { makeAgent } from './agent-fixture.ts';
@@ -151,4 +152,94 @@ test('a workflow step with worktree runs on its own branch and the summary names
   await waitFor(() => s.parentPrompts.some(prompt => prompt.includes('Boite workflow done')), SLOW_GIT_MS);
   // The summary is JSON: a Windows path's backslashes arrive escaped.
   expect(s.parentPrompts.find(prompt => prompt.includes('Boite workflow done'))).toContain(JSON.stringify(`Worktree kept: ${inst.worktree!.path} on branch ${inst.worktree!.branch}`).slice(1, -1));
+}, 90_000);
+
+test.each(['partial checkout', 'branch only', 'reserved ref', 'foreign ref'])('a child stopped after worktree registration preserves %s on the next instruction', async leftover => {
+  const filesAtDriver: string[][] = [];
+  const s = await setup(ctx => {
+    filesAtDriver.push(['first.txt', 'nested/second.txt'].map(file => readFileSync(join(ctx.thread.cwd, file), 'utf8')));
+    // Keep the recovered checkout so its preserved files remain observable after settlement.
+    writeFileSync(join(ctx.thread.cwd, 'notes.txt'), 'keep this work\n');
+  });
+  writeFileSync(join(s.repo, 'first.txt'), 'first tracked file\n');
+  mkdirSync(join(s.repo, 'nested'));
+  writeFileSync(join(s.repo, 'nested/second.txt'), 'second tracked file\n');
+  git(s.repo, 'add', '.'); git(s.repo, 'commit', '-q', '-m', 'tracked fixture');
+  const base = git(s.repo, 'rev-parse', 'HEAD');
+  const ready = join(s.h.dataDir, 'partial-worktree-ready');
+  const release = join(s.h.dataDir, 'release-partial-worktree');
+  const spawn = s.h.core.procs.spawn.bind(s.h.core.procs);
+  let partial: SpawnedProcess | undefined;
+  const intercepted = spyOn(s.h.core.procs, 'spawn').mockImplementation((id, cmd, args, options) => {
+    const add = args.indexOf('worktree');
+    const target = leftover === 'reserved ref' ? args[0] === 'update-ref' : add >= 0 && args[add + 1] === 'add';
+    if (partial || cmd !== 'git' || !target) return spawn(id, cmd, args, options);
+    // Real ref and checkout registration, but no tracked files yet: the point where
+    // a terminated checkout can leave its branch behind. Only the barrier is synthetic.
+    const noCheckout = [...args];
+    if (leftover !== 'reserved ref') noCheckout.splice(add + 2, 0, '--no-checkout');
+    partial = spawn(id, process.execPath, ['-e', `
+      const { existsSync, writeFileSync } = require('node:fs');
+      const result = Bun.spawnSync({cmd: ['git', ...${JSON.stringify(noCheckout)}], cwd: ${JSON.stringify(s.repo)}, stdout: 'pipe', stderr: 'pipe', windowsHide: true});
+      if (!result.success) { console.error(result.stderr.toString()); process.exit(7); }
+      ${leftover === 'branch only' ? `
+        const removed = Bun.spawnSync({cmd: ['git', 'worktree', 'remove', '--force', ${JSON.stringify(s.h.core.delegation.worktrees.get(id)!.path)}], cwd: ${JSON.stringify(s.repo)}, stdout: 'pipe', stderr: 'pipe', windowsHide: true});
+        if (!removed.success) { console.error(removed.stderr.toString()); process.exit(8); }
+      ` : ''}
+      writeFileSync(${JSON.stringify(ready)}, 'registered');
+      setInterval(() => { if (existsSync(${JSON.stringify(release)})) process.exit(0); }, 5);
+    `], options);
+    return partial;
+  });
+  const checkpoints = spyOn(s.h.core.threads.codeCheckpoints, 'begin');
+  try {
+    const child = await s.client.call('delegation.spawn', { threadId: s.threadId, task: 'Accepted before checkout', worktree: true, requestId: 'interrupted-checkout' });
+    const id = child.thread.id, { path, branch } = child.worktree!;
+    await waitFor(() => existsSync(ready), SLOW_GIT_MS);
+    expect(branchExists(s.repo, branch)).toBe(true);
+    expect(git(s.repo, 'worktree', 'list', '--porcelain').includes(`branch refs/heads/${branch}`)).toBe(leftover !== 'branch only' && leftover !== 'reserved ref');
+    expect(existsSync(join(path, 'first.txt'))).toBe(false);
+    const first = s.h.core.journal.runningTurn(id)!;
+    expect(await s.client.call('turns.stop', { threadId: id })).toEqual({ stopped: true });
+    expect(await partial!.exited).not.toBe(0);
+    await waitFor(() => s.results().length === 1, SLOW_GIT_MS);
+    expect(s.h.core.journal.getTurn(first.id)?.status).toBe('stopped');
+    expect(filesAtDriver).toEqual([]);
+    expect(checkpoints.mock.calls.filter(([thread]) => thread.id === id)).toHaveLength(0);
+    expect(s.h.core.journal.listMessages(id).some(message => message.turnId === first.id
+      && message.parts.some(part => part.type === 'text' && part.text.includes('Accepted before checkout')))).toBe(true);
+    expect(s.h.core.procs.liveCount(id)).toBe(0);
+    // Files created while preparation was paused must survive the recovery too.
+    if (leftover !== 'branch only' && leftover !== 'reserved ref') {
+      writeFileSync(join(path, 'first.txt'), 'useful edit before recovery\n');
+      writeFileSync(join(path, 'untracked.txt'), 'preserve this note\n');
+    }
+    let foreign: string | undefined;
+    if (leftover === 'foreign ref') {
+      git(s.repo, 'commit', '-q', '--allow-empty', '-m', 'another actor owns this commit');
+      foreign = git(s.repo, 'rev-parse', 'HEAD');
+      git(s.repo, 'update-ref', '-m', 'foreign replacement', `refs/heads/${branch}`, foreign, base);
+    }
+    await s.client.call('delegation.send', { threadId: s.threadId, toThreadId: id, text: 'Complete the checkout and continue', requestId: 'resume-checkout' });
+    await waitFor(() => s.results().length === 2, SLOW_GIT_MS);
+    const next = s.h.core.journal.listTurns(id).at(-1)!;
+    if (foreign) {
+      expect(next.status).toBe('error');
+      expect(next.error).toContain('expected a branch reserved by');
+      expect(filesAtDriver).toEqual([]);
+      expect(git(s.repo, 'rev-parse', `refs/heads/${branch}`)).toBe(foreign);
+      expect(readFileSync(join(path, 'first.txt'), 'utf8')).toBe('useful edit before recovery\n');
+    } else {
+      expect(next).toMatchObject({ status: 'done', error: null });
+      expect(filesAtDriver).toEqual([[leftover === 'branch only' || leftover === 'reserved ref' ? 'first tracked file\n' : 'useful edit before recovery\n', 'second tracked file\n']]);
+      expect(git(path, 'rev-parse', 'HEAD')).toBe(base);
+      expect(s.h.core.delegation.worktrees.get(id)).toMatchObject({ state: 'kept', base, dirty: true });
+    }
+    if (leftover !== 'branch only' && leftover !== 'reserved ref') expect(readFileSync(join(path, 'untracked.txt'), 'utf8')).toBe('preserve this note\n');
+  } finally {
+    writeFileSync(release, 'finish');
+    await partial?.exited;
+    await waitFor(() => s.h.core.scheduler.state().running.length === 0, SLOW_GIT_MS);
+    checkpoints.mockRestore(); intercepted.mockRestore();
+  }
 }, 90_000);

@@ -161,7 +161,7 @@ export type DelegationInput =
 export interface DelegationWorktree {
   branch: string;
   path: string;
-  /** The commit it branched from; null while pending. */
+  /** The reserved base commit; null until preparation reaches its first mutation. */
   base: string | null;
   state: 'pending' | 'active' | 'kept' | 'removed';
   /** Commits on the branch beyond `base` when it was last settled. */

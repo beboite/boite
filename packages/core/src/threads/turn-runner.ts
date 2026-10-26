@@ -2,7 +2,7 @@ import type { PermissionMode, ProviderId, ThreadId, ThreadRetry, ThreadSummary, 
 import type { Core } from '../core.ts';
 import { getDriver, releaseThread } from '../drivers/index.ts';
 import type { TurnResult } from '../drivers/types.ts';
-import { messageOf } from '../errors.ts';
+import { messageOf, refused } from '../errors.ts';
 import { logMessageOf } from '../log-errors.ts';
 import { reportSettlementError, settleTurn } from './turn-settlement.ts';
 import type { ThreadStore } from '../threads.ts';
@@ -106,7 +106,9 @@ export class TurnRunner {
       })());
       started = true;
       // A delegated agent with a worktree of its own: made from its parent's HEAD before the agent starts in it.
-      const entering = this.core.delegation.worktrees.enter(threadId);
+      const entering = this.core.delegation.worktrees.enter(threadId, () => {
+        if (this.attempts.preparationStopped(threadId)) throw refused('worktree preparation was stopped');
+      });
       if (entering) await entering;
       this.core.workforce.resident.assertThreadRoute(threadId, state.thread);
       const provider = this.core.providers.require(state.thread.providerId);

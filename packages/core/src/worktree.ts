@@ -43,7 +43,7 @@ export interface PlacedWorktree {
 interface WorktreePreparation {
   beforeMutation: (placed: PlacedWorktree) => (() => void) | void;
   assertActive: () => void;
-  timeoutMs: number;
+  timeoutMs?: number;
 }
 
 /**
@@ -105,6 +105,42 @@ export class Worktrees {
     return this.add(threadId, project, branch, path);
   }
 
+  /** Finish only a pending checkout whose ref was atomically reserved by this thread. */
+  async resumePreparation(threadId: ThreadId, project: Project, branch: string, path: string, assertActive: () => void): Promise<void> {
+    assertActive();
+    const owner = await this.git(threadId, project.path, ['reflog', 'show', '-1', '--format=%gs', `refs/heads/${branch}`]);
+    assertActive();
+    if (owner.code !== 0 || owner.stdout.trim() !== draftBranchOwner(threadId)) {
+      throw refused(`cannot resume ${branch}: expected a branch reserved by ${threadId}`, { branch, path });
+    }
+    if (!existsSync(path)) await this.ensure(threadId, project, branch, path);
+    assertActive();
+    if (await this.checkoutBranch(threadId, project.path, path) !== branch) {
+      throw refused(`cannot resume ${branch}: ${path} is not its registered checkout`, { branch, path });
+    }
+    assertActive();
+    const index = await this.git(threadId, path, ['rev-parse', '--git-path', 'index']);
+    if (index.code !== 0) throw refused(`cannot locate the index of ${path}: ${index.stderr.trim()}`);
+    assertActive();
+    if (!existsSync(resolve(path, index.stdout.trim()))) {
+      // Git writes its index after checkout. A killed add may leave only its ref
+      // and registration. Populate that missing index without touching any file.
+      const read = await this.git(threadId, path, ['read-tree', 'HEAD']);
+      if (read.code !== 0) throw refused(`cannot restore the index of ${path}: ${read.stderr.trim()}`);
+    }
+    assertActive();
+    const missing = await this.git(threadId, path, ['ls-files', '--deleted', '-z']);
+    if (missing.code !== 0) throw refused(`cannot inspect missing files in ${path}: ${missing.stderr.trim()}`);
+    assertActive();
+    if (missing.stdout) {
+      // No --force: complete only absent indexed paths, preserving existing edits,
+      // notes and staged changes. NUL-delimited stdin also handles long Windows lists.
+      const checkout = await this.git(threadId, path, ['checkout-index', '-z', '--stdin'], undefined, missing.stdout);
+      if (checkout.code !== 0) throw refused(`cannot finish the checkout of ${path}: ${checkout.stderr.trim()}`);
+      assertActive();
+    }
+  }
+
   /** `base` is the commit the new branch starts from; left out, the project's HEAD. */
   async add(threadId: ThreadId, project: Project, wanted?: string, recordedPath?: string, preparation?: WorktreePreparation, base?: string): Promise<PlacedWorktree> {
     preparation?.assertActive();
@@ -153,8 +189,10 @@ export class Worktrees {
         // Creating the ref and its ownership reflog is atomic. A failed compare-and-swap
         // cannot confer ownership of a branch created concurrently by another actor.
         const created = await this.git(threadId, project.path,
-          ['update-ref', '--create-reflog', '-m', draftBranchOwner(threadId), `refs/heads/${branch}`, 'HEAD', ''], preparation.timeoutMs);
+          ['update-ref', '--create-reflog', '-m', draftBranchOwner(threadId), `refs/heads/${branch}`, base ?? 'HEAD', ''], preparation.timeoutMs);
         if (created.code !== 0) {
+          // A stopped Git may have committed the ref before its exit was observed.
+          preparation.assertActive();
           abandon?.();
           throw refused(`cannot reserve branch ${branch}: ${created.stderr.trim()}`, { branch, path });
         }
@@ -303,10 +341,16 @@ export class Worktrees {
     } catch (error) { throw refused(`cannot exclude worktrees in ${file}: ${messageOf(error)}`); }
   }
 
-  private async git(threadId: ThreadId, cwd: string, args: string[], timeoutMs?: number): Promise<{ code: number; stderr: string; stdout: string }> {
+  private async git(threadId: ThreadId, cwd: string, args: string[], timeoutMs?: number, input?: string): Promise<{ code: number; stderr: string; stdout: string }> {
     let spawned;
     try {
-      spawned = this.core.procs.spawn(threadId, 'git', args, { cwd });
+      if (input === undefined) spawned = this.core.procs.spawn(threadId, 'git', args, { cwd });
+      else {
+        const piped = this.core.procs.spawnPiped(threadId, 'git', args, { cwd });
+        piped.proc.stdin.write(input);
+        piped.proc.stdin.end();
+        spawned = piped;
+      }
     } catch (error) {
       throw refused(`git did not start (${messageOf(error)}): a worktree needs git on PATH`, { cwd, args });
     }

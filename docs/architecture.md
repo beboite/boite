@@ -275,6 +275,11 @@ delegated worktree. A stop received there is retained through setup and settles
 the turn as stopped before its first code checkpoint or native preparation.
 If Stop kills a preparation process and worktree entry rejects, the turn still
 ends stopped. A preparation failure without an accepted Stop remains an error.
+A delegated worktree records its base before mutation and reserves its ref with
+an atomic ownership reflog, as draft preparation does. A pending retry accepts
+only that owned ref and its registered path, rebuilding a missing index and
+checking out absent indexed files without overwriting existing edits or notes.
+A changed ref remains untouched and is refused instead of adopted.
 The accepted input remains in history, and the next turn starts normally.
 
 After an unplanned restart, an ordinary queued prompt that never started stays
