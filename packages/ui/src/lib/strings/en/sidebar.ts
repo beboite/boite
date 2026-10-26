@@ -81,6 +81,8 @@ export const strings = {
     projectMenu: 'Project actions',
     copyPath: 'Copy path',
     manageProject: 'Manage project',
+    renameProject: 'Rename project',
+    projectName: 'Project name',
     worktreeDefault: 'Worktree by default',
     autoArchiveMergedPr: 'Hide merged PR conversations',
     autoRemoveWorktrees: 'Remove settled worktrees',
