@@ -6,6 +6,7 @@ import {thrown} from '../../../packages/core/test/settle.ts';
 import {observeHelperJob, parseHold, populatedProof, releasedProof, observation, type HoldFrame, type RootProof, type JobAccounting} from './helper-job.ts';
 import type {Membership} from './target-topology.ts';
 import type {Captured} from './capture.ts';
+import {HelperReferenceSlot, type ReferenceAnchor} from './helper-reference.ts';
 const helper = {pid: 11, created: '100'}, creator = {pid: 22, created: '200'}, root = {pid: 33, created: '300'};
 const proof: RootProof = {request: {version: 1, phase: 'root', nonce: '01'.repeat(16), waiting: true, helper, creator, root},
   proof: ['launcher', 'harness'].flatMap(owner => [helper, creator, root].map(p => ({...p, owner, role: `${owner}-main`,
@@ -115,4 +116,81 @@ test('early release and a missed populated-observation deadline cannot produce a
     expect(await thrown(observeHelperJob(options))).toThrow('deadline');
     expect(existsSync(`${options.prefix}.hold.release`)).toBe(false);
   });
+});
+
+function referenceFixture(options: Parameters<typeof observeHelperJob>[0], delay = 0, failedClose = false) {
+  const file = join(options.trace, 'harness-main.jsonl');
+  const rows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line))
+    .filter(r => !(r.event === 'close-result' && r.id === 'harness/11'));
+  const save = () => writeFileSync(file, rows.map(r => JSON.stringify(r)).join('\n') + '\n');
+  save(); let closes = 0, owned = true, exitCode = 259;
+  const anchor: ReferenceAnchor = {nonce: proof.request.nonce, helper, owner: 'harness', id: 'harness/11', handle: 8,
+    threadId: live.threadId, threadJob: live.threadJob, jobKey: 4, globalJob: live.globalJob, nestingRefused: false, deadline: Date.now() + 30000};
+  const slot = new HelperReferenceSlot({owner: 'harness', role: 'harness-main',
+    reference: () => owned ? {entry: {id: anchor.id, handle: 8, pid: 11, incarnation: '100', from: 'harness', stage: 'tracked'},
+      identity: {pid: 11, incarnation: '100', exitCode}, complete: true} : undefined,
+    event: e => {rows.push({...e, owner: 'harness', role: 'harness-main'}); save();},
+    close: (_handle, id) => {
+      closes++; owned = false;
+      rows.push({event: 'close-result', owner: 'harness', role: 'harness-main', id, success: !failedClose, error: failedClose ? 6 : 0}); save();
+      return {id, success: !failedClose, error: failedClose ? 6 : 0, wallMs: Date.now()};
+    }});
+  slot.arm(anchor, proof.proof.find(p => p.role === 'harness-main' && p.pid === helper.pid)!);
+  const transfer = () => {exitCode = 125; expect(slot.retain(8, 11, '100', live.threadId, 125, anchor)).toBe(true);};
+  const timer = delay ? setTimeout(transfer, delay) : undefined; if (!delay) transfer();
+  options.reference = {arm: () => {throw new Error('already armed before root release');}, bound: d => slot.bound(d),
+    pending: () => slot.pending(), sample: () => slot.sample(), close: () => slot.close(), cleanup: () => slot.cleanup()};
+  return {slot, rows, save, closes: () => closes, stop: () => {if (timer) clearTimeout(timer); slot.cleanup();}};
+}
+
+test('real held protocol waits for late reportExit, observes twice held, closes once, then releases creator', async () => {
+  await fixture(async (options, release) => {
+    const ref = referenceFixture(options, 20), observed: string[] = [];
+    const observer = options.observe;
+    options.observe = async (path, phase, index, limit) => {
+      observed.push(phase);
+      if (phase.startsWith('held')) expect(ref.closes()).toBe(0);
+      else expect(ref.closes()).toBe(1);
+      if (phase !== 'empty') expect(existsSync(`${options.prefix}.hold.release`)).toBe(false);
+      return observer(path, phase, index, limit);
+    };
+    const timer = setInterval(() => {if (existsSync(`${options.prefix}.hold.release`)) release();}, 5);
+    try {
+      await observeHelperJob(options);
+      expect(options.record.protocolValid).toBe(true); expect(options.record.causeConfirmed).toBe(false);
+      expect(options.record.productionAccepted).toBe(false);
+      expect(observed).toEqual(['held-0', 'held-0', 'held-1', 'held-1', 'populated', 'populated', 'empty', 'empty']);
+      expect(options.record.held).toHaveLength(4); expect(options.record.populated).toHaveLength(2);
+      expect(options.record.referenceClose).toMatchObject({success: true, reason: 'observed'});
+      expect(ref.closes()).toBe(1);
+    } finally {clearInterval(timer); ref.stop();}
+  });
+});
+
+test('held controller rejects missing other-registry closure, actual close failure, early close, changed job/live creator and deadline', async () => {
+  for (const fault of ['missing-closure', 'failed-close', 'early-close', 'job', 'creator', 'deadline']) {
+    await fixture(async options => {
+      const ref = referenceFixture(options, 0, fault === 'failed-close');
+      if (fault === 'missing-closure') {
+        const at = ref.rows.findIndex(r => r.event === 'close-result' && r.id === 'launcher/11'); ref.rows.splice(at, 1); ref.save();
+      }
+      if (fault === 'missing-closure' || fault === 'deadline') {
+        const f = frame(); f.deadlineWallMs = Date.now() + 35; writeFileSync(`${options.prefix}.hold.ready`, JSON.stringify(f));
+      }
+      const observer = options.observe; let observations = 0;
+      options.observe = async (path, phase, index, limit) => {
+        observations++;
+        if (fault === 'early-close' && observations === 1) ref.slot.close();
+        if (fault === 'job' && observations === 1) options.job = () => ({...account, jobKey: 99});
+        if (fault === 'creator' && observations === 1) options.live = () => ({...live, created: '201'});
+        if (fault === 'deadline') await new Promise(resolve => setTimeout(resolve, 45));
+        return observer(path, phase, index, limit);
+      };
+      try {
+        expect(await thrown(observeHelperJob(options))).toThrow();
+        expect(options.record.protocolValid).toBe(false); expect(ref.closes()).toBe(1);
+        expect(existsSync(`${options.prefix}.hold.release`)).toBe(false);
+      } finally {ref.stop();}
+    });
+  }
 });

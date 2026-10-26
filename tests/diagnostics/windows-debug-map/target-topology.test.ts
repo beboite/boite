@@ -56,13 +56,16 @@ test('creator closure requires both main owners and reconciles transferred refer
 test('real barriers require live memberships and both creator closure ledgers before echoing a frame', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'boite-target-topology-')), trace = join(directory, 'trace'); mkdirSync(trace);
   const prefix = join(directory, 'trial'), proofs: unknown[] = [];
-  let stopped = false, available = false, creatorGone = false;
+  let stopped = false, available = false, creatorGone = false, armed = 0;
   const gate = {...request, phase: 'creator' as const, root: null};
   const events = rows().filter(r => r.role === 'launcher-main').map(r => ({event: 'owned-membership', ...r}));
   writeFileSync(join(trace, 'launcher-main.jsonl'), events.map(e => JSON.stringify(e)).join('\n') + '\n');
   writeFileSync(`${prefix}.creator.request`, JSON.stringify(gate));
   const service = serveTopology(prefix, 11, trace, pid => available && !(creatorGone && pid === 22) ? rows().find(r => r.role === 'harness-main' && r.pid === pid)! : null,
-    () => stopped, proofs);
+    () => stopped, proofs, false, (r, proof) => {
+      expect(r.phase).toBe('root'); expect(proof).toHaveLength(6);
+      expect(() => readFileSync(`${prefix}.root.release`)).toThrow(); armed++;
+    });
   async function awaitProofs(count: number) {
     const deadline = Date.now() + 1000;
     while (proofs.length < count && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
@@ -75,6 +78,7 @@ test('real barriers require live memberships and both creator closure ledgers be
     await awaitProofs(1);
     expect(readFileSync(`${prefix}.creator.release`, 'utf8')).toBe(JSON.stringify(gate));
     writeFileSync(`${prefix}.root.request`, JSON.stringify(request)); await awaitProofs(2);
+    expect(armed).toBe(1);
     const closed = {...request, phase: 'closed'};
     writeFileSync(`${prefix}.closed.request`, JSON.stringify(closed)); creatorGone = true;
     const references = ['launcher', 'harness'].flatMap(owner => [

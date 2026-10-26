@@ -1,0 +1,36 @@
+// Appended only to the pinned diagnostic registry copy. The launcher never arms
+// this slot. The retained handle keeps its original ledger ID and owning module.
+const helperReferenceSlot = new HelperReferenceSlot({
+  role: ownershipTrace.role, owner: ownershipTrace.owner,
+  reference: handle => ownershipTrace.reference(handle),
+  event: fields => ownershipTrace.event(fields as {event: string}),
+  close: (handle, id) => ownershipTrace.preserve(() => {
+    if (!native) throw new Error('helper reference native owner missing');
+    native.close(handle);
+    return ownershipTrace.closeResult(id);
+  }),
+});
+export const ownershipHelperReference: HelperReferenceControl = {
+  arm: (request, proof) => ownershipTrace.preserve(() => {
+    if (request.phase !== 'root' || !request.waiting || !request.root || !proveTopology(request, proof))
+      throw new Error('helper reference requires complete root topology');
+    const entry = tracked.get(request.helper.pid), live = ownershipMembership(request.helper.pid);
+    const job = entry && threadJobs.get(entry.threadId);
+    const reference = entry && ownershipTrace.reference(entry.handle);
+    if (!entry || !live || !job || !reference || entry.identity?.incarnation !== request.helper.created ||
+        proof.filter(p => p.role === 'harness-main' && p.owner === live.owner && p.pid === live.pid && p.created === live.created &&
+          p.threadId === live.threadId && p.threadJob === live.threadJob && p.jobKey === live.jobKey &&
+          p.globalJob === live.globalJob && p.nestingRefused === live.nestingRefused &&
+          p.threadMember === live.threadMember && p.globalMember === live.globalMember).length !== 1)
+      throw new Error('helper reference captured live topology missing/ambiguous');
+    helperReferenceSlot.arm({nonce: request.nonce, helper: request.helper, owner: ownershipTrace.owner,
+      id: reference.entry.id, handle: entry.handle, threadId: entry.threadId, threadJob: String(job.handle),
+      jobKey: job.key, globalJob: String(globalJob), nestingRefused, deadline: Date.now() + 30000}, {...live, role: 'harness-main'});
+  }),
+  bound: deadline => ownershipTrace.preserve(() => helperReferenceSlot.bound(deadline)),
+  pending: () => ownershipTrace.preserve(() => helperReferenceSlot.pending()),
+  sample: () => ownershipTrace.preserve(() => helperReferenceSlot.sample()),
+  close: () => ownershipTrace.preserve(() => helperReferenceSlot.close()),
+  cleanup: () => ownershipTrace.preserve(() => helperReferenceSlot.cleanup()),
+};
+process.once('exit', () => helperReferenceSlot.cleanup());

@@ -3,7 +3,7 @@ import {isAbsolute, join} from 'node:path';
 import {threadId} from 'node:worker_threads';
 import {dlopen, FFIType, ptr} from 'bun:ffi';
 import type {Pointer} from 'bun:ffi';
-import {OwnershipLedger, type HandleIdentity, type TraceEvent, type Transfer} from './ownership-ledger.ts';
+import {OwnershipLedger, type HandleIdentity, type TraceEvent, type Transfer, type OwnedHandle} from './ownership-ledger.ts';
 
 /** Pass each compiler's trace selection directly; worker environment inheritance is not evidence. */
 export function ownershipWorkerOptions(): {argv: string[]} {
@@ -64,6 +64,7 @@ export class OwnershipTrace {
   private file: string | undefined;
   private sequence = 0;
   private ledger: OwnershipLedger;
+  private closeResults = new Map<string, {id: string; success: boolean; error: number; wallMs: number}>();
   readonly owner = `${process.pid}/${threadId}/${crypto.randomUUID()}`;
   constructor(readonly role: string, private native: OwnershipReads | null = nativeReads(), directory = process.env.BOITE_DEBUG_MAP_TRACE) {
     this.ledger = new OwnershipLedger(this.owner, event => this.write(event));
@@ -129,8 +130,24 @@ export class OwnershipTrace {
     this.guarded(() => this.ledger.stage(handle, stage, fields));
   }
   closed(handle: number, success: boolean, error: number): void {
-    this.guarded(() => this.ledger.close(handle, success, error));
+    this.guarded(() => {
+      const entry = this.ledger.owned.get(handle);
+      this.ledger.close(handle, success, error);
+      if (entry) this.closeResults.set(entry.id, {id: entry.id, success, error, wallMs: Date.now()});
+    });
   }
+  preserve<T>(action: () => T): T {
+    const saved = this.native?.save();
+    try {return action();} finally {if (saved !== undefined) this.native?.restore(saved);}
+  }
+  reference(handle: number): {entry: OwnedHandle; identity: HandleIdentity; complete: boolean} | undefined {
+    return this.guarded(() => {
+      const entry = this.ledger.owned.get(handle);
+      if (!entry || entry.closeFailed) return;
+      return {entry: {...entry}, identity: this.read(handle), complete: this.ledger.complete};
+    });
+  }
+  closeResult(id: string) {return this.closeResults.get(id);}
   stop(): void {
     this.guarded(() => {
       if (this.timer) clearInterval(this.timer); this.timer = undefined;

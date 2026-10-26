@@ -64,8 +64,12 @@ test('telemetry preserves last error across reads, failed original closures and 
     read(handle) {expect(handle).toBe(8); reads++; lastError = 999; return {pid: 42, incarnation: '1000', exitCode: 0};}});
   try {
     trace.start(directory); trace.acquired(8, 42); expect(lastError).toBe(123);
+    const reference = trace.reference(8)!;
+    expect(reference.identity).toMatchObject({pid: 42, incarnation: '1000'}); expect(lastError).toBe(123);
     lastError = 6; trace.closed(8, false, 6); expect(lastError).toBe(6);
-    trace.stop(); expect(reads).toBe(1); expect(lastError).toBe(6);
+    expect(trace.closeResult(reference.entry.id)).toMatchObject({success: false, error: 6});
+    expect(trace.reference(8)).toBeUndefined();
+    trace.stop(); expect(reads).toBe(2); expect(lastError).toBe(6);
     const events = readdirSync(directory).flatMap(name => readFileSync(join(directory, name), 'utf8').trim().split('\n').map(line => JSON.parse(line)));
     expect(events.find(e => e.event === 'close-result')).toMatchObject({success: false, error: 6});
     expect(events.at(-1)).toMatchObject({event: 'owner-stop', complete: false});

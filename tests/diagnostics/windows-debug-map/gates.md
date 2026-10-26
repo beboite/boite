@@ -799,8 +799,69 @@ The registry now reclassifies each newly captured start instead of inheriting
 that ignored bit. Duplicate tracked starts and late exits retain their existing
 ownership checks. The generated diagnostic logs ignored-pid-reclassification
 without additional native reads or rights, and pins the reviewed registry hash.
-Native confirmation of this correction remains pending; no timeout, topology,
-map-cleanup or production acceptance assertion is relaxed.
+No timeout, topology, map-cleanup or production acceptance assertion is relaxed.
+
+## decccab2 native registry evidence
+
+Run 40245532358 / job 121326349430 executes the reviewed registry under the
+same Windows10.0.26100 and Bun1.4.3. All45 manifest and nine provenance hashes
+match. Four SDK starts and one MinGW start emit ignored-pid-reclassification,
+then enter tracked with their captured incarnation and receive exactly one
+successful close-result. The native trace confirms the new branch runs and
+preserves ownership through closure; the earlier missing nonce guard remains
+unattributed because its cache branch was not recorded.
+
+All seven target-creator fault trials now reach their required proofs and
+cleanup under each compiler. SDK nonce reaches the creator topology barrier,
+balances its two exchange events and rejects with the intended original
+error13. Abort cleanup1067 remains a separate result. Both complete process
+ledgers balance: SDK941/941 references and715/715 transfers, MinGW945/945 and
+719/719. There are no incomplete records or failed closes.
+
+Each compiler still records48 fatal diagnostic failures. Both worker arms
+retain their original names after normal thread return and handle closure;
+the original helper-exited control finds both owned names absent while its
+same job still counts two processes. Every production protected test still
+fails at NUL error5, zero of seven passing under each compiler. The registry
+fix does not qualify map cleanup or protected execution. CAUSE_CONFIRMED=no
+and productionAccepted=false remain unchanged.
+
+## Exited helper with one captured process reference
+
+`TARGET-HELPER-HELD` executes the unchanged `target-helper-exited-run` native
+body beside the original `TARGET-HELPER-EXITED` control. Before releasing the
+root topology barrier, the generated harness registry arms one exact captured
+helper reference, bound to its ledger ID, owner, PID, creation time, nonce and
+existing job identities. At normal exit125, its original close site transfers
+custody into a diagnostic slot. The tracked entry is removed and the original
+exit notification proceeds normally. The launcher never arms a slot.
+
+Every other helper reference and worker transfer in both registries must drain
+before observations begin. The slot queries creation identity and exit125
+through the retained handle before and after each held observation. These
+handles lack SYNCHRONIZE: no wait, extra right, process open, duplication,
+foreign handle-table read or job assignment is added. Native last error is
+preserved. The exact successfully created original and `.retired` names are
+observed twice with the reference retained, then again after its one successful
+actual closure. The same known creator stays alive and its unchanged job stays
+populated around each observation. Results record sample times and captured
+registry exits for comparison with the no-hold control.
+
+The existing creator3s hold and5s external observation budget still apply.
+An armed slot awaits the normal registry exit packet within that budget;
+capture completion alone cannot substitute for the custody transfer. Deadline
+or error cleanup closes only the still-proven owned slot, once. Missing,
+changed or undecidable ownership and failed closure invalidate the control;
+no numeric handle is retried. Creator release, reaping and empty-job evidence
+retain their original requirements, as do every fatal map-cleanup assertion
+and the protected production tests.
+
+Absence while this exited helper reference is held excludes deletion of its
+process object as necessary in this fixture. Retention while held followed
+by absence after closure implicates that known reference lifetime, subject to
+the separately recorded baseline timings. Neither outcome identifies the
+internal map owner or establishes a unique cause. The new control awaits
+native SDK and MinGW execution; CAUSE_CONFIRMED=no and productionAccepted=false.
 
 ## Gates still required
 

@@ -71,7 +71,8 @@ export function creatorReferencesClosed(process: ProcessIdentity, rows: LedgerRo
 }
 export async function serveTopology(prefix: string, helperPid: number, trace: string,
     current: (pid: number) => Omit<Membership, 'owner' | 'role'> | null,
-    stopped: () => boolean, proofs: unknown[], deferClosure = false): Promise<void> {
+    stopped: () => boolean, proofs: unknown[], deferClosure = false,
+    beforeRootRelease?: (request: TopologyRequest, proof: Membership[]) => void): Promise<void> {
   let previous: TopologyRequest | undefined;
   let previousProof: Membership[] = [];
   for (const phase of (deferClosure ? ['creator', 'root'] : ['creator', 'root', 'closed']) as TopologyRequest['phase'][]) {
@@ -108,6 +109,7 @@ export async function serveTopology(prefix: string, helperPid: number, trace: st
             ? previousProof : null
           : proveTopology(request, [...records.filter(r => r.event === 'owned-membership' && r.role === 'launcher-main') as Membership[], ...rows]);
         if (proof) {
+          if (phase === 'root') beforeRootRelease?.(request, proof);
           proofs.push({request, proof, ...(phase === 'closed' ? {creatorReferencesClosed: true,
             acquisitions: records.filter(r => ['acquired', 'transfer-received'].includes(r.event) &&
               r.pid === request.creator.pid && r.incarnation === request.creator.created)} : {})});

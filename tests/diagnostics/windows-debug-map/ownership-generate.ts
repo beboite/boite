@@ -10,6 +10,8 @@ export const jobsHash = 'c9662cdf4a9ef2a2bb4171f3e8f030a4f69bf9bba3664163d2c144c
 export const workerHash = '965d53bd9dc181b6db14db8f172250e1981efe27288aaa782bf3821c6896b541';
 const runtime = pathToFileURL(join(import.meta.dir, 'ownership-trace.ts')).href;
 const ledger = pathToFileURL(join(import.meta.dir, 'ownership-ledger.ts')).href;
+const reference = pathToFileURL(join(import.meta.dir, 'helper-reference.ts')).href;
+const topology = pathToFileURL(join(import.meta.dir, 'target-topology.ts')).href;
 function once(source: string, before: string, after: string): string {
   if (source.split(before).length !== 2) throw new Error(`ownership substitution must match once: ${before}`);
   return source.replace(before, after);
@@ -49,11 +51,17 @@ export function instrumentJobs(source: string, generatedWorker: string): string 
     "  ownershipTrace.event({event: 'job-packet', message, key, pid, handle});");
   source = once(source, '  api.close(entry.handle);\n  sink?.exited(threadId, pid, exit);',
     "  ownershipTrace.event({event: 'owned-exit', pid, created: entry.identity?.incarnation ?? null, exitCode: exit.exitCode});\n" +
-    '  api.close(entry.handle);\n  sink?.exited(threadId, pid, exit);');
+    '  const referenceJob = threadJobs.get(threadId);\n' +
+    '  if (!ownershipTrace.preserve(() => helperReferenceSlot.retain(entry.handle, pid, entry.identity?.incarnation, threadId, exit.exitCode,\n' +
+    '    referenceJob ? {threadJob: String(referenceJob.handle), jobKey: referenceJob.key, globalJob: String(globalJob), nestingRefused} : undefined))) api.close(entry.handle);\n' +
+    '  sink?.exited(threadId, pid, exit);');
   source = imports(source, jobsPath);
-  return `import {ownershipTrace, ownershipWorkerOptions} from ${JSON.stringify(runtime)};\n` + source +
+  return `import {ownershipTrace, ownershipWorkerOptions} from ${JSON.stringify(runtime)};\n` +
+    `import {HelperReferenceSlot, type HelperReferenceControl} from ${JSON.stringify(reference)};\n` +
+    `import {proveTopology} from ${JSON.stringify(topology)};\n` + source +
     '\nexport const ownershipTraceInstalled = true;\n' +
-    readFileSync(join(import.meta.dir, 'target-topology-export.txt'), 'utf8');
+    readFileSync(join(import.meta.dir, 'target-topology-export.txt'), 'utf8') + '\n' +
+    readFileSync(join(import.meta.dir, 'helper-reference-export.txt'), 'utf8');
 }
 export function instrumentWorker(source: string): string {
   if (sha256(source) !== workerHash) throw new Error('jobs-worker.ts source drift: review and repin ownership trace');
@@ -88,7 +96,7 @@ export function prepareOwnership(directory: string): PreparedOwnership {
     [jobs]: sha256(generatedJobs), [worker]: sha256(generatedWorker),
     [preload]: sha256(readFileSync(preload)),
   };
-  for (const name of ['ownership-generate.ts', 'ownership-ledger.ts', 'ownership-trace.ts', 'target-topology-export.txt'])
+  for (const name of ['ownership-generate.ts', 'ownership-ledger.ts', 'ownership-trace.ts', 'target-topology-export.txt', 'helper-reference.ts', 'helper-reference-export.txt'])
     hashes[join(import.meta.dir, name)] = sha256(readFileSync(join(import.meta.dir, name)));
   writeFileSync(join(directory, 'provenance.json'), JSON.stringify({jobsPath, workerPath, hashes}, null, 2) + '\n');
   return {directory, jobs, worker, preload, hashes};
@@ -133,4 +141,11 @@ export async function ownedJobReader(): Promise<(threadId: string) => import('./
   if (canonical.ownershipTraceInstalled !== true || typeof canonical.ownershipJobAccounting !== 'function')
     throw new Error('owned job accounting diagnostic export unavailable');
   return canonical.ownershipJobAccounting;
+}
+
+export async function ownedHelperReference(): Promise<import('./helper-reference.ts').HelperReferenceControl> {
+  const canonical = await import(pathToFileURL(jobsPath).href);
+  if (canonical.ownershipTraceInstalled !== true || !canonical.ownershipHelperReference)
+    throw new Error('owned helper reference diagnostic export unavailable');
+  return canonical.ownershipHelperReference;
 }

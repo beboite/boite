@@ -1,6 +1,7 @@
 import {existsSync, lstatSync, readFileSync, writeFileSync} from 'node:fs';
 import {creatorReferencesClosed, traceRows, type TopologyRequest, type Membership} from './target-topology.ts';
 import type {Captured} from './capture.ts';
+import {otherReferencesClosed, type HelperReferenceControl} from './helper-reference.ts';
 
 export interface JobAccounting {
   owner: string; threadId: string; threadJob: string; jobKey: number; globalJob: string;
@@ -69,22 +70,35 @@ export function observation(path: string, result: Captured): {path: string; abse
     throw new Error('invalid helper-job exact-name observation');
   return {path, absent, status: absent ? '0xc0000034' : '0x00000000', result};
 }
-export async function observeHelperJob(options: {
+interface HelperJobOptions {
   prefix: string; helper: Captured; roots: RootProof[]; trace: string;
   live: (pid: number) => Omit<Membership, 'role'> | null;
   job: (threadId: string) => JobAccounting | null;
   observe: (path: string, phase: string, index: number, milliseconds: number) => Promise<Captured>;
   record: Record<string, unknown>;
-}): Promise<void> {
+  reference?: HelperReferenceControl;
+}
+export async function observeHelperJob(options: HelperJobOptions): Promise<void> {
+  try {await observeHelperJobBody(options);}
+  finally {
+    if (options.reference) {
+      const closed = options.reference.cleanup(); options.record.referenceCleanup = closed;
+      if (!closed?.success || closed.reason !== 'observed') options.record.protocolValid = false;
+    }
+  }
+}
+async function observeHelperJobBody(options: HelperJobOptions): Promise<void> {
   const {prefix, helper, trace, record} = options;
   const started = Date.now(), externalDeadline = started + 5000;
   record.protocolValid = false; record.productionAccepted = false; record.helperExitObservedAt = started;
+  record.causeConfirmed = false;
   const root = options.roots.find(p => p.request.phase === 'root' && p.request.helper.pid === helper.pid);
   if (!root || helper.timedOut || helper.code === null) throw new Error('helper-job requires captured helper exit and root proof');
   const text = readControl(`${prefix}.hold.ready`);
   if (text === null) throw new Error('helper-job closed ready file missing');
   const frame = parseHold(text, root.request, Date.now());
   record.frame = frame; record.rootProof = root;
+  options.reference?.bound(frame.deadlineWallMs);
   const limit = Math.min(frame.deadlineWallMs, started + 3000, externalDeadline);
   const checkDeadline = () => {if (Date.now() >= limit) throw new Error('helper-job populated observation deadline');};
   const before: unknown[] = [], after: unknown[] = []; record.populated = before; record.empty = after;
@@ -97,9 +111,17 @@ export async function observeHelperJob(options: {
     if (!populatedProof(frame, root!, live, accounting, traceRows(trace) as Row[])) throw new Error('helper-job populated ownership/key/membership/zero evidence');
     return {live, accounting: accounting!};
   }
-  while (!creatorReferencesClosed(frame.helper, traceRows(trace))) {
+  const referenceDrained = () => options.reference
+    ? otherReferencesClosed(frame.helper, options.reference.sample(), traceRows(trace))
+    : creatorReferencesClosed(frame.helper, traceRows(trace));
+  while (options.reference?.pending()) {
     checkDeadline(); await new Promise(resolve => setTimeout(resolve, 5));
   }
+  while (!referenceDrained()) {
+    checkDeadline(); await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  record.helperRegistryExits = traceRows(trace).filter(r => r.event === 'owned-exit' && r.pid === frame.helper.pid &&
+    r.created === frame.helper.created);
   const initial = snapshot(), anchor = initial.accounting; record.anchor = anchor;
   // Names must come from this helper's successful owned creations, not ambient input.
   const original = helper.err.match(/^private-map path=(.+) create=0x00000000\r?$/m)?.[1]?.replace(/\r$/, '');
@@ -108,6 +130,19 @@ export async function observeHelperJob(options: {
   if (!original || !retired || suffix !== String.raw`\BaseNamedObjects\boite.route.${helper.pid}` || retired !== `${original}.retired`)
     throw new Error('helper-job owned names missing');
   const names = [original, retired];
+  if (options.reference) {
+    const held: unknown[] = []; record.held = held;
+    for (let pass = 0; pass < 2; pass++) for (const [index, name] of names.entries()) {
+      const pre = snapshot(), referencePre = options.reference.sample();
+      if (!referenceDrained()) throw new Error('helper reference other registry closure changed');
+      const result = observation(name, await options.observe(name, `held-${pass}`, index, Math.min(1000, limit - Date.now())));
+      const referencePost = options.reference.sample(), post = snapshot();
+      if (!referenceDrained()) throw new Error('helper reference other registry closure changed');
+      held.push({pre, referencePre, observation: result, referencePost, post});
+    }
+    checkDeadline(); record.referenceClose = options.reference.close();
+    if (!creatorReferencesClosed(frame.helper, traceRows(trace))) throw new Error('helper reference final closure ledger missing');
+  }
   for (const [index, name] of names.entries()) {
     const pre = snapshot();
     const result = observation(name, await options.observe(name, 'populated', index, Math.min(1000, limit - Date.now())));
