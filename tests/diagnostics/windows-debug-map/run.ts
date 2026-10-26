@@ -54,7 +54,7 @@ try {
   if (ownership) for (const file of ['jobs.ts', 'jobs-worker.ts', 'preload.ts', 'provenance.json'])
     hashes[`ownership-source/${file}`] = sha256(readFileSync(join(ownership.directory, file)));
   for (const file of ['generate.ts', 'run.ts', 'routing.test.ts', 'environment.ts', 'capture.ts', 'gates.md', 'target-topology.ts', 'target-topology.test.ts', 'target-topology-export.txt', 'helper-job.ts', 'helper-job.test.ts', 'helper-reference.ts', 'helper-reference.test.ts', 'helper-reference-export.txt', 'worker-lifetime.ts', 'worker-lifetime.test.ts', 'retirement-timing.ts', 'retirement-timing.test.ts', 'directory-twin.ts', 'directory-twin.test.ts', 'retirement-fixture.ts', 'anchor-overlap.ts', 'anchor-overlap.test.ts', 'target-acl.test.ts', 'target-acl-cases.c',
-    'ownership-generate.ts', 'ownership-ledger.ts', 'ownership-trace.ts', 'ownership-summary.ts', 'ownership.test.ts', 'null-message.ts', 'null-message.test.ts']) {
+    'anchor-access-cases.c', 'ownership-generate.ts', 'ownership-ledger.ts', 'ownership-trace.ts', 'ownership-summary.ts', 'ownership.test.ts', 'null-message.ts', 'null-message.test.ts']) {
     hashes[file] = sha256(readFileSync(join(import.meta.dir, file)));
   }
   writeFileSync(join(output, 'sha256.json'), JSON.stringify(hashes, null, 2) + '\n'); save();

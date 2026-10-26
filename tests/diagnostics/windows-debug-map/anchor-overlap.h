@@ -102,6 +102,12 @@ static DWORD ao_anchor_close(HANDLE *slot, const AO_FRAME *frame) {
 static DWORD ao_access(HANDLE handle, DWORD access, DWORD flags, const wchar_t *type) {
   struct { ULONG attributes, granted, handles, pointers; ULONG reserved[10]; } info;
   ULONG used = 0; DWORD actual_flags = 0;
+  DWORD expected_access = access;
+  /* Native Server 26100 grants SET_LIMITED with this exact SET_INFORMATION
+   * request. Keep DuplicateHandle's requested mask unchanged and compare the
+   * complete observed mask, including this implied right. */
+  if (access == (PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE) && !wcscmp(type, L"Process"))
+    expected_access |= PROCESS_SET_LIMITED_INFORMATION;
   query_object_fn query = (query_object_fn)(void *)nt_api("NtQueryObject");
   ZeroMemory(&info, sizeof(info));
   NTSTATUS status = query ? query(handle, (OBJECT_INFORMATION_CLASS)0, &info, sizeof(info), &used) : (NTSTATUS)0xc0000002;
@@ -109,7 +115,7 @@ static DWORD ao_access(HANDLE handle, DWORD access, DWORD flags, const wchar_t *
   const wchar_t *check = L"query";
   if (status != 0) error = (DWORD)status;
   else if (used != sizeof(info)) {check = L"size"; error = ERROR_INVALID_DATA;}
-  else if (info.granted != access) {check = L"access"; error = ERROR_INVALID_DATA;}
+  else if (info.granted != expected_access) {check = L"access"; error = ERROR_INVALID_DATA;}
   else {
     flags_queried = TRUE;
     if (!GetHandleInformation(handle, &actual_flags)) {
@@ -120,8 +126,8 @@ static DWORD ao_access(HANDLE handle, DWORD access, DWORD flags, const wchar_t *
   /* Keep the exact guard and its short-circuit query order. A failed duplicate
    * must expose the measured mismatch before any setter exists. */
   if (error) {
-    fwprintf(stderr, L"anchor-handle-check type=%ls check=%ls query=0x%08lx bytes=%lu expected-bytes=%lu requested=0x%08lx granted=0x%08lx attributes=0x%08lx flags-queried=%d flags=%lu expected-flags=%lu flags-error=%lu error=0x%08lx\n",
-      type, check, (unsigned long)status, used, (unsigned long)sizeof(info), access, info.granted,
+    fwprintf(stderr, L"anchor-handle-check type=%ls check=%ls query=0x%08lx bytes=%lu expected-bytes=%lu requested=0x%08lx expected-granted=0x%08lx granted=0x%08lx attributes=0x%08lx flags-queried=%d flags=%lu expected-flags=%lu flags-error=%lu error=0x%08lx\n",
+      type, check, (unsigned long)status, used, (unsigned long)sizeof(info), access, expected_access, info.granted,
       info.attributes, flags_queried, actual_flags, flags, flags_error, error); fflush(stderr);
   }
   return error;

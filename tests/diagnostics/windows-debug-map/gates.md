@@ -1048,8 +1048,40 @@ mask, short-circuit query order, native calls, return values and all deadlines.
 No access normalization is accepted without a measured Windows result. Local
 recheck reports54 pass,1 native skip,0 fail and626 assertions; scoped types and
 both strict MinGW compilations pass. Independent static review confirms the
-guard remains unchanged. Native telemetry, successful setter handoff and fault
-coverage remain pending. CAUSE_CONFIRMED=no and productionAccepted=false.
+guard remains unchanged. These checks did not establish native telemetry,
+successful setter handoff or fault coverage.
+
+Run40258008601 / job121364137508 executes integrated heade7e1d34c. All59
+manifest and11 provenance hashes match. Every one of the14 new arms reports
+the same successful object-basic query: bytes56, requested0x00101200,
+granted0x00103200, attributes2. The exact access comparison rejects13 before
+GetHandleInformation, type comparison, the second duplicate or setter creation.
+The extra0x2000 is PROCESS_SET_LIMITED_INFORMATION. This establishes the
+diagnostic guard mismatch, not a retention cause. Registry references close
+1538/1538 SDK and1539/1539 MinGW. Prior64 fatal labels and earlier lifetime/twin
+outcomes remain; total93 failures/compiler and production0/7 NUL5 persist.
+Independent native review confirms all14 measured rejections and revalidates
+the four prior timing and two twin traces.
+
+The next delta compares the complete granted mask with0x00103200 only for
+the exact Process request0x00101200. DuplicateHandle still requests0x00101200;
+the directory request and exact grant remain3. No generic/subset comparison or
+additional requested right is introduced. Every other missing or additional
+grant bit, handle flag, query size/status and type remains a rejection. Frame
+fields continue to record requested rights; child validation uses the same
+complete grant check. Existing API order, pair protocol and deadlines remain.
+
+The regression compiles the actual C guard with replayed query results. Before
+the change it rejects the measured process grant:0 pass,1 fail. After the change
+it passes78 cases, including every single-bit mutation of both granted masks,
+inherited/cleared flags and failed query/type paths. This replay does not emulate
+kernel access mapping or prove real inheritance. The complete local diagnostic
+suite reports55 pass,1 native skip,0 fail and633 assertions; scoped types,
+architecture1219 modules and both strict MinGW compilations pass. Independent
+static review confirms complete exact comparison and unchanged requested rights.
+SDK compilation, corrected native handoff, five actual fault injections and the
+anchor retention comparison remain pending. CAUSE_CONFIRMED=no and
+productionAccepted=false.
 
 ## Gates still required
 

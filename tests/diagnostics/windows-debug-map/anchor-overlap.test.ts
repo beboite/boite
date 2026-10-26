@@ -1,8 +1,38 @@
 import {expect, test} from 'bun:test';
+import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {Journal} from '../../../packages/core/src/journal.ts';
+import {Bus} from '../../../packages/core/src/bus.ts';
+import {ProcRegistry} from '../../../packages/core/src/procs.ts';
+import {capture} from './capture.ts';
+import {selectedEnvironment} from './environment.ts';
 import {expected, path, twinFixture} from './retirement-fixture.ts';
 import {validateAnchorOverlap, compareAnchorPair, corroborateAnchorRegistry, type AnchorReport} from './anchor-overlap.ts';
 import type {LedgerRow, Membership, TopologyRequest} from './target-topology.ts';
 import type {Captured} from './capture.ts';
+
+const compiler = process.platform === 'win32' ? null : Bun.which('cc');
+test.skipIf(!compiler)('anchor native access guard accepts the measured implied right and rejects broader masks', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'boite-anchor-access-'));
+  const journal = new Journal(join(directory, 'journal.db')), procs = new ProcRegistry(journal, new Bus());
+  try {
+    // Compile the actual guard; the fixture supplies Win32 query results only.
+    const source = readFileSync(join(import.meta.dir, 'anchor-overlap.h'), 'utf8');
+    const start = source.indexOf('static DWORD ao_access('), end = source.indexOf('\nstatic DWORD ao_topology(', start);
+    expect(start).toBeGreaterThanOrEqual(0); expect(end).toBeGreaterThan(start);
+    writeFileSync(join(directory, 'anchor-access-function.h'), source.slice(start, end));
+    const executable = join(directory, 'anchor-access-cases');
+    const built = await capture(procs, 'compile-anchor-access', procs.spawnPiped('compile-anchor-access', compiler!,
+      ['-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', '-I', directory, join(import.meta.dir, 'anchor-access-cases.c'), '-o', executable],
+      {cwd: directory, env: selectedEnvironment(), agentRoot: false}), 15000);
+    expect(built.timedOut).toBe(false); expect(built.code, built.out + built.err).toBe(0);
+    const result = await capture(procs, 'anchor-access-cases', procs.spawnPiped('anchor-access-cases', executable, [],
+      {cwd: directory, env: selectedEnvironment(), agentRoot: false}), 5000);
+    expect(result.timedOut).toBe(false); expect(result.code, result.out + result.err).toBe(0);
+    expect(result.out).toBe('ANCHOR_ACCESS_CASES_PASS: 78 cases\n');
+  } finally {await procs.killAll(); await procs.close(); journal.close(); rmSync(directory, {recursive: true, force: true});}
+}, 30000);
 
 function anchor(mode: 'exclusive' | 'held', attachedAbsent = false): Captured {
   const f = twinFixture(true, attachedAbsent);
