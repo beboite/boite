@@ -3,23 +3,27 @@ import type {RootRequest} from './fault-root-reference.ts';
 export const stdioLabels=['ASSIGNED-STDIO-HELD','ASSIGNED-STDIO-CLOSED'] as const;
 export const isStdioLabel=(s:string)=>stdioLabels.some(v=>v===s);
 export interface StdioStream {original:string;crt:string;fd:number;type:number;flushAttempted:number;flushResult:number;closeAttempted:number;closeResult:number;invalid:number;invalidError:number;closeAt:number}
-export interface StdioReceipt {version:number;phase:number;role:number;result:number;helper:number;root:number;helperCreated:string;rootCreated:string;ready:number;deadline:number;rootDeadline:number;at:number;nonce:string;compilerNonce:string;acquired:number;closed:number;error:number;session:number;cleanup:number;streams:StdioStream[]}
+export interface StdoutZeroWrite {attempted:number;result:number;transferred:number;error:number;at:number}
+export interface StdioReceipt {zero?:StdoutZeroWrite;version:number;phase:number;role:number;result:number;helper:number;root:number;helperCreated:string;rootCreated:string;ready:number;deadline:number;rootDeadline:number;at:number;nonce:string;compilerNonce:string;acquired:number;closed:number;error:number;session:number;cleanup:number;streams:StdioStream[]}
 function check(v:unknown,s:string):asserts v {if(!v)throw Error('stdio root fence: '+s);}
-export type StreamExperiment='stdio'|'stdout-write';
+export type StreamExperiment='stdio'|'stdout-write'|'stdout-zero';
 export function encodeStdioReceipt(f:StdioReceipt):Buffer {return encodeStreamReceipt(f,'stdio');}
 export function encodeStreamReceipt(f:StdioReceipt,experiment:StreamExperiment):Buffer {
- check(experiment==='stdio'||experiment==='stdout-write','explicit stream experiment');
- const b=Buffer.alloc(400);[experiment==='stdio'?0x53524631:0x53574631,f.version,400,f.phase,f.role,f.result,f.helper,f.root].forEach((v,i)=>b.writeUInt32LE(v,4*i));
+ check(experiment==='stdio'||experiment==='stdout-write'||experiment==='stdout-zero','explicit stream experiment');
+ const size=experiment==='stdout-zero'?424:400,magic=experiment==='stdio'?0x53524631:experiment==='stdout-write'?0x53574631:0x5a574631;
+ const b=Buffer.alloc(size);[magic,f.version,size,f.phase,f.role,f.result,f.helper,f.root].forEach((v,i)=>b.writeUInt32LE(v,4*i));
  [f.helperCreated,f.rootCreated,f.ready,f.deadline,f.rootDeadline,f.at].forEach((v,i)=>b.writeBigUInt64LE(BigInt(v),32+i*8));
  b.write(f.nonce,80,64,'utf16le');b.write(f.compilerNonce,146,64,'utf16le');
  [f.acquired,f.closed,f.error,f.session,f.cleanup].forEach((v,i)=>b.writeUInt32LE(v,212+4*i));
  f.streams.forEach((s,i)=>{const o=232+i*56;b.writeBigUInt64LE(BigInt(s.original),o);b.writeBigUInt64LE(BigInt(s.crt),o+8);
- [s.fd,s.type,s.flushAttempted,s.flushResult,s.closeAttempted,s.closeResult,s.invalid,s.invalidError].forEach((v,j)=>b.writeInt32LE(v,o+16+j*4));b.writeBigUInt64LE(BigInt(s.closeAt),o+48);});return b;
+ [s.fd,s.type,s.flushAttempted,s.flushResult,s.closeAttempted,s.closeResult,s.invalid,s.invalidError].forEach((v,j)=>b.writeInt32LE(v,o+16+j*4));b.writeBigUInt64LE(BigInt(s.closeAt),o+48);});
+ if(experiment==='stdout-zero'){check(f.zero,'zero-write evidence present');[f.zero.attempted,f.zero.result,f.zero.transferred,f.zero.error].forEach((v,i)=>b.writeUInt32LE(v,400+4*i));b.writeBigUInt64LE(BigInt(f.zero.at),416);}return b;
 }
 export function parseStdioReceipt(b:Buffer):StdioReceipt {return parseStreamReceipt(b,'stdio');}
 export function parseStreamReceipt(b:Buffer,experiment:StreamExperiment):StdioReceipt {
- check(experiment==='stdio'||experiment==='stdout-write','explicit stream experiment');
- check(b.length===400&&b.readUInt32LE(0)===(experiment==='stdio'?0x53524631:0x53574631)&&b.readUInt32LE(8)===400,'distinct fixed receipt');
+ check(experiment==='stdio'||experiment==='stdout-write'||experiment==='stdout-zero','explicit stream experiment');
+ const size=experiment==='stdout-zero'?424:400,magic=experiment==='stdio'?0x53524631:experiment==='stdout-write'?0x53574631:0x5a574631;
+ check(b.length===size&&b.readUInt32LE(0)===magic&&b.readUInt32LE(8)===size,'distinct fixed receipt');
  const num=(o:number)=>{const n=Number(b.readBigUInt64LE(o));check(Number.isSafeInteger(n),'safe native integer');return n;};
  const f:StdioReceipt={version:b.readUInt32LE(4),phase:b.readUInt32LE(12),role:b.readUInt32LE(16),result:b.readUInt32LE(20),helper:b.readUInt32LE(24),root:b.readUInt32LE(28),helperCreated:String(b.readBigUInt64LE(32)),rootCreated:String(b.readBigUInt64LE(40)),ready:num(48),deadline:num(56),rootDeadline:num(64),at:num(72),nonce:b.toString('utf16le',80,144),compilerNonce:b.toString('utf16le',146,210),acquired:b.readUInt32LE(212),closed:b.readUInt32LE(216),error:b.readUInt32LE(220),session:b.readUInt32LE(224),cleanup:b.readUInt32LE(228),streams:[]};
  for(let i=0;i<3;i++){const o=232+i*56;f.streams.push({original:String(b.readBigUInt64LE(o)),crt:String(b.readBigUInt64LE(o+8)),fd:b.readInt32LE(o+16),type:b.readInt32LE(o+20),flushAttempted:b.readInt32LE(o+24),flushResult:b.readInt32LE(o+28),closeAttempted:b.readInt32LE(o+32),closeResult:b.readInt32LE(o+36),invalid:b.readInt32LE(o+40),invalidError:b.readInt32LE(o+44),closeAt:num(o+48)});}
@@ -34,6 +38,10 @@ export function parseStreamReceipt(b:Buffer,experiment:StreamExperiment):StdioRe
    (experiment==='stdio'&&f.role===2?s.closeAt>=f.ready&&s.closeAt<=f.at:s.closeAt===0),'actual CRT owner closure and immediate invalidity');
  });
  if(experiment==='stdio'&&f.role===2)check(f.streams[0]!.closeAt<=f.streams[1]!.closeAt&&f.streams[1]!.closeAt<=f.streams[2]!.closeAt,'stderr closes last');
+ if(experiment==='stdout-zero'){
+  const z=f.zero={attempted:b.readUInt32LE(400),result:b.readUInt32LE(404),transferred:b.readUInt32LE(408),error:b.readUInt32LE(412),at:num(416)};
+  check(f.role===1?Object.values(z).every(v=>v===0):z.attempted===1&&z.result===1&&z.transferred===0&&z.error===0&&z.at>=f.ready&&z.at<=f.at,'actual bounded zero-byte write');
+ }
  return f;
 }
 export function boundStdioReceipt(r:RootRequest,b:Buffer,now:number):StdioReceipt {

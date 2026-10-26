@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <wchar.h>
-typedef uint32_t DWORD;typedef int32_t LONG;typedef uint64_t ULONGLONG;typedef uintptr_t ULONG_PTR;typedef int BOOL;typedef void *HANDLE;
+typedef unsigned char BYTE;typedef uint32_t DWORD;typedef int32_t LONG;typedef uint64_t ULONGLONG;typedef uintptr_t ULONG_PTR;typedef int BOOL;typedef void *HANDLE;
 #define ERROR_INVALID_DATA 13
 #define ERROR_INVALID_HANDLE 6
 #define ERROR_WRITE_FAULT 29
@@ -14,6 +14,8 @@ typedef uint32_t DWORD;typedef int32_t LONG;typedef uint64_t ULONGLONG;typedef u
 typedef struct {DWORD role;} BASE;
 typedef struct {ULONGLONG original,crt;DWORD fd,type,flush_attempted;LONG flush_result;DWORD close_attempted;LONG close_result;DWORD invalid,invalid_error;ULONGLONG close_at;} SF_STREAM;
 typedef struct {BASE base;SF_STREAM streams[3];} SF_FRAME;
+typedef struct {DWORD attempted;BOOL result;DWORD transferred,error;ULONGLONG at;} SF_ZERO;
+static int raw_calls,raw_bad,last_error_reads;
 static char operations[64];static int operation_count;
 static int mode,closed[3],attempts[3],flushes[3],sequence[3],nclose,nwrite,last_error,cases;
 static int index_of(FILE *f){return f==stdin?0:f==stdout?1:2;}
@@ -22,7 +24,9 @@ static int _fileno(FILE *f){return mode==2&&f==stdin?3:index_of(f);}
 static intptr_t _get_osfhandle(int fd){return mode==3&&fd==0?999:100+fd;}
 static DWORD GetFileType(HANDLE h){(void)h;return mode==4?1:3;}
 static BOOL GetHandleInformation(HANDLE h,DWORD *flags){int i=(int)(uintptr_t)h-100;*flags=0;if(mode==8)return 0;if(i>=0&&i<3&&closed[i]&&mode!=7){last_error=6;return 0;}return 1;}
-static DWORD GetLastError(void){return (DWORD)last_error;}
+static DWORD GetLastError(void){last_error_reads++;return (DWORD)last_error;}
+BOOL WriteFile(HANDLE h,const void *buffer,DWORD bytes,DWORD *used,void *overlapped){raw_calls++;operations[operation_count++]='w';if(h!=(HANDLE)(uintptr_t)101||!buffer||bytes!=0||overlapped)raw_bad=1;
+ if(mode==9){*used=0;last_error=5;return 0;}if(mode==10){*used=1;return 1;}if(mode!=11)*used=0;return 1;}
 static ULONGLONG ownership_wall_ms(void){return (ULONGLONG)(1000+nclose);}
 static int emit(const wchar_t *s,FILE *f){(void)s;operations[operation_count++]=(char)('a'+index_of(f));nwrite++;return 0;}
 static int flush(FILE *f){int i=index_of(f);operations[operation_count++]=(char)('x'+i);flushes[i]++;return mode==5&&i==1?-1:0;}
@@ -35,7 +39,7 @@ static int close_stream(FILE *f){int i=index_of(f);operations[operation_count++]
 #undef fflush
 #undef fputws
 #define CHECK(s,e) do{cases++;if(!(e)){fprintf(stderr,"stdio case failed: %s\n",s);return 1;}}while(0)
-static void reset(int bad){mode=bad;memset(closed,0,sizeof(closed));memset(attempts,0,sizeof(attempts));memset(flushes,0,sizeof(flushes));memset(sequence,0,sizeof(sequence));nclose=nwrite=last_error=operation_count=0;memset(operations,0,sizeof(operations));}
+static void reset(int bad){mode=bad;memset(closed,0,sizeof(closed));memset(attempts,0,sizeof(attempts));memset(flushes,0,sizeof(flushes));memset(sequence,0,sizeof(sequence));nclose=nwrite=last_error=operation_count=raw_calls=raw_bad=last_error_reads=0;memset(operations,0,sizeof(operations));}
 int main(void){
  for(int role=1;role<=2;role++){reset(0);SF_FRAME f={0};f.base.role=(DWORD)role;
   CHECK("valid exact context",sf_streams(&f,L"barrier\n",0)==0);
@@ -60,6 +64,22 @@ int main(void){
   CHECK("stdout only flushes output",flushes[0]==0&&flushes[1]==1&&flushes[2]==1);
   for(int i=0;i<3;i++)CHECK("stdout never records a closure",f.streams[i].close_attempted==0&&f.streams[i].invalid==0&&f.streams[i].invalid_error==0&&f.streams[i].close_at==0);
  }
- reset(0);SF_FRAME invalid={0};invalid.base.role=1;CHECK("unknown experiment never writes",sf_streams(&invalid,L"barrier\n",2)!=0&&nwrite==0&&nclose==0);
+ reset(0);SF_FRAME invalid={0};invalid.base.role=1;CHECK("unknown experiment never writes",sf_streams(&invalid,L"barrier\n",3)!=0&&nwrite==0&&nclose==0);
+ for(int role=1;role<=2;role++){reset(0);SF_FRAME f={0};SF_ZERO zero={0};f.base.role=(DWORD)role;last_error=123;
+  CHECK("zero selected native path succeeds",sf_prepare_streams(&f,&zero,L"barrier\n",2)==0);
+  CHECK("zero selected write actually called once",raw_calls==(role==2?1:0));
+  CHECK("zero exact original stdout nonnull zero count synchronous",raw_bad==0);
+  CHECK("zero stderr and common flush precede the raw write",!strcmp(operations,role==1?"cyz":"cyzw"));
+  CHECK("zero never closes original handles",nclose==0&&attempts[0]==0&&attempts[1]==0&&attempts[2]==0);
+  CHECK("zero records real BOOL transferred and fresh timestamp",role==1?(zero.attempted==0&&zero.result==0&&zero.transferred==0&&zero.error==0&&zero.at==0):(zero.attempted==1&&zero.result==1&&zero.transferred==0&&zero.error==0&&zero.at==1000));
+  CHECK("zero success never reads stale last error",last_error_reads==0);
+ }
+ for(int bad=1;bad<=11;bad++){if(bad==6||bad==7)continue;reset(bad);SF_FRAME f={0};SF_ZERO zero={0};f.base.role=2;
+  CHECK("zero bad mapping flush or actual write refuses",sf_prepare_streams(&f,&zero,L"barrier\n",2)!=0);
+  CHECK("zero failed operation never retries or closes",nclose==0&&raw_calls==(bad>=9?1:0));
+  if(bad==9)CHECK("zero failed BOOL preserves native error",zero.attempted==1&&zero.result==0&&zero.error==5&&zero.transferred==0&&last_error_reads==1);
+  if(bad==10)CHECK("zero nonzero transfer preserved",zero.result==1&&zero.transferred==1);
+  if(bad==11)CHECK("zero untouched sentinel refused",zero.result==1&&zero.transferred==0xffffffff);
+ }
  printf("STDIO_STREAM_GUARDS_PASS cases=%d native=false\n",cases);return 0;
 }

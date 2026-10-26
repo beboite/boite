@@ -7,12 +7,14 @@ function check(v:unknown,s:string):asserts v {if(!v)throw Error('stdout write re
 /** The inherited child output remains part of the capture. Reconstruct its
  * complete three-generation transcript from the exact job marker and PID chain;
  * no arbitrary prefix, extra line or suffix is ignored. */
-export function validateAssignedStdout(arm:LiveArmRecord,barrier:string):void {
+export function validateAssignedStdout(arm:LiveArmRecord,barrier:string,experiment:'stdout-write'|'stdout-zero'='stdout-write'):void {
  const h=arm.helper!,marker=arm.stdoutMarker,r=arm.request;
  check(typeof marker==='string'&&marker.startsWith('TASK_ROUTE_ANCHOR-FAULT-'+r.label+'_')&&/^TASK_ROUTE_[A-Z-]+_[a-f0-9]{32}$/.test(marker)&&marker.length<=96,'exact launch marker');
- const write=r.label===stdoutLabels[1];
+ const zero=experiment==='stdout-zero';check(experiment==='stdout-write'||zero,'explicit transcript experiment');
+ check(zero?['ASSIGNED-ZERO-SILENT','ASSIGNED-ZERO-WRITE'].includes(r.label):stdoutLabels.some(l=>l===r.label),'selected transcript labels');
+ const write=!zero&&r.label===stdoutLabels[1],prefixName=zero?'zero':'stdout';
  const prefix=write?h.out.slice(0,-barrier.length-2):h.out;
- check(write?h.out===prefix+barrier+'\r\n'&&!prefix.includes('stdout-fence '):!h.out.includes('stdout-fence '),'only WRITE emits one final stdout barrier');
+ check(write?h.out===prefix+barrier+'\r\n'&&!prefix.includes(prefixName+'-fence '):!h.out.includes(prefixName+'-fence '),'only WRITE emits one final stdout barrier');
  const escaped=marker.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
  const starts=[...prefix.matchAll(new RegExp('^inspect-start='+escaped+'\\.generation-([0-2]) pid=([1-9]\\d*)\\r$','gm'))];
  check(starts.length===3&&starts.every((s,i)=>Number(s[1])===i),'three original inspect generations');

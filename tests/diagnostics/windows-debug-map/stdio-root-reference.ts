@@ -33,10 +33,10 @@ export function validateStreamCapture(arm:LiveArmRecord,rows:ReturnType<LiveDepe
 export function measureStdioRootReferences(inputs:Record<'held'|'released',LiveArmInput>,deps:LiveDependencies){
  return measureFencedRootReferences(inputs,deps,{label:k=>stdioLabels[k==='held'?0:1],bound:boundStdioReceipt,artifact:stdioArtifact,validateProof:validateActiveProof,returned:validateStdioCapture,strategy:'both-released'});
 }
-export function streamFailure(directory:string,label:string):unknown {
+export function streamFailure(directory:string,label:string,frameSize=400):unknown {
  const file=join(directory,label+'.failed.bin');if(!existsSync(file))return undefined;
  const size=statSync(file).size;if(size>4096)return {label,file,size,error:'oversized native failure receipt'};
- const bytes=readFileSync(file);return {label,file,size,bytes:bytes.toString('base64'),sha256:createHash('sha256').update(bytes).digest('hex'),phase:bytes.length===400?bytes.readUInt32LE(12):null,error:bytes.length===400?bytes.readUInt32LE(220):null};
+ const bytes=readFileSync(file);return {label,file,size,bytes:bytes.toString('base64'),sha256:createHash('sha256').update(bytes).digest('hex'),phase:bytes.length===frameSize?bytes.readUInt32LE(12):null,error:bytes.length===frameSize?bytes.readUInt32LE(220):null};
 }
 export function runStdioRootHarness<J extends {label:string;project:string}>(jobs:J[],deps:HarnessDependencies<J>){
  return runFencedRootHarness(jobs,deps,{labels:stdioLabels,parse:parseStdioReceipt,bound:boundStdioReceipt,encode:encodeStdioReceipt,environment:['BOITE_STDIO_ROOT_LABEL','BOITE_STDIO_ROOT_DIRECTORY','BOITE_STDIO_ROOT_NONCE'],measure:measureStdioRootReferences,failure:streamFailure});

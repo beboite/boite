@@ -1396,6 +1396,66 @@ adapted only for the new labels/marker lengths, pass the new grammar;16 changed
 prefix/root/barrier variants reject. This replay launches no native process.
 The new paired Windows schedule, SDK build and causal result remain unverified.
 
+## Native stdout write differential and zero-byte discriminator
+
+Run40278827854 / job121427551378 executes37c1c22c. Parent and independent
+audits reconcile84 manifest entries and19 generated-owner provenance hashes,
+12 private400-byte receipts,24 live stdout observations and12 post-helper
+absences. Both compiler pairs are valid within the original3s bounds. Both
+retired-name baselines retain with launcher references held. After both exact
+launcher references close, SILENT retains and WRITE loses the retired name.
+All three original streams remain open in all four arms. Both helpers remain
+alive throughout comparison; all names are absent after helper exit.
+
+The nonempty helper stdout write distinguishes these two paired outcomes.
+Its effect depends on root-reference release: the WRITE baselines still retain.
+The shared preflight, stderr marker and explicit flushes do not explain the
+split alone. No internal pipe/process owner, CRT mechanism, general retention
+cause or safe production operation is established by this single native run.
+
+SDK2475/2475 and MinGW2399/2399 acquired registry references close exactly
+once; transfers1831/1831 and1779/1779 reconcile. Observer identities bind exact
+tracked thread IDs to PID incarnations, including reused SDK PIDs8736/5928.
+Ten old controls and both completed-helper pairs remain valid. Simultaneous
+legacy live pairs remain both-retained. The old STDIO pair remains both-absent
+for SDK; MinGW STDIO is inconclusive, with CLOSED READY3644ms after its common
+deadline and no admitted drainage or live observer. Its failure receipts and
+failed gates remain visible, with no widened bound or rerun.
+
+All81 historical fatal prefixes remain for both compilers. SDK has85 failures;
+MinGW has87. The latter adds two stdout failures, two STDIO post-helper retained
+names and the inconclusive STDIO control, while its old STDIO-CLOSED final-map
+failure does not occur on this path. That assertion remains present. Production
+remains0/7 per compiler at NUL error5; productionAccepted=false.
+
+The next independent pair compares SILENT with a single zero-byte WriteFile on
+the exact original stdout pipe. Both arms keep every original stream open and
+preserve the common preflight, stderr marker, flushes, authenticated drainage,
+held-root baseline, both-root release and unchanged deadlines. Neither emits
+a helper stdout marker. A separate private receipt must authenticate the actual
+write result, transferred count and timestamp. No zero-byte effect or corrected
+production behavior is yet verified.
+
+ASSIGNED-ZERO-SILENT and ASSIGNED-ZERO-WRITE select anchor-zero-run. Both keep
+the original three-generation child stdout transcript without a helper stdout
+marker. The WRITE arm calls synchronous WriteFile once after common output
+flushes, on the saved original stdout pipe, with a valid buffer and count0.
+A separate424-byte frame records attempted, BOOL result, transferred bytes,
+error and operation time; success requires result1/count0/error0. SILENT records
+no call. Failed evidence remains archived and invalidates the comparison.
+The distinct magic and explicit owner admission reject every older protocol.
+
+Local Bun1.4.3 passes125 tests with one native skip, zero failures and2590
+assertions. The compiled real stream path first fails because the selected
+write was not called, then passes110 guard assertions. A compiling count1
+mutation is rejected for its nonzero write count. Codec and controller tests
+cover cross-protocol admission, real owner export/transport, immutable native
+metadata, exact stdout, late capture, failed receipts and joined cleanup after
+synchronous launch failure. Replaying37 preserves20 old400-byte and12 old232-byte
+receipts, four stdout captures, two SDK STDIO captures,30 active proofs and10
+drain proofs. The original MinGW STDIO timeout remains invalid. These checks
+run no Windows process and establish no zero-byte retention effect.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:
