@@ -1,0 +1,56 @@
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <wchar.h>
+typedef uint32_t DWORD;typedef int32_t LONG;typedef uint64_t ULONGLONG;typedef uintptr_t ULONG_PTR;typedef int BOOL;typedef void *HANDLE;
+#define ERROR_INVALID_DATA 13
+#define ERROR_INVALID_HANDLE 6
+#define ERROR_WRITE_FAULT 29
+#define FILE_TYPE_PIPE 3
+#define STD_INPUT_HANDLE 0
+#define STD_OUTPUT_HANDLE 1
+#define STD_ERROR_HANDLE 2
+#define INVALID_HANDLE_VALUE ((HANDLE)(intptr_t)-1)
+typedef struct {DWORD role;} BASE;
+typedef struct {ULONGLONG original,crt;DWORD fd,type,flush_attempted;LONG flush_result;DWORD close_attempted;LONG close_result;DWORD invalid,invalid_error;ULONGLONG close_at;} SF_STREAM;
+typedef struct {BASE base;SF_STREAM streams[3];} SF_FRAME;
+static int mode,closed[3],attempts[3],flushes[3],sequence[3],nclose,nwrite,last_error,cases;
+static int index_of(FILE *f){return f==stdin?0:f==stdout?1:2;}
+static HANDLE GetStdHandle(DWORD i){return (HANDLE)(uintptr_t)(mode==1&&i==1?100:100+i);}
+static int _fileno(FILE *f){return mode==2&&f==stdin?3:index_of(f);}
+static intptr_t _get_osfhandle(int fd){return mode==3&&fd==0?999:100+fd;}
+static DWORD GetFileType(HANDLE h){(void)h;return mode==4?1:3;}
+static BOOL GetHandleInformation(HANDLE h,DWORD *flags){int i=(int)(uintptr_t)h-100;*flags=0;if(mode==8)return 0;if(i>=0&&i<3&&closed[i]&&mode!=7){last_error=6;return 0;}return 1;}
+static DWORD GetLastError(void){return (DWORD)last_error;}
+static ULONGLONG ownership_wall_ms(void){return (ULONGLONG)(1000+nclose);}
+static int emit(const wchar_t *s,FILE *f){(void)s;(void)f;nwrite++;return 0;}
+static int flush(FILE *f){int i=index_of(f);flushes[i]++;return mode==5&&i==1?-1:0;}
+static int close_stream(FILE *f){int i=index_of(f);attempts[i]++;sequence[nclose++]=i;if(mode==6&&i==0)return -1;closed[i]=1;return 0;}
+#define fputws emit
+#define fflush flush
+#define fclose close_stream
+#include "stdio-stream-function.h"
+#undef fclose
+#undef fflush
+#undef fputws
+#define CHECK(s,e) do{cases++;if(!(e)){fprintf(stderr,"stdio case failed: %s\n",s);return 1;}}while(0)
+static void reset(int bad){mode=bad;memset(closed,0,sizeof(closed));memset(attempts,0,sizeof(attempts));memset(flushes,0,sizeof(flushes));memset(sequence,0,sizeof(sequence));nclose=nwrite=last_error=0;}
+int main(void){
+ for(int role=1;role<=2;role++){reset(0);SF_FRAME f={0};f.base.role=(DWORD)role;
+  CHECK("valid exact context",sf_streams(&f,L"barrier\n")==0);
+  CHECK("flush output only",flushes[0]==0&&flushes[1]==1&&flushes[2]==1);
+  CHECK("common final marker before closure",nwrite==2);
+  CHECK("role owner closure count",nclose==(role==2?3:0));
+  for(int i=0;i<3;i++){CHECK("original descriptor mapping",f.streams[i].fd==(DWORD)i&&f.streams[i].original==(ULONGLONG)(100+i)&&f.streams[i].crt==(ULONGLONG)(100+i));
+   CHECK("only closed arm closes",attempts[i]==(role==2?1:0));
+   CHECK("immediate invalidity recorded",f.streams[i].invalid==(DWORD)(role==2)&&f.streams[i].invalid_error==(DWORD)(role==2?6:0));}
+  CHECK("stderr closes last",role==1||(sequence[0]==0&&sequence[1]==1&&sequence[2]==2));
+ }
+ for(int bad=1;bad<=8;bad++){reset(bad);SF_FRAME f={0};f.base.role=2;
+  CHECK("bad preflight/flush/closure rejects",sf_streams(&f,L"barrier\n")!=0);
+  CHECK("bad mapping/flush never closes",(bad>5&&bad<8)||nclose==0);
+  CHECK("no retry after close refusal",bad!=6||nclose==1);
+  CHECK("missing invalidity never continues closure",bad!=7||nclose==1);
+ }
+ printf("STDIO_STREAM_GUARDS_PASS cases=%d native=false\n",cases);return 0;
+}

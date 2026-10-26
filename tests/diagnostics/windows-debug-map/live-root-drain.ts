@@ -1,5 +1,5 @@
 import {parseRootRequest,type RootRequest,type RootOwned,type RootCustody,type RootClose} from './fault-root-reference.ts';
-import {boundLiveReceipt,isLiveLabel} from './live-root-fence.ts';
+import {boundActiveReceipt as boundLiveReceipt,isActiveLiveLabel as isLiveLabel} from './live-fence-dispatch.ts';
 import type {LedgerRow,Membership} from './target-topology.ts';
 type Rows=(LedgerRow&Partial<Membership>&{wallMs?:number;error?:number;stage?:string})[];
 type CapturedCustody=RootCustody&{pid:number;created:string;exitCode:number};

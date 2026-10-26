@@ -15,7 +15,7 @@ function once(source: string, before: string, after: string): string {
 export function generate(source: string): string {
   if (sha256(source) !== sourceHash) throw new Error('protected-tool.c changed: review and repin the diagnostic before running');
   source = once(source, 'static int launch(int count, wchar_t **args) {',
-    '#include "routing.h"\n#include "inspect.h"\n#include "setter.h"\n#include "creator.h"\n#include "target-creator.h"\n#include "retirement-timing.h"\n#include "live-root-fence.h"\n\nstatic int launch(int count, wchar_t **args) {');
+    '#include "routing.h"\n#include "inspect.h"\n#include "setter.h"\n#include "creator.h"\n#include "target-creator.h"\n#include "retirement-timing.h"\n#include "live-root-fence.h"\n#include "stdio-root-fence.h"\n\nstatic int launch(int count, wchar_t **args) {');
   source = once(source, 'CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT, NULL, args[3]',
     'CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT | (debug_mode ? DEBUG_PROCESS : 0), NULL, args[3]');
   source = once(source, '  if (!CreateProcessW(args[4], line, &child_security, &child_security, TRUE, EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED |',
@@ -90,14 +90,15 @@ export function generate(source: string): string {
     '  else if (count > 1 && !wcscmp(args[1], L"create-target")) result = target_creator_entry(count, args);\n' +
     '  else if (count > 4 && (!wcscmp(args[1], L"run") || !wcscmp(args[1], L"debug-run") ||\n' +
     '      !wcscmp(args[1], L"direct-run") || !wcscmp(args[1], L"setter-run") || !wcscmp(args[1], L"quiet-run") ||\n' +
-    '      !wcscmp(args[1], L"reopen-run") || !wcscmp(args[1], L"creator-run") || !wcscmp(args[1], L"retire-run") || !wcscmp(args[1], L"retire-named-run") || !wcscmp(args[1], L"retire-live-run") || !wcscmp(args[1], L"retire-exited-run") || !wcscmp(args[1], L"directory-twin-run") || !wcscmp(args[1], L"anchor-exclusive-run") || !wcscmp(args[1], L"anchor-held-run") ||\n' +
+    '      !wcscmp(args[1], L"reopen-run") || !wcscmp(args[1], L"creator-run") || !wcscmp(args[1], L"retire-run") || !wcscmp(args[1], L"retire-named-run") || !wcscmp(args[1], L"retire-live-run") || !wcscmp(args[1], L"retire-exited-run") || !wcscmp(args[1], L"directory-twin-run") || !wcscmp(args[1], L"anchor-exclusive-run") || !wcscmp(args[1], L"anchor-stdio-run") || !wcscmp(args[1], L"anchor-held-run") ||\n' +
     '      !wcscmp(args[1], L"target-exited-run") || !wcscmp(args[1], L"target-waiting-run") || !wcscmp(args[1], L"target-helper-exited-run"))) {\n' +
     '    debug_mode = !wcscmp(args[1], L"debug-run");\n' +
     '    reopen_owned_map = !wcscmp(args[1], L"reopen-run");\n' +
     '    external_map_creator = !wcscmp(args[1], L"creator-run");\n' +
     '    target_creator_mode = !wcscmp(args[1], L"target-exited-run") ? 1 : !wcscmp(args[1], L"target-waiting-run") ? 2 : !wcscmp(args[1], L"target-helper-exited-run") ? 3 : 0;\n' +
     '    directory_twin_mode = !wcscmp(args[1], L"directory-twin-run");\n' +
-    '    anchor_overlap_mode = !wcscmp(args[1], L"anchor-exclusive-run") ? 1 : !wcscmp(args[1], L"anchor-held-run") ? 2 : 0;\n' +
+    '    stdio_root_mode = !wcscmp(args[1], L"anchor-stdio-run");\n' +
+    '    anchor_overlap_mode = (stdio_root_mode || !wcscmp(args[1], L"anchor-exclusive-run")) ? 1 : !wcscmp(args[1], L"anchor-held-run") ? 2 : 0;\n' +
     '    if (anchor_overlap_mode) directory_twin_mode = TRUE;\n' +
     '    retirement_timing_mode = (directory_twin_mode || !wcscmp(args[1], L"retire-live-run")) ? 1 : !wcscmp(args[1], L"retire-exited-run") ? 2 : 0;\n' +
     '    retire_named_map = !wcscmp(args[1], L"retire-named-run") || target_creator_mode || retirement_timing_mode;\n' +
@@ -123,7 +124,7 @@ export function generate(source: string): string {
     '      DWORD creator_map = creator_closed ? creator_closed : target_creator_absence();\n' +
     '      if (creator_map) result = failure(L"routing.cleanup.creator-exited-map", creator_map);\n' +
     '    }\n' +
-    '    (void)live_root_fence(result);\n  }');
+    '    if (stdio_root_mode) (void)stdio_root_fence(result); else (void)live_root_fence(result);\n  }');
   // Share exactly the generated DIRECT body with both worker arms. Other arms
   // retain their existing inline body and selectors.
   const bodyStart = source.indexOf('    DWORD before = caller_snapshot(args[3], FALSE);');
@@ -149,7 +150,7 @@ export function writeSource(output: string): Record<string, string> {
   const source = generate(original);
   writeFileSync(join(output, 'debug-map.c'), source);
   const hashes: Record<string, string> = {'protected-tool.c': sha256(original), 'debug-map.c': sha256(source)};
-  for (const file of ['routing.h', 'inspect.h', 'ownership.h', 'identity.h', 'startup-site.h', 'startup-site.json', 'roundtrip.h', 'setter.h', 'creator.h', 'target-creator.h', 'target-acl.h', 'helper-job.h', 'worker-lifetime.h', 'retirement-timing.h', 'directory-twin.h', 'anchor-overlap.h', 'live-root-fence.h']) {
+  for (const file of ['routing.h', 'inspect.h', 'ownership.h', 'identity.h', 'startup-site.h', 'startup-site.json', 'roundtrip.h', 'setter.h', 'creator.h', 'target-creator.h', 'target-acl.h', 'helper-job.h', 'worker-lifetime.h', 'retirement-timing.h', 'directory-twin.h', 'anchor-overlap.h', 'live-root-fence.h', 'stdio-root-fence.h']) {
     const bytes = readFileSync(join(import.meta.dir, file));
     writeFileSync(join(output, file), bytes);
     hashes[file] = sha256(bytes);

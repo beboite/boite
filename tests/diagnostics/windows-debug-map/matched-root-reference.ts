@@ -58,7 +58,7 @@ export async function measureMatchedRootReferences(inputs:Record<Arm,MatchedArmI
 }
 /** Shared observer/drainage/owned-close protocol; each caller supplies its own
  * admission, without converting live helpers into completed captures. */
-export async function measureOwnedRootWindow<T extends RootWindowRecord>(record:T,deps:MatchedDependencies,admit:()=>void):Promise<T> {
+export async function measureOwnedRootWindow<T extends RootWindowRecord>(record:T,deps:MatchedDependencies,admit:()=>void,strategy:'root-overlap'|'both-released'='root-overlap'):Promise<T> {
  const both=async<T>(action:(arm:RootWindowArm,key:Arm)=>Promise<T>)=>{
   const settled=await Promise.allSettled(arms.map(key=>action(record.arms[key],key)));
   const errors=settled.filter(s=>s.status==='rejected').map(s=>(s as PromiseRejectedResult).reason);
@@ -86,6 +86,19 @@ export async function measureOwnedRootWindow<T extends RootWindowRecord>(record:
    arm.baseline.find(o=>o.path===arm.request.names.retired)?.out.includes('absent=0'),'same retired retained baseline');
   await both(async arm=>{arm.verified=await deps.exchange({...arm.request,phase:'verified',reference:arm.held!.sample});});
   check(drained(),'references unchanged after baseline');
+  if(strategy==='both-released') {
+   await both(async arm=>{arm.released=await deps.exchange({...arm.request,phase:'release',reference:arm.held!.sample});actualClose(arm,deps.rows(),arm.verified!.at-1);});
+   record.finalDrained=drained(arms);check(record.finalDrained,'both exact roots before stdio comparison');
+   const window=record.comparisonWindow={begin:deps.now(),end:0};
+   try{await batch('comparison');}finally{window.end=deps.now();}
+   check(drained(arms),'both exact roots after stdio comparison');
+   for(const arm of Object.values(record.arms))check(arm.comparison.filter(o=>o.path!==arm.request.names.retired).every(o=>o.out.includes('absent=1')),'other comparison names stay absent');
+   check(deps.now()<record.deadline,'shared stdio window deadline');
+   const h=record.arms.held.comparison.find(o=>o.path===record.arms.held.request.names.retired)!.out.includes('absent=0');
+   const c=record.arms.released.comparison.find(o=>o.path===record.arms.released.request.names.retired)!.out.includes('absent=0');
+   record.outcome=h&&!c?'stdio-held-retained-closed-absent':h&&c?'both-retained':!h&&!c?'both-absent':'stdio-held-absent-closed-retained';
+   record.protocolValid=true;return record;
+  }
   const released=record.arms.released,held=record.arms.held;
   released.released=await deps.exchange({...released.request,phase:'release',reference:released.held!.sample});
   actualClose(released,deps.rows(),released.verified!.at-1);

@@ -14,6 +14,7 @@ import {validateAnchorOverlap, corroborateAnchorRegistry, compareAnchorPair, typ
 import {measureFaultRootReference,requestRootReference,type RootRequest,type RootControlRecord} from './fault-root-reference.ts';
 import {measureMatchedRootReferences,type MatchedArmInput} from './matched-root-reference.ts';
 import {runLiveRootHarness} from './live-root-harness.ts';
+import {runStdioRootHarness} from './stdio-root-reference.ts';
 import {sha256} from './generate.ts';
 
 const native = process.platform === 'win32' && process.env.BOITE_TEST_DEBUG_MAP === '1';
@@ -54,12 +55,14 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   const faultRootReferences: RootControlRecord[] = []; report.faultRootReferences = faultRootReferences;
   const matchedFaultHelpers: {label:string;fault:string;protocol:AnchorReport;cleanup?:boolean}[] = []; report.matchedFaultHelpers = matchedFaultHelpers;
   const liveMatchedHelpers: typeof matchedFaultHelpers = []; report.liveMatchedFaultHelpers = liveMatchedHelpers;
+  const stdioHelpers: typeof matchedFaultHelpers = []; report.stdioHelpers = stdioHelpers;
+  const stdioPairLabels=['ANCHOR-FAULT-ASSIGNED-STDIO-HELD','ANCHOR-FAULT-ASSIGNED-STDIO-CLOSED'];
   const completedPairLabels=['ANCHOR-FAULT-ASSIGNED-PAIR-HELD','ANCHOR-FAULT-ASSIGNED-PAIR-RELEASED'];
   const livePairLabels=['ANCHOR-FAULT-ASSIGNED-LIVE-HELD','ANCHOR-FAULT-ASSIGNED-LIVE-RELEASED'];
   const legacyTimingLabels=['RETIRE-LIVE','RETIRE-EXITED','DIRECTORY-TWIN','ANCHOR-EXCLUSIVE','ANCHOR-HELD',...anchorFaults.map(f=>`ANCHOR-FAULT-${f.toUpperCase()}`)];
   const controls = join(state, 'target-creator-control'); mkdirSync(controls);
   const topologyProofs: unknown[] = []; report.targetCreatorTopology = topologyProofs;
-  const jobs = ['RED', 'A', 'B', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'THREAD-EXITED', 'THREAD-WAITING', 'TARGET-HELPER-HELD', 'RETIRE-LIVE', 'RETIRE-EXITED', 'DIRECTORY-TWIN', 'ANCHOR-EXCLUSIVE', 'ANCHOR-HELD', ...anchorFaults.map(f => `ANCHOR-FAULT-${f.toUpperCase()}`), ...completedPairLabels, ...livePairLabels].map(label => {
+  const jobs = ['RED', 'A', 'B', 'DIRECT', 'SCOPE', 'QUIET', 'REOPEN', 'CREATOR', 'RETIRE', 'RETIRE-NAMED', 'TARGET-EXITED', 'TARGET-WAITING', 'TARGET-HELPER-EXITED', 'THREAD-EXITED', 'THREAD-WAITING', 'TARGET-HELPER-HELD', 'RETIRE-LIVE', 'RETIRE-EXITED', 'DIRECTORY-TWIN', 'ANCHOR-EXCLUSIVE', 'ANCHOR-HELD', ...anchorFaults.map(f => `ANCHOR-FAULT-${f.toUpperCase()}`), ...completedPairLabels, ...livePairLabels, ...stdioPairLabels].map(label => {
     const root = join(state, label), project = join(root, 'project'), runtime = join(root, 'runtime'), home = join(root, 'home');
     const marker = `TASK_ROUTE_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
     return {label, root, project, runtime, home, marker, profile: `boite.debug.route.${crypto.randomUUID().replaceAll('-', '')}`};
@@ -74,7 +77,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
   async function execute(id: string, args: string[], home = state, extra: Record<string, string | undefined> = {}, milliseconds?: number, spawned?: (pid:number)=>void) {
     const workerMode = args[0] === 'thread-exited-run' ? 'exited' : args[0] === 'thread-waiting-run' ? 'waiting' : null;
     const workerNonce = crypto.randomUUID().replaceAll('-', '');
-    const anchorMode = args[0] === 'anchor-exclusive-run' ? 'exclusive' : args[0] === 'anchor-held-run' ? 'held' : null;
+    const anchorMode = args[0] === 'anchor-exclusive-run' || args[0] === 'anchor-stdio-run' ? 'exclusive' : args[0] === 'anchor-held-run' ? 'held' : null;
     const anchorFault = extra.BOITE_DIAGNOSTIC_ANCHOR_FAULT;
     const anchorProofs: unknown[] = [];
     if (anchorMode) anchorTopology.push({id, proofs: anchorProofs});
@@ -167,6 +170,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
           if (id === 'lpac-ANCHOR-FAULT-ASSIGNED-PAIR-HELD' || id === 'lpac-ANCHOR-FAULT-ASSIGNED-PAIR-RELEASED')
             matchedFaultHelpers.push({label:id.slice(5),fault:anchorFault,protocol:evidence});
           else if (livePairLabels.includes(id.slice(5))) liveMatchedHelpers.push({label:id.slice(5),fault:anchorFault,protocol:evidence});
+          else if(stdioPairLabels.includes(id.slice(5))) stdioHelpers.push({label:id.slice(5),fault:anchorFault,protocol:evidence});
           else anchorFaultControls.push({fault: anchorFault, protocol: evidence});
           if (evidence.protocolValid) failures.push(`${id} deliberate anchor fault accepted`);
         }
@@ -180,7 +184,7 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
     writeFileSync(join(output!, `${id}.log`), `pid=${result.pid} exit=${result.code} timedOut=${result.timedOut}\n${result.out}${result.err}`);
     console.log(`${id}: ${JSON.stringify(result)}`); save(); return result;
   }
-  function run(job: typeof jobs[number], debug: boolean, mode?: 'direct-run' | 'setter-run' | 'quiet-run' | 'reopen-run' | 'creator-run' | 'retire-run' | 'retire-named-run' | 'target-exited-run' | 'target-waiting-run' | 'target-helper-exited-run' | 'thread-exited-run' | 'thread-waiting-run' | 'retire-live-run' | 'retire-exited-run' | 'directory-twin-run' | 'anchor-exclusive-run' | 'anchor-held-run', fault?: string, live?: {env:Record<string,string>;spawned(pid:number):void}) {
+  function run(job: typeof jobs[number], debug: boolean, mode?: 'direct-run' | 'setter-run' | 'quiet-run' | 'reopen-run' | 'creator-run' | 'retire-run' | 'retire-named-run' | 'target-exited-run' | 'target-waiting-run' | 'target-helper-exited-run' | 'thread-exited-run' | 'thread-waiting-run' | 'retire-live-run' | 'retire-exited-run' | 'directory-twin-run' | 'anchor-exclusive-run' | 'anchor-held-run' | 'anchor-stdio-run', fault?: string, live?: {env:Record<string,string>;spawned(pid:number):void}) {
     const promise = execute(`lpac-${job.label}`, [mode ?? (debug ? 'debug-run' : 'run'), job.profile, job.project,
       join(job.runtime, 'inspect.exe'), 'inspect', '0', job.marker, ...(debug ? ['forward-check'] : [])], job.home,
       {PATH: `${job.runtime};${process.env.SystemRoot}\\System32`, ...(fault ? {BOITE_DIAGNOSTIC_ANCHOR_FAULT: fault} : {}), ...live?.env}, undefined, live?.spawned);
@@ -610,6 +614,23 @@ test.skipIf(!native)('initial diagnostic: red root map, then concurrent LPAC deb
           },
         });
         report.liveMatchedFaultRootReference=control;if(!control.protocolValid)failures.push(`live matched root reference control: ${control.error}`);save();
+      })());
+      timingTasks.push((async()=>{
+        const directory=process.env.BOITE_ROOT_REFERENCE_DIRECTORY;if(!directory)throw Error('stdio private controller directory missing');
+        const drainer=await ownedLiveRootDrainer(process.env.BOITE_ROOT_REFERENCE_COMPILER!,process.env.BOITE_ROOT_REFERENCE_NONCE!,directory,process.env.BOITE_DEBUG_MAP_TRACE!);
+        const control=await runStdioRootHarness(jobs.filter(j=>stdioPairLabels.includes(j.label)),{
+          directory,compiler:process.env.BOITE_ROOT_REFERENCE_COMPILER!,compilerNonce:process.env.BOITE_ROOT_REFERENCE_NONCE!,trace:process.env.BOITE_DEBUG_MAP_TRACE!,preserve:action=>ownershipTrace.preserve(action),
+          drainHarness:async request=>ownershipTrace.preserve(()=>drainer.drain(request)),start:(job,env,spawned)=>run(job,false,'anchor-stdio-run','assigned',{env,spawned}),
+          observe:async(r,path,phase,deadline)=>{const remaining=deadline-Date.now();if(remaining<=0)throw Error('stdio observer deadline');return {path,...await execute(`stdio-root-${r.label.toLowerCase()}-${phase}-${path.endsWith('.retired')?'retired':path.endsWith('.unused')?'unused':'map'}`,['observe-map',path],state,{},remaining)};},
+          finish:async(job,_request,result)=>{
+            report[job.label.toLowerCase()]=result;completed(job.label,result,125);
+            verify(`${job.label} retired final map absence`,()=>expect(result.err).toContain('cleanup retired-open phase=final status=0xc0000034 absent=1 closed=1 error=0'));
+            cleanupConfirmed.set(`lpac-${job.label}`,false);await observeAfterExit(job.label,result);
+            const evidence=stdioHelpers.find(r=>r.label===job.label);if(evidence)evidence.cleanup=false;
+            save();return {postHelper:afterExit.filter(r=>r.label===job.label).map(r=>({path:r.path as string,code:r.code as number|null,out:r.out as string,err:r.err as string,timedOut:r.timedOut as boolean})),priorCleanupPassed:false};
+          },
+        });
+        report.stdioRootReference=control;if(!control.protocolValid)failures.push(`stdio root reference control: ${control.error}`);save();
       })());
       for (const promise of timingTasks) void promise.catch(() => {});
       for (const [index, mode] of (['direct-run', 'setter-run', 'quiet-run', 'reopen-run', 'creator-run', 'retire-run', 'retire-named-run', 'target-exited-run', 'target-waiting-run', 'target-helper-exited-run', 'thread-exited-run', 'thread-waiting-run', 'target-helper-exited-run'] as const).entries()) {

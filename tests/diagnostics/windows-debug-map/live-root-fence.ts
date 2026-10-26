@@ -31,7 +31,9 @@ export function boundLiveReceipt(r:RootRequest,b:Buffer,now:number):LiveReceipt 
  check(f.ready<=now&&now<r.deadline&&r.deadline<=f.deadline&&r.deadline<=now+3000,'bound deadline');return f;
 }
 export function authorizeLiveFence(r:RootRequest,root:RootOwned,helper:RootOwned|undefined,b:Buffer,rows:(LedgerRow&Partial<Membership>)[],now:number):LiveProof {
- boundLiveReceipt(r,b,now);
+ boundLiveReceipt(r,b,now);return authorizeLiveContext(r,root,helper,b,rows,now);
+}
+export function authorizeLiveContext(r:RootRequest,root:RootOwned,helper:RootOwned|undefined,b:Buffer,rows:(LedgerRow&Partial<Membership>)[],now:number):LiveProof {
  check(helper&&helper.role==='launcher-main'&&helper.pid===r.helper.pid&&helper.created===r.helper.created&&helper.exitCode===259&&helper.complete&&!helper.closeFailed&&helper.stage==='tracked'&&Number.isSafeInteger(helper.handle)&&helper.handle>0&&helper.id!==root.id,'exact live captured helper');
  check(root.pid===r.root.pid&&root.created===r.root.created&&root.exitCode===125&&root.complete&&!root.closeFailed&&root.stage==='tracked','terminal root');
  for(const k of ['owner','threadId','threadJob','jobKey','globalJob','nestingRefused'] as const)check(helper[k]===root[k],'same helper ancestor job');
@@ -40,8 +42,11 @@ export function authorizeLiveFence(r:RootRequest,root:RootOwned,helper:RootOwned
  return {helper:{owner:helper.owner,id:helper.id,threadId:helper.threadId,threadJob:helper.threadJob,jobKey:helper.jobKey,globalJob:helper.globalJob,nestingRefused:helper.nestingRefused,pid:helper.pid,created:helper.created,exitCode:259},at:now,ready:b.toString('base64')};
 }
 export function validateLiveProof(r:RootRequest,value:unknown,now:number):asserts value is LiveProof {
+ validateLiveProofContext(r,value,now);boundLiveReceipt(r,Buffer.from(value.ready,'base64'),value.at);
+}
+export function validateLiveProofContext(r:RootRequest,value:unknown,now:number):asserts value is LiveProof {
  const v=value as LiveProof;check(v&&Object.keys(v).sort().join()===['helper','at','ready'].sort().join()&&typeof v.ready==='string'&&Number.isSafeInteger(v.at)&&v.at<=now,'live proof fields');
- const bytes=Buffer.from(v.ready,'base64');check(bytes.toString('base64')===v.ready,'canonical receipt');boundLiveReceipt(r,bytes,v.at);
+ const bytes=Buffer.from(v.ready,'base64');check(bytes.toString('base64')===v.ready,'canonical receipt');
  const h=v.helper;check(h&&Object.keys(h).sort().join()===['owner','id','threadId','threadJob','jobKey','globalJob','nestingRefused','pid','created','exitCode'].sort().join()&&h.pid===r.helper.pid&&h.created===r.helper.created&&h.exitCode===259&&h.threadId==='native-'+r.compiler&&[h.owner,h.id].every(s=>typeof s==='string'&&s.length>0&&s.length<200)&&/^[1-9]\d*$/.test(h.threadJob)&&/^(0|[1-9]\d*)$/.test(h.globalJob)&&Number.isSafeInteger(h.jobKey)&&h.jobKey>0&&typeof h.nestingRefused==='boolean','live proof identity');
 }
 export function receiptArtifact(bytes:Buffer){return {bytes:bytes.toString('base64'),sha256:hash(bytes),receipt:parseLiveReceipt(bytes)};}

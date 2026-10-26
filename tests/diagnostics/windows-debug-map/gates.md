@@ -1307,6 +1307,53 @@ private receipts and failed closure without retry. Both serialized drain proofs
 are rechecked on one fresh snapshot before any baseline observer. No corrected
 Windows execution or shared-window performance is claimed by these local checks.
 
+## Valid live helper comparison after symmetric drainage
+
+Run40272768823 / job121409194037 executes9aca65b9. All73 manifest and16
+generated-owner provenance hashes match. Four authenticated harness roots
+and four launcher roots close exactly once through their original owners.
+All30 live observers run within the original common3s bound; four RETURN
+receipts and captures125 validate without timeout. Both SDK and MinGW pairs
+are valid and both-retained. Ten retired-name observations remain present
+after the controlled root-reference releases while helpers live. All12 names
+are absent after helper exit. No internal owner or general cause follows.
+
+SDK2129/2129 and MinGW2132/2132 acquired registry references close successfully;
+transfers1581/1581 and1584/1584 reconcile. These counts cover the registered
+process references, not every native handle. Ten old release controls and
+two completed-helper pairs remain valid. All79 historical fatal entries
+remain, plus two live final-absence failures, totaling81 per compiler.
+Production remains0/7 per compiler at NUL error5. No production fix or
+acceptance is established; CAUSE_CONFIRMED=no; productionAccepted=false.
+
+The helper closes three duplicated child streams before READY but retains
+its three GetStdHandle originals. A separate stdio-held/closed comparison
+tests those originals with the helpers alive. The existing live pair and
+all its requirements remain unchanged. The new pair authenticates the CRT
+ownership and pipe type before flushing both outputs; the closed arm uses
+fclose and immediately proves each saved handle invalid before opening
+receipt files. Both launcher root references must close before the shared
+stdio comparison. All subsequent receipts and failures use private binary
+files, never the closed streams. This additional control is unverified;
+no pipe security context, token owner or causal effect is inferred yet.
+
+The additional labels are ASSIGNED-STDIO-HELD and ASSIGNED-STDIO-CLOSED,
+selected by anchor-stdio-run. Both retain their root-held baseline, then
+discharge both exact launcher references before twelve total live observers
+and six post-helper observers per compiler. Private stdio receipts use a
+distinct400-byte format and separate explicit admission. A native failed
+receipt invalidates the control even if a RETURN receipt exists. Actual
+stdio captures must finish before the unchanged shared deadline; a missing
+failure file cannot excuse a late exit. Failed-control bytes remain evidence.
+
+Local Bun1.4.3 tests pass109 cases with one native skip, zero failures and1898
+assertions. Regression runs first accept a valid RETURN with a later native
+failure and accept a late capture without a failure file; both now reject.
+The real stream guard also runs against non-native API stubs to check exact
+mapping, alias rejection, output-only flush, owner closure order and immediate
+invalidity without closing unknown handles. These checks establish no SDK,
+Windows runtime, native scheduling, stdio effect or production acceptance.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:

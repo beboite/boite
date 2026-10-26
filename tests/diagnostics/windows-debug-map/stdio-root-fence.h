@@ -1,0 +1,104 @@
+/* Diagnostic-only CRT-owned original standard stream experiment. */
+#include <io.h>
+#include <errno.h>
+static BOOL stdio_root_mode;
+typedef struct {
+  ULONGLONG original, crt;
+  DWORD fd, type, flush_attempted; LONG flush_result;
+  DWORD close_attempted; LONG close_result;
+  DWORD invalid, invalid_error;
+  ULONGLONG close_at;
+} SF_STREAM;
+typedef struct { LF_FRAME base; SF_STREAM streams[3]; } SF_FRAME;
+typedef char sf_fixed_size[(sizeof(SF_FRAME) == 400) ? 1 : -1];
+static DWORD sf_acquired, sf_closed;
+/* SF_STREAMS_BEGIN: compiled verbatim by the non-native guard regression. */
+static DWORD sf_streams(SF_FRAME *f, const wchar_t *marker) {
+  FILE *files[3] = {stdin, stdout, stderr}; DWORD ids[3] = {STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE};
+  for (int i=0;i<3;i++) {
+    SF_STREAM *s=&f->streams[i]; HANDLE original=GetStdHandle(ids[i]);
+    int fd=_fileno(files[i]); s->fd=(DWORD)fd;
+    s->original=(ULONGLONG)(ULONG_PTR)original;
+    if (fd!=i || !original || original==INVALID_HANDLE_VALUE) return ERROR_INVALID_DATA;
+    s->crt=(ULONGLONG)(ULONG_PTR)_get_osfhandle(fd); s->type=GetFileType(original);
+    DWORD flags=0;
+    if (s->crt!=s->original || s->type!=FILE_TYPE_PIPE || !GetHandleInformation(original,&flags)) return ERROR_INVALID_DATA;
+    for(int j=0;j<i;j++) if(f->streams[j].original==s->original) return ERROR_INVALID_DATA;
+  }
+  /* These markers are the last permitted writes on either captured stream. */
+  if(fputws(marker,stdout)<0 || fputws(marker,stderr)<0) return ERROR_WRITE_FAULT;
+  for(int i=1;i<3;i++) { SF_STREAM *s=&f->streams[i];s->flush_attempted=1;s->flush_result=fflush(files[i]);if(s->flush_result) return ERROR_WRITE_FAULT; }
+  for(int i=0;i<3;i++) {
+    SF_STREAM *s=&f->streams[i];
+    if(f->base.role==2) {
+      s->close_attempted=1;s->close_result=fclose(files[i]);
+      DWORD flags=0;BOOL valid=GetHandleInformation((HANDLE)(ULONG_PTR)s->original,&flags);
+      s->invalid=!valid;s->invalid_error=valid?0:GetLastError();s->close_at=ownership_wall_ms();
+      if(s->close_result || !s->invalid || s->invalid_error!=ERROR_INVALID_HANDLE) return ERROR_INVALID_DATA;
+    }else {
+      if(_fileno(files[i])!=i || (ULONGLONG)(ULONG_PTR)_get_osfhandle(i)!=s->original) return ERROR_INVALID_DATA;
+      DWORD flags=0;if(!GetHandleInformation((HANDLE)(ULONG_PTR)s->original,&flags)) return ERROR_INVALID_HANDLE;
+    }
+  }
+  return 0;
+}
+/* SF_STREAMS_END */
+/* Publication is conditional on the real successful close, including RETURN.
+ * Counter fields predict that one close, never a publication on close failure. */
+static DWORD sf_file(const wchar_t *directory,const wchar_t *label,const wchar_t *phase,SF_FRAME *f,BOOL write) {
+  wchar_t path[4300],pending[4300];int n=swprintf(path,4300,L"%ls\\%ls.%ls.bin",directory,label,phase);
+  if(n<0||n>=4300)return ERROR_INSUFFICIENT_BUFFER;
+  int m=swprintf(pending,4300,L"%ls.pending",path);if(m<0||m>=4300)return ERROR_INSUFFICIENT_BUFFER;
+  HANDLE file=CreateFileW(write?pending:path,write?GENERIC_WRITE:GENERIC_READ,write?0:FILE_SHARE_READ,NULL,write?CREATE_NEW:OPEN_EXISTING,0,NULL);
+  if(file==INVALID_HANDLE_VALUE)return GetLastError();
+  sf_acquired++;DWORD used=0,error=0;LARGE_INTEGER size;
+  if(write){f->base.acquired=sf_acquired;f->base.closed=sf_closed+1;}
+  BOOL ok=write?WriteFile(file,f,sizeof(*f),&used,NULL):ReadFile(file,f,sizeof(*f),&used,NULL);
+  if(!ok){error=GetLastError();if(!error)error=ERROR_READ_FAULT;}
+  else if(used!=sizeof(*f))error=ERROR_INVALID_DATA;
+  if(!error&&!write&&(!GetFileSizeEx(file,&size)||size.QuadPart!=sizeof(*f)))error=ERROR_INVALID_DATA;
+  BOOL closed=CloseHandle(file);DWORD close_error=closed?0:GetLastError();if(closed)sf_closed++;
+  if(!error&&!closed)error=close_error?close_error:ERROR_INVALID_HANDLE;
+  if(!error&&write&&!MoveFileExW(pending,path,0))error=GetLastError();
+  return error;
+}
+static DWORD stdio_root_fence(int result) {
+  wchar_t label[40]={0},directory[4096]={0},fault[32]={0},marker[400];SF_FRAME f;ZeroMemory(&f,sizeof(f));DWORD error=0;
+  DWORD length=GetEnvironmentVariableW(L"BOITE_STDIO_ROOT_LABEL",label,40);
+  if(!length||length>=40)return ERROR_INVALID_NAME;
+  f.base.role=!wcscmp(label,L"ASSIGNED-STDIO-HELD")?1:!wcscmp(label,L"ASSIGNED-STDIO-CLOSED")?2:0;
+  DWORD count=GetEnvironmentVariableW(L"BOITE_STDIO_ROOT_DIRECTORY",directory,4096);
+  if(!count||count>=4096)return ERROR_INVALID_NAME;
+  f.base.magic=0x53524631;f.base.version=1;f.base.bytes=sizeof(f);f.base.phase=1;f.base.result=(DWORD)result;
+  f.base.helper=rt_frame.helper;f.base.root=rt_frame.root;f.base.helper_created=rt_frame.helper_created;f.base.root_created=rt_frame.created;
+  f.base.cleanup=lf_cleanup_mask;f.base.ready=ownership_wall_ms();f.base.root_deadline=rt_frame.deadline;
+  f.base.deadline=f.base.ready+3000<f.base.root_deadline?f.base.ready+3000:f.base.root_deadline;
+  ULONGLONG tick_deadline=GetTickCount64()+(f.base.deadline>f.base.ready?f.base.deadline-f.base.ready:0);
+  if(!f.base.role||result!=125||anchor_overlap_mode!=1||retirement_timing_mode!=1||
+    GetEnvironmentVariableW(L"BOITE_DIAGNOSTIC_ANCHOR_FAULT",fault,32)!=8||wcscmp(fault,L"assigned")||
+    !lf_hex(f.base.compiler_nonce,L"BOITE_STDIO_ROOT_NONCE")||rt_nonce(f.base.nonce)||
+    !f.base.root||f.base.helper!=GetCurrentProcessId()||f.base.helper_created!=rt_created(GetCurrentProcess(),FALSE)||
+    probe_map||probe_link||swap_map||f.base.cleanup!=0x1ff||ao_files_acquired!=ao_files_closed)error=ERROR_INVALID_DATA;
+  if(!ProcessIdToSessionId(GetCurrentProcessId(),&f.base.session))error=GetLastError();
+  int used=swprintf(marker,400,L"stdio-fence barrier label=%ls nonce=%ls helper=%lu helper-created=%llu root=%lu created=%llu ready=%llu deadline=%llu\n",label,f.base.nonce,f.base.helper,f.base.helper_created,f.base.root,f.base.root_created,f.base.ready,f.base.deadline);
+  if(used<0||used>=400)error=ERROR_INSUFFICIENT_BUFFER;
+  if(!error)error=sf_streams(&f,marker);
+  /* No stdio operation, including generic failure(), occurs beyond here. */
+  if(!error&&(ownership_wall_ms()>=f.base.deadline||GetTickCount64()>=tick_deadline||!rt_in_time()))error=ERROR_TIMEOUT;
+  f.base.at=ownership_wall_ms();
+  if(!error)error=sf_file(directory,label,L"ready",&f,TRUE);
+  while(!error) {
+    if(ownership_wall_ms()>=f.base.deadline||GetTickCount64()>=tick_deadline||!rt_in_time()){error=ERROR_TIMEOUT;break;}
+    SF_FRAME release;ZeroMemory(&release,sizeof(release));error=sf_file(directory,label,L"release",&release,FALSE);
+    if(error==ERROR_FILE_NOT_FOUND||error==ERROR_SHARING_VIOLATION){error=0;Sleep(5);continue;}
+    if(error)break;
+    SF_FRAME identity=release;identity.base.phase=1;identity.base.at=f.base.at;
+    if(release.base.phase!=2||release.base.at<f.base.at||release.base.at>=f.base.deadline||memcmp(&identity,&f,sizeof(f))) {error=ERROR_INVALID_DATA;break;}
+    if(ownership_wall_ms()>=f.base.deadline||GetTickCount64()>=tick_deadline||sf_acquired!=sf_closed){error=ERROR_TIMEOUT;break;}
+    f.base.phase=3;f.base.at=ownership_wall_ms();error=sf_file(directory,label,L"return",&f,TRUE);
+    if(!error&&(ownership_wall_ms()>=f.base.deadline||GetTickCount64()>=tick_deadline||sf_acquired!=sf_closed))error=ERROR_TIMEOUT;
+    break;
+  }
+  if(error) {f.base.phase=4;f.base.at=ownership_wall_ms();f.base.error=error;(void)sf_file(directory,label,L"failed",&f,TRUE);}
+  return error;
+}
