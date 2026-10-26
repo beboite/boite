@@ -38,3 +38,9 @@ test('a fence in a numbered step leaves the check, a marker indented as code ope
   expect(withoutFences(['1. Run it:', '', '   ```powershell', '   [inside](missing.md)', '   ```'].join('\n'))).not.toContain('missing.md');
   expect(withoutFences(['    ~~~', '', '[after indented code](missing.md)', '~~~'].join('\n'))).toContain('missing.md');
 });
+
+test('a fence never closed runs to the end of the file', () => {
+  const left = withoutFences(['[before](kept.md)', '', '```md', '[inside](missing.md)', '', 'more'].join('\n'));
+  expect(left).toContain('[before](kept.md)');
+  expect(left).not.toContain('missing.md');
+});

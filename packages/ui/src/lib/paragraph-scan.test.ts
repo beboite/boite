@@ -1,4 +1,5 @@
 import { expect, test } from 'vitest';
+import { renderMarkdown } from './markdown';
 import { ParagraphScan, paragraphBlocks, pendingDrawing, visibleAnswer } from './message-display';
 
 const PIECES = ['word ', 'two words ', '\n', '\n\n', '\r\n', '\r\n\r\n', '```', '```ts\n', '~~~', '````\n', '  ', '\t', '[BOITE_GOAL_COMPLETE]', '[BOITE_GOAL_', 'x'];
@@ -61,7 +62,13 @@ test('a paragraph being written stops where a diagram, a formula or a view opens
   expect(pendingDrawing('```mermaid\nflowchart LR\n  A --> B\n```')).toEqual({ text: '', drawing: true });
   expect(pendingDrawing('So\n$$\n\\int_0^1')).toEqual({ text: 'So', drawing: true });
   expect(pendingDrawing('So \\[x')).toEqual({ text: 'So \\[x', drawing: false });
-  // A fence shown as code is written as it comes, even when it quotes a drawable one.
-  expect(pendingDrawing('````md\n```view\n<p>\n````\nafter')).toEqual({ text: '````md\n```view\n<p>\n````\nafter', drawing: false });
+  // A fence shown as code is written as it comes; the renderer ends it on the next fence line, which opens nothing.
   expect(pendingDrawing('```html\n<p>Hi</p>')).toEqual({ text: '```html\n<p>Hi</p>', drawing: false });
+  expect(pendingDrawing('```md\nquoted\n```view\n<p>')).toEqual({ text: '```md\nquoted\n```view\n<p>', drawing: false });
+  expect(pendingDrawing('```md\nquoted\n```\n```view\n<p>')).toEqual({ text: '```md\nquoted\n```', drawing: true });
+  // Held back only where the renderer draws: an indented opener stays text, a capitalized kind is drawn.
+  expect(pendingDrawing('Steps:\n   ```view\n<p>')).toEqual({ text: 'Steps:\n   ```view\n<p>', drawing: false });
+  expect(renderMarkdown('   ```view\n<p>Hi</p>\n   ```')).not.toContain('md-view');
+  expect(pendingDrawing('```Mermaid\nflowchart LR')).toEqual({ text: '', drawing: true });
+  expect(renderMarkdown('```Mermaid\nflowchart LR\n```')).toContain('md-mermaid');
 });

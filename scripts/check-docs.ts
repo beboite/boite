@@ -5,10 +5,11 @@ import { dirname, join, resolve } from 'node:path';
  * The Markdown left once its fenced blocks are taken out. A fence opens a line, so a
  * ```` ```view ```` span in a sentence is none, and a run of the same marker at least as long closes it.
  * It is indented by three spaces at most, as in a numbered step: four make indented code. A fence
- * nested deeper in a list stays in, so a link in it is checked rather than skipped.
+ * nested deeper in a list stays in, so a link in it is checked rather than skipped. One never closed
+ * runs to the end of the file.
  */
 export function withoutFences(source: string): string {
-  return source.replace(/^ {0,3}(([`~])\2{2,})[^`\n]*\n[\s\S]*?^ {0,3}\1\2*[ \t]*$/gm, '');
+  return source.replace(/^ {0,3}(([`~])\2{2,})[^`\n]*\n[\s\S]*?(?:^ {0,3}\1\2*[ \t]*$|$(?![\s\S]))/gm, '');
 }
 
 if (import.meta.main) {

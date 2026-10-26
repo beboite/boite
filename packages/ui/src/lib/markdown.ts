@@ -72,7 +72,8 @@ function webLinks(text: string): string {
   return out + text.slice(start);
 }
 
-const FENCE = /^```([\w+-]*)\s*$/;
+/** A fence line: it opens a block at the start of a line, and the next one closes it. */
+export const FENCE = /^```([\w+-]*)\s*$/;
 const HEADING = /^(#{1,6})\s+(.+)$/;
 const RULE = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/;
 const ITEM = /^(\s*)(?:[-*+]|\d+[.)])\s+(.*)$/;

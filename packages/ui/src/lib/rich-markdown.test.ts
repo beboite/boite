@@ -17,6 +17,7 @@ afterEach(() => {
   mounted?.destroy();
   mounted = null;
   document.body.replaceChildren();
+  document.documentElement.removeAttribute('style');
 });
 
 describe('richMarkdown', () => {
@@ -132,8 +133,14 @@ describe('richMarkdown', () => {
     // Loading under the placeholder: neither drawn nor its source.
     expect(block.matches('.md-drawn, .md-source')).toBe(false);
     const post = (data: unknown) => window.dispatchEvent(new MessageEvent('message', { data, source: frame.contentWindow }));
+    // An accent picked while the page loads reaches it once it is up, not only at the next change.
+    const sent = vi.spyOn(frame.contentWindow!, 'postMessage');
+    document.documentElement.style.setProperty('--color-accent', 'rgb(1, 2, 3)');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sent).not.toHaveBeenCalled();
     post({ boiteView: 1, type: 'size', height: 180 });
     post({ boiteView: 1, type: 'ready' });
+    expect(sent).toHaveBeenCalledWith(expect.objectContaining({ type: 'theme', theme: expect.objectContaining({ vars: expect.objectContaining({ '--color-accent': 'rgb(1, 2, 3)' }) }) }), '*');
     expect(frame.style.height).toBe('180px');
     expect(block.classList.contains('md-drawn')).toBe(true);
     expect(block.dataset.view).toBe('diagram');

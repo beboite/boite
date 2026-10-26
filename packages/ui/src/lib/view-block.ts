@@ -44,6 +44,14 @@ function sendFonts(frame: HTMLIFrameElement): void {
   if (theme) void viewFonts(theme).then((messages) => { for (const message of messages) target?.postMessage(message, '*'); }, () => {});
 }
 
+/** The theme on screen, for a page whose address carries the one it was mounted with. */
+function sendTheme(frame: HTMLIFrameElement): void {
+  if (!theme) return;
+  const message: ViewHostMessage = { boiteView: 1, type: 'theme', theme };
+  frame.style.colorScheme = theme.scheme;
+  frame.contentWindow?.postMessage(message, '*');
+}
+
 /** FNV-1a: the key of a height, where a collision costs one placeholder of the wrong height. */
 function keyOf(source: string): number {
   let hash = 0x811c9dc5;
@@ -86,6 +94,8 @@ function heard(event: MessageEvent): void {
     state.ready = true;
     clearTimeout(state.timer);
     frame.dataset.ready = '';
+    // A theme picked while the page loaded passed it by.
+    sendTheme(frame);
     sendFonts(frame);
     state.events.ready();
   // A page can post without a click: the link opens only from the frame the reader just acted in.
@@ -102,11 +112,9 @@ function watch(): void {
   watchViewTheme(() => {
     const before = families(theme);
     theme = viewTheme();
-    const message: ViewHostMessage = { boiteView: 1, type: 'theme', theme };
     for (const frame of mounted()) {
       if (!states.get(frame)?.ready) continue;
-      frame.style.colorScheme = theme.scheme;
-      frame.contentWindow?.postMessage(message, '*');
+      sendTheme(frame);
       if (families(theme) !== before) sendFonts(frame);
     }
   });

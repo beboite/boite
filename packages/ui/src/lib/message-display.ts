@@ -1,4 +1,5 @@
 import type { Message, MessagePart, MoveNotice, ThreadLink, ThreadSummary } from '@boite/contracts';
+import { FENCE } from './markdown';
 
 /** Older cores journalled the whole goal instruction as a user message. */
 export function visibleUserText(text: string): string {
@@ -158,28 +159,29 @@ export class ParagraphScan {
   }
 }
 
-/** A fence `lib/rich-markdown.ts` draws, or a formula on lines of its own (`lib/markdown.ts`). */
-const DRAWN_FENCE = /^```(?:mermaid|math|view)\s*$/;
+/** The fences `lib/rich-markdown.ts` draws, or a formula on lines of its own (`lib/markdown.ts`). */
+const DRAWN = new Set(['mermaid', 'math', 'view']);
 const DISPLAY_MATH = /^(?:\$\$|\\\[)/;
 
 /**
  * The paragraph an answer is still writing (`ParagraphScan.pending`), cut
  * where a diagram, a formula or a view opens outside another fence: what is
  * written of it would show as source, then jump to a drawing, so a placeholder
- * stands there (`drawing`) until its paragraph is complete.
+ * stands there (`drawing`) until its paragraph is complete. Fences are
+ * read as `renderMarkdown` reads them (`FENCE`), so what is held back is
+ * what it draws.
  */
 export function pendingDrawing(tail: string): { text: string; drawing: boolean } {
-  let fence = '';
+  let open = false;
   let offset = 0;
   for (const line of tail.split('\n')) {
-    const trimmed = line.trim();
-    const marker = /^(?:`{3,}|~{3,})/.exec(trimmed)?.[0];
-    if (fence) {
-      if (marker && marker[0] === fence[0] && marker.length >= fence.length && trimmed === marker) fence = '';
-    } else if (DRAWN_FENCE.test(trimmed) || DISPLAY_MATH.test(trimmed)) {
+    const fence = FENCE.exec(line);
+    if (open) {
+      if (fence) open = false;
+    } else if (DRAWN.has(fence?.[1]?.toLowerCase() ?? '') || DISPLAY_MATH.test(line.trim())) {
       return { text: tail.slice(0, offset).trimEnd(), drawing: true };
-    } else if (marker) {
-      fence = marker;
+    } else if (fence) {
+      open = true;
     }
     offset += line.length + 1;
   }
