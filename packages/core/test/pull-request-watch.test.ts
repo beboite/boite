@@ -5,7 +5,7 @@ import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { Retirements } from '../src/delegation/retirement.ts';
 import { PullRequestWatches } from '../src/pull-request-watch.ts';
-import { evaluate, initialMemory, mergeChanges, parseDetail, parseRemarks, wakeMessage, type Remark, type WatchDetail } from '../src/pull-request-watch-read.ts';
+import { evaluate, initialMemory, mergeChanges, parseDetail, parseRemarks, stillTrue, wakeMessage, type Remark, type WatchDetail } from '../src/pull-request-watch-read.ts';
 import { parseProtection, parseRules, withRequired } from '../src/pull-request-required.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
@@ -96,6 +96,11 @@ test('remarks count when someone else wrote them, once each, a bot rewriting one
   expect(evaluate(behind.next, { ...detail([]), behind: true }, null).changes).toEqual([]);
   expect(evaluate(evaluate(behind.next, { ...detail([]), behind: false }, null).next, { ...detail([]), behind: true }, null).changes).toEqual([{ kind: 'behind', base: 'main' }]);
   expect(evaluate(memory, { ...detail([]), behind: true, queue: 1 }, null).changes).toEqual([]);
+  // A warning still held when the branch is updated or queued is not told.
+  const queued = evaluate(behind.next, { ...detail([]), behind: true, queue: 1 }, null).next;
+  expect(stillTrue(behind.changes, queued)).toEqual([]);
+  expect(stillTrue(behind.changes, evaluate(behind.next, { ...detail([]), behind: false }, null).next)).toEqual([]);
+  expect(stillTrue(behind.changes, behind.next)).toEqual(behind.changes);
   expect(wakeMessage([{ number: 7, url: URL, changes: behind.changes }])).toMatchObject({ label: 'Pull request update, #7: behind base' });
 });
 

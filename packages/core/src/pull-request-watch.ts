@@ -2,7 +2,7 @@ import { pullRequestAddress, type PullRequestWatch, type PullRequestWatchSeen, t
 import type { Core } from './core.ts';
 import { messageOf, refused } from './errors.ts';
 import {
-  CLOSER_QUERY, DETAIL_QUERY, FINGERPRINT_QUERY, REMARK_PAGES, evaluate, initialMemory, mergeChanges, parseCloser, parseDetail, parseFingerprint, parseRemarks,
+  CLOSER_QUERY, DETAIL_QUERY, FINGERPRINT_QUERY, REMARK_PAGES, evaluate, initialMemory, mergeChanges, parseCloser, stillTrue, parseDetail, parseFingerprint, parseRemarks,
   rateLimited, remarkPath, wakeMessage, type Fingerprint, type Remark, type RemarkKind, type WatchChange, type WatchDetail, type WatchMemory,
 } from './pull-request-watch-read.ts';
 import { RequiredContexts, withRequired } from './pull-request-required.ts';
@@ -261,6 +261,8 @@ export class PullRequestWatches {
       if (remarks !== null) record.remarksReadAt = now;
       record.seen = seenOf(detail, next, now);
       this.#answered(runtime, record);
+      record.pending = stillTrue(record.pending, next);
+      if (!record.pending.length) record.pendingSince = null;
       if (changes.length && !baseline) {
         record.pending = mergeChanges(record.pending, changes);
         record.pendingSince ??= now;

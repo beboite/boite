@@ -434,6 +434,11 @@ export function mergeChanges(held: WatchChange[], next: WatchChange[]): WatchCha
   return out.filter(change => !(change.kind === 'failed' && passed && change.head !== passed.head) && !((change.kind === 'dequeued' || change.kind === 'behind') && closed));
 }
 
+/** Held changes a later read made untrue: falling behind, once the branch was updated or entered the merge queue. */
+export function stillTrue(held: WatchChange[], memory: WatchMemory): WatchChange[] {
+  return memory.behind && !memory.queued ? held : held.filter(change => change.kind !== 'behind');
+}
+
 function snippet(body: string): string {
   const flat = body.replaceAll(/<!--[\s\S]*?-->/g, ' ').replaceAll(/<details>[\s\S]*?<\/details>/g, ' ').replaceAll(/\s+/g, ' ').trim();
   return flat.length <= SNIPPET ? flat : `${flat.slice(0, SNIPPET - 3)}...`;
