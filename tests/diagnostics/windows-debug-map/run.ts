@@ -95,7 +95,7 @@ try {
       if (!compileOnly) {
         const rootDirectory = join(directory, 'fault-root-control'), rootNonce = crypto.randomUUID().replaceAll('-', '');
         mkdirSync(rootDirectory, {mode: 0o700});
-        rootService = startFaultRootService(rootDirectory, await ownedFaultRootReference(compiler.name, rootNonce, directory, traceDirectory), action => trace!.preserve(action));
+        rootService = startFaultRootService(rootDirectory, await ownedFaultRootReference(compiler.name, rootNonce, directory, traceDirectory, rootDirectory), action => trace!.preserve(action));
         let tested: Captured;
         try {tested = await execute(`native-${compiler.name}`, process.execPath,
           ownershipTestArgs(ownership!.preload, join(import.meta.dir, 'routing.test.ts')), selectedEnvironment({

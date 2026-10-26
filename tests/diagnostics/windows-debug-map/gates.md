@@ -1237,6 +1237,34 @@ and changed helper-reference custody. SDK compilation, the actual live Windows
 schedule and its fit inside the original shared3s bound remain unverified.
 CAUSE_CONFIRMED=no for general retention; productionAccepted=false.
 
+## Live helper native admission directory correction
+
+Run40270030872 / job121400814843 executes4a224306. All70 manifest and14
+generated-owner provenance hashes match. The four live helpers produce exact
+232-byte READY/RETURN receipts, native cleanup mask511 and successful fence
+I/O3/3; their original exit125 is preserved. Admission nevertheless fails before
+the first held sample under both compilers: the owner reads READY in the
+compiler capture directory, while the harness publishes it in its separate
+fault-root-control directory. All four held replies report ENOENT, with no root
+sample, controlled root close or live observer. Both pairs are inconclusive.
+
+The original ten release controls and two completed-helper pairs stay valid.
+All79 previous failures per compiler remain fatal; two live final-absence and
+two live post-exit absence failures plus the invalid control bring the total
+to84 per compiler. SDK2034/2034 and MinGW2041/2041 references close, with
+transfers1516/1516 and1523/1523. Production remains0/7 per compiler at NUL5.
+
+The owner now receives the private control directory explicitly from the runner
+through ownedFaultRootReference and the generated export. Completed-helper logs
+continue to use the original capture directory. The existing generated-export
+service test reproduces the separate capture/control directories: ENOENT red,
+then one passing test/37 assertions after the correction. The full Bun1.4.3
+diagnostic suite passes90 tests/1544 assertions with one native skip; scoped
+and generated-copy typing and architecture1219 modules pass. No production,
+C helper, rights, cleanup gates or deadline changes. Corrected native admission
+and the actual live comparison remain unverified. CAUSE_CONFIRMED=no;
+productionAccepted=false.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:

@@ -24,8 +24,10 @@ test('private final receipt binds its bytes, nonce, exact identities, role, fina
  expect(()=>validateFaultNativeEvidence({...r,label:'ASSIGNED'},root,'live ready',members(r))).toThrow();
 });
 
-function fixture(){
- const directory=mkdtempSync(join(tmpdir(),'boite-live-root-')),rows:any[]=[],roots=new Map<number,RootOwned>(),helpers=new Map<number,RootOwned>(),closures:number[]=[],events:string[]=[],returns=new Map<string,Buffer>();
+function fixture(separateDirectories=false){
+ const artifactDirectory=mkdtempSync(join(tmpdir(),'boite-live-root-')),directory=separateDirectories?join(artifactDirectory,'fault-root-control'):artifactDirectory;
+ if(separateDirectories)mkdirSync(directory);
+ const rows:any[]=[],roots=new Map<number,RootOwned>(),helpers=new Map<number,RootOwned>(),closures:number[]=[],events:string[]=[],returns=new Map<string,Buffer>();
  const started=Date.now(),ready=[context(1,started),context(2,started)],resolve=new Map<string,(value:any)=>void>();
  const arms=Object.fromEntries(ready.map(f=>{
   const request=req(f);roots.set(f.root,owned(f.root,f.rootCreated,125));helpers.set(f.helper,owned(f.helper,f.helperCreated,259));
@@ -58,7 +60,7 @@ function fixture(){
  let joined=0;const deps={now:Date.now,rows:()=>rows,exchange:async(r:RootRequest)=>owner.handle(r),
   observe:async(r:RootRequest,path:string,phase:string)=>{try{await new Promise(res=>setTimeout(res,2));expect(helpers.get(11)!.exitCode).toBe(259);expect(helpers.get(12)!.exitCode).toBe(259);events.push('observe:'+phase);return observed(path,path!==r.names.retired||!roots.has(r.root.pid));}finally{joined++;}},
   releaseHelper,readReturn:(r:RootRequest)=>returns.get(r.label)!,finish:async(r:RootRequest)=>({postHelper:Object.values(r.names).map(path=>observed(path,true)),priorCleanupPassed:false})};
- return {directory,arms,deps,roots,helpers,rows,closures,events,resolve,owner,nativeClose,get joined(){return joined;},cleanup(){rmSync(directory,{recursive:true,force:true});}};
+ return {artifactDirectory,directory,arms,deps,roots,helpers,rows,closures,events,resolve,owner,nativeClose,get joined(){return joined;},cleanup(){rmSync(artifactDirectory,{recursive:true,force:true});}};
 }
 test('live shared comparison closes roots before either authenticated helper fence release',async()=>{
  const f=fixture();try{const r=await measureLiveRootReferences(f.arms,f.deps);expect(r.error).toBeUndefined();expect(r.protocolValid).toBe(true);expect(r.outcome).toBe('held-retained-released-absent');expect(f.closures).toEqual([22,21]);expect(f.joined).toBe(15);expect(r.arms.held.helper!.code).toBe(125);expect(r.arms.held.priorCleanupPassed).toBe(false);expect(r.causeConfirmed).toBe(false);expect(r.productionAccepted).toBe(false);expect(f.events.indexOf('helper-release:11')).toBeGreaterThan(f.events.lastIndexOf('observe:final'));expect(r.arms.held.held!.live!.helper.exitCode).toBe(259);}finally{f.cleanup();}
@@ -76,8 +78,8 @@ test('all delayed observers join before failure cleanup releases helper fences',
  try{const r=await measureLiveRootReferences(f.arms,f.deps);expect(r.protocolValid).toBe(false);expect(settled).toBe(6);expect(f.closures).toEqual([22]);expect(r.arms.held.helper!.code).toBe(125);}finally{f.cleanup();}
 });
 
-test('the actual generated owner export admits live receipts through strict private service phases',async()=>{
- const f=fixture(),tracked=new Map<number,any>(),jobs=new Map([['native-sdk',{handle:7,key:3}]]),proofs=new Map();
+test('the actual generated owner export reads live receipts from the private control directory through strict service phases',async()=>{
+ const f=fixture(true),tracked=new Map<number,any>(),jobs=new Map([['native-sdk',{handle:7,key:3}]]),proofs=new Map();
  for(const x of [...f.roots.values(),...f.helpers.values()])tracked.set(x.pid,{handle:x.handle,threadId:x.threadId,identity:{incarnation:x.created}});
  const trace={owner:'owner',role:'launcher-main',preserve:(fn:()=>any)=>fn(),reference:(handle:number)=>{
   const x=[...f.roots.values(),...f.helpers.values()].find(x=>x.handle===handle);if(!x)return undefined;
@@ -86,7 +88,7 @@ test('the actual generated owner export admits live receipts through strict priv
  const js=new Bun.Transpiler({loader:'ts'}).transformSync(source);
  const factory=new Function('FaultRootOwner','authorizeLiveFence','validateFaultNativeEvidence','readFileSync','join','traceRows','ownershipTrace','tracked','threadJobs','globalJob','nestingRefused','reportExit',js+'\nreturn ownershipFaultRootReference;');
  const exported=factory(FaultRootOwner,authorizeLiveFence,validateFaultNativeEvidence,readFileSync,join,()=>f.rows,trace,tracked,jobs,8,false,(threadId:string,pid:number)=>{expect(threadId).toBe('native-sdk');f.closures.push(pid);const close=f.nativeClose(pid);tracked.delete(pid);proofs.set(close.id,close);});
- const owner=exported('sdk','a'.repeat(32),f.directory,'unused-trace'),service=startFaultRootService(f.directory,owner,fn=>fn());
+ const owner=exported('sdk','a'.repeat(32),f.artifactDirectory,'unused-trace',f.directory),service=startFaultRootService(f.directory,owner,fn=>fn());
  try{
   const result=await measureLiveRootReferences(f.arms,{...f.deps,exchange:r=>requestRootReference(f.directory,r,fn=>fn())});
   expect(result.error).toBeUndefined();expect(result.protocolValid).toBe(true);expect(f.closures).toEqual([22,21]);

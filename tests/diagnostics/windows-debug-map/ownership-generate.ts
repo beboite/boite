@@ -156,8 +156,8 @@ export async function ownedHelperReference(): Promise<import('./helper-reference
   return canonical.ownershipHelperReference;
 }
 
-export async function ownedFaultRootReference(compiler:string,nonce:string,directory:string,trace:string):Promise<import('./fault-root-reference.ts').FaultRootOwner> {
+export async function ownedFaultRootReference(compiler:string,nonce:string,directory:string,trace:string,controlDirectory:string):Promise<import('./fault-root-reference.ts').FaultRootOwner> {
  const canonical=await import(pathToFileURL(jobsPath).href);
  if(canonical.ownershipTraceInstalled!==true||typeof canonical.ownershipFaultRootReference!=='function')throw new Error('fault root owner export missing');
- return canonical.ownershipFaultRootReference(compiler,nonce,directory,trace);
+ return canonical.ownershipFaultRootReference(compiler,nonce,directory,trace,controlDirectory);
 }

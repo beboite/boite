@@ -1,5 +1,5 @@
 // Only the pinned launcher registry can discharge this exact tracked root.
-export function ownershipFaultRootReference(compiler: string, compilerNonce: string, directory: string, traceDirectory: string) {
+export function ownershipFaultRootReference(compiler: string, compilerNonce: string, directory: string, traceDirectory: string, controlDirectory: string) {
   const current = (pid: number) => ownershipTrace.preserve(() => {
       const entry = tracked.get(pid), job = entry && threadJobs.get(entry.threadId);
       const ref = entry && ownershipTrace.reference(entry.handle);
@@ -11,7 +11,7 @@ export function ownershipFaultRootReference(compiler: string, compilerNonce: str
     });
   return new FaultRootOwner({compiler, compilerNonce, now: () => Date.now(), current,
     authorizeLive: (request, sample) => ownershipTrace.preserve(() => authorizeLiveFence(request, sample, current(request.helper.pid),
-      readFileSync(join(directory, `${request.label}.ready.bin`)), traceRows(traceDirectory), Date.now())),
+      readFileSync(join(controlDirectory, `${request.label}.ready.bin`)), traceRows(traceDirectory), Date.now())),
     removed: pid => !tracked.has(pid),
     authorize: (request, sample) => ownershipTrace.preserve(() => validateFaultNativeEvidence(request, sample,
       readFileSync(join(directory, `lpac-ANCHOR-FAULT-${request.label}.log`), 'utf8'), traceRows(traceDirectory))),
