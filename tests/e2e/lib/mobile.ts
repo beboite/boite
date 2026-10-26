@@ -1,5 +1,11 @@
 import type { BrowserPage } from './cdp.ts';
 
+/**
+ * The phone's slides and sheets (`app.css`'s `screen-*` and `sheet-*` keyframes) have come
+ * to rest: what is measured or tapped next is where it stays.
+ */
+export const screensSettled = `!document.getAnimations().some(animation => /^(screen|sheet)-/.test(animation.animationName ?? '') && animation.playState === 'running')`;
+
 /** From a conversation, which hides the bottom bar, Back leads to the list that shows it. */
 export async function toMobileList(page: BrowserPage): Promise<void> {
   if (await page.evaluate(`!!document.querySelector('[data-testid=mobile-tabs]')`)) return;

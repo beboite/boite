@@ -1,4 +1,4 @@
-import { mobileAction, newMobileThread } from './lib/mobile.ts';
+import { mobileAction, newMobileThread, screensSettled } from './lib/mobile.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -64,7 +64,8 @@ async function leaveSettings(draft?: string) {
     if (draft) { await page.waitFor(`!!${row}`); await page.evaluate(`${row}.click()`); }
     else await page.click(id('mobile-new'));
   }
-  await page.waitFor(`document.querySelector('${id('composer-input')}')`);
+  // On a phone the conversation slides in over the list: the bar is measured where it stops.
+  await page.waitFor(`document.querySelector('${id('composer-input')}') && ${screensSettled}`);
 }
 /** Where every button of the composer's bar sits, the dictation's floating menu aside. */
 const barLayout = `[...document.querySelectorAll('${id('composer')} .bar button')].filter(button => button.getClientRects().length && !button.closest('${id('dictation-panel')}')).map(button => { const r = button.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)].join(); })`;
@@ -157,7 +158,7 @@ test('phone draft options preserve worktree choice and close when returning to d
   await page.send('Emulation.setDeviceMetricsOverride', { width: 320, height: 600, deviceScaleFactor: 1, mobile: true });
   await page.click(id('composer-options'));
   await page.click(id('composer-options-worktree'));
-  await page.waitFor(`document.querySelector('${id('composer-options-worktree')}')?.getAttribute('aria-pressed') === 'true'`);
+  await page.waitFor(`document.querySelector('${id('composer-options-worktree')}')?.getAttribute('aria-pressed') === 'true' && ${screensSettled}`);
   expect(await page.evaluate(`(() => { const r=document.querySelector('${id('composer-options-sheet')}').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight; })()`)).toBe(true);
   await capture('speech-phone-draft-options.png');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1360, height: 950, deviceScaleFactor: 1, mobile: false });

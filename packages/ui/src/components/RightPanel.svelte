@@ -788,10 +788,17 @@
       width: auto;
       min-width: 0;
       background: var(--color-surface);
-      box-shadow: none;
+      box-shadow: var(--shadow-screen);
       /* The sheet covers the whole screen, the status bar and the home indicator included. */
       box-sizing: border-box;
       padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+      /* A screen of its own: it slides in over the conversation and back out, opaque all the way, as the conversation does over the list. */
+      animation: screen-in var(--dur-3) var(--ease-slide);
+    }
+
+    .panel.closing,
+    .panel.maximized.closing {
+      animation: screen-out var(--dur-3) var(--ease-slide);
     }
 
     .sheet-scrim {

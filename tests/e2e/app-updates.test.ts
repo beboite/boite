@@ -180,7 +180,7 @@ test('ordinary browsers have no native update controls in Machines, including Fr
   await page.waitFor(`document.querySelector('${id('app-updates-card')}')`);
   expect(await absent('app-update-nightly')).toBe(true);
   await capture('phone-fr');
-  expect((await page.text('.mobile-settings > header h1')).trim()).toBe('Machines et mises à jour');
+  expect((await page.text('[data-testid=mobile-settings-header] h1')).trim()).toBe('Machines et mises à jour');
 }, 30_000);
 
 test('waiting keeps channel changes disabled and cancellation restores the download at desktop and phone widths', async () => {
