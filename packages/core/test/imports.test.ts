@@ -1,5 +1,5 @@
 import { inspectJournal } from '../src/journal/integrity.ts';
-import { mkdirSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import type { Account, MessagePart } from '@boite/contracts';
@@ -229,9 +229,10 @@ test('an unchanged transcript is listed from memory, a changed one read again, a
 for (const location of ['canonical', 'alias'] as const) {
   test(`a symlink project imports a canonical cwd from the ${location} transcript folder`, async () => {
     const client = await harness.connect();
-    const canonical = join(harness.dataDir, 'canonical');
+    const target = join(harness.dataDir, 'canonical');
+    mkdirSync(target);
+    const canonical = realpathSync(target);
     const alias = join(harness.dataDir, 'alias');
-    mkdirSync(canonical);
     symlinkSync(canonical, alias, 'junction');
     const project = await client.call('projects.add', { path: alias });
     const account = await client.call('accounts.add', { providerId: 'claude', label: 'alias' });
@@ -323,9 +324,10 @@ test('shared default roots list one transcript with an explicit account choice, 
 for (const action of ['list', 'run'] as const) {
   test(`imports.${action} skips an unrelated alias candidate before a valid canonical transcript`, async () => {
     const client = await harness.connect();
-    const canonical = join(harness.dataDir, 'canonical');
+    const target = join(harness.dataDir, 'canonical');
+    mkdirSync(target);
+    const canonical = realpathSync(target);
     const alias = join(harness.dataDir, 'alias');
-    mkdirSync(canonical);
     symlinkSync(canonical, alias, 'junction');
     const project = await client.call('projects.add', { path: alias });
     const account = await client.call('accounts.add', { providerId: 'claude', label: 'variants' });
@@ -370,9 +372,10 @@ test('import refuses only foreign cwd candidates before creation, but accepts an
 for (const canonicalFallback of [false, true]) {
   test(`an alias with no initial cwd stays importable ${canonicalFallback ? 'before its canonical fallback' : 'without a fallback candidate'}`, async () => {
     const client = await harness.connect();
-    const canonical = join(harness.dataDir, 'canonical');
+    const target = join(harness.dataDir, 'canonical');
+    mkdirSync(target);
+    const canonical = realpathSync(target);
     const alias = join(harness.dataDir, 'alias');
-    mkdirSync(canonical);
     symlinkSync(canonical, alias, 'junction');
     const project = await client.call('projects.add', { path: alias });
     const account = await client.call('accounts.add', { providerId: 'claude', label: 'initial cwd' });
