@@ -734,7 +734,7 @@ export class Workspace {
     const active = this.active, navigation = active.navigationGeneration;
     const client = owner.client, ownerNavigation = owner.navigationGeneration;
     const current = () => generation === this.#generation && lifecycle === this.#lifecycle && this.active === active
-      && active.navigationGeneration === navigation && owner.client === client && owner.connection === 'ready'
+      && active.navigationGeneration === navigation && owner.client === client
       && owner.navigationGeneration === ownerNavigation;
     const core = where !== null && /^[0-9a-f]{64}$/.test(where) ? where : null;
     const slug = (name: string) => name.trim().replace(/\s+/g, '-').toLowerCase();
@@ -746,7 +746,7 @@ export class Workspace {
     const target = where === null || where === 'here' ? owner : named.length === 1 ? named[0]!.store : undefined;
     if (!current()) return;
     if (where !== null && where !== 'here' && named.length > 1) { owner.error = strings.agentMessages.threadMissing; return; }
-    if (target?.client) {
+    if (target?.client && target.connection === 'ready') {
       const targetClient = target.client, targetNavigation = target.navigationGeneration;
       const targetCurrent = () => current() && target.client === targetClient && target.connection === 'ready'
         && target.navigationGeneration === targetNavigation;
@@ -767,19 +767,21 @@ export class Workspace {
         if (where !== null) { owner.error = strings.agentMessages.threadMissing; return; }
       }
     }
+    // An offline source can open an explicit ready target, but cannot resolve another address.
+    if (owner.connection !== 'ready') return;
     // An unqualified address can still name the sole known remote holder after local NotFound.
     const holders = connected.filter(machine => machine.store.threads.some(thread => thread.id === threadId));
     if (where === null && holders.length === 1) { await this.select(holders[0]!.store, threadId); return; }
     if (client && from) {
       try {
         const [{ self }, { agents }] = await Promise.all([client.call('collaboration.get', { threadId: from }), client.call('collaboration.directory', { threadId: from })]);
-        if (!current()) return;
+        if (!current() || owner.connection !== 'ready') return;
         const found = agents.filter(agent => agent.threadId === threadId && (core !== null ? agent.coreId === core
           : where === 'here' ? agent.coreId === self.coreId : names(agent.machine) || names(agent.coreId)));
         if (found.length === 1) { await this.openAgentThread(owner, self, found[0]!); return; }
       } catch { /* Coordination off on this thread: no contact names the core. */ }
     }
-    if (current()) owner.error = strings.agentMessages.threadMissing;
+    if (current() && owner.connection === 'ready') owner.error = strings.agentMessages.threadMissing;
   }
 
   /** A click on a thread link `renderMarkdown` drew opens that thread; true when it was one. */

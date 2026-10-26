@@ -92,6 +92,38 @@ test.each(['remote', 'b'.repeat(64)])('a rendered archive link explicitly naming
   expect(source.mock.calls.filter(([method]) => method === 'threads.get')).toHaveLength(0);
 });
 
+test.each([{ name: 'remote', archived: false }, { name: 'b'.repeat(64), archived: true }])(
+  'a disconnected source can open an explicit ready target ($name, archived=$archived)',
+  async ({ name, archived }) => {
+    const { a, b, ca, cb } = await setup();
+    await thread(cb, b, targetId, archived);
+    ca.drop();
+    expect(a.connection).toBe('connecting');
+    expect(a.openThread?.id).toBe('t-trace');
+    const source = vi.spyOn(ca, 'call');
+    link(a, `${name}/${targetId}`);
+    await vi.waitFor(() => expect(b.openThread?.id).toBe(targetId));
+    expect(workspace.active).toBe(b);
+    expect(b.openThread?.archived).toBe(archived);
+    expect(a.error).toBeNull();
+    // Selecting B retires A's subscription; the offline client rejects that local cleanup before transport.
+    expect(source.mock.calls.filter(([method]) => method !== 'threads.unsubscribe')).toHaveLength(0);
+  }
+);
+
+test('a disconnected contextual owner does not probe or substitute a remote collision', async () => {
+  const { a, b, ca, cb } = await setup();
+  await thread(cb, b, targetId);
+  ca.drop();
+  const source = vi.spyOn(ca, 'call'), remote = vi.spyOn(cb, 'call');
+  await workspace.openThreadLink(a, 't-trace', null, targetId);
+  expect(workspace.active).toBe(a);
+  expect(a.openThread?.id).toBe('t-trace');
+  expect(a.error).toBeNull();
+  expect(source).not.toHaveBeenCalled();
+  expect(remote).not.toHaveBeenCalled();
+});
+
 test('an unconnected named machine never falls back to the only local holder', async () => {
   const { a, ca } = await setup();
   await thread(ca, a, targetId);
@@ -253,7 +285,7 @@ test('an archive rendered by a background owner opens there, not on the active m
   expect(a.openThread?.archived).toBe(true);
 });
 
-test('a delayed coordination address cannot replace a newer local draft', async () => {
+test.each(['draft', 'disconnection'] as const)('a delayed coordination address is cancelled by source %s', async next => {
   const { a, b, ca, cb } = await setup();
   await thread(cb, b, targetId, true);
   const call = ca.call.bind(ca);
@@ -271,13 +303,15 @@ test('a delayed coordination address cannot replace a newer local draft', async 
   const opening = workspace.openThreadLink(a, 't-trace', 'far-pc', targetId);
   try {
     await vi.waitFor(() => expect(reading).toBe(true));
-    a.startDraft('p-boite', { fresh: true });
-    a.editComposerText('draft', 'A newer draft');
+    if (next === 'draft') {
+      a.startDraft('p-boite', { fresh: true });
+      a.editComposerText('draft', 'A newer draft');
+    } else ca.drop();
     release();
     await opening;
     expect(workspace.active).toBe(a);
-    expect(a.openThread).toBeNull();
-    expect(a.composerStates.draft?.text).toBe('A newer draft');
+    expect(a.openThread?.id ?? null).toBe(next === 'draft' ? null : 't-trace');
+    if (next === 'draft') expect(a.composerStates.draft?.text).toBe('A newer draft');
     expect(a.error).toBeNull();
   } finally { release(); await opening; }
 });
