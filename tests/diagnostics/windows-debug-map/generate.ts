@@ -15,7 +15,7 @@ function once(source: string, before: string, after: string): string {
 export function generate(source: string): string {
   if (sha256(source) !== sourceHash) throw new Error('protected-tool.c changed: review and repin the diagnostic before running');
   source = once(source, 'static int launch(int count, wchar_t **args) {',
-    '#include "routing.h"\n#include "inspect.h"\n#include "setter.h"\n#include "creator.h"\n#include "target-creator.h"\n#include "retirement-timing.h"\n#include "live-root-fence.h"\n#include "stdio-root-fence.h"\n\nstatic int launch(int count, wchar_t **args) {');
+    '#include "routing.h"\n#include "inspect.h"\n#include "setter.h"\n#include "creator.h"\n#include "target-creator.h"\n#include "retirement-timing.h"\n#include "live-root-fence.h"\n#include "stdio-root-fence.h"\n#include "debug-pipe.h"\n\nstatic int launch(int count, wchar_t **args) {');
   source = once(source, 'CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT, NULL, args[3]',
     'CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT | (debug_mode ? DEBUG_PROCESS : 0), NULL, args[3]');
   source = once(source, '  if (!CreateProcessW(args[4], line, &child_security, &child_security, TRUE, EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED |',
@@ -78,6 +78,7 @@ export function generate(source: string): string {
     '    if (ok) lf_cleanup_mask |= 1UL << (i + 6);\n' +
     '    if (!ok && !error) { error = native_error ? native_error : ERROR_INVALID_DATA; stage = L"routing.cleanup.stream"; }\n  }');
   source = once(source, '  for (DWORD i = 0; i < group_count; i++)',
+    '  { DWORD cleanup = debug_pipe_cleanup(child.dwProcessId); if (cleanup && !error) { error = cleanup; stage = L"routing.cleanup.debug-pipe"; } }\n' +
     '  { DWORD cleanup = map_close(); if (cleanup && !error) { error = cleanup; stage = L"routing.cleanup.map"; } }\n  for (DWORD i = 0; i < group_count; i++)');
   source = once(source, '  else if (count > 1 && !wcscmp(args[1], L"run")) result = launch(count, args);',
     '  else if (count == 3 && !wcscmp(args[1], L"observe")) result = observe(args[2]);\n' +
@@ -88,11 +89,12 @@ export function generate(source: string): string {
     '  else if (count > 1 && !wcscmp(args[1], L"anchor-setter")) result = anchor_setter_entry(count, args);\n' +
     '  else if (count > 1 && !wcscmp(args[1], L"create-map")) result = creator_entry(count, args);\n' +
     '  else if (count > 1 && !wcscmp(args[1], L"create-target")) result = target_creator_entry(count, args);\n' +
-    '  else if (count > 4 && (!wcscmp(args[1], L"run") || !wcscmp(args[1], L"debug-run") ||\n' +
+    '  else if (count > 4 && (!wcscmp(args[1], L"run") || !wcscmp(args[1], L"debug-run") || !wcscmp(args[1], L"debug-pipe-held-run") || !wcscmp(args[1], L"debug-pipe-closed-run") ||\n' +
     '      !wcscmp(args[1], L"direct-run") || !wcscmp(args[1], L"setter-run") || !wcscmp(args[1], L"quiet-run") ||\n' +
     '      !wcscmp(args[1], L"reopen-run") || !wcscmp(args[1], L"creator-run") || !wcscmp(args[1], L"retire-run") || !wcscmp(args[1], L"retire-named-run") || !wcscmp(args[1], L"retire-live-run") || !wcscmp(args[1], L"retire-exited-run") || !wcscmp(args[1], L"directory-twin-run") || !wcscmp(args[1], L"anchor-exclusive-run") || !wcscmp(args[1], L"anchor-stdio-run") || !wcscmp(args[1], L"anchor-stdout-run") || !wcscmp(args[1], L"anchor-zero-run") || !wcscmp(args[1], L"anchor-close-run") || !wcscmp(args[1], L"anchor-byte-run") || !wcscmp(args[1], L"anchor-held-run") ||\n' +
     '      !wcscmp(args[1], L"target-exited-run") || !wcscmp(args[1], L"target-waiting-run") || !wcscmp(args[1], L"target-helper-exited-run"))) {\n' +
-    '    debug_mode = !wcscmp(args[1], L"debug-run");\n' +
+    '    debug_pipe_mode = !wcscmp(args[1], L"debug-pipe-held-run") ? 1 : !wcscmp(args[1], L"debug-pipe-closed-run") ? 2 : 0;\n' +
+    '    debug_mode = !wcscmp(args[1], L"debug-run") || debug_pipe_mode;\n' +
     '    reopen_owned_map = !wcscmp(args[1], L"reopen-run");\n' +
     '    external_map_creator = !wcscmp(args[1], L"creator-run");\n' +
     '    target_creator_mode = !wcscmp(args[1], L"target-exited-run") ? 1 : !wcscmp(args[1], L"target-waiting-run") ? 2 : !wcscmp(args[1], L"target-helper-exited-run") ? 3 : 0;\n' +
@@ -154,7 +156,7 @@ export function writeSource(output: string): Record<string, string> {
   const source = generate(original);
   writeFileSync(join(output, 'debug-map.c'), source);
   const hashes: Record<string, string> = {'protected-tool.c': sha256(original), 'debug-map.c': sha256(source)};
-  for (const file of ['routing.h', 'inspect.h', 'ownership.h', 'identity.h', 'startup-site.h', 'startup-site.json', 'roundtrip.h', 'setter.h', 'creator.h', 'target-creator.h', 'target-acl.h', 'helper-job.h', 'worker-lifetime.h', 'retirement-timing.h', 'directory-twin.h', 'anchor-overlap.h', 'live-root-fence.h', 'stdio-root-fence.h']) {
+  for (const file of ['routing.h', 'inspect.h', 'ownership.h', 'identity.h', 'startup-site.h', 'startup-site.json', 'roundtrip.h', 'setter.h', 'creator.h', 'target-creator.h', 'target-acl.h', 'helper-job.h', 'worker-lifetime.h', 'retirement-timing.h', 'directory-twin.h', 'anchor-overlap.h', 'live-root-fence.h', 'stdio-root-fence.h', 'debug-pipe.h']) {
     const bytes = readFileSync(join(import.meta.dir, file));
     writeFileSync(join(output, file), bytes);
     hashes[file] = sha256(bytes);

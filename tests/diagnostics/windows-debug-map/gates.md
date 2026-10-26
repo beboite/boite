@@ -1604,6 +1604,46 @@ frames/16 stream captures/60 owner proofs fromb580e68c. Routing remains900 lines
 Cross compilation does not verify Windows execution; SDK, native closure effect
 and its budget remain unverified.
 
+## Native stdout closure result and normal DEBUG cleanup control
+
+Run40293073260 / job121472762966 executes996587ad. The archived evidence
+reconciles95 manifest hashes,22 owner provenance hashes,14 pairs,72 private
+receipts and264 tracked observations. All28 controlled roots have terminal125
+snapshots before HELD. SDK3012/3012 and MinGW3013/3013 references close; their
+2224/2224 and2225/2225 transfers reconcile. No native retry was performed.
+
+Both PIPE comparisons retain the retired directory in HELD and remove it in
+CLOSED after the launcher roots close, while both helpers remain alive. Neither
+arm adds helper stdout bytes. CLOSED alone closes originalfd1 successfully,
+proves immediate invalidity with error6, and preserves the other streams. The
+12 closure receipts,36 observations, exact output and immutable stream metadata
+agree. All six previous families reproduce their earlier outcomes. This proves
+the bounded closure effect in this fault pair, not a Windows internal owner or
+a production NUL fix. The prior final-map failures occur before this experiment
+and remain fatal:91 failures per compiler, all89 previous and81 historical
+entries retained. Production still rejects all7 NUL probes with error5 per
+compiler. CodeQL, Linux and UI/type checks pass; the PR remains a draft.
+
+The additive DEBUG-PIPE-HELD/CLOSED pair now tests the normal DEBUG path without
+fault injection, retirement or a replacement map. Both arms retain debug-run's
+process creation, assignment, three target generations and three identified
+console auxiliaries. After the owned job/root/duplicate streams and USER32
+cleanup, both run the same CRT preflight, stderr marker and output flushes;
+CLOSED alone calls the existing stdout-only closure guard. This action precedes
+the unchanged first map_close observation. Its native trace binds helper/root,
+role, cleanup mask511, three original CRT mappings and closure times. Exact
+three-generation stdout must contain no new helper output. Invalid or partial
+proofs reject admission, and a new cleanup error never clears an earlier one.
+
+The original A/B assertions are shared with the new pair, including image and
+parent identity, LPAC/job checks, pinned loader and application exceptions,
+six exit events, both drains, caller observations and all cleanup gates. The
+seven prior reference families and their ordering remain intact. The new arms
+run concurrently after them, join with post-helper observers on every path,
+and preserve the2s map wait,3s checkpoint,150s test and170s outer capture bounds.
+These are diagnostic-only changes; Windows effect, SDK execution and native
+budget for this new normal-path control remain unverified.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:

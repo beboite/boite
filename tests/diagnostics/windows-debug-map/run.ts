@@ -61,6 +61,7 @@ try {
     'stdout-zero-fence.ts', 'stdout-zero-reference.ts', 'stdout-zero-reference.test.ts',
     'stdout-byte-fence.ts', 'stdout-byte-reference.ts', 'stdout-byte-reference.test.ts',
     'stdout-close-fence.ts', 'stdout-close-reference.ts', 'stdout-close-reference.test.ts',
+    'debug-pipe.ts', 'debug-pipe.test.ts', 'debug-pipe-cases.c', 'debug-routing.ts',
     'control-schedule.ts', 'control-schedule.test.ts',
     'anchor-access-cases.c', 'ownership-generate.ts', 'ownership-ledger.ts', 'ownership-trace.ts', 'ownership-summary.ts', 'ownership.test.ts', 'null-message.ts', 'null-message.test.ts']) {
     hashes[file] = sha256(readFileSync(join(import.meta.dir, file)));
