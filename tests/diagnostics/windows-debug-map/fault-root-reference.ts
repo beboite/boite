@@ -4,14 +4,14 @@ import {isActiveLiveLabel as isLiveLabel,validateActiveProof as validateLiveProo
 import {join} from 'node:path';
 import type {LedgerRow,ProcessIdentity,Membership} from './target-topology.ts';
 
-export type FaultLabel='NONCE'|'EARLY-RELEASE'|'ASSIGNED'|'RELEASE'|'STALL'|'ASSIGNED-PAIR-HELD'|'ASSIGNED-PAIR-RELEASED'|'ASSIGNED-LIVE-HELD'|'ASSIGNED-LIVE-RELEASED'|'ASSIGNED-STDIO-HELD'|'ASSIGNED-STDIO-CLOSED';
+export type FaultLabel='NONCE'|'EARLY-RELEASE'|'ASSIGNED'|'RELEASE'|'STALL'|'ASSIGNED-PAIR-HELD'|'ASSIGNED-PAIR-RELEASED'|'ASSIGNED-LIVE-HELD'|'ASSIGNED-LIVE-RELEASED'|'ASSIGNED-STDIO-HELD'|'ASSIGNED-STDIO-CLOSED'|'ASSIGNED-STDOUT-SILENT'|'ASSIGNED-STDOUT-WRITE';
 export interface RootCustody {owner:string;id:string;threadId:string;threadJob:string;jobKey:number;globalJob:string;nestingRefused:boolean}
 export interface RootRequest {version:1;compiler:string;compilerNonce:string;nonce:string;label:FaultLabel;phase:'held'|'verified'|'release';helper:ProcessIdentity;root:ProcessIdentity;names:{map:string;retired:string;unused:string};deadline:number;reference:RootCustody|null}
 export interface RootClose {id:string;success:boolean;error:number;wallMs:number}
 export interface RootReply {request:RootRequest;sample:RootCustody|null;close:RootClose|null;at:number;error:string|null;live?:LiveProof}
 export interface RootOwned extends RootCustody {handle:number;pid:number;created:string;exitCode:number|null;role:string;complete:boolean;closeFailed:boolean;stage:string}
 export interface RootOwnerDependencies {compiler:string;compilerNonce:string;now():number;current(pid:number):RootOwned|undefined;removed(pid:number):boolean;authorize(request:RootRequest,sample:RootOwned):void;authorizeLive?(request:RootRequest,sample:RootOwned):LiveProof;retire(sample:RootOwned):RootClose|undefined}
-const labels=['NONCE','EARLY-RELEASE','ASSIGNED','RELEASE','STALL','ASSIGNED-PAIR-HELD','ASSIGNED-PAIR-RELEASED','ASSIGNED-LIVE-HELD','ASSIGNED-LIVE-RELEASED','ASSIGNED-STDIO-HELD','ASSIGNED-STDIO-CLOSED'];
+const labels=['NONCE','EARLY-RELEASE','ASSIGNED','RELEASE','STALL','ASSIGNED-PAIR-HELD','ASSIGNED-PAIR-RELEASED','ASSIGNED-LIVE-HELD','ASSIGNED-LIVE-RELEASED','ASSIGNED-STDIO-HELD','ASSIGNED-STDIO-CLOSED','ASSIGNED-STDOUT-SILENT','ASSIGNED-STDOUT-WRITE'];
 function requireValue(value:unknown,error:string):asserts value {if(!value)throw new Error('fault root reference: '+error);}
 function keys(value:unknown,expected:string[]):asserts value is Record<string,unknown> {requireValue(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join()===expected.sort().join(),'exact fields');}
 function identity(value:unknown):asserts value is ProcessIdentity {keys(value,['pid','created']);requireValue(Number.isSafeInteger(value.pid)&&Number(value.pid)>0&&Number(value.pid)<=0xffffffff&&typeof value.created==='string'&&/^[1-9]\d{0,19}$/.test(value.created),'identity');}
@@ -89,7 +89,7 @@ function readBounded(path:string):string {requireValue(statSync(path).size<=1638
 export function startFaultRootService(directory:string,owner:FaultRootOwner,preserve:Preserve) {
  let stopped=false;const consumed=new Set<string>();
  const done=(async()=>{while(!stopped){preserve(()=>{
-  for(const file of readdirSync(directory).filter(f=>/^(?:NONCE|EARLY-RELEASE|ASSIGNED|RELEASE|STALL|ASSIGNED-PAIR-HELD|ASSIGNED-PAIR-RELEASED|ASSIGNED-LIVE-HELD|ASSIGNED-LIVE-RELEASED|ASSIGNED-STDIO-HELD|ASSIGNED-STDIO-CLOSED)\.(?:held|verified|release)\.request\.json$/.test(f))){
+  for(const file of readdirSync(directory).filter(f=>/^(?:NONCE|EARLY-RELEASE|ASSIGNED|RELEASE|STALL|ASSIGNED-PAIR-HELD|ASSIGNED-PAIR-RELEASED|ASSIGNED-LIVE-HELD|ASSIGNED-LIVE-RELEASED|ASSIGNED-STDIO-HELD|ASSIGNED-STDIO-CLOSED|ASSIGNED-STDOUT-SILENT|ASSIGNED-STDOUT-WRITE)\.(?:held|verified|release)\.request\.json$/.test(f))){
    if(consumed.has(file))continue;consumed.add(file);const path=join(directory,file);let request:RootRequest|undefined;
    try{request=parseRootRequest(readBounded(path),Date.now());requireValue(file===`${request.label}.${request.phase}.request.json`,'request filename');const reply=owner.handle(request);publish(path.replace('.request.json','.response.json'),JSON.stringify(reply));}
    catch(error){publish(path.replace('.request.json','.response.json'),JSON.stringify({request:request??null,sample:null,close:null,error:String(error),at:Date.now()}));}

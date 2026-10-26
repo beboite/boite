@@ -6,7 +6,7 @@ import {requestRootReference,type RootRequest,type RootObservation} from './faul
 import {parseLiveReceipt,encodeLiveReceipt,boundLiveReceipt,type LiveReceipt} from './live-root-fence.ts';
 import {measureLiveRootReferences,type LiveArmInput,type LiveDependencies,type LiveRootRecord} from './live-root-reference.ts';
 import type {LiveDrainProof} from './live-root-drain.ts';
-interface Job {label:string;project:string}
+interface Job {label:string;project:string;marker?:string}
 export interface HarnessDependencies<J extends Job> {
  directory:string;compiler:string;compilerNonce:string;trace:string;preserve<T>(f:()=>T):T;
  start(job:J,env:Record<string,string>,spawned:(pid:number)=>void):Promise<Captured>;
@@ -21,7 +21,7 @@ const pause=()=>new Promise<void>(r=>setTimeout(r,5));
 export async function runLiveRootHarness<J extends Job>(jobs:J[],deps:HarnessDependencies<J>) {
  return runFencedRootHarness(jobs,deps,{labels:['ASSIGNED-LIVE-HELD','ASSIGNED-LIVE-RELEASED'],parse:parseLiveReceipt,bound:boundLiveReceipt,encode:encodeLiveReceipt,environment:['BOITE_LIVE_ROOT_FENCE_LABEL','BOITE_LIVE_ROOT_FENCE_DIRECTORY','BOITE_LIVE_ROOT_FENCE_NONCE'],measure:measureLiveRootReferences});
 }
-interface HarnessProtocol<F extends LiveReceipt> {labels:readonly [string,string];parse(b:Buffer):F;bound(r:RootRequest,b:Buffer,now:number):F;encode(f:F):Buffer;environment:readonly [string,string,string];measure(inputs:Record<'held'|'released',LiveArmInput>,deps:LiveDependencies):Promise<LiveRootRecord>;failure?(directory:string,label:string):unknown}
+interface HarnessProtocol<F extends LiveReceipt> {marker?(job:Job):string;labels:readonly [string,string];parse(b:Buffer):F;bound(r:RootRequest,b:Buffer,now:number):F;encode(f:F):Buffer;environment:readonly [string,string,string];measure(inputs:Record<'held'|'released',LiveArmInput>,deps:LiveDependencies):Promise<LiveRootRecord>;failure?(directory:string,label:string):unknown}
 export async function runFencedRootHarness<J extends Job,F extends LiveReceipt>(jobs:J[],deps:HarnessDependencies<J>,protocol:HarnessProtocol<F>) {
  check(jobs.length===2&&jobs.every((j,i)=>j.label==='ANCHOR-FAULT-'+protocol.labels[i]),'fixed pair jobs');
  check(isAbsolute(deps.directory)&&/^[a-f0-9]{32}$/.test(deps.compilerNonce),'private controller context');
@@ -59,7 +59,7 @@ export async function runFencedRootHarness<J extends Job,F extends LiveReceipt>(
   }
   const prepared=await Promise.allSettled(started.map(s=>s.preparation));check(prepared.every(r=>r.status==='fulfilled'),'both final READY receipts');
   const deadline=controlDeadline=Math.min(Date.now()+3000,...[...samples.values()].map(s=>s.receipt.deadline));
-  const inputs=Object.fromEntries(started.map((s,i)=>{const sample=samples.get(s.label)!;const request=context(sample.receipt,deadline);return [i?'released':'held',{request,ready:sample.bytes,capturedPid:sample.pid,readyObservedAt:sample.observedAt,capture:s.capture}];})) as unknown as Record<'held'|'released',LiveArmInput>;
+  const inputs=Object.fromEntries(started.map((s,i)=>{const sample=samples.get(s.label)!;const request=context(sample.receipt,deadline);return [i?'released':'held',{request,...(protocol.marker?{stdoutMarker:protocol.marker(s.job)}:{}),ready:sample.bytes,capturedPid:sample.pid,readyObservedAt:sample.observedAt,capture:s.capture}];})) as unknown as Record<'held'|'released',LiveArmInput>;
   record=await protocol.measure(inputs,{now:Date.now,rows:()=>deps.preserve(()=>traceRows(deps.trace)),exchange:r=>requestRootReference(deps.directory,r,deps.preserve),observe:deps.observe,drainHarness:deps.drainHarness,
    releaseHelper:async r=>release(r),readReturn:r=>deps.preserve(()=>{checkFailure(r.label);return readFileSync(join(deps.directory,r.label+'.return.bin'));}),finish});
  }catch(error){record={protocolValid:false,outcome:'inconclusive',error:String(error),causeConfirmed:false,productionAccepted:false,preparation:[...samples].map(([label,s])=>({label,receipt:s.receipt,bytes:s.bytes.toString('base64'),pid:s.pid,observedAt:s.observedAt})),helpers:[]};}

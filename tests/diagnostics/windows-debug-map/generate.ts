@@ -90,7 +90,7 @@ export function generate(source: string): string {
     '  else if (count > 1 && !wcscmp(args[1], L"create-target")) result = target_creator_entry(count, args);\n' +
     '  else if (count > 4 && (!wcscmp(args[1], L"run") || !wcscmp(args[1], L"debug-run") ||\n' +
     '      !wcscmp(args[1], L"direct-run") || !wcscmp(args[1], L"setter-run") || !wcscmp(args[1], L"quiet-run") ||\n' +
-    '      !wcscmp(args[1], L"reopen-run") || !wcscmp(args[1], L"creator-run") || !wcscmp(args[1], L"retire-run") || !wcscmp(args[1], L"retire-named-run") || !wcscmp(args[1], L"retire-live-run") || !wcscmp(args[1], L"retire-exited-run") || !wcscmp(args[1], L"directory-twin-run") || !wcscmp(args[1], L"anchor-exclusive-run") || !wcscmp(args[1], L"anchor-stdio-run") || !wcscmp(args[1], L"anchor-held-run") ||\n' +
+    '      !wcscmp(args[1], L"reopen-run") || !wcscmp(args[1], L"creator-run") || !wcscmp(args[1], L"retire-run") || !wcscmp(args[1], L"retire-named-run") || !wcscmp(args[1], L"retire-live-run") || !wcscmp(args[1], L"retire-exited-run") || !wcscmp(args[1], L"directory-twin-run") || !wcscmp(args[1], L"anchor-exclusive-run") || !wcscmp(args[1], L"anchor-stdio-run") || !wcscmp(args[1], L"anchor-stdout-run") || !wcscmp(args[1], L"anchor-held-run") ||\n' +
     '      !wcscmp(args[1], L"target-exited-run") || !wcscmp(args[1], L"target-waiting-run") || !wcscmp(args[1], L"target-helper-exited-run"))) {\n' +
     '    debug_mode = !wcscmp(args[1], L"debug-run");\n' +
     '    reopen_owned_map = !wcscmp(args[1], L"reopen-run");\n' +
@@ -98,7 +98,8 @@ export function generate(source: string): string {
     '    target_creator_mode = !wcscmp(args[1], L"target-exited-run") ? 1 : !wcscmp(args[1], L"target-waiting-run") ? 2 : !wcscmp(args[1], L"target-helper-exited-run") ? 3 : 0;\n' +
     '    directory_twin_mode = !wcscmp(args[1], L"directory-twin-run");\n' +
     '    stdio_root_mode = !wcscmp(args[1], L"anchor-stdio-run");\n' +
-    '    anchor_overlap_mode = (stdio_root_mode || !wcscmp(args[1], L"anchor-exclusive-run")) ? 1 : !wcscmp(args[1], L"anchor-held-run") ? 2 : 0;\n' +
+    '    stdout_root_mode = !wcscmp(args[1], L"anchor-stdout-run");\n' +
+    '    anchor_overlap_mode = (stdio_root_mode || stdout_root_mode || !wcscmp(args[1], L"anchor-exclusive-run")) ? 1 : !wcscmp(args[1], L"anchor-held-run") ? 2 : 0;\n' +
     '    if (anchor_overlap_mode) directory_twin_mode = TRUE;\n' +
     '    retirement_timing_mode = (directory_twin_mode || !wcscmp(args[1], L"retire-live-run")) ? 1 : !wcscmp(args[1], L"retire-exited-run") ? 2 : 0;\n' +
     '    retire_named_map = !wcscmp(args[1], L"retire-named-run") || target_creator_mode || retirement_timing_mode;\n' +
@@ -124,7 +125,7 @@ export function generate(source: string): string {
     '      DWORD creator_map = creator_closed ? creator_closed : target_creator_absence();\n' +
     '      if (creator_map) result = failure(L"routing.cleanup.creator-exited-map", creator_map);\n' +
     '    }\n' +
-    '    if (stdio_root_mode) (void)stdio_root_fence(result); else (void)live_root_fence(result);\n  }');
+    '    if (stdio_root_mode || stdout_root_mode) (void)stdio_root_fence(result, stdout_root_mode ? 1 : 0); else (void)live_root_fence(result);\n  }');
   // Share exactly the generated DIRECT body with both worker arms. Other arms
   // retain their existing inline body and selectors.
   const bodyStart = source.indexOf('    DWORD before = caller_snapshot(args[3], FALSE);');

@@ -14,6 +14,6 @@ test.skipIf(!compiler)('the actual native stream guard validates CRT ownership a
   const built=await capture(procs,'compile-stdio',procs.spawnPiped('compile-stdio',compiler!,['-std=c11','-Wall','-Wextra','-Werror','-I',dir,join(import.meta.dir,'stdio-stream-cases.c'),'-o',join(dir,'cases')],{cwd:dir,env:selectedEnvironment(),agentRoot:false}),15000);
   expect(built.timedOut).toBe(false);expect(built.code,built.err).toBe(0);
   const result=await capture(procs,'stdio-cases',procs.spawnPiped('stdio-cases',join(dir,'cases'),[],{cwd:dir,env:selectedEnvironment(),agentRoot:false}),5000);
-  expect(result.timedOut).toBe(false);expect(result.code,result.err).toBe(0);expect(result.out).toContain('STDIO_STREAM_GUARDS_PASS');
+  expect(result.timedOut).toBe(false);expect(result.code,result.err).toBe(0);expect(result.out).toContain('STDIO_STREAM_GUARDS_PASS');console.log(result.out.trim());
  }finally{await procs.killAll();await procs.close();journal.close();rmSync(dir,{recursive:true,force:true});}
 },30000);

@@ -1354,6 +1354,48 @@ mapping, alias rejection, output-only flush, owner closure order and immediate
 invalidity without closing unknown handles. These checks establish no SDK,
 Windows runtime, native scheduling, stdio effect or production acceptance.
 
+## Native original-stdio lifetime result and stdout discriminator
+
+Run40275974985 / job121418872575 executes09d74bf2. Parent and independent
+audits reconcile80 manifest entries and18 generated-owner provenance hashes,
+12 private400-byte receipts,24 live observers and12 post-helper absences.
+Both STDIO pairs are valid and both-absent within the original3s bound.
+All four retired-name baselines retain the directory with launcher roots
+held; all four comparison observations are absent after both roots close.
+HELD keeps all originals open with0/3 closes; CLOSED proves3/3 successful
+owning closures. Original stdio closure is therefore not necessary for this
+observed disappearance. No internal owner or general cause follows.
+
+The simultaneous legacy live pairs remain both-retained. Ten old release
+controls and two completed-helper pairs remain valid. All81 historical fatal
+entries remain, plus two STDIO final-absence failures, totaling83 per compiler.
+SDK2306/2306 and MinGW2312/2312 acquired registry references close; transfers
+1710/1710 and1716/1716 reconcile. Production remains0/7 per compiler at NUL
+error5. Later name disappearance never clears an earlier fatal cleanup gate.
+
+An additional independent pair compares only the helper's stdout marker
+write. ASSIGNED-STDOUT-SILENT and ASSIGNED-STDOUT-WRITE keep all three original
+streams open. Both perform the same CRT/Win32 preflight, stderr barrier,
+stdout/stderr flushes, authenticated harness drainage, root-held baseline,
+both-root release and private receipt protocol. Only WRITE emits the additional
+stdout marker before the common flush. Exact captured output and distinct
+receipt admission authenticate the chosen arm. The old pairs and all bounds
+remain unchanged. Local implementation and compilation do not establish a
+native stdout effect. CAUSE_CONFIRMED=no; productionAccepted=false.
+
+Local Bun1.4.3 passes116 tests with one native skip, zero failures and2221
+assertions. The missing write-selector interface first fails compilation.
+A scratch mutation that writes stdout for SILENT compiles but fails the actual
+operation-order assertion; the current function passes both old ownership cases
+and the exact silent/write, common-flush, zero-close sequences. Scoped/generated-owner types,
+architecture and strict MinGW compilation of both programs pass. The final
+compile snapshot has78 manifest entries and generated-owner provenance has19.
+Replaying archived09 captures preserves timing4/4, twin2/2, anchor4/4, STDIO4/4,
+live4/4 and their original fatal flags. Four archived child-output prefixes,
+adapted only for the new labels/marker lengths, pass the new grammar;16 changed
+prefix/root/barrier variants reject. This replay launches no native process.
+The new paired Windows schedule, SDK build and causal result remain unverified.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:

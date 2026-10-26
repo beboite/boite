@@ -3,8 +3,8 @@ import {parseRootRequest,validateRootObservations,validateFaultNativeEvidence,ty
 import {measureOwnedRootWindow,validateAssignedFailure,type RootWindowRecord,type RootWindowArm,type MatchedDependencies} from './matched-root-reference.ts';
 import {boundLiveReceipt,parseLiveReceipt,validateLiveProof,receiptArtifact,type LiveProof} from './live-root-fence.ts';
 import {validateLiveDrain,type LiveDrainProof} from './live-root-drain.ts';
-export interface LiveArmInput {request:RootRequest;ready:Buffer;capturedPid:number;readyObservedAt:number;capture:Promise<Captured>}
-export interface LiveArmRecord extends RootWindowArm {capturedPid:number;readyObservedAt:number;ready:ReturnType<typeof receiptArtifact>;harnessDrain?:LiveDrainProof;helper?:Captured;captureFinishedAt?:number;helperRelease?:{receipt:ReturnType<typeof receiptArtifact>;publishStartedAt:number;publishFinishedAt:number};returned?:ReturnType<typeof receiptArtifact>;postHelper:RootObservation[];priorCleanupPassed?:boolean}
+export interface LiveArmInput {stdoutMarker?:string;request:RootRequest;ready:Buffer;capturedPid:number;readyObservedAt:number;capture:Promise<Captured>}
+export interface LiveArmRecord extends RootWindowArm {stdoutMarker?:string;stdoutPrefix?:string;capturedPid:number;readyObservedAt:number;ready:ReturnType<typeof receiptArtifact>;harnessDrain?:LiveDrainProof;helper?:Captured;captureFinishedAt?:number;helperRelease?:{receipt:ReturnType<typeof receiptArtifact>;publishStartedAt:number;publishFinishedAt:number};returned?:ReturnType<typeof receiptArtifact>;postHelper:RootObservation[];priorCleanupPassed?:boolean}
 export interface LiveRootRecord extends RootWindowRecord {arms:Record<'held'|'released',LiveArmRecord>;observationsFinishedAt?:number;helpersJoined:boolean}
 export interface LiveDependencies extends MatchedDependencies {
  drainHarness(r:RootRequest):Promise<LiveDrainProof>;
@@ -42,7 +42,7 @@ export async function measureLiveRootReferences(inputs:Record<'held'|'released',
  return measureFencedRootReferences(inputs,deps,{label:k=>`ASSIGNED-LIVE-${k.toUpperCase()}` as RootRequest['label'],bound:boundLiveReceipt,artifact:receiptArtifact,validateProof:validateLiveProof,returned:returnedCapture,strategy:'root-overlap'});
 }
 export async function measureFencedRootReferences(inputs:Record<'held'|'released',LiveArmInput>,deps:LiveDependencies,protocol:FencedRootProtocol):Promise<LiveRootRecord> {
- const record:LiveRootRecord={arms:Object.fromEntries(roles.map(k=>[k,{request:inputs[k].request,capturedPid:inputs[k].capturedPid,readyObservedAt:inputs[k].readyObservedAt,ready:{bytes:inputs[k].ready.toString('base64'),sha256:'',receipt:{}},baseline:[],comparison:[],final:[],postHelper:[]}])) as unknown as LiveRootRecord['arms'],deadline:inputs.held.request.deadline,otherReferencesDrained:false,finalDrained:false,protocolValid:false,outcome:'inconclusive',causeConfirmed:false,productionAccepted:false,helpersJoined:false};
+ const record:LiveRootRecord={arms:Object.fromEntries(roles.map(k=>[k,{request:inputs[k].request,...(inputs[k].stdoutMarker!==undefined?{stdoutMarker:inputs[k].stdoutMarker}:{}),capturedPid:inputs[k].capturedPid,readyObservedAt:inputs[k].readyObservedAt,ready:{bytes:inputs[k].ready.toString('base64'),sha256:'',receipt:{}},baseline:[],comparison:[],final:[],postHelper:[]}])) as unknown as LiveRootRecord['arms'],deadline:inputs.held.request.deadline,otherReferencesDrained:false,finalDrained:false,protocolValid:false,outcome:'inconclusive',causeConfirmed:false,productionAccepted:false,helpersJoined:false};
  const completed=new Set<string>(),proofs=new Map<string,LiveProof>(),errors:string[]=[];
  const captures=roles.map(async k=>{try{const h=await inputs[k].capture;record.arms[k].helper=h;record.arms[k].captureFinishedAt=deps.now();return h;}finally{completed.add(k);}});
  // Capture rejections cannot become unhandled while observers are running.

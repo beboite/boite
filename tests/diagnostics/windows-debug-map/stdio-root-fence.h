@@ -1,7 +1,7 @@
 /* Diagnostic-only CRT-owned original standard stream experiment. */
 #include <io.h>
 #include <errno.h>
-static BOOL stdio_root_mode;
+static BOOL stdio_root_mode, stdout_root_mode;
 typedef struct {
   ULONGLONG original, crt;
   DWORD fd, type, flush_attempted; LONG flush_result;
@@ -13,7 +13,8 @@ typedef struct { LF_FRAME base; SF_STREAM streams[3]; } SF_FRAME;
 typedef char sf_fixed_size[(sizeof(SF_FRAME) == 400) ? 1 : -1];
 static DWORD sf_acquired, sf_closed;
 /* SF_STREAMS_BEGIN: compiled verbatim by the non-native guard regression. */
-static DWORD sf_streams(SF_FRAME *f, const wchar_t *marker) {
+static DWORD sf_streams(SF_FRAME *f, const wchar_t *marker, DWORD experiment) {
+  if(experiment>1 || (f->base.role!=1 && f->base.role!=2)) return ERROR_INVALID_DATA;
   FILE *files[3] = {stdin, stdout, stderr}; DWORD ids[3] = {STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE};
   for (int i=0;i<3;i++) {
     SF_STREAM *s=&f->streams[i]; HANDLE original=GetStdHandle(ids[i]);
@@ -26,11 +27,11 @@ static DWORD sf_streams(SF_FRAME *f, const wchar_t *marker) {
     for(int j=0;j<i;j++) if(f->streams[j].original==s->original) return ERROR_INVALID_DATA;
   }
   /* These markers are the last permitted writes on either captured stream. */
-  if(fputws(marker,stdout)<0 || fputws(marker,stderr)<0) return ERROR_WRITE_FAULT;
+  if(((!experiment || f->base.role==2) && fputws(marker,stdout)<0) || fputws(marker,stderr)<0) return ERROR_WRITE_FAULT;
   for(int i=1;i<3;i++) { SF_STREAM *s=&f->streams[i];s->flush_attempted=1;s->flush_result=fflush(files[i]);if(s->flush_result) return ERROR_WRITE_FAULT; }
   for(int i=0;i<3;i++) {
     SF_STREAM *s=&f->streams[i];
-    if(f->base.role==2) {
+    if(!experiment && f->base.role==2) {
       s->close_attempted=1;s->close_result=fclose(files[i]);
       DWORD flags=0;BOOL valid=GetHandleInformation((HANDLE)(ULONG_PTR)s->original,&flags);
       s->invalid=!valid;s->invalid_error=valid?0:GetLastError();s->close_at=ownership_wall_ms();
@@ -62,27 +63,28 @@ static DWORD sf_file(const wchar_t *directory,const wchar_t *label,const wchar_t
   if(!error&&write&&!MoveFileExW(pending,path,0))error=GetLastError();
   return error;
 }
-static DWORD stdio_root_fence(int result) {
+static DWORD stdio_root_fence(int result, DWORD experiment) {
+  if(experiment>1)return ERROR_INVALID_DATA;
   wchar_t label[40]={0},directory[4096]={0},fault[32]={0},marker[400];SF_FRAME f;ZeroMemory(&f,sizeof(f));DWORD error=0;
-  DWORD length=GetEnvironmentVariableW(L"BOITE_STDIO_ROOT_LABEL",label,40);
+  DWORD length=GetEnvironmentVariableW(experiment?L"BOITE_STDOUT_WRITE_LABEL":L"BOITE_STDIO_ROOT_LABEL",label,40);
   if(!length||length>=40)return ERROR_INVALID_NAME;
-  f.base.role=!wcscmp(label,L"ASSIGNED-STDIO-HELD")?1:!wcscmp(label,L"ASSIGNED-STDIO-CLOSED")?2:0;
-  DWORD count=GetEnvironmentVariableW(L"BOITE_STDIO_ROOT_DIRECTORY",directory,4096);
+  f.base.role=!wcscmp(label,experiment?L"ASSIGNED-STDOUT-SILENT":L"ASSIGNED-STDIO-HELD")?1:!wcscmp(label,experiment?L"ASSIGNED-STDOUT-WRITE":L"ASSIGNED-STDIO-CLOSED")?2:0;
+  DWORD count=GetEnvironmentVariableW(experiment?L"BOITE_STDOUT_WRITE_DIRECTORY":L"BOITE_STDIO_ROOT_DIRECTORY",directory,4096);
   if(!count||count>=4096)return ERROR_INVALID_NAME;
-  f.base.magic=0x53524631;f.base.version=1;f.base.bytes=sizeof(f);f.base.phase=1;f.base.result=(DWORD)result;
+  f.base.magic=experiment?0x53574631:0x53524631;f.base.version=1;f.base.bytes=sizeof(f);f.base.phase=1;f.base.result=(DWORD)result;
   f.base.helper=rt_frame.helper;f.base.root=rt_frame.root;f.base.helper_created=rt_frame.helper_created;f.base.root_created=rt_frame.created;
   f.base.cleanup=lf_cleanup_mask;f.base.ready=ownership_wall_ms();f.base.root_deadline=rt_frame.deadline;
   f.base.deadline=f.base.ready+3000<f.base.root_deadline?f.base.ready+3000:f.base.root_deadline;
   ULONGLONG tick_deadline=GetTickCount64()+(f.base.deadline>f.base.ready?f.base.deadline-f.base.ready:0);
   if(!f.base.role||result!=125||anchor_overlap_mode!=1||retirement_timing_mode!=1||
     GetEnvironmentVariableW(L"BOITE_DIAGNOSTIC_ANCHOR_FAULT",fault,32)!=8||wcscmp(fault,L"assigned")||
-    !lf_hex(f.base.compiler_nonce,L"BOITE_STDIO_ROOT_NONCE")||rt_nonce(f.base.nonce)||
+    !lf_hex(f.base.compiler_nonce,experiment?L"BOITE_STDOUT_WRITE_NONCE":L"BOITE_STDIO_ROOT_NONCE")||rt_nonce(f.base.nonce)||
     !f.base.root||f.base.helper!=GetCurrentProcessId()||f.base.helper_created!=rt_created(GetCurrentProcess(),FALSE)||
     probe_map||probe_link||swap_map||f.base.cleanup!=0x1ff||ao_files_acquired!=ao_files_closed)error=ERROR_INVALID_DATA;
   if(!ProcessIdToSessionId(GetCurrentProcessId(),&f.base.session))error=GetLastError();
-  int used=swprintf(marker,400,L"stdio-fence barrier label=%ls nonce=%ls helper=%lu helper-created=%llu root=%lu created=%llu ready=%llu deadline=%llu\n",label,f.base.nonce,f.base.helper,f.base.helper_created,f.base.root,f.base.root_created,f.base.ready,f.base.deadline);
+  int used=swprintf(marker,400,experiment?L"stdout-fence barrier label=%ls nonce=%ls helper=%lu helper-created=%llu root=%lu created=%llu ready=%llu deadline=%llu\n":L"stdio-fence barrier label=%ls nonce=%ls helper=%lu helper-created=%llu root=%lu created=%llu ready=%llu deadline=%llu\n",label,f.base.nonce,f.base.helper,f.base.helper_created,f.base.root,f.base.root_created,f.base.ready,f.base.deadline);
   if(used<0||used>=400)error=ERROR_INSUFFICIENT_BUFFER;
-  if(!error)error=sf_streams(&f,marker);
+  if(!error)error=sf_streams(&f,marker,experiment);
   /* No stdio operation, including generic failure(), occurs beyond here. */
   if(!error&&(ownership_wall_ms()>=f.base.deadline||GetTickCount64()>=tick_deadline||!rt_in_time()))error=ERROR_TIMEOUT;
   f.base.at=ownership_wall_ms();
