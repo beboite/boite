@@ -71,7 +71,7 @@ export const PROBE_TIMEOUT_MS = 20_000;
 export const PROBE_MAX_PAGES = 10;
 
 /** How long a failed request waits for the child's exit before blaming itself. */
-export const EXIT_GRACE_MS = 500;
+export { EXIT_GRACE_MS } from '../exit.ts';
 
 /** Codex names no tool for a shell command, so the card carries the usual one. */
 export const COMMAND_TOOL_NAME = 'Bash';

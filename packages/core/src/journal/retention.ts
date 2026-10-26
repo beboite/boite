@@ -59,38 +59,47 @@ export const eventPace = (): Pace => new Pace(500, 100, 600);
  */
 export function scheduleEventRetention(journal: Journal, onError: (message: string) => void): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let stopped = false;
   // The statistics this pass still builds, one per tick; null at the start of a pass.
   let statistics: string[] | null = null;
   let first = true, pruned = false;
   const pace = eventPace();
   const arm = (delay: number): void => {
+    if (stopped || journal.isClosed()) return;
     timer = setTimeout(pass, delay);
     timer.unref?.();
   };
   const pass = async (): Promise<void> => {
     timer = null;
-    if (journal.isClosed()) return;
+    if (stopped || journal.isClosed()) return;
     try {
+      // Waiting for checkpoints is not a productive tick, including for ANALYZE.
+      if (journal.checkpoints?.behind === true) { arm(MOVE_RETRY_MS); return; }
       statistics ??= first ? journal.staleStatistics(true) : [];
       first = false;
-      const statement = statistics.shift();
+      const statement = statistics[0];
       if (statement !== undefined) {
         journal.analyze(statement);
+        statistics.shift();
         arm(10);
         return;
       }
       if (!pruned) {
-        if (await pace.run(limit => pruneEventsOnce(journal, Date.now(), limit))) {
+        const more = await pace.run(limit => pruneEventsOnce(journal, Date.now(), limit));
+        if (stopped || journal.isClosed()) return;
+        if (more) {
           arm(10);
           return;
         }
-        pruned = true;
         statistics = journal.staleStatistics();
+        pruned = true;
         arm(10);
         return;
       }
     } catch (error) {
       onError(`journal event retention: ${messageOfError(error)}`);
+      arm(MOVE_RETRY_MS);
+      return;
     }
     statistics = null;
     pruned = false;
@@ -98,6 +107,7 @@ export function scheduleEventRetention(journal: Journal, onError: (message: stri
   };
   arm(RETENTION_FIRST_MS);
   return () => {
+    stopped = true;
     if (timer !== null) clearTimeout(timer);
     timer = null;
   };
@@ -154,7 +164,8 @@ async function rowPass(journal: Journal, key: string, run: (after: number) => Pa
  */
 function dailyPass(journal: Journal, now: number, atKey: string, throughKey: string, run: (after: unknown) => { through: unknown; more: boolean }): Step {
   const at = journal.getSetting(atKey) as number | undefined;
-  if (at !== undefined && now - at < DAILY_MS) return 'done';
+  if (at !== undefined && at > now) journal.deleteSetting(atKey);
+  if (at !== undefined && at <= now && now - at < DAILY_MS) return 'done';
   const { through, more } = run(journal.getSetting(throughKey));
   if (more) {
     journal.setSetting(throughKey, through);

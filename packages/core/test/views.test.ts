@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { AGENT_ENV, VIEW_BLOCK_MAX_BYTES, VIEW_CONTENT_POLICY, VIEW_HELP, VIEW_GUIDE_LINE, viewDocument, viewFrameHeight, viewTitleOf, readViewMessage, type MessagePart } from '@boite/contracts';
-import { agentGuide } from '../src/agent-guide.ts';
+import { agentGuide, CHAT_VISUALS } from '../src/agent-guide.ts';
 import { findChromium } from '../src/browser/chromium.ts';
 import { connect, type CoreClient } from '../src/client.ts';
 import { runCli } from '../src/cli.ts';
@@ -57,8 +57,15 @@ async function cli(...args: string[]): Promise<{ code: number; output: string; e
   return { code, output, error };
 }
 
-test('the session guide names the command and what calls for it, and view help carries the rules', async () => {
-  expect(agentGuide(true)).toContain(VIEW_GUIDE_LINE);
+test('the session guide sends a visual to the chat\'s own Mermaid, TeX and view blocks first, and view help carries the page rules', async () => {
+  const guide = agentGuide(true);
+  // A diagram, a chart, a formula or a small page needs no command and no help to read: the guide names the blocks chat draws.
+  expect(guide).toContain(CHAT_VISUALS);
+  for (const header of ['```mermaid', 'flowchart', 'sequenceDiagram', 'xychart-beta with "quoted" labels', 'pie', 'gantt', 'timeline', 'quadrantChart', 'sankey-beta', 'mindmap', '`$$`', 'never single `$`', '```view fence of HTML, SVG, CSS and script', 'interactive or animated', 'no fixed color']) expect(CHAT_VISUALS).toContain(header);
+  expect(CHAT_VISUALS).toMatch(/when asked for a visual or when a picture explains better than text/);
+  // Then the page a block does not suit: its help is read before a page, not before every visual.
+  expect(guide.indexOf(CHAT_VISUALS)).toBeLessThan(guide.indexOf(VIEW_GUIDE_LINE));
+  expect(VIEW_GUIDE_LINE).toMatch(/^A larger page, or one kept as a file, needs `boite view/);
   // The logs hint stands without a skill (one that could not be written), and only while agents may read logs.
   expect(agentGuide(true, true, [])).toContain('`boite logs problems`');
   expect(agentGuide(true, false, [])).not.toContain('boite logs');
@@ -67,9 +74,9 @@ test('the session guide names the command and what calls for it, and view help c
   expect(agentGuide(true, false, skills)).not.toContain('boite-report-issue');
   expect(agentGuide(true, false, skills)).toContain('boite-prove-it: d2\nFile: /p');
   expect(agentGuide(true, true, skills)).toContain('; skill boite-report-issue: /r');
-  expect(VIEW_GUIDE_LINE).toMatch(/when asked for a visual or a schema/);
-  // One line of the session prompt, which every turn of every thread pays for.
-  expect(VIEW_GUIDE_LINE.length).toBeLessThan(240);
+  // Two lines of the session prompt, which every turn of every thread pays for: 419 before the ```view fence, whose 130
+  // spare a small page its command and its help (549 measured 2026-10-26).
+  expect(CHAT_VISUALS.length + VIEW_GUIDE_LINE.length).toBeLessThan(550);
   const help = await cli('view', 'help');
   expect(help.code).toBe(0);
   expect(help.output).toContain(VIEW_HELP);

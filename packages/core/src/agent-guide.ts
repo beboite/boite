@@ -7,6 +7,14 @@ import { REPORT_ISSUE_SKILL } from './builtin-skills.ts';
  */
 export const SHORT_ANSWERS = 'Answer style: reduce text before or between tool calls. Make the final reply self-contained with the result and everything the user needs to know. Result first, in short plain sentences; no preamble, filler, hedging or courtesy lines. Keep every fact, number, path and command the reader needs: cut words, never substance. A list for parallel items, a table for a comparison.';
 
+/**
+ * What chat draws by itself (docs/diagrams-and-formulas.md): the first choice
+ * for a visual, since it costs the agent no command and no help to read. Each
+ * Mermaid header named is one Pele draws. Pele's xychart lexer rejects a bare
+ * label with an accent (`x-axis [Jan, Fév]`), the one slip a live run made.
+ */
+export const CHAT_VISUALS = 'Visuals need no command: chat draws a ```mermaid fence (flowchart, sequenceDiagram, xychart-beta with "quoted" labels, pie, gantt, timeline, quadrantChart, sankey-beta, mindmap) and TeX in `$$` or backslash-parens, never single `$`. Use them when asked for a visual or when a picture explains better than text.';
+
 type ListedSkill = { name: string; description: string; path: string };
 
 /**
@@ -52,8 +60,8 @@ export function agentGuide(asyncQuestions: boolean, logAccess = false, skills: r
     '`boite show <file>[:line]`, `boite diff [file]`, `boite browse <url>` open the panel. `boite preview <file.html>` previews HTML/assets; `boite attach <file>` sends files (512 MB max).',
     'Inline `path:line` opens this checkout\'s files. Use `boite attach` for media across machines.',
     '`boite window help`: desktop windows (Unity, a game) as PNG; emulators: `boite device`. A picture costs ~w×h/750 tokens: use `--max`/`--crop`.',
+    CHAT_VISUALS,
     VIEW_GUIDE_LINE,
-    'Simple schema: a mermaid fence. Formula: TeX in `$$` or backslash-parens, not single `$`.',
     ...(asyncQuestions ? ['`boite ask [--open <url>] "<question>" [option ...]` asks asynchronously. Keep working on independent tasks; the answer arrives as a message. Silence grants no approval. Login wall: `--open <url>`, the site and why, options "Signed in" Skip; never in chat.'] : []),
     'Never ask for a secret in chat: `boite secret list`, else `boite secret ask <NAME> --why <reason>`, then `boite secret write|run|pipe <ref>`.',
     '`boite settings [bot] [request|open|create]` reads Boite settings or a bot\'s, puts a card in chat for the user to change one, or creates the bot the user asked for.',

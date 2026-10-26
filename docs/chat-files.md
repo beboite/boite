@@ -141,15 +141,17 @@ reader's theme or accent, and a font of the page's own (`viewAdvice` in
 
 ### What the agent is told
 
-The guide every session starts with (`packages/core/src/agent-guide.ts`) has
-one line: the command, and that a request for a visual or a schema calls for
-it. `boite view help` prints the rest, read only by an agent about to write a
-page: the layout rules, the app's look and its kit, the theme variables, how
-to animate and what the publish checks. Both texts are `VIEW_GUIDE_LINE` and `VIEW_HELP` in
-`packages/contracts/src/view.ts`, beside the code they describe. The next line of
-the guide sends a simple schema to a Mermaid block in the answer instead
-([diagrams and formulas](diagrams-and-formulas.md)), so a page is for what
-moves or answers the reader.
+The guide every session starts with (`packages/core/src/agent-guide.ts`) sends
+a diagram, a chart or a formula to the chat first: `CHAT_VISUALS` names the
+Mermaid headers chat draws and the TeX delimiters, and says when a picture is
+called for ([diagrams and formulas](diagrams-and-formulas.md)). That costs the
+agent no command and no help to read. The next line, `VIEW_GUIDE_LINE` in
+`packages/contracts/src/view.ts`, keeps a page for what Mermaid cannot draw (a
+simulator, an animation, a custom page) and sends the agent to `boite view
+help` before its first one. `VIEW_HELP`, beside it, prints the rest: the layout
+rules, the app's look and its kit, the theme variables, how to animate and what
+the publish checks. The built-in skill `boite-visual` is listed for the same
+richer case only.
 
 One file is one visual. Several visuals are several files, each published
 with its own command. The help and the command's output tell the agent to

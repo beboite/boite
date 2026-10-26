@@ -71,3 +71,39 @@ test('Import a Claude Code session in the project menu lists the transcripts and
   press('Escape');
   await waitFor(() => document.querySelector('[data-testid=import-dialog]') === null);
 });
+
+test('a shared transcript asks for its account, supports menu keys, and imports with the alternative', async () => {
+  setExperiment('session-import', true);
+  await mountOnFake();
+  const alternative = await store.client!.call('accounts.add', { providerId: 'claude', label: 'Alternative login', useDefaultLocation: true });
+  await waitFor(() => store.accounts.some(account => account.id === alternative.id));
+  const imported = vi.spyOn(store, 'importSession');
+  try {
+    await store.openImports('p-boite');
+    await waitFor(() => document.querySelectorAll('[data-testid=import-row]').length === 2);
+    const row = query<HTMLButtonElement>('[data-testid=import-row]:not(:disabled)');
+    row.click();
+    expect(imported).not.toHaveBeenCalled();
+    await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
+    const menu = query<HTMLElement>('[data-testid=context-menu]');
+    expect(Array.from(menu.querySelectorAll('[role=menuitem]')).map(item => item.textContent?.trim())).toEqual(['Default login', 'Alternative login']);
+    query<HTMLButtonElement>('[data-testid=context-menu] [role=menuitem]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
+    expect(store.imports).not.toBeNull();
+    expect(document.activeElement).toBe(row);
+    row.click();
+    await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
+    const first = query<HTMLButtonElement>('[data-testid=context-menu] [role=menuitem]');
+    first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    expect((document.activeElement as HTMLElement).dataset.value).toBe(alternative.id);
+    (document.activeElement as HTMLButtonElement).click();
+    expect(imported).toHaveBeenCalledExactlyOnceWith(alternative.id, '4c1d2e3f-5a6b-4c7d-8e9f-0a1b2c3d4e5f');
+    await waitFor(() => store.imports !== null && store.imports.running !== null);
+    expect(Array.from(document.querySelectorAll<HTMLButtonElement>('[data-testid=import-row]')).every(button => button.disabled)).toBe(true);
+    expect(query('[data-testid=import-row]:not(.done) .hint').textContent).toBe('Importing');
+    await waitFor(() => store.imports === null);
+    expect(store.openThread?.accountId).toBe(alternative.id);
+  } finally {
+    imported.mockRestore();
+  }
+});

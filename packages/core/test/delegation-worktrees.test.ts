@@ -1,9 +1,10 @@
-import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { afterEach, expect, spyOn, test } from 'bun:test';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_DELEGATION_CONFIG, checkSteps } from '@boite/contracts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
+import type { SpawnedPipedProcess, SpawnedProcess } from '../src/procs.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
 import { makeAgent } from './agent-fixture.ts';
@@ -45,6 +46,7 @@ async function setup(work: (ctx: TurnContext) => void = () => {}) {
   const repo = join(h.dataDir, 'repo');
   mkdirSync(repo, { recursive: true });
   git(repo, 'init', '-q');
+  git(repo, 'config', 'core.autocrlf', 'false');
   git(repo, 'commit', '-q', '--allow-empty', '-m', 'init');
   const project = await client.call('projects.add', { path: repo, name: 'repo' });
   const accountId = (await client.call('accounts.list', {})).find(entry => entry.providerId === 'echo')!.id;
@@ -151,4 +153,238 @@ test('a workflow step with worktree runs on its own branch and the summary names
   await waitFor(() => s.parentPrompts.some(prompt => prompt.includes('Boite workflow done')), SLOW_GIT_MS);
   // The summary is JSON: a Windows path's backslashes arrive escaped.
   expect(s.parentPrompts.find(prompt => prompt.includes('Boite workflow done'))).toContain(JSON.stringify(`Worktree kept: ${inst.worktree!.path} on branch ${inst.worktree!.branch}`).slice(1, -1));
+}, 90_000);
+
+test.each(['partial checkout', 'branch only', 'reserved ref', 'absent ref', 'index lock', 'foreign index lock', 'foreign ref'])('a child stopped during worktree preparation preserves %s on the next instruction', async leftover => {
+  const filesAtDriver: string[][] = [];
+  const s = await setup(ctx => {
+    filesAtDriver.push(['first.txt', 'nested/second.txt'].map(file => readFileSync(join(ctx.thread.cwd, file), 'utf8')));
+    // Keep the recovered checkout so its preserved files remain observable after settlement.
+    writeFileSync(join(ctx.thread.cwd, 'notes.txt'), 'keep this work\n');
+  });
+  writeFileSync(join(s.repo, 'first.txt'), 'first tracked file\n');
+  mkdirSync(join(s.repo, 'nested'));
+  writeFileSync(join(s.repo, 'nested/second.txt'), 'second tracked file\n');
+  if (leftover === 'index lock') writeFileSync(join(s.repo, '.gitattributes'), 'nested/second.txt filter=checkout-barrier\n');
+  git(s.repo, 'add', '.'); git(s.repo, 'commit', '-q', '-m', 'tracked fixture');
+  const base = git(s.repo, 'rev-parse', 'HEAD');
+  const ready = join(s.h.dataDir, 'partial-worktree-ready');
+  const release = join(s.h.dataDir, 'release-partial-worktree');
+  const spawn = s.h.core.procs.spawn.bind(s.h.core.procs);
+  const noFolder = ['branch only', 'reserved ref', 'absent ref'].includes(leftover);
+  let partial: SpawnedProcess | SpawnedPipedProcess | undefined;
+  let foreignLock: { fd: number; path: string } | undefined;
+  let indexLockedAtStop = false;
+  const started = performance.now();
+  // Read only the captured checkout's group/session, immediately before its signal.
+  const libc = leftover === 'index lock' && process.platform !== 'win32'
+    ? (await import('bun:ffi')).dlopen(process.platform === 'darwin' ? '/usr/lib/libSystem.B.dylib' : 'libc.so.6', {
+      getpgid: { args: ['i32'], returns: 'i32' }, getsid: { args: ['i32'], returns: 'i32' },
+      getuid: { args: [], returns: 'u32' }, geteuid: { args: [], returns: 'u32' },
+    }) : undefined;
+  let checkoutOwner: { pid: number; uid: number; startedAt: number | null; sampledMs: number } | undefined;
+  if (leftover === 'index lock') {
+    const filter = join(s.h.dataDir, 'checkout-filter.cjs');
+    writeFileSync(filter, `
+      const { existsSync, readFileSync, writeFileSync } = require('node:fs');
+      const input = readFileSync(0);
+      writeFileSync(${JSON.stringify(ready)}, 'real checkout filter');
+      const tick = setInterval(() => { if (existsSync(${JSON.stringify(release)})) { clearInterval(tick); process.stdout.write(input); } }, 5);
+    `);
+    // Git invokes this through its shell on Windows too; these are fixture-owned paths.
+    const quote = (path: string) => "'" + path.replace(/\\/g, '/').replace(/'/g, "'\"'\"'") + "'";
+    git(s.repo, 'config', 'filter.checkout-barrier.smudge', `${quote(process.execPath)} ${quote(filter)}`);
+    git(s.repo, 'config', 'filter.checkout-barrier.clean', `${quote(process.execPath)} ${quote(filter)}`);
+    git(s.repo, 'config', 'filter.checkout-barrier.required', 'true');
+  }
+  const spawnPiped = s.h.core.procs.spawnPiped.bind(s.h.core.procs);
+  const piped = spyOn(s.h.core.procs, 'spawnPiped').mockImplementation((id, cmd, args, options) => {
+    const child = spawnPiped(id, cmd, args, options);
+    if (leftover === 'index lock' && cmd === 'git' && args.includes('checkout-index')) partial = child;
+    return child;
+  });
+  const killTree = s.h.core.procs.killTree.bind(s.h.core.procs);
+  // Record identity belongs to this captured spawn, even before Bun reports exit.
+  const forcedCheckouts = new WeakSet<SpawnedProcess['record']>();
+  const forcedStop = spyOn(s.h.core.procs, 'killTree').mockImplementation(id => {
+    // Model the forced Job termination with a captured process, not a name/pattern kill.
+    if (leftover === 'index lock' && partial?.record.threadId === id && partial.proc.exitCode === null && !forcedCheckouts.has(partial.record)) {
+      // worktree add starts another Git to write the index. Off Windows this
+      // captured root leads its own group; kill that group without SIGTERM cleanup.
+      try {
+        if (process.platform !== 'win32') {
+          const pid = partial.proc.pid;
+          const identity = { pid, pgid: libc!.symbols.getpgid(pid), sid: libc!.symbols.getsid(pid),
+            uid: libc!.symbols.getuid(), euid: libc!.symbols.geteuid(),
+            runningSince: s.h.core.procs.platform.runningSince(pid),
+            sampledOwner: checkoutOwner, ms: performance.now() - started };
+          console.error('CHECKOUT_SIGNAL_IDENTITY', JSON.stringify(identity));
+          // Never send a group signal after the fixture lost proof of ownership.
+          if (identity.pgid !== pid || checkoutOwner?.pid !== pid || checkoutOwner.uid !== identity.euid) {
+            throw new Error('the captured checkout no longer proves ownership of its process group');
+          }
+          process.kill(-pid, 'SIGKILL');
+        }
+        else partial.proc.kill();
+        forcedCheckouts.add(partial.record);
+      } catch (error) {
+        // RPC deliberately hides internal errors. Keep this fixture's failed signal
+        // visible in CI without changing Stop or suppressing the original failure.
+        console.error('CHECKOUT_FORCED_STOP_FAILED', {
+          platform: process.platform, pid: partial.proc.pid,
+          exitCode: partial.proc.exitCode, signalCode: partial.proc.signalCode,
+          code: (error as NodeJS.ErrnoException).code,
+          syscall: (error as NodeJS.ErrnoException).syscall,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    }
+    return killTree(id);
+  });
+  const intercepted = spyOn(s.h.core.procs, 'spawn').mockImplementation((id, cmd, args, options) => {
+    const add = args.indexOf('worktree');
+    const target = leftover === 'absent ref' ? args.join(' ') === 'rev-parse --git-path info/exclude'
+      : leftover === 'reserved ref' ? args[0] === 'update-ref' : add >= 0 && args[add + 1] === 'add';
+    if (leftover === 'index lock') {
+      const child = spawn(id, cmd, args, options);
+      if (cmd === 'git' && target && !args.includes('--no-checkout')) partial = child;
+      return child;
+    }
+    if (partial || cmd !== 'git' || !target) return spawn(id, cmd, args, options);
+    // Real ref and checkout registration, but no tracked files yet: the point where
+    // a terminated checkout can leave its branch behind. Only the barrier is synthetic.
+    const noCheckout = [...args];
+    if (leftover !== 'reserved ref' && leftover !== 'absent ref') noCheckout.splice(add + 2, 0, '--no-checkout');
+    partial = spawn(id, process.execPath, ['-e', `
+      const { existsSync, writeFileSync } = require('node:fs');
+      const result = Bun.spawnSync({cmd: ['git', ...${JSON.stringify(noCheckout)}], cwd: ${JSON.stringify(s.repo)}, stdout: 'pipe', stderr: 'pipe', windowsHide: true});
+      if (!result.success) { console.error(result.stderr.toString()); process.exit(7); }
+      ${leftover === 'branch only' ? `
+        const removed = Bun.spawnSync({cmd: ['git', 'worktree', 'remove', '--force', ${JSON.stringify(s.h.core.delegation.worktrees.get(id)!.path)}], cwd: ${JSON.stringify(s.repo)}, stdout: 'pipe', stderr: 'pipe', windowsHide: true});
+        if (!removed.success) { console.error(removed.stderr.toString()); process.exit(8); }
+      ` : ''}
+      writeFileSync(${JSON.stringify(ready)}, 'registered');
+      setInterval(() => { if (existsSync(${JSON.stringify(release)})) process.exit(0); }, 5);
+    `], options);
+    return partial;
+  });
+  const checkpoints = spyOn(s.h.core.threads.codeCheckpoints, 'begin');
+  try {
+    const child = await s.client.call('delegation.spawn', { threadId: s.threadId, task: 'Accepted before checkout', worktree: true, requestId: 'interrupted-checkout' });
+    const id = child.thread.id, { path, branch } = child.worktree!;
+    await waitFor(() => existsSync(ready), SLOW_GIT_MS);
+    expect(branchExists(s.repo, branch)).toBe(leftover !== 'absent ref');
+    expect(git(s.repo, 'worktree', 'list', '--porcelain').includes(`branch refs/heads/${branch}`)).toBe(!noFolder);
+    if (leftover !== 'index lock') expect(existsSync(join(path, 'first.txt'))).toBe(false);
+    if (leftover === 'index lock') {
+      const index = git(path, 'rev-parse', '--git-path', 'index');
+      const locked = indexLockedAtStop = existsSync(index + '.lock');
+      // The RED has the actual checkout's lock and no index. The fixed mechanism
+      // must avoid that shared lock, publishing its index before the filter runs.
+      expect(existsSync(index)).toBe(!locked);
+      console.error(`CHECKOUT_INDEX_AT_STOP index=${existsSync(index)} lock=${locked}`);
+      if (process.platform !== 'win32') {
+        const pid = partial!.proc.pid;
+        // No global ps: this is one captured, fixture-owned PID, with no command line.
+        const identity = spawn(s.threadId, 'ps', ['-p', String(pid), '-o', 'uid=']);
+        const [uid, error, code] = await Promise.all([new Response(identity.proc.stdout).text(), new Response(identity.proc.stderr).text(), identity.exited]);
+        if (code !== 0 || !/^\s*\d+\s*$/.test(uid)) throw new Error(`cannot read the captured checkout UID: ${code}, ${error}`);
+        checkoutOwner = { pid, uid: Number(uid.trim()), startedAt: s.h.core.procs.platform.runningSince(pid), sampledMs: performance.now() - started };
+      }
+    }
+    const first = s.h.core.journal.runningTurn(id)!;
+    expect(await s.client.call('turns.stop', { threadId: id })).toEqual({ stopped: true });
+    expect(await partial!.exited).not.toBe(0);
+    await waitFor(() => s.results().length === 1, SLOW_GIT_MS);
+    expect(s.h.core.journal.getTurn(first.id)?.status).toBe('stopped');
+    expect(filesAtDriver).toEqual([]);
+    expect(checkpoints.mock.calls.filter(([thread]) => thread.id === id)).toHaveLength(0);
+    expect(s.h.core.journal.listMessages(id).some(message => message.turnId === first.id
+      && message.parts.some(part => part.type === 'text' && part.text.includes('Accepted before checkout')))).toBe(true);
+    if (s.h.core.procs.liveCount(id) !== 0) {
+      console.error('CHECKOUT_STOP_LIVE_PROCESSES', JSON.stringify({
+        leftover, platform: process.platform,
+        stopped: { pid: partial!.proc.pid, exitCode: partial!.proc.exitCode, signalCode: partial!.proc.signalCode },
+        live: s.h.core.procs.liveOf(id).map(record => ({
+          ...record, runningSince: s.h.core.procs.platform.runningSince(record.pid),
+        })),
+      }));
+    }
+    // Wrapper exit precedes native descendant events; wait for registry retirement.
+    const waitingAt = performance.now();
+    await s.h.core.procs.waitForExit(id);
+    console.error('CHECKOUT_REGISTRY_RETIRED', JSON.stringify({ leftover, ms: performance.now() - started,
+      waitedMs: performance.now() - waitingAt, live: s.h.core.procs.liveCount(id) }));
+    expect(s.h.core.procs.liveCount(id)).toBe(0);
+    if (leftover === 'index lock') expect(existsSync(git(path, 'rev-parse', '--git-path', 'index') + '.lock')).toBe(indexLockedAtStop);
+    // Files created while preparation was paused must survive the recovery too.
+    if (!noFolder) {
+      writeFileSync(join(path, 'first.txt'), 'useful edit before recovery\n');
+      writeFileSync(join(path, 'untracked.txt'), 'preserve this note\n');
+    }
+    if (leftover === 'partial checkout') {
+      git(path, 'read-tree', 'HEAD');
+      git(path, 'add', 'first.txt');
+    }
+    if (leftover === 'index lock') writeFileSync(release, 'finish the next checkout');
+    if (leftover === 'absent ref') {
+      // Recovery owns the durable base, even when the parent moved in the meantime.
+      git(s.repo, 'commit', '-q', '--allow-empty', '-m', 'parent moved during Stop');
+      expect(git(s.repo, 'rev-parse', 'HEAD')).not.toBe(base);
+      expect(s.h.core.delegation.worktrees.get(id)).toMatchObject({ state: 'pending', base });
+    }
+    if (leftover === 'foreign index lock') {
+      const lock = git(path, 'rev-parse', '--git-path', 'index') + '.lock';
+      foreignLock = { path: lock, fd: openSync(lock, 'wx') };
+      writeFileSync(foreignLock.fd, 'an active foreign index writer\n');
+    }
+    let foreign: string | undefined;
+    if (leftover === 'foreign ref') {
+      git(s.repo, 'commit', '-q', '--allow-empty', '-m', 'another actor owns this commit');
+      foreign = git(s.repo, 'rev-parse', 'HEAD');
+      git(s.repo, 'update-ref', '-m', 'foreign replacement', `refs/heads/${branch}`, foreign, base);
+    }
+    await s.client.call('delegation.send', { threadId: s.threadId, toThreadId: id, text: 'Complete the checkout and continue', requestId: 'resume-checkout' });
+    await waitFor(() => s.results().length === 2, SLOW_GIT_MS);
+    const next = s.h.core.journal.listTurns(id).at(-1)!;
+    if (foreignLock) {
+      expect(next.status).toBe('error');
+      expect(next.error).toContain('lock');
+      expect(filesAtDriver).toEqual([]);
+      expect(readFileSync(foreignLock.path, 'utf8')).toBe('an active foreign index writer\n');
+      expect(existsSync(git(path, 'rev-parse', '--git-path', 'index'))).toBe(false);
+    } else if (foreign) {
+      expect(next.status).toBe('error');
+      expect(next.error).toContain('expected a branch reserved by');
+      expect(filesAtDriver).toEqual([]);
+      expect(git(s.repo, 'rev-parse', `refs/heads/${branch}`)).toBe(foreign);
+      expect(readFileSync(join(path, 'first.txt'), 'utf8')).toBe('useful edit before recovery\n');
+    } else {
+      expect(next).toMatchObject({ status: 'done', error: null });
+      const expectedFiles = [[noFolder ? 'first tracked file\n' : 'useful edit before recovery\n', 'second tracked file\n']];
+      if (process.platform === 'win32' || JSON.stringify(filesAtDriver) !== JSON.stringify(expectedFiles)) {
+        console.error('CHECKOUT_CONTENT_BYTES', JSON.stringify({
+          leftover, platform: process.platform,
+          actualHex: filesAtDriver.map(files => files.map(text => Buffer.from(text).toString('hex'))),
+          expectedHex: expectedFiles.map(files => files.map(text => Buffer.from(text).toString('hex'))),
+          autocrlf: git(path, 'config', '--get', '--default', 'unset', 'core.autocrlf'),
+          eol: git(path, 'config', '--get', '--default', 'unset', 'core.eol'),
+          attributes: git(path, 'check-attr', 'text', 'eol', '--', 'first.txt', 'nested/second.txt'),
+        }));
+      }
+      expect(filesAtDriver).toEqual(expectedFiles);
+      expect(git(path, 'rev-parse', 'HEAD')).toBe(base);
+      expect(s.h.core.delegation.worktrees.get(id)).toMatchObject({ state: 'kept', base, dirty: true });
+    }
+    if (leftover === 'partial checkout') expect(git(path, 'show', ':first.txt')).toBe('useful edit before recovery');
+    if (!noFolder) expect(readFileSync(join(path, 'untracked.txt'), 'utf8')).toBe('preserve this note\n');
+  } finally {
+    writeFileSync(release, 'finish');
+    if (foreignLock) { closeSync(foreignLock.fd); unlinkSync(foreignLock.path); }
+    await partial?.exited;
+    await waitFor(() => s.h.core.scheduler.state().running.length === 0, SLOW_GIT_MS);
+    checkpoints.mockRestore(); intercepted.mockRestore(); piped.mockRestore(); forcedStop.mockRestore();
+    libc?.close();
+  }
 }, 90_000);

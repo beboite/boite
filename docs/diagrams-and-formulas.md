@@ -120,13 +120,29 @@ is up 2 seconds after loading, or leaves its own address. Its bar copies the
 HTML and switches between the page and its code; copying a selection across
 a drawn page gives back its ```` ```view ```` block.
 
+## What the agent is told
+
+One line of the session guide (`CHAT_VISUALS` in
+`packages/core/src/agent-guide.ts`) makes these blocks the first choice for a
+visual: a diagram, a chart, a formula or a small page needs no command and no
+help to read. It names the Mermaid headers worth knowing (`flowchart`,
+`sequenceDiagram`, `xychart-beta` for bars and lines, `pie`, `gantt`,
+`timeline`, `quadrantChart`, `sankey-beta`, `mindmap`) and the TeX delimiters,
+and asks for a picture whenever one explains better than text. It asks for
+quoted `xychart-beta` labels: Pele rejects a bare label with an accent, such
+as `x-axis [Jan, Fév]`. It offers a ```` ```view ```` block of HTML, SVG, CSS
+and script for an interactive or animated piece, and says the page is offline
+and takes the app's look, so it writes no fixed color. Only a larger page, or
+one to keep as a file, goes to `boite view`
+([chat files](chat-files.md#what-the-agent-is-told)).
+
 ## Limits
 
 - Mermaid features Pele does not implement are reported as a parse error with
   the code shown.
 - Links (`click`) and images in a diagram are never drawn.
 - A single `$…$` is never math. Agents are told to write `$$…$$` or `\(…\)`
-  (`packages/core/src/agent-guide.ts`).
+  (`CHAT_VISUALS`).
 - A page larger than a block allows, or one worth keeping as a file, belongs
   to `boite view` ([chat files](chat-files.md#inline-views)).
 - A view block that fails is shown as code to the reader; the agent is not
