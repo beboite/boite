@@ -1555,6 +1555,55 @@ The complete Bun1.4.3 suite passes133 tests, one native skip, zero failures and
 all48 archived232/400/424-byte frames,12 stream captures and48 owner proofs.
 Windows, SDK, native timing and the internal mechanism are not verified locally.
 
+## Repeated native byte result and isolated stdout closure control
+
+Run40288016977 / job121456435461 at4efcd622 and run40289233720 /
+job121460372328 atb580e68c both validate all six paired families under SDK
+and MinGW. Each raw audit reconciles92 manifest hashes,21 owner provenances,
+60 private frames,228 observations,16 stream captures and60 owner proofs.
+All24 exact root references have terminal125 snapshots before HELD. The
+owned-exit trace is emitted by reportExit immediately before controlled closure;
+it is not the kernel termination time. Both runs preserve all81 legacy fatal
+prefixes and all87 preceding fatal entries, with89 failures per compiler.
+The later BYTE write does not waive its earlier fatal cleanup failures.
+
+The BYTE pair retains both retired names in baseline. During comparison,
+SILENT retains and WRITE disappears under each compiler in both runs. The
+successful native call records BOOL1/count1/error0 and the capture has exactly
+one exclamation suffix only for WRITE. All original streams remain open, and
+the shared preflight, stderr marker, output flushes, owner drain, three-second
+window and private return checks pass. Zero-byte writes still retain both maps,
+while the CRT stdout marker reproduces the same differential. These observations
+establish the bounded effect without requiring a CRT stdout marker, long payload
+or fclose in these pairs. They do not identify an internal Windows reference or
+establish a production cleanup mechanism. All ordinary NUL probes still fail5,
+seven per compiler; production admission stays false. Registered references close
+2829/2829 and2833/2833 in4efcd622, then2830/2830 and2837/2837 inb580e68c.
+CodeQL succeeds onb580e68c after complete LF-to-CRLF fixture conversion; Linux and
+UI/types also pass. Windows remains failed, so no ready or merge follows.
+
+The next additive PIPE pair keeps stdout silent in BOTH arms and closes only
+the original stdout in CLOSED. The earlier STDIO pair wrote a stdout marker in
+both arms before closure, so its both-absent result cannot isolate fclose.
+Both new arms retain the exact three-generation transcript, common CRT mapping
+preflight, stderr marker and successful output flushes. HELD keeps all originals
+open. CLOSED calls fclose(stdout) exactly once; stdin and stderr stay open. There
+is no new stdout byte, duplicate, reopen or replacement. A distinct400-byte
+protocol authenticates fd1-only success0, immediate invalidity/error6 and the
+immutable close timestamp. READY/release/RETURN and failure receipts use the
+existing private files. The same owner-only drain, reportExit closure path,
+both-released comparison and original bounds remain required. The seventh pair
+runs after BYTE, with its arms concurrent. No old assertion, gate or production
+source changes. Local codec and compiled verbatim C guard regressions fail before
+implementation and then pass. Seven closure mutations compile and fail at runtime,
+covering unwanted stdout output, wrong or missing closures and skipped native
+result checks. The Bun1.4.3 suite passes140 tests, one native skip, zero failures
+and3323 assertions; scoped types and architecture pass. Current validators replay
+all48 archived frames/12 stream captures/48 owner proofs from8025e955 and all60
+frames/16 stream captures/60 owner proofs fromb580e68c. Routing remains900 lines.
+Cross compilation does not verify Windows execution; SDK, native closure effect
+and its budget remain unverified.
+
 ## Gates still required
 
 Passing this initial gate does not cover or waive:

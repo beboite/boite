@@ -31,7 +31,7 @@ BOOL WriteFile(HANDLE h,const void *buffer,DWORD bytes,DWORD *used,void *overlap
 static ULONGLONG ownership_wall_ms(void){return (ULONGLONG)(1000+nclose);}
 static int emit(const wchar_t *s,FILE *f){(void)s;operations[operation_count++]=(char)('a'+index_of(f));nwrite++;return 0;}
 static int flush(FILE *f){int i=index_of(f);operations[operation_count++]=(char)('x'+i);flushes[i]++;return mode==5&&i==1?-1:0;}
-static int close_stream(FILE *f){int i=index_of(f);operations[operation_count++]=(char)('0'+i);attempts[i]++;sequence[nclose++]=i;if(mode==6&&i==0)return -1;closed[i]=1;return 0;}
+static int close_stream(FILE *f){int i=index_of(f);operations[operation_count++]=(char)('0'+i);attempts[i]++;sequence[nclose++]=i;if((mode==6&&i==0)||(mode==17&&i==1))return -1;closed[i]=1;return mode==18&&i==1?-1:0;}
 #define fputws emit
 #define fflush flush
 #define fclose close_stream
@@ -65,7 +65,7 @@ int main(void){
   CHECK("stdout only flushes output",flushes[0]==0&&flushes[1]==1&&flushes[2]==1);
   for(int i=0;i<3;i++)CHECK("stdout never records a closure",f.streams[i].close_attempted==0&&f.streams[i].invalid==0&&f.streams[i].invalid_error==0&&f.streams[i].close_at==0);
  }
- reset(0);SF_FRAME invalid={0};invalid.base.role=1;CHECK("unknown experiment never writes",sf_streams(&invalid,L"barrier\n",4)!=0&&nwrite==0&&nclose==0);
+ reset(0);SF_FRAME invalid={0};invalid.base.role=1;CHECK("unknown experiment never writes",sf_streams(&invalid,L"barrier\n",5)!=0&&nwrite==0&&nclose==0);
  for(int role=1;role<=2;role++){reset(0);SF_FRAME f={0};SF_ZERO zero={0};f.base.role=(DWORD)role;last_error=123;
   CHECK("zero selected native path succeeds",sf_prepare_streams(&f,&zero,L"barrier\n",2)==0);
   CHECK("zero selected write actually called once",raw_calls==(role==2?1:0));
@@ -95,5 +95,21 @@ int main(void){
   CHECK("byte refusal never retries or closes",raw_calls==1&&raw_bad==0&&nclose==0);
   CHECK("byte failed BOOL preserves error",bad!=15||(call.result==0&&call.error==5&&last_error_reads==1));
  }
+ for(int role=1;role<=2;role++){reset(0);SF_FRAME f={0};SF_ZERO unused={0};f.base.role=(DWORD)role;
+  CHECK("stdout close explicit native path succeeds",sf_prepare_streams(&f,&unused,L"barrier\n",4)==0);
+  CHECK("stdout close common stderr flush then only fd1 closure",!strcmp(operations,role==1?"cyz":"cyz1"));
+  CHECK("stdout close never writes stdout or raw bytes",nwrite==1&&raw_calls==0);
+  CHECK("stdout close only closes original stdout once",nclose==(role==2?1:0)&&attempts[0]==0&&attempts[1]==(role==2?1:0)&&attempts[2]==0);
+  CHECK("stdout close original stdout validated immediately",role==1||(f.streams[1].close_result==0&&f.streams[1].invalid==1&&f.streams[1].invalid_error==6&&f.streams[1].close_at==1001));
+  for(int i=0;i<3;i++){CHECK("stdout close exact CRT mapping",f.streams[i].fd==(DWORD)i&&f.streams[i].original==(ULONGLONG)(100+i)&&f.streams[i].crt==(ULONGLONG)(100+i));
+   if(i!=1||role==1)CHECK("stdout close unselected streams remain open",closed[i]==0&&f.streams[i].close_attempted==0&&f.streams[i].invalid==0&&f.streams[i].invalid_error==0&&f.streams[i].close_at==0);}
+ }
+ for(int bad=1;bad<=8;bad++){reset(bad==6?17:bad);SF_FRAME f={0};SF_ZERO unused={0};f.base.role=2;
+  CHECK("stdout close bad preflight flush close or invalidity rejects",sf_prepare_streams(&f,&unused,L"barrier\n",4)!=0);
+  CHECK("stdout close bad mapping or flush never closes",(bad==6||bad==7)||nclose==0);
+  CHECK("stdout close failed closure or invalidity never retries",(bad!=6&&bad!=7)||(nclose==1&&attempts[1]==1));
+ }
+ reset(18);SF_FRAME close_failed={0};SF_ZERO close_unused={0};close_failed.base.role=2;
+ CHECK("stdout close fclose failure rejects even if handle became invalid",sf_prepare_streams(&close_failed,&close_unused,L"barrier\n",4)!=0&&attempts[1]==1&&closed[1]==1);
  printf("STDIO_STREAM_GUARDS_PASS cases=%d native=false\n",cases);return 0;
 }
