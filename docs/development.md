@@ -1110,6 +1110,12 @@ paste, cut, a picture added or removed and every text the app writes are steps
 of their own, so deleting everything and typing by mistake comes back in two
 undos, pictures included. A sent prompt clears that history.
 
+ArrowUp on an idle thread loads the recalled prompt's deferred attachments
+before entering edit mode, like the message's Edit button. A late load cannot
+replace a new draft, another recall or another visit. Submitting an edit
+validates its current attachments and page references before rewinding history;
+attachments deliberately removed from the recalled prompt stay removed.
+
 Original file links in the local desktop thread may open through the system
 application, with executable links retaining their explicit local behavior.
 The shell resolves symlinks, checks thread containment and rejects browsed-webview
