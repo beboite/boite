@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { echoThread, holdAccountTurns, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
 import { ContactMailboxes } from '../src/contacts/mailboxes.ts';
@@ -78,6 +78,57 @@ test('older uncertain mailbox receipts do not block a new routed reply', async (
   } finally { resume(); }
   await waitFor(() => responses.every(response => c.core.coordination.get(recipient).messages.find(letter => letter.id === response.id)?.status === 'delivered'), 12000);
   expect(sources.map(threadId => a.core.coordination.get(threadId).wakes)).toEqual([1, 1, 1, 1, 1]);
+}, 30000);
+
+test('forwarding a mailbox backlog deserializes only the selected batch', async () => {
+  const { a, b, c, ai, ci, source, recipient } = await routed();
+  const sent = await a.core.coordination.send({ threadId: source, to: { coreId: ci, threadId: recipient }, text: 'Create a return route.', requestId: 'batch-question' });
+  await waitFor(() => c.core.coordination.get(recipient).messages.some(letter => letter.id === sent.id));
+  const incoming = c.core.coordination.get(recipient).messages.find(letter => letter.id === sent.id)!;
+  await b.core.coordination.mailboxes.close();
+  const response = await c.core.coordination.send({ threadId: recipient, to: incoming.from, replyTo: incoming.id, text: 'A pending reply.', requestId: 'batch-answer' });
+  await waitFor(() => b.core.coordination.mailboxes.received(response.id) !== null);
+  const row = b.core.journal.db.query('SELECT mailbox, data FROM contact_route_letters WHERE id = ? AND direction = ?').get(response.id, 'in') as { mailbox: string; data: string };
+  const template = JSON.parse(row.data);
+  const payloads = new Set<string>([row.data]);
+  b.core.journal.db.transaction(() => {
+    for (let i = 1; i < 128; i++) {
+      const id = `backlog-${i}`;
+      const data = JSON.stringify({ ...template, wire: { ...template.wire, id, status: 'uncertain' }, canonical: { ...template.canonical, id } });
+      b.core.journal.db.query('INSERT INTO contact_route_letters VALUES (?, ?, ?, ?)').run(id, row.mailbox, 'in', data);
+      payloads.add(data);
+    }
+  })();
+  const attempted: string[] = [];
+  const request = b.core.coordination.request.bind(b.core.coordination);
+  b.core.coordination.request = async (peer, operation, payload) => {
+    const p = payload as { action?: string; letter?: { id: string } };
+    if (peer.coreId === ai && operation === 'contact.route' && p.action === 'return') {
+      attempted.push(p.letter!.id);
+      throw new Error('The initiating core is temporarily unreachable');
+    }
+    return request(peer, operation, payload);
+  };
+  const mailboxes = new ContactMailboxes(b.core);
+  (b.core.coordination as unknown as { mailboxes: ContactMailboxes }).mailboxes = mailboxes;
+  let parsed = 0;
+  const parse = JSON.parse;
+  const queries = spyOn(b.core.journal.db, 'query');
+  let selections: string[] = [];
+  const parsing = spyOn(JSON, 'parse').mockImplementation((data, reviver) => {
+    if (payloads.has(data)) parsed++;
+    return parse(data, reviver);
+  });
+  try {
+    mailboxes.tick();
+    selections = queries.mock.calls.map(([sql]) => sql).filter(sql => sql.startsWith('SELECT') && sql.includes('contact_route_letters'));
+  } finally { parsing.mockRestore(); queries.mockRestore(); }
+  expect(attempted).toHaveLength(4);
+  expect(parsed).toBe(4);
+  expect(selections).toHaveLength(1);
+  const plan = b.core.journal.db.query(`EXPLAIN QUERY PLAN ${selections[0]}`).all(4) as { detail: string }[];
+  expect(plan.some(row => row.detail.includes('TEMP B-TREE'))).toBe(false);
+  await mailboxes.close();
 }, 30000);
 
 test('a routed ask returns its decision to the initiating thread, including after an automatic pause', async () => {

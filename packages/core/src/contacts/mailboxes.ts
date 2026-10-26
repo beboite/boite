@@ -28,7 +28,7 @@ export class ContactMailboxes {
   private closed = false;
   private readonly pending = new Set<Promise<unknown>>();
   private readonly busy = new Set<string>();
-  private readonly attempts = new Map<string, number>();
+  private attempt = 0;
   private readonly off: () => void;
   private prunedAt = 0;
 
@@ -312,6 +312,10 @@ export class ContactMailboxes {
     if (this.initialized) return;
     this.core.journal.db.exec('CREATE TABLE IF NOT EXISTS contact_route_letters (id TEXT NOT NULL, mailbox TEXT NOT NULL, direction TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(id, mailbox, direction))');
     this.core.journal.db.exec("CREATE INDEX IF NOT EXISTS contact_route_pending ON contact_route_letters(direction, json_extract(data, '$.wire.status'))");
+    // Rebuild the transient retry order from durable pending letters after a restart.
+    this.core.journal.db.exec('CREATE TEMP TABLE IF NOT EXISTS contact_route_attempts (id TEXT NOT NULL, mailbox TEXT NOT NULL, attempt INTEGER NOT NULL, createdAt INTEGER NOT NULL, PRIMARY KEY(id, mailbox))');
+    this.core.journal.db.exec('CREATE INDEX IF NOT EXISTS temp.contact_route_attempt_order ON contact_route_attempts(attempt, createdAt, id, mailbox)');
+    this.core.journal.db.exec("DELETE FROM temp.contact_route_attempts; INSERT INTO temp.contact_route_attempts SELECT id, mailbox, 0, json_extract(data, '$.wire.createdAt') FROM contact_route_letters WHERE direction = 'in' AND json_extract(data, '$.wire.status') IN ('received', 'uncertain')");
     this.initialized = true;
   }
   private rows(where = '1 = 1', ...params: (string | number)[]): StoredLetter[] {
@@ -321,6 +325,10 @@ export class ContactMailboxes {
   private save(letter: StoredLetter): void {
     this.init();
     this.core.journal.db.query('INSERT OR REPLACE INTO contact_route_letters VALUES (?, ?, ?, ?)').run(letter.wire.id, letter.mailbox, letter.direction, JSON.stringify(letter));
+    if (letter.direction === 'in') {
+      if (letter.wire.status === 'received' || letter.wire.status === 'uncertain') this.core.journal.db.query('INSERT OR IGNORE INTO temp.contact_route_attempts VALUES (?, ?, 0, ?)').run(letter.wire.id, letter.mailbox, letter.wire.createdAt);
+      else this.core.journal.db.query('DELETE FROM temp.contact_route_attempts WHERE id = ? AND mailbox = ?').run(letter.wire.id, letter.mailbox);
+    }
   }
   private store(mailbox: string, direction: string, wire: AgentLetter, canonical: AgentLetter): StoredLetter {
     const fingerprint = createHash('sha256').update(JSON.stringify([wire.id, wire.from.coreId, wire.from.threadId, wire.to, wire.text, wire.replyTo])).digest('hex');
@@ -338,6 +346,7 @@ export class ContactMailboxes {
     if (this.initialized && Date.now() - this.prunedAt > 3_600_000) {
       this.prunedAt = Date.now();
       this.core.journal.db.query("DELETE FROM contact_route_letters WHERE json_extract(data, '$.wire.createdAt') < ?").run(Date.now() - 30 * 24 * 3_600_000);
+      this.core.journal.db.exec("DELETE FROM temp.contact_route_attempts WHERE NOT EXISTS (SELECT 1 FROM contact_route_letters AS letter WHERE letter.id = contact_route_attempts.id AND letter.mailbox = contact_route_attempts.mailbox AND letter.direction = 'in')");
     }
     for (const route of this.sources()) if (!this.route(route.threadId, route.coreId)) this.revokeSource(route, 'The group contact route was revoked');
     for (const box of this.mailboxes()) {
@@ -349,14 +358,12 @@ export class ContactMailboxes {
     }
     if (!this.mailboxes().length) return;
     // A queued provider wake can return an uncertain receipt; refresh it until settled.
-    const letters = this.rows("direction = 'in' AND json_extract(data, '$.wire.status') IN ('received', 'uncertain') ORDER BY json_extract(data, '$.wire.createdAt')");
-    const ids = new Set(letters.map(letter => letter.wire.id));
-    for (const id of this.attempts.keys()) if (!ids.has(id)) this.attempts.delete(id);
-    // Pending receipts must not keep newer replies behind the same oldest batch.
-    const next = letters.sort((a, b) => (this.attempts.get(a.wire.id) ?? 0) - (this.attempts.get(b.wire.id) ?? 0)).slice(0, 4 + this.busy.size);
+    this.init();
+    // The indexed retry order keeps both selection and deserialization within the batch.
+    const next = (this.core.journal.db.query("SELECT letter.mailbox, letter.direction, letter.data FROM temp.contact_route_attempts AS retry CROSS JOIN contact_route_letters AS letter WHERE letter.id = retry.id AND letter.mailbox = retry.mailbox AND letter.direction = 'in' ORDER BY retry.attempt, retry.createdAt, retry.id, retry.mailbox LIMIT ?").all(4 + this.busy.size) as Row[]).map(row => JSON.parse(row.data) as StoredLetter);
     for (const letter of next) {
       if (this.busy.has(letter.wire.id)) continue;
-      this.attempts.set(letter.wire.id, performance.now());
+      this.core.journal.db.query('UPDATE temp.contact_route_attempts SET attempt = ? WHERE id = ? AND mailbox = ?').run(++this.attempt, letter.wire.id, letter.mailbox);
       this.busy.add(letter.wire.id);
       const job = this.forward(letter).finally(() => { this.busy.delete(letter.wire.id); this.pending.delete(job); });
       this.pending.add(job);
