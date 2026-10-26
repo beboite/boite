@@ -7,7 +7,7 @@ import { startUi } from './lib/ui.ts';
 const ARTIFACTS = join(import.meta.dir, '.artifacts', 'secret-card');
 const DESKTOP = { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false };
 const PHONE = { width: 390, height: 844, deviceScaleFactor: 1, mobile: true };
-const SECRET = 'sk-live-4f9b2c71e0d84a6b';
+const SECRET = 'sk-test-synthetic-0123456789';
 
 let page: BrowserPage;
 let server: { close(): Promise<void> };
@@ -32,12 +32,14 @@ const PENDING = '[data-testid="secret-card"][data-state="pending"]';
 async function bothWidths(selector: string, name: string) {
   await page.evaluate(`document.querySelector('${selector}').scrollIntoView({ block: 'center' })`);
   await capture(`${name}-desktop.png`);
+  await page.evaluate(`window.__boiteTest.setLocaleSetting('fr')`);
   await page.send('Emulation.setDeviceMetricsOverride', PHONE);
   await page.waitFor(`document.querySelector('${selector}')?.getBoundingClientRect().width > 0`);
   await page.evaluate(`document.querySelector('${selector}').scrollIntoView({ block: 'center' })`);
   expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
   expect(await page.evaluate(`(() => { const box = document.querySelector('${selector}').getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth; })()`)).toBe(true);
   await capture(`${name}-phone.png`);
+  await page.evaluate(`window.__boiteTest.setLocaleSetting('en')`);
   await page.send('Emulation.setDeviceMetricsOverride', DESKTOP);
   await page.waitFor(`document.querySelector('${selector}')?.getBoundingClientRect().width > 0`);
 }
@@ -72,7 +74,7 @@ function ask(params: Record<string, unknown>) {
   })()`);
 }
 
-test('an agent asks for a key: the card takes it masked, keeps it for the project, folds to one line and Settings lists it', async () => {
+test('Secret Drop takes a masked one-use key, opens a fresh card each time and explains memory-only storage', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', DESKTOP);
   await page.evaluate(`(async () => {
     const store = window.__boiteTest.workspace.active;
@@ -84,12 +86,14 @@ test('an agent asks for a key: the card takes it masked, keeps it for the projec
   })()`);
   await page.waitFor(`window.__boiteTest.workspace.active.openThread?.turns.at(-1)?.status === 'done'`);
 
-  // Open, with the box unticked: a one-off copy unless the user keeps it.
+  // Each request offers only a temporary copy.
   await ask({});
-  await page.waitFor(`document.querySelector('${PENDING} [data-testid="secret-keep"]')?.checked === false`);
+  await page.waitFor(`document.querySelector('${PENDING} [data-testid="secret-field"]') != null`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="secret-keep"]') === null`)).toBe(true);
+  expect(await page.text(`${PENDING} [data-testid="secret-transit"]`)).toContain('10 minutes');
   expect(await page.evaluate(`document.querySelector('${PENDING}')?.closest('[data-testid="thread-activity"]') != null`)).toBe(true);
   expect((await page.text('[data-testid="activity-question-toggle"]')).trim()).toBe('OPENAI_API_KEY');
-  await bothWidths(PENDING, 'open-unchecked');
+  await bothWidths(PENDING, 'open');
   await staysDocked();
   await page.send('Emulation.setDeviceMetricsOverride', PHONE);
   await staysDocked();
@@ -103,38 +107,34 @@ test('an agent asks for a key: the card takes it masked, keeps it for the projec
   await bothWidths(PENDING, 'typing');
   await page.evaluate(`document.querySelector('${PENDING} [data-testid="secret-field"]').focus()`);
   await page.send('Input.insertText', { text: SECRET.slice(14) });
-  await page.click(`${PENDING} [data-testid="secret-keep"]`);
   await page.evaluate(`document.querySelector('${PENDING} [data-testid="secret-field"]').focus()`);
-  expect(await page.evaluate(`document.querySelector('[data-testid="composer"]')?.textContent.includes('sk-live') ?? false`)).toBe(false);
+  expect(await page.evaluate(`document.querySelector('[data-testid="composer"]')?.textContent.includes('sk-test-synthetic') ?? false`)).toBe(false);
   await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', text: '\r', windowsVirtualKeyCode: 13 });
   await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
 
   // Saved: one line in the timeline, and the agent gets a ref, never the value.
-  const saved = '[data-testid="secret-card"][data-state="saved"][data-kept="true"]';
+  const saved = '[data-testid="secret-card"][data-state="saved"]';
   await page.waitFor(`document.querySelector('${saved}') && window.__secretOutcome`);
-  expect(await page.text(`${saved} [data-testid="secret-outcome"]`)).toBe('OPENAI_API_KEY saved and kept for this project');
-  expect(await page.evaluate(`window.__secretOutcome.ref`)).toBe('secret:project/OPENAI_API_KEY');
-  expect(await page.evaluate(`[document.body.innerHTML, JSON.stringify(window.__boiteTest.workspace.active.openThread), JSON.stringify(window.__boiteTest.workspace.active.composerStates), JSON.stringify({ ...localStorage })].some(text => text.includes('sk-live'))`)).toBe(false);
+  expect(await page.text(`${saved} [data-testid="secret-outcome"]`)).toBe('OPENAI_API_KEY sent for one use');
+  expect(await page.evaluate(`window.__secretOutcome.ref`)).toMatch(/^secret:sec_/);
+  expect(await page.evaluate(`window.__secretOutcome.storage`)).toBe('memory');
+  expect(await page.evaluate(`[document.body.innerHTML, JSON.stringify(window.__boiteTest.workspace.active.openThread), JSON.stringify(window.__boiteTest.workspace.active.composerStates), JSON.stringify({ ...localStorage })].some(text => text.includes('sk-test-synthetic'))`)).toBe(false);
   await bothWidths(saved, 'saved');
 
-  // Asked again to replace it: the card says so and starts ticked.
-  await ask({ replace: true });
-  await page.waitFor(`document.querySelector('${PENDING} [data-testid="secret-keep"]')?.checked === true`);
-  expect(await page.text(`${PENDING} [data-testid="secret-replaces"]`)).toBe('Replaces the key kept for this project.');
-  await bothWidths(PENDING, 'open-checked');
+  // Asking for the same name again always opens an empty, independent card.
+  await ask({});
+  await page.waitFor(`document.querySelector('${PENDING} [data-testid="secret-field"]') != null`);
+  expect(await page.evaluate(`document.querySelector('${PENDING} [data-testid="secret-field"]').value`)).toBe('');
+  expect(await page.evaluate(`document.querySelector('[data-testid="secret-keep"]') === null`)).toBe(true);
+  await bothWidths(PENDING, 'fresh-request');
   await page.click(`${PENDING} [data-testid="secret-decline"]`);
   await page.waitFor(`document.querySelector('[data-testid="secret-card"][data-state="declined"]') && window.__secretOutcome?.outcome === 'declined'`);
 
-  // Settings lists the kept key by name and date, under its project.
+  // Settings explains Secret Drop without exposing project-key management.
   await page.evaluate(`window.__boiteTest.workspace.active.showSettings('general', 'secrets')`);
-  const key = '[data-testid="secrets-card"] [data-testid="secrets-key"][data-name="OPENAI_API_KEY"]';
-  await page.waitFor(`document.querySelector('${key}')?.getBoundingClientRect().width > 0`);
-  expect(await page.text('[data-testid="secrets-storage"]')).toBe('Stored in Windows (DPAPI)');
-  await page.evaluate(`document.querySelector('[data-testid="secrets-card"]').scrollIntoView({ block: 'start' })`);
-  await capture('settings-desktop.png');
-  await page.send('Emulation.setDeviceMetricsOverride', PHONE);
-  await page.waitFor(`document.querySelector('[data-testid="mobile-settings-detail"] ${key}')?.getBoundingClientRect().width > 0`);
-  expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
-  await capture('settings-phone.png');
-  await page.send('Emulation.setDeviceMetricsOverride', DESKTOP);
+  await page.waitFor(`document.querySelector('[data-testid="secrets-storage"]')?.getBoundingClientRect().width > 0`);
+  expect(await page.text('[data-testid="secrets-storage"]')).toContain('Memory only. One use.');
+  expect(await page.evaluate(`document.querySelectorAll('[data-testid="secrets-key"], [data-testid="secrets-delete"]').length`)).toBe(0);
+  expect(await page.text('[data-testid="secrets-card"]')).not.toMatch(/DPAPI|Keychain|kept for/);
+  await bothWidths('[data-testid="secrets-card"]', 'settings');
 }, 90_000);

@@ -55,7 +55,7 @@ export function agentGuide(asyncQuestions: boolean, logAccess = false, skills: r
     VIEW_GUIDE_LINE,
     'Simple schema: a mermaid fence. Formula: TeX in `$$` or backslash-parens, not single `$`.',
     ...(asyncQuestions ? ['`boite ask [--open <url>] "<question>" [option ...]` asks asynchronously. Keep working on independent tasks; the answer arrives as a message. Silence grants no approval. Login wall: `--open <url>`, the site and why, options "Signed in" Skip; never in chat.'] : []),
-    'Never ask for a secret in chat: `boite secret list`, else `boite secret ask <NAME> --why <reason>`, then `boite secret write|run|pipe <ref>`.',
+    'Never ask for a secret in chat: `boite secret ask <NAME> --why <reason>`, then `boite secret write|run|pipe <ref>`. A ref is single-use, in memory for at most 10 minutes, and erased when its turn ends.',
     '`boite settings [bot] [request|open|create]` reads Boite settings or a bot\'s, puts a card in chat for the user to change one, or creates the bot the user asked for.',
     bot
       ? 'Task tracking is optional. Use it only when steps help you and the user. `boite task add <text>` / `boite task start|done <id>` track those steps.'

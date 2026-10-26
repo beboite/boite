@@ -225,7 +225,7 @@
       {:else if shown === 'windows'}
         <div class="page"><WindowAllowlistCard store={target} /><WindowExclusionsCard store={target} /></div>
       {:else if shown === 'secrets'}
-        <div class="page secrets-page"><SecretsCard store={target} /></div>
+        <div class="page secrets-page"><SecretsCard /></div>
       {:else if shown === 'browser-profiles'}
         <div class="page"><BrowserProfilesCard /></div>
       {:else if shown === 'auto-compact'}

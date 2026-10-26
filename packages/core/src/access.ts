@@ -156,11 +156,11 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   // watching, a screenshot already gives the agent the screen, and the device's clipboard can hold what that person copied.
   ['questions.ask','a question card on its own thread that it does not wait on; the answer comes back as a message'],
   ['questions.list', 'read pending question cards on its own thread without creating another card; answers remain the user\'s'],
-  // The value never reaches the agent: ask returns a ref, use spends it in the core (secrets/use.ts). A kept key
-  // is replaced only through a card the user confirms; deleting one stays the owner's (secrets.delete).
+  // Ask returns a temporary ref; use consumes it once in its requesting turn (secrets/use.ts).
+  // List remains metadata-only compatibility for older clients and guides.
   ['secrets.ask', 'a masked card on its own thread asking the user for a key; it gets back a ref, never the value'],
-  ['secrets.use', 'spending a ref of its own thread or project: written to an ignored file of its folder, or handed to one command whose output comes back masked'],
-  ['secrets.list', 'the names and dates of the keys kept for its own project, never their values'],
+  ['secrets.use', 'consuming a temporary ref of its own running turn: written to an ignored file of its folder, or handed to one command whose output comes back masked'],
+  ['secrets.list', 'compatibility metadata for its own thread, always an empty list with no values'],
   ['agent.settings', 'the settings it may ask the user about, with their values and pages; credentials, accounts and browser profiles are not among them'],
   ['settings.request', 'a settings card on its own thread proposing a change or pointing at a page; only the owner applies it, through settings.set'],
   ['agents.settings.read', 'the settings of one of the owner\'s agents a card may propose to change (name, domain, instructions, avatar, status, projects, model, effort, memory pass, subagents, daily budget), so it reads before it proposes; never their brains or conversations'],

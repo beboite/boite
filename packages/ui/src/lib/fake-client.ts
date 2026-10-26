@@ -45,7 +45,7 @@ import { providerCatalogMethods } from './fake-client/provider-catalog';
 import { providerInstallMethods } from './fake-client/provider-installs';
 import { RELEASES } from './fake-client/providers';
 import { clearRequestsOf, requestMethods } from './fake-client/requests';
-import { secretMethods } from './fake-client/secrets';
+import { closeSecrets, secretMethods } from './fake-client/secrets';
 import { resourceMethods } from './fake-client/resources';
 import { seed } from './fake-client/seed';
 import { settingsMethods } from './fake-client/settings';
@@ -253,6 +253,7 @@ export class FakeClient implements ObservableClient {
     const ctx = this.#ctx;
     this.#stopWorking();
     closeSideQuestions(ctx);
+    closeSecrets(ctx);
     this.#stopLoad();
     ctx.agents.close();
     unregisterCore(ctx);
