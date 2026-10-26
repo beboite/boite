@@ -293,7 +293,7 @@ export function viewTitleOf(html: string): string | null {
  * One line in the guide every agent reads when its session starts, after the
  * one sending diagrams, charts and formulas to the chat's own Mermaid and TeX.
  */
-export const VIEW_GUIDE_LINE = 'Only a simulator, an animation or a custom page needs `boite view <file.html>`: read `boite view help` first.';
+export const VIEW_GUIDE_LINE = 'A larger page, or one kept as a file, needs `boite view <file.html>`: read `boite view help` first.';
 
 /** `boite view help`: everything an agent needs to write a page that looks like part of the app. */
 export const VIEW_HELP = `boite view <file.html> [--title <text>]   publish a page to draw in your answer

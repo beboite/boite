@@ -13,7 +13,7 @@ export const SHORT_ANSWERS = 'Answer style: reduce text before or between tool c
  * Mermaid header named is one Pele draws. Pele's xychart lexer rejects a bare
  * label with an accent (`x-axis [Jan, Fév]`), the one slip a live run made.
  */
-export const CHAT_VISUALS = 'Visuals need no command: chat draws a ```mermaid fence (flowchart, sequenceDiagram, xychart-beta with "quoted" labels, pie, gantt, timeline, quadrantChart, sankey-beta, mindmap) and TeX in `$$` or backslash-parens, never single `$`. Use them when asked for a visual or when a picture explains better than text.';
+export const CHAT_VISUALS = 'Visuals need no command: chat draws a ```mermaid fence (flowchart, sequenceDiagram, xychart-beta with "quoted" labels, pie, gantt, timeline, quadrantChart, sankey-beta, mindmap), TeX in `$$` or backslash-parens, never single `$`, and a ```view fence of HTML, SVG, CSS and script for an interactive or animated piece, drawn offline in the app\'s theme: write no fixed color. Use them when asked for a visual or when a picture explains better than text.';
 
 type ListedSkill = { name: string; description: string; path: string };
 

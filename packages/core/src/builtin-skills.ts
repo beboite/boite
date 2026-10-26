@@ -118,17 +118,18 @@ export const VISUAL_SKILL: BuiltinSkill = {
   description: 'A visual beyond a mermaid fence: a boite view page (simulator, animation, controls) or an HTML file to keep, what to draw and how to check it.',
   body: `# Show it visually
 
-Four ways, four jobs:
+Five ways, five jobs:
 
 | Way | For |
 |---|---|
 | A \`\`\`mermaid fence or TeX in your answer | A diagram, a chart or a formula. No command: chat draws it. The default. |
-| \`boite view <page.html>\` | A page drawn in your answer, after the paragraph it explains, in the app's look: what Mermaid cannot draw, such as a simulator, an animation or controls. |
+| A \`\`\`view fence of HTML in your answer | What Mermaid cannot draw, kept small: a slider, an animation, a simulator. No command and no file: chat draws it in the app's look. |
+| \`boite view <page.html>\` | A larger page, or one kept as a file, drawn in your answer after the paragraph it explains, in the app's look. |
 | \`boite attach <file>\` | A file the user keeps or opens elsewhere: a capture, a clip, a PDF, a standalone HTML page. |
 | \`boite preview <file.html>\` | The project's own HTML, opened in the panel to try. |
 
 Read \`boite view help\` before your first page: it gives the page rules,
-classes and colors. This skill is about what to draw.
+classes and colors, which a view block shares. This skill is about what to draw.
 
 ## Start from the question
 
