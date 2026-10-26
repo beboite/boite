@@ -74,7 +74,7 @@ duplicate.
 
 export const PROVE_IT_SKILL: BuiltinSkill = {
   name: 'boite-prove-it',
-  description: 'Check that a change works before calling it done, and put the proof in the answer: the deciding output, a capture, a clip or a boite view page.',
+  description: 'Check that a change works before calling it done, and put the proof in the answer: the deciding output, a capture, a clip or a chart.',
   body: `# Prove it
 
 A change is done once you have seen it work. Size the check to the change: a
@@ -103,7 +103,7 @@ Put the proof where the user reads, in the answer:
 | A command's result | The one deciding line, such as \`42 pass, 0 fail\` |
 | A screen, a render, a clip | \`boite attach <file>\` |
 | Before and after | Both files attached, or one \`boite view\` page side by side |
-| Numbers, a timeline, a comparison | A \`boite view\` page (skill boite-visual) |
+| Numbers, a timeline, a comparison | A \`\`\`mermaid fence in the answer (xychart-beta, timeline) or a table |
 
 A link to a Markdown report proves nothing to the user: it opens as raw text.
 Notes for the next agent go in the project's docs, not in the answer.
@@ -115,14 +115,15 @@ or two lines.
 
 export const VISUAL_SKILL: BuiltinSkill = {
   name: 'boite-visual',
-  description: 'Explain with a diagram, chart or simulator drawn by boite view, or an HTML file to keep. For a visual, a schema, a catch-up or a choice between options.',
+  description: 'A visual beyond a mermaid fence: a boite view page (simulator, animation, controls) or an HTML file to keep, what to draw and how to check it.',
   body: `# Show it visually
 
-Three commands, three jobs:
+Four ways, four jobs:
 
-| Command | For |
+| Way | For |
 |---|---|
-| \`boite view <page.html>\` | A page drawn in your answer, after the paragraph it explains, in the app's look. The default for explaining. |
+| A \`\`\`mermaid fence or TeX in your answer | A diagram, a chart or a formula. No command: chat draws it. The default. |
+| \`boite view <page.html>\` | A page drawn in your answer, after the paragraph it explains, in the app's look: what Mermaid cannot draw, such as a simulator, an animation or controls. |
 | \`boite attach <file>\` | A file the user keeps or opens elsewhere: a capture, a clip, a PDF, a standalone HTML page. |
 | \`boite preview <file.html>\` | The project's own HTML, opened in the panel to try. |
 
