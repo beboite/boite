@@ -214,6 +214,17 @@ describe('the Device panel live stream', () => {
     }
   }, 30_000);
 
+  for (const loaded of [false, true]) test(`closing the panel refuses a stream call still awaiting its ${loaded ? 'loaded' : 'loading'} module`, async () => {
+    await owner.call('settings.set', { deviceStream: true });
+    if (loaded) await owner.call('devices.stream', { threadId, deviceId: PHONE });
+    const starts = () => sdk.calls().filter((call) => call.includes('app_process')).length;
+    const before = starts();
+    const pending = thrown(harness.core.devices.stream({ threadId, deviceId: PHONE }));
+    await harness.core.devices.close({ threadId, deviceId: PHONE });
+    expect(await pending).toThrow('is not open in this conversation');
+    expect(starts()).toBe(before);
+  });
+
   test('closing the panel, turning the setting off, unplugging and stopping the core each end the session', async () => {
     sdk.set({ scrcpyExitDelayMs: 6000 });
     const spawn = harness.core.procs.spawn.bind(harness.core.procs);
