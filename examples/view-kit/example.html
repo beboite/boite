@@ -1,0 +1,22 @@
+<!doctype html><html lang="en"><head><title>View kit: experimental composition</title><link rel="stylesheet" href="view-kit.css"></head><body><main class="feature-lab">
+<header><h3>One state, several views.</h3><span class="chip">Experimental prototype</span></header>
+<section id="scene" class="stack">
+<p class="hint">Fictional calculation: the same inputs drive numbers, SVG geometry and animation.</p>
+<div class="grid"><label class="field">Speed <input name="speed" type="range" min="1" max="8" value="3"></label><label class="field">Workshops <input name="units" type="range" min="1" max="6" value="2"></label></div>
+<div class="stats"><div class="card stat"><span class="label">Output per minute</span><b><output data-value="debit">6</output></b></div><div class="card stat"><span class="label">Over an hour</span><b><output data-value="total">360</output></b></div></div>
+<svg class="scene" viewBox="0 0 600 108" role="img" aria-label="Workshops feed production"><rect class="node" x="2" y="18" width="140" height="70" rx="8"/><text class="ink" x="72" y="48" text-anchor="middle"><tspan data-value="units">2</tspan> workshops</text><text x="72" y="70" text-anchor="middle">speed <tspan data-value="speed">3</tspan></text><path class="stroke accent flow" d="M142 53H302"/><rect class="node" x="302" y="18" width="294" height="70" rx="8"/><text class="ink" x="449" y="45" text-anchor="middle"><tspan data-value="debit">6</tspan> units / min</text><rect class="soft muted" x="319" y="62" width="260" height="8" rx="4"/><rect class="filled" x="319" y="62" height="8" rx="4"/></svg>
+<div class="presets"><button type="button" data-set='{"speed":2,"units":1}'>Low</button><button type="button" class="primary" data-set='{"speed":8,"units":6}'>High</button><button type="button" data-reset>Reset</button></div>
+<details><summary>One function drives the whole scene</summary><pre><code>View.bind('#scene', ({ speed, units }) =&gt; ({
+  debit: speed * units,
+  total: speed * units * 60,
+  fill: speed * units / 48 * 100
+}));</code></pre></details>
+</section>
+<section class="stack"><header><h3>Compose choices and steps.</h3><span class="chip">Arbitrary children</span></header><view-choices id="compositions" aria-label="Composition example"><div data-label="Steps"><view-steps id="story" aria-label="Example process"><article class="card stage-card" data-label="Input"><b>1. Input</b><p>Children can contain any HTML or SVG.</p></article><article class="card stage-card" data-label="Transform"><b>2. Transform</b><p>Shared controls switch between these cards.</p></article><article class="card stage-card" data-label="Result"><b>3. Result</b><p>Specific behavior can still use ordinary JavaScript.</p></article></view-steps></div><div class="card stage-card" data-label="Custom content"><b>Custom content</b><p>Layouts, drawings and controls stay author-defined.</p></div></view-choices></section>
+<section class="stack"><header><h3>Compare without writing the controls.</h3><span class="chip">Wipe</span></header><view-compare aria-label="Share of the after image"><img src="before.svg" alt="Example diagram before"><img src="after.svg" alt="Example diagram after"></view-compare><p class="hint">Synthetic diagrams. Use the range with a pointer or keyboard.</p></section>
+<section class="stack"><header><h3>One transport for several videos.</h3><span class="chip">Linked playback</span></header><view-media><div class="videos"><figure><video src="before.webm" muted playsinline preload="metadata"></video><figcaption>Before</figcaption></figure><figure><video src="after.webm" muted playsinline preload="metadata"></video><figcaption>After</figcaption></figure></div></view-media><p class="hint">Play, pause, shared position, speed and restart. Synthetic silent clips, not performance measurements.</p></section>
+<p class="hint">Opt-in prototype: include the script and styles yourself. No native view fence or automatic runtime injection is implemented.</p>
+</main><script src="view-kit.js"></script><script>
+const initialize = () => { window.scene = View.bind('#scene', ({speed, units}) => ({debit:speed*units,total:speed*units*60,fill:speed*units/48*100})); window.featureReady = true; };
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initialize,{once:true});else initialize();
+</script></body></html>
