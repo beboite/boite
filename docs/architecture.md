@@ -277,6 +277,24 @@ There is no global or per-account interactive turn ceiling. A conversation has
 one in-flight turn and can stay queued while its account is being configured or
 its team is paused. Process resource guards are separate from admission.
 
+Stop is accepted from the start of turn setup, including while entering a
+delegated worktree. A stop received there is retained through setup and settles
+the turn as stopped before its first code checkpoint or native preparation.
+If Stop kills a preparation process and worktree entry rejects, the turn still
+ends stopped. A preparation failure without an accepted Stop remains an error.
+A delegated worktree records its base before mutation and reserves its ref with
+an atomic ownership reflog, as draft preparation does. If Stop preceded that
+transaction, a pending retry reserves the still-absent ref at its saved base,
+not the parent's later HEAD. Read errors and foreign refs are refused.
+Preparation registers the worktree without checkout. Git builds a missing
+index in an exclusively allocated temporary directory; after Git exits, the
+core publishes it synchronously under the ordinary exclusive index lock.
+Stop can therefore kill Git without stranding a lock on the shared index.
+An existing index or foreign lock stays untouched. Recovery accepts only
+the owned ref and registered path and checks out absent indexed files without
+overwriting existing edits, notes or staging.
+The accepted input remains in history, and the next turn starts normally.
+
 After an unplanned restart, an ordinary queued prompt that never started stays
 held with its original turn, input receipt and execution selection. Desktop and
 phone offer Resume and Discard through `turns.recover`; neither creates a second
