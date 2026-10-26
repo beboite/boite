@@ -2,7 +2,7 @@ import type { ToolStatus } from '@boite/contracts';
 
 export const STDERR_MAX = 400;
 /** How long a failed command waits for the child's exit before blaming itself. */
-export const EXIT_GRACE_MS = 500;
+export { EXIT_GRACE_MS } from '../exit.ts';
 /** How long a probe waits for the three commands it sends before giving up. */
 export const PROBE_TIMEOUT_MS = 30_000;
 /** Where a thread's pi transcript lives, under the account's own directory. */

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { setDriver } from '../src/drivers/index.ts';
 import type { Driver, TurnResult } from '../src/drivers/types.ts';
 import { STOP_DEADLINE, STOP_DEADLINE_ERROR } from '../src/threads/turn-runner.ts';
@@ -81,3 +81,49 @@ test('a driver that settles its stop in time is never killed', async () => {
     restore();
   }
 }, 15_000);
+
+test.each([true, false])('worktree entry preserves an early stop (%s) before native preparation', async stopped => {
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  let starts = 0;
+  const restoreDriver = setDriver('echo', {
+    protocol: 'echo',
+    startTurn() {
+      starts++;
+      return { stop() {}, done: Promise.resolve({ status: 'done', sessionId: null, usage: null }) };
+    },
+  } as Driver);
+  const client = await harness.connect();
+  const { threadId } = await echoThread(harness, client);
+  const originalEnter = harness.core.delegation.worktrees.enter.bind(harness.core.delegation.worktrees);
+  const enter = spyOn(harness.core.delegation.worktrees, 'enter').mockImplementation(id => {
+    if (id !== threadId) return originalEnter(id);
+    entered.resolve();
+    return release.promise;
+  });
+  const checkpoint = spyOn(harness.core.threads.codeCheckpoints, 'begin');
+  try {
+    const turn = await client.call('turns.start', { threadId, prompt: 'Accepted before worktree entry' });
+    await entered.promise;
+    expect(harness.core.scheduler.state().running.some(row => row.turnId === turn.id)).toBe(true);
+    expect(starts).toBe(0);
+    if (stopped) expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
+    release.resolve();
+    await waitFor(() => harness.core.scheduler.state().running.length === 0);
+    expect(harness.core.journal.getTurn(turn.id)?.status).toBe(stopped ? 'stopped' : 'done');
+    expect(starts).toBe(stopped ? 0 : 1);
+    expect(checkpoint).toHaveBeenCalledTimes(stopped ? 0 : 1);
+    expect(harness.core.journal.listMessages(threadId).some(message => message.role === 'user'
+      && message.parts.some(part => part.type === 'text' && part.text === 'Accepted before worktree entry'))).toBe(true);
+    expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: false });
+    const next = await client.call('turns.start', { threadId, prompt: 'A subsequent turn' });
+    await waitFor(() => harness.core.scheduler.state().running.length === 0);
+    expect(harness.core.journal.getTurn(next.id)?.status).toBe('done');
+    expect(starts).toBe(stopped ? 1 : 2);
+  } finally {
+    release.resolve();
+    await waitFor(() => harness.core.scheduler.state().running.length === 0);
+    enter.mockRestore();
+    checkpoint.mockRestore();
+    restoreDriver();
+  }
+});

@@ -77,6 +77,8 @@ export class TurnAttempts {
 
   open(state: TurnAttemptState): LivePermissions {
     const { threadId } = state;
+    this.stopRequested.delete(threadId);
+    this.preparing.add(threadId);
     const permissions = new LivePermissions(state.thread.permissionMode, handle => {
       this.threads.cards.clearPermissionsOf(threadId, 'mode change');
       this.threads.cards.clearQuestionsOf(threadId, false, 'mode change');
@@ -117,8 +119,7 @@ export class TurnAttempts {
   async run(queued: Turn, state: TurnAttemptState, target: TurnAttemptTarget, permissions: LivePermissions): Promise<TurnResult> {
     const { threadId, turnId } = state;
     const { provider, account, driver } = target;
-    this.stopRequested.delete(threadId);
-    this.preparing.add(threadId);
+    if (this.stopRequested.has(threadId)) return { status: 'stopped', sessionId: state.thread.sessionId, usage: null };
     const checkpoint = this.threads.codeCheckpoints.begin(state.thread, turnId);
     if (checkpoint && driver.prepare) {
       const context = this.threads.contexts.makeSessionContext(state.thread, provider, account);

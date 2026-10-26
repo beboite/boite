@@ -429,6 +429,8 @@ export class MuseSession {
   }
 
   private watch(child: SpawnedChild, ctx: SessionContext, rpc: MuseRpc): void {
+    // Refuse warm reuse immediately, without interrupting stdout drainage.
+    child.stdin.once('close', () => { if (this.child === child) this.closing = true; });
     let closed = (): void => undefined;
     this.processClosed = new Promise<void>(resolve => { closed = resolve; });
     child.stderr.setEncoding('utf8');

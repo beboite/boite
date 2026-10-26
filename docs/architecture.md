@@ -270,6 +270,11 @@ There is no global or per-account interactive turn ceiling. A conversation has
 one in-flight turn and can stay queued while its account is being configured or
 its team is paused. Process resource guards are separate from admission.
 
+Stop is accepted from the start of turn setup, including while entering a
+delegated worktree. A stop received there is retained through setup and settles
+the turn as stopped before its first code checkpoint or native preparation.
+The accepted input remains in history, and the next turn starts normally.
+
 After an unplanned restart, an ordinary queued prompt that never started stays
 held with its original turn, input receipt and execution selection. Desktop and
 phone offer Resume and Discard through `turns.recover`; neither creates a second

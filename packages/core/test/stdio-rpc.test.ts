@@ -7,6 +7,8 @@ import { PiPeer } from '../src/drivers/pi/rpc.ts';
 import { STDOUT_LINE_MAX } from '../src/drivers/lines.ts';
 import type { SpawnedChild } from '../src/procs.ts';
 import { logMessageOf } from '../src/log-errors.ts';
+import type { StdioRequestOptions } from '../src/drivers/stdio.ts';
+import { EXIT_GRACE_MS } from '../src/drivers/codex/protocol.ts';
 
 const streams: PassThrough[] = [];
 afterEach(() => { for (const stream of streams.splice(0)) stream.destroy(); });
@@ -30,19 +32,77 @@ function outcome<T>(promise: Promise<T>): Promise<T | Error> {
 const protocols = [
   { name: 'codex', make: (f: ReturnType<typeof fixture>) => {
     const peer = new CodexRpc(f.child, { log: f.log, fault: f.fault, notification: (...args) => f.received.push(args), request: async () => 'answer' });
-    return { request: () => peer.request('probe', {}), reply: { id: 1, result: 'ok' }, invalid: { method: {}, id: [] } };
+    return { request: (options?: StdioRequestOptions) => peer.request('probe', {}, options), write: () => peer.notify('notice', {}), fail: peer.fail.bind(peer), reply: { id: 1, result: 'ok' }, invalid: { method: {}, id: [] } };
   } },
   { name: 'muse', make: (f: ReturnType<typeof fixture>) => {
     const peer = new MuseRpc(f.child, { log: f.log, fault: f.fault, notification: (...args) => f.received.push(args) });
-    return { request: () => peer.request('probe', {}), reply: { id: 1, result: 'ok' }, invalid: { method: {}, id: [] } };
+    return { request: (options?: StdioRequestOptions) => peer.request('probe', {}, options), write: () => peer.notify('notice', {}), fail: peer.fail.bind(peer), reply: { id: 1, result: 'ok' }, invalid: { method: {}, id: [] } };
   } },
   { name: 'pi', make: (f: ReturnType<typeof fixture>) => {
     const peer = new PiPeer(f.child, { log: f.log, fault: f.fault, event: message => f.received.push(message) });
-    return { request: () => peer.command('probe'), reply: { type: 'response', id: 'boite-1', success: true }, invalid: { type: {}, id: [] } };
+    return { request: (options?: StdioRequestOptions) => peer.command('probe', {}, options), write: () => peer.answer({ type: 'extension_ui_response', id: 'notice' }), fail: peer.fail.bind(peer), reply: { type: 'response', id: 'boite-1', success: true }, invalid: { type: {}, id: [] } };
   } },
 ];
 
 for (const protocol of protocols) describe(`${protocol.name} stdio boundary`, () => {
+  test('closed stdin drains accepted responses through the final EOF record and refuses new writes', async () => {
+    const f = fixture(), peer = protocol.make(f);
+    const first = outcome(peer.request()), final = outcome(peer.request()), missing = outcome(peer.request());
+    const closed = new Promise<void>(resolve => f.stdin.once('close', resolve));
+    f.stdin.destroy();
+    await closed;
+    expect(f.faults).toEqual([]);
+    expect(await outcome(peer.request())).toMatchObject({ message: expect.stringContaining('transport closed') });
+    peer.write();
+    expect(f.sent).toHaveLength(3);
+    f.stdout.write(`${JSON.stringify(peer.reply)}\n`);
+    expect(await first).not.toBeInstanceOf(Error);
+    expect(f.faults).toEqual([]);
+    f.stdout.end(JSON.stringify({ ...peer.reply, id: f.sent[1]!.id }));
+    expect(await final).not.toBeInstanceOf(Error);
+    expect(await missing).toMatchObject({ message: expect.stringContaining('stdout ended') });
+    expect(f.faults).toEqual([expect.stringContaining('stdout ended')]);
+    f.stdin.emit('error', new Error('late teardown error'));
+    expect(f.faults).toHaveLength(1);
+  });
+
+  test('closed stdin keeps cancellation, request expiry and explicit failure diagnostics', async () => {
+    const f = fixture(), peer = protocol.make(f), controller = new AbortController();
+    const cancelled = outcome(peer.request({ signal: controller.signal }));
+    const expired = outcome(peer.request({ timeoutMs: 10 })), failed = outcome(peer.request());
+    const closed = new Promise<void>(resolve => f.stdin.once('close', resolve));
+    f.stdin.destroy();
+    await closed;
+    controller.abort();
+    expect(await cancelled).toMatchObject({ message: expect.stringContaining('request cancelled') });
+    expect(await expired).toMatchObject({ message: expect.stringContaining('request timed out') });
+    peer.fail('stderr for the user', 'the captured process exited with code 1');
+    const error = await failed;
+    expect(error).toMatchObject({ message: 'stderr for the user' });
+    expect(logMessageOf(error)).toBe('the captured process exited with code 1');
+    f.stdout.end(JSON.stringify(peer.reply));
+    await Bun.sleep(0);
+    expect(f.faults).toEqual([]);
+    expect(f.received).toEqual([]);
+  });
+
+  test('closed stdin bounds requests without deadlines when stdout never ends', async () => {
+    const f = fixture(), peer = protocol.make(f);
+    const result = peer.request().catch(error => error as Error);
+    const closed = new Promise<void>(resolve => f.stdin.once('close', resolve));
+    const at = performance.now();
+    f.stdin.destroy();
+    await closed;
+    expect(f.faults).toEqual([]);
+    const settled = await Promise.race([result, Bun.sleep(EXIT_GRACE_MS + 250).then(() => new Error('request remained pending'))]);
+    const elapsed = performance.now() - at;
+    expect(settled).toMatchObject({ message: expect.stringContaining('stdout drain timed out') });
+    expect(elapsed).toBeGreaterThanOrEqual(EXIT_GRACE_MS - 20);
+    expect(elapsed).toBeLessThan(EXIT_GRACE_MS + 250);
+    expect(f.faults).toEqual([expect.stringContaining('stdout drain timed out')]);
+    console.info(`${protocol.name}: pending settled after ${Math.round(elapsed)} ms; stdout still open=${!f.stdout.destroyed}`);
+  });
+
   test('malformed JSON values and envelope fields cannot escape or reach handlers', async () => {
     const f = fixture(), peer = protocol.make(f), pending = peer.request();
     const invalidId = protocol.name === 'pi' ? { type: 'future_event', id: {} } : { method: 'future/event', id: {} };
