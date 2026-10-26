@@ -1,5 +1,6 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
+  import CompactionSettings from './CompactionSettings.svelte';
   import CacheKeepaliveSettings from './CacheKeepaliveSettings.svelte';
   import DeviceStreamSettings from './DeviceStreamSettings.svelte';
   import GoalTrackerSetting from './GoalTrackerSetting.svelte';
@@ -72,5 +73,5 @@
     {/each}
   </section>
 
-  {#if store}<CacheKeepaliveSettings {store} /><DeviceStreamSettings {store} />{/if}
+  {#if store}<CacheKeepaliveSettings {store} /><CompactionSettings {store} backgroundOnly /><DeviceStreamSettings {store} />{/if}
 </div>

@@ -56,6 +56,32 @@ test('unchanged warm policy reuses the query; a new threshold resumes between tu
   } finally { client.close(); }
 });
 
+test('a warm Claude session follows type overrides and returns to live common defaults', async () => {
+  const client = await harness.connect();
+  try {
+    const threadId = await claudeThread(client);
+    await client.call('settings.set', { warmProcessMinutes: 5, autoCompact: { tokens: 300_000, moments: [] },
+      compactionByType: { agent: { autoCompact: { tokens: 200_000, moments: [] }, backgroundCompaction: false } } });
+    const thresholds: (number | undefined)[] = [];
+    scripted(fake => { fake.nativeCompactionEnabled = false; }, (fake, prompt, index) => {
+      thresholds.push(fake.compactionThreshold);
+      answerEach('sess-type-policy')(fake, prompt, index);
+    });
+    expect(await runTurn(client, threadId, 'override')).toBe('done');
+    await client.call('settings.set', { autoCompact: { tokens: 400_000, moments: [] } });
+    expect(await runTurn(client, threadId, 'common changed')).toBe('done');
+    expect(queries).toHaveLength(2);
+    await client.call('settings.set', { compactionByType: {} });
+    expect(await runTurn(client, threadId, 'inherit')).toBe('done');
+    expect(calls[3]!.options.resume).toBe('sess-type-policy');
+    await client.call('settings.set', { compactionByType: { agent: { autoCompact: null, backgroundCompaction: false } } });
+    expect(await runTurn(client, threadId, 'off')).toBe('done');
+    expect(thresholds).toEqual([200_000, 200_000, 400_000, undefined]);
+    expect(calls[4]!.options.resume).toBe('sess-type-policy');
+    expect(queries.every(query => query.interrupts === 0)).toBe(true);
+  } finally { client.close(); }
+});
+
 test('a model limit that prevents the exact threshold falls back to an unmodified native query', async () => {
   const client = await harness.connect();
   try {

@@ -33,6 +33,14 @@ keyboard connected to such a device, so that keyboard's Enter writes a new
 line too. A touchscreen laptop whose primary pointer is a mouse keeps Enter's
 send.
 
+Opening a conversation or draft, browsing projects and models, and dismissing
+an overlay keep the touch keyboard closed. Automatic focus returns to the
+composer frame or the dialog instead of a text field. This follows
+`pointer: coarse`, including landscape phones and tablets. Tapping a field,
+choosing Answer in writing, editing a message, or opening search explicitly
+still starts typing. A terminal opens on its output and waits for a tap before
+taking the keyboard. Desktop autofocus stays available.
+
 At phone widths, Settings opens a list in two groups. This phone:
 Notifications, Appearance, Privacy, the two analytics switches, and
 Experiments, which follow the computer's desktop app until the phone flips one
@@ -63,8 +71,11 @@ day, provider and model; Limits draws the core's subscription bars, read-only
 CLIProxyAPI gateway on or off
 ([providers](providers.md#switching-the-gateway-from-limits)).
 
+Owner sessions have an Automatic compaction row with common defaults and
+independent settings for conversations, subagents and bots.
+
 Provider accounts, keyboard shortcuts, plugins, resource limits, the brain,
-the task manager, worktrees, automatic compaction, diagnostics, the tour and
+the task manager, worktrees, diagnostics, the tour and
 server configuration have no row in the phone's settings list. A link or a
 card can still open a supported detail page, subject to its permissions;
 `MobileSettings.svelte` defines those pages. Project management is available
@@ -364,6 +375,23 @@ list it was opened from. Each of those owns one history entry
 (`lib/mobile-history.ts`); closing it by a button removes that entry, so Back
 never lands on something already closed. The conversation the app opens on has
 no list behind it, and Back from there leaves the app as before.
+
+Screens move as a phone's own do (`lib/screen-slide.svelte.ts`). A
+conversation slides in from the right edge over the list it opens from, which
+shifts a quarter of the width left under it, and slides back out on the way
+back; a Settings page does the same over the Settings home. The right panel
+comes in from the right edge and leaves by it, and a bottom sheet rises from
+the bottom edge and goes back down. Only transforms move, over `--dur-3` with
+`--ease-slide`, and the conversation keeps its full height on the way, so
+nothing inside it reflows. Between the bottom bar's places, from one Settings
+page to another and wider than 720 px nothing slides; under reduced motion
+nothing moves. Safari's swipe from the edge, and Chrome's where it draws one,
+already slides a picture of the screen underneath before the Back lands: what
+that Back closes, a conversation, a page, the panel or a sheet, then leaves at
+once instead of sliding a second time. The browser says so on the
+`popstate` event (`hasUAVisualTransition`, Safari 18 and Chrome 118); on an
+older one, a Back within a second of a finger lifted from the screen's edge
+counts as the browser's. The app's own Back, from its buttons, always slides.
 
 Every button on the chat, the list, the panel and Appearance registers a tap
 19 px from its centre on either axis, and `--touch-target` is 44 px. Some controls

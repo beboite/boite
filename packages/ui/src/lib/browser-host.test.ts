@@ -90,6 +90,32 @@ test('the app answers the core as a browser: a target is a webview, its session 
   expect(popup.params.targetInfo).toMatchObject({ type: 'page', openerId: targetId, url: 'https://example.com/popup' });
   expect(shell.created.at(-1)).toEqual({ id: popup.params.targetInfo.targetId, url: 'https://example.com/popup', profile: 'work' });
 
+  // A popup the shell made itself, keeping its `window.opener`, is adopted without a webview of the relay's:
+  // the core attaches to it, drives it through its own channel and hears its events.
+  const made = shell.created.length;
+  shell.emit({ type: 'popup', id: targetId, popup: 'agent-popup-1-0', url: 'https://example.com/send-as' });
+  await settle(); await settle();
+  expect(core.replies('work').filter(reply => reply.method === 'Target.targetCreated').at(-1)!.params.targetInfo)
+    .toEqual({ targetId: 'agent-popup-1-0', type: 'page', url: 'https://example.com/send-as', title: '', attached: true, openerId: targetId });
+  expect(shell.created).toHaveLength(made);
+  await core.answer('work', core.send('work', 'Runtime.evaluate', { expression: 'opener !== null' }, 'agent-popup-1-0'));
+  expect(shell.protocol).toHaveBeenCalledWith('agent-popup-1-0', 'Runtime.evaluate', { expression: 'opener !== null' });
+  shell.listeners.get('agent-popup-1-0')!('Page.loadEventFired', {});
+  await settle();
+  expect(core.replies('work')).toContainEqual({ method: 'Page.loadEventFired', params: {}, sessionId: 'agent-popup-1-0' });
+  // Its page closing it is the shell's destroyed surface: the core hears a closed page.
+  shell.emit({ type: 'destroyed', id: 'agent-popup-1-0' });
+  await settle();
+  expect(core.replies('work')).toContainEqual({ method: 'Target.targetDestroyed', params: { targetId: 'agent-popup-1-0' } });
+  // One whose opener the relay does not drive is closed at once.
+  shell.emit({ type: 'popup', id: 'agent-gone', popup: 'agent-popup-1-1', url: 'about:blank' });
+  expect(shell.destroyed).toContain('agent-popup-1-1');
+  // One that closes itself before its events are subscribed is never announced as a page left open.
+  shell.emit({ type: 'popup', id: targetId, popup: 'agent-popup-1-2', url: 'about:blank' });
+  shell.emit({ type: 'destroyed', id: 'agent-popup-1-2' });
+  await settle(); await settle();
+  expect(core.replies('work').filter(reply => reply.method === 'Target.targetCreated' && reply.params.targetInfo.targetId === 'agent-popup-1-2')).toEqual([]);
+
   // A throwaway context is a private webview, still answering on the profile that asked.
   const { result: { browserContextId } } = await core.answer('work', core.send('work', 'Target.createBrowserContext'));
   const scratch = (await core.answer('work', core.send('work', 'Target.createTarget', { url: 'about:blank', browserContextId }))).result.targetId;

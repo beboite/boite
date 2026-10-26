@@ -186,7 +186,7 @@ test('phone Limits opens the same gateway and disabling it restores the native p
   await page.waitFor('document.querySelector("[data-testid=quota-monitor][data-account-id=a-grok]")');
   await expectNoNativeOpenCode();
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
-  expect(await page.evaluate('document.querySelector("[data-testid=subscription-proxy-show-dashboard]").getBoundingClientRect().top >= document.querySelector("[data-testid=settings] > header").getBoundingClientRect().bottom')).toBe(true);
+  expect(await page.evaluate('document.querySelector("[data-testid=subscription-proxy-show-dashboard]").getBoundingClientRect().top >= document.querySelector("[data-testid=mobile-settings-header]").getBoundingClientRect().bottom')).toBe(true);
   await capture('boite-proxy-native-limits-phone.png');
   await page.click('[data-testid="subscription-proxy-show-dashboard"]');
   await page.waitFor('document.querySelector("[data-testid=subscription-proxy-dashboard-page]")');

@@ -471,6 +471,24 @@ test('fake inline views store the page with its bootstrap and open only for a vi
   }
 });
 
+test('fake child compaction uses its type policy and preserves its task result', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  await client.call('settings.set', { autoCompact: null, compactionByType: {
+    subagent: { autoCompact: { tokens: 1000, moments: [] }, backgroundCompaction: false },
+  } });
+  await client.call('delegation.configure', { threadId: 't-trace', config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true,
+    profiles: [{ id: 'echo', name: 'Echo reviewer', providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: null }],
+  } });
+  const child = await client.call('delegation.spawn', { threadId: 't-trace', profileId: 'echo', task: 'Review the boundary', requestId: 'compact-child' });
+  await vi.waitFor(async () => {
+    const thread = await client.call('threads.get', { threadId: child.thread.id });
+    expect(thread.turns.at(-1)).toMatchObject({ status: 'done', execution: { operation: 'compact' } });
+  });
+  const view = await client.call('delegation.get', { threadId: 't-trace' });
+  expect(view.agents[0]?.lastTurn?.execution?.operation).toBe('delegation');
+  expect(view.agents[0]?.result).toContain('Review the boundary');
+});
+
 test('fake delegation enforces family access and keeps request IDs idempotent', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
   const config = {

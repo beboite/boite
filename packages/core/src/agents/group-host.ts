@@ -348,6 +348,7 @@ export class GroupBotHost {
   }
 
   private onTurn(turn: Turn): void {
+    if (turn.execution?.operation === 'compact' || turn.execution?.operation === 'keepalive') return;
     if (turn.status === 'queued' || turn.status === 'running') return;
     const thread = this.core.journal.getThread(turn.threadId);
     if (thread === null || thread.archived) return;

@@ -51,6 +51,7 @@
     <h2 class="ui-label-box"><span class="ui-label">{strings.telemetry.heading}</span><InfoTip topic={strings.telemetry.heading} text={strings.telemetry.description} /></h2>
     {#if consent}
       {#if !consent.configured}<p class="hint">{strings.telemetry.unconfigured}</p>{/if}
+      {#if consent.configured}<p class="hint" data-testid="telemetry-choice-notice">{strings.telemetry.choiceNotice}</p>{/if}
       <label for="{uid}-basic" class="switch-row">
         <span class="text ui-label-box"><span class="ui-label" id="{uid}-basic-name">{strings.telemetry.basic}</span><InfoTip topic={strings.telemetry.basic} text={strings.telemetry.basicHint} /></span>
         <input id="{uid}-basic" aria-labelledby="{uid}-basic-name" type="checkbox" role="switch" checked={consent.mode !== 'off'} disabled={busy}

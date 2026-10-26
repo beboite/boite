@@ -1,6 +1,7 @@
 // Boite telemetry Worker
 // =========================
 // Endpoints:
+//   POST /consent           - Anonymous explicit choice receipt
 //   POST /track             - Mode A or B events (batch)
 //   POST /forget            - GDPR art. 17, Mode B only
 //   POST /export            - GDPR art. 20, Mode B only
@@ -89,6 +90,10 @@ export default {
       switch (url.pathname) {
         case "/":
           response = json({ ok: true, service: "boite-telemetry" });
+          break;
+        case "/consent":
+          response =
+            request.method === "POST" ? await handleConsent(request, env, ctx) : methodNotAllowed();
           break;
         case "/track":
           response =
@@ -209,6 +214,30 @@ async function handleTrack(request: Request, env: Env, ctx: ExecutionContext): P
   return json({ ok: true, accepted: batch.length });
 }
 
+// /consent shares the usage endpoint's abuse controls, but no usage identity.
+async function handleConsent(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const uaErr = checkUa(request, env);
+  if (uaErr) return uaErr;
+  const blocked = await enforceRateLimit(env, env.RL_TRACK, clientIp(request), "/consent", ctx, true);
+  if (blocked) return blocked;
+  const payload = await readJsonCapped<{ mode?: unknown; receipt_id?: unknown }>(request, TRACK_BODY_MAX_BYTES);
+  if (payload instanceof Response) return payload;
+  if (!payload || typeof payload.mode !== "string" || !["off", "basic", "enhanced"].includes(payload.mode)) return json({ error: "bad_mode" }, 400);
+  if (!isUuidV4(payload.receipt_id)) return json({ error: "bad_receipt_id" }, 400);
+  const overGlobal = await enforceGlobalLimit(env, "/consent", ctx);
+  if (overGlobal) return overGlobal;
+  const sent = await posthogCapture(env, [{
+    event: "consent_choice", distinct_id: "anonymous-consent", uuid: payload.receipt_id,
+    timestamp: new Date().toISOString(),
+    properties: {
+      distinct_id: "anonymous-consent", $process_person_profile: false, ...privacyProperties(),
+      choice: payload.mode, receipt_id: payload.receipt_id,
+    },
+  }]);
+  if (!sent.ok) return json({ error: "upstream_unavailable" }, 502);
+  return json({ ok: true, accepted: 1 });
+}
+
 // ─── /forget (Mode B, GDPR art. 17) ──────────────────────────────
 
 const RGPD_BODY_MAX_BYTES = 4 * 1024;
@@ -316,6 +345,7 @@ const POSTHOG_BATCH_PATH = "/batch/";
 const POSTHOG_TIMEOUT_MS = 10000;
 
 export interface PostHogBatchItem {
+  uuid?: string;
   event: string;
   distinct_id: string;
   timestamp: string;

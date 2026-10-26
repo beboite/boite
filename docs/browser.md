@@ -174,7 +174,12 @@ goes to a delegated agent's parent: only the user can sign in.
 
 A conversation has at most 8 tabs and a machine 24. A page that opens a
 window, a sign-in popup for instance, adds a tab to the same conversation; past
-the limit the window is closed. A tab still attaching counts toward both
+the limit the window is closed. A script's `window.open` without a click opens
+one too: neither the core's Chromium (`--disable-popup-blocking`) nor the
+desktop app's webviews block popups, so the tab limit is the bound. The tab
+shares the opener's profile and cookies and keeps `window.opener`, so the
+sign-in can answer the page with `postMessage`; its page calling
+`window.close()` closes the tab. A tab still attaching counts toward both
 limits, so a burst of windows opened at once stops at the limit too. Nobody can answer a dialog in a headless page.
 One raised while an agent command runs follows `dialog accept|dismiss`
 (accept until told otherwise) and is listed in that command's output; any

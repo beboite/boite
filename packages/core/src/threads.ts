@@ -39,6 +39,7 @@ import { ThreadBranching } from './threads/branching.ts';
 import { CodeCheckpoints } from './threads/code-checkpoints.ts';
 import { ThreadCards } from './threads/cards.ts';
 import { AUTO_COMPACT_LABEL, AutoCompaction } from './threads/auto-compact.ts';
+import { BackgroundCompaction } from './threads/background-compact.ts';
 import { CacheKeepalive } from './threads/cache-keepalive.ts';
 import { DeferredInput } from './threads/deferred.ts';
 import { MOVE_NOTE_PREFIX, pendingMove, ThreadMove } from './threads/move.ts';
@@ -111,6 +112,8 @@ export class ThreadStore {
   readonly spawns: ThreadSpawns;
   /** The `autoCompact` setting: compactions the core opens between turns. */
   readonly autoCompact: AutoCompaction;
+  /** The experimental `backgroundCompaction` setting: copies compacted ahead of the limit. */
+  readonly backgroundCompact: BackgroundCompaction;
   /** The `cacheKeepalive` setting: pings that keep a waiting thread's prompt cache warm. */
   readonly cacheKeepalive: CacheKeepalive;
   /** Threads a usage limit stopped, resumed once its window resets (`threads/limit-resume.ts`). */
@@ -140,6 +143,7 @@ export class ThreadStore {
     this.moves = new ThreadMove(core, this);
     this.spawns = new ThreadSpawns(core, this);
     this.autoCompact = new AutoCompaction(core, this);
+    this.backgroundCompact = new BackgroundCompaction(core, this);
     this.cacheKeepalive = new CacheKeepalive(core, this);
     this.limitResumes = new LimitResumes(core, this);
     this.autoContinue = new AutoContinues(core, this);

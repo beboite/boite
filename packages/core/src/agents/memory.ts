@@ -125,6 +125,7 @@ export class MemoryKeeper {
     this.off = core.bus.onAny((name, payload) => {
       if (this.closed || core.journal.isClosed() || name !== 'turn.finished') return;
       const turn = payload as Turn;
+      if (turn.execution?.operation === 'compact' || turn.execution?.operation === 'keepalive') return;
       const keeper = this.keepers.get(turn.threadId);
       if (!keeper || turn.status === 'queued' || turn.status === 'running') return;
       try { this.finished(turn, keeper); } catch (error) { core.log('warn', `memory pass ${turn.threadId}: ${messageOf(error)}`); }

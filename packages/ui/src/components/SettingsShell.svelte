@@ -133,7 +133,7 @@
       ...(store.owner ? [{ id: 'execution', label: strings.settings.execution }, { id: 'phone', label: strings.phone.heading }, { id: 'origins', label: strings.machines.browserOrigins }] : []),
       { id: 'core', label: strings.settings.core }
     ],
-    experiments: [...EXPERIMENT_IDS.map((id) => ({ id, label: experimentCopy()[id].title })), ...(store.owner ? [{ id: 'device-stream', label: strings.settings.deviceStream }] : [])],
+    experiments: [...EXPERIMENT_IDS.map((id) => ({ id, label: experimentCopy()[id].title })), ...(store.owner ? [{ id: 'background-compaction', label: strings.settings.backgroundCompaction }, { id: 'device-stream', label: strings.settings.deviceStream }] : [])],
     diagnostics: [
       { id: 'diagnostics-status', label: strings.diagnostics.status },
       { id: 'diagnostics-problems', label: strings.diagnostics.problems },

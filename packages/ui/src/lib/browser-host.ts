@@ -188,6 +188,12 @@ export class BrowserHostRelay {
     const target: Target = { id: `${AGENT_VIEW_PREFIX}${crypto.randomUUID()}`, relay, profile, context, url, title: '', off: null };
     this.#targets.set(target.id, target);
     this.bridge.create(target.id, url, profile === DEFAULT_BROWSER_PROFILE ? undefined : profile);
+    return this.#track(target);
+  }
+
+  /** Relays the page events of a webview the bridge already holds. */
+  async #track(target: Target): Promise<Target> {
+    this.#targets.set(target.id, target);
     try {
       const off = await this.bridge.events(target.id, HOST_PAGE_EVENTS, (method, params) => {
         const compact = this.#targets.has(target.id) ? compactPageEvent(method, params) : null;
@@ -214,6 +220,8 @@ export class BrowserHostRelay {
 
   #bridgeEvent(event: BrowserEvent): void {
     const target = this.#targets.get(event.id);
+    // A popup whose opener this relay no longer drives has nobody to go to.
+    if (event.type === 'popup' && (!target || this.#stopped)) { this.bridge.destroy(event.popup); return; }
     if (!target || this.#stopped) return;
     if (event.type === 'url' || event.type === 'title') {
       if (event.type === 'url') target.url = event.url; else target.title = event.title;
@@ -223,9 +231,17 @@ export class BrowserHostRelay {
       this.#targets.delete(target.id); target.off?.();
       this.#send(target.relay, { method: 'Target.targetDestroyed', params: { targetId: target.id } });
     } else if (event.type === 'new-window') {
-      // A sign-in popup: a webview of the same profile, adopted by the core as a tab of the opener's conversation.
+      // A window the shell could not keep with its opener: a webview of the same profile, adopted by the core as a tab of the opener's conversation.
       void this.#open(target.relay, target.profile, event.url, target.context).then(popup => {
-        this.#send(target.relay, { method: 'Target.targetCreated', params: { targetInfo: this.#info(popup, target.id) } });
+        // A page closed while its events were subscribed is already gone for the core.
+        if (this.#targets.has(popup.id)) this.#send(target.relay, { method: 'Target.targetCreated', params: { targetInfo: this.#info(popup, target.id) } });
+      }, () => {});
+    } else if (event.type === 'popup') {
+      // A popup the shell already made, its `window.opener` the page that asked: adopted the same way.
+      const popup: Target = { id: event.popup, relay: target.relay, profile: target.profile, context: target.context, url: event.url, title: '', off: null };
+      void this.#track(popup).then(() => {
+        // A sign-in that closes itself at once may be destroyed before it is announced.
+        if (this.#targets.has(popup.id)) this.#send(target.relay, { method: 'Target.targetCreated', params: { targetInfo: this.#info(popup, target.id) } });
       }, () => {});
     }
   }

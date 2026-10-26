@@ -15,7 +15,7 @@
   import { boxSelection, copySelection, pasteImages, travel, type EditingHost } from '../lib/composer-editing';
   import { ComposerMentions } from '../lib/composer-mentions.svelte';
   import { unresolvedAssetId } from '../lib/draft-attachments';
-  import { focusWithin } from '../lib/focus';
+  import { focusInitial, focusWithin } from '../lib/focus';
   import { touchScreen } from '../lib/device';
   import { ignoreQuestions, noteTyping, repliesOf, replyTarget, sendAnswer } from '../lib/question-reply.svelte';
   import { emptyBox, returnPrompt, sentPrompts, textEntries, type ComposerState, type SentPrompt } from '../lib/composer-queue';
@@ -30,6 +30,7 @@
   import ComposerBar from './ComposerBar.svelte';
   import ComposerIntent from './ComposerIntent.svelte';
   import ComposerQueue from './ComposerQueue.svelte';
+  import ComposerSpeechPreview from './ComposerSpeechPreview.svelte';
   import MentionMenu from './MentionMenu.svelte';
   import SlashMenu from './SlashMenu.svelte';
   import ThreadActivity from './ThreadActivity.svelte';
@@ -95,12 +96,12 @@
     choice = chipChoice(store, thread, target);
   });
 
-  /** A new draft or thread gets the keyboard; reloading the same thread preserves focus. */
+  /** Desktop drafts take the keyboard; touch navigation leaves it closed. */
   $effect(() => {
     key;
     store.draft;
     recall = null;
-    box?.focus({ preventScroll: true });
+    focusInitial(box, box?.closest<HTMLElement>('[data-testid=composer]'));
   });
 
   /** This thread's own sent prompts, most recent first: what ArrowUp walks. */
@@ -466,7 +467,7 @@
     const refocus = focusWithin(box?.closest('[data-testid="composer"]'));
     removeImageReferences(store, key, at);
     state.attachments = state.attachments.filter((_, index) => index !== at);
-    if (refocus) box?.focus({ preventScroll: true });
+    if (refocus) focusInitial(box, box?.closest<HTMLElement>('[data-testid=composer]'));
   }
 
   /**
@@ -548,7 +549,7 @@
     state.previewReferences = [];
     recall = null; recallRead = null;
     put('');
-    box?.focus({ preventScroll: true });
+    focusInitial(box, box?.closest<HTMLElement>('[data-testid=composer]'));
   }
 
   function restoreQueued(at: number) {
@@ -726,13 +727,18 @@
     {/if}
   </div>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="composer" class:dictating data-testid="composer" {ondragover} {ondrop}>
+  <div class="composer" class:dictating data-testid="composer" tabindex="-1" {ondragover} {ondrop} onkeydown={(event) => {
+    if (event.target !== event.currentTarget || event.key !== 'Escape') return;
+    // The touch focus target shares the box's Escape handling, including pending questions.
+    onkeydown(event);
+    event.stopPropagation();
+  }}>
     {#if !target}<ThreadActivity {store} reserveInComposer={hasQueue} onroom={(height) => (activityRoom = height)} />{/if}
     <ComposerIntent editing={!!composer?.editing} reply={reply?.async && reply.id === repliesOf(store).docked ? null : reply} oncancel={cancelEdit} onignore={() => ignoreQuestions(store)} />
 
-    {#if side.current && side.current.threadId === thread?.id}<SideAnswer {...side.current} {store} onclose={() => { side.clear(); box?.focus({ preventScroll: true }); }} />{/if}
+    {#if side.current && side.current.threadId === thread?.id}<SideAnswer {...side.current} {store} onclose={() => { side.clear(); focusInitial(box, box?.closest<HTMLElement>('[data-testid=composer]')); }} />{/if}
     {#if attachments.length > 0}
-      {#key composer}<ComposerAttachments bind:this={attachmentStrip} {attachments} highlighted={highlightedImage} onremove={removeAttachment} onfocus={() => box?.focus({ preventScroll: true })} />{/key}
+      {#key composer}<ComposerAttachments bind:this={attachmentStrip} {attachments} highlighted={highlightedImage} onremove={removeAttachment} onfocus={() => focusInitial(box, box?.closest<HTMLElement>('[data-testid=composer]'))} />{/key}
     {/if}
 
     <div class="input-wrap">
@@ -790,12 +796,7 @@
       onhover={(index) => (mentions.at = index)}
     />
 
-    {#if speechStatus}
-      <div class="speech-preview" class:error={speechError} data-testid="dictation-preview">
-        <span class="speech-status" role={speechError ? 'alert' : 'status'}>{speechStatus}</span>
-        {#if speechPreview}<p aria-live="polite" aria-atomic="true">{speechPreview}</p>{/if}
-      </div>
-    {/if}
+    <ComposerSpeechPreview status={speechStatus} preview={speechPreview} error={speechError} />
 
     <ComposerBar bind:this={toolbar} {store} {key} {target} {bot} {provider} {canSend} answering={!!reply} sendLabel={reply ? strings.composer.replySend : undefined} bind:choice bind:picking bind:dictating
       onsubmit={() => void submit()}
@@ -809,10 +810,6 @@
 </div>
 
 <style>
-  .speech-preview { padding: 0 14px 6px; min-width: 0; }
-  .speech-status { font-size: var(--text-xs); color: var(--color-muted-foreground); }
-  .speech-preview.error .speech-status { color: var(--color-danger); }
-  .speech-preview p { margin: 2px 0 0; font-size: var(--text-sm); line-height: 1.5; color: var(--color-foreground); overflow-wrap: anywhere; max-height: 3em; overflow-y: auto; }
   .composer-wrap {
     position: relative;
     flex: none;
@@ -888,8 +885,6 @@
 
   @media (max-width: 720px) {
     .composer { --composer-rest: var(--shadow-e1); border-radius: var(--radius-xl); }
-    .speech-preview { padding: 0 16px 8px; }
-    .speech-status { color: var(--color-accent); }
     textarea, .input-mirror { font-size: var(--text-md); }
     .composer-wrap, .composer-wrap.centered {
       padding: 8px 12px max(10px, env(safe-area-inset-bottom));

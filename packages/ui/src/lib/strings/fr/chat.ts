@@ -90,6 +90,8 @@ export const fr: Translation = {
     compactionNoPost: 'Contexte compacté depuis {pre} jetons',
     compactionUnknown: 'Contexte compacté',
     compactionManual: 'à la main',
+    /** Beside a compaction a copy of the session made while the conversation went on. */
+    compactionBackground: 'en arrière-plan',
     moveExplained: "Déplacement expliqué à l'agent",
     moveShow: "Voir ce qui a été dit à l'agent",
     moveHide: "Masquer ce qui a été dit à l'agent",
@@ -195,6 +197,8 @@ export const fr: Translation = {
     errorTitle: "L'agent n'a pas pu continuer",
     errorSubscriptionTitle: 'Aucun abonnement disponible',
     errorSubscriptionHint: 'Connectez un compte ou attendez la réinitialisation de son quota.',
+    errorRateTitle: 'Limite de débit atteinte',
+    errorRateHint: 'Le fournisseur limite les requêtes pour le moment. Renvoyez votre message dans quelques minutes.',
     errorServerTitle: 'Le fournisseur est indisponible',
     errorServerHint: 'Réessayez dans un instant.',
     errorDetails: 'Détails techniques',

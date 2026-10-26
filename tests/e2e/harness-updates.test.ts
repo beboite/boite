@@ -98,7 +98,7 @@ test('agent updates live on Providers and Update and Skip target the machine its
   await page.waitFor(`document.querySelector('${id('mobile-settings-connection')}') || document.querySelector('${id('machines-page')}')`);
   if (!await page.evaluate<boolean>(`document.querySelector('${id('machines-page')}') !== null`)) await page.click(id('mobile-settings-connection'));
   await page.waitFor(`document.querySelector('${id('machines-page')}') && document.querySelector('${id('updates-others')}')`);
-  expect((await page.text('.mobile-settings > header h1')).trim()).toBe('Machines and updates');
+  expect((await page.text('[data-testid=mobile-settings-header] h1')).trim()).toBe('Machines and updates');
   // Builder's codex is done and this PC's Claude is skipped: neither is offered again.
   expect(await page.evaluate(`document.querySelectorAll('${id('updates-other')}[data-part="codex"]').length`)).toBe(1);
   expect(await page.evaluate(`document.querySelectorAll('${id('updates-other')}[data-part="claude"]').length`)).toBe(1);

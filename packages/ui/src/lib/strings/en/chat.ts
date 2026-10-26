@@ -103,6 +103,8 @@ export const strings = {
     compactionNoPost: 'Context compacted from {pre} tokens',
     compactionUnknown: 'Context compacted',
     compactionManual: 'by hand',
+    /** Beside a compaction a copy of the session made while the conversation went on. */
+    compactionBackground: 'in the background',
     /** The accent line on the first message after a move: the agent was told where it works now. */
     moveExplained: 'Move explained to the agent',
     moveShow: 'Show what the agent was told',
@@ -230,6 +232,8 @@ export const strings = {
     errorTitle: "The agent couldn't continue",
     errorSubscriptionTitle: 'No subscription available',
     errorSubscriptionHint: 'Connect an account or wait for its quota to reset.',
+    errorRateTitle: 'Rate limit reached',
+    errorRateHint: 'The provider is limiting requests for now. Send your message again in a few minutes.',
     errorServerTitle: 'The provider is unavailable',
     errorServerHint: 'Try again in a moment.',
     errorDetails: 'Technical details',

@@ -121,7 +121,8 @@ test('a failed turn offers a compact link to its thread on desktop and phone', a
     await page.click('[data-testid="error-toast"] .open-thread');
     await page.waitFor(`!document.querySelector('[data-testid="error-toast"]')`);
     expect(await page.evaluate(`getComputedStyle(document.querySelector('.app > .body')).visibility`)).toBe('visible');
-    expect(await page.evaluate(`document.querySelector('[data-testid="mobile-list"]') === null`)).toBe(true);
+    // The list stays under the conversation sliding over it, then goes.
+    await page.waitFor(`document.querySelector('[data-testid="mobile-list"]') === null`);
   }
   await page.screenshot(join(import.meta.dir, '.artifacts/thread-error-phone-chat.png'));
   expect(page.errors()).toEqual([]);

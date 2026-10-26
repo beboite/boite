@@ -122,23 +122,26 @@ test('the reviewed goals switch shows its checklist model only while it is on', 
   expect(document.querySelector('[data-testid=goal2-tracker]')).toBeNull();
 });
 
-test('the owner turns the live device stream on; a paired device does not see the switch', async () => {
+test('the owner turns the live device stream and background compaction on; a paired device does not see the switches', async () => {
   const saved: unknown[] = [];
-  const store = { owner: true, settings: { deviceStream: false }, providers: [], accountsOf: () => [], modelsOf: () => [], saveSettings: async (patch: unknown) => { saved.push(patch); return true; } } as unknown as Store;
+  const store = { owner: true, settings: { deviceStream: false, backgroundCompaction: false }, providers: [], accountsOf: () => [], modelsOf: () => [], saveSettings: async (patch: unknown) => { saved.push(patch); return true; } } as unknown as Store;
   running = mount(ExperimentsPage, { target: document.body, props: { store } });
   flushSync();
   await tick();
-  const toggle = query<HTMLInputElement>('[data-testid=device-stream-on]');
-  expect(toggle.checked).toBe(false);
-  toggle.click();
-  flushSync();
-  await tick();
-  expect(saved).toEqual([{ deviceStream: true }]);
+  for (const id of ['device-stream-on', 'background-compaction-on']) {
+    const toggle = query<HTMLInputElement>(`[data-testid=${id}]`);
+    expect(toggle.checked).toBe(false);
+    toggle.click();
+    flushSync();
+    await tick();
+  }
+  expect(saved).toEqual([{ deviceStream: true }, { backgroundCompaction: true }]);
   unmount(running);
   running = mount(ExperimentsPage, { target: document.body, props: { store: { ...store, owner: false } as unknown as Store } });
   flushSync();
   await tick();
   expect(document.querySelector('[data-testid=device-stream-settings]')).toBeNull();
+  expect(document.querySelector('[data-testid=background-compaction-settings]')).toBeNull();
 });
 test('a phone has the desktop app\'s experiments until it flips one of its own, and can follow again', async () => {
   window.localStorage.setItem(EXPERIMENTS_STORAGE_KEY, '["theme-grain"]');

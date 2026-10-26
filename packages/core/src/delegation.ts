@@ -182,7 +182,7 @@ export class Delegation {
   }
   private rows(rootId: string): AgentRow[] { return this.core.journal.db.query('SELECT * FROM delegated_agents WHERE root_id = ? ORDER BY rowid').all(rootId) as AgentRow[]; }
   private lastTurn(threadId: string): Turn | null {
-    const row = this.core.journal.db.query('SELECT id FROM turns WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1').get(threadId) as { id: string } | null;
+    const row = this.core.journal.db.query("SELECT id FROM turns WHERE thread_id = ? AND COALESCE(json_extract(execution, '$.operation'), '') NOT IN ('compact', 'keepalive') ORDER BY rowid DESC LIMIT 1").get(threadId) as { id: string } | null;
     return row ? this.core.journal.getTurn(row.id) : null;
   }
   /** The bounded final answer of a finished turn, or its error. */
@@ -590,6 +590,7 @@ export class Delegation {
     } finally { this.delivering.delete(threadId); }
   }
   private finished(turn: Turn): void {
+    if (turn.execution?.operation === 'compact' || turn.execution?.operation === 'keepalive') return;
     const thread = this.core.journal.getThread(turn.threadId);
     if (!thread) return;
     // A parent's own turn ending badly (a provider error, an agent update, a restart) is no

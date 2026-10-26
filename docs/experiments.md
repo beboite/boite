@@ -38,11 +38,12 @@ client switches; `lib/experiment-copy.ts` supplies their labels.
 | Show actions in recordings (`recording-indicators`) | Click markers and navigation keys in native browser recordings. Typed text and password input are not shown as key labels. |
 | Pinned model quotas (`pinned-quotas`) | Pin the current model provider's limits in a conversation corner or below the thread list; see [placement and behavior](development.md#ui-spacing-and-motion). |
 
-The page also has two owner-only core settings, separate from those client
+The page also has three owner-only core settings, separate from those client
 switches: [Keep the prompt cache warm](prompt-cache.md#keeping-the-cache-warm)
-(`cacheKeepalive`) and [Device live stream](devices.md#live-stream)
+(`cacheKeepalive`), [Background compaction](context.md#background-compaction)
+(`backgroundCompaction`) and [Device live stream](devices.md#live-stream)
 (`deviceStream`). They change execution on the selected core and affect its
-clients; neither follows the desktop's experiment preferences.
+clients; none follows the desktop's experiment preferences.
 
 ## Whip
 

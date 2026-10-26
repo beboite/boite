@@ -177,15 +177,21 @@ profile, or in the private session, and keeps `window.opener`: the sign-in
 answers the page through it and closes itself. Its title starts with the
 host it shows, since it has no address bar. Closing the tab closes its
 popups. A popup from the tab on screen comes to the front; one from a user's
-tab off screen opens behind without the focus. One from a tab an agent drives
-out of sight opens hidden, its page still running, and shows only while that
-tab is on screen, so an agent's `window.open` never puts a window over the
-user's work. A `target="_blank"` link, or `window.open` without a size, opens a tab
-in the same panel and profile instead, and that tab has no opener. So does a
-sized `window.open` while the tab already holds three popups: WebView2 has no
-popup blocker. Popups are
-desktop windows: an agent's browser commands and the phone's remote view see
-the tab, not its popups.
+tab off screen opens behind without the focus. A `target="_blank"` link, or
+`window.open` without a size, opens a tab in the same panel and profile
+instead, and that tab has no opener. So does a sized `window.open` while the
+tab already holds three popups: WebView2 has no popup blocker. Popups are
+desktop windows: the phone's remote view sees the tab, not its popups.
+
+On Windows a page of an agent tab gets neither: every window it opens, sized
+or not, by a click or a script, becomes another agent tab of the conversation
+(`apps/shell/src-tauri/src/browser/adopted.rs`). The shell hands WebView2 a
+webview in the opener's environment and session, so the page keeps
+`window.opener`, then moves it into the main window off screen beside the
+other agent tabs and tells the core, which attaches to it like any tab. Its
+page calling `window.close()` closes the tab. Before this, a sized popup of an
+agent tab opened as a hidden desktop window the agent never saw: Gmail's
+"Send mail as" editor could not be reached (2026-10-26).
 
 Surfaces and popups show other sites without the app's bridge. On Windows
 `src/platform/browser_page.rs` turns off WebView2's `chrome.webview`, and removes

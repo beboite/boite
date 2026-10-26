@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { checkSettingsPatch, DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
+import { checkSettingsPatch, DEFAULT_DELEGATION_CONFIG, effectiveCompaction, followedPatch, effectiveSetting, type CompactionPolicy } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { AUTO_COMPACT } from '../src/threads/auto-compact.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { echoDriver } from '../src/drivers/echo.ts';
+import { makeAgent, settled } from './agent-fixture.ts';
 let h: TestCore;
 beforeEach(async () => { h = await startTestCore(); });
 afterEach(async () => { await h.stop(); });
@@ -262,6 +263,85 @@ describe('automatic compaction', () => {
     await pause(120);
     expect(await compactions(client, threadId)).toEqual([]);
     client.close();
+  });
+
+  test('type policies inherit live defaults, normalize complete overrides and reject malformed policies', async () => {
+    const client = await h.connect();
+    try {
+      const policy: CompactionPolicy = { autoCompact: { tokens: 200_000, moments: ['cache-expiry', 'turn-end', 'turn-end'] }, backgroundCompaction: true };
+      const next = await client.call('settings.set', { compactionByType: { subagent: policy } });
+      expect(next.compactionByType?.subagent?.autoCompact?.moments).toEqual(['turn-end', 'cache-expiry']);
+      for (const bad of [null, [], { worker: policy }, { bot: {} }, { bot: { autoCompact: null } }, { bot: { autoCompact: 'on', backgroundCompaction: false } }, { bot: { autoCompact: null, backgroundCompaction: 1 } }]) {
+        expect(checkSettingsPatch({ compactionByType: bad } as never)).toMatchObject({ ok: false, field: 'compactionByType' });
+      }
+      expect(checkSettingsPatch({ compactionByType: {} })).toEqual({ ok: true, patch: { compactionByType: {} } });
+      expect(followedPatch(next, { compactionByType: {} })).toEqual({ compactionByType: {} });
+      expect(effectiveSetting(h.core.settings.get(), 'compactionByType')).toEqual(next.compactionByType);
+      const common = { autoCompact: { tokens: 3000, moments: [] }, backgroundCompaction: false } satisfies CompactionPolicy;
+      const settings = { ...common, compactionByType: next.compactionByType };
+      expect(effectiveCompaction(settings, {})).toEqual(common);
+      expect(effectiveCompaction(settings, { agentSessionId: 'bot' })).toEqual(common);
+      expect(effectiveCompaction(settings, { parentThreadId: 'parent', agentSessionId: 'bot' })).toEqual(next.compactionByType!.subagent!);
+    } finally { client.close(); }
+  });
+
+  test('a real delegated child inherits the common limit and compaction never delivers a second result', async () => {
+    const client = await h.connect();
+    try {
+      const { threadId } = await quiet(client);
+      const { accountId, model } = h.core.threads.require(threadId);
+      await client.call('delegation.configure', { threadId, config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true,
+        profiles: [{ id: 'worker', name: 'Worker', providerId: 'echo', accountId, model: model!, effort: null }] } });
+      await client.call('settings.set', { autoCompact: { tokens: 1000, moments: [] } });
+      const child = await client.call('delegation.spawn', { threadId, profileId: 'worker', task: 'x'.repeat(1100), requestId: 'compact-child' });
+      const childId = child.thread.id;
+      await waitFor(() => h.core.journal.lastTurn(childId)?.status === 'done');
+      await pause(180);
+      expect(await compactions(client, childId)).toHaveLength(1);
+      await waitFor(() => !h.core.delegation.hasMail(threadId) && h.core.threads.require(threadId).status === 'idle');
+      const view = await client.call('delegation.get', { threadId });
+      const member = view.agents.find(a => a.thread.id === childId)!;
+      expect(member.lastTurn?.execution?.operation).not.toBe('compact');
+      expect(member.result).toContain('x'.repeat(1100));
+      expect(view.messages.filter(letter => letter.origin === 'result' && letter.from.threadId === childId)).toHaveLength(1);
+    } finally { client.close(); }
+  });
+
+  test('resolved driver and idle policies differ by type, explicit off and removal restore live inheritance', async () => {
+    const client = await h.connect();
+    const seen = new Map<string, (number | null | undefined)[]>();
+    const restore = setDriver('echo', { ...echoDriver, startTurn(ctx) {
+      if (ctx.turn.execution?.operation !== 'compact') seen.set(ctx.thread.id, [...(seen.get(ctx.thread.id) ?? []), ctx.autoCompactTokens?.()]);
+      return echoDriver.startTurn(ctx);
+    } });
+    try {
+      const { threadId } = await quiet(client);
+      const { threadId: botId } = await makeAgent(h, client);
+      await client.call('settings.set', { autoCompact: { tokens: 1000, moments: [] }, compactionByType: {
+        agent: { autoCompact: { tokens: 2000, moments: [] }, backgroundCompaction: false },
+        bot: { autoCompact: { tokens: null, moments: ['turn-end'] }, backgroundCompaction: false },
+      } });
+      await turn(client, threadId, 'x'.repeat(1100));
+      await turn(client, botId, 'bot work');
+      await pause(180);
+      expect(await compactions(client, threadId)).toHaveLength(0);
+      expect(await compactions(client, botId)).toHaveLength(1);
+      expect(seen.get(threadId)?.at(-1)).toBe(2000);
+      expect(seen.get(botId)?.at(-1)).toBeNull();
+      const before = (await client.call('agents.snapshot', {})).status[0]!.last;
+      expect(before?.text).toContain('bot work');
+      await client.call('settings.set', { compactionByType: { bot: { autoCompact: null, backgroundCompaction: false } } });
+      await turn(client, botId, 'x'.repeat(1100));
+      await pause(100);
+      expect(await compactions(client, botId)).toHaveLength(1);
+      expect(seen.get(botId)?.at(-1)).toBeNull();
+      await client.call('settings.set', { autoCompact: { tokens: 1500, moments: [] }, compactionByType: {} });
+      await turn(client, botId, 'x'.repeat(1500));
+      await pause(180);
+      expect(await compactions(client, botId)).toHaveLength(2);
+      expect(seen.get(botId)?.at(-1)).toBe(1500);
+      expect(settled(h, botId)).toBe(true);
+    } finally { restore(); client.close(); }
   });
 
   test('the setting refuses a threshold out of range and an empty or unknown list of moments', () => {

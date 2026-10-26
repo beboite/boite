@@ -105,12 +105,14 @@ describe('cache keepalive', () => {
       CACHE_KEEPALIVE.marginMs = 300_000 - 100;
       await s.client.call('settings.set', { cacheKeepalive: { hours: 12 }, autoCompact: { tokens: 100_000, moments: ['cache-expiry'] } });
       await s.spawn();
+      const maintenance = s.client.next('turn.started', turn => turn.threadId === s.threadId
+        && (turn.execution?.operation === 'compact' || turn.execution?.operation === 'keepalive'));
+      const compacted = s.client.next('turn.finished', turn => turn.threadId === s.threadId && turn.execution?.operation === 'compact');
       await s.turn();
-      await waitFor(() => {
-        const last = h.core.journal.lastTurn(s.threadId);
-        return last?.execution?.operation === 'compact' && last.status === 'done';
-      });
-      expect(await s.pings()).toEqual([]);
+      const first = await maintenance;
+      expect((await compacted).status).toBe('done');
+      // A new ping after compaction is valid; the first maintenance turn must compact.
+      expect(first.execution?.operation).toBe('compact');
       expect(s.prompts.filter(prompt => prompt === '[compact]')).toHaveLength(1);
     } finally { AUTO_COMPACT.cacheMarginMs = margin; s.restore(); }
   });

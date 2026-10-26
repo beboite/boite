@@ -90,29 +90,36 @@ pub(crate) async fn surface(view: &Webview, muted: bool) -> Result<(), String> {
 /// the new-window handler, on the main thread, before WebView2 is handed the
 /// popup, so its first document already finds it plain.
 pub(crate) fn popup<R: Runtime>(window: &WebviewWindow<R>, muted: bool) -> Result<(), String> {
-    let (sender, receiver) = mpsc::channel();
     let app = window.app_handle().clone();
     let label = window.label().to_owned();
-    window.with_webview(move |platform| {
-        let made = (|| -> Result<(), String> {
-            let webview = unsafe { platform.controller().CoreWebView2() }.map_err(|error| error.to_string())?;
-            plain(&webview)?;
-            if muted { mute(&webview).map_err(|error| format!("its sound could not be muted: {error}"))?; }
-            let handler = WindowCloseRequestedEventHandler::create(Box::new(move |_, _| {
-                // Closed later, off this WebView2 callback, which must not
-                // destroy the webview it is running in.
-                let app = app.clone();
-                let label = label.clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Some(window) = app.get_webview_window(&label) { let _ = window.close(); }
-                });
-                Ok(())
-            }));
-            let mut token = 0;
-            unsafe { webview.add_WindowCloseRequested(&handler, &mut token) }.map_err(|error| error.to_string())
-        })();
-        let _ = sender.send(made);
-    }).map_err(|error| error.to_string())?;
+    let closed = move || {
+        // Closed later, off this WebView2 callback, which must not
+        // destroy the webview it is running in.
+        let app = app.clone();
+        let label = label.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Some(window) = app.get_webview_window(&label) { let _ = window.close(); }
+        });
+    };
+    let (sender, receiver) = mpsc::channel();
+    window.with_webview(move |platform| { let _ = sender.send(prepare(&platform, muted, closed)); }).map_err(|error| error.to_string())?;
     // `with_webview` runs at once on the main thread, where this is called.
     receiver.try_recv().map_err(|_| "the popup's webview did not answer".to_owned())?
+}
+
+/// The same for an agent's popup, a child webview (`browser/adopted.rs`):
+/// `closed` runs on the WebView2 callback when its page calls `window.close()`.
+pub(crate) fn adopted<R: Runtime>(view: &Webview<R>, muted: bool, closed: impl Fn() + Send + 'static) -> Result<(), String> {
+    let (sender, receiver) = mpsc::channel();
+    view.with_webview(move |platform| { let _ = sender.send(prepare(&platform, muted, closed)); }).map_err(|error| error.to_string())?;
+    receiver.try_recv().map_err(|_| "the popup's webview did not answer".to_owned())?
+}
+
+fn prepare(platform: &tauri::webview::PlatformWebview, muted: bool, closed: impl Fn() + Send + 'static) -> Result<(), String> {
+    let webview = unsafe { platform.controller().CoreWebView2() }.map_err(|error| error.to_string())?;
+    plain(&webview)?;
+    if muted { mute(&webview).map_err(|error| format!("its sound could not be muted: {error}"))?; }
+    let handler = WindowCloseRequestedEventHandler::create(Box::new(move |_, _| { closed(); Ok(()) }));
+    let mut token = 0;
+    unsafe { webview.add_WindowCloseRequested(&handler, &mut token) }.map_err(|error| error.to_string())
 }

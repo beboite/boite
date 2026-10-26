@@ -254,6 +254,16 @@ test('losing owner access on the last screen keeps the step and count valid', as
   expect(query('[data-testid=onboarding-next]').textContent?.trim()).toBe("Let's Boite");
 });
 
+test.each(['basic', 'enhanced', 'off'] as const)('the disclosed %s choice requests its anonymous count', async mode => {
+  await open();
+  await click('onboarding-dot-privacy');
+  await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+  const call = vi.spyOn(store.client!, 'call');
+  expect(query('[data-testid=telemetry-choice-notice]').textContent).toContain('without an installation ID');
+  await answer(`onboarding-telemetry-${mode}`);
+  expect(call).toHaveBeenCalledWith('telemetry.configure', { mode, countChoice: true });
+});
+
 test('refusing the deal keeps basic counters, turns the row red and closes after the clip', async () => {
   await open();
   await click('onboarding-dot-privacy');
@@ -285,7 +295,9 @@ test('under reduced motion refusing closes at once, and a replay keeps a saved o
     await open();
     await click('onboarding-dot-privacy');
     await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+    const call = vi.spyOn(store.client!, 'call');
     await answer('onboarding-telemetry-basic');
+    expect(call).toHaveBeenCalledWith('telemetry.configure', { mode: 'off', countChoice: false });
     expect(await store.client!.call('telemetry.state', {})).toMatchObject({ mode: 'off' });
     expect(document.querySelector('[data-testid=onboarding]')).toBeNull();
     expect(tourSeen()).toBe(true);

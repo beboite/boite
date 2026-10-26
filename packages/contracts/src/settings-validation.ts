@@ -104,7 +104,7 @@ export interface CacheKeepalive {
 }
 
 const NUMERIC_KEYS = ['warmProcessMinutes', 'agentCpuCapPercent', 'threadMemoryCapMb', 'agentMemoryBudgetPercent', 'memoryReserveMb'] as const;
-const BOOLEAN_KEYS = ['listenOnLan', 'focusGuard', 'muteAgents', 'reapOrphans', 'memoryProtection', 'autoUpdateHarnesses', 'autoInstallUpdates', 'asyncQuestions', 'shortAnswers', 'toolSummaries', 'agentLogAccess', 'autoResumeLimitedThreads', 'deviceStream', 'groupThreads', 'groupBots'] as const;
+const BOOLEAN_KEYS = ['listenOnLan', 'focusGuard', 'muteAgents', 'reapOrphans', 'memoryProtection', 'autoUpdateHarnesses', 'autoInstallUpdates', 'asyncQuestions', 'shortAnswers', 'toolSummaries', 'agentLogAccess', 'autoResumeLimitedThreads', 'backgroundCompaction', 'deviceStream', 'groupThreads', 'groupBots'] as const;
 /** Keys whose value is a percentage of the machine, so anything past 100 is a mistake. */
 const PERCENT_KEYS = ['agentCpuCapPercent'] as const;
 
@@ -313,6 +313,22 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
       return { ok: false, field: 'autoCompact', message: `autoCompact.moments must list only ${MOMENTS.join(', ')}; an empty list requires a token limit` };
     }
     next.autoCompact = { tokens: tokens as number | null, moments: MOMENTS.filter((moment) => moments.includes(moment)) };
+  }
+  if (patch.compactionByType !== undefined) {
+    const policies: unknown = patch.compactionByType;
+    const fail = (message: string): SettingsPatchCheck => ({ ok: false, field: 'compactionByType', message });
+    if (policies === null || typeof policies !== 'object' || Array.isArray(policies)) return fail('compactionByType must be an object keyed by agent, subagent or bot');
+    const normalized: NonNullable<Settings['compactionByType']> = {};
+    for (const [target, raw] of Object.entries(policies)) {
+      if (target !== 'agent' && target !== 'subagent' && target !== 'bot') return fail(`compactionByType.${target}: expected agent, subagent or bot`);
+      if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return fail(`compactionByType.${target}: expected { autoCompact, backgroundCompaction }`);
+      const policy = raw as Record<string, unknown>;
+      if (policy.autoCompact === undefined || typeof policy.backgroundCompaction !== 'boolean') return fail(`compactionByType.${target}: expected autoCompact (a rule or null) and backgroundCompaction (a boolean)`);
+      const checked = checkSettingsPatch({ autoCompact: policy.autoCompact as AutoCompact | null });
+      if (!checked.ok) return fail(`compactionByType.${target}.${checked.message}`);
+      normalized[target] = { autoCompact: checked.patch.autoCompact ?? null, backgroundCompaction: policy.backgroundCompaction };
+    }
+    next.compactionByType = normalized;
   }
   if (patch.cacheKeepalive !== undefined && patch.cacheKeepalive !== null) {
     const { hours } = (typeof patch.cacheKeepalive === 'object' ? patch.cacheKeepalive : {}) as Partial<CacheKeepalive>;

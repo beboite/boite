@@ -266,6 +266,9 @@ with one message, a `pull-request` turn, when:
   rate limit, review skipped) wake nothing. A body already read, its HTML
   comments and spacing aside, never wakes twice;
 - the branch starts to conflict with its base;
+- the branch falls behind a base that requires branches up to date before
+  merging (GitHub's `BEHIND` merge state), once until an update clears it,
+  and never while it waits in the merge queue, which updates it itself;
 - it leaves the base branch's merge queue still open: a check of its merge
   group failed, it conflicted there or someone took it out. A merge seen on
   the same read is the only news;
@@ -276,7 +279,7 @@ the rest of its burst and for a running turn to end, then everything waiting
 goes out together; the same state never wakes twice.
 
 Each watched PR costs one GraphQL query a minute, a fingerprint of its state,
-mergeability, head, place in the merge queue, check counts by state, comment and review counts, edits
+mergeability, merge state, head, place in the merge queue, check counts by state, comment and review counts, edits
 and `updatedAt`. Only when it moves does the core read the checks one by one
 (with whether each is required) and the comments, reviews and inline comments,
 100 a page up to 10 pages each; remarks are read again every 30 minutes

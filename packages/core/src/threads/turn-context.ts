@@ -19,9 +19,9 @@ import { agentEnvOf } from '../agent.ts';
 import { agentGuide, SHORT_ANSWERS } from '../agent-guide.ts';
 import { nativeSkillFiles } from '../brain.ts';
 import { takesSystemGuide } from '../drivers/index.ts';
-import { contextRulesBlock } from '@boite/contracts';
+import { effectiveCompaction, contextRulesBlock } from '@boite/contracts';
 import { prepareAttachments, FileReferences } from '../attachments.ts';
-import { continuationInput } from '../continuation.ts';
+import { continuationInput, tailInput } from '../continuation.ts';
 import type { Core } from '../core.ts';
 import type { EmitSink, PermissionTicket, ToolPatch, QuestionAsk, QuestionTicket, SessionContext, TurnContext } from '../drivers/types.ts';
 import { newId } from '../ids.ts';
@@ -30,6 +30,7 @@ import { LazyMcp } from '../mcp/lazy.ts';
 import { noteStderr } from '../drivers/stderr-tail.ts';
 import { watchProviderProcess } from './provider-process-log.ts';
 import type { ThreadStore } from '../threads.ts';
+import { compactionTail } from './background-compact.ts';
 import { nativeCommandPrompt, systemOperation } from './operations.ts';
 import { stoppedInput } from './stopped-input.ts';
 
@@ -92,12 +93,12 @@ export class TurnContexts {
       sessionId: thread.sessionId,
       resumeAt: thread.sessionResumeAt ?? null,
       sessionBefore: this.sessionBefore(thread, ''),
-      accountEnv: this.core.accounts.accountEnv(account, provider),
+      accountEnv: this.core.accounts.accountEnv(account, provider, thread),
       systemGuide: this.systemGuide(thread, provider),
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
       toolSummaries: this.core.settings.get().toolSummaries === true,
       shortAnswers: this.core.settings.get().shortAnswers !== false,
-      autoCompactTokens: () => this.core.settings.get().autoCompact?.tokens ?? null,
+      autoCompactTokens: () => effectiveCompaction(this.core.settings.get(), this.core.journal.getThread(threadId) ?? thread).autoCompact?.tokens ?? null,
       log: (level, message, context) => {
         if (context?.kind === 'provider-output') noteStderr(threadId, message);
         this.core.log(level, message, { ...context, source: provider.id, threadId });
@@ -127,7 +128,7 @@ export class TurnContexts {
   ): TurnContext {
     const threadId = thread.id;
     const backgroundOwner = { providerId: provider.id, sessionGeneration: thread.sessionGeneration ?? 0, parentTurnId: turn.id };
-    const env = this.core.accounts.accountEnv(account, provider);
+    const env = this.core.accounts.accountEnv(account, provider, thread);
     // When each tool card first showed up and when it stopped running, by slot.
     const toolTimes = new Map<string, { startedAt: number; finishedAt: number | null }>();
     const partProgress = new Map<string, { phase: import('@boite/contracts').ThreadProgress['phase']; detail: string | null }>();
@@ -325,6 +326,17 @@ export class TurnContexts {
       // advanced its generation. That fresh start still needs journal history.
       continued = thread.sessionId === null && interrupted !== input ? carry() : interrupted;
     }
+    // A session swapped in by a background compaction summarizes up to its fork:
+    // the turns since then go with the next prompt the agent reads as such.
+    const kind = turn.execution?.operation;
+    if (!fresh && resumePrompt === undefined && thread.sessionId !== null && kind !== 'compact' && kind !== 'keepalive' && kind !== 'background' && kind !== 'resume'
+      && !nativeCommandPrompt(input.prompt)) {
+      const tail = compactionTail(this.core, thread);
+      if (tail !== null) {
+        continued = tailInput(this.core.journal, threadId, tail.after, turn.id, continued, (part, place) => this.files.of(threadId, part, place));
+        this.threads.backgroundCompact.carried(threadId, turn.id);
+      }
+    }
     const prepared = prepareAttachments(this.core.dataDir, continued, provider);
     const operation = turn.execution?.operation;
     // A compaction or a cache keepalive goes to the agent as its command alone: nothing taken rides on it.
@@ -387,7 +399,7 @@ export class TurnContexts {
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
       toolSummaries: this.core.settings.get().toolSummaries === true,
       shortAnswers: this.core.settings.get().shortAnswers !== false,
-      autoCompactTokens: () => this.core.settings.get().autoCompact?.tokens ?? null,
+      autoCompactTokens: () => effectiveCompaction(this.core.settings.get(), this.core.journal.getThread(threadId) ?? thread).autoCompact?.tokens ?? null,
       emit,
       reportProgress: progress,
       reportProviderEvent: () => this.threads.progress.contact(threadId, turn.id),

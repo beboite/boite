@@ -6,7 +6,7 @@ are offered in the onboarding tour. Skipping the tour leaves enhanced mode
 disabled. The host preserves any saved choice, including Off.
 The tour's privacy step has three answers: the "NO! Just the basic counters"
 row keeps the counters, the "DEAL" row turns on enhanced mode, and the "turn
-everything off" link under both rows saves Off. Each one closes the tour.
+usage analytics off" link under both rows saves Off. Each one closes the tour.
 Settings > General > Privacy and analytics has two switches. On a phone connected
 as the owner, they are under This phone > Privacy.
 Paired guest devices and agents cannot read or change these settings.
@@ -17,7 +17,8 @@ second installation or duplicate conversation events.
 ## Modes
 
 - Off: no usage events are queued or sent. Previously requested deletion can
-  still contact the relay until it succeeds.
+  still contact the relay until it succeeds. An explicitly selected choice can
+  send the anonymous receipt described below, including a refusal.
 - Anonymous counters: a local random UUID is hashed by the relay for daily
   installation pings. Other events use a daily HMAC of the source IP and
   User-Agent. No PostHog person profile is created. The ping identifier remains
@@ -28,13 +29,41 @@ second installation or duplicate conversation events.
   Failed deletions remain on disk and retry after restart. Re-enabling enhanced
   mode immediately creates a new identifier without cancelling earlier deletion
   requests.
-  Pending deletions block uploads until accepted; consent switches and onboarding
+  Pending deletions block usage uploads until accepted; consent switches and onboarding
   navigation remain available. Settings contains export and deletion status;
   the onboarding tour does not.
 
 Export downloads up to 10,000 enhanced events as JSON. PostHog processes event
 deletion asynchronously after accepting the request. A batch already received
 by the relay can still finish during withdrawal; deletion is not instantaneous.
+
+## Anonymous choice counts
+
+The tour and privacy settings disclose that Basic, Enhanced and Off choices are
+counted anonymously, including refusals. Only an explicit selection from a UI
+showing this notice sets `countChoice: true` on `telemetry.configure`. Starting
+the host, loading saved preferences, skipping the tour and older clients do not
+report a choice. A fresh host's default Basic mode is not a response.
+Keeping a saved Off mode when replaying the tour's Basic row reports no new
+refusal. Builds without a configured relay never create a choice receipt.
+
+The host sends `POST /consent` with only the selected mode and a random receipt
+UUID. The relay emits `consent_choice` with `choice` and `receipt_id`, a constant
+`anonymous-consent` identity and person profiles disabled. No installation ID,
+usage event, version, OS, country, IP or User-Agent identity accompanies it in
+PostHog. The source IP is processed only for request rate limits.
+
+The receipt persists in `telemetry.json` until acknowledged and keeps the same
+UUID on retry or restart. Re-selecting the last recorded mode creates no new
+receipt; a later changed mode does. Changing a choice before upload replaces
+the unsent receipt. Deletion failures do not block this independent anonymous
+count. Off sends no usage events after its choice is counted.
+
+The dashboard counts distinct receipt IDs for Base, Plus and Refus. These are
+choices, not unique people or current installation preferences: a changed mode
+can add another choice. Earlier refusals cannot be reconstructed. A separate
+Base/Plus chart counts observed active installations over 30 days; a mode change
+can place an installation in both groups.
 
 ## Events and properties
 
@@ -49,7 +78,7 @@ by the relay can still finish during withdrawal; deletion is not instantaneous.
 | `turn_finished` | A turn finishes, fails or stops | `provider`, `outcome`, `duration_ms` |
 | `subagent_started` | A delegated child turn starts, enhanced mode only | `provider`, selected public `model`, `effort`, `speed` |
 
-Every event has a random event UUID, timestamp, app version, OS, OS version and
+Every usage event has a random event UUID, timestamp, app version, OS, OS version and
 architecture. The relay adds country and collection mode.
 
 `os_version` names the host's release from fixed system fields, read once at
@@ -110,7 +139,7 @@ The in-memory queue holds at most 200 events. Upload starts after 20 seconds and
 normally runs every five minutes. Failed batches retry with exponential backoff,
 up to an hour, keeping event UUIDs for deduplication. Old events can be lost when
 the queue fills or the host exits. `telemetry.json` stores only consent,
-identifiers and pending deletion, outside the application journal.
+identifiers, pending deletion and the last choice receipt, outside the application journal.
 
 ## Repairing consent state
 
