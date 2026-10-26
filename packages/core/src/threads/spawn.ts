@@ -305,6 +305,7 @@ export class ThreadSpawns {
    * the turn runner before a failed turn pauses coordination.
    */
   async finished(turn: Turn): Promise<void> {
+    if (turn.execution?.operation === 'compact' || turn.execution?.operation === 'keepalive') return;
     const key = `${ORIGIN}${turn.threadId}`;
     const saved = this.core.journal.getSetting(key) as Origin | undefined;
     if (saved === undefined || saved.reported) return;

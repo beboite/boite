@@ -104,7 +104,7 @@ export class Concierge {
     let answer: string;
     try {
       answer = await driver.sideQuestion({
-        thread, provider, question: prompt, prompt, accountEnv: this.core.accounts.accountEnv(account, provider), signal: controller.signal,
+        thread, provider, question: prompt, prompt, accountEnv: this.core.accounts.accountEnv(account, provider, thread), signal: controller.signal,
         spawnChild: (cmd, args, opts) => {
           const child = this.core.procs.spawnChild(procId, cmd, args, { ...opts, env: withoutBoiteCredentials(opts?.env ?? process.env) });
           // The install stays in place while the child runs.

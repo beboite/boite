@@ -80,7 +80,7 @@ export function pickModel(ctx: FakeContext, parent: Thread, config: DelegationCo
 function delegatedAgent(ctx: FakeContext, row: { threadId: ThreadId; profileId: string; task: string }): DelegatedAgent {
   const thread = ctx.thread(row.threadId);
   const summary = toSummary(thread);
-  const lastTurn = thread.turns.at(-1) ?? null;
+  const lastTurn = thread.turns.findLast(turn => turn.execution?.operation !== 'compact' && turn.execution?.operation !== 'keepalive') ?? null;
   const terminal = lastTurn !== null && !['queued', 'running'].includes(lastTurn.status);
   const result = terminal
     ? thread.messages.filter(message => message.turnId === lastTurn.id && message.role === 'assistant').at(-1)?.parts
@@ -102,7 +102,7 @@ function delegatedAgent(ctx: FakeContext, row: { threadId: ThreadId; profileId: 
 /** A child still owes its parent a result: a turn under way, or a wait on its own background work. */
 function owesResult(ctx: FakeContext, threadId: ThreadId): boolean {
   const thread = ctx.thread(threadId);
-  const turn = thread.turns.at(-1);
+  const turn = thread.turns.findLast(turn => turn.execution?.operation !== 'compact' && turn.execution?.operation !== 'keepalive');
   return (turn !== undefined && ['queued', 'running'].includes(turn.status)) || toSummary(thread).backgroundWait?.state === 'waiting';
 }
 
@@ -228,7 +228,7 @@ export function workflowChild(ctx: FakeContext, root: Thread, profile: ChildRout
 export function workflowAnswer(ctx: FakeContext, threadId: ThreadId, text: string, ok: boolean): void {
   const thread = ctx.threads.get(threadId);
   if (!thread) return;
-  const turn = thread.turns.at(-1);
+  const turn = thread.turns.findLast(turn => turn.execution?.operation !== 'compact' && turn.execution?.operation !== 'keepalive');
   const at = ctx.now();
   if (turn && (turn.status === 'running' || turn.status === 'queued')) {
     Object.assign(turn, { status: ok ? 'done' : 'error', finishedAt: at, error: ok ? null : text,
@@ -271,7 +271,7 @@ export function pumpDelegation(ctx: FakeContext, rootId: ThreadId): void {
   const rows = ctx.delegationAgents.get(rootId) ?? [];
   for (const row of rows) {
     const thread = ctx.thread(row.threadId);
-    const turn = thread.turns.at(-1);
+    const turn = thread.turns.findLast(turn => turn.execution?.operation !== 'compact' && turn.execution?.operation !== 'keepalive');
     if (thread.status !== 'queued' || turn?.status !== 'queued') continue;
     ctx.scheduler.queued = ctx.scheduler.queued.filter(entry => entry.turnId !== turn.id);
     ctx.scheduler.queued.forEach((entry, index) => { entry.position = index + 1; });

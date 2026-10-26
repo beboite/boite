@@ -1,3 +1,4 @@
+import type { CompactionPolicy, CompactionTarget } from './settings-compaction';
 import type { BrowserProfile } from './browser';
 import type { AccountId, ProviderId, RequestId } from './ids';
 import type { ClientPreferences, ExperimentId, SettingAsk, SettingRequestParams } from './setting-requests.ts';
@@ -150,6 +151,8 @@ export interface Settings {
    * Missing reads as off.
    */
   backgroundCompaction?: boolean;
+  /** Complete policies per thread type. Missing targets follow the live common defaults. */
+  compactionByType?: Partial<Record<CompactionTarget, CompactionPolicy>>;
   /**
    * Experimental: while a thread of the user's waits on its delegated agents
    * or workflows, the core sends a minimal turn before its prompt cache lapses
