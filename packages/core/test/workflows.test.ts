@@ -179,6 +179,7 @@ test.each([
   ['U+2029 around backticks inside a JSON string', fencedOutput({ text: 'Before\u2029```\u2029after' }), { value: { text: 'Before\u2029```\u2029after' } }],
   ['CRLF and an indented closing fence', '```json \r\n' + JSON.stringify(FENCED_TEXT) + '\r\n  ``` \t\r\n', { value: FENCED_TEXT }],
   ['an opening after prose and an extra backtick', 'Answer: ````json\t\n' + JSON.stringify(FENCED_TEXT) + '\n```', { value: FENCED_TEXT }],
+  ['four-backtick fences around JSON containing backticks', '````json\n' + JSON.stringify(FENCED_TEXT) + '\n````', { value: FENCED_TEXT }],
   ['raw JSON', JSON.stringify(FENCED_TEXT), { value: FENCED_TEXT }],
   ['the last valid block', fencedOutput({ text: 'Earlier' }) + '\nThen:\n' + fencedOutput(FENCED_TEXT), { value: FENCED_TEXT }],
   ['an invalid final block', fencedOutput(FENCED_TEXT) + '\n```json\n{"text":}\n```', { value: FENCED_TEXT }],

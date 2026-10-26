@@ -44,6 +44,7 @@ test.each(['captured', 'collection-failure', 'write-failure', 'caller-profile'] 
   const artifacts = join(import.meta.dir, '.artifacts');
   const port = await freePort();
   const sentinel = 'captured-startup-stderr';
+  const endpoint = `ws://127.0.0.1:${port}/devtools/browser/private-cdp-token`;
   const suppliedProfile = mode === 'caller-profile' ? join(fixture, 'caller-profile') : undefined;
   if (suppliedProfile) mkdirSync(suppliedProfile);
   const script = `
@@ -54,7 +55,7 @@ test.each(['captured', 'collection-failure', 'write-failure', 'caller-profile'] 
     fs.writeFileSync(path.join(profile, 'First Run'), 'fixture');
     ${mode === 'collection-failure' ? "fs.mkdirSync(path.join(profile, 'DevToolsActivePort'));" : "fs.writeFileSync(path.join(profile, 'DevToolsActivePort'), '12345\\n/secret-websocket');"}
     ${mode === 'write-failure' ? `fs.mkdirSync(${JSON.stringify(artifacts)}, { recursive: true }); fs.mkdirSync(path.join(${JSON.stringify(artifacts)}, 'browser-' + process.pid + '-attempt-1.json'));` : ''}
-    fs.writeSync(2, ${JSON.stringify(sentinel)});
+    fs.writeSync(2, ${JSON.stringify(sentinel + '\nDevTools listening on ' + endpoint + '\nDevTools listening on ' + endpoint.replace('ws:', 'wss:') + '\n')});
     process.exit(23);
   `;
   let captured: { pid: number; profile: string } | undefined;
@@ -69,6 +70,8 @@ test.each(['captured', 'collection-failure', 'write-failure', 'caller-profile'] 
     expect(error.cause).toBeInstanceOf(Error);
     expect((error.cause as Error).message).toBe('the browser exited before opening CDP with code 23');
     expect(error.message).toContain(sentinel);
+    expect(error.message).toContain(endpoint);
+    expect(readFileSync(join(artifacts, `browser-${captured!.pid}.log`), 'utf8')).toContain(endpoint);
     expect(existsSync(captured!.profile)).toBe(mode === 'caller-profile');
     expect(() => process.kill(captured!.pid, 0)).toThrow();
     const artifact = join(artifacts, `browser-${captured!.pid}-attempt-1.json`);
@@ -85,6 +88,8 @@ test.each(['captured', 'collection-failure', 'write-failure', 'caller-profile'] 
       expect(report.executable.resolved).toBeString();
       expect(report.wrapper.exitCode).toBe(23);
       expect(report.stderr).toContain(sentinel);
+      expect(report.stderr).toContain('DevTools listening on [redacted]');
+      expect(raw).not.toContain('private-cdp-token');
       expect(report.failedAt).toBeGreaterThanOrEqual(report.startedAt);
       if (mode === 'caller-profile') expect(report.profile.markers).toBeUndefined();
       else expect(report.profile.markers['First Run'].kind).toBe('file');

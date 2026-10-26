@@ -291,6 +291,7 @@ export function extractJson(answer: string): { value: unknown } | null {
       while (answer[fence] === ' ' || answer[fence] === '\t') fence++;
       if (answer.startsWith('```', fence)) {
         let tail = fence + 3;
+        while (answer[tail] === '`') tail++;
         while (answer[tail] === ' ' || answer[tail] === '\t') tail++;
         if (answer[tail] === '\r') tail++;
         if (tail === end) {

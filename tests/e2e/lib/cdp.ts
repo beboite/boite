@@ -480,7 +480,8 @@ export class BrowserPage {
           flags: launch.cmd.filter(arg => ['--headless=new', '--mute-audio', '--disable-gpu', '--enable-gpu', '--disable-software-rasterizer',
             '--use-gl=angle', '--use-angle=d3d11', '--use-angle=gl-egl'].includes(arg)),
           wrapper: { exitCode: proc.exitCode, signalCode: proc.signalCode, exitedAt },
-          native: { ...native, ageMs: typeof native.completedAt === 'number' ? failedAt - native.completedAt : null }, stderr,
+          native: { ...native, ageMs: typeof native.completedAt === 'number' ? failedAt - native.completedAt : null },
+          stderr: stderr.replace(/(DevTools listening on\s+)wss?:\/\/\S+/g, '$1[redacted]'),
         };
         mkdirSync(dirname(log), { recursive: true });
         writeFileSync(diagnostic, JSON.stringify(report, null, 2));
