@@ -97,3 +97,25 @@ for (const draft of [null, 'My replacement draft'] as const) test(`Escape cancel
   expect(input.value).toBe(draft ?? '');
   expect(read.mock.calls.some(([method]) => method === 'threads.rewind')).toBe(false);
 });
+
+test('sending an edit with a missing provider reports why and preserves the draft and history', async ({ app: _app }) => {
+  await store.open('t-trace');
+  const message = store.openThread!.messages.find(row => row.role === 'user')!;
+  message.parts.push({ type: 'file', name: 'notes.txt', mimeType: 'text/plain', data: btoa('keep my attachment') });
+  store.startEdit('t-trace', message);
+  const state = store.composerStates['t-trace']!;
+  const before = { text: state.text, attachments: [...state.attachments], editing: state.editing };
+  const history = store.openThread!.messages.map(row => row.id);
+  const read = vi.spyOn(store.client!, 'call');
+  const stage = vi.spyOn(store, 'stageSend');
+  store.providers = store.providers.filter(provider => provider.id !== store.openThread!.providerId);
+  store.error = null;
+  await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+  query<HTMLButtonElement>('[data-testid=composer-send]').click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(store.error).toBe("This thread's provider is unavailable. Reconnect it before editing a sent message.");
+  expect({ text: state.text, attachments: state.attachments, editing: state.editing }).toEqual(before);
+  expect(store.openThread!.messages.map(row => row.id)).toEqual(history);
+  expect(stage).not.toHaveBeenCalled();
+  expect(read.mock.calls.some(([method]) => method === 'threads.rewind' || method === 'turns.start')).toBe(false);
+});

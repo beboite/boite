@@ -252,11 +252,13 @@ test('a cancelled deferred file download neither saves empty bytes nor reports a
   const loadMessageAttachment = vi.fn(async () => null);
   const store = { loadMessageAttachment, reportError } as unknown as Store;
   const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
-  mounted.push(mount(UserMessage, { target: document.body, props: { store, message, turn: undefined, accepted: false, responded: false } }));
-  flushSync();
-  query<HTMLAnchorElement>('[data-testid=file-part]').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-  await vi.waitFor(() => expect(loadMessageAttachment).toHaveBeenCalled());
-  await new Promise(resolve => setTimeout(resolve, 0));
-  expect(download).not.toHaveBeenCalled();
-  expect(reportError).not.toHaveBeenCalled();
+  try {
+    mounted.push(mount(UserMessage, { target: document.body, props: { store, message, turn: undefined, accepted: false, responded: false } }));
+    flushSync();
+    query<HTMLAnchorElement>('[data-testid=file-part]').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(loadMessageAttachment).toHaveBeenCalled());
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(download).not.toHaveBeenCalled();
+    expect(reportError).not.toHaveBeenCalled();
+  } finally { download.mockRestore(); }
 });

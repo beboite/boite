@@ -68,3 +68,22 @@ test('a failed deferred attachment load keeps history and the draft intact', asy
   expect(rewind).not.toHaveBeenCalled();
   expect(store.error).toBe('Attachment read failed');
 });
+
+
+test('an edit cancelled by navigation stays silent and preserves its draft', async ({ ready }) => {
+  const { store } = await ready();
+  await store.open('t-trace');
+  const message = store.openThread!.messages.find(row => row.role === 'user')!;
+  store.startEdit('t-trace', message);
+  const state = store.composerStates['t-trace']!;
+  const before = { text: state.text, attachments: [...state.attachments], editing: state.editing };
+  await store.open('t-bench');
+  store.error = null;
+  const rewind = vi.spyOn(store, 'rewind');
+  const stage = vi.spyOn(store, 'stageSend');
+  expect(await rewindComposerEdit(store, 't-trace', state, state.text, state.attachments, [])).toBe(false);
+  expect(store.error).toBeNull();
+  expect({ text: state.text, attachments: state.attachments, editing: state.editing }).toEqual(before);
+  expect(rewind).not.toHaveBeenCalled();
+  expect(stage).not.toHaveBeenCalled();
+});

@@ -17,8 +17,9 @@ export async function rewindComposerEdit(
   if (!editing) return { local: null };
   if (state.queued.length) { store.error = strings.composer.editingQueued; return false; }
   const thread = store.openThread;
-  const provider = thread?.id === key ? store.providerOf(thread.providerId) : null;
-  if (!provider) return false;
+  if (thread?.id !== key) return false;
+  const provider = store.providerOf(thread.providerId);
+  if (!provider) { store.reportError(strings.composer.editUnavailable); return false; }
   const invalid = attachmentError(attachments, provider)?.message ?? previewReferencesError(previewReferences, prompt);
   if (invalid) { store.reportError(invalid); return false; }
   const local = store.stageSend(key, prompt, attachments, previewReferences);
