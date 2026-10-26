@@ -91,7 +91,7 @@
       const last = stops.at(-1);
       if (!first || !last) return;
       const active = document.activeElement;
-      if (event.shiftKey ? active !== first : active !== last) return;
+      if (active !== card && (event.shiftKey ? active !== first : active !== last)) return;
       event.preventDefault();
       (event.shiftKey ? last : first).focus({ preventScroll: true });
     }

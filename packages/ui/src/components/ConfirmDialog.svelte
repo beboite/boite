@@ -72,7 +72,7 @@
     if (!first || !last) return;
     const active = document.activeElement;
     const inside = active instanceof Node && el.contains(active);
-    if (event.shiftKey ? inside && active !== first : inside && active !== last) return;
+    if (active !== el && (event.shiftKey ? inside && active !== first : inside && active !== last)) return;
     event.preventDefault();
     (event.shiftKey ? last : first).focus({ preventScroll: true });
   }

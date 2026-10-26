@@ -25,6 +25,10 @@ async function tap(selector: string) {
   await page.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
 }
 
+async function shiftTab() {
+  for (const type of ['keyDown', 'keyUp']) await page.send('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', modifiers: 8, windowsVirtualKeyCode: 9 });
+}
+
 async function ask() {
   await page.evaluate(`(() => { const store = __boiteTest.workspace.active;
     return store.client.call('questions.ask', { threadId: store.openThread.id, text: 'Which checks should run?', options: ['Unit tests', 'Browser tests'] });
@@ -81,6 +85,21 @@ test('phone choices, folder browsing and overlay dismissal never focus a text fi
   await page.waitFor(`!document.querySelector('[data-testid=confirm-dialog]')`);
   expect(await page.evaluate(typing)).toBe(false);
   expect(await page.evaluate('document.activeElement === document.body')).toBe(false);
+
+  await page.evaluate(`import('/src/lib/confirm.svelte.ts').then(({ confirm }) => { void confirm.ask({ title: 'Remove project?', confirmLabel: 'Remove', cancelLabel: 'Cancel', requiredText: 'project' }); })`);
+  await page.waitFor(`document.activeElement?.matches('[data-testid=confirm-dialog]')`);
+  await shiftTab();
+  expect(await page.evaluate(`document.activeElement?.matches('[data-testid=confirm-cancel]')`)).toBe(true);
+  await tap('[data-testid=confirm-cancel]');
+  await page.waitFor(`!document.querySelector('[data-testid=confirm-dialog]')`);
+
+  await page.evaluate(`__boiteTest.workspace.active.showSettings('diagnostics')`);
+  await page.waitFor(`document.querySelector('[data-testid=diagnostics-report]:not(:disabled)')`);
+  await tap('[data-testid=diagnostics-report]');
+  await page.waitFor(`document.activeElement?.matches('[data-testid=diagnostics-report-dialog]')`);
+  await shiftTab();
+  expect(await page.evaluate(`document.activeElement?.matches('[data-testid=diagnostics-report-dialog] .actions .ghost')`)).toBe(true);
+  await tap('[data-testid=diagnostics-report-dialog] .actions .ghost');
   expect(page.errors()).toEqual([]);
 }, 30_000);
 
@@ -95,5 +114,12 @@ test('landscape touch devices browse models without opening the keyboard', async
   await capture('keyboard-models-landscape.png');
   await tap('[data-testid=picker-search]');
   expect(await page.evaluate(typing)).toBe(true);
+  await page.send('Input.insertText', { text: 'Echo' });
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.waitFor(`document.querySelector('[data-testid=composer-picker-menu]')?.dataset.mobileSheet === 'true'`);
+  expect(await page.evaluate(`document.activeElement?.matches('[data-testid=picker-search]')`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('[data-testid=picker-search]').value`)).toBe('Echo');
+  await page.send('Input.insertText', { text: ' model' });
+  expect(await page.evaluate(`document.querySelector('[data-testid=picker-search]').value`)).toBe('Echo model');
   expect(page.errors()).toEqual([]);
 }, 30_000);

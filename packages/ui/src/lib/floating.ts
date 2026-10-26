@@ -1,6 +1,5 @@
 import { mobileOverlay } from './mobile-history';
 import { strings } from './strings';
-import { focusInitial } from './focus';
 import type { MenuFit } from './menu-fit';
 /** Position desktop popovers at their anchor and phone menus above the keyboard. */
 export function floating(node: HTMLElement, options: { anchor: () => HTMLElement | null; side?: 'right'; placement?: 'top' | 'bottom'; align?: 'start' | 'end'; sheet?: boolean; matchWidth?: boolean; cap?: number; fit?: (anchor: DOMRect, height: number, topInset: number, cap: number) => MenuFit; dismiss?: () => void }) {
@@ -29,7 +28,7 @@ export function floating(node: HTMLElement, options: { anchor: () => HTMLElement
       const focused = node.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
       node.hidePopover?.();
       node.showPopover?.();
-      if (focused) focusInitial(focused, node);
+      focused?.focus({ preventScroll: true });
       backdropMotion = new MutationObserver(() => backdrop?.classList.toggle('closing', node.classList.contains('closing')));
       backdropMotion.observe(node, { attributes: true, attributeFilter: ['class'] });
       closeHistory = mobileOverlay(options.dismiss);

@@ -85,6 +85,35 @@ test('browsing project folders on touch focuses the dialog instead of its path f
   query<HTMLButtonElement>('[data-testid=project-cancel]').click();
 });
 
+test('Shift+Tab from a touch confirmation frame stays inside the dialog', async () => {
+  touch();
+  await mountOnFake();
+  const answer = confirm.ask({ title: 'Remove project?', confirmLabel: 'Remove', cancelLabel: 'Cancel', requiredText: 'project' });
+  await waitFor(() => document.activeElement?.matches('[data-testid=confirm-dialog]') === true);
+  try {
+    const backwards = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true });
+    document.activeElement!.dispatchEvent(backwards);
+    expect(backwards.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(query('[data-testid=confirm-cancel]'));
+  } finally {
+    confirm.answer(false);
+    await answer;
+  }
+});
+
+test('Shift+Tab from a touch report frame stays inside the dialog', async () => {
+  touch();
+  await mountOnFake();
+  store.showSettings('diagnostics');
+  await waitFor(() => document.querySelector('[data-testid=diagnostics-report]') !== null);
+  query<HTMLButtonElement>('[data-testid=diagnostics-report]').click();
+  await waitFor(() => document.activeElement?.matches('[data-testid=diagnostics-report-dialog]') === true);
+  const backwards = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true });
+  document.activeElement!.dispatchEvent(backwards);
+  expect(backwards.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(query('[data-testid=diagnostics-report-dialog] .actions .ghost'));
+});
+
 test('a wide touch device does not focus the model search automatically', async () => {
   touch(false);
   await mountOnFake();
