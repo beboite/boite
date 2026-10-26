@@ -258,8 +258,8 @@ function profileMarkers(profile: string): Record<string, object> {
 }
 
 /** No raw command line, URL, or arbitrary switch value leaves the native helper. */
-async function startupProcessTree(pid: number, profile: string, port: number): Promise<object[]> {
-  return (await windowsProcessTree(pid)).map(proc => {
+async function startupProcessTree(pid: number, profile: string, port: number, authorized: () => boolean): Promise<object[]> {
+  return (await windowsProcessTree(pid, authorized)).map(proc => {
     const command = proc.CommandLine ?? '';
     const type = /(?:^|\s)--type=([a-z-]+)(?:\s|$)/.exec(command)?.[1];
     const knownType = ['renderer', 'gpu-process', 'utility', 'crashpad-handler'].includes(type ?? '') ? type : undefined;
@@ -423,13 +423,14 @@ export class BrowserPage {
     void proc.exited.then(() => { exitedAt = Date.now(); }, () => undefined);
     let native: Record<string, unknown> = { status: process.platform === 'win32' ? 'not-started' : 'unsupported' };
     let observing = true;
-    const collectLate = () => {
+    const collectLate = (deadline: number) => {
       if (!observing || native.status !== 'not-started') return;
       const requestedAt = Date.now();
       native = { status: 'pending', requestedAt };
       // The FFI helper cannot be preempted while synchronous native work runs.
       // Its promise is handled, but startup/cleanup never awaits it.
-      void startupProcessTree(proc.pid, userDataDir, port).then(tree => {
+      void startupProcessTree(proc.pid, userDataDir, port,
+        () => observing && proc.exitCode === null && Date.now() <= deadline).then(tree => {
         if (observing) native = { status: 'collected', requestedAt, completedAt: Date.now(), tree, incarnationVerified: false };
       }, error => {
         if (observing) native = { status: 'failed', requestedAt, completedAt: Date.now(), error: diagnosticError(error) };
@@ -1026,7 +1027,7 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
   }
 }
 
-async function waitForPageTarget(port: number, urlIncludes = '', proc?: Subprocess, allowBlank = false, collectLate?: () => void): Promise<TargetInfo> {
+async function waitForPageTarget(port: number, urlIncludes = '', proc?: Subprocess, allowBlank = false, collectLate?: (deadline: number) => void): Promise<TargetInfo> {
   const started = Date.now();
   const deadline = started + CONNECT_TIMEOUT_MS;
   let last = 'the debugging port never answered';
@@ -1037,7 +1038,7 @@ async function waitForPageTarget(port: number, urlIncludes = '', proc?: Subproce
   for (;;) {
     if (proc && proc.exitCode !== null) throw new Error(`the browser exited before opening CDP with code ${proc.exitCode}`);
     const elapsed = Date.now() - started;
-    if (elapsed >= CONNECT_TIMEOUT_MS - PROBE_TIMEOUT_MS && elapsed < CONNECT_TIMEOUT_MS) collectLate?.();
+    if (elapsed >= CONNECT_TIMEOUT_MS - PROBE_TIMEOUT_MS && elapsed < CONNECT_TIMEOUT_MS) collectLate?.(deadline);
     try {
       const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(1_000) });
       const targets = (await response.json()) as TargetInfo[];

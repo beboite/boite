@@ -33,3 +33,12 @@ test.skipIf(process.platform !== 'win32')('the process tree lists every descenda
     await parent.exited;
   }
 }, 20_000);
+
+// import('bun:ffi') yields before opening the native library. Revoking the
+// attempt during that suspension must work even on Linux, without kernel32.
+test('a process-tree observation revoked while FFI loads cancels before native access', async () => {
+  let authorized = true;
+  const sampling = windowsProcessTree(process.pid, () => authorized);
+  authorized = false;
+  await expect(sampling).rejects.toMatchObject({ code: 'ABORT_ERR' });
+});
