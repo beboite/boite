@@ -270,9 +270,43 @@ export function shapeMismatch(value: unknown, shape: WorkflowShape, path = 'outp
 
 /** The last valid fenced JSON block, or the whole answer when it is JSON. */
 export function extractJson(answer: string): { value: unknown } | null {
-  // JSON strings can contain U+2028/U+2029, which multiline anchors also treat as line breaks.
-  const blocks = [...answer.matchAll(/```(?:json)?[ \t]*\r?\n([\s\S]*?)(?<=\n)[ \t]*```[ \t]*\r?(?=\n|$)/g)];
-  const candidates = [...blocks.reverse().map(m => m[1]!), answer.trim()];
+  const blocks: string[] = [];
+  let cursor = 0;
+  while (cursor < answer.length) {
+    const opening = answer.indexOf('```', cursor);
+    if (opening === -1) break;
+    let header = opening + 3;
+    if (answer.startsWith('json', header)) header += 4;
+    while (answer[header] === ' ' || answer[header] === '\t') header++;
+    if (answer[header] === '\r') header++;
+    if (answer[header] !== '\n') { cursor = opening + 1; continue; }
+    const body = header + 1;
+    let line = body;
+    let closed = false;
+    // Only physical LF/CRLF lines close a block; Unicode separators remain JSON string data.
+    while (line <= answer.length) {
+      const newline = answer.indexOf('\n', line);
+      const end = newline === -1 ? answer.length : newline;
+      let fence = line;
+      while (answer[fence] === ' ' || answer[fence] === '\t') fence++;
+      if (answer.startsWith('```', fence)) {
+        let tail = fence + 3;
+        while (answer[tail] === ' ' || answer[tail] === '\t') tail++;
+        if (answer[tail] === '\r') tail++;
+        if (tail === end) {
+          blocks.push(answer.slice(body, line));
+          cursor = end;
+          closed = true;
+          break;
+        }
+      }
+      if (newline === -1) break;
+      line = newline + 1;
+    }
+    // No later opener can find a closing line this scan has not already visited.
+    if (!closed) break;
+  }
+  const candidates = [...blocks.reverse(), answer.trim()];
   for (const candidate of candidates) {
     try {
       return { value: JSON.parse(candidate) };

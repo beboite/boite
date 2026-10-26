@@ -178,13 +178,47 @@ test.each([
   ['U+2028 around backticks inside a JSON string', fencedOutput({ text: 'Before\u2028```\u2028after' }), { value: { text: 'Before\u2028```\u2028after' } }],
   ['U+2029 around backticks inside a JSON string', fencedOutput({ text: 'Before\u2029```\u2029after' }), { value: { text: 'Before\u2029```\u2029after' } }],
   ['CRLF and an indented closing fence', '```json \r\n' + JSON.stringify(FENCED_TEXT) + '\r\n  ``` \t\r\n', { value: FENCED_TEXT }],
+  ['an opening after prose and an extra backtick', 'Answer: ````json\t\n' + JSON.stringify(FENCED_TEXT) + '\n```', { value: FENCED_TEXT }],
   ['raw JSON', JSON.stringify(FENCED_TEXT), { value: FENCED_TEXT }],
   ['the last valid block', fencedOutput({ text: 'Earlier' }) + '\nThen:\n' + fencedOutput(FENCED_TEXT), { value: FENCED_TEXT }],
   ['an invalid final block', fencedOutput(FENCED_TEXT) + '\n```json\n{"text":}\n```', { value: FENCED_TEXT }],
+  ['an unterminated final block', fencedOutput(FENCED_TEXT) + '\n```json\n{"text":', { value: FENCED_TEXT }],
+  ['non-overlapping blocks', '```json\ninvalid\n' + fencedOutput(FENCED_TEXT), null],
   ['malformed JSON', '```json\n{"text":}\n```', null],
 ] as const)('workflow JSON extraction: %s', (_name, answer, expected) => {
   expect(extractJson(answer)).toEqual(expected);
 });
+
+test('workflow JSON extraction finishes on repeated unterminated fences', async () => {
+  const { h, threadId } = await setup();
+  const module = new URL('../../contracts/src/workflow-plan.ts', import.meta.url).href;
+  const program = `
+    import { extractJson } from ${JSON.stringify(module)};
+    const fence = ${JSON.stringify('```')};
+    const answers = [
+      fence + '\\n' + (fence + '\\na').repeat(500_000),
+      fence + 'json\\n' + ' '.repeat(500_000) + 'x\\n',
+      fence + '\\n' + (fence + '\\t').repeat(500_000),
+    ];
+    console.log(JSON.stringify(answers.map(extractJson)));
+  `;
+  const child = h.core.procs.spawn(threadId, process.execPath, ['--eval', program], { agentRoot: false });
+  const output = new Response(child.proc.stdout).text();
+  const errors = new Response(child.proc.stderr).text();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let exit: number | null;
+  try {
+    // A generous liveness bound, not a benchmark: the old backtracking takes minutes on this input.
+    exit = await Promise.race([child.exited, new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), 10_000); })]);
+  } finally {
+    clearTimeout(timer);
+    h.core.procs.killTree(threadId);
+    await child.exited;
+  }
+  expect(exit).toBe(0);
+  expect(await errors).toBe('');
+  expect(await output).toBe('[null,null,null]\n');
+}, 20_000);
 
 test('fenced workflow output preserves backticks in a JSON string without a correction', async () => {
   const output = { text: 'Keep \u2028```\u2028 and \u2029```\u2029 inside the JSON string.' };
