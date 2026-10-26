@@ -17,6 +17,8 @@
 //! navigation handler refuses it again for a link the page itself followed.
 //! A page's new windows are tabs or popups, as `popups` explains.
 
+#[cfg(windows)]
+mod adopted;
 mod popups;
 
 use popups::{close_popups, follow_surface, new_window};
@@ -165,6 +167,17 @@ enum Event {
     NewWindow {
         id: String,
         url: String,
+    },
+    /// A page of the agent surface `id` opened a window, which is the agent
+    /// surface `popup` now, its `window.opener` still the page that asked.
+    Popup {
+        id: String,
+        popup: String,
+        url: String,
+    },
+    /// The page of an agent's popup called `window.close()`.
+    Closed {
+        id: String,
     },
 }
 
@@ -638,6 +651,49 @@ pub async fn browser_create(
         }
     }
 
+    builder = page_events(builder, &app, id.clone(), profile == Profile::Private);
+
+    // An agent surface is never hidden, so it starts where it waits out of
+    // sight: see `Surfaces::placement`.
+    let agent = is_agent_label(&label);
+    let view = if agent {
+        window.add_child(builder, PhysicalPosition::new(OFF_SCREEN_X, 0), LogicalSize::new(AGENT_SIZE.0, AGENT_SIZE.1))
+    } else {
+        window.add_child(
+            builder,
+            LogicalPosition::new(0.0, 0.0),
+            // A tab first opened by a background agent has no measured UI slot.
+            // Give its hidden page a usable viewport until the panel shows it.
+            LogicalSize::new(1024.0, 768.0),
+        )
+    }
+    .map_err(|error| format!("the browser surface {id:?} could not be created: {error}"))?;
+    if !agent {
+        view.hide()
+            .map_err(|error| format!("the browser surface {id:?} could not be parked: {error}"))?;
+    }
+    #[cfg(windows)]
+    {
+        if let Err(error) = crate::platform::browser_page::surface(&view, muted(&label)).await {
+            let _ = view.close();
+            return Err(format!("the browser surface {id:?} could not be prepared: {error}"));
+        }
+        if let Err(error) = crate::platform::browser_diagnostics::attach(view.clone(), id.clone()).await {
+            crate::platform::browser_diagnostics::remove(&id); let _ = view.close(); return Err(error);
+        }
+        if let Err(error) = view.navigate(start) {
+            crate::platform::browser_diagnostics::remove(&id);
+            let _ = view.close();
+            return Err(error.to_string());
+        }
+    }
+    Ok(())
+}
+
+/// What the page of the surface `id` tells the UI: where it goes, what it is
+/// called, when it loads, and the windows it asks for. An agent's popup is
+/// built with the same handlers as the tab whose page opened it.
+fn page_events(mut builder: WebviewBuilder<tauri::Wry>, app: &AppHandle, id: String, private: bool) -> WebviewBuilder<tauri::Wry> {
     let handle = app.clone();
     let surface = id.clone();
     builder = builder.on_navigation(move |url| {
@@ -744,45 +800,8 @@ pub async fn browser_create(
     });
 
     let handle = app.clone();
-    let surface = id.clone();
-    let private = profile == Profile::Private;
-    builder = builder.on_new_window(move |url, features| new_window(&handle, &surface, private, url, features));
-
-    // An agent surface is never hidden, so it starts where it waits out of
-    // sight: see `Surfaces::placement`.
-    let agent = is_agent_label(&label);
-    let view = if agent {
-        window.add_child(builder, PhysicalPosition::new(OFF_SCREEN_X, 0), LogicalSize::new(AGENT_SIZE.0, AGENT_SIZE.1))
-    } else {
-        window.add_child(
-            builder,
-            LogicalPosition::new(0.0, 0.0),
-            // A tab first opened by a background agent has no measured UI slot.
-            // Give its hidden page a usable viewport until the panel shows it.
-            LogicalSize::new(1024.0, 768.0),
-        )
-    }
-    .map_err(|error| format!("the browser surface {id:?} could not be created: {error}"))?;
-    if !agent {
-        view.hide()
-            .map_err(|error| format!("the browser surface {id:?} could not be parked: {error}"))?;
-    }
-    #[cfg(windows)]
-    {
-        if let Err(error) = crate::platform::browser_page::surface(&view, muted(&label)).await {
-            let _ = view.close();
-            return Err(format!("the browser surface {id:?} could not be prepared: {error}"));
-        }
-        if let Err(error) = crate::platform::browser_diagnostics::attach(view.clone(), id.clone()).await {
-            crate::platform::browser_diagnostics::remove(&id); let _ = view.close(); return Err(error);
-        }
-        if let Err(error) = view.navigate(start) {
-            crate::platform::browser_diagnostics::remove(&id);
-            let _ = view.close();
-            return Err(error.to_string());
-        }
-    }
-    Ok(())
+    let surface = id;
+    builder.on_new_window(move |url, features| new_window(&handle, &surface, private, url, features))
 }
 
 #[tauri::command]

@@ -124,6 +124,9 @@ export function chromiumArgs(profileDir: string, platform = process.platform, us
     '--password-store=basic',
     '--use-mock-keychain',
     '--disable-blink-features=AutomationControlled',
+    // A window a page opens from a script the agent ran, not a click, becomes a tab as in the desktop app's webviews,
+    // which have no popup blocker: the conversation's tab limit is the bound (`#adopt` in `browser.ts`).
+    '--disable-popup-blocking',
     '--test-type',
     '--screen-info={1920x1080}',
     ...(userAgent ? [`--user-agent=${userAgent}`] : []),
