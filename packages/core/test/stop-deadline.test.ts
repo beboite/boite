@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { setDriver } from '../src/drivers/index.ts';
 import type { Driver, TurnResult } from '../src/drivers/types.ts';
+import type { SpawnedProcess } from '../src/procs.ts';
 import { STOP_DEADLINE, STOP_DEADLINE_ERROR } from '../src/threads/turn-runner.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -123,6 +126,73 @@ test.each([true, false])('worktree entry preserves an early stop (%s) before nat
     release.resolve();
     await waitFor(() => harness.core.scheduler.state().running.length === 0);
     enter.mockRestore();
+    checkpoint.mockRestore();
+    restoreDriver();
+  }
+});
+
+test.each([true, false])('worktree Git failure preserves an accepted stop (%s) and genuine errors', async stopped => {
+  const entered = Promise.withResolvers<void>();
+  const gate = join(harness.dataDir, 'finish-worktree-git');
+  let starts = 0, child: SpawnedProcess | undefined;
+  const restoreDriver = setDriver('echo', {
+    protocol: 'echo',
+    startTurn() {
+      starts++;
+      return { stop() {}, done: Promise.resolve({ status: 'done', sessionId: null, usage: null }) };
+    },
+  } as Driver);
+  const client = await harness.connect();
+  const { threadId } = await echoThread(harness, client);
+  const spawn = harness.core.procs.spawn.bind(harness.core.procs);
+  const intercepted = spyOn(harness.core.procs, 'spawn').mockImplementation((id, command, args, options) => {
+    if (id !== threadId || command !== 'git') return spawn(id, command, args, options);
+    child = spawn(id, process.execPath, ['-e', `
+      const { existsSync } = require('node:fs');
+      setInterval(() => { if (existsSync(${JSON.stringify(gate)})) process.exit(7); }, 5);
+    `], options);
+    entered.resolve();
+    return child;
+  });
+  const originalEnter = harness.core.delegation.worktrees.enter.bind(harness.core.delegation.worktrees);
+  let first = true;
+  const enter = spyOn(harness.core.delegation.worktrees, 'enter').mockImplementation(id => {
+    if (id !== threadId || !first) return originalEnter(id);
+    first = false;
+    // Use the real Git helper and process registry; only the executable is synthetic.
+    return harness.core.worktrees.head(id, harness.dataDir).then(() => undefined);
+  });
+  const checkpoint = spyOn(harness.core.threads.codeCheckpoints, 'begin');
+  try {
+    const turn = await client.call('turns.start', { threadId, prompt: 'Accepted before worktree Git' });
+    await entered.promise;
+    expect(harness.core.procs.liveCount(threadId)).toBe(1);
+    if (stopped) expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
+    else writeFileSync(gate, 'fail');
+    const exitCode = await child!.exited;
+    expect(exitCode).not.toBe(0);
+    if (!stopped) expect(exitCode).toBe(7);
+    await waitFor(() => harness.core.scheduler.state().running.length === 0);
+    const finished = harness.core.journal.getTurn(turn.id)!;
+    expect(finished.status).toBe(stopped ? 'stopped' : 'error');
+    if (stopped) expect(finished.error).toBeNull();
+    else expect(finished.error).toContain('cannot read the commit checked out');
+    expect(starts).toBe(0);
+    expect(checkpoint).not.toHaveBeenCalled();
+    expect(harness.core.journal.listMessages(threadId).some(message => message.role === 'user'
+      && message.parts.some(part => part.type === 'text' && part.text === 'Accepted before worktree Git'))).toBe(true);
+    expect(harness.core.procs.liveCount(threadId)).toBe(0);
+    if (stopped) expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: false });
+    const next = await client.call('turns.start', { threadId, prompt: 'After worktree Git failure' });
+    await waitFor(() => harness.core.scheduler.state().running.length === 0);
+    expect(harness.core.journal.getTurn(next.id)?.status).toBe('done');
+    expect(starts).toBe(1);
+  } finally {
+    writeFileSync(gate, 'finish');
+    await child?.exited;
+    await waitFor(() => harness.core.scheduler.state().running.length === 0);
+    enter.mockRestore();
+    intercepted.mockRestore();
     checkpoint.mockRestore();
     restoreDriver();
   }

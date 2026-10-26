@@ -115,7 +115,9 @@ export class TurnRunner {
       result = await this.attempts.run(queued, state, { provider, account, driver }, permissions);
       if (state.running.execution?.operation === 'coordination' && result.status === 'done') this.core.coordination.submitted(threadId, turnId);
     } catch (error) {
-      result = { status: 'error', sessionId: state.thread.sessionId, usage: null, error: messageOf(error), diagnosticError: logMessageOf(error) };
+      result = this.attempts.preparationStopped(threadId)
+        ? { status: 'stopped', sessionId: state.thread.sessionId, usage: null }
+        : { status: 'error', sessionId: state.thread.sessionId, usage: null, error: messageOf(error), diagnosticError: logMessageOf(error) };
     } finally {
       try { this.attempts.close(threadId); }
       catch (error) { reportSettlementError(this.core, threadId, turnId, 'attempt cleanup', error); }

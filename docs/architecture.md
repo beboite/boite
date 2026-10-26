@@ -273,6 +273,8 @@ its team is paused. Process resource guards are separate from admission.
 Stop is accepted from the start of turn setup, including while entering a
 delegated worktree. A stop received there is retained through setup and settles
 the turn as stopped before its first code checkpoint or native preparation.
+If Stop kills a preparation process and worktree entry rejects, the turn still
+ends stopped. A preparation failure without an accepted Stop remains an error.
 The accepted input remains in history, and the next turn starts normally.
 
 After an unplanned restart, an ordinary queued prompt that never started stays

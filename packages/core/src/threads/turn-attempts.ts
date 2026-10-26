@@ -279,6 +279,11 @@ export class TurnAttempts {
     return result;
   }
 
+  /** A preparation process killed by an accepted Stop can reject before run starts. */
+  preparationStopped(threadId: ThreadId): boolean {
+    return this.preparing.has(threadId) && this.stopRequested.has(threadId);
+  }
+
   close(threadId: ThreadId): void {
     this.livePermissions.get(threadId)?.detach();
     this.livePermissions.delete(threadId);
