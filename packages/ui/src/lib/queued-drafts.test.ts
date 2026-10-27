@@ -12,11 +12,11 @@ vi.mock('./draft-journal', () => ({ readDraftJournal: vi.fn(async () => null), w
 const stores: Store[] = [];
 const clients: FakeClient[] = [];
 
-/** A Store on `machine` whose client records every creation and start. */
+/** A Store on `machine` whose client records every creation and start. Its core keeps no composer records, so the frontend starts drafts. */
 async function machine(id: string) {
   const store = new Store();
   store.machineId = id;
-  const client = new FakeClient({ delayMs: 0 });
+  const client = new FakeClient({ delayMs: 0, missing: ['composer.list'] });
   clients.push(client);
   const original = client.call.bind(client);
   const creates: { title?: string; clientRequestId?: string }[] = [];

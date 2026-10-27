@@ -118,6 +118,8 @@ test('a machine of the linked machine\'s group shares its projects through it, w
   const a = await ready({ delayMs: 0, coreId: 'machine-a' });
   const b = await ready({ delayMs: 0, coreId: 'machine-b' });
   const remote = await b.client.call('projects.add', { path: '/builder-app', name: 'Builder app' });
+  const account = (await b.client.call('accounts.list', {}))[0]!;
+  const source = await b.client.call('threads.create', {projectId: remote.id, providerId: account.providerId, accountId: account.id, title: 'Member source'});
   await b.client.call('contacts.remove', { coreId: 'core-chris' });
   await a.client.call('group.create', { name: 'Home' });
   await b.client.call('group.join', { invite: (await a.client.call('group.invite', {})).invite });
@@ -142,6 +144,7 @@ test('a machine of the linked machine\'s group shares its projects through it, w
   // The machine the contact is linked to is asked, naming the member that holds the project.
   expect(linkedCalls).toHaveBeenCalledWith('contacts.grant', { coreId: 'core-chris', projectId: remote.id, machine: 'machine-b' });
   expect(memberCalls.mock.calls.filter(([method]) => method === 'contacts.grant')).toEqual([]);
+  expect(memberCalls).toHaveBeenCalledWith('sharedProjects.list', {threadId: source.id});
   const row = document.querySelector<HTMLElement>(`[data-testid="contact-grant-${remote.id}"]`)!;
   expect(row.dataset['machineId']).toBe('b');
   expect(row.textContent).toContain('Builder app');

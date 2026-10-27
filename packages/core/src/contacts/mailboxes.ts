@@ -28,6 +28,7 @@ export class ContactMailboxes {
   private closed = false;
   private readonly pending = new Set<Promise<unknown>>();
   private readonly busy = new Set<string>();
+  private attempt = 0;
   private readonly off: () => void;
   private prunedAt = 0;
 
@@ -157,7 +158,7 @@ export class ContactMailboxes {
     const route = this.route(letter.from.threadId, letter.to.coreId);
     if (!route) throw refused('route: the group contact route is no longer available');
     const from = this.source(letter.from.threadId, letter.status === 'queued');
-    try { this.core.contacts.reach.checkSendTier(letter.from.threadId); }
+    try { this.core.contacts.checkSendTier(letter.from.threadId); }
     catch (error) { throw new PeerRefusal(messageOf(error)); }
     const answer = await this.request(route, { action: 'deliver', from, letter, receipt: letter.status !== 'queued' }) as AgentLetter | { retry: true };
     if ('retry' in answer) throw unavailable('The contact is unreachable; retrying until expiry');
@@ -186,7 +187,7 @@ export class ContactMailboxes {
     const route = this.route(params.threadId, found[0]!.coreId);
     if (!route) throw refused('route: the group contact route is no longer available');
     const from = this.source(params.threadId, true);
-    this.core.contacts.reach.checkSendTier(params.threadId);
+    this.core.contacts.checkSendTier(params.threadId);
     const gitRemote = gitRemoteOf(this.core.threads.require(params.threadId).cwd);
     const answer = await this.request(route, { action: 'ask', from, coreId: route.coreId, id: randomUUID(), text: text(params.text, 'text'), ...(gitRemote ? { gitRemote } : {}) }) as ContactRequest;
     this.source(params.threadId);
@@ -211,7 +212,10 @@ export class ContactMailboxes {
       return this.core.coordination.receiveRouted(letter, route.name);
     }
     const from = checkRemoteContact(p?.from as AgentContact, peer);
-    if (p.action === 'contacts') return this.core.contacts.available().map(contact => ({ ...contact, admission: this.core.contacts.find(contact.coreId)!.addedAt }));
+    if (p.action === 'contacts') return this.core.contacts.available().flatMap(contact => {
+      const direct = this.core.contacts.find(contact.coreId);
+      return direct ? [{...contact, admission: direct.addedAt}] : [];
+    });
     const contactId = p.action === 'deliver' ? address(p.letter?.to as AgentContact, 'letter.to').coreId : text(p.coreId, 'route.coreId', 100);
     if (this.core.contacts.find(contactId)?.addedAt !== p.admission) throw refused('route: the gateway contact admission changed; discover its contacts again');
     if (p.action === 'lookup') {
@@ -226,7 +230,7 @@ export class ContactMailboxes {
       return answer;
     }
     if (p.action === 'ask') {
-      this.core.contacts.reach.checkAttestedTier(from.agent);
+      this.core.contacts.checkAttestedTier(from.agent);
       const contact = this.contact(text(p.coreId, 'route.coreId', 100));
       const box = this.mailbox(from, contact);
       const id = text(p.id, 'route.ask.id', 100);
@@ -240,7 +244,7 @@ export class ContactMailboxes {
     if (p.action !== 'deliver') throw refused('route.action: expected contacts, lookup, ask, deliver or return');
     const canonical = p.letter!;
     if (!same(address(canonical.from, 'letter.from'), from)) throw refused('letter.from: expected the authenticated initiating conversation');
-    this.core.contacts.reach.checkAttestedTier(from.agent);
+    this.core.contacts.checkAttestedTier(from.agent);
     this.timestamps(canonical, LETTER_TTL_MS);
     const contact = this.contact(address(canonical.to, 'letter.to').coreId);
     const box = this.mailbox(from, contact, canonical.createdAt);
@@ -292,11 +296,15 @@ export class ContactMailboxes {
     if (!box || letter.to.coreId !== this.self()) throw refused('letter.to: unknown contact mailbox');
     this.valid(box);
     const from = checkRemoteContact(letter.from, this.contact(peer.coreId));
-    this.core.contacts.reach.checkAttestedTier(from.agent);
+    const human = letter.origin === 'contact-human';
+    if (letter.origin !== undefined && !['agent', 'contact-human'].includes(letter.origin)) throw refused('letter.origin: expected contact agent or attested contact-human');
+    if (human && this.core.contacts.find(peer.coreId)?.capabilities?.humanLetters !== 1) throw refused('letter.origin: contact-human requires negotiated humanLetters support');
+    if (!human) this.core.contacts.checkAttestedTier(from.agent);
     this.timestamps(letter, LETTER_TTL_MS);
     if (letter.replyTo !== null && !this.rows("mailbox = ? AND direction = 'out' AND id = ?", box.id, letter.replyTo).length) throw refused('replyTo: expected a letter sent from this contact mailbox');
     const accepted: AgentLetter = { ...letter, from, text: text(letter.text, 'letter.text'), status: 'received', error: null, contact: { coreId: box.coreId, name: box.name } };
-    delete accepted.origin;
+    if (human) { delete accepted.from.agent; accepted.origin = 'contact-human'; }
+    else delete accepted.origin;
     const canonical = { ...accepted, to: { coreId: box.source.coreId, threadId: box.source.threadId }, toTitle: box.source.title, toProject: box.source.project, toMachine: box.source.machine };
     const stored = this.store(box.id, 'in', accepted, canonical);
     queueMicrotask(() => this.tick());
@@ -311,6 +319,10 @@ export class ContactMailboxes {
     if (this.initialized) return;
     this.core.journal.db.exec('CREATE TABLE IF NOT EXISTS contact_route_letters (id TEXT NOT NULL, mailbox TEXT NOT NULL, direction TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(id, mailbox, direction))');
     this.core.journal.db.exec("CREATE INDEX IF NOT EXISTS contact_route_pending ON contact_route_letters(direction, json_extract(data, '$.wire.status'))");
+    // Rebuild the transient retry order from durable pending letters after a restart.
+    this.core.journal.db.exec('CREATE TEMP TABLE IF NOT EXISTS contact_route_attempts (id TEXT NOT NULL, mailbox TEXT NOT NULL, attempt INTEGER NOT NULL, createdAt INTEGER NOT NULL, PRIMARY KEY(id, mailbox))');
+    this.core.journal.db.exec('CREATE INDEX IF NOT EXISTS temp.contact_route_attempt_order ON contact_route_attempts(attempt, createdAt, id, mailbox)');
+    this.core.journal.db.exec("DELETE FROM temp.contact_route_attempts; INSERT INTO temp.contact_route_attempts SELECT id, mailbox, 0, json_extract(data, '$.wire.createdAt') FROM contact_route_letters WHERE direction = 'in' AND json_extract(data, '$.wire.status') IN ('received', 'uncertain')");
     this.initialized = true;
   }
   private rows(where = '1 = 1', ...params: (string | number)[]): StoredLetter[] {
@@ -320,12 +332,16 @@ export class ContactMailboxes {
   private save(letter: StoredLetter): void {
     this.init();
     this.core.journal.db.query('INSERT OR REPLACE INTO contact_route_letters VALUES (?, ?, ?, ?)').run(letter.wire.id, letter.mailbox, letter.direction, JSON.stringify(letter));
+    if (letter.direction === 'in') {
+      if (letter.wire.status === 'received' || letter.wire.status === 'uncertain') this.core.journal.db.query('INSERT OR IGNORE INTO temp.contact_route_attempts VALUES (?, ?, 0, ?)').run(letter.wire.id, letter.mailbox, letter.wire.createdAt);
+      else this.core.journal.db.query('DELETE FROM temp.contact_route_attempts WHERE id = ? AND mailbox = ?').run(letter.wire.id, letter.mailbox);
+    }
   }
   private store(mailbox: string, direction: string, wire: AgentLetter, canonical: AgentLetter): StoredLetter {
     const fingerprint = createHash('sha256').update(JSON.stringify([wire.id, wire.from.coreId, wire.from.threadId, wire.to, wire.text, wire.replyTo])).digest('hex');
     const existing = this.rows('mailbox = ? AND direction = ? AND id = ?', mailbox, direction, wire.id)[0];
     if (existing) {
-      if (existing.fingerprint !== fingerprint) throw refused('message id already used for different content');
+      if (existing.fingerprint !== fingerprint || (existing.wire.origin === 'contact-human') !== (wire.origin === 'contact-human')) throw refused('message id already used for different content');
       return existing;
     }
     const stored = { mailbox, direction, wire, canonical, fingerprint };
@@ -337,6 +353,7 @@ export class ContactMailboxes {
     if (this.initialized && Date.now() - this.prunedAt > 3_600_000) {
       this.prunedAt = Date.now();
       this.core.journal.db.query("DELETE FROM contact_route_letters WHERE json_extract(data, '$.wire.createdAt') < ?").run(Date.now() - 30 * 24 * 3_600_000);
+      this.core.journal.db.exec("DELETE FROM temp.contact_route_attempts WHERE NOT EXISTS (SELECT 1 FROM contact_route_letters AS letter WHERE letter.id = contact_route_attempts.id AND letter.mailbox = contact_route_attempts.mailbox AND letter.direction = 'in')");
     }
     for (const route of this.sources()) if (!this.route(route.threadId, route.coreId)) this.revokeSource(route, 'The group contact route was revoked');
     for (const box of this.mailboxes()) {
@@ -347,8 +364,20 @@ export class ContactMailboxes {
       this.pending.add(job);
     }
     if (!this.mailboxes().length) return;
-    for (const letter of this.rows("direction = 'in' AND json_extract(data, '$.wire.status') = 'received' ORDER BY json_extract(data, '$.wire.createdAt') LIMIT ?", 4 + this.busy.size)) {
+    // A queued provider wake can return an uncertain receipt; refresh it until settled.
+    this.init();
+    // Reserve one slot for an older retry; new arrivals cannot postpone it until expiry.
+    const select = "SELECT letter.id, letter.mailbox, letter.direction, letter.data FROM temp.contact_route_attempts AS retry CROSS JOIN contact_route_letters AS letter WHERE letter.id = retry.id AND letter.mailbox = retry.mailbox AND letter.direction = 'in' AND retry.id NOT IN (SELECT value FROM json_each(?))";
+    const order = 'ORDER BY retry.attempt, retry.createdAt, retry.id, retry.mailbox';
+    const excluded = [...this.busy];
+    const retry = this.core.journal.db.query(`${select} AND retry.attempt > 0 ${order} LIMIT 1`).get(JSON.stringify(excluded)) as (Row & { id: string }) | null;
+    if (retry) excluded.push(retry.id);
+    const remaining = this.core.journal.db.query(`${select} ${order} LIMIT ?`).all(JSON.stringify(excluded), 4 - (retry ? 1 : 0)) as Row[];
+    // Both indexed selections skip in-flight letters before reading at most four payloads.
+    const next = (retry ? [retry, ...remaining] : remaining).map(row => JSON.parse(row.data) as StoredLetter);
+    for (const letter of next) {
       if (this.busy.has(letter.wire.id)) continue;
+      this.core.journal.db.query('UPDATE temp.contact_route_attempts SET attempt = ? WHERE id = ? AND mailbox = ?').run(++this.attempt, letter.wire.id, letter.mailbox);
       this.busy.add(letter.wire.id);
       const job = this.forward(letter).finally(() => { this.busy.delete(letter.wire.id); this.pending.delete(job); });
       this.pending.add(job);

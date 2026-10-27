@@ -21,6 +21,8 @@ export interface TestCore {
 }
 
 export interface TestCoreOptions {
+  /** Restart fixtures can retain the address peers already trust, like an installed core. */
+  port?: number;
   serverUpdates?: CoreOptions['serverUpdates'];
   bundleHash?: string;
   helloTimeoutMs?: number;
@@ -101,7 +103,7 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
   const server = startServer({
     core,
     host: '127.0.0.1',
-    port: 0,
+    port: options.port ?? 0,
     ...(options.helloTimeoutMs === undefined ? {} : { helloTimeoutMs: options.helloTimeoutMs }),
   });
 

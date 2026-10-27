@@ -65,6 +65,9 @@ export function listen(ctx: StoreContext, client: Client): void {
           ctx.serverUpdater.reset();
           if (s.owner && !s.localCore) { void ctx.serverUpdater.load(); void ctx.serverUpdater.loadDesktop(); }
           void s.reload();
+          // A reconnect lists the composer records again; the first connection does once the journal is read.
+          void ctx.sync.resync();
+          ctx.shared.reconnected();
           ctx.terminals.reconnected(client);
           if (!s.owner) layout.checkPushKinds(client);
         }
@@ -77,6 +80,7 @@ export function listen(ctx: StoreContext, client: Client): void {
   on('client.desktopExperiments', ({ experiments }) => heardDesktop(s, experiments, s.core?.coreId ?? null));
 
   on('core.updateChanged', snapshot => ctx.serverUpdater.apply(snapshot));
+  on('composer.updated', record => ctx.sync.receive(record));
   on('core.desktopUpdateChanged', ({ status }) => { if (!s.localCore) ctx.serverUpdater.applyDesktop(status); });
   on('ui.appUpdate', ({ version }) => appUpdateRequested(s, version));
 
@@ -137,6 +141,7 @@ export function listen(ctx: StoreContext, client: Client): void {
     const preloaded = threads.preloads.thread(threadId);
     if (preloaded) preloaded.activity = activity;
   });
+  on('sharedProjects.changed', scope => ctx.shared.changed(scope));
   on('collaboration.changed', ({ threadId }) => {
     if (s.openThread?.id === threadId) void s.loadCoordination(threadId, false);
   });

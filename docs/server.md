@@ -13,7 +13,10 @@ Grok and Muse Code have none there, so they need a custom image. The x64 image c
 baseline build only, which also runs on CPUs without AVX2. Agent
 authentication is still required. No login is built into the image.
 
-Release workflows publish `ghcr.io/beboite/boite/boite-server` for Linux x64 and ARM64.
+Release workflows publish `ghcr.io/mtsu-dev/boite/boite-server` for Linux x64 and ARM64.
+Images built before the repository moved on 2026-10-26 stay at
+`ghcr.io/beboite/boite/boite-server`, which gets no new tags. GHCR does not
+redirect a moved package, so a Compose file that names it needs the new path.
 Until the first image has been published, build it from this checkout:
 
 ```sh
@@ -74,7 +77,7 @@ it is the copy Boite updates next. `npm uninstall -g <package>`
 Record the current image digest and stop the core before backing up:
 
 ```sh
-docker image inspect ghcr.io/beboite/boite/boite-server:latest --format '{{index .RepoDigests 0}}'
+docker image inspect ghcr.io/mtsu-dev/boite/boite-server:latest --format '{{index .RepoDigests 0}}'
 docker compose stop -t 60
 ```
 
@@ -96,7 +99,7 @@ wrote to `/data/core.json`, so a `--port` passed in `command:` is followed.
 Compose restarts exited containers;
 Docker does not automatically restart an unhealthy process.
 
-To pin a release, set `BOITE_IMAGE=ghcr.io/beboite/boite/boite-server:v<version>` in
+To pin a release, set `BOITE_IMAGE=ghcr.io/mtsu-dev/boite/boite-server:v<version>` in
 a local `.env` file. To roll back, stop the server, restore the matching volume
 backup and set `BOITE_IMAGE` to the old recorded digest before starting again.
 An older binary may not understand a journal migrated by a newer one.

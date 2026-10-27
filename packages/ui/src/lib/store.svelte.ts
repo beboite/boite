@@ -134,6 +134,7 @@ export class Store {
   }
   get clientGeneration(): number { return this.#ctx.clientGeneration; }
   get navigationGeneration(): number { return this.#ctx.threads.openGeneration; }
+  get shared() { return this.#ctx.shared; }
   get serverUpdater() { return this.#ctx.serverUpdater; }
 
   // -------------------------------------------------------------------------
@@ -170,6 +171,7 @@ export class Store {
     listen(ctx, client);
     ctx.off.push(modelFavorites.register(ctx.models.favoritesTarget));
     ctx.off.push(ctx.composer.watchQueues());
+    ctx.off.push(ctx.sync.watch());
     ctx.off.push(ctx.draftStartup.watch());
     ctx.off.push(watchIncognito(ctx));
     // Each machine hears about this window's own failures. Unit tests drive
@@ -179,6 +181,7 @@ export class Store {
 
   detach(): void {
     const ctx = this.#ctx;
+    ctx.shared.reset();
     ctx.requests.resetSecrets();
     ctx.clientGeneration++;
     ctx.settings.brainCommands = [];
@@ -189,6 +192,7 @@ export class Store {
     ctx.serverUpdater.reset();
     ctx.terminals.dropSessions();
     ctx.drafts.stop();
+    ctx.sync.stop();
     ctx.workbench.resetMemory();
     ctx.delegation.coordinationEpoch++;
     this.coordination = null;
@@ -512,6 +516,7 @@ export class Store {
   addProject(...args: Parameters<Projects['addProject']>) { return this.#ctx.projects.addProject(...args); }
   addProjects(...args: Parameters<Projects['addProjects']>) { return this.#ctx.projects.addProjects(...args); }
   removeProject(...args: Parameters<Projects['removeProject']>) { return this.#ctx.projects.removeProject(...args); }
+  renameProject(...args: Parameters<Projects['renameProject']>) { return this.#ctx.projects.renameProject(...args); }
   refreshProjects() { return this.#ctx.projects.refreshProjects(); }
   archiveProject(...args: Parameters<Projects['archiveProject']>) { return this.#ctx.projects.archiveProject(...args); }
   projectIconUrl(...args: Parameters<Projects['projectIconUrl']>) { return this.#ctx.projects.projectIconUrl(...args); }

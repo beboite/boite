@@ -1,14 +1,12 @@
 /**
- * What the core knows about stored secrets, never their values: which vault
- * entry is which name, whose it is and when it goes. Written before a value
- * goes into the vault and after it leaves, so every vault entry has a line
- * here and the startup sweep can erase the ones that lost theirs.
+ * Pending card locations survive a crash, never secret values. Version 1
+ * metadata is retained only until its legacy vault entries can be erased.
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ProjectId, ThreadId } from '@boite/contracts';
 
-/** A transit copy: one thread's, erased at the first of archive, removal, 24 h or a restart that lost it. */
+/** Transit metadata, also used for legacy cleanup. Live values stay in SecretStore memory. */
 export interface TransitEntry {
   id: string;
   threadId: ThreadId;
@@ -36,13 +34,13 @@ export interface OpenCard {
 }
 
 export interface SecretIndexData {
-  version: 1;
+  version: 1 | 2;
   transit: TransitEntry[];
   kept: KeptEntry[];
   cards: OpenCard[];
 }
 
-const empty = (): SecretIndexData => ({ version: 1, transit: [], kept: [], cards: [] });
+const empty = (): SecretIndexData => ({ version: 2, transit: [], kept: [], cards: [] });
 
 export class SecretIndex {
   readonly file: string;
@@ -52,18 +50,18 @@ export class SecretIndex {
     this.file = join(dir, 'index.json');
   }
 
-  /** Nothing was ever stored: the startup sweep has nothing to read and opens no vault. */
+  /** An old folder can contain orphaned blobs even if its index was lost. */
   exists(): boolean {
-    return existsSync(this.file);
+    return existsSync(this.dir);
   }
 
   get data(): SecretIndexData {
     if (this.#data !== null) return this.#data;
     let parsed: Partial<SecretIndexData> | null = null;
     try { parsed = JSON.parse(readFileSync(this.file, 'utf8')) as Partial<SecretIndexData>; } catch { parsed = null; }
-    this.#data = parsed?.version === 1
-      ? { version: 1, transit: Array.isArray(parsed.transit) ? parsed.transit : [], kept: Array.isArray(parsed.kept) ? parsed.kept : [], cards: Array.isArray(parsed.cards) ? parsed.cards : [] }
-      : empty();
+    this.#data = parsed?.version === 1 || parsed?.version === 2
+      ? { version: parsed.version, transit: Array.isArray(parsed.transit) ? parsed.transit : [], kept: Array.isArray(parsed.kept) ? parsed.kept : [], cards: Array.isArray(parsed.cards) ? parsed.cards : [] }
+      : { ...empty(), version: this.exists() ? 1 : 2 };
     return this.#data;
   }
 
@@ -74,13 +72,5 @@ export class SecretIndex {
     const temp = `${this.file}.tmp`;
     writeFileSync(temp, `${JSON.stringify(this.data, null, 2)}\n`, { mode: 0o600 });
     renameSync(temp, this.file);
-  }
-
-  transit(id: string): TransitEntry | undefined {
-    return this.data.transit.find(entry => entry.id === id);
-  }
-
-  kept(projectId: string, name: string): KeptEntry | undefined {
-    return this.data.kept.find(entry => entry.projectId === projectId && entry.name === name);
   }
 }

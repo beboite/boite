@@ -97,10 +97,13 @@ own provider process do not appear as children.
 After a core restart, an old trace without an exit stays in history as Status
 unknown unless the current process registry confirms it is still running.
 
-Windows records descendant starts and exits through its process jobs. Linux and
-macOS record only direct processes, so a CLI launched inside another shell can
-remain outside this view. Provider-native agents and Boite-managed children use
-their existing lifecycle on every platform.
+Windows records descendant starts and exits through its process jobs. When the
+job never reports an exit, for example after a nested job is terminated, the
+next load sample finds it within four seconds and the active count drops.
+A CLI that Boite or its job ended exits with code 9 and reads Stopped; any
+other nonzero code reads Failed. Linux and macOS record only direct processes, so a CLI launched inside another
+shell can remain outside this view. Provider-native agents and Boite-managed
+children use their existing lifecycle on every platform.
 
 A successful spawn call is not a completed child. Missing individual states,
 background launch acknowledgements, and unfinished children after a parent
@@ -123,7 +126,8 @@ One button above the composer shows the number of active subagents and running
 workflows, with elapsed time since the oldest active start. It appears for a
 running workflow even before a child starts. Click it to open the team overview,
 then select an agent or workflow to inspect its progress. The panel keeps
-completed results after the button disappears.
+completed results after the button disappears. The button sits right on the
+composer, below any notice; the task overlay floats above it, never over it.
 
 A parent's row in the sidebar, the Recent list and the phone's list carries a
 chip with the number of its subagents at work, in every state of the parent.
@@ -227,6 +231,51 @@ explicit dependencies, fan-out, conditions and plan concurrency. They do not
 require an enabled team or custom profile; pause still holds launches. Workflow
 steps remain separate from the team's agent list. That guide owns plan syntax,
 structured output, commands and recovery.
+
+## Shared-project hosts
+
+An associated project can offer compute separately from its read and board
+permissions ([Contacts](contacts.md#compute-and-results)). The host owner binds
+the offer to an enabled local parent, its delegation profiles, permission mode
+and optional contribution limit. `sharedCompute.models/start/list/get/send/cancel`
+operate on that exact association and source conversation. The host resolves
+the provider/account, creates an ordinary captured child and isolated worktree,
+and uses its scheduler, quota and process controls. Credentials never cross.
+
+The source supplies a full base commit already present in both registered
+repositories; no remote path or account is accepted. The host retains the
+captured branch even when echo makes no changes. Completion derives repository,
+branch, base, commit and dirty state from Git, rather than an agent's answer.
+Core preparation and inspection disable Git hooks, filters and fsmonitor for
+these jobs. Bounded result text remains data. Fetching and merging the branch
+uses the project's ordinary approved Git workflow; the result executes nothing.
+
+The host can be a group member behind a Contact gateway. Its canonical
+owner/core/project tuple selects the original host; the gateway does not
+choose its account, spawn the worker or consume its result. The real three-core
+fixture in `tests/e2e/shared-cores.test.ts` fetches the captured worker branch
+from a fixture-controlled local repository, checks the advertised object and
+base ancestry, then cherry-picks that commit on the source integration branch.
+This verifies normal Git consumption without executing a peer-supplied URL.
+
+Follow-ups stay external instructions and cannot approve a host permission
+card. Stop/revoke fences exactly the captured job, including delayed starts,
+and waits for its tracked processes and preparation; siblings and the host's
+own conversation continue. Non-Windows process tracking retains its documented
+direct-child limitations. An offline cancellation remains pending until the
+host confirms it. Interrupted host execution is uncertain after restart and
+is never automatically resubmitted.
+
+Actual host file protection is required before enabling providers with tools.
+Without that service only tool-free echo is admitted. Claude/Codex use their
+mandatory protected adapters and the common OS executor when available. Their
+trusted native account/control stays local; model tools receive a filtered
+project view without account credentials, hooks or ambient host access.
+`boite_commit` publishes validated edits on the captured branch for real Git
+result verification. OpenCode 1.19.3 (default/build or plan) and pi (YOLO/bypass)
+now use their own native extension and the common executor. Muse 1.4.13 uses
+its verified mandatory MCP-only native registry and the same executor; older
+Muse versions and other ACP implementations remain refused. No permission fallback or implicit bypass is introduced.
 
 ## Agent commands
 

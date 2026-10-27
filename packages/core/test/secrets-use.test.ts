@@ -1,15 +1,13 @@
 import { afterEach, expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { secretMask } from '@boite/contracts';
 import { parse } from '../src/cli-args.ts';
 import { runCli } from '../src/cli.ts';
 import type { CoreClient } from '../src/client.ts';
-import { openSecretVault } from '../src/platform/secret-vault.ts';
 import { secretCommand } from '../src/secret-cli.ts';
 import { encryptedLink } from '../src/server.ts';
-import { removeDir, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { startTestCore, waitFor, type TestCore } from './harness.ts';
 import { holdTurn, leaks, saveSecret, secretValue } from './secret-fixture.ts';
 import { rejection, thrown } from './settle.ts';
 
@@ -48,10 +46,12 @@ test('write puts the value in an ignored env file, keeps its other lines, and re
   h = await startTestCore();
   const { owner, root, threadId } = await repoThread();
   const value = secretValue();
-  const ref = await saveSecret(h, owner, threadId, 'API_KEY', value);
   writeFileSync(join(root, '.env'), 'FIRST=1\r\nAPI_KEY=old\r\n# kept comment\r\n');
   if (process.platform !== 'win32') chmodSync(join(root, '.env'), 0o644);
-  const write = (path: string, extra: { allowUnignored?: boolean } = {}) => owner.call('secrets.use', { threadId, ref, use: { action: 'write', path, key: 'API_KEY', ...extra } });
+  const write = async (path: string, extra: { allowUnignored?: boolean } = {}) => {
+    const fresh = await saveSecret(h, owner, threadId, 'API_KEY', value);
+    return owner.call('secrets.use', { threadId, ref: fresh, use: { action: 'write', path, key: 'API_KEY', ...extra } });
+  };
 
   // The path given back is the real one: on macOS the temp folder is under /private.
   expect(await write(join(root, '.env'))).toEqual({ action: 'write', path: realpathSync(join(root, '.env')), replaced: true });
@@ -89,11 +89,13 @@ test('run and pipe hand the value to the command and give back its exit code and
   } });
   expect(ran).toMatchObject({ action: 'run', exitCode: 3, timedOut: false, stdout: `k=${mask} u=${mask}`, truncated: false });
 
-  const piped = await owner.call('secrets.use', { threadId, ref, use: {
+  const pipeRef = await saveSecret(h, owner, threadId, 'API_KEY', value);
+  const piped = await owner.call('secrets.use', { threadId, ref: pipeRef, use: {
     action: 'pipe', command: bun, cwd: root, args: ['-e', 'console.error("got " + (await Bun.stdin.text()))'],
   } });
   expect(piped).toMatchObject({ action: 'pipe', exitCode: 0, stderr: `got ${mask}\n` });
-  expect(await thrown(owner.call('secrets.use', { threadId, ref, use: { action: 'run', as: 'API_KEY', command: bun, args: [], cwd: h.dataDir } }))).toThrow('outside the conversation\'s folder');
+  const outsideRef = await saveSecret(h, owner, threadId, 'API_KEY', value);
+  expect(await thrown(owner.call('secrets.use', { threadId, ref: outsideRef, use: { action: 'run', as: 'API_KEY', command: bun, args: [], cwd: h.dataDir } }))).toThrow('outside the conversation\'s folder');
 
   // A shell handed the value can expand it into a grandchild's command line, which the trace keeps and sends.
   const traced: string[] = [];
@@ -132,17 +134,17 @@ test('an agent that reads the env file back gets the value masked in its convers
   h = await startTestCore();
   const { owner, root, threadId } = await repoThread();
   const value = `sk-plain-${crypto.randomUUID().replaceAll('-', '')}`;
-  const ref = await saveSecret(h, owner, threadId, 'API_KEY', value, true);
+  const ref = await saveSecret(h, owner, threadId, 'API_KEY', value);
   writeFileSync(join(root, '.env'), '');
   await owner.call('secrets.use', { threadId, ref, use: { action: 'write', path: join(root, '.env'), key: 'API_KEY' } });
-  // Another conversation of the project, masked by the kept key's scope.
-  const thread = h.core.threads.get(threadId);
-  const reader = (await owner.call('threads.create', { projectId: thread.projectId!, providerId: 'echo', accountId: thread.accountId!, title: 'reader' })).id;
-  await owner.call('threads.subscribe', { threadId: reader });
-  const finished = owner.next('turn.finished', turn => turn.threadId === reader, 15000);
-  await owner.call('turns.start', { threadId: reader, prompt: `[spawn:${process.platform === 'win32' ? 'type' : 'cat'} ${join(root, '.env')}]` });
+  // A later turn in the same conversation still masks output using hashes, without the value.
+  await owner.call('turns.stop', { threadId });
+  await waitFor(() => h.core.journal.runningTurn(threadId) === null);
+  await owner.call('threads.subscribe', { threadId });
+  const finished = owner.next('turn.finished', turn => turn.threadId === threadId, 15000);
+  await owner.call('turns.start', { threadId, prompt: `[spawn:${process.platform === 'win32' ? 'type' : 'cat'} ${join(root, '.env')}]` });
   expect((await finished).status).toBe('done');
-  const text = (await owner.call('threads.get', { threadId: reader })).messages.flatMap(message => message.parts).map(part => part.type === 'text' ? part.text : '').join('\n');
+  const text = (await owner.call('threads.get', { threadId })).messages.flatMap(message => message.parts).map(part => part.type === 'text' ? part.text : '').join('\n');
   expect(text).toContain(`API_KEY=${secretMask('API_KEY')}`);
   expect(text).not.toContain(value);
   expect(await leaks(h, value, [root])).toEqual([]);
@@ -158,7 +160,7 @@ test('boite secret: an agent asks, lists and runs by ref from the command line, 
     await Bun.sleep(5);
     return { code, out, err };
   };
-  expect((await cli(['secret', 'list'])).out).toContain('no key kept for this project');
+  expect((await cli(['secret', 'list'])).out).toContain('stores no project keys');
 
   const asked = cli(['secret', 'ask', 'API_KEY', '--why', 'to call the API']);
   let requestId = '';
@@ -168,37 +170,20 @@ test('boite secret: an agent asks, lists and runs by ref from the command line, 
     return requestId !== '';
   });
   const value = secretValue();
-  await owner.call('secrets.answer', { threadId, requestId, value, keep: true });
+  await owner.call('secrets.answer', { threadId, requestId, value });
   const answer = await asked;
   expect(answer).toMatchObject({ code: 0 });
-  expect(answer.out).toContain('saved secret:project/API_KEY');
-  expect((await cli(['secret', 'list'])).out).toContain('secret:project/API_KEY');
+  const ref = /saved (secret:sec_[a-z0-9]+)/.exec(answer.out)?.[1];
+  expect(ref).toBeString();
+  expect((await cli(['secret', 'list'])).out).toContain('stores no project keys');
 
   writeFileSync(join(root, 'echo-args.js'), 'console.log(process.argv.slice(2).join(" ") + " " + process.env.API_KEY); process.exit(4);\n');
-  const ran = await cli(['secret', 'run', 'secret:project/API_KEY', '--as', 'API_KEY', '--', bun, 'echo-args.js', '--json']);
+  const ran = await cli(['secret', 'run', ref!, '--as', 'API_KEY', '--', bun, 'echo-args.js', '--json']);
   expect(ran.code).toBe(4);
   expect(ran.out).toBe(`--json ${secretMask('API_KEY')}\n`);
   expect(ran.out + ran.err).not.toContain(value);
   expect((await cli(['secret', 'delete'])).code).not.toBe(0);
   expect(await leaks(h, value)).toEqual([]);
-});
-
-// The system's own vault (DPAPI, Keychain or Secret Service) writes outside the test's folder on macOS and Linux: opt-in only.
-test.if(process.env.BOITE_E2E_SECRET_VAULT === '1')('the system vault keeps a value, gives it back and erases it', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'boite-vault-'));
-  try {
-    const vault = await openSecretVault(dir);
-    expect(vault.kind).toBe(process.platform === 'win32' ? 'dpapi' : process.platform === 'darwin' ? 'keychain' : 'libsecret');
-    const id = `sec_vaulttest${crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`;
-    const value = new TextEncoder().encode(secretValue());
-    await vault.put(id, value);
-    expect(await vault.take(id)).toEqual(value);
-    await vault.delete(id);
-    expect(await vault.take(id)).toBeNull();
-    if (vault.ids) expect(await vault.ids()).not.toContain(id);
-  } finally {
-    await removeDir(dir);
-  }
 });
 
 test('a socket counts as encrypted on loopback both ways, from the tailnet or behind an HTTPS page, never over plain HTTP', () => {

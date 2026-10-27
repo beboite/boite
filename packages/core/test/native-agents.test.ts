@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { collectNativeAgents, collectProcessAgents, nativeAgentsOfTool, type MessagePart, type ProcessRecord } from '@boite/contracts';
+import { collectNativeAgents, collectProcessAgents, KILL_EXIT_CODE, nativeAgentsOfTool, type MessagePart, type ProcessRecord } from '@boite/contracts';
 import { toolViewOf } from '../src/drivers/codex/mapping.ts';
 
 const tool = (patch: Partial<Extract<MessagePart, { type: 'tool' }>> = {}): Extract<MessagePart, { type: 'tool' }> => ({ type: 'tool', toolId: 'call-1', name: 'Task', input: { prompt: 'Review parsing' }, output: null, status: 'running', ...patch });
@@ -15,12 +15,14 @@ test('traced Windows binaries and Linux Node launchers expose CLI metadata and t
     processRecord({ pid: 6, exe: 'grok.exe', commandLine: 'grok.exe --prompt "Review"', exitedAt: 10, exitCode: null }),
     processRecord({ pid: 7, exe: '/usr/bin/node', commandLine: 'node --require /tmp/preload.js --import /tmp/init.mjs --conditions development /opt/node_modules/@openai/codex/bin/codex.js exec --model reviewer -c model_reasoning_effort="high" "Review"' }),
     processRecord({ pid: 8, exe: '/usr/bin/bun', commandLine: 'bun --preload /tmp/preload.js /opt/node_modules/@anthropic-ai/claude-code/cli.js --print --effort high "Review"' }),
+    // Ended by Boite or by its job: stopped, not failed.
+    processRecord({ pid: 9, exitedAt: 10, exitCode: KILL_EXIT_CODE }),
   ];
   const agents = collectProcessAgents([shell, ...commands]);
   expect(agents.map(agent => [agent.name, agent.model, agent.effort, agent.status])).toEqual([
     ['Claude Code', 'opus', 'xhigh', 'running'], ['Codex', 'reviewer', 'high', 'running'],
     ['OpenCode', 'provider/reviewer', undefined, 'done'], ['pi', 'reviewer', 'high', 'error'], ['Grok', undefined, undefined, 'unknown'],
-    ['Codex', 'reviewer', 'high', 'running'], ['Claude Code', undefined, 'high', 'running'],
+    ['Codex', 'reviewer', 'high', 'running'], ['Claude Code', undefined, 'high', 'running'], ['Claude Code', 'opus', 'xhigh', 'stopped'],
   ]);
   expect(agents[2]?.finishedAt).toBe(10);
 });

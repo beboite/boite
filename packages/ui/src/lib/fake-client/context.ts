@@ -1,9 +1,10 @@
 import { secureId } from '../secure-id';
+import { FakeComposerState } from './composer';
 import type { FakeArchiveState, MergedPrFixture } from './merged-pr-archive';
 /** The state one fake core keeps, and the plumbing every domain module shares. */
 import { observeProgress } from './progress';
 import type { FakeRoster } from './group';
-import { cancelSecretCards, type FakeSecretCard, type FakeSecretKey } from './secrets';
+import { cancelSecretCards, type FakeSecretCard, type FakeSecretTransit } from './secrets';
 import {
   type ClientPreferences,
   type ExperimentId,
@@ -93,6 +94,8 @@ import type { FakeWorktree } from './worktrees';
 export type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}` | `agents.${string}` | `workflows.${string}` | `resident.${string}`>]: (params: RpcParams<M>) => Promise<RpcResult<M>> };
 
 export interface FakeClientOptions {
+  /** Explicit peer clients share one core's composer records and attachment assets. */
+  composerState?: FakeComposerState;
   /** Milliseconds between two streamed chunks. Tests pass 0. */
   delayMs?: number;
   /** Exhausted quotas with banked resets and credits for visual checks. */
@@ -134,6 +137,8 @@ export interface FakeClientOptions {
   windowsDemo?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
+  /** Explicit thread-bound token fixture; agent methods otherwise fail closed. */
+  agentThreadId?: ThreadId;
   /** A link nobody encrypts (plain HTTP from another machine): no secret value travels on it; `?fake=1&plainLink=1` sets it. */
   plainLink?: boolean;
   /**
@@ -174,9 +179,11 @@ function tokenStream(): number | undefined {
 type Rest<F> = F extends (ctx: FakeContext, ...rest: infer R) => unknown ? R : never;
 
 export class FakeContext {
+  readonly composer: FakeComposerState;
   hasProtectedInput(threadId: ThreadId): boolean {
     return this.bus.protectAllThreads || this.bus.protectedThreadIds.has(threadId);
   }
+  readonly agentThreadId: ThreadId | null;
   readonly logs: CoreLogRecord[] = [];
   readonly logRunId = secureId();
   logSequence = 0;
@@ -290,9 +297,10 @@ export class FakeContext {
     string,
     { request: QuestionRequest; resolve: (answer: QuestionAnswer | null) => void }
   >();
-  /** Secret cards still open (`secrets.ts`), and the keys kept per project: names, dates and a length, never a value. */
+  /** Open cards and synthetic transit metadata: never a value or a project key. */
   readonly pendingSecrets = new Map<string, FakeSecretCard>();
-  secretKeys: FakeSecretKey[] = [];
+  readonly secretTransits = new Map<string, FakeSecretTransit>();
+  readonly settledSecrets = new Map<string, { threadId: Thread['id']; result: RpcResult<'secrets.ask'> }>();
   readonly inFlight = new Map<ThreadId, { cancelled: boolean; done: Promise<void>; steered?: { prompt: string; attachments: Attachment[] }[] }>();
   private readonly toolBoundaries = new Set<string>();
   /** Async answers waiting for the thread to be free, oldest first. */
@@ -323,6 +331,7 @@ export class FakeContext {
   readonly harnessUpdates: HarnessUpdate[] = initialHarnessUpdates();
 
   constructor(options: FakeClientOptions = {}) {
+    this.composer = options.composerState ?? new FakeComposerState();
     this.quotaExtras = options.quotaExtras ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('quotaExtras') === '1');
     this.brainLinkPermission = options.brainLinkPermission ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('brainLinkPermission') === '1');
     this.plainLink = options.plainLink ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('plainLink') === '1');
@@ -388,11 +397,12 @@ export class FakeContext {
     this.longCopies = options.longCopies ?? 0;
     this.heavy = options.heavy ?? false;
     this.diagrams = options.diagrams ?? false;
-    const coreId = options.coreId ?? `fake-core-${secureId()}`;
+    const coreId = options.coreId ?? `${secureId()}${secureId()}`;
     if (options.desktopApp) {
       this.serverUpdate = { ...this.serverUpdate, mode: 'manual', phase: 'idle', version: null, publishedAt: null, received: 0, total: null, error: null };
       this.desktopUpdate = initialDesktopUpdate();
     }
+    this.agentThreadId = options.agentThreadId ?? null;
     this.identity = {
       coreId,
       name: options.coreName ?? 'This PC',
@@ -425,7 +435,7 @@ export class FakeContext {
       version: '2.0.0-beta.1',
       coreId,
       protocolVersion: PROTOCOL_VERSION,
-      features: { draftPreparation: true, attachmentUploads: true, threadSnapshots: true, chunkedAnswers: true, readingPages: true, messagePositions: true, deferredToolParts: true, deviceKeys: true, revealMachines: true, loadEvents: true, desktopUpdates: true, gatewayMove: true, projectBoard: true, settingsHome: true },
+      features: { draftPreparation: true, attachmentUploads: true, threadSnapshots: true, chunkedAnswers: true, readingPages: true, messagePositions: true, deferredToolParts: true, deviceKeys: true, revealMachines: true, loadEvents: true, desktopUpdates: true, gatewayMove: true, projectBoard: true, settingsHome: true, sharedProjects: 1 },
       os: 'windows',
       channel: 'stable',
       pid: 4242,
@@ -479,6 +489,7 @@ export class FakeContext {
   }
 
   emit<E extends RpcEventName>(event: E, payload: RpcEvents[E]): void {
+    this.composer.observe(this, event, payload);
     if (event === 'thread.removed') cancelSecretCards(this, (payload as RpcEvents['thread.removed']).threadId);
     if (event === 'thread.updated') {
       const thread = payload as RpcEvents['thread.updated'];

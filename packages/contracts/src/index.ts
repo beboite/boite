@@ -1,4 +1,6 @@
 import type { AgentsRpcMethods, AgentsRpcEvents } from './agents';
+import type { ComposerRpcMethods, ComposerRpcEvents } from './composer';
+export * from './composer';
 import type { WorkflowsRpcMethods, WorkflowsRpcEvents } from './workflows';
 import type { BrowserRpcMethods, BrowserRpcEvents, BrowserProfile } from './browser';
 import type { PullRequestsRpcMethods, PullRequestsRpcEvents, PullRequestWatch } from './pull-requests';
@@ -43,6 +45,7 @@ import type { SettingsRpcEvents, SettingsRpcMethods } from './settings';
 import type { SpeechRpcMethods } from './speech';
 import type { SubscriptionProxyRpcEvents, SubscriptionProxyRpcMethods } from './subscription-proxy';
 import type { TerminalsRpcEvents, TerminalsRpcMethods } from './terminals';
+import type { SharedProjectsRpcEvents, SharedProjectsRpcMethods } from './shared-projects';
 import type { ThreadsRpcEvents, ThreadsRpcMethods } from './threads';
 import type { TodosRpcEvents, TodosRpcMethods } from './todos';
 import type { TraceRpcEvents, TraceRpcMethods } from './trace';
@@ -81,6 +84,7 @@ export * from './brain';
 export * from './settings-sync';
 export * from './hooks';
 export * from './terminals';
+export * from './shared-projects';
 export * from './wire';
 
 /**
@@ -107,6 +111,7 @@ export { nativeAgentsOfTool, collectNativeAgents } from './native-agents.ts';
 export { collectProcessAgents, processAgentCommand } from './process-agents.ts';
 
 export interface RpcMethods extends
+  ComposerRpcMethods,
   AgentsRpcMethods,
   WorkflowsRpcMethods,
   BrowserRpcMethods,
@@ -144,6 +149,7 @@ export interface RpcMethods extends
   DelegationRpcMethods,
   BrainRpcMethods,
   HooksRpcMethods,
+  SharedProjectsRpcMethods,
   TerminalsRpcMethods {}
 
 export type RpcMethodName = keyof RpcMethods;
@@ -151,6 +157,7 @@ export type RpcParams<M extends RpcMethodName> = RpcMethods[M]['params'];
 export type RpcResult<M extends RpcMethodName> = RpcMethods[M]['result'];
 
 export interface RpcEvents extends
+  ComposerRpcEvents,
   AgentsRpcEvents,
   WorkflowsRpcEvents,
   BrowserRpcEvents,
@@ -181,6 +188,7 @@ export interface RpcEvents extends
   DelegationRpcEvents,
   BrainRpcEvents,
   HooksRpcEvents,
+  SharedProjectsRpcEvents,
   TerminalsRpcEvents {}
 
 export type RpcEventName = keyof RpcEvents;

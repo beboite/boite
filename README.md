@@ -3,7 +3,7 @@
 </p>
 <h1 align="center">boite <sub>[bwat]</sub></h1>
 <p align="center">
-  <a href="https://github.com/beboite/boite/releases">Download page</a> ·
+  <a href="https://github.com/mtsu-dev/boite/releases">Download page</a> ·
   <a href="docs/README.md">Documentation</a> ·
   <a href="docs/server.md">Self-host</a>
 </p>
@@ -37,7 +37,7 @@ Keep your projects, conversations and agents together, across your computers and
 
 ## Get started
 
-Boite is open source and in beta. The [download page](https://github.com/beboite/boite/releases)
+Boite is open source and in beta. The [download page](https://github.com/mtsu-dev/boite/releases)
 lists builds for Windows, macOS and Linux, including Apple Silicon and Linux ARM64.
 New release notes put the download links under each platform, above the changelog.
 
@@ -45,7 +45,7 @@ New release notes put the download links under each platform, above the changelo
 > Current downloads are nightly prereleases. Nightly builds are unstable and may contain
 > bugs or unfinished changes. Back up your Boite data before installing or switching channels.
 
-1. Open the [download page](https://github.com/beboite/boite/releases) and choose your system and processor.
+1. Open the [download page](https://github.com/mtsu-dev/boite/releases) and choose your system and processor.
 2. Install and sign in to your agents, then connect them in Settings, Providers.
 3. Open a project, choose a model and start a conversation.
 

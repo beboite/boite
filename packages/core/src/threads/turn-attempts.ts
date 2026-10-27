@@ -77,6 +77,8 @@ export class TurnAttempts {
 
   open(state: TurnAttemptState): LivePermissions {
     const { threadId } = state;
+    this.stopRequested.delete(threadId);
+    this.preparing.add(threadId);
     const permissions = new LivePermissions(state.thread.permissionMode, handle => {
       this.threads.cards.clearPermissionsOf(threadId, 'mode change');
       this.threads.cards.clearQuestionsOf(threadId, false, 'mode change');
@@ -106,33 +108,60 @@ export class TurnAttempts {
   changeSettings(threadId: ThreadId, selection: Pick<ThreadSummary, 'accountId' | 'model' | 'effort' | 'speed'>): void {
     const live = this.liveSettings.get(threadId);
     if (live === undefined) return;
+    if (live.state.running.execution?.frozenSelection) return;
     if (selection.accountId !== live.state.thread.accountId || selection.model !== live.state.thread.model) return;
     live.settings.change({ effort: selection.effort, speed: selection.speed ?? null });
   }
 
-  changePermissionMode(threadId: ThreadId, mode: PermissionMode): void {
-    this.livePermissions.get(threadId)?.change(mode);
+  changePermissionMode(threadId: ThreadId, mode: PermissionMode, before: ThreadSummary, next: ThreadSummary): void {
+    const state = this.liveSettings.get(threadId)?.state;
+    const modeOnly = before.providerId === next.providerId && before.accountId === next.accountId && before.model === next.model
+      && before.effort === next.effort && (before.speed ?? null) === (next.speed ?? null);
+    const permissions = this.livePermissions.get(threadId);
+    if (!permissions) {
+      // Queued turns have no native controller yet. Retain only an unbroken
+      // mode-only version chain; startup will pass the live mode to the driver.
+      if (modeOnly) for (const turn of this.core.journal.listTurnsFor(threadId, [])) {
+        if (turn.status !== 'queued' || !turn.execution || (turn.execution.selectionVersion ?? 0) !== (before.selectionVersion ?? 0)) continue;
+        turn.execution = { ...turn.execution, permissionMode: mode, selectionVersion: next.selectionVersion ?? 0 };
+        this.core.journal.putTurn(turn);
+      }
+      return;
+    }
+    permissions.change(mode, () => {
+      const execution = state?.running.execution;
+      // Mode is live; other picker changes, including a change and return, stay fenced.
+      if (!modeOnly || !state || !execution || (execution.selectionVersion ?? 0) !== (before.selectionVersion ?? 0)) return;
+      state.thread.selectionVersion = next.selectionVersion;
+      state.running.execution = { ...execution, selectionVersion: next.selectionVersion ?? 0 };
+      this.core.journal.putTurn(state.running);
+      const current = this.core.journal.getThread(threadId);
+      if (current) this.core.bus.emit('thread.updated', current);
+    });
   }
 
   async run(queued: Turn, state: TurnAttemptState, target: TurnAttemptTarget, permissions: LivePermissions): Promise<TurnResult> {
     const { threadId, turnId } = state;
     const { provider, account, driver } = target;
-    this.stopRequested.delete(threadId);
-    this.preparing.add(threadId);
-    const checkpoint = this.threads.codeCheckpoints.begin(state.thread, turnId);
-    if (checkpoint && driver.prepare) {
-      const context = this.threads.contexts.makeSessionContext(state.thread, provider, account);
-      void driver.prepare(context, { forTurn: true }).catch(error => {
-        if (!this.stopRequested.has(threadId)) this.core.log('warn', `preparing the turn failed: ${String(error)}`, { source: provider.id, threadId, event: 'provider.prepareFailed' });
-      });
-    }
-    try { if (checkpoint) await checkpoint; }
-    catch (error) {
+    if (this.stopRequested.has(threadId)) return { status: 'stopped', sessionId: state.thread.sessionId, usage: null };
+    try {
+      const protection = this.core.sharedAccess.execution.prepare(threadId);
+      if (protection) await protection;
+      const checkpoint = this.threads.codeCheckpoints.begin(state.thread, turnId);
+      if (checkpoint && driver.prepare) {
+        const context = this.threads.contexts.makeSessionContext(state.thread, provider, account);
+        void driver.prepare(context, { forTurn: true }).catch(error => {
+          if (!this.stopRequested.has(threadId)) this.core.log('warn', `preparing the turn failed: ${String(error)}`, { source: provider.id, threadId, event: 'provider.prepareFailed' });
+        });
+      }
+      if (checkpoint) await checkpoint;
+    } catch (error) {
       releaseThread(threadId);
+      void this.core.procs.protection.revoke(threadId).catch(() => {});
       this.core.procs.killTree(threadId);
+      if (this.stopRequested.has(threadId)) return { status: 'stopped', sessionId: state.thread.sessionId, usage: null };
       throw error;
-    }
-    this.preparing.delete(threadId);
+    } finally { this.preparing.delete(threadId); }
     if (this.stopRequested.has(threadId)) return { status: 'stopped', sessionId: state.thread.sessionId, usage: null };
 
     // Keep consumed input so a retry on a fresh session sends it too.
@@ -154,6 +183,13 @@ export class TurnAttempts {
     let afterCapacity = false;
     for (;;) {
       attempt += 1;
+      // A retry or delayed provider preparation cannot outlive shared host consent.
+      this.core.sharedCompute?.assertTurn(threadId);
+      this.core.sharedAccess?.assertTurn(threadId);
+      const protection = this.core.sharedAccess.execution.prepare(threadId);
+      if (protection) await protection;
+      // Preparation can yield while the user changes modes. Read it only
+      // once the native context and handle can be constructed without yielding.
       state.thread.permissionMode = permissions.mode;
       const note = afterUpdate;
       afterUpdate = null;
@@ -278,6 +314,11 @@ export class TurnAttempts {
     return result;
   }
 
+  /** A preparation process killed by an accepted Stop can reject before run starts. */
+  preparationStopped(threadId: ThreadId): boolean {
+    return this.preparing.has(threadId) && this.stopRequested.has(threadId);
+  }
+
   close(threadId: ThreadId): void {
     this.livePermissions.get(threadId)?.detach();
     this.livePermissions.delete(threadId);
@@ -353,7 +394,7 @@ export class TurnAttempts {
     state.thread = { ...state.thread, sessionId: result.sessionId ?? state.thread.sessionId, sessionResumeAt: null };
     if (state.running.execution) state.running = { ...state.running, execution: { ...state.running.execution, sessionId: state.thread.sessionId, sessionResumeAt: null } };
     const current = this.core.journal.getThread(state.threadId);
-    if (current && (current.sessionGeneration ?? 0) === (state.thread.sessionGeneration ?? 0)) {
+    if (current && current.providerId === state.thread.providerId && current.accountId === state.thread.accountId && (current.sessionGeneration ?? 0) === (state.thread.sessionGeneration ?? 0)) {
       saveThread(this.core, { ...current, sessionId: state.thread.sessionId, sessionResumeAt: null }, 'thread.updated');
     }
   }
@@ -451,6 +492,7 @@ export class TurnAttempts {
   }
 
   stopRunning(threadId: ThreadId): boolean {
+    void this.core.procs.protection.revoke(threadId).catch(() => {});
     const waiting = this.retryWaits.get(threadId);
     if (waiting !== undefined) {
       this.stopRequested.add(threadId);

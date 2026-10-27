@@ -19,7 +19,8 @@ another thread waits on the user, the title menu and a Browser button. The threa
 list opens on its search field, with the display options at its right end:
 the view, by project or recent, and the grouping switches. Choosing recent
 or custom project ordering stays on the desktop. Project cards have a menu
-for their archived conversations and management; an existing custom order
+for renaming them, their archived conversations and management. Renaming is
+available to paired devices and changes only the display name. An existing custom order
 also adds Move up and Move down. Actions follow the
 connection's owner or paired-device permissions. The composer stays at the
 bottom of the available viewport, above the keyboard when it is open. A touch
@@ -816,8 +817,11 @@ devices you intend to give that control.
   journal is on the core. Prompts
   written in a thread that was open before the connection went wait in the
   device's outbox (`docs/machines.md`), and go out once it is back, even after
-  the PWA was closed in between. A new conversation sent from a draft waits
-  there too, and starts once the core is back.
+  the PWA was closed in between. Input that never reached the core requires a
+  client to reconnect first. Once synchronized, the core runs pending prompts
+  and draft starts with every app closed. Drafts, unsent replies and their
+  attachments are shared by the owner's paired devices; incognito input stays
+  in client memory.
 - A phone is added with a QR code or a link somebody shows it, within ten
   minutes. There is no discovery on the network. Adding it
   once is enough for every machine of its [group](groups.md).

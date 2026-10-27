@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { affectedChecks, ciMode, lastGreen, needsCodeChecks, needsWorkflowLint, plan } from './changes.ts';
+import { affectedChecks, ciMode, lastGreen, needsCodeChecks, needsNativeWindows, needsWorkflowLint, plan } from './changes.ts';
 
 const none = { core: false, web: false, desktop: false, shellRust: false, server: false, android: false, androidServer: false, telemetry: false, e2eTypes: false, stress: false };
 const allChecks = { core: true, web: true, desktop: true, shellRust: true, server: true, android: true, androidServer: true, telemetry: true, e2eTypes: true, stress: true };
@@ -100,6 +100,23 @@ test('workflow lint follows workflows, local actions and their decision scripts'
   expect(needsWorkflowLint(['README.md'])).toBe(false);
   for (const path of ['.github/workflows/ci.yml', '.github/actions/setup/action.yml', 'scripts/ci/changes.ts']) {
     expect(needsWorkflowLint([path])).toBe(true);
+  }
+});
+
+test('native Windows proof follows protection code and shared toolchain inputs', () => {
+  for (const file of ['packages/core/src/platform/windows/protected-tool.c', 'packages/core/src/platform/protected-checkout.ts', 'packages/core/src/execution-policy.ts', 'packages/core/src/drivers/muse/protected.ts', 'packages/core/src/drivers/protected-bridge.ts', 'packages/core/src/contacts/native-execution.ts', 'packages/core/bin/install-windows-sandbox.ts', 'packages/core/test/protected-windows.test.ts', 'bun.lock', 'package.json', '.github/workflows/ci.yml', 'scripts/ci/changes.ts', 'new-config.json']) {
+    expect(needsNativeWindows([file]), file).toBe(true);
+    const draft = plan(affectedChecks([file]), 'draft', needsNativeWindows([file]));
+    expect(draft.nativeWindows).toBe(true);
+    expect(JSON.parse(draft.coreRunners).map((runner: { os: string }) => runner.os)).toEqual(['ubuntu-24.04', 'windows-2025']);
+    expect(draft.desktop).toBe(false);
+  }
+  for (const file of ['docs/ci.md', 'packages/ui/src/App.svelte', 'packages/core/src/cli.ts', 'Dockerfile']) {
+    expect(needsNativeWindows([file]), file).toBe(false);
+    expect(plan(affectedChecks([file]), 'draft', needsNativeWindows([file])).coreRunners).toBe(plan(affectedChecks([file]), 'draft').coreRunners);
+  }
+  for (const mode of ['pr', 'warm', 'full'] as const) {
+    expect(plan(allChecks, mode, true).nativeWindows).toBe(true);
   }
 });
 

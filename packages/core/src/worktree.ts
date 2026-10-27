@@ -1,10 +1,15 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { BRANCH_NAME_MAX, type Project, type ThreadId, type WorktreeStorage } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { folderGone, messageOf, refused } from './errors.ts';
 import { newId } from './ids.ts';
 import { logGit } from './git/git-log.ts';
+import { sharedGitConfig } from './contacts/compute-git.ts';
+import { gitCommonDirOf } from './contacts/git-remote.ts';
+
+// Linked checkouts and separate Core instances share one registration directory.
+const registrations = new Map<string, Promise<void>>();
 
 /** Every branch the core makes on its own starts with this. */
 export const BRANCH_PREFIX = 'boite/';
@@ -43,7 +48,7 @@ export interface PlacedWorktree {
 interface WorktreePreparation {
   beforeMutation: (placed: PlacedWorktree) => (() => void) | void;
   assertActive: () => void;
-  timeoutMs: number;
+  timeoutMs?: number;
 }
 
 /**
@@ -77,9 +82,11 @@ export class Worktrees {
   }
 
   /** Adopt only the exact branch/path recorded before preparation, or create it once. */
-  async ensure(threadId: ThreadId, project: Project, branch: string, recordedPath?: string): Promise<PlacedWorktree> {
+  async ensure(threadId: ThreadId, project: Project, branch: string, recordedPath?: string, preparation?: WorktreePreparation): Promise<PlacedWorktree> {
+    preparation?.assertActive();
     const path = recordedPath ?? this.pathFor(project, branch);
-    const listed = await this.git(threadId, project.path, ['worktree', 'list', '--porcelain', '-z']);
+    const listed = await this.registeredGit(threadId, project.path, ['worktree', 'list', '--porcelain', '-z'], preparation?.timeoutMs, preparation?.assertActive);
+    preparation?.assertActive();
     if (listed.code !== 0) throw refused(`cannot inspect worktrees in ${project.path}: ${listed.stderr.trim()}`);
     for (const entry of listed.stdout.split('\0\0')) {
       const fields = entry.split('\0');
@@ -97,12 +104,94 @@ export class Worktrees {
       if (existsSync(path)) throw refused(`cannot recover ${branch}: ${path} already exists`);
       // No live checkout uses this branch. One --force permits an obsolete registration,
       // but does not bypass a locked worktree or overwrite an existing directory.
-      await this.exclude(threadId, project, path);
-      const added = await this.git(threadId, project.path, [...await this.checkoutWorkers(threadId, project.path), 'worktree', 'add', '--force', path, branch]);
+      await this.exclude(threadId, project, path, preparation);
+      const parallel = await this.checkoutWorkers(threadId, project.path);
+      preparation?.assertActive();
+      const added = await this.registeredGit(threadId, project.path, [...parallel, 'worktree', 'add', '--force', ...(preparation ? ['--no-checkout'] : []), path, branch], preparation?.timeoutMs, preparation?.assertActive);
+      preparation?.assertActive();
       if (added.code !== 0) throw refused(`cannot recover ${branch} at ${path}: ${added.stderr.trim()}`);
       return { path, branch };
     }
+    if (preparation) throw refused(`cannot resume ${branch}: the reserved branch is absent`, { branch, path });
     return this.add(threadId, project, branch, path);
+  }
+
+  /** Finish only a pending checkout whose ref was atomically reserved by this thread. */
+  async resumePreparation(threadId: ThreadId, project: Project, branch: string, path: string, base: string, assertActive: () => void): Promise<void> {
+    assertActive();
+    const ref = await this.git(threadId, project.path, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]);
+    assertActive();
+    if (ref.code === 1) {
+      // Stop may have preceded the reservation transaction. Resume its saved
+      // base through the same CAS; never turn an I/O failure into an absent ref.
+      await this.add(threadId, project, branch, path, { assertActive, beforeMutation: () => {} }, base);
+      return;
+    }
+    if (ref.code !== 0) throw refused(`cannot inspect reserved branch ${branch}: ${ref.stderr.trim()}`, { branch, path });
+    const owner = await this.git(threadId, project.path, ['reflog', 'show', '-1', '--format=%gs', `refs/heads/${branch}`]);
+    assertActive();
+    if (owner.code !== 0 || owner.stdout.trim() !== draftBranchOwner(threadId)) {
+      throw refused(`cannot resume ${branch}: expected a branch reserved by ${threadId}`, { branch, path });
+    }
+    if (!existsSync(path)) await this.ensure(threadId, project, branch, path, { assertActive, beforeMutation: () => {} });
+    assertActive();
+    if (await this.checkoutBranch(threadId, project.path, path) !== branch) {
+      throw refused(`cannot resume ${branch}: ${path} is not its registered checkout`, { branch, path });
+    }
+    assertActive();
+    await this.finishPreparation(threadId, path, { assertActive, beforeMutation: () => {} });
+  }
+
+  /** Git only mutates a private index; Stop never strands a lock on the shared index. */
+  private async finishPreparation(threadId: ThreadId, path: string, preparation: WorktreePreparation): Promise<void> {
+    const assertActive = preparation.assertActive;
+    assertActive();
+    const index = await this.git(threadId, path, ['rev-parse', '--git-path', 'index'], preparation.timeoutMs);
+    if (index.code !== 0) throw refused(`cannot locate the index of ${path}: ${index.stderr.trim()}`);
+    assertActive();
+    const file = resolve(path, index.stdout.trim());
+    const lock = `${file}.lock`;
+    if (existsSync(lock)) throw refused(`cannot prepare ${path}: its index lock already exists`, { path, lock });
+    if (!existsSync(file)) {
+      const temporary = mkdtempSync(join(dirname(file), 'boite-index-'));
+      try {
+        // Only this read-tree receives GIT_INDEX_FILE. Its exclusive directory
+        // stays until the process exits and its pipes finish draining.
+        const read = await this.git(threadId, path, ['-c', 'core.splitIndex=false', 'read-tree', 'HEAD'], preparation.timeoutMs, undefined, join(temporary, 'index'));
+        assertActive();
+        if (read.code !== 0) throw refused(`cannot restore the index of ${path}: ${read.stderr.trim()}`);
+        // Git's ordinary lock excludes other writers. Publication is entirely
+        // synchronous in the core: Stop kills children, never this transaction.
+        const fd = openSync(lock, 'wx');
+        const owned = fstatSync(fd, { bigint: true });
+        const ownsLock = () => {
+          const current = lstatSync(lock, { bigint: true, throwIfNoEntry: false });
+          return current?.dev === owned.dev && current.ino === owned.ino;
+        };
+        try {
+          if (!existsSync(file)) {
+            if (!ownsLock()) throw refused(`cannot prepare ${path}: its index lock was replaced`, { path, lock });
+            renameSync(join(temporary, 'index'), file);
+          }
+        } finally {
+          closeSync(fd);
+          if (ownsLock()) unlinkSync(lock);
+        }
+      } finally { rmSync(temporary, { recursive: true, force: true }); }
+    }
+    assertActive();
+    const missing = await this.git(threadId, path, ['ls-files', '--deleted', '-z'], preparation.timeoutMs);
+    if (missing.code !== 0) throw refused(`cannot inspect missing files in ${path}: ${missing.stderr.trim()}`);
+    assertActive();
+    if (missing.stdout) {
+      // No --force: complete only absent indexed paths, preserving existing edits,
+      // notes and staged changes. NUL-delimited stdin also handles long Windows lists.
+      const parallel = await this.checkoutWorkers(threadId, path, preparation.timeoutMs);
+      assertActive();
+      const checkout = await this.git(threadId, path, [...parallel, 'checkout-index', '-z', '--stdin'], preparation.timeoutMs, missing.stdout);
+      if (checkout.code !== 0) throw refused(`cannot finish the checkout of ${path}: ${checkout.stderr.trim()}`);
+      assertActive();
+    }
   }
 
   /** `base` is the commit the new branch starts from; left out, the project's HEAD. */
@@ -153,15 +242,17 @@ export class Worktrees {
         // Creating the ref and its ownership reflog is atomic. A failed compare-and-swap
         // cannot confer ownership of a branch created concurrently by another actor.
         const created = await this.git(threadId, project.path,
-          ['update-ref', '--create-reflog', '-m', draftBranchOwner(threadId), `refs/heads/${branch}`, 'HEAD', ''], preparation.timeoutMs);
+          ['update-ref', '--create-reflog', '-m', draftBranchOwner(threadId), `refs/heads/${branch}`, base ?? 'HEAD', ''], preparation.timeoutMs);
         if (created.code !== 0) {
+          // A stopped Git may have committed the ref before its exit was observed.
+          preparation.assertActive();
           abandon?.();
           throw refused(`cannot reserve branch ${branch}: ${created.stderr.trim()}`, { branch, path });
         }
         preparation.assertActive();
       }
-      const added = await this.git(threadId, project.path,
-        [...parallel, ...(preparation ? ['worktree', 'add', path, branch] : ['worktree', 'add', '-b', branch, path, ...(base === undefined ? [] : [base])])], preparation?.timeoutMs);
+      const added = await this.registeredGit(threadId, project.path,
+        [...parallel, ...(preparation ? ['worktree', 'add', '--no-checkout', path, branch] : ['worktree', 'add', '-b', branch, path, ...(base === undefined ? [] : [base])])], preparation?.timeoutMs, preparation?.assertActive);
       if (added.code !== 0) {
         throw refused(`git worktree add failed in ${project.path}: ${added.stderr.trim() || `exit ${added.code}`}`, {
           path: project.path,
@@ -169,6 +260,7 @@ export class Worktrees {
           worktree: path,
         });
       }
+      if (preparation) await this.finishPreparation(threadId, path, preparation);
       return { branch, path, namingPending: wanted === undefined };
     }
     throw refused(`${SUFFIX_MAX} worktrees already carry the generated name ${slug}: try creating the thread again`, { slug, root });
@@ -187,7 +279,7 @@ export class Worktrees {
       const bounded = slug.slice(0, BRANCH_NAME_MAX - BRANCH_PREFIX.length - suffix.length).replace(/-+$/, '');
       const branch = `${BRANCH_PREFIX}${bounded}${suffix}`;
       if (await this.branchExists(threadId, cwd, branch)) continue;
-      const renamed = await this.git(threadId, cwd, ['branch', '-m', oldBranch, branch]);
+      const renamed = await this.registeredGit(threadId, cwd, ['branch', '-m', oldBranch, branch]);
       if (renamed.code !== 0) throw refused(`cannot rename ${oldBranch} to ${branch}: ${renamed.stderr.trim()}`, { cwd, branch });
       return branch;
     }
@@ -224,7 +316,7 @@ export class Worktrees {
     }
     const checkoutOwned = timeoutMs === undefined || await this.checkoutBranch(threadId, project.path, placed.path, remaining()) === placed.branch;
     if (checkoutOwned) {
-      const removed = await this.git(threadId, project.path,
+      const removed = await this.registeredGit(threadId, project.path,
         ['worktree', 'remove', '--force', ...(timeoutMs === undefined ? [] : ['--force']), placed.path], remaining());
       if (removed.code !== 0) {
         this.core.log('warn', `could not remove the worktree ${placed.path}: ${removed.stderr.trim() || `exit ${removed.code}`}`);
@@ -238,7 +330,7 @@ export class Worktrees {
       if (branch.code === 1) return true;
       if (branch.code !== 0) return false;
     }
-    const deleted = await this.git(threadId, project.path, ['branch', '-D', placed.branch], remaining());
+    const deleted = await this.registeredGit(threadId, project.path, ['branch', '-D', placed.branch], remaining());
     if (deleted.code !== 0) {
       this.core.log('warn', `could not delete the branch ${placed.branch}: ${deleted.stderr.trim() || `exit ${deleted.code}`}`);
     }
@@ -247,7 +339,7 @@ export class Worktrees {
 
   /** Git's registered checkout must own the reserved branch before its folder is removed. */
   private async checkoutBranch(threadId: ThreadId, cwd: string, path: string, timeoutMs?: number): Promise<string | null> {
-    const listed = await this.git(threadId, cwd, ['worktree', 'list', '--porcelain', '-z'], timeoutMs);
+    const listed = await this.registeredGit(threadId, cwd, ['worktree', 'list', '--porcelain', '-z'], timeoutMs);
     if (listed.code !== 0) throw refused(`cannot inspect worktrees in ${cwd}: ${listed.stderr.trim()}`);
     const expected = existsSync(path) ? statSync(path, { bigint: true }) : null;
     for (const entry of listed.stdout.split('\0\0')) {
@@ -303,10 +395,45 @@ export class Worktrees {
     } catch (error) { throw refused(`cannot exclude worktrees in ${file}: ${messageOf(error)}`); }
   }
 
-  private async git(threadId: ThreadId, cwd: string, args: string[], timeoutMs?: number): Promise<{ code: number; stderr: string; stdout: string }> {
-    let spawned;
+  /** Git exposes a partial registration before commondir is readable by another add/list. */
+  private async registeredGit(threadId: ThreadId, cwd: string, args: string[], timeoutMs?: number, assertActive?: () => void): Promise<{ code: number; stderr: string; stdout: string }> {
+    const key = realpathSync(gitCommonDirOf(cwd) ?? cwd);
+    const previous = registrations.get(key) ?? Promise.resolve();
+    const release = Promise.withResolvers<void>();
+    const tail = previous.then(() => release.promise);
+    registrations.set(key, tail);
+    const started = performance.now();
+    const expired = () => refused(`git ${args.join(' ')} did not finish within ${timeoutMs} ms`, { cwd, args });
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      spawned = this.core.procs.spawn(threadId, 'git', args, { cwd });
+      if (timeoutMs === undefined) await previous;
+      else await Promise.race([previous, new Promise<never>((_, reject) => {timer = setTimeout(() => reject(expired()), timeoutMs);})]);
+      clearTimeout(timer);
+      const remaining = timeoutMs === undefined ? undefined : timeoutMs - (performance.now() - started);
+      if (remaining !== undefined && remaining <= 0) throw expired();
+      assertActive?.();
+      return await this.git(threadId, cwd, args, remaining);
+    } finally {
+      clearTimeout(timer); release.resolve();
+      // A timed-out waiter still sits behind its predecessor until that owner exits.
+      void tail.then(() => {if (registrations.get(key) === tail) registrations.delete(key);});
+    }
+  }
+
+  private async git(threadId: ThreadId, cwd: string, args: string[], timeoutMs?: number, input?: string, indexFile?: string): Promise<{ code: number; stderr: string; stdout: string }> {
+    if (this.core.sharedCompute?.journal.worker(threadId)) args = [...await sharedGitConfig(this.core, threadId, cwd), ...args];
+    this.core.sharedCompute?.assertGit(threadId);
+    let spawned;
+    const options = { cwd, ...(indexFile === undefined ? {} : { env: { GIT_INDEX_FILE: indexFile } }) };
+    try {
+      const scope = this.core.procs.protection.policy(threadId) ? this.core.procs.protection.control(threadId) : threadId;
+      if (input === undefined) spawned = this.core.procs.spawn(scope, 'git', args, options);
+      else {
+        const piped = this.core.procs.spawnPiped(scope, 'git', args, options);
+        piped.proc.stdin.write(input);
+        piped.proc.stdin.end();
+        spawned = piped;
+      }
     } catch (error) {
       throw refused(`git did not start (${messageOf(error)}): a worktree needs git on PATH`, { cwd, args });
     }

@@ -1,5 +1,5 @@
 import { inspectJournal } from '../src/journal/integrity.ts';
-import { mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import type { Account, MessagePart } from '@boite/contracts';
@@ -224,3 +224,182 @@ test('an unchanged transcript is listed from memory, a changed one read again, a
   await first;
   expect(harness.core.imports.list(projectId)).not.toBe(first);
 });
+
+
+for (const location of ['canonical', 'alias'] as const) {
+  test(`a symlink project imports a canonical cwd from the ${location} transcript folder`, async () => {
+    const client = await harness.connect();
+    const target = join(harness.dataDir, 'canonical');
+    mkdirSync(target);
+    const canonical = realpathSync(target);
+    const alias = join(harness.dataDir, 'alias');
+    symlinkSync(canonical, alias, 'junction');
+    const project = await client.call('projects.add', { path: alias });
+    const account = await client.call('accounts.add', { providerId: 'claude', label: 'alias' });
+    const folder = join(account.isolationDir!, 'projects', claudeProjectFolder(location === 'alias' ? alias : canonical));
+    mkdirSync(folder, { recursive: true });
+    const file = join(folder, `${FIXTURE_SESSION_ID}.jsonl`);
+    writeFileSync(file, claudeSessionFixture(canonical));
+    if (location === 'alias') {
+      const fallback = join(account.isolationDir!, 'projects', claudeProjectFolder(canonical));
+      mkdirSync(fallback, { recursive: true });
+      writeFileSync(join(fallback, `${FIXTURE_SESSION_ID}.jsonl`), claudeSessionFixture(canonical, { aiTitle: 'Canonical fallback' }));
+    }
+    const foreign = join(folder, 'foreign.jsonl');
+    writeFileSync(foreign, claudeSessionFixture(join(harness.dataDir, 'elsewhere'), { sessionId: 'foreign' }));
+
+    const listed = await client.call('imports.list', { projectId: project.id });
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({ file, sessionId: FIXTURE_SESSION_ID, threadId: null });
+    if (location === 'canonical') {
+      const aliasFolder = join(account.isolationDir!, 'projects', claudeProjectFolder(alias));
+      symlinkSync(folder, aliasFolder, 'junction');
+      expect(await client.call('imports.list', { projectId: project.id })).toHaveLength(1);
+    }
+    const thread = await client.call('imports.run', { projectId: project.id, accountId: account.id, sessionId: FIXTURE_SESSION_ID });
+    expect(thread).toMatchObject({ projectId: project.id, cwd: alias, accountId: account.id, title: 'List the files of this folder, then say hello' });
+    expect(harness.core.projects.require(project.id).path).toBe(alias);
+  });
+}
+
+for (const child of [false, true]) {
+  test(`a recoverable ${child ? 'deleted child' : 'deleted root'} reserves its imported native session`, async () => {
+    const client = await harness.connect();
+    const { projectId, account } = await seeded(client);
+    const imported = await client.call('imports.run', { projectId, accountId: account.id, sessionId: FIXTURE_SESSION_ID });
+    const echo = (await client.call('accounts.list', {})).find(account => account.providerId === 'echo')!;
+    const root = child ? await client.call('threads.create', { projectId, providerId: 'echo', accountId: echo.id }) : imported;
+    if (child) harness.core.journal.putThread({ ...imported, parentThreadId: root.id });
+    await client.call('threads.remove', { threadId: root.id });
+    expect((await client.call('threads.deleted', {})).map(thread => thread.id)).toEqual([root.id]);
+    expect(await client.call('threads.list', { projectId })).toHaveLength(0);
+
+    const params = { projectId, accountId: account.id, sessionId: FIXTURE_SESSION_ID };
+    // Check admission first: a refusal must leave the still-readable transcript alone.
+    const attempt = await Promise.allSettled([client.call('imports.run', params)]);
+    expect(attempt[0]!.status).toBe('rejected');
+    expect((await client.call('imports.list', { projectId }))[0]?.threadId).toBe(imported.id);
+    expect(await thrown(client.call('imports.run', params))).toThrow('already a thread');
+    await client.call('threads.restore', { threadId: root.id });
+    const restored = (await client.call('threads.list', { projectId })).filter(thread => thread.sessionId === FIXTURE_SESSION_ID);
+    expect(restored.map(thread => thread.id)).toEqual([imported.id]);
+    expect(await thrown(client.call('imports.run', params))).toThrow('already a thread');
+  });
+}
+
+test('shared default roots list one transcript with an explicit account choice, distinct roots stay listed', async () => {
+  const saved = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = join(harness.dataDir, 'default-claude');
+  try {
+    const client = await harness.connect();
+    const { projectId, account: isolated, file } = await seeded(client);
+    const accounts = await Promise.all(['First', 'Alternative'].map(label => client.call('accounts.add', {
+      providerId: 'claude', label, useDefaultLocation: true,
+    })));
+    const project = harness.core.projects.require(projectId);
+    const folder = join(process.env.CLAUDE_CONFIG_DIR, 'projects', claudeProjectFolder(project.path));
+    mkdirSync(folder, { recursive: true });
+    const shared = join(folder, `${FIXTURE_SESSION_ID}.jsonl`);
+    writeFileSync(shared, claudeSessionFixture(project.path));
+    const listed = await client.call('imports.list', { projectId });
+    expect(listed).toHaveLength(2);
+    expect(listed.find(session => session.file === shared)).toMatchObject({
+      accountId: accounts[0]!.id, accountIds: accounts.map(account => account.id), threadId: null,
+    });
+    expect(listed.find(session => session.file === file)?.accountId).toBe(isolated.id);
+    const imported = await client.call('imports.run', { projectId, accountId: accounts[1]!.id, sessionId: FIXTURE_SESSION_ID });
+    expect(imported.accountId).toBe(accounts[1]!.id);
+    expect(await thrown(client.call('imports.run', { projectId, accountId: accounts[0]!.id, sessionId: FIXTURE_SESSION_ID }))).toThrow('already a thread');
+    const after = await client.call('imports.list', { projectId });
+    expect(after.find(session => session.file === shared)?.threadId).toBe(imported.id);
+    expect(after.find(session => session.file === file)?.file).toBe(file);
+    expect(await thrown(client.call('imports.run', { projectId, accountId: isolated.id, sessionId: FIXTURE_SESSION_ID }))).toThrow('already a thread');
+  } finally {
+    if (saved === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = saved;
+  }
+});
+
+
+for (const action of ['list', 'run'] as const) {
+  test(`imports.${action} skips an unrelated alias candidate before a valid canonical transcript`, async () => {
+    const client = await harness.connect();
+    const target = join(harness.dataDir, 'canonical');
+    mkdirSync(target);
+    const canonical = realpathSync(target);
+    const alias = join(harness.dataDir, 'alias');
+    symlinkSync(canonical, alias, 'junction');
+    const project = await client.call('projects.add', { path: alias });
+    const account = await client.call('accounts.add', { providerId: 'claude', label: 'variants' });
+    for (const path of [alias, canonical]) {
+      const folder = join(account.isolationDir!, 'projects', claudeProjectFolder(path));
+      mkdirSync(folder, { recursive: true });
+      const valid = path === canonical;
+      writeFileSync(join(folder, `${FIXTURE_SESSION_ID}.jsonl`), claudeSessionFixture(valid ? canonical : join(harness.dataDir, 'foreign'), {
+        aiTitle: valid ? 'Canonical candidate' : 'Foreign candidate',
+      }));
+    }
+    if (action === 'list') {
+      const rows = await client.call('imports.list', { projectId: project.id });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.title).toBe('Canonical candidate');
+    } else {
+      const imported = await client.call('imports.run', { projectId: project.id, accountId: account.id, sessionId: FIXTURE_SESSION_ID });
+      expect(imported).toMatchObject({ title: 'Canonical candidate', cwd: alias });
+    }
+  });
+}
+
+test('import refuses only foreign cwd candidates before creation, but accepts an unrecorded cwd', async () => {
+  const client = await harness.connect();
+  const { projectId, account, file } = await seeded(client);
+  const foreign = join(harness.dataDir, 'foreign');
+  writeFileSync(file, claudeSessionFixture(foreign));
+  expect(await client.call('imports.list', { projectId })).toEqual([]);
+  const params = { projectId, accountId: account.id, sessionId: FIXTURE_SESSION_ID };
+  expect(await thrown(client.call('imports.run', params))).toThrow('cwd');
+  expect(await client.call('threads.list', { projectId })).toHaveLength(0);
+  const body = claudeSessionFixture(foreign).trim().split('\n').map(line => {
+    const record = JSON.parse(line);
+    delete record.cwd;
+    return JSON.stringify(record);
+  }).join('\n') + '\n';
+  writeFileSync(file, body);
+  expect(await client.call('imports.list', { projectId })).toHaveLength(1);
+  expect((await client.call('imports.run', params)).cwd).toBe(harness.core.projects.require(projectId).path);
+});
+
+for (const canonicalFallback of [false, true]) {
+  test(`an alias with no initial cwd stays importable ${canonicalFallback ? 'before its canonical fallback' : 'without a fallback candidate'}`, async () => {
+    const client = await harness.connect();
+    const target = join(harness.dataDir, 'canonical');
+    mkdirSync(target);
+    const canonical = realpathSync(target);
+    const alias = join(harness.dataDir, 'alias');
+    symlinkSync(canonical, alias, 'junction');
+    const project = await client.call('projects.add', { path: alias });
+    const account = await client.call('accounts.add', { providerId: 'claude', label: 'initial cwd' });
+    const folder = join(account.isolationDir!, 'projects', claudeProjectFolder(alias));
+    mkdirSync(folder, { recursive: true });
+    const file = join(folder, `${FIXTURE_SESSION_ID}.jsonl`);
+    // Only the first prompt lacks cwd; a later prompt records another directory.
+    const body = claudeSessionFixture(join(harness.dataDir, 'foreign'), { aiTitle: 'Alias without initial cwd' })
+      .trim().split('\n').map(line => {
+        const record = JSON.parse(line);
+        if (record.uuid === 'u1') delete record.cwd;
+        return JSON.stringify(record);
+      }).join('\n') + '\n';
+    writeFileSync(file, body);
+    if (canonicalFallback) {
+      const fallback = join(account.isolationDir!, 'projects', claudeProjectFolder(canonical));
+      mkdirSync(fallback, { recursive: true });
+      writeFileSync(join(fallback, `${FIXTURE_SESSION_ID}.jsonl`), claudeSessionFixture(canonical, { aiTitle: 'Canonical fallback' }));
+    }
+    const rows = await client.call('imports.list', { projectId: project.id });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ file, title: 'Alias without initial cwd', threadId: null });
+    const imported = await client.call('imports.run', { projectId: project.id, accountId: account.id, sessionId: FIXTURE_SESSION_ID });
+    expect(imported).toMatchObject({ title: 'Alias without initial cwd', cwd: alias });
+    expect((await client.call('threads.get', { threadId: imported.id })).turns).toHaveLength(2);
+  });
+}

@@ -54,7 +54,7 @@
         </span>
         <span class="top">
           <strong class="title" data-testid="agent-discussion-title">{discussion.title}</strong>
-          {#if discussion.contact}<RemoteChip name={discussion.contact} />{/if}
+          {#if discussion.contact}<RemoteChip name={discussion.contact} human={discussion.entries.every(entry => entry.letter.origin === 'contact-human')} />{/if}
           {#if tag}<span class="tag" data-relation={tag}>{strings.agentMessages.relation[tag]}</span>{/if}
           {#if where}<span class="where">{where}</span>{/if}
         </span>

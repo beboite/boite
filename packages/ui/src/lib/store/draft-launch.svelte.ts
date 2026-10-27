@@ -48,15 +48,17 @@ export class DraftLaunch {
   /** The drafts whose first prompt waits to start their conversation, oldest queue first. */
   private queuedDrafts(): string[] {
     const s = this.ctx.store;
+    // A core that keeps composer records starts these drafts itself; incognito ones stay here.
+    const own = (draft: Draft) => !this.ctx.sync.deferredDraft(draft);
     const waiting = (input: Input | undefined): input is Input => !!input && !input.sending && !!input.queued[0]?.request && input.queued[0].request.failed === undefined;
     // Only the request that stalled waits: one sent again after a cancel goes at once.
     const ready = (key: string, input: Input) => this.stalled.get(key) !== input.queued[0]?.request?.id;
     const keys: { key: string; at: number }[] = [];
     const open = s.draft ? draftKey(s.draft) : null;
     const input = this.ctx.composer.composerStates[DRAFT_STASH_KEY];
-    if (open !== null && waiting(input) && ready(open, input)) keys.push({ key: open, at: input.queued[0]!.request!.queuedAt });
+    if (open !== null && own(s.draft!) && waiting(input) && ready(open, input)) keys.push({ key: open, at: input.queued[0]!.request!.queuedAt });
     for (const [key, saved] of Object.entries(this.ctx.drafts.saved)) {
-      if (key !== open && waiting(saved.input) && ready(key, saved.input)) keys.push({ key, at: saved.input.queued[0]!.request!.queuedAt });
+      if (key !== open && own(saved.draft) && waiting(saved.input) && ready(key, saved.input)) keys.push({ key, at: saved.input.queued[0]!.request!.queuedAt });
     }
     return keys.sort((a, b) => a.at - b.at).map(entry => entry.key);
   }

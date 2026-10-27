@@ -188,6 +188,14 @@ the panel never confirms by accident. All are noted in the diagnostics. Download
 [quarantine](#downloads). Archiving or removing the
 conversation closes its tabs.
 
+When a DevTools session detaches, its pending commands fail immediately with
+their method and session identity; commands for the browser or another session
+keep waiting for their own answers. A native click accepts detachment only
+while releasing the mouse on its own tab, as happens when a popup closes itself.
+It sends no remaining double-click input or navigation queries to that page.
+Detachment identifies the lost session, not why it disappeared. Earlier input
+failures, protocol errors and a closed browser connection still fail the click.
+
 ### A tab nobody uses sleeps
 
 The browser runs every tab as shown (`--disable-renderer-backgrounding` and
@@ -254,6 +262,12 @@ error. A click, a key or a fill that starts a navigation waits the same way and
 reports where the page went. Clicks, keys and text are native input; an element
 something covers is clicked through the DOM, and the agent hears what covered
 it.
+
+Before pressing, a native click waits up to two seconds for trusted pointer
+movement in the target's document and checks that the target and every enclosing
+iframe still receive that point. This also works in popups whose CSS `:hover` state stays unset.
+If movement misses the target, the command fails without pressing; it never
+retries the click.
 
 ## Frames from other origins
 

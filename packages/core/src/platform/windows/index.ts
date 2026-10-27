@@ -8,8 +8,10 @@ import * as jobs from './jobs.ts';
 import * as guard from './guard.ts';
 import { findTailscaleCli } from '../tailscale.ts';
 import { firewallAllow, firewallQuery } from './firewall.ts';
+import { WindowsExecutionBoundary } from './protected.ts';
 
 export const platform: ProcessPlatform = {
+  protectedExecution: new WindowsExecutionBoundary(),
   tailscaleCli: () => findTailscaleCli('windows'),
   firewall: { query: firewallQuery, allow: firewallAllow },
   // bun:ffi and the WinRT capture objects load with the first `boite window`, never at startup.
@@ -29,6 +31,7 @@ export const platform: ProcessPlatform = {
     guard.setGuardMute(settings.muteAgents);
   },
   attach: jobs.assignToThreadJob,
+  hasProcesses: jobs.threadJobHasProcesses,
   startup: jobs.setThreadStartup,
   terminate: jobs.terminateThreadJob,
   terminateProcess: jobs.terminateJobProcess,

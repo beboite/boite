@@ -38,6 +38,8 @@
     && !(pinnedQuotas.wantsDock(store) && dockAvailable));
   let discussion = $state<HTMLElement>();
   let quotaRoom = $state<HTMLElement>();
+  /** How tall the subagent bar stands over the composer: the band of tasks floats above it, not over it. */
+  let agentDockRoom = $state(0);
   $effect(() => {
     const box = discussion, column = quotaRoom, owner = store;
     if (!box || !column || !experimentOn('pinned-quotas') || !pinnedQuotas.current.pinned) return;
@@ -115,7 +117,7 @@
   <!-- The draft's roomier composer belongs to the middle of the column: once
      the prompt is on its way the composer is at the bottom, at its thread size,
      or it shrinks a second time when the thread opens. -->
-  <section class="chat" class:drafting={!thread && !sending} bind:this={chat} data-testid="chat">
+  <section class="chat" class:drafting={!thread && !sending} bind:this={chat} data-testid="chat" style:--agent-dock-room={thread ? `${agentDockRoom}px` : undefined}>
     {#if thread?.forkOrigin}{#key thread.id}<ForkReturn {store} {thread} />{/key}{/if}
     <div class="discussion" class:draft-body={!thread && !sending} bind:this={discussion} data-testid={!thread && !sending ? 'draft-empty' : undefined}>
     {#if experimentOn('pinned-quotas') && pinnedQuotas.current.pinned}<div class="quota-room" bind:this={quotaRoom} aria-hidden="true"></div>{/if}
@@ -178,10 +180,11 @@
 
     {#if pinnedHere && pinnedQuotas.crowded.get(store) && (thread || sending)}<Deferred part={parts.PinnedQuota} quiet>{#snippet children(PinnedQuota)}<PinnedQuota {store} inline area={discussion} />{/snippet}</Deferred>{/if}
 
-    {#if thread}<AgentDock {store} threadId={thread.id} />{/if}
     {#if thread}<ThreadRecovery {store} /><ThreadRetry {store} />{/if}
     {#if store.openProject?.missing === true && !thread?.agentSessionId}<FolderGoneNotice {store} project={store.openProject} />{/if}
     {#if thread?.worktreeRemoved}<WorktreeGoneNotice removal={thread.worktreeRemoved} archived={thread.archived} />{/if}
+    <!-- Right on the composer, so the band of tasks rises by this bar's height alone, whatever notice stands above. -->
+    {#if thread}<div bind:offsetHeight={agentDockRoom}><AgentDock {store} threadId={thread.id} /></div>{/if}
     {#if locked}<p class="locked" data-testid="chat-locked">{locked}</p>
     {:else if thread?.archived}<DoneThreadNotice {store} threadId={thread.id} />{:else}<Composer {store} centered={!thread && !sending} />{/if}
 

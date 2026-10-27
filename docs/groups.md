@@ -294,6 +294,18 @@ group already has full control of the others ([trust](#trust)), so this gives
 it nothing it did not have. The client link is not sealed on that hop either:
 as private as the network between the two machines.
 
+### Contact projects on a member
+
+An explicitly shared Contact project can live on another member. The linked
+gateway forwards `contact.project` through existing sealed `relay.in/out`
+requests, checking the member's current admission and that contact's exact
+member/project grant again before returning the answer. Saved member mirrors
+bind the group and both admission epochs; removing and readmitting a core does
+not restore an old copy's authority. The association and jobs stay on the
+executing member, with no copy on the gateway. This bounded peer protocol is
+separate from the owner's general group RPC relay. See
+[Contacts](contacts.md#implemented-association-service).
+
 ### Notifications through the group
 
 A phone installs one machine's page and subscribes to Web Push there, with
