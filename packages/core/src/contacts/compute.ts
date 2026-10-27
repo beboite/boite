@@ -234,7 +234,7 @@ export class SharedCompute {
     const saved = this.journal.get(id, 'host');
     if (saved) {
       if (saved.fingerprint !== hash) throw refused('requestId: already used for different compute content');
-      return this.active.get(id) ?? Promise.resolve(saved.job);
+      return Promise.resolve(saved.job);
     }
     const boundary = this.protection(ctx, route);
     if (!boundary.supported) throw refused(`compute.protection: ${boundary.reason}`);
@@ -248,7 +248,9 @@ export class SharedCompute {
     // This reservation has no await: concurrent requests cannot admit the same job or overspend the host contribution.
     this.journal.put(record);
     const work = this.launch(record, ctx, parent, route).finally(() => this.active.delete(id));
-    this.active.set(id, work); this.background(work); return work;
+    this.active.set(id, work); this.background(work);
+    // Acknowledge durable admission without making the relay wait for Git or provider setup.
+    return Promise.resolve(this.journal.get(id, 'host')!.job);
   }
   private assertLive(record: ComputeRecord): SharedPeerContext {
     if (this.closed || record.stopping || terminalCompute(record.job)) throw refused('compute.job: execution authority is closed');
@@ -272,6 +274,7 @@ export class SharedCompute {
   assertTurn(threadId: string): void {
     const record = this.journal.worker(threadId);
     if (record) {
+      if (record.job.status === 'queued') throw refused('compute.job: admission is still preparing the captured worker');
       if (record.job.status === 'uncertain') throw refused('compute.job: execution authority is closed until the uncertain job is cancelled');
       this.assertLive(record);
     }
@@ -447,6 +450,7 @@ export class SharedCompute {
   }
   private hostSend(ctx: SharedPeerContext, id: string, body: string, requestId: string): { ok: true } {
     const record = this.hostRecord(ctx, id);
+    if (record.job.status === 'queued') throw refused('compute.job: admission is still preparing the captured worker');
     if (record.job.status === 'done') record.job.status = 'waiting';
     this.assertLive(record);
     if (!record.job.worker) throw refused('compute.worker: execution is not admitted');

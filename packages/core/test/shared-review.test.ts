@@ -136,6 +136,7 @@ test('a real secret-file denial revokes letters, board execution and compute wit
   await waitFor(() => b.h.core.journal.lastTurn(board.id)?.status === 'running');
   const input = {threadId: a.threadId, sharedProjectId: id, requestId: 'compute', host: b.ref, profileId: 'conversation', baseCommit: await git(a.h, a.path, 'rev-parse', 'HEAD'), task: '[sleep:90000]'};
   const job = await a.client.call('sharedCompute.start', input);
+  await waitFor(() => b.h.core.sharedCompute.journal.get(job.id, 'host')?.job.status === 'running');
   const worker = b.h.core.threads.require(job.worker!.threadId);
   const agent = await connect(b.h.url, b.h.core.agents.tokenFor(worker.id));
   // A normal local conversation is not subject to revocation, even in this project.

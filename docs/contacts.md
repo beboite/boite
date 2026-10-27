@@ -615,8 +615,11 @@ repository base commit, task and optional board claim, never a path, shell
 command, account or remote permission override. Bind it to the authenticated
 source conversation and host access revision. Persist a job and an admission
 reservation before calling existing delegation/scheduler/worktree machinery.
-Duplicate starts return the same job; changed-content retries fail. Use the
-host's own registered repository, account, quota, permission mode and process
+Start acknowledges the durable queued job without waiting for checkout or
+provider preparation. Follow job state for admission failures and completion.
+Duplicate starts return its current state without waiting for preparation;
+changed-content retries fail. Follow-up and direct turns are refused until
+admission completes. Use the host's own registered repository, account, quota, permission mode and process
 caps. Validate the base object/repository before creating an isolated worktree.
 Do not inherit a remote parent's account, bypass mode, hooks or Boite token.
 Local nested delegation stays subject to the same shared scope; it cannot

@@ -603,6 +603,7 @@ export class Core {
     await this.sharedBoard.close();
     await this.sharedCompute.close();
     await this.sharedReview.close();
+    await this.delegation.worktrees.close();
     await this.speech.close();
     await this.push.close();
     await this.plugins.close();

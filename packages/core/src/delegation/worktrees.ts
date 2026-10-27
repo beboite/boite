@@ -17,6 +17,7 @@ const KEY = 'delegation-worktree:';
  */
 export class ChildWorktrees {
   private readonly settling = new Map<ThreadId, Promise<void>>();
+  private closed = false;
 
   constructor(private readonly core: Core, private readonly changed: (threadId: ThreadId) => void) {}
 
@@ -26,6 +27,12 @@ export class ChildWorktrees {
 
   /** A turn has ended and the worktree is being looked at: a wait for its result goes on. */
   isSettling(threadId: ThreadId): boolean { return this.settling.has(threadId); }
+
+  /** Called after turn and shared-job producers stop, while their journal is still open. */
+  async close(): Promise<void> {
+    this.closed = true;
+    await Promise.allSettled([...this.settling.values()]);
+  }
 
   private save(threadId: ThreadId, worktree: DelegationWorktree): void {
     this.core.journal.setSetting(`${KEY}${threadId}`, worktree);
@@ -115,6 +122,7 @@ export class ChildWorktrees {
   settle(threadId: ThreadId): Promise<void> | null {
     const running = this.settling.get(threadId);
     if (running) return running;
+    if (this.closed) return null;
     const compute = this.core.sharedCompute?.journal.worker(threadId);
     if (compute?.stopping || compute && ['cancelled', 'revoked'].includes(compute.job.status)) return null;
     const record = this.get(threadId);

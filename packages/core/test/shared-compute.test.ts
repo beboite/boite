@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -73,6 +73,55 @@ async function done(s: Awaited<ReturnType<typeof side>>, scope: { threadId: stri
   expect(current.error).toBeNull(); expect(current.status).toBe('done');
   return current;
 }
+test('start and duplicate requests acknowledge a durable queued job while host admission is held', async () => {
+  const {a, b, scope, baseCommit, enable} = await pair(); await enable(a); await enable(b);
+  for (const host of [a, b]) {
+    const release = Promise.withResolvers<void>();
+    let entered = false, reply: SharedComputeJob | undefined;
+    const guard = host.h.core.sharedCompute.guardStart;
+    host.h.core.sharedCompute.guardStart = async (...args) => {await guard(...args); entered = true; await release.promise;};
+    const input = {...scope, requestId: `queued-${host.coreId}`, host: host.ref, profileId: 'conversation', baseCommit, task: 'one durable admission'};
+    const started = a.client.call('sharedCompute.start', input).then(job => {reply = job; return job;});
+    try {
+      await waitFor(() => entered);
+      await waitFor(() => reply !== undefined, 1000);
+      expect(reply!.status).toBe('queued');
+      const retry = await a.client.call('sharedCompute.start', input);
+      expect(retry).toMatchObject({id: reply!.id, worker: reply!.worker, status: 'queued', revision: reply!.revision});
+      const direct = await thrown(host.client.call('turns.start', {threadId: reply!.worker!.threadId, prompt: 'bypass preparation'}));
+      const followup = await thrown(a.client.call('sharedCompute.send', {...scope, jobId: reply!.id, requestId: 'early-followup', text: 'bypass preparation'}));
+      expect(direct).toThrow('admission');
+      expect(followup).toThrow('admission');
+      expect(host.h.core.journal.listChildThreads()).toHaveLength(1);
+      expect(host.h.core.journal.db.query('SELECT COUNT(*) AS n FROM turns WHERE thread_id=?').get(reply!.worker!.threadId)).toEqual({n: 0});
+      release.resolve();
+      expect((await done(a, scope, reply!)).worker).toEqual(reply!.worker);
+    } finally {release.resolve(); await started; host.h.core.sharedCompute.guardStart = guard;}
+  }
+}, 30000);
+
+test('core shutdown drains a held child worktree inspection before closing its journal', async () => {
+  const {a, b, scope, baseCommit, enable} = await pair(); await enable(b);
+  const job = await done(a, scope, await a.client.call('sharedCompute.start', {...scope, requestId: 'shutdown-inspection', host: b.ref, profileId: 'conversation', baseCommit, task: 'inspect at shutdown'}));
+  const worktrees = b.h.core.delegation.worktrees, workerId = job.worker!.threadId;
+  worktrees.record(workerId, {...worktrees.get(workerId)!, state: 'active'});
+  const release = Promise.withResolvers<{commits: number; dirty: boolean}>();
+  const changes = spyOn(b.h.core.worktrees, 'changes').mockImplementation(() => release.promise);
+  const inspection = worktrees.settle(workerId)!;
+  // Consume a late rejection too, so the RED run reports the assertion rather than an unhandled error.
+  const inspected = inspection.catch(error => error);
+  let closed = false;
+  const closing = b.h.core.close().then(() => {closed = true;});
+  try {
+    await Promise.race([closing, Bun.sleep(1000)]);
+    expect(closed).toBe(false);
+    expect(b.h.core.journal.isClosed()).toBe(false);
+    release.resolve({commits: 1, dirty: false});
+    await inspection; await closing;
+    expect(b.h.core.journal.isClosed()).toBe(true);
+  } finally {release.resolve({commits: 1, dirty: false}); await inspected; await closing; changes.mockRestore();}
+}, 30000);
+
 test('host opt-in runs four local and five remote children on the owning accounts and returns git provenance', async () => {
   const { a, b, scope, baseCommit, enable } = await pair();
   expect(await thrown(a.client.call('sharedCompute.start', { ...scope, requestId: 'disabled', host: b.ref, profileId: 'conversation', baseCommit, task: 'fixture' }))).toThrow('compute');
@@ -231,7 +280,9 @@ test('host contribution and authenticated source boundaries reject arbitrary pat
     // The source knows this commit; the host must diagnose its own missing object.
     await git(a.h, a.path, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'source-only base');
     const sourceOnlyBase = await git(a.h, a.path, 'rev-parse', 'HEAD');
-    const missing = await a.client.call('sharedCompute.start', {...p, requestId: 'missing-base', baseCommit: sourceOnlyBase});
+    let missing = await a.client.call('sharedCompute.start', {...p, requestId: 'missing-base', baseCommit: sourceOnlyBase});
+    await waitFor(() => b.h.core.sharedCompute.journal.get(missing.id, 'host')?.job.status === 'failed');
+    missing = await a.client.call('sharedCompute.get', {...scope, jobId: missing.id});
     expect(missing.status).toBe('failed');
     expect(missing.error).not.toContain(b.path);
     const gitFailure = (await b.h.core.logs.query({source: 'git', threadId: missing.worker!.threadId})).find(log => log.event === 'git.failed');
@@ -249,6 +300,8 @@ test('host contribution and authenticated source boundaries reject arbitrary pat
     } finally {agent.close(); hostAgent.close();}
     // Keep the worker held: a late terminal notification must not replace the
     // forged-result read with the source's already verified cached completion.
+    await waitFor(() => b.h.core.sharedCompute.journal.get(job.id, 'host')?.job.status === 'running');
+    await a.client.call('sharedCompute.get', {...scope, jobId: job.id});
     const original = a.h.core.coordination.request.bind(a.h.core.coordination);
     let forgedReads = 0;
     a.h.core.coordination.request = async (peer, op, payload) => {
@@ -356,13 +409,17 @@ test('board release cancels its exact delegated job before releasing the reserva
   const claim = await a.client.call('sharedBoard.apply', {...scope, command: {kind: 'claim', requestId: 'claim', cardId: 'card', expectedRevision: add.revision, worker}});
   const claimId = claim.card!.assignment!.claimId;
   const input = {...scope, requestId: 'claimed-compute', host: b.ref, profileId: 'conversation', baseCommit, claimId, task: '[sleep:15000]'};
-  const job = await a.client.call('sharedCompute.start', input);
+  let job = await a.client.call('sharedCompute.start', input);
+  await waitFor(() => b.h.core.sharedCompute.journal.get(job.id, 'host')?.job.status === 'running');
+  job = await a.client.call('sharedCompute.get', {...scope, jobId: job.id});
   expect(job.status).toBe('running');
   const released = await a.client.call('sharedBoard.apply', {...scope, command: {kind: 'release', requestId: 'release', cardId: 'card', claimId}});
   expect(released.outcome).toBe('applied'); expect(released.card!.assignment).toBeNull();
   expect(b.h.core.sharedCompute.journal.get(job.id, 'host')?.job.status).toBe('cancelled');
   expect(b.h.core.procs.liveCount(job.worker!.threadId)).toBe(0);
-  const late = await a.client.call('sharedCompute.start', {...input, requestId: 'late'});
+  let late = await a.client.call('sharedCompute.start', {...input, requestId: 'late'});
+  await waitFor(() => b.h.core.sharedCompute.journal.get(late.id, 'host')?.job.status === 'failed');
+  late = await a.client.call('sharedCompute.get', {...scope, jobId: late.id});
   expect(late.status).toBe('failed');
 }, 30000);
 
@@ -513,7 +570,9 @@ test('a worker cannot substitute another repository through its captured checkou
     const thread = b.h.core.threads.require(worker.threadId);
     writeFileSync(join(thread.cwd, '.git'), `gitdir: ${join(a.path, '.git')}\n`);
   };
-  const job = await a.client.call('sharedCompute.start', {...scope, requestId: 'foreign-git', host: b.ref, profileId: 'conversation', baseCommit, task: 'must not start'});
+  let job = await a.client.call('sharedCompute.start', {...scope, requestId: 'foreign-git', host: b.ref, profileId: 'conversation', baseCommit, task: 'must not start'});
+  await waitFor(() => b.h.core.sharedCompute.journal.get(job.id, 'host')?.job.status === 'failed');
+  job = await a.client.call('sharedCompute.get', {...scope, jobId: job.id});
   expect(job.status).toBe('failed'); expect(job.result).toBeNull();
   expect(b.h.core.journal.db.query('SELECT COUNT(*) AS n FROM turns WHERE thread_id=?').get(job.worker!.threadId)).toEqual({n: 0});
 }, 30000);
