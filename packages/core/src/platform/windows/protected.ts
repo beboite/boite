@@ -40,7 +40,7 @@ export class WindowsExecutionBoundary implements NativeExecutionBoundary {
     if (policy.credentialPaths.some(path => inside(windows, path) || inside(path, windows))
       || inside(windows, policy.checkout)) throw new Error('execution.windows.runtime: credentials and checkout must be outside the public Windows runtime');
     const checked = await run(helper, ['--version'], policy.checkout);
-    if (checked.code || checked.stdout !== windowsHelperVersion) throw new Error(`execution.windows.helper: expected ${windowsHelperVersion}`);
+    if (checked.code || checked.stdout !== windowsHelperVersion) throw new Error(`execution.windows.helper: expected ${windowsHelperVersion}; received ${JSON.stringify(checked)}`);
     const temporary = windowsScratchParent(windows, tmpdir(), process.env.LOCALAPPDATA);
     mkdirSync(temporary, {recursive: true});
     // Validate the canonical target too: a junction must not redirect the

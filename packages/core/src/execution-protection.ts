@@ -1,6 +1,11 @@
 import {randomUUID} from 'node:crypto';
+import {processEventDiagnostic} from './process-event-diagnostics.ts';
 import {assertExecutionPolicy, captureExecutionPolicy, type ExecutionPolicy, type ProtectedExecutionInput} from './execution-policy.ts';
 import type {NativeExecutionBoundary, NativeExecutionSession, ProtectedLaunch, ProtectionRunner} from './platform/protected.ts';
+
+// Record only the fixed field prefix, never paths or other error values.
+const refusalField = (error: unknown): string | null => error instanceof Error
+  ? /^execution\.[a-zA-Z.]+(?=:)/.exec(error.message)?.[0] ?? null : null;
 
 interface Lease {
   policy: ExecutionPolicy;
@@ -30,7 +35,10 @@ export class ExecutionProtections {
   assert(threadId: string): void {
     const lease = this.bindings.get(threadId);
     if (!lease) throw new Error('execution.thread: expected an installed capability');
-    try {this.check(lease);} catch (error) {void this.revoke(threadId).catch(() => {}); throw error;}
+    try {this.check(lease);} catch (error) {
+      processEventDiagnostic('protection.assert-refused', {threadId, capabilityId: lease.policy.capabilityId, closed: lease.closed, field: refusalField(error)});
+      void this.revoke(threadId).catch(() => {}); throw error;
+    }
   }
   /** Trusted provider control and fixed core Git operations, never model-supplied commands. */
   control(threadId: string): string {
@@ -79,12 +87,18 @@ export class ExecutionProtections {
     if (this.refused.has(threadId)) throw new Error('execution.scope: protection descriptor was refused; release required');
     const lease = this.bindings.get(threadId);
     if (!lease) return null;
+    let phase = 'authority';
     try {
       this.check(lease);
+      phase = 'descriptors';
       if (!lease.session) throw new Error('execution.platform: native protection is not ready');
       if (opts.extraPipes || opts.showWindow) throw new Error('execution.descriptors: protected tools accept only controlled stdin/stdout/stderr pipes and hidden execution');
+      phase = 'native-launch';
       return lease.session.launch(command, args, opts.cwd ?? lease.policy.checkout);
-    } catch (error) { void this.revoke(threadId).catch(() => {}); throw error; }
+    } catch (error) {
+      processEventDiagnostic('protection.launch-refused', {threadId, capabilityId: lease.policy.capabilityId, phase, field: refusalField(error)});
+      void this.revoke(threadId).catch(() => {}); throw error;
+    }
   }
 
   assertTerminal(threadId: string): void {
@@ -94,20 +108,34 @@ export class ExecutionProtections {
   flush(threadId: string): readonly string[] {
     const lease = this.bindings.get(threadId);
     if (!lease) throw new Error('execution.thread: expected an installed capability');
+    let phase = 'authority';
     try {
       this.check(lease);
-      if ([...lease.threads].some(id => this.live(id))) throw new Error('execution.processes: tools must exit before publishing project edits');
+      phase = 'processes';
+      if ([...lease.threads].some(id => {
+        const count = this.live(id);
+        processEventDiagnostic('protection.flush-membership', {threadId: id, capabilityId: lease.policy.capabilityId, count});
+        return count > 0;
+      })) throw new Error('execution.processes: tools must exit before publishing project edits');
+      phase = 'session';
       if (!lease.session) throw new Error('execution.platform: native protection is not ready');
+      phase = 'publish';
       const changed = lease.session.flush() ?? [];
+      phase = 'authority-after-publish';
       this.check(lease);
       return changed;
-    } catch (error) { void this.revoke(threadId).catch(() => {}); throw error; }
+    } catch (error) {
+      processEventDiagnostic('protection.flush-refused', {threadId, capabilityId: lease.policy.capabilityId, phase, field: refusalField(error)});
+      void this.revoke(threadId).catch(() => {}); throw error;
+    }
   }
 
   revoke(threadId: string): Promise<void> {
     const lease = this.bindings.get(threadId);
     if (!lease) return Promise.resolve();
     if (lease.stopping) return lease.stopping;
+    processEventDiagnostic('protection.revoke', {threadId, capabilityId: lease.policy.capabilityId, scopeId: lease.policy.scope.id,
+      controlId: lease.controlId ?? null, threads: lease.threads.size, helpers: lease.helpers.size});
     lease.closed = true;
     clearTimeout(lease.timer);
     lease.stopping = Promise.all([...lease.threads, ...lease.helpers].map(id => this.stop(id))).then(async () => {
@@ -135,7 +163,10 @@ export class ExecutionProtections {
 
   private expire(lease: Lease): void {
     lease.timer = setTimeout(() => {
-      if (Date.now() >= lease.policy.expiresAt) void this.revoke([...lease.threads][0]!).catch(() => {});
+      if (Date.now() >= lease.policy.expiresAt) {
+        processEventDiagnostic('protection.expired', {capabilityId: lease.policy.capabilityId});
+        void this.revoke([...lease.threads][0]!).catch(() => {});
+      }
       else this.expire(lease);
     }, Math.min(lease.policy.expiresAt - Date.now(), 2_147_483_647));
     lease.timer.unref();

@@ -100,7 +100,10 @@ the live registry is checked, without waiting for completion-port delivery.
 For a native ordering investigation, `BOITE_DIAGNOSE_JOB_EVENTS=1` writes
 `WINDOWS_JOB_EVENT` records to host stderr: worker packet/action/sequence,
 main-thread receipt, captured creation identity and registry admission or
-rejection. The native protected-tools CI step enables it for both helpers.
+rejection. Protection records identify the captured capability, native and
+registry membership, refusal phase, revocation and process-stop requests. Probe
+records distinguish deadline termination from a completed command. The native
+protected-tools and provider/shared CI steps enable it for both helpers.
 It records no commands, environment or paths and changes no exit, wait or
 publication decision. A later PID lookup without a valid creation time cannot
 identify the incarnation retained by the registry.

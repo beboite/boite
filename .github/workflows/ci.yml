@@ -328,6 +328,7 @@ jobs:
         if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
         env:
           BOITE_TEST_NATIVE_EXECUTION: '1'
+          BOITE_DIAGNOSE_JOB_EVENTS: '1'
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
         shell: pwsh
@@ -370,7 +371,8 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && github.event.pull_request.draft && (needs.changes.outputs.stale == 'true' || needs.changes.result != 'success' && needs.changes.outputs.stale != 'false') || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"windows-2025"')) }}
     runs-on: windows-2025
-    timeout-minutes: 15
+    # Two native compiler/provider matrices follow roughly eight minutes of setup.
+    timeout-minutes: 30
     steps: *core-steps
 
   core-macos-arm64:

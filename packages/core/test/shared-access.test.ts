@@ -18,7 +18,7 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 async function git(h: TestCore, cwd: string, ...args: string[]) {
-  const p = h.core.procs.spawn('thr_fixture', 'git', args, { cwd });
+  const p = h.core.procs.spawn('thr_fixture', 'git', args, {cwd, env: {GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(h.dataDir, 'no-global-gitconfig')}});
   const [out, err, code] = await Promise.all([new Response(p.proc.stdout).text(), new Response(p.proc.stderr).text(), p.exited]);
   if (code !== 0) throw new Error(`git ${args[0]}: ${err}`);
   return out.trim();
@@ -30,8 +30,10 @@ async function side() {
   const client = await h.connect();
   const path = join(dataDir, 'project'); mkdirSync(path);
   await git(h, path, 'init', '-b', 'main');
+  await git(h, path, 'config', '--local', 'user.name', 'Fixture');
+  await git(h, path, 'config', '--local', 'user.email', 'fixture@example.invalid');
   await git(h, path, 'remote', 'add', 'origin', 'https://example.invalid/fixtures/shared.git');
-  await git(h, path, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'base');
+  await git(h, path, 'commit', '--allow-empty', '-m', 'base');
   const project = await client.call('projects.add', { path });
   const account = h.core.accounts.list().find(a => a.providerId === 'echo')!;
   const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id });
@@ -57,6 +59,21 @@ async function fixture() {
   const agent = await connect(b.h.url, b.h.core.agents.tokenFor(worker.id));
   return {a, b, sharedProjectId, job, worker, agent};
 }
+
+test('shared fixture commits are consumable without a host Git identity', async () => {
+  const a = await side(), b = await side();
+  try {
+    await git(b.h, b.path, 'fetch', a.path, 'main');
+    await git(b.h, b.path, 'reset', '--hard', 'FETCH_HEAD');
+    writeFileSync(join(b.path, 'answer.txt'), '42');
+    await git(b.h, b.path, 'add', 'answer.txt');
+    await git(b.h, b.path, 'commit', '-m', 'Fixture edit');
+    await git(a.h, a.path, 'fetch', b.path, 'main');
+    await git(a.h, a.path, 'cherry-pick', 'FETCH_HEAD');
+    expect(readFileSync(join(a.path, 'answer.txt'), 'utf8')).toBe('42');
+    expect(await git(a.h, a.path, 'log', '-1', '--format=%cn <%ce>')).toBe('Fixture <fixture@example.invalid>');
+  } finally {a.client.close(); b.client.close();}
+});
 
 test('shared compaction tails enforce upload policy before materializing historical files', async () => {
   const {a, b, worker, agent} = await fixture();
@@ -136,9 +153,8 @@ test.skipIf(!nativePlatforms.includes(process.platform) || process.env.BOITE_TES
   writeFileSync(join(a.path, 'answer.test.js'), "import {test, expect} from 'bun:test'; import {answer} from './answer.js'; test('answer', () => expect(answer).toBe(42));\n");
   writeFileSync(join(a.path, '.gitignore'), 'dist/\n');
   await git(a.h, a.path, 'add', 'answer.js', 'answer.test.js', '.gitignore');
-  await git(a.h, a.path, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'Fixture source');
+  await git(a.h, a.path, 'commit', '-m', 'Fixture source');
   await git(b.h, b.path, 'fetch', a.path, 'main'); await git(b.h, b.path, 'reset', '--hard', 'FETCH_HEAD');
-  await git(b.h, b.path, 'config', 'user.name', 'Fixture'); await git(b.h, b.path, 'config', 'user.email', 'fixture@example.invalid');
   const api = protectedProviderApi(protocol === 'pi' || protocol === 'opencode' ? 'claude' : protocol, [
     {name: nativeName(protocol), input: nativeCommand(`const fs=require('fs'); if(fs.existsSync('.git')||process.env.BOITE_TOKEN) throw new Error('ambient authority'); fs.writeFileSync('answer.js',fs.readFileSync('answer.js','utf8').replace('41','42')); for (const args of [['build','answer.js','--outdir','dist'],['test','answer.test.js']]) {const p=Bun.spawnSync([process.execPath,...args]); if(p.exitCode) throw new Error(p.stderr.toString());}`)},
     {name: nativeName(protocol, true), input: {message: 'Apply validated fixture edit'}},

@@ -39,7 +39,10 @@ test('historical diagnostics reach their original setup and probe without enteri
   }
 });
 
-test('production still rejects the historical v1 helper before setup', async () => {
+test.each([
+  {code: 0, stdout: 'boite-windows-protected 1', stderr: ''},
+  {code: 9, stdout: 'boite-windows-protected 2', stderr: 'synthetic probe termination'},
+])('production rejects a failed version probe before setup and preserves its result: %j', async result => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'boite-production-version-'))), oldRoot = process.env.SystemRoot;
   try {
     const checkout = join(root, 'project'), windows = join(root, 'windows'), helper = join(root, 'historical.exe');
@@ -48,8 +51,8 @@ test('production still rejects the historical v1 helper before setup', async () 
       checkout, credentialPaths: [], expiresAt: Date.now() + 60000});
     const calls: string[][] = [];
     expect(await thrown(new WindowsExecutionBoundary(() => helper).open(policy, async (_command, args) => {
-      calls.push(args); return {code: 0, stdout: 'boite-windows-protected 1', stderr: ''};
-    }))).toThrow('expected boite-windows-protected 2');
+      calls.push(args); return result;
+    }))).toThrow(`expected boite-windows-protected 2; received ${JSON.stringify(result)}`);
     expect(calls).toEqual([['--version']]);
   } finally {
     if (oldRoot === undefined) delete process.env.SystemRoot; else process.env.SystemRoot = oldRoot;

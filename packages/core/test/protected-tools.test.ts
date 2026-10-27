@@ -1,4 +1,4 @@
-import {expect, test} from 'bun:test';
+import {expect, spyOn, test} from 'bun:test';
 import {mkdirSync} from 'node:fs';
 import {join} from 'node:path';
 import {Bus} from '../src/bus.ts';
@@ -28,6 +28,9 @@ for (const descendant of [false, true]) {
       })},
     };
     const procs = new ProcRegistry(harness.core.journal, bus, platform);
+    const previousDiagnostic = process.env.BOITE_DIAGNOSE_JOB_EVENTS;
+    const output = descendant ? spyOn(console, 'error').mockImplementation(() => {}) : null;
+    if (descendant) process.env.BOITE_DIAGNOSE_JOB_EVENTS = '1';
     const id = 'publication';
     try {
       await procs.protection.install(id, {scope: {kind: 'job', id: 'job', associationId: 'association', grantRevision: 1},
@@ -45,6 +48,11 @@ for (const descendant of [false, true]) {
       if (descendant) {
         expect(result.error).toContain('tools must exit');
         expect(published).toBe(0);
+        const events = output!.mock.calls.filter(call => call[0] === 'WINDOWS_JOB_EVENT')
+          .map(call => JSON.parse(String(call[1])));
+        const refused = events.findIndex(event => event.stage === 'protection.flush-refused');
+        expect(events[refused]).toMatchObject({phase: 'processes', field: 'execution.processes'});
+        expect(events.findIndex(event => event.stage === 'protection.revoke')).toBeGreaterThan(refused);
       } else {
         expect(result.error).toBe('');
         expect(result.result).toMatchObject({code: 0, stdout: 'useful\n'});
@@ -55,6 +63,9 @@ for (const descendant of [false, true]) {
     } finally {
       events.exited(id, 900_001, {exitCode: 0, cpuMs: null, peakMemoryBytes: null, ioBytes: null});
       await procs.close(); await harness.stop();
+      output?.mockRestore();
+      if (previousDiagnostic === undefined) delete process.env.BOITE_DIAGNOSE_JOB_EVENTS;
+      else process.env.BOITE_DIAGNOSE_JOB_EVENTS = previousDiagnostic;
     }
   });
 }

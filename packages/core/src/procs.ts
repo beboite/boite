@@ -631,6 +631,7 @@ export class ProcRegistry {
     this.finishStartup(threadId);
     const byPid = this.live.get(threadId);
     const entries = byPid === undefined ? [] : [...byPid.values()];
+    processEventDiagnostic('registry.stop-requested', {threadId, registered: entries.length});
     const terminated = this.platform.terminate(threadId);
     for (const entry of entries) {
       if (terminated && !this.unassigned.has(entry.record.pid)) continue;
