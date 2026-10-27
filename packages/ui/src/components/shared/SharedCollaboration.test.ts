@@ -99,6 +99,8 @@ test('host consent/contribution autosave, supported routes, job follow/cancel an
   expect([...el('shared-compute-start').closest('form')!.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input,textarea')].map(input => [input.value, input.checkValidity()])).toEqual([[base, true], ['Check the shared project', true]]);
   await click('shared-compute-start');
   expect(calls.mock.calls.filter(([method]) => method === 'sharedCompute.start')).toHaveLength(1);
+  expect(el<HTMLInputElement>('shared-profile-conversation').disabled).toBe(true);
+  expect(el<HTMLInputElement>('shared-compute-consent').disabled).toBe(false);
   expect(document.querySelector('[data-testid=shared-compute] [role=alert]')?.textContent ?? '').toBe('');
   await vi.waitFor(() => expect(el('shared-job')).not.toBeNull());
   const jobId = el('shared-job').dataset.job!;
@@ -108,6 +110,10 @@ test('host consent/contribution autosave, supported routes, job follow/cancel an
   await fill('shared-compute-task', 'Second shared job'); await click('shared-compute-start');
   await vi.waitFor(() => expect(el('shared-job-cancel')).not.toBeNull()); await click('shared-job-cancel');
   await vi.waitFor(async () => expect((await a.call('sharedCompute.list', localScope)).some(j => j.status === 'cancelled')).toBe(true));
+  await click('shared-compute-consent');
+  await vi.waitFor(() => expect(el<HTMLInputElement>('shared-profile-conversation').disabled).toBe(false));
+  await click('shared-profile-conversation');
+  await vi.waitFor(async () => expect((await a.call('sharedProjects.get', localScope)).shared.access[0].compute).toMatchObject({enabled: false, profiles: []}));
   expect(el('shared-protection-state').textContent).toContain('Secret files blocked by default');
   expect(el('shared-review-state').textContent).toContain('Off');
   await b.call('sharedProjects.revoke', {sharedProjectId: bs.sharedProjectId, requestId: 'host-close'});
@@ -152,6 +158,31 @@ test('reopening host settings restores the chosen conversation and unchanged pol
   expect(current.shared.access).toEqual(configured.shared.access);
   expect((await a.call('sharedCompute.list', as)).find(j => j.id === job.id)?.status).toBe('running');
   expect((await b.call('sharedCompute.list', bs)).find(j => j.id === job.id)?.status).toBe('running');
+});
+
+test.each(['threads', 'associations'] as const)('shared %s clears a recovered load error and ignores failures from older requests', async surface => {
+  const {store, a, ap, bid} = await setup();
+  let rejectFirst!: (error: Error) => void, rejectSecond!: (error: Error) => void;
+  const first = new Promise<never>((_, reject) => {rejectFirst = reject;}), second = new Promise<never>((_, reject) => {rejectSecond = reject;});
+  const original = store.shared.load.bind(store.shared);
+  const load = vi.spyOn(store.shared, 'load').mockImplementationOnce(() => first);
+  if (surface === 'threads') show(SharedProjectThreads, {store, projectId: ap.id, active: true,
+    children: createRawSnippet(() => ({render: () => '<div>Local thread</div>'}))});
+  else show(SharedAssociations, {store, projectId: ap.id, contact: (await a.call('contacts.get', {})).contacts.find(c => c.coreId === bid)!});
+  await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+  rejectFirst(new Error('Transient shared load failure')); await settle();
+  expect(document.querySelector('[role=alert]')?.textContent).toContain('Transient shared load failure');
+  await a.call('contacts.update', {coreId: bid, name: 'Recovered contact'});
+  await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(2)); await settle();
+  expect(document.querySelector('[role=alert]')).toBeNull();
+  load.mockImplementationOnce(() => second);
+  await a.call('contacts.update', {coreId: bid, name: 'Slow contact update'});
+  await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(3));
+  await a.call('contacts.update', {coreId: bid, name: 'Latest contact update'});
+  await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(4)); await settle();
+  rejectSecond(new Error('Obsolete request failure')); await settle();
+  expect(document.querySelector('[role=alert]')).toBeNull();
+  load.mockImplementation(original);
 });
 
 test('association needs the second owner consent and an open Contacts page can refresh an incoming offer', async () => {
@@ -261,4 +292,29 @@ test('revoke hides a foreign transcript immediately and fences an already pendin
   resolve({entries: [{id: 'late', at: Date.now(), role: 'assistant', text: 'LATE PRIVATE TEXT'}], more: false}); await settle();
   expect(el('shared-thread-dialog').textContent).not.toContain('LATE PRIVATE TEXT');
   expect(el('shared-thread-dialog').textContent).toContain('Access revoked');
+});
+
+
+test('manual and background association refreshes only publish their latest result', async () => {
+  const {store, a, ap, bid} = await setup();
+  show(SharedAssociations, {store, projectId: ap.id, contact: (await a.call('contacts.get', {})).contacts.find(c => c.coreId === bid)!});
+  await settle();
+  let reject!: (error: Error) => void;
+  const original = store.shared.load.bind(store.shared);
+  const load = vi.spyOn(store.shared, 'load').mockImplementationOnce(() => new Promise<never>((_, r) => {reject = r;}));
+  await click('shared-associations-refresh');
+  await a.call('contacts.update', {coreId: bid, name: 'Newest background'});
+  await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(2)); await settle();
+  reject(new Error('Obsolete manual failure')); await settle();
+  expect(document.querySelector('[role=alert]')).toBeNull();
+  let resolve!: (value: Awaited<ReturnType<typeof original>>) => void;
+  load.mockImplementationOnce(() => new Promise<Awaited<ReturnType<typeof original>>>(r => {resolve = r;}));
+  await a.call('contacts.update', {coreId: bid, name: 'Held background'});
+  await vi.waitFor(() => expect(resolve).toBeTypeOf('function'));
+  load.mockRejectedValueOnce(new Error('Current manual failure'));
+  await click('shared-associations-refresh');
+  expect(document.querySelector('[role=alert]')?.textContent).toBe('Current manual failure');
+  resolve([]); await settle();
+  expect(document.querySelector('[role=alert]')?.textContent).toBe('Current manual failure');
+  load.mockImplementation(original);
 });

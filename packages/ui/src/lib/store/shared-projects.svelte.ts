@@ -135,11 +135,11 @@ export class SharedProjects {
       this.#clear(watch);
       watch.value.error = this.ctx.reason(error);
       this.#release(watch);
-    }).finally(() => {
+    }).finally(async () => {
       if (!current()) return;
       watch.reading = null;
       watch.value.loading = false;
-      if (watch.pending) { const pending = [...watch.pending]; watch.pending = null; void this.refresh(scope, pending); }
+      if (watch.pending) { const pending = [...watch.pending]; watch.pending = null; await this.refresh(scope, pending); }
     });
     watch.reading = read;
     return read;

@@ -112,7 +112,7 @@ export function checkSteps(value: unknown, options: CheckOptions, field = 'steps
       const c = raw.compute;
       if (!isRecord(c) || !isRecord(c.host) || typeof c.host.ownerCoreId !== 'string' || !/^[a-f0-9]{64}$/.test(c.host.ownerCoreId) || typeof c.host.coreId !== 'string' || !/^[a-f0-9]{64}$/.test(c.host.coreId)
         || typeof c.baseCommit !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(c.baseCommit)) fail(`${at}.compute: expected a shared-project endpoint and full base commit`);
-      if (raw.model !== undefined || raw.profile !== undefined || raw.effort !== undefined || raw.context !== undefined || raw.worktree !== undefined) fail(`${at}.compute: the host owns model, effort, permissions, context and checkout`);
+      if (raw.model != null || raw.profile != null || raw.effort != null || raw.context != null || raw.worktree != null && raw.worktree !== false) fail(`${at}.compute: the host owns model, effort, permissions, context and checkout`);
       compute = {sharedProjectId: text(c.sharedProjectId, `${at}.compute.sharedProjectId`, 100), host: {ownerCoreId: c.host.ownerCoreId, coreId: c.host.coreId, projectId: text(c.host.projectId, `${at}.compute.host.projectId`, 128)},
         profileId: text(c.profileId, `${at}.compute.profileId`, 128), baseCommit: c.baseCommit};
     }
@@ -193,7 +193,11 @@ export function checkPlan(value: unknown, options: CheckOptions): CheckedPlan {
   const name = text(value.name, 'name', 80);
   const steps = checkSteps(value.steps, options);
   const limits = checkLimits(value.limits, steps.some(s => s.compute !== undefined));
-  const plan: WorkflowPlan = { name, steps: steps.map(({ deps: _deps, ...step }) => step), ...(value.limits ? { limits } : {}) };
+  const explicitLimits = isRecord(value.limits) ? {
+    ...(value.limits.maxConcurrent === undefined ? {} : {maxConcurrent: limits.maxConcurrent}),
+    ...(value.limits.maxSteps === undefined ? {} : {maxSteps: limits.maxSteps}),
+  } : undefined;
+  const plan: WorkflowPlan = { name, steps: steps.map(({ deps: _deps, ...step }) => step), ...(explicitLimits ? { limits: explicitLimits } : {}) };
   return { plan, steps, limits };
 }
 

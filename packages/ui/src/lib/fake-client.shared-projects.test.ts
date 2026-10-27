@@ -156,6 +156,14 @@ test('compute uses the selected host profile, refuses unsafe execution, scopes j
   b.finishSharedCompute(second.id,'Result');const done=await a.call('sharedCompute.get',{...as,jobId:second.id});
   expect(done).toMatchObject({status:'done',result:{baseCommit:base,commit:base,repository:'https://example.test/shared.git'}});
   expect(JSON.stringify(done)).not.toMatch(/accountId|token|executable/);
+  expect(await a.call('sharedCompute.cancel',{...as,jobId:second.id,requestId:'late-cancel'})).toEqual(done);
+  expect(await b.call('sharedCompute.get',{...bs,jobId:second.id})).toEqual(done);
+  const raced=await a.call('sharedCompute.start',{...input,requestId:'cancel-race'});
+  a.setContactConnected(bid,false);
+  await a.call('sharedCompute.cancel',{...as,jobId:raced.id,requestId:'held-cancel'});
+  b.finishSharedCompute(raced.id,'Completed before cancellation arrived');
+  a.setContactConnected(bid,true);
+  expect(await a.call('sharedCompute.get',{...as,jobId:raced.id})).toMatchObject({status:'done',result:{text:'Completed before cancellation arrived'}});
   await b.call('sharedProjects.revoke',{sharedProjectId:bs.sharedProjectId,requestId:'revoke'});
   expect(await a.call('sharedCompute.get',{...as,jobId:job.id}).catch(e=>e)).toMatchObject({code:RpcErrorCode.Refused});
 });

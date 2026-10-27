@@ -118,8 +118,12 @@ there. A step's result is collected once its worktree is kept or removed.
 For a plan containing shared-compute steps, the default and maximum concurrency
 ceiling in this table do not apply. A positive explicit plan limit still holds,
 and each host enforces its own contribution/resource settings. This permits
-four local and five remote executions without changing ordinary local plans
-or adding an exchange/hop limit. Existing step and payload bounds remain.
+four host-local and five remote shared executions without changing ordinary
+local plans or adding an exchange/hop limit. In a mixed plan, ordinary steps
+keep the default local concurrency of three unless the plan specifies an
+explicit limit. Shared steps can still start while those local slots are full;
+an explicit plan limit counts both kinds together. Existing step and payload
+bounds remain.
 
 Shared executions keep `instance.compute` with their job, owning endpoint,
 worker and verified Git result. A remote worker ID is never used as a local

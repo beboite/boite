@@ -90,3 +90,28 @@ test('access-only invalidations update verdicts without recursively reading watc
   expect(calls.mock.calls.filter(([m])=>m==='sharedCompute.list'||m==='sharedBoard.get')).toHaveLength(0);
   expect(calls.mock.calls.filter(([m])=>m==='sharedProjects.get')).toHaveLength(1);
 });
+
+
+test('access pagination waits for the queued refresh after an already pending read', async () => {
+  const {a, sa, as} = await setup();
+  releases.push(sa.shared.watch(as, ['access']));
+  await vi.waitFor(() => expect(sa.shared.view(as)?.loading).toBe(false));
+  const original = a.call.bind(a);
+  const resolve: ((value: unknown) => void)[] = [];
+  const calls = vi.spyOn(a, 'call').mockImplementation(((method: never, params: never) => {
+    if (method === 'sharedAccess.get') return new Promise<unknown>(r => {resolve.push(r);});
+    return original(method, params);
+  }) as typeof a.call);
+  let finished = false;
+  const first = sa.shared.refresh(as);
+  await vi.waitFor(() => expect(resolve).toHaveLength(1));
+  const next = sa.shared.accessPage(as, 'next-page').then(() => {finished = true;});
+  try {
+    resolve[0]!({events: [], next: 'next-page'});
+    await vi.waitFor(() => expect(resolve).toHaveLength(2));
+    expect(finished).toBe(false);
+    expect(calls.mock.calls.filter(([m]) => m === 'sharedAccess.get')[1]![1]).toMatchObject({after: 'next-page'});
+  } finally {
+    resolve[1]?.({events: [], next: null}); await first; await next; calls.mockRestore();
+  }
+});

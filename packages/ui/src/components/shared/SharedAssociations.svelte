@@ -14,20 +14,26 @@
   let projects = $derived(thread ? (store.shared.projects[thread.id] ?? []).filter(p => p.contact.coreId === contact.coreId) : []);
   let busy = $state(false), error = $state('');
   let selected = $state<SharedProjectScope | null>(null);
+  let loadVersion = 0;
+  async function load() {
+    const owner = store, id = thread?.id, client = owner.client, request = ++loadVersion;
+    if (!id || owner.connection !== 'ready' || !client) return;
+    const current = () => request === loadVersion && store === owner && owner.client === client && thread?.id === id;
+    try {await owner.shared.load(id); if (current()) error = '';}
+    catch (e) {if (current()) error = errorText(e);}
+  }
   async function refresh() {
     if (!thread || busy) return;
     busy = true; error = '';
-    try { await store.shared.load(thread.id); } catch (e) { error = errorText(e); }
+    try { await load(); }
     finally { busy = false; }
   }
   $effect(() => {
     const id = thread?.id, client = store.client;
     if (!id || store.connection !== 'ready' || !client) return;
-    let alive = true;
-    const load = () => { void store.shared.load(id).catch(e => { if (alive) error = errorText(e); }); };
-    untrack(load);
-    const release = client.on('contacts.updated', load);
-    return () => { alive = false; release(); };
+    untrack(() => {void load();});
+    const release = client.on('contacts.updated', () => {void load();});
+    return () => { loadVersion++; release(); };
   });
   const remoteOf = (offer: ContactOffer): SharedProjectRef => offer.sharedProject ?? {ownerCoreId: contact.coreId, coreId: contact.coreId, projectId: offer.projectId};
   const keyOf = (ref: SharedProjectRef) => JSON.stringify([ref.ownerCoreId, ref.coreId, ref.projectId]);

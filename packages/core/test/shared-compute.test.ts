@@ -403,6 +403,27 @@ test('the existing workflow runner distributes four local and five remote jobs w
   expect(await thrown(a.client.call('workflows.check', {threadId: a.threadId, plan: {...plan, steps: [{...plan.steps[0]!, model: 'echo'}]}}))).toThrow('host owns model');
 }, 30000);
 
+test.each([undefined, {maxSteps: 24}, {maxConcurrent: 2}])('mixed workflows retain ordinary admission with plan limits %j while shared work can start', async limits => {
+  const maxConcurrent = limits && 'maxConcurrent' in limits ? limits.maxConcurrent : undefined;
+  const {a, b, scope, baseCommit, enable} = await pair(); await enable(b);
+  const unblockA = holdAccountTurns(a.h, a.accountId), unblockB = holdAccountTurns(b.h, b.accountId);
+  try {
+    const run = await a.client.call('workflows.start', {threadId: a.threadId, requestId: 'mixed-admission', plan: {
+      name: 'Mixed admission', ...(limits === undefined ? {} : {limits}),
+      steps: [...Array.from({length: 5}, (_, i) => ({id: `local${i}`, task: 'Held local work'})),
+        {id: 'remote', task: 'Held remote work', compute: {sharedProjectId: scope.sharedProjectId, host: b.ref, profileId: 'conversation', baseCommit}}],
+    }});
+    const current = () => a.h.core.workflows.get(a.threadId, run.id);
+    await waitFor(() => current().nodes.some(n => n.instances.some(i => i.status === 'running')));
+    const local = current().nodes.filter(n => n.id.startsWith('local'));
+    expect(local.flatMap(n => n.instances).filter(i => i.status === 'running')).toHaveLength(maxConcurrent ?? 3);
+    expect(local.flatMap(n => n.instances).filter(i => i.status === 'waiting')).toHaveLength(5 - (maxConcurrent ?? 3));
+    if (maxConcurrent === undefined) await waitFor(() => current().nodes.find(n => n.id === 'remote')!.instances.some(i => i.compute?.jobId));
+    else expect(current().nodes.find(n => n.id === 'remote')!.instances[0]!.status).toBe('waiting');
+    await a.client.call('workflows.control', {threadId: a.threadId, runId: run.id, action: 'stop'});
+  } finally {unblockA(); unblockB();}
+}, 30000);
+
 test('workflow stop cancels the captured remote execution; a paused restart reattaches the same completed job', async () => {
   const {a, b, scope, baseCommit, enable} = await pair(); await enable(b);
   const plan: WorkflowPlan = {name: 'Shared controlled', steps: [{id: 'remote', task: '[sleep:3000]', compute: {sharedProjectId: scope.sharedProjectId, host: b.ref, profileId: 'conversation', baseCommit}}]};

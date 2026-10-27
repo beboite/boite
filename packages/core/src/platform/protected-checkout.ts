@@ -160,7 +160,11 @@ export class ProtectedCheckout {
           } finally { closeSync(input); }
         } finally { closeSync(fd); }
       }
-      for (const path of this.files.keys()) if (!next.has(path)) unlinkSync(join(this.policy.checkout, path));
+      for (const [path, file] of this.files) if (!next.has(path)) {
+        const host = join(this.policy.checkout, path);
+        if (policyIdentity(host, lstatSync(host, {bigint: true})) !== file.identity) throw new Error('execution.result: host file changed since capture');
+        unlinkSync(host);
+      }
       this.files.clear();
       for (const [path, state] of next) {
         const host = join(this.policy.checkout, path);

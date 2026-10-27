@@ -52,17 +52,21 @@ export class WindowsExecutionBoundary implements NativeExecutionBoundary {
     let prepared = false, closed = false;
     let launchMode: WindowsLaunchMode = 'run';
     const close = () => {
-      if (closed) return;
+      closed = true;
+      const errors: unknown[] = [];
       // Core-owned FFI cleanup still runs after the captured runner has been revoked.
       // DeleteAppContainerProfile touches only this unpredictable task-created profile.
-      if (prepared) {
+      try {if (prepared) {
         const library = dlopen('userenv.dll', {DeleteAppContainerProfile: {args: [FFIType.ptr], returns: FFIType.i32}});
         try {
           const name = wide(profile), hr = library.symbols.DeleteAppContainerProfile(ptr(name));
           if (hr !== 0 && (hr >>> 0) !== 0x80070002) throw new Error(`execution.windows.profile.cleanup: DeleteAppContainerProfile failed (${hr >>> 0})`);
+          prepared = false;
         } finally {library.close();}
-      }
-      checkout.close(); closed = true;
+      }} catch (error) {errors.push(error);}
+      try {checkout.close();} catch (error) {errors.push(error);}
+      if (errors.length === 1) throw errors[0];
+      if (errors.length) throw new AggregateError(errors, 'execution.windows.cleanup: profile and checkout cleanup failed');
     };
     try {
       mkdirSync(runtime); mkdirSync(home); mkdirSync(join(home, 'temp'));

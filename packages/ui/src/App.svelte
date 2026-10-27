@@ -335,7 +335,7 @@
     const held = workspace.waiting && owner === workspace.primary;
     // Chrome refuses every socket until "Local network" is allowed: the recovery screen says so, and "socket error" says nothing more.
     const blocked = mobileRecovery && localNetwork.state === 'denied';
-    if (!error || pairingNotice || held || blocked) {
+    if (!error || owner.errorOffline || pairingNotice || held || blocked) {
       toast.hide();
       return;
     }

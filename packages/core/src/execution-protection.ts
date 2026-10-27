@@ -155,19 +155,23 @@ export class ExecutionProtections {
       controlId: lease.controlId ?? null, threads: lease.threads.size, helpers: lease.helpers.size});
     lease.closed = true;
     clearTimeout(lease.timer);
-    lease.stopping = Promise.all([...lease.threads, ...lease.helpers].map(id => this.stop(id))).then(async () => {
+    lease.stopping = Promise.allSettled([...lease.threads, ...lease.helpers].map(id => Promise.resolve().then(() => this.stop(id)))).then(async results => {
+      const errors: unknown[] = results.filter(r => r.status === 'rejected').map(r => r.reason);
       const session = lease.session ?? await lease.opening?.catch(() => null);
-      await session?.close();
-      lease.session = null;
+      try {await session?.close(); lease.session = null;} catch (error) {errors.push(error);}
+      if (errors.length) throw new AggregateError(errors, 'execution.cleanup: protected stop or session cleanup failed');
     });
-    return lease.stopping;
+    const stopping = lease.stopping;
+    void stopping.catch(() => {if (lease.stopping === stopping) lease.stopping = undefined;});
+    return stopping;
   }
 
   async release(threadId: string): Promise<void> {
     const lease = this.bindings.get(threadId);
     await this.revoke(threadId);
+    if (this.bindings.get(threadId) !== lease) return;
     this.refused.delete(threadId);
-    if (lease) for (const id of lease.threads) this.bindings.delete(id);
+    if (lease) for (const id of lease.threads) if (this.bindings.get(id) === lease) this.bindings.delete(id);
   }
 
   async close(): Promise<void> { await Promise.all([...this.bindings.keys()].map(id => this.release(id))); this.refused.clear(); }

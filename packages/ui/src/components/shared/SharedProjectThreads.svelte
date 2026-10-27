@@ -18,8 +18,12 @@
   $effect(() => {
     const client = store.client, id = thread?.id;
     if (!active || !id || !experimentOn('contacts') || store.connection !== 'ready' || !client) return;
-    let alive = true;
-    const load = () => { void store.shared.load(id).catch(e => { if (alive) error = errorText(e); }); };
+    let alive = true, version = 0;
+    const load = () => {
+      const request = ++version;
+      void store.shared.load(id).then(() => {if (alive && request === version) error = '';})
+        .catch(e => {if (alive && request === version) error = errorText(e);});
+    };
     untrack(load);
     const release = client.on('contacts.updated', load);
     return () => { alive = false; release(); };

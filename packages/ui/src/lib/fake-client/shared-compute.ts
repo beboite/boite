@@ -102,7 +102,7 @@ export function sharedComputeMethods(ctx:FakeContext){
       const host=source.job.host.coreId===ctx.identity.coreId?ctx:remoteShared(ctx,s);
       const record=host&&stateOf(host).jobs.get(source.job.id);
       if(!record)continue;
-      if(source.cancelRequest&&!['revoked','cancelled'].includes(record.job.status)) {
+      if(source.cancelRequest&&!terminal(record.job)) {
         record.job={...record.job,status:'cancelled',error:null,result:null,revision:record.job.revision+1,updatedAt:Date.now()};
         if(record.job.worker){const running=host!.inFlight.get(record.job.worker.threadId);if(running)running.cancelled=true;host!.thread(record.job.worker.threadId).status='idle';}
       }
@@ -163,6 +163,7 @@ export function sharedComputeMethods(ctx:FakeContext){
     },
     'sharedCompute.cancel':async p=>{
       const {host,record,shared}=job(p);const requestId=sharedText(p.requestId,'requestId');
+      if(terminal(record.job))return cloneShared(record.job);
       if(record.job.host.coreId!==ctx.identity.coreId) {
         record.cancelRequest??=requestId;record.job={...record.job,status:'uncertain',error:'Cancellation pending',result:null,revision:record.job.revision+1};
         notifyShared(ctx,shared.id);return cloneShared(record.job);
