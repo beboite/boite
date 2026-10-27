@@ -1,4 +1,8 @@
 import { expect, test } from 'bun:test';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { processTreeFixture } from './lib/process-tree-fixture.ts';
 import { rejection } from '../../packages/core/test/settle.ts';
 import { windowsProcessTree } from './lib/process-tree.ts';
 
@@ -7,30 +11,10 @@ import { windowsProcessTree } from './lib/process-tree.ts';
 // loaded runner; this one reads the same in this process.
 test.skipIf(process.platform !== 'win32')('the process tree lists every descendant with its command line, in well under a second', async () => {
   const marker = `tree-${process.pid}-${Date.now()}`;
-  // Two levels below the captured root, all kept alive until the test ends.
-  const descendant = `const child = Bun.spawn([process.execPath, '-e', 'setInterval(() => {}, 1000)', '${marker}-great-grandchild'], { stdout: 'ignore', stderr: 'ignore', windowsHide: true }); console.log(child.pid); setInterval(() => {}, 1000);`;
-  const script = `const child = Bun.spawn([process.execPath, '-e', ${JSON.stringify(descendant)}, '${marker}-grandchild'], { stdout: 'pipe', stderr: 'ignore', windowsHide: true }); console.log(child.pid); await Bun.write(Bun.stdout, child.stdout);`;
-  const parent = Bun.spawn([process.execPath, '-e', script, `${marker}-child`], { stdout: 'pipe', stderr: 'ignore', windowsHide: true });
-  const descendants: number[] = [];
+  const fixture = processTreeFixture(marker);
+  const parent = fixture.parent;
   try {
-    const reader = parent.stdout.getReader();
-    try {
-      let output = '';
-      while (descendants.length < 2) {
-        const { value, done } = await reader.read();
-        if (done) throw new Error('process-tree fixture exited before both descendants were ready');
-        output += new TextDecoder().decode(value);
-        let end: number;
-        while ((end = output.indexOf('\n')) !== -1) {
-          const pid = Number(output.slice(0, end).trim());
-          output = output.slice(end + 1);
-          if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('process-tree fixture returned an invalid PID');
-          descendants.push(pid);
-        }
-      }
-    } finally {
-      reader.releaseLock();
-    }
+    const descendants = await fixture.ready();
     const started = performance.now();
     const tree = await windowsProcessTree(parent.pid);
     const took = performance.now() - started;
@@ -59,9 +43,7 @@ test.skipIf(process.platform !== 'win32')('the process tree lists every descenda
     expect(took).toBeLessThan(1000);
     expect(await windowsProcessTree(2 ** 31)).toEqual([]);
   } finally {
-    for (const pid of descendants.toReversed()) try { process.kill(pid); } catch {}
-    parent.kill();
-    await parent.exited;
+    await fixture.close();
   }
 }, 20_000);
 
@@ -74,3 +56,40 @@ test('a process-tree observation revoked while FFI loads cancels before native a
   const failure = await rejection(sampling);
   expect(failure.reason).toMatchObject({ code: 'ABORT_ERR' });
 });
+
+// The spawn journal is independent of PID forwarding: a silent stdout must
+// neither hang readiness nor leave processes the caller never heard about.
+test.each(['ready', 'timeout', 'cancel'] as const)('fixture readiness and owned cleanup (%s)', async mode => {
+  const directory = mkdtempSync(join(tmpdir(), 'boite-process-tree-'));
+  const journal = join(directory, 'spawned.txt');
+  const fixture = processTreeFixture(`cleanup-${process.pid}-${Date.now()}`, mode === 'ready', journal);
+  const controller = new AbortController();
+  const ready = fixture.ready(controller.signal).then(() => 'ready', (error: unknown) => String(error));
+  let pids: number[] = [];
+  let supervisor: ReturnType<typeof setTimeout> | undefined;
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  try {
+    const deadline = Date.now() + 5_000;
+    do {
+      pids = readFileSync(journal, 'utf8').trim().split('\n').map(Number);
+      if (pids.length === 3) break;
+      await Bun.sleep(10);
+    } while (Date.now() < deadline);
+    expect(pids).toHaveLength(3);
+    expect(pids.every(pid => Number.isSafeInteger(pid) && pid > 0 && alive(pid))).toBe(true);
+    if (mode === 'cancel') controller.abort(new Error('fixture startup cancelled by test'));
+    // A regression must fail and still reach its finally if readiness never settles.
+    const outcome = await Promise.race([ready, new Promise<string>(resolve => { supervisor = setTimeout(() => resolve('startup never settled'), 6_000); })]);
+    await fixture.close();
+    const remaining = pids.filter(alive);
+    expect({ outcome: mode === 'ready' ? outcome : /timed out|cancelled/.test(outcome), remaining }).toEqual({ outcome: mode === 'ready' ? 'ready' : true, remaining: [] });
+  } finally {
+    clearTimeout(supervisor);
+    await fixture.close();
+    // Only PIDs captured at their spawn in this fixture's private journal.
+    pids = readFileSync(journal, 'utf8').trim().split('\n').map(Number);
+    for (const pid of pids.toReversed()) if (alive(pid)) try { process.kill(pid); } catch {}
+    await ready;
+    rmSync(directory, { recursive: true, force: true });
+  }
+}, 20_000);
