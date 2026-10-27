@@ -1,4 +1,4 @@
-import type { Options, Query, SDKControlGetContextUsageResponse, Settings } from '@anthropic-ai/claude-agent-sdk';
+import type { HookCallback, Options, Query, SDKControlGetContextUsageResponse, Settings } from '@anthropic-ai/claude-agent-sdk';
 import { messageOf } from '../../errors.ts';
 import { PromptQueue, type QueryFn } from './query.ts';
 
@@ -7,6 +7,24 @@ const MIN_WINDOW = 100_000;
 const MAX_WINDOW = 1_000_000;
 
 type OpenQuery = { query: Query; prompts: PromptQueue };
+
+/**
+ * What every compaction asks of its summary: Boite's `/compact`, the CLI's
+ * own at its threshold and the user's. The summary rides in every call until
+ * the next compaction: 20k characters, about 8k tokens, at the median over a
+ * week of Claude sessions (`bun scripts/token-audit.ts`, 2026-10-27), some
+ * 3,300 words. The CLI attaches the files read last after it, so their code
+ * need not be in it.
+ */
+export const COMPACT_FOCUS = 'Keep the summary short, under 2,000 words: the user\'s requests and corrections, decisions and their reasons, the current state and the next step, and the paths, identifiers, commands and numbers still needed. Leave out code and tool output that the files hold, and finished steps that need no follow-up.';
+
+/**
+ * Claude Code 2.1.310 adds a PreCompact hook's `systemMessage` to the summary
+ * prompt's "Additional Instructions", after any the `/compact` command gave.
+ * A callback still runs under `disableAllHooks` and emits no hook event, so
+ * it never reaches the user's hook ledger (probed offline, 2026-10-27).
+ */
+export const compactFocus: HookCallback = async () => ({ systemMessage: COMPACT_FOCUS });
 
 /**
  * Claude Code 2.1.310 accepts the live flag but leaves appState.autoCompactWindow

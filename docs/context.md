@@ -84,6 +84,21 @@ The existing Stop action cancels the maintenance turn. Paired devices may call i
 | ACP | `/compact` only when the session advertised that command |
 | echo | `[compact]`, a deterministic test operation; the divider it draws says `manual`, while `[compact]` inside a prompt draws an `auto` one |
 
+Every Claude compaction asks for a short summary: this one, the CLI's own at
+its threshold, and a `/compact` the user types. A PreCompact hook in the
+session's options returns `COMPACT_FOCUS`
+(`packages/core/src/drivers/claude/compaction.ts`): under 2,000 words, keeping
+the user's requests and corrections, decisions, the current state, the next
+step, and the paths, identifiers, commands and numbers still needed, without
+code the files hold. The summary stays in every request until the next
+compaction, and a week of Claude sessions put it at 20k characters, some 3,300
+words, at the median ([where the tokens go](performance.md#where-an-agents-tokens-go)).
+Claude Code 2.1.310 adds the hook's text to the summary prompt after the
+user's own instructions, runs it under `disableAllHooks` too, and reports no
+hook run for it. The offline control test in `claude.compact.test.ts`
+(`BOITE_TEST_CLAUDE_CONTROLS=1`) checks that the text reaches the summary request.
+Other drivers compact with their own prompt.
+
 The control is disabled while a turn runs, before a native session exists, or
 when the driver cannot compact. ACP must advertise the command. Compaction can make a provider
 call and incur usage. The driver does not invent a post-compaction token count.

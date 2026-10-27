@@ -3,7 +3,7 @@ import { answerEach, calls, claudeThread, harness, queries, runTurn, scripted, s
 import { waitFor } from './harness.ts';
 import { join } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { openWithCompaction } from '../src/drivers/claude/compaction.ts';
+import { COMPACT_FOCUS, compactFocus, openWithCompaction } from '../src/drivers/claude/compaction.ts';
 
 useClaudeHarness();
 
@@ -23,6 +23,7 @@ test('the independent token threshold is verified at launch before the first pro
     expect(calls[0]!.prompts).toEqual([]);
     expect(calls[0]!.options.persistSession).toBe(false);
     expect(calls[1]!.options.settings).toMatchObject({ autoCompactWindow: 227_419, autoCompactEnabled: true, autoMemoryEnabled: false, fastMode: false });
+    expect(calls[1]!.options.hooks?.PreCompact).toEqual([{ hooks: [compactFocus] }]);
     expect(calls[1]!.prompts).toEqual(['work']);
     expect(queries.every(query => query.contextUsageCalls.every(options => options.detail === 'summary'))).toBe(true);
     expect(queries.every(query => query.interrupts === 0 && query.compactionSettings.length === 0)).toBe(true);
@@ -200,13 +201,17 @@ test.skipIf(process.env['BOITE_TEST_CLAUDE_CONTROLS'] !== '1')('the installed CL
   writeFileSync(fixture, 'Offline read fixture.');
   let requests = 0;
   let counts = 0;
+  let summaryPrompt = '';
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
     const path = new URL(request.url).pathname;
     if (path.endsWith('/count_tokens')) { counts++; return new Response('token counting forbidden in this test', { status: 400 }); }
     if (path !== '/v1/messages') return new Response('unexpected route', { status: 404 });
-    const body = await request.json() as { stream?: boolean };
+    const body = await request.json() as { stream?: boolean; messages: { content: string | { text?: string }[] }[] };
     requests++;
     if (requests > 4) return new Response('unexpected extra inference', { status: 400 });
+    if (requests === 3) {
+      summaryPrompt = body.messages.flatMap(({ content }) => typeof content === 'string' ? [content] : content.map(block => block.text ?? '')).join('\n');
+    }
     const tool = requests <= 2;
     const content = tool
       ? { type: 'tool_use', id: `toolu_offline_${requests}`, name: 'Read', input: { file_path: fixture } }
@@ -241,6 +246,7 @@ test.skipIf(process.env['BOITE_TEST_CLAUDE_CONTROLS'] !== '1')('the installed CL
     model: 'claude-opus-5', tools: ['Read'], strictMcpConfig: true, mcpServers: {},
     permissionMode: 'bypassPermissions', allowDangerouslySkipPermissions: true,
     systemPrompt: 'Offline control test', persistSession: false, env, abortController: controller,
+    hooks: { PreCompact: [{ hooks: [compactFocus] }] },
     spawnClaudeCodeProcess(options) {
       const child = harness.core.procs.spawnChild('claude-compact-controls', options.command, options.args, { cwd: options.cwd, env: options.env });
       child.stderr.resume();
@@ -270,7 +276,8 @@ test.skipIf(process.env['BOITE_TEST_CLAUDE_CONTROLS'] !== '1')('the installed CL
     expect(compactAt).toBe(3);
     expect(requests).toBe(4);
     expect(counts).toBe(0);
-    console.log('offline native loop: no compact at 190000 tokens; compact after tool at 210000; fourth request continues the same turn; no token-count call');
+    expect(summaryPrompt).toContain(`Additional Instructions:\n${COMPACT_FOCUS}`);
+    console.log('offline native loop: no compact at 190000 tokens; compact after tool at 210000 with Boite\'s summary focus; fourth request continues the same turn; no token-count call');
   } finally {
     prompts.end();
     controller.abort();
