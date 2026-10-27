@@ -313,7 +313,8 @@ export function threadJobHasProcesses(threadId: string): boolean {
   if (job === undefined) return false;
   const api = ensureNative();
   const members = api === null ? null : listJobPids(api, job.handle);
-  processEventDiagnostic('jobs.publication-membership', {threadId, members: members?.size ?? null});
+  processEventDiagnostic('jobs.publication-membership', {threadId, members: members?.size ?? null, capturedPids: [...job.pids].filter(pid => tracked.get(pid)?.threadId === threadId).join(','),
+    pids: members === null ? null : [...members].join(','), ignoredPids: members === null ? null : [...members].filter(pid => ignored.has(pid)).join(',')});
   if (members === null || members.size > 0) return true;
   for (const pid of [...job.pids]) onProcessExited(threadId, pid);
   return false;

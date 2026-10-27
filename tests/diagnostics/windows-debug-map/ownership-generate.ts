@@ -6,7 +6,7 @@ import {mock} from 'bun:test';
 
 export const jobsPath = resolve(import.meta.dir, '../../../packages/core/src/platform/windows/jobs.ts');
 export const workerPath = join(dirname(jobsPath), 'jobs-worker.ts');
-export const jobsHash = 'da79e6fa3337d31371e402a8ef979e940f32275d807c2f658cf681ce6de61930';
+export const jobsHash = '1005a96fc78320bafca64ba92202e7853c583412d90c6dcfed446085e9ae0f5d';
 export const workerHash = 'e0b93fcb4ddb0e9d8155cd203bfa67bcb1ac0715318a23ca2bdb19b2ecdcc29f';
 const runtime = pathToFileURL(join(import.meta.dir, 'ownership-trace.ts')).href;
 const ledger = pathToFileURL(join(import.meta.dir, 'ownership-ledger.ts')).href;

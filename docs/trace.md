@@ -104,6 +104,8 @@ rejection. Protection records identify the captured capability, native and
 registry membership, refusal phase, revocation and process-stop requests. Probe
 records distinguish deadline termination from a completed command. The native
 protected-tools and provider/shared CI steps enable it for both helpers.
+Publication snapshots include the PID list from that same native membership
+query and the existing captured and ignored PID sets, without reopening a PID.
 It records no commands, environment or paths and changes no exit, wait or
 publication decision. A later PID lookup without a valid creation time cannot
 identify the incarnation retained by the registry.

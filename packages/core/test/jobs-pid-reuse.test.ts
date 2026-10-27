@@ -133,26 +133,35 @@ test('a held-handle diagnostic distinguishes a running process from an unreadabl
   }
 });
 
-for (const state of ['exited', 'still-active', 'unseen-member', 'unreadable-job'] as const) {
+for (const state of ['exited', 'still-active', 'unseen-member', 'ignored-member', 'unreadable-job'] as const) {
   test(`publication reconciles captured exits before delayed job packets: ${state}`, async () => {
     const {registry, close} = await fixture(), harness = await startTestCore();
     const root = join(harness.dataDir, 'publication'); mkdirSync(root);
     const creation = 116444736000001111n, closed: number[] = [];
-    let running = state === 'still-active', published = 0;
+    let running = state === 'still-active', published = 0, queries = 0;
+    const previous = process.env.BOITE_DIAGNOSE_JOB_EVENTS;
+    const output = spyOn(console, 'error').mockImplementation(() => {});
+    process.env.BOITE_DIAGNOSE_JOB_EVENTS = '1';
     const platform: ProcessPlatform = {...createPosixPlatform('linux', null),
       capability: () => ({os: 'windows', mode: 'events', note: 'held native job fixture'}),
       hasProcesses: id => registry.threadJobHasProcesses?.(id) ?? false,
       terminate: () => true,
       retain: events => registry.configure({hasNt: false, lastError: () => 5,
         openProcess: () => {throw new Error('must use the captured handle');},
-        close: handle => {closed.push(handle);}, imageName: () => false,
+        close: handle => {closed.push(handle);}, imageName(handle, out, size) {
+          if (handle !== 303) return false;
+          const image = String.raw`C:\Windows\System32\conhost.exe`;
+          for (let i = 0; i < image.length; i++) out[i] = image.charCodeAt(i);
+          size[0] = image.length; return true;
+        },
         processTimes(_handle, out) {new DataView(out.buffer).setBigUint64(0, creation, true); return true;},
         exitCode(_handle, out) {out[0] = running ? 259 : 0; return true;},
         memoryInfo: () => false, ioCounters: () => false, terminateProcess: () => false,
         queryJobInfo(_job, klass, out) {
+          queries++;
           expect(klass).toBe(3);
           if (state === 'unreadable-job') return false;
-          if (state === 'unseen-member') {
+          if (state === 'unseen-member' || state === 'ignored-member') {
             const view = new DataView(out.buffer);
             view.setUint32(0, 1, true); view.setUint32(4, 1, true); view.setBigUint64(8, 5678n, true);
           }
@@ -170,6 +179,7 @@ for (const state of ['exited', 'still-active', 'unseen-member', 'unreadable-job'
         checkout: root, credentialPaths: [], executables: [process.execPath], expiresAt: Date.now() + 60000}, () => {});
       registry.hold(id);
       if (state === 'exited' || state === 'still-active') registry.start(id, 1234, 202);
+      if (state === 'ignored-member') registry.start(id, 5678, 303);
       if (state === 'exited') {
         expect(procs.liveCount(id)).toBe(1);
         expect(procs.protection.flush(id)).toEqual(['answer.js']);
@@ -181,12 +191,24 @@ for (const state of ['exited', 'still-active', 'unseen-member', 'unreadable-job'
       } else {
         expect(() => procs.protection.flush(id)).toThrow('tools must exit');
         expect(procs.liveCount(id)).toBe(state === 'still-active' ? 1 : 0);
-        expect(closed).toEqual([]);
+        expect(closed).toEqual(state === 'ignored-member' ? [303] : []);
       }
       expect(published).toBe(state === 'exited' ? 1 : 0);
+      expect(queries).toBe(1);
+      const snapshots = output.mock.calls.filter(call => call[0] === 'WINDOWS_JOB_EVENT')
+        .map(call => JSON.parse(String(call[1]))).filter(row => row.stage === 'jobs.publication-membership');
+      expect(snapshots).toEqual([expect.objectContaining({
+        members: state === 'unreadable-job' ? null : state.endsWith('member') ? 1 : 0,
+        pids: state === 'unreadable-job' ? null : state.endsWith('member') ? '5678' : '',
+        ignoredPids: state === 'unreadable-job' ? null : state === 'ignored-member' ? '5678' : '',
+        capturedPids: state === 'exited' || state === 'still-active' ? '1234' : '',
+      })]);
     } finally {
       running = false; registry.exit(id, 1234);
       await procs.close(); close(); await harness.stop();
+      output.mockRestore();
+      if (previous === undefined) delete process.env.BOITE_DIAGNOSE_JOB_EVENTS;
+      else process.env.BOITE_DIAGNOSE_JOB_EVENTS = previous;
     }
   });
 }

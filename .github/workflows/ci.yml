@@ -191,6 +191,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - name: Build userspace native helper
+        id: native_helper
         if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
         shell: pwsh
         run: |
@@ -319,13 +320,14 @@ jobs:
           path: ${{ runner.temp }}/protected-tool*.exe
           retention-days: 3
       - name: Prepare synthetic native providers
-        if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        id: native_providers
+        if: ${{ !cancelled() && runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true' && steps.native_helper.outcome == 'success' }}
         env:
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
         run: bun packages/core/test/fixtures/prepare-native-providers.ts
       - name: Native Windows provider and shared scopes
-        if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        if: ${{ !cancelled() && runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true' && steps.native_providers.outcome == 'success' }}
         env:
           BOITE_TEST_NATIVE_EXECUTION: '1'
           BOITE_DIAGNOSE_JOB_EVENTS: '1'

@@ -156,10 +156,14 @@ test('protection changes run the native fixture inside the existing Windows core
   const ci = loadWorkflow('ci.yml');
   const changes = ci.jobs.changes as Job & { outputs: Record<string, string> };
   expect(changes.outputs.nativeWindows).toBe('${{ steps.filter.outputs.nativeWindows }}');
-  const windows = ci.jobs['core-windows-x64'] as Job & { 'timeout-minutes': number; steps: { name?: string; if?: string; run?: string; env?: Record<string, string> }[] };
+  const windows = ci.jobs['core-windows-x64'] as Job & { 'timeout-minutes': number; steps: { id?: string; name?: string; if?: string; run?: string; env?: Record<string, string> }[] };
   const helper = windows.steps.find(step => step.name === 'Build userspace native helper')!;
   const native = windows.steps.find(step => step.name === 'Native Windows protected tools')!;
+  const prepare = windows.steps.find(step => step.name === 'Prepare synthetic native providers')!;
   const providers = windows.steps.find(step => step.name === 'Native Windows provider and shared scopes')!;
+  expect(helper.id).toBe('native_helper');
+  expect(prepare).toMatchObject({id: 'native_providers', if: "${{ !cancelled() && runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true' && steps.native_helper.outcome == 'success' }}"});
+  expect(providers.if).toBe("${{ !cancelled() && runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true' && steps.native_providers.outcome == 'success' }}");
   expect(windows['timeout-minutes']).toBe(30);
   expect(providers.env).toMatchObject({BOITE_TEST_NATIVE_EXECUTION: '1', BOITE_DIAGNOSE_JOB_EVENTS: '1'});
   expect(providers.run).toContain("@('protected-tool.exe', 'protected-tool-mingw.exe')");

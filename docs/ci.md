@@ -302,6 +302,9 @@ old 15-minute budget during the second provider matrix. Individual scenario
 deadlines and all admission checks remain unchanged. Shared Git fixtures set
 their synthetic identity in each repository, including the commit consumer,
 and ignore host system/global Git configuration.
+Once the helpers build, provider preparation and both provider matrices run
+even if protected-tools tests fail. A failed preparation still blocks those
+matrices; cancellation stops them. Each test step retains its failing exit code.
 The setup ACL root contains only the private view, runtime and home. Synthetic
 host files and the process journal stay outside that subtree so inherited ACL
 changes cannot invalidate the host control or prevent journal cleanup. The same
