@@ -71,6 +71,19 @@ typedef int (*nb_read_fn)(void *, uintptr_t, void *, size_t);
 static int nb_create_extras(const uint64_t args[7]) {
   return (!!args[0]) | ((!!args[5]) << 1) | ((!!(uint32_t)args[6]) << 2);
 }
+/* ProcessHandleInformation x64: prove absence without issuing I/O on a stale handle. */
+static int nb_credential_absent(const void *snapshot, size_t length, uint64_t candidate, uint64_t control) {
+  if (!snapshot || length<16 || !candidate || !control || control==UINT64_MAX || control==candidate) return 0;
+  uint64_t count; memcpy(&count,snapshot,8);
+  if (!count || count>(length-16)/40) return 0;
+  int found=0;
+  for (size_t i=0;i<(size_t)count;i++) {
+    uint64_t handle; memcpy(&handle,(const unsigned char *)snapshot+16+i*40,8);
+    if (handle==candidate) return 0;
+    if (handle==control) found=1;
+  }
+  return found;
+}
 static int nb_snapshot_qos(uintptr_t address, NB_QOS *out, nb_read_fn read, void *ctx) {
   memset(out, 0, sizeof(*out));
   if (!address) return 1;

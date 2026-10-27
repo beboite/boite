@@ -311,6 +311,11 @@ bytes cannot reject an ordinary call. It records both halves of that slot to
 attribute a remaining rejection. Bun stage markers and forwarded-exception
 context locate runtime failures without suppressing application exceptions or
 relaxing workload admission.
+Credential non-inheritance is checked with a complete handle-table snapshot of
+the caller and a live stdout-handle control. The candidate must equal the
+captured parent handle and be absent at that instant; a numeric collision or
+incomplete query leaves the experiment incomplete. This avoids issuing invalid
+handle I/O under a debugger, which can raise an application exception.
 
 A skip passes in a ruleset, so a draft must not satisfy it:
 

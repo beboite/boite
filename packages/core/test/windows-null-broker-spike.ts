@@ -22,7 +22,7 @@ const decimal = (value?: string) => !!value && /^(?:0|[1-9]\d*)$/.test(value) &&
 const hex = (value?: string) => !!value && /^0x[0-9a-f]{8}$/.test(value);
 const negativeStatus = (value?: string) => hex(value) && Number.parseInt(value!, 16) >= 0x80000000;
 const known = new Set(['BIND','IMAGE','PROCESS_IMAGE','PRIMITIVE','END','FAILURE','POINTER','EVENT','HANDLE','SUSPEND','RESUME','DEFER',
-  'DRAIN','INPUT','QOS','PASSTHROUGH','DELEGATE','EXCEPTION','EXIT','OPEN','MODE','OBJECT','CHECK','DENY','OFF','READY','DETACHED','BUN','ROLLBACK','MEASUREMENT','TRANSFER']);
+  'DRAIN','INPUT','QOS','PASSTHROUGH','DELEGATE','EXCEPTION','EXIT','OPEN','MODE','OBJECT','CHECK','DENY','CREDENTIAL','OFF','READY','DETACHED','BUN','ROLLBACK','MEASUREMENT','TRANSFER']);
 function parse(text: string): Row[] | null {
   const rows: Row[] = [];
   for (const line of text.split(/\r?\n/)) {
@@ -61,6 +61,7 @@ function completeTrace(rows: Row[], bindings: Row[]): boolean {
       if (!live.has(pid)||!threads?.has(tid)||ownership.get(`${pid}:process:0`)!=='own'||ownership.get(`${pid}:thread:${tid}`)!=='own') return false;
       continue;
     }
+    if (row.tag === 'CREDENTIAL' && !live.has(pid)) return false;
     if (['SUSPEND','RESUME','DEFER'].includes(row.tag!)) {
       if (!live.has(pid) || !threads?.has(tid) || !threads.has(row.owner!) || tid === row.owner) return false;
       const key = `${pid}:${tid}`, previous = held.get(key);
@@ -110,7 +111,17 @@ function completeTrace(rows: Row[], bindings: Row[]): boolean {
   if (live.size || created.size !== bound.size || loaded.size !== bound.size || startup.size !== bound.size) return false;
   return ownership.size === handles.size && [...ownership.values()].every(action => action === 'close');
 }
-function fullNativeProof(rows: Row[], pid: string): boolean {
+const uint64 = (value?: string) => !!value && /^(?:0|[1-9]\d*)$/.test(value) && value.length <= 20 && BigInt(value) <= 0xffffffffffffffffn;
+function credentialProof(rows: Row[], pid: string, candidate?: string): boolean {
+  const proofs=rows.filter(r=>r.tag==='CREDENTIAL'&&r.pid===pid), proof=proofs[0];
+  if (!proof) return false;
+  return proofs.length===1 && uint64(candidate) && candidate!=='0' && proof.candidate===candidate &&
+    proof.status==='0x00000000' && proof.absent==='1' && proof.control==='1' && uint64(proof.controlHandle) &&
+    proof.controlHandle!=='0' && proof.controlHandle!=='18446744073709551615' && proof.controlHandle!==candidate &&
+    decimal(proof.entries) && Number(proof.entries)>0 && decimal(proof.bytes) && Number(proof.bytes)<=65536 &&
+    Number(proof.bytes)>=16+40*Number(proof.entries);
+}
+function fullNativeProof(rows: Row[], pid: string, credential?: string): boolean {
   const records = (tag: string) => rows.filter(r => r.tag === tag);
   const opens = records('OPEN').filter(r => r.pid === pid), modes = records('MODE').filter(r => r.pid === pid), objects = records('OBJECT').filter(r => r.pid === pid);
   if (opens.length !== 9 || !unique(opens, r => `${r.api}:${r.access}`) || opens.some(r => !['0','1','2'].includes(r.api!) || !['0','1','2'].includes(r.access!) ||
@@ -122,8 +133,9 @@ function fullNativeProof(rows: Row[], pid: string): boolean {
   const denied = records('DENY').filter(r => r.pid === pid);
   const expected = ['ambient','excluded','hostfile','credential','hostprocess','direct','acl','forged-path','breakaway','network'];
   if (denied.length !== expected.length || expected.some(name => denied.filter(r => r.name === name && r.denied === '1').length !== 1)) return false;
-  const errors: Record<string, string> = {ambient:'5',excluded:'5',hostfile:'5',credential:'6',hostprocess:'5',direct:String(0xc0000022),acl:String(0xc00000bb),'forged-path':String(0xc0000022),breakaway:'5'};
-  if (denied.some(r => !decimal(r.error) || r.error === '0' || (errors[r.name!] && r.error !== errors[r.name!]))) return false;
+  const errors: Record<string, string> = {ambient:'5',excluded:'5',hostfile:'5',credential:'0',hostprocess:'5',direct:String(0xc0000022),acl:String(0xc00000bb),'forged-path':String(0xc0000022),breakaway:'5'};
+  if (denied.some(r => !decimal(r.error) || (r.error === '0' && r.name!=='credential') || (errors[r.name!] && r.error !== errors[r.name!]))) return false;
+  if (!credentialProof(rows,pid,credential) || denied.find(r=>r.name==='credential')?.proof!=='snapshot') return false;
   for (const name of ['redirection','two-threads','control-handles']) if (records('CHECK').filter(r => r.pid === pid && r.name === name && r.ok === '1').length !== 1) return false;
 
   return records('DELEGATE').filter(r => r.pid === pid && r.opened === '1' && r.status === '0x00000000').length >= 28;
@@ -168,7 +180,7 @@ function completeTraffic(rows: Row[]): boolean {
   }
   return true;
 }
-type ExpectedImages = {root: string; native: string; console?: string};
+type ExpectedImages = {root: string; native: string; console?: string; credential?: string};
 function workloadBindings(rows: Row[], bindings: Row[], expected?: ExpectedImages): Row[] | null {
   const images = rows.filter(r => r.tag === 'PROCESS_IMAGE');
   if (images.length !== bindings.length || !unique(images,r=>r.pid!)) return null;
@@ -253,7 +265,7 @@ export function classifyBroker(text: string, scenario: string, timedOut = false,
   if (scenario === 'native' || scenario === 'root-exit') {
     const child = workload.find(r => r.generation === 'child' && r.parent === root.pid);
     if (workload.length !== 2 || !child || processImages.some(r => r.sha !== processImages.find(i => i.pid === root.pid)!.sha)) return verdict('incomplete');
-    for (const generation of scenario === 'native' ? workload : [root]) if (!fullNativeProof(rows,generation.pid!)) return verdict('incomplete');
+    for (const generation of scenario === 'native' ? workload : [root]) if (!fullNativeProof(rows,generation.pid!,expectedImages?.credential)) return verdict('incomplete');
     if (records('CHECK').filter(r => r.pid === root.pid && r.name === 'ordinary-child' && r.ok === '1').length !== 1 ||
         records('EXIT').find(r => r.pid === root.pid)?.code !== '0x00000000') return verdict('incomplete');
     if (scenario === 'root-exit' && (records('READY').filter(r => r.pid === child.pid && r.wait === '1').length !== 1 ||
@@ -264,7 +276,7 @@ export function classifyBroker(text: string, scenario: string, timedOut = false,
     const bun = records('BUN'), children = workload.filter(r => r !== root), native = processImages.filter(r => r.sha === expectedImages?.native);
     if (!expectedImages || expectedImages.root === expectedImages.native || workload.length !== 4 || children.some(r => r.parent !== root.pid) || native.length !== 1 ||
         !children.some(r => r.pid === native[0]!.pid) || bun.length !== 1 || bun[0]!.pid !== root.pid || !['ignore','pipe','argv','denials','network'].every(k => bun[0]![k] === '1') ||
-        !fullNativeProof(rows,native[0]!.pid!) || !records('DELEGATE').some(r => r.pid === root.pid && r.opened === '1' && r.status === '0x00000000')) return verdict('incomplete');
+        !credentialProof(rows,root.pid!,expectedImages.credential) || !fullNativeProof(rows,native[0]!.pid!,expectedImages.credential) || !records('DELEGATE').some(r => r.pid === root.pid && r.opened === '1' && r.status === '0x00000000')) return verdict('incomplete');
     return verdict('positive');
   }
   return verdict('incomplete');
@@ -329,6 +341,20 @@ export async function runLocalContracts(): Promise<{code: number | null; out: st
   } finally {procs.killAll(); await procs.close(); journal.close(); rmSync(scratch, {recursive: true, force: true});}
 }
 
+/** ProcessHandleInformation x64: 16-byte header, 40-byte entries. No candidate is dereferenced. */
+export function credentialHandleAbsent(snapshot: Uint8Array, length: number, candidate: bigint, control: bigint): boolean {
+  if (!Number.isInteger(length) || length<16 || length>snapshot.byteLength || candidate<=0n || candidate>0xffffffffffffffffn ||
+      control<=0n || control>=0xffffffffffffffffn || control===candidate) return false;
+  const view=new DataView(snapshot.buffer,snapshot.byteOffset,length), count=view.getBigUint64(0,true);
+  if (!count || count>BigInt(Math.floor((length-16)/40))) return false;
+  let found=false;
+  for (let i=0;i<Number(count);i++) {
+    const handle=view.getBigUint64(16+i*40,true);
+    if(handle===candidate) return false;
+    if(handle===control) found=true;
+  }
+  return found;
+}
 const bunFixture = String.raw`
 import {spawn} from 'node:child_process';
 import {readFileSync} from 'node:fs';
@@ -337,6 +363,7 @@ const [ambient,excluded,hostfile,credential,hostpid,url,native] = process.argv.s
 const args = ['quote" and spaces','trailing\\','$(echo unsafe)'];
 // Diagnostic breadcrumbs only. Admission still requires NB_BUN and full child evidence.
 const stage = name => console.error('BUN_STAGE pid='+process.pid+' name='+name);
+const credentialHandleAbsent = ${credentialHandleAbsent.toString()};
 async function child(argv, stdio, input) {
   const p = spawn(process.execPath, argv, {stdio}); let out = '', err = '';
   p.stdout?.on('data', b => out += b); p.stderr?.on('data', b => err += b);
@@ -359,20 +386,25 @@ stage('files-end');
 stage('ffi-begin');
 const k = dlopen('kernel32.dll', {
  OpenProcess:{args:[FFIType.u32,FFIType.i32,FFIType.u32],returns:FFIType.ptr},
- ReadFile:{args:[FFIType.ptr,FFIType.ptr,FFIType.u32,FFIType.ptr,FFIType.ptr],returns:FFIType.i32},
+ GetStdHandle:{args:[FFIType.u32],returns:FFIType.u64},
  CloseHandle:{args:[FFIType.ptr],returns:FFIType.i32},
  GetLastError:{args:[],returns:FFIType.u32},
 });
+let n;
 try {
  stage('ffi-openprocess-begin');
  const h=k.symbols.OpenProcess(0x50,0,Number(hostpid));
  stage('ffi-openprocess-end');
  if(h){denied=false;k.symbols.CloseHandle(h);}
- const bytes=Buffer.alloc(32),used=Buffer.alloc(4);
- stage('ffi-read-begin');
- if(k.symbols.ReadFile(Number(credential),ptr(bytes),32,ptr(used),null)) denied=false;
- stage('ffi-read-end');
-} finally {stage('ffi-close-begin');k.close();stage('ffi-close-end');}
+ stage('ffi-snapshot-begin');
+ n=dlopen('ntdll.dll',{NtQueryInformationProcess:{args:[FFIType.i64,FFIType.u32,FFIType.ptr,FFIType.u32,FFIType.ptr],returns:FFIType.i32}});
+ const snapshot=Buffer.alloc(65536),used=Buffer.alloc(4),control=BigInt(k.symbols.GetStdHandle(0xfffffff5));
+ const status=n.symbols.NtQueryInformationProcess(-1n,51,ptr(snapshot),snapshot.length,ptr(used));
+ const length=used.readUInt32LE(),candidate=BigInt(credential),absent=status===0&&credentialHandleAbsent(snapshot,length,candidate,control);
+ console.error('NB_CREDENTIAL pid='+process.pid+' candidate='+candidate+' status=0x'+(status>>>0).toString(16).padStart(8,'0')+' bytes='+length+' entries='+snapshot.readBigUInt64LE()+' absent='+Number(absent)+' control='+Number(absent)+' controlHandle='+control);
+ if(!absent) denied=false;
+ stage('ffi-snapshot-end');
+} finally {stage('ffi-close-begin');n?.close();k.close();stage('ffi-close-end');}
 stage('ffi-end');
 stage('network-begin');
 let network = true; try {await fetch(url,{signal:AbortSignal.timeout(1500)}); network=false;} catch {}
@@ -427,12 +459,13 @@ async function nativeCases(procs: ProcRegistry, helper: string, scratch: string,
   const cleanups: string[] = [];
   const expected=['off','pointers','rollback','native','handled','unhandled','root-exit','bun','cancel','revoke','expiry','launcher-death'];
   const outcomes: Record<string, BrokerVerdict> = {};
-  const evidence = {capturedImages,calls,outcomes,unrun:[...expected],connections:0,cleanupErrors:cleanups,verdict:verdict('incomplete')};
+  const evidence = {capturedImages,credentialHandle:null as string|null,calls,outcomes,unrun:[...expected],connections:0,cleanupErrors:cleanups,verdict:verdict('incomplete')};
   entry.native = evidence;
   try {
     const security = Buffer.alloc(24); security.writeUInt32LE(24); security.writeUInt32LE(1,16);
     credential = kernel.symbols.CreateFileW(ptr(Buffer.from(`${excluded}\0`,'utf16le')),0x80000000,7,ptr(security),3,0,null);
     if (!credential || Number(credential) === -1) throw new Error('synthetic credential open failed');
+    evidence.credentialHandle=String(credential);
     prepared = true;
     const env = {PATH:`${runtime};${join(windows,'System32')}`,SystemRoot:windows,WINDIR:windows,
       COMSPEC:join(windows,'System32','cmd.exe'),HOME:home,USERPROFILE:home,APPDATA:home,LOCALAPPDATA:home,TEMP:join(home,'temp'),TMP:join(home,'temp'),
@@ -453,7 +486,7 @@ async function nativeCases(procs: ProcRegistry, helper: string, scratch: string,
       const target = scenario === 'bun' ? capturedBun : capturedNative;
       const args = scenario === 'bun' ? [join(project,'bun-fixture.js'),ambient,excluded,join(host,'ordinary.txt'),String(credential),String(process.pid),`http://127.0.0.1:${listener.port}`,capturedNative] : targetArgs(scenario);
       const capture = await run(scenario,[command,profile,project,target,...args],env);
-      const expectedImages = {root: scenario === 'bun' ? capturedImages.bun : capturedImages.native, native: capturedImages.native, console: capturedImages.console};
+      const expectedImages = {root: scenario === 'bun' ? capturedImages.bun : capturedImages.native, native: capturedImages.native, console: capturedImages.console, credential:String(credential)};
       let result = classifyBroker(capture.err,scenario,capture.timedOut,expectedImages);
       const primitive=classifyBroker(capture.err,'primitive',capture.timedOut,expectedImages);
       if(scenario!=='off'&&outcomes.off?.kind==='positive'&&primitive.kind==='negative'&&!capture.overflow&&!connections)result=primitive;
@@ -486,12 +519,13 @@ async function nativeCases(procs: ProcRegistry, helper: string, scratch: string,
         calls.push({id:controlId,kind:'lifecycle-prerequisite',archive,...c});persist();return {code:c.code??125,stdout:c.out,stderr:c.err};
       },scope=>procs.stopAndWait(scope),scope=>procs.liveCount(scope));
       activeLeases.push(leases);
+      const expiresAt=Date.now()+(reason==='expiry'?20000:90000);
       await leases.install(id,{scope:{kind:'job',id,associationId:'synthetic',grantRevision:1},checkout:project,credentialPaths:[excluded],
-        executables:[capturedNative],expiresAt:Date.now()+(reason==='expiry'?20000:90000)},()=>{});
+        executables:[capturedNative],expiresAt},()=>{});
       const launch=leases.launch(id,capturedNative,targetArgs('lifetime'),{cwd:project});
       if(!launch)throw new Error('missing captured lifecycle launch');
       const child = procs.spawnPiped(id,launch.command,launch.args,{cwd:launch.cwd,env:launch.env,agentRoot:false}); child.proc.stdin.end();
-      const held: {pid:number; handle:NonNullable<ReturnType<typeof kernel.symbols.OpenProcess>>}[] = []; let text = '', ready = false, tooLarge = false;
+      const held: {pid:number; handle:NonNullable<ReturnType<typeof kernel.symbols.OpenProcess>>}[] = []; let text = '', ready = false, readyAt:number|null=null, tooLarge = false;
       const reader = child.proc.stderr.getReader(), stdout = child.proc.stdout.getReader();
       const collecting = (async () => {
         const decoder = new TextDecoder();
@@ -503,13 +537,13 @@ async function nativeCases(procs: ProcRegistry, helper: string, scratch: string,
             const pid = Number(row.pid), handle = kernel.symbols.OpenProcess(0x100000,0,pid);
             if (handle) held.push({pid,handle});
           }
-          if (text.includes('NB_READY wait=1')) ready=true;
+          if (!ready&&text.includes('NB_READY wait=1')) {ready=true;readyAt=Date.now();}
         }
       })();
       const discarding = (async()=>{let bytes=0;for(;;){const next=await stdout.read();if(next.done)break;bytes+=next.value.length;if(bytes>65536){tooLarge=true;procs.killTree(id);break;}}})();
       const deadline = Date.now()+10000;
       while (!ready && procs.liveCount(id) && Date.now()<deadline) await Bun.sleep(25);
-      let action = false;
+      let action = false; const actionStartedAt=Date.now();
       if (reason==='revoke') {await leases.revoke(id);action=sessionClosed;}
       else if(reason==='expiry') {
         const expires=Date.now()+25000;
@@ -519,6 +553,7 @@ async function nativeCases(procs: ProcRegistry, helper: string, scratch: string,
         const launcher=kernel.symbols.OpenProcess(0x100001,0,child.record.pid);
         if(launcher){action=kernel.symbols.TerminateProcess(launcher,125)!==0;kernel.symbols.CloseHandle(launcher);}
       } else {await procs.stopAndWait(id);action=!procs.liveCount(id);}
+      const actionFinishedAt=Date.now();
       if(!action||!ready)await procs.stopAndWait(id);
       let timer: ReturnType<typeof setTimeout> | undefined;
       const drained = await Promise.race([Promise.all([collecting,discarding]).then(()=>true),new Promise<false>(resolve=>{timer=setTimeout(()=>resolve(false),6000);})]); clearTimeout(timer);
@@ -533,7 +568,7 @@ async function nativeCases(procs: ProcRegistry, helper: string, scratch: string,
         bindings.every(r=>held.some(h=>String(h.pid)===r.pid)) && held.every(h=>kernel.symbols.WaitForSingleObject(h.handle,5000)===0);
       const closed = held.every(h=>kernel.symbols.CloseHandle(h.handle)!==0);
       writeFileSync(join(output,`${compiler}-lifetime-${reason}.stderr.txt`),text);
-      calls.push({id,reason,ready,action,drained,held:held.map(h=>h.pid),exited,closed,tooLarge});
+      calls.push({id,reason,expiresAt,readyAt,actionStartedAt,actionFinishedAt,ready,action,drained,held:held.map(h=>h.pid),exited,closed,tooLarge});
       outcomes[reason] = ready && action && drained && exited && closed && !tooLarge ? verdict('positive') : verdict('incomplete');
       evidence.unrun=evidence.unrun.filter(name=>name!==reason); persist();
       await leases.close();

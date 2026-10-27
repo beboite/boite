@@ -16,7 +16,11 @@ static HANDLE nb_thread_handle(NB_PROCESS *p, DWORD id) {
 }
 static int nb_hold(void *ctx, uint32_t id) {
   NB_PROCESS *p = ctx; HANDLE t = nb_thread_handle(p, id); DWORD old = t ? SuspendThread(t) : (DWORD)-1;
-  fwprintf(stderr, L"NB_SUSPEND pid=%lu tid=%lu owner=%lu previous=%lu\n", p->id, (DWORD)id, (DWORD)p->step.owner, old);
+  DWORD error=old==(DWORD)-1?(t?GetLastError():ERROR_INVALID_HANDLE):0,exit_code=0;
+  DWORD wait=old==(DWORD)-1&&t?WaitForSingleObject(t,0):WAIT_TIMEOUT;
+  int queried=old==(DWORD)-1&&t&&GetExitCodeThread(t,&exit_code);
+  fwprintf(stderr, L"NB_SUSPEND pid=%lu tid=%lu owner=%lu previous=%lu error=%lu wait=%lu exitKnown=%d exitCode=%lu\n",
+    p->id, (DWORD)id, (DWORD)p->step.owner, old,error,wait,queried,exit_code);
   return old != (DWORD)-1;
 }
 static int nb_release(void *ctx, uint32_t id) {

@@ -173,6 +173,17 @@ static NTSTATUS nb_host_path(const wchar_t *dos, HANDLE *handle) {
   IO_STATUS_BLOCK io;
   return nb_create(handle, GENERIC_READ | SYNCHRONIZE, &oa, &io, NULL, 0, 3, 1, 0x60, NULL, 0);
 }
+static int nb_credential_snapshot(uint64_t candidate) {
+  typedef NTSTATUS (NTAPI *query_process)(HANDLE, ULONG, PVOID, ULONG, PULONG);
+  query_process query=(query_process)(void *)GetProcAddress(GetModuleHandleW(L"ntdll.dll"),"NtQueryInformationProcess");
+  BYTE *snapshot=calloc(1,65536); ULONG length=0; uint64_t count=0,control=(uint64_t)(uintptr_t)GetStdHandle(STD_OUTPUT_HANDLE);
+  NTSTATUS status=query&&snapshot?query(GetCurrentProcess(),51,snapshot,65536,&length):NB_INVALID;
+  if(snapshot)memcpy(&count,snapshot,8);
+  int absent=status==0&&length<=65536&&nb_credential_absent(snapshot,length,candidate,control);
+  fwprintf(stderr,L"NB_CREDENTIAL pid=%lu candidate=%llu status=0x%08lx bytes=%lu entries=%llu absent=%d control=%d controlHandle=%llu\n",
+    GetCurrentProcessId(),(unsigned long long)candidate,(DWORD)status,length,(unsigned long long)count,absent,absent,(unsigned long long)control);
+  free(snapshot); return absent;
+}
 static int nb_denials(int count, wchar_t **args) {
   if (count != 11) return 0;
   int ok = 1; const wchar_t *names[] = {L"ambient", L"excluded", L"hostfile"};
@@ -183,12 +194,11 @@ static int nb_denials(int count, wchar_t **args) {
     if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
     fwprintf(stderr, L"NB_DENY pid=%lu name=%ls denied=%d error=%lu\n", GetCurrentProcessId(), names[i], denied, error); ok = ok && denied;
   }
-  HANDLE credential = (HANDLE)(uintptr_t)_wcstoui64(args[7], NULL, 10); BYTE bytes[32]; DWORD used = 0;
-  BOOL read = ReadFile(credential, bytes, sizeof(bytes), &used, NULL); DWORD error = read ? 0 : GetLastError();
-  fwprintf(stderr, L"NB_DENY pid=%lu name=credential denied=%d error=%lu\n", GetCurrentProcessId(), !read && error == ERROR_INVALID_HANDLE, error);
-  ok = ok && !read && error == ERROR_INVALID_HANDLE;
+  int absent=nb_credential_snapshot(_wcstoui64(args[7],NULL,10));
+  fwprintf(stderr, L"NB_DENY pid=%lu name=credential denied=%d error=0 proof=snapshot\n", GetCurrentProcessId(),absent);
+  ok = ok && absent;
   HANDLE host = OpenProcess(PROCESS_VM_READ | PROCESS_DUP_HANDLE, FALSE, wcstoul(args[8], NULL, 10));
-  error = host ? 0 : GetLastError();
+  DWORD error = host ? 0 : GetLastError();
   fwprintf(stderr, L"NB_DENY pid=%lu name=hostprocess denied=%d error=%lu\n", GetCurrentProcessId(), !host && error == ERROR_ACCESS_DENIED, error);
   if (host) CloseHandle(host);
   ok = ok && !host && error == ERROR_ACCESS_DENIED;

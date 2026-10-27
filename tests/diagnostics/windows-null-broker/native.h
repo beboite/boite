@@ -23,6 +23,9 @@ typedef NTSTATUS (NTAPI *NB_QUERY_VOLUME)(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG
 typedef NTSTATUS (NTAPI *NB_COMPARE)(HANDLE, HANDLE);
 typedef struct {ULONG Attributes; ACCESS_MASK GrantedAccess; ULONG HandleCount, PointerCount; ULONG Reserved[10];} NB_BASIC;
 typedef struct {ULONG Type, Characteristics;} NB_DEVICE;
+typedef struct {HANDLE Value; ULONG_PTR Handles, Pointers; ACCESS_MASK Access; ULONG Type, Attributes, Reserved;} NB_HANDLE_ENTRY;
+typedef struct {ULONG_PTR Count, Reserved; NB_HANDLE_ENTRY Entries[1];} NB_HANDLE_SNAPSHOT;
+_Static_assert(sizeof(NB_HANDLE_ENTRY)==40 && offsetof(NB_HANDLE_SNAPSHOT,Entries)==16, "ProcessHandleInformation x64 ABI");
 typedef struct {UNICODE_STRING Name; USHORT Type, Reserved; ULONG Flags, Count; union {ULONGLONG *Integer;} Values;} NB_ATTR;
 typedef struct {USHORT Version, Reserved; ULONG Count; NB_ATTR *Attrs;} NB_ATTRS;
 #define NB_DENIED ((NTSTATUS)0xc0000022)

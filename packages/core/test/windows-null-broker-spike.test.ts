@@ -2,7 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import {mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {isAbsolute, join, relative, sep} from 'node:path';
-import {createBrokerFixture, brokerSource, classifyBroker, combineVerdicts, runLocalContracts, type BrokerVerdict} from './windows-null-broker-spike.ts';
+import {createBrokerFixture, credentialHandleAbsent, brokerSource, classifyBroker, combineVerdicts, runLocalContracts, type BrokerVerdict} from './windows-null-broker-spike.ts';
 
 const bind = 'NB_BIND pid=10 parent=1 generation=root package=S-1-15-2-1-2-3 lpac=1 capabilities=1 registry=1 job=1 dup=1';
 const end = 'NB_END error=0 active=0 owned=0 suspended=0 pending=0 delegations=0';
@@ -83,6 +83,7 @@ test('shared native scheduler and output-span contracts: queued trap B cannot su
   expect(result.out).toContain('NB_LOCAL queued-replay=1 balanced=1 progress=2 pointer-contracts=1');
   expect(result.out).toContain('qos-snapshot=1');
   expect(result.out).toContain('create-abi=1');
+  expect(result.out).toContain('credential-snapshot=1');
 });
 
 test('source generation pins the production reference and rejects a second replacement', () => {
@@ -94,7 +95,9 @@ test('source generation pins the production reference and rejects a second repla
 });
 
 const nativeSha = 'b'.repeat(64), bunSha = 'a'.repeat(64);
-const expectedImages = {root: bunSha, native: nativeSha};
+const credential='436', nativeImages={root:nativeSha,native:nativeSha,credential};
+const expectedImages = {root: bunSha, native: nativeSha,credential};
+const snapshotRow=(pid:number)=>`NB_CREDENTIAL pid=${pid} candidate=${credential} status=0x00000000 bytes=96 entries=2 absent=1 control=1 controlHandle=20`;
 function traffic(pid: number, count: number, start = 0): string[] {
   return Array.from({length: count}, (_, i) => {
     const sequence = start + i + 1;
@@ -110,8 +113,9 @@ function fullNative(pid: number): string[] {
   }
   for (let async=0; async<2; async++) rows.push(`NB_MODE pid=${pid} async=${async} status=0x00000000 mode=${async?'0x00000000':'0x00000020'} granted=0x0012019f ok=1`);
   rows.push(`NB_OBJECT pid=${pid} same=0x00000000 different=0xc00001ac ok=1`);
-  const errors: Record<string, number> = {ambient:5,excluded:5,hostfile:5,credential:6,hostprocess:5,direct:0xc0000022,acl:0xc00000bb,'forged-path':0xc0000022,breakaway:5,network:10013};
-  for (const [name,error] of Object.entries(errors)) rows.push(`NB_DENY pid=${pid} name=${name} denied=1 error=${error}`);
+  const errors: Record<string, number> = {ambient:5,excluded:5,hostfile:5,credential:0,hostprocess:5,direct:0xc0000022,acl:0xc00000bb,'forged-path':0xc0000022,breakaway:5,network:10013};
+  for (const [name,error] of Object.entries(errors)) rows.push(`NB_DENY pid=${pid} name=${name} denied=1 error=${error}${name==='credential'?' proof=snapshot':''}`);
+  rows.push(snapshotRow(pid));
   for (const name of ['redirection','two-threads','control-handles']) rows.push(`NB_CHECK pid=${pid} name=${name} ok=1`);
   return rows;
 }
@@ -129,7 +133,7 @@ function positiveCapture(bun=false): string {
   event(10,2,12); rows.push('NB_HANDLE pid=10 tid=12 kind=thread action=own');
   rows.push('NB_SUSPEND pid=10 tid=12 owner=11 previous=0','NB_DEFER pid=10 tid=12 owner=11','NB_RESUME pid=10 tid=12 owner=11 previous=1');
   event(10,4,12);rows.push('NB_HANDLE pid=10 tid=12 kind=thread action=close');
-  if (bun) rows.push(...traffic(10,1),...traffic(40,28,1),...fullNative(40),'NB_BUN pid=10 ignore=1 pipe=1 argv=1 denials=1 network=1');
+  if (bun) rows.push(...traffic(10,1),...traffic(40,28,1),...fullNative(40),snapshotRow(10),'NB_BUN pid=10 ignore=1 pipe=1 argv=1 denials=1 network=1');
   else rows.push(...traffic(10,28),...traffic(20,28,28),...fullNative(10),...fullNative(20),'NB_CHECK pid=10 name=ordinary-child ok=1');
   for (const pid of [...pids].reverse()) {
     event(pid,5);rows.push(`NB_EXIT pid=${pid} code=0x00000000`,`NB_HANDLE pid=${pid} tid=${pid+1} kind=thread action=close`,`NB_HANDLE pid=${pid} tid=0 kind=process action=close`);
@@ -139,35 +143,68 @@ function positiveCapture(bun=false): string {
 
 test('complete native capture preserves the observed Win32 WRITE attributes',()=>{
   const capture=positiveCapture();
-  expect(classifyBroker(capture,'native').kind).toBe('positive');
-  expect(classifyBroker(capture.replace('statusKnown=1','statusKnown=0'),'native').experimentComplete).toBe(false);
-  expect(classifyBroker(capture.replace('api=0 access=1 async=0 disposition=1 status=0x00000000 statusKnown=1 win32Error=0 type=2 device=21 granted=0x00120196','api=0 access=1 async=0 disposition=1 status=0x00000000 statusKnown=1 win32Error=0 type=2 device=21 granted=0x00120116'),'native').experimentComplete).toBe(false);
+  expect(classifyBroker(capture,'native',false,nativeImages).kind).toBe('positive');
+  expect(classifyBroker(capture.replace('statusKnown=1','statusKnown=0'),'native',false,nativeImages).experimentComplete).toBe(false);
+  expect(classifyBroker(capture.replace('api=0 access=1 async=0 disposition=1 status=0x00000000 statusKnown=1 win32Error=0 type=2 device=21 granted=0x00120196','api=0 access=1 async=0 disposition=1 status=0x00000000 statusKnown=1 win32Error=0 type=2 device=21 granted=0x00120116'),'native',false,nativeImages).experimentComplete).toBe(false);
+});
+
+test('a credential denial needs a complete snapshot tied to the captured parent handle',()=>{
+  const capture=positiveCapture().split('\n').filter(line=>!line.startsWith('NB_CREDENTIAL')).join('\n');
+  expect(classifyBroker(capture,'native',false,nativeImages).experimentComplete).toBe(false);
+  const complete=positiveCapture(), proof=snapshotRow(10);
+  expect(classifyBroker(complete,'native',false,nativeImages).kind).toBe('positive');
+  for(const [a,b] of [['candidate=436','candidate=0'],['candidate=436','candidate=440'],['status=0x00000000','status=0xc0000004'],
+    ['bytes=96','bytes=95'],['entries=2','entries=0'],['absent=1','absent=0'],['control=1','control=0'],['controlHandle=20','controlHandle=436']]) {
+    expect(classifyBroker(complete.replace(proof,proof.replace(a!,b!)),'native',false,nativeImages).experimentComplete).toBe(false);
+  }
+  expect(classifyBroker(complete,'native',false,{...nativeImages,credential:undefined}).experimentComplete).toBe(false);
+  expect(classifyBroker(complete.replace(proof,`${proof}\n${proof}`),'native',false,nativeImages).experimentComplete).toBe(false);
+  const late=complete.replace(proof,'').replace('NB_EXIT pid=10 code=0x00000000',`NB_EXIT pid=10 code=0x00000000\n${proof}`);
+  expect(classifyBroker(late,'native',false,nativeImages).experimentComplete).toBe(false);
+  const high='1152921504606847412';
+  expect(classifyBroker(complete.replaceAll('candidate=436','candidate='+high),'native',false,{...nativeImages,credential:high}).kind).toBe('positive');
+});
+
+test('credential snapshots reject a present handle, truncation and an absent positive control',()=>{
+  const bytes=Buffer.alloc(96), candidate=0x10000000000001b4n, control=20n;
+  bytes.writeBigUInt64LE(2n);bytes.writeBigUInt64LE(control,16);bytes.writeBigUInt64LE(24n,56);
+  expect(credentialHandleAbsent(bytes,96,candidate,control)).toBe(true);
+  expect(credentialHandleAbsent(bytes,95,candidate,control)).toBe(false);
+  expect(credentialHandleAbsent(bytes,96,candidate,28n)).toBe(false);
+  expect(credentialHandleAbsent(bytes,96,control,control)).toBe(false);
+  expect(credentialHandleAbsent(bytes,96,0n,control)).toBe(false);
+  bytes.writeBigUInt64LE(candidate,56);
+  expect(credentialHandleAbsent(bytes,96,candidate,control)).toBe(false);
+  bytes.writeBigUInt64LE(0xffffffffffffffffn);
+  expect(credentialHandleAbsent(bytes,96,candidate,control)).toBe(false);
+  bytes.writeBigUInt64LE(0n);
+  expect(credentialHandleAbsent(bytes,96,candidate,control)).toBe(false);
 });
 
 test('native admission reconciles every delegation, measurement and suspension',()=>{
   const capture=positiveCapture();
   const uniform=capture;
   const without=(prefix:string)=>uniform.split('\n').filter(line=>!line.startsWith(prefix)).join('\n');
-  for (const prefix of ['NB_DELEGATE','NB_MEASUREMENT','NB_RESUME']) expect(classifyBroker(without(prefix),'native').experimentComplete).toBe(false);
-  for (const [a,b] of [['previous=1 ok=1','previous=1 ok=0'],['hostClosed=1','hostClosed=0'],['owner=11 previous=1','owner=12 previous=1'],['sequence=2 ','sequence=1 ']]) expect(classifyBroker(uniform.replace(a!,b!),'native').experimentComplete).toBe(false);
+  for (const prefix of ['NB_DELEGATE','NB_MEASUREMENT','NB_RESUME']) expect(classifyBroker(without(prefix),'native',false,nativeImages).experimentComplete).toBe(false);
+  for (const [a,b] of [['previous=1 ok=1','previous=1 ok=0'],['hostClosed=1','hostClosed=0'],['owner=11 previous=1','owner=12 previous=1'],['sequence=2 ','sequence=1 ']]) expect(classifyBroker(uniform.replace(a!,b!),'native',false,nativeImages).experimentComplete).toBe(false);
   const qos='NB_QOS pid=10 length=12 level=2 tracking=0 effective=1 copied=1';
   const withInput=input.replace('qos=0','qos=1');
   const withQos=capture.replace(input,`${withInput}\n${qos}`);
-  expect(classifyBroker(withQos,'native').kind).toBe('positive');
+  expect(classifyBroker(withQos,'native',false,nativeImages).kind).toBe('positive');
   for(const [a,b] of [['length=12','length=11'],['level=2','level=4'],['tracking=0','tracking=2'],['effective=1','effective=2'],['copied=1','copied=0'],['NB_QOS pid=10','NB_QOS pid=99']]) {
-    expect(classifyBroker(withQos.replace(a!,b!),'native').experimentComplete).toBe(false);
+    expect(classifyBroker(withQos.replace(a!,b!),'native',false,nativeImages).experimentComplete).toBe(false);
   }
-  expect(classifyBroker(withQos.replace(withInput,''),'native').experimentComplete).toBe(false);
-  expect(classifyBroker(withQos.replace(qos,''),'native').experimentComplete).toBe(false);
-  expect(classifyBroker(withQos.replace(qos,`${qos}\n${qos}`),'native').experimentComplete).toBe(false);
-  expect(classifyBroker(withQos.replace(`${withInput}\n${qos}`,''),'native').experimentComplete).toBe(false);
-  expect(classifyBroker(withQos.replace(withInput,withInput.replace('pid=10','pid=20')),'native').experimentComplete).toBe(false);
+  expect(classifyBroker(withQos.replace(withInput,''),'native',false,nativeImages).experimentComplete).toBe(false);
+  expect(classifyBroker(withQos.replace(qos,''),'native',false,nativeImages).experimentComplete).toBe(false);
+  expect(classifyBroker(withQos.replace(qos,`${qos}\n${qos}`),'native',false,nativeImages).experimentComplete).toBe(false);
+  expect(classifyBroker(withQos.replace(`${withInput}\n${qos}`,''),'native',false,nativeImages).experimentComplete).toBe(false);
+  expect(classifyBroker(withQos.replace(withInput,withInput.replace('pid=10','pid=20')),'native',false,nativeImages).experimentComplete).toBe(false);
 });
 
 test('Bun evidence binds its exact runtime, ordinary children and complete native child proof',()=>{
   const capture=positiveCapture(true);
   expect(classifyBroker(capture,'bun',false,expectedImages).kind).toBe('positive');
-  for (const prefix of ['NB_OPEN','NB_DENY','NB_CHECK','NB_DELEGATE','NB_MEASUREMENT']) {
+  for (const prefix of ['NB_OPEN','NB_DENY','NB_CREDENTIAL','NB_CHECK','NB_DELEGATE','NB_MEASUREMENT']) {
     const partial=capture.split('\n').filter(line=>!line.startsWith(prefix)).join('\n');
     expect(classifyBroker(partial,'bun',false,expectedImages).experimentComplete).toBe(false);
   }
@@ -192,7 +229,7 @@ test('setup ACL propagation cannot reach synthetic host controls or the process 
 
 
 test('an authenticated console is traced but cannot stand in for a workload child',()=>{
-  const consoleSha='c'.repeat(64), expected={root:nativeSha,native:nativeSha,console:consoleSha};
+  const consoleSha='c'.repeat(64), expected={root:nativeSha,native:nativeSha,console:consoleSha,credential};
   const capture=positiveCapture();
   const lines=capture.split('\n');
   // Creation while the root is live, then console exit only after root exit/drain.

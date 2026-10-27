@@ -76,5 +76,18 @@ int main(void) {
   assert(nb_create_extras(args) == 2);
   args[0] = 1; args[6] |= 1;
   assert(nb_create_extras(args) == 7);
-  puts("NB_LOCAL queued-replay=1 balanced=1 progress=2 pointer-contracts=1 qos-snapshot=1 create-abi=1"); return 0;
+  unsigned char handles[96]={0}; uint64_t count=2, control=20, candidate=UINT64_C(0x10000000000001b4), other=24;
+  memcpy(handles,&count,8); memcpy(handles+16,&control,8); memcpy(handles+56,&other,8);
+  assert(nb_credential_absent(handles,sizeof(handles),candidate,control));
+  assert(!nb_credential_absent(handles,95,candidate,control)); /* Truncated final entry. */
+  assert(!nb_credential_absent(handles,sizeof(handles),candidate,28)); /* Missing positive control. */
+  assert(!nb_credential_absent(handles,sizeof(handles),control,control)); /* Numeric collision. */
+  assert(!nb_credential_absent(handles,sizeof(handles),0,control));
+  memcpy(handles+56,&candidate,8);
+  assert(!nb_credential_absent(handles,sizeof(handles),candidate,control));
+  count=UINT64_MAX; memcpy(handles,&count,8);
+  assert(!nb_credential_absent(handles,sizeof(handles),candidate,control));
+  count=0; memcpy(handles,&count,8);
+  assert(!nb_credential_absent(handles,sizeof(handles),candidate,control));
+  puts("NB_LOCAL queued-replay=1 balanced=1 progress=2 pointer-contracts=1 qos-snapshot=1 create-abi=1 credential-snapshot=1"); return 0;
 }
