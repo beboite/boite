@@ -1,18 +1,18 @@
 import {afterEach, describe, expect, test} from 'bun:test';
 import type {Pointer} from 'bun:ffi';
-import {copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
-import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
+import {join, win32} from 'node:path';
 import {startTestCore, waitFor, type TestCore} from './harness.ts';
 import {policyFile} from '../src/contacts/file-policy.ts';
 import type {ProtectedExecutionInput} from '../src/execution-policy.ts';
+import {publicationState} from './fixtures/native-windows-publication.ts';
 
 let harness: TestCore | undefined;
 afterEach(async () => {await harness?.stop(); harness = undefined;});
 const native = process.platform === 'win32' && process.env.BOITE_TEST_NATIVE_EXECUTION === '1';
 
 describe.skipIf(!native)('native Windows protected execution', () => {
-  test('directory name measurements retain the failing volume and compare a system-volume private view', async () => {
+  test('a host checkout on the runner volume builds in the selected system-volume private view', async () => {
     const {procs, root, input} = await setup();
     const fixture = join(import.meta.dir, 'fixtures/native-windows-volume.ts');
     copyFileSync(fixture, join(root, 'volume.ts'));
@@ -23,32 +23,18 @@ describe.skipIf(!native)('native Windows protected execution', () => {
     console.error('WINDOWS_VOLUME_HOST', out.trim());
     expect(JSON.parse(out).build).toMatchObject({status: 0, output: true});
     rmSync(join(root, 'volume-dist'), {recursive: true, force: true});
-    // This second view changes only its scratch volume. The host checkout and
-    // Bun, LPAC, admission, ACLs, native helper and build command stay the same.
-    const systemTemp = process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Temp');
-    for (const variant of ['runner', 'system'] as const) {
-      if (variant === 'system' && (!systemTemp || systemTemp.slice(0, 2).toLowerCase() !== process.env.SystemRoot?.slice(0, 2).toLowerCase())) {
-        console.error('WINDOWS_VOLUME_SYSTEM unavailable'); continue;
-      }
-      const saved = {TEMP: process.env.TEMP, TMP: process.env.TMP};
-      try {
-        if (variant === 'system') {mkdirSync(systemTemp!, {recursive: true}); process.env.TEMP = systemTemp; process.env.TMP = systemTemp;}
-        await procs.protection.install(`volume-${variant}`, input(), () => {});
-      } finally {
-        for (const key of ['TEMP', 'TMP'] as const) {
-          if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key];
-        }
-      }
-      try {
-        const launch = procs.protection.launch(`volume-${variant}`, process.execPath, ['volume.ts'], {cwd: root});
-        const child = procs.spawn(`volume-${variant}`, process.execPath, ['volume.ts'], {cwd: root});
-        const [code, out, err] = await Promise.all([child.exited, new Response(child.proc.stdout).text(), new Response(child.proc.stderr).text()]);
-        console.error('WINDOWS_VOLUME_PRIVATE', JSON.stringify({variant, mode: launch?.args[0], code, out, err}));
-        expect(code, err).toBe(0);
-        // Diagnostic only: useful-workload build=true remains a separate gate.
-        expect(JSON.parse(out).observations.length).toBe(6);
-      } finally {await procs.protection.release(`volume-${variant}`);}
-    }
+    await procs.protection.install('volume-selected', input(), () => {});
+    try {
+      const launch = procs.protection.launch('volume-selected', process.execPath, ['volume.ts'], {cwd: root});
+      const child = procs.spawn('volume-selected', process.execPath, ['volume.ts'], {cwd: root});
+      const [code, out, err] = await Promise.all([child.exited, new Response(child.proc.stdout).text(), new Response(child.proc.stderr).text()]);
+      console.error('WINDOWS_VOLUME_PRIVATE', JSON.stringify({variant: 'selected', source: root, mode: launch?.args[0], code, out, err}));
+      expect(code, err).toBe(0);
+      const result = JSON.parse(out);
+      expect(result.observations.length).toBe(6);
+      expect(win32.parse(result.cwd).root.toLowerCase()).toBe(win32.parse(result.systemRoot).root.toLowerCase());
+      expect(result.build).toMatchObject({status: 0, output: true});
+    } finally {await procs.protection.release('volume-selected');}
   }, 120000);
 
   test('an ordinary native process edits, builds and tests without host file authority', async () => {
@@ -119,21 +105,31 @@ describe.skipIf(!native)('native Windows protected execution', () => {
 
   test('exact read exceptions stay read-only and do not grant aliases or original host access', async () => {
     const {procs, root, input} = await setup();
-    const secret = join(root, '.env'); writeFileSync(secret, 'SYNTHETIC_PROTECTED');
-    linkSync(secret, join(root, 'secret-alias'));
-    const identity = policyFile(root, '.env').identity;
-    await procs.protection.install('override', input({readOverrides: [{path: '.env', identity, expiresAt: Date.now() + 60000}]}), () => {});
-    const result = await execute('override', `const fs = require('fs'); let written = false, alias = false, host = false;
+    const stop = harness!.core.bus.onAny((event, payload) => {
+      if (event !== 'process.started' && event !== 'process.exited') return;
+      const record = payload as {threadId: string; pid: number; parentPid: number | null; exe: string; startedAt: number; exitedAt: number | null};
+      if (record.threadId === 'override') console.error('WINDOWS_PUBLICATION_EVENT', JSON.stringify({event, at: performance.now(),
+        pid: record.pid, parentPid: record.parentPid, exe: record.exe, startedAt: record.startedAt, exitedAt: record.exitedAt}));
+    });
+    const observe = (phase: string, rootPid: number) => console.error('WINDOWS_PUBLICATION_STATE', JSON.stringify({phase, rootPid,
+      at: performance.now(), live: publicationState(procs.liveOf('override'))}));
+    try {
+      const secret = join(root, '.env'); writeFileSync(secret, 'SYNTHETIC_PROTECTED');
+      linkSync(secret, join(root, 'secret-alias'));
+      const identity = policyFile(root, '.env').identity;
+      await procs.protection.install('override', input({readOverrides: [{path: '.env', identity, expiresAt: Date.now() + 60000}]}), () => {});
+      const result = await execute('override', `const fs = require('fs'); let written = false, alias = false, host = false;
 const {dlopen,FFIType,ptr}=require('bun:ffi'); const acl=dlopen('advapi32.dll',{SetNamedSecurityInfoW:{args:[FFIType.ptr,FFIType.u32,FFIType.u32,FFIType.ptr,FFIType.ptr,FFIType.ptr,FFIType.ptr],returns:FFIType.u32}});
 const aclDenied=acl.symbols.SetNamedSecurityInfoW(ptr(Buffer.from('.env\\0','utf16le')),1,4,null,null,null,null)===5; acl.close();
 try {fs.writeFileSync('.env', 'altered'); written=true;} catch {}
 try {fs.readFileSync('secret-alias'); alias=true;} catch {}
 try {fs.readFileSync(${JSON.stringify(secret)}); host=true;} catch {}
-console.log(JSON.stringify({text:fs.readFileSync('.env','utf8'),written,alias,host,aclDenied}));`, root);
-    expect(JSON.parse(result)).toEqual({text: 'SYNTHETIC_PROTECTED', written: false, alias: false, host: false, aclDenied: true});
-    procs.protection.flush('override');
-    writeFileSync(secret, 'changed');
-    expect(() => procs.spawn('override', process.execPath, ['-e', ''], {cwd: root})).toThrow('authorized file');
+console.log(JSON.stringify({text:fs.readFileSync('.env','utf8'),written,alias,host,aclDenied}));`, root, observe);
+      expect(JSON.parse(result)).toEqual({text: 'SYNTHETIC_PROTECTED', written: false, alias: false, host: false, aclDenied: true});
+      procs.protection.flush('override');
+      writeFileSync(secret, 'changed');
+      expect(() => procs.spawn('override', process.execPath, ['-e', ''], {cwd: root})).toThrow('authorized file');
+    } finally {stop();}
   }, 120000);
 
   test.each(['revoke', 'expiry', 'root-exit'] as const)('%s terminates a captured detached descendant and cleans task identity and view', async reason => {
@@ -144,6 +140,8 @@ console.log(JSON.stringify({text:fs.readFileSync('.env','utf8'),written,alias,ho
     const captured = await procs.protection.install('parent', input({expiresAt: Date.now() + (reason === 'expiry' ? 5000 : 60000)}), () => {});
     procs.protection.inherit('parent', 'child');
     expect(procs.protection.policy('child')?.fingerprint).toBe(captured.fingerprint);
+    const scratch = procs.protection.launch('child', process.execPath, [], {cwd: root})!.cwd;
+    expect(existsSync(scratch)).toBe(true);
     const tool = procs.spawn('child', process.execPath, ['-e', `const p=require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'}); p.unref(); console.log(p.pid); ${reason === 'root-exit' ? 'setTimeout(()=>process.exit(0),2000)' : 'setInterval(()=>{},1000)'}`], {cwd: root});
     const first = await tool.proc.stdout.getReader().read(), pid = Number(new TextDecoder().decode(first.value).trim());
     expect(pid, pid ? '' : await new Response(tool.proc.stderr).text()).toBeGreaterThan(0);
@@ -155,7 +153,7 @@ console.log(JSON.stringify({text:fs.readFileSync('.env','utf8'),written,alias,ho
       expect(kernel.symbols.WaitForSingleObject(held, 5000)).toBe(0);
       if (reason === 'root-exit') await procs.protection.revoke('parent');
       else expect(() => procs.spawn('parent', process.execPath, [], {cwd: root})).toThrow('revoked');
-      await waitFor(() => !readdirSync(tmpdir()).some(p => p.startsWith(`boite-protected-${captured.capabilityId}-`)));
+      await waitFor(() => !existsSync(scratch));
       // Recreating the exact name fails with ERROR_ALREADY_EXISTS if cleanup leaked it.
       const userenv = dlopen('userenv.dll', {
         CreateAppContainerProfile: {args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.u32, FFIType.ptr], returns: FFIType.i32},
@@ -211,9 +209,11 @@ async function setup() {
     credentialPaths: [], executables: [process.execPath], expiresAt: Date.now() + 120000, ...extra});
   return {procs: harness.core.procs, root, input};
 }
-async function execute(id: string, script: string, cwd: string) {
+async function execute(id: string, script: string, cwd: string, observe?: (phase: string, rootPid: number) => void) {
   const child = harness!.core.procs.spawn(id, process.execPath, ['-e', script], {cwd});
   const [code, out, err] = await Promise.all([child.exited, new Response(child.proc.stdout).text(), new Response(child.proc.stderr).text()]);
+  observe?.('collected', child.record.pid);
   await harness!.core.procs.waitForExit(id, [child.record.pid]);
+  observe?.('root-retired', child.record.pid);
   expect(code, err).toBe(0); return out;
 }

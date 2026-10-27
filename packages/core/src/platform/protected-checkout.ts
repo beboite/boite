@@ -16,8 +16,8 @@ export class ProtectedCheckout {
   private readonly directories = new Map<string, string>();
   private closed = false;
 
-  constructor(readonly policy: ExecutionPolicy) {
-    this.scratch = mkdtempSync(join(tmpdir(), `boite-protected-${policy.capabilityId}-`));
+  constructor(readonly policy: ExecutionPolicy, temporary = tmpdir()) {
+    this.scratch = mkdtempSync(join(temporary, `boite-protected-${policy.capabilityId}-`));
     this.root = join(this.scratch, 'checkout');
     try {
       mkdirSync(this.root, {mode: 0o700});

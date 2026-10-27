@@ -1,6 +1,7 @@
 import {dlopen, FFIType, ptr} from 'bun:ffi';
 import {copyFileSync, existsSync, lstatSync, mkdirSync, realpathSync} from 'node:fs';
-import {basename, dirname, isAbsolute, join, relative, resolve} from 'node:path';
+import {tmpdir} from 'node:os';
+import {basename, dirname, isAbsolute, join, relative, resolve, win32} from 'node:path';
 import {inside} from '../../contacts/file-policy.ts';
 import {assertExecutionPolicy, type ExecutionPolicy} from '../../execution-policy.ts';
 import type {NativeExecutionBoundary, NativeExecutionSession, ProtectedLaunch, ProtectionRunner} from '../protected.ts';
@@ -8,6 +9,20 @@ import {ProtectedCheckout} from '../protected-checkout.ts';
 import {admitWindowsExecution, windowsHelperIdentity, windowsHelperVersion, type WindowsLaunchMode} from './protected-admission.ts';
 
 const wide = (value: string) => Buffer.from(`${value}\0`, 'utf16le');
+
+export function windowsScratchParent(windows: string, temporary: string, localAppData: string | undefined,
+  canonical: (path: string) => string = realpathSync): string {
+  // Bun's AppContainer DOS-name fallback only reconstructs the system volume.
+  const volume = win32.parse(windows).root.toLowerCase();
+  const compatible = (path: string) => win32.isAbsolute(path) && win32.parse(path).root.toLowerCase() === volume;
+  const resolved = canonical(temporary);
+  if (compatible(resolved)) return resolved;
+  if (localAppData && win32.isAbsolute(localAppData)) {
+    const local = canonical(localAppData);
+    if (compatible(local)) return win32.join(local, 'Temp');
+  }
+  throw new Error('execution.windows.scratch: expected a user temporary directory on the Windows system volume');
+}
 
 /** A private LPAC identity plus a non-breakaway kernel job; never changes a host ACL. */
 export class WindowsExecutionBoundary implements NativeExecutionBoundary {
@@ -26,7 +41,12 @@ export class WindowsExecutionBoundary implements NativeExecutionBoundary {
       || inside(windows, policy.checkout)) throw new Error('execution.windows.runtime: credentials and checkout must be outside the public Windows runtime');
     const checked = await run(helper, ['--version'], policy.checkout);
     if (checked.code || checked.stdout !== windowsHelperVersion) throw new Error(`execution.windows.helper: expected ${windowsHelperVersion}`);
-    const checkout = new ProtectedCheckout(policy), profile = `boite.tool.${policy.capabilityId}`;
+    const temporary = windowsScratchParent(windows, tmpdir(), process.env.LOCALAPPDATA);
+    mkdirSync(temporary, {recursive: true});
+    // Validate the canonical target too: a junction must not redirect the
+    // selected user directory back onto an unsupported volume.
+    const canonical = windowsScratchParent(windows, temporary, undefined);
+    const checkout = new ProtectedCheckout(policy, canonical), profile = `boite.tool.${policy.capabilityId}`;
     const runtime = join(checkout.scratch, 'runtime'), home = join(checkout.scratch, 'home');
     const binaries = new Map<string, string>(), aliases = new Map<string, string>();
     let prepared = false, closed = false;

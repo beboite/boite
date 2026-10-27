@@ -1090,6 +1090,13 @@ checkout directory; the original host checkout path grants no access. Windows
 PE executables are checked by their native extension and captured file identity,
 rather than POSIX execute bits.
 
+The Windows copy uses a user temporary directory on the system volume. Bun's
+AppContainer path fallback reconstructs DOS directory names only on that
+volume. A compatible configured temporary directory is retained; otherwise
+the backend uses `LOCALAPPDATA/Temp` after canonical volume validation, or
+refuses preparation. The host checkout can remain on another volume. This
+selection changes neither global TEMP/TMP nor any host ACL.
+
 `platform/windows/protected-tool.c` creates an unpredictable per-capability
 AppContainer profile and changes ACLs only inside that task's scratch directory.
 It grants the package project edits, private home/temp and runtime reads, with
