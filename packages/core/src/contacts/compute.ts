@@ -222,6 +222,8 @@ export class SharedCompute {
     const next = checkedComputeJob(raw, current.job, current.repository);
     if (next.revision < current.job.revision) return current.job;
     if (next.result && next.result.baseCommit !== current.input.baseCommit) throw refused('compute.result.baseCommit: expected the requested base');
+    // A change notice and a read can both deliver one host state: accepting it again would restamp history.
+    if (!current.cancelRequest && fingerprint({...next, updatedAt: current.job.updatedAt}) === fingerprint(current.job)) return current.job;
     current.job = next;
     if (terminalCompute(next)) delete current.cancelRequest;
     this.save(current); return next;
