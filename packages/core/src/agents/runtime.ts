@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { AgentProfile, Message, MessagePart, ThreadSummary, Turn } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf, refused, RpcFailure } from '../errors.ts';
@@ -45,7 +46,7 @@ export interface AgentFact {
   threadIds?: string[];
 }
 
-interface HeldFact { key: string; text: string; at: number; notBefore: number; threadIds?: string[] }
+interface HeldFact { key: string; text: string; at: number; notBefore: number; threadIds?: string[]; deferred?: boolean }
 interface HeldEvent { key: string; label: string; prompt: string; at: number }
 /** What waits for the agent's thread to be free, kept across restarts. */
 interface Pending { facts: HeldFact[]; events: HeldEvent[] }
@@ -278,10 +279,13 @@ export class AgentRuntime {
       return false;
     }
     if (eventWakes) sent.at.push(now);
-    let facts = [...pending.facts, { key: fact.key, text: fact.text, at: now, notBefore: now + (fact.delay ?? NOTICE_BATCH_MS), ...(fact.threadIds ? { threadIds: [...fact.threadIds] } : {}) }];
-    while (eventWakes && facts.length > 1 && this.eventPrompt(facts).length > EVENT_PROMPT_MAX) {
-      this.dropped(agentId, sent, `Event dropped to keep the next wake under ${EVENT_PROMPT_MAX} characters. ${about(facts[0]!.text)}`);
-      facts = facts.slice(1);
+    let facts = [...pending.facts, { key: fact.key, text: fact.text, at: now, notBefore: now + (fact.delay ?? NOTICE_BATCH_MS), ...(!eventWakes ? { deferred: true } : {}), ...(fact.threadIds ? { threadIds: [...fact.threadIds] } : {}) }];
+    // Deferred facts remain protected through re-enable and restart; only automatic arrivals compete for their cap.
+    const automatic = facts.filter(f => !f.deferred);
+    while (eventWakes && automatic.length > 1 && this.eventPrompt(automatic).length > EVENT_PROMPT_MAX) {
+      const dropped = automatic.shift()!;
+      this.dropped(agentId, sent, `Event dropped to keep the next wake under ${EVENT_PROMPT_MAX} characters. ${about(dropped.text)}`);
+      facts = facts.filter(f => f.key !== dropped.key);
     }
     pending.facts = facts;
     this.save(agentId, pending);
@@ -430,11 +434,23 @@ export class AgentRuntime {
         this.save(agentId, { ...this.held(agentId), facts: this.held(agentId).facts.filter(f => facts.some(kept => kept.key === f.key)) });
         if (facts.length === 0) continue;
       }
-      const label = facts.length === 1 ? '1 project event' : `${facts.length} project events`;
-      const attempt = this.attempt(agent, { kind: 'event', label, prompt: this.eventPrompt(facts), requestId: `facts-${agentId.slice(-40)}-${facts[0]!.at}` });
+      // Re-enabled event wakes can inherit a backlog larger than one prompt.
+      const batch: HeldFact[] = [];
+      let prompt = EVENT_HEADER;
+      for (const fact of facts) {
+        const addition = this.eventPrompt([fact]).slice(EVENT_HEADER.length);
+        if (batch.length && prompt.length + addition.length > EVENT_PROMPT_MAX) break;
+        batch.push(fact);
+        prompt += addition;
+      }
+      const label = batch.length === 1 ? '1 project event' : `${batch.length} project events`;
+      // A burst can share a timestamp across batches; the first fact distinguishes their receipts.
+      const first = batch[0]!;
+      const receipt = createHash('sha256').update(JSON.stringify([first.at, first.key])).digest('hex');
+      const attempt = this.attempt(agent, { kind: 'event', label, prompt, requestId: `facts-${agentId.slice(-40)}-${receipt}` });
       if (attempt.held === 'busy' || attempt.held === 'paused') continue;
       // Started, skipped for the budget or failed: these facts are spent. Those that arrived meanwhile stay.
-      const keys = new Set(facts.map(f => f.key));
+      const keys = new Set(batch.map(f => f.key));
       this.save(agentId, { ...this.held(agentId), facts: this.held(agentId).facts.filter(f => !keys.has(f.key)) });
     }
   }

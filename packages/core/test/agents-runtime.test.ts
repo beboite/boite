@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CoreClient } from '../src/client.ts';
 import { notifiesOnFinish } from '@boite/contracts';
-import { AgentRuntime, isAgentHeld, NOTICES_PER_HOUR } from '../src/agents/runtime.ts';
+import { AgentRuntime, EVENT_PROMPT_MAX, isAgentHeld, NOTICES_PER_HOUR } from '../src/agents/runtime.ts';
 import { agentGuide, BOT_GUIDE } from '../src/agent-guide.ts';
 import { agentContext } from '../src/agents/context.ts';
 import { costing, makeAgent, scripted, settled, turnsOf } from './agent-fixture.ts';
@@ -332,6 +332,64 @@ test('deferred arrivals leave the automatic event allowance available after re-e
   }
   expect(h.core.agentRuntime.fact(agent.id, { key: 'over-cap', text: 'Over cap.', threadIds: [] })).toBe(false);
   expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(NOTICES_PER_HOUR);
+});
+
+test('re-enabling event wakes drains a deferred backlog in bounded batches without replay after restart', async () => {
+  const driver = scripted(ctx => ({ text: 'Seen.', hold: ctx.prompt.includes('BACKLOG_0') })); restore = driver.restore;
+  const { agent, threadId } = await makeAgent(h, client);
+  const config = await client.call('agents.runtime.get', { agentId: agent.id });
+  const save = (eventWakes: boolean) => client.call('agents.runtime.configure', {
+    agentId: agent.id, expectedRevision: h.core.workforce.records.get('profile', agent.id).revision, config: { ...config, eventWakes },
+  });
+  const tick = () => (h.core.agentRuntime as unknown as { tick(): void }).tick();
+  const events = () => turnsOf(h, threadId).filter(t => t.execution?.operation === 'event');
+  await save(false);
+  const now = Date.now;
+  const arrived = now();
+  // Facts in one burst share a timestamp; each batch must still have its own receipt.
+  Date.now = () => arrived;
+  try {
+    for (let i = 0; i < 5; i++) h.core.agentRuntime.fact(agent.id, { key: `backlog:${i}`, text: `BACKLOG_${i} ${'x'.repeat(6000)}`, threadIds: [], delay: 0 });
+  } finally { Date.now = now; }
+  const before = events().length;
+  await save(true);
+  const delivered: string[] = [];
+  for (const remaining of [4, 3, 0]) {
+    tick();
+    if (remaining === 4) {
+      await waitFor(() => driver.held.length === 1);
+      expect(h.core.agentRuntime.fact(agent.id, { key: 'new-live', text: 'NEW_LIVE', threadIds: [], delay: 0 })).toBe(true);
+      const keys = ['backlog:2', 'backlog:3', 'backlog:4', 'new-live'];
+      expect(h.core.agentRuntime.facts(agent.id).map(f => f.key)).toEqual(keys);
+      const persisted = h.core.journal.getSetting(`agents:pending:${agent.id}`) as { facts: { key: string }[] };
+      expect(persisted.facts.map(f => f.key)).toEqual(keys);
+      driver.release();
+    }
+    await h.core.agentRuntime.close();
+    expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(remaining);
+    await waitFor(() => settled(h, threadId));
+    const turn = events().at(-1)!;
+    const message = h.core.journal.listMessages(threadId).find(m => m.turnId === turn.id && m.role === 'system')!;
+    const prompt = message.parts[0]?.type === 'text' ? message.parts[0].text : '';
+    expect(prompt.length).toBeLessThanOrEqual(EVENT_PROMPT_MAX);
+    delivered.push(...(prompt.match(/BACKLOG_\d|NEW_LIVE|RESTART_LIVE/g) ?? []));
+    // The remainder is durable and each new batch starts after a reconstructed runtime.
+    expect(h.core.journal.getSetting(`agents:pending:${agent.id}`)).toEqual(remaining ? expect.objectContaining({ facts: expect.any(Array) }) : undefined);
+    (h.core as { agentRuntime: AgentRuntime }).agentRuntime = new AgentRuntime(h.core);
+    expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(remaining);
+    if (remaining === 4) {
+      // Protection must also survive the runtime reconstruction, before the next lot starts.
+      expect(h.core.agentRuntime.fact(agent.id, { key: 'restart-live', text: 'RESTART_LIVE', threadIds: [], delay: 0 })).toBe(true);
+      const keys = ['backlog:2', 'backlog:3', 'backlog:4', 'new-live', 'restart-live'];
+      expect(h.core.agentRuntime.facts(agent.id).map(f => f.key)).toEqual(keys);
+      const persisted = h.core.journal.getSetting(`agents:pending:${agent.id}`) as { facts: { key: string }[] };
+      expect(persisted.facts.map(f => f.key)).toEqual(keys);
+    }
+  }
+  expect(delivered).toEqual(['BACKLOG_0', 'BACKLOG_1', 'BACKLOG_2', 'BACKLOG_3', 'BACKLOG_4', 'NEW_LIVE', 'RESTART_LIVE']);
+  expect(events()).toHaveLength(before + 3);
+  tick();
+  expect(events()).toHaveLength(before + 3);
 });
 
 test('routine fact consumption rolls back before any driver starts and commits before delivery, without request replay', async () => {
