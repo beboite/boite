@@ -10,7 +10,7 @@
 import { cpus, totalmem } from 'node:os';
 import { dlopen, FFIType, ptr } from 'bun:ffi';
 import type { Pointer } from 'bun:ffi';
-import type { TraceCapability } from '@boite/contracts';
+import { KILL_EXIT_CODE, type TraceCapability } from '@boite/contracts';
 import type { JobsWorkerMessage, JobsWorkerStart } from './jobs-worker.ts';
 import { describeWorkerError, workerEntry } from './worker-entry.ts';
 import { resolveMemoryLimits } from '../../memory-limits.ts';
@@ -61,7 +61,6 @@ const PROCESS_QUERY_INFORMATION = 0x400;
 /** What OpenProcess says for a pid no process holds any more. */
 const ERROR_INVALID_PARAMETER = 87;
 const STILL_ACTIVE = 259;
-const KILL_EXIT_CODE = 9;
 
 /** JOBOBJECT_BASIC_ACCOUNTING_INFORMATION.TotalUserTime, in 100 ns units. */
 const OFF_TOTAL_USER_TIME = 0;
@@ -461,15 +460,23 @@ export function sampleThreadJob(threadId: string): ProcessSample | null {
 
   let memoryBytes = 0;
   const workingSets: { pid: number; bytes: number; committedBytes: number }[] = [];
+  const ended: [number, TrackedProcess][] = [];
   for (const pid of job.pids) {
     const entry = tracked.get(pid);
     if (entry === undefined || entry.threadId !== threadId) continue;
+    // A job nested in this one and ended by TerminateJobObject (a test suite's
+    // core ending its CLIs) posts no exit here, and the port promises none anyway.
+    if (exitCodeOf(api, entry.handle) !== null) { ended.push([pid, entry]); continue; }
     const memory = workingSetOf(api, entry.handle);
     if (memory === null) continue;
     memoryBytes += memory.workingSet;
     workingSets.push({ pid, bytes: memory.workingSet, committedBytes: memory.committedBytes });
     if (memory.peak > entry.peakMemoryBytes) tracked.set(pid, { ...entry, peakMemoryBytes: memory.peak });
   }
+  // Reported once the registry's sample, which reads its entries, is done. A late packet matches no live record.
+  if (ended.length > 0) queueMicrotask(() => {
+    for (const [pid, entry] of ended) if (tracked.get(pid)?.handle === entry.handle) onProcessExited(threadId, pid);
+  });
 
   return { processes: view.getUint32(OFF_ACTIVE_PROCESSES, true), cpuPercent, memoryBytes, workingSets,
     cpuMeasured, memoryMeasured: workingSets.length > 0 };

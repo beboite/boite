@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { dlopen, FFIType, ptr } from 'bun:ffi';
 import type { Pointer } from 'bun:ffi';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { RpcErrorCode } from '@boite/contracts';
 import type { ProcessRecord, ThreadSummary } from '@boite/contracts';
 import { cpuRateOfGlobalJob, memoryLimitOfJob, releaseThreadJob, sampleThreadJob } from '../src/platform/windows/jobs.ts';
 import { commandLineOf, consoleHost, startedAs, whenCommandLineReads, type ProcessReads } from '../src/platform/windows/process-reads.ts';
 import { jobPacketAction, MSG_JOB_MEMORY_LIMIT, MSG_NEW_PROCESS } from '../src/platform/windows/jobs-packets.ts';
 import { resolveMemoryLimits } from '../src/memory-limits.ts';
+import { nativeAgents } from '../src/native-agents.ts';
 import { processPlatform } from '../src/platform/index.ts';
 import { STARTUP_PRIORITY } from '../src/procs.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
@@ -283,6 +285,41 @@ describeWindows('windows job objects', () => {
     expect(killed.killed).toBeGreaterThan(0);
     await until('the detached ping to be killed', () => !isRunning(ping?.pid as number), 2000);
   }, 30000);
+
+  test('an agent CLI a nested job ends without an exit packet leaves the running count with its exit', async () => {
+    // A test suite's own core does this to the CLIs it ran: TerminateJobObject on
+    // its job, which posts their exits to no job above it.
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const workDir = join(harness.dataDir, 'nested-job');
+    const launcher = harness.core.procs.spawn(threadId, process.execPath, [join(import.meta.dir, 'fixtures', 'nested-job-cli.ts'), workDir, '1']);
+    const agents = async () => (await client.call('delegation.get', { threadId })).nativeAgents.filter(agent => agent.source === 'process');
+    const deadline = async (label: string, predicate: (found: Awaited<ReturnType<typeof agents>>) => boolean, timeoutMs: number) => {
+      const started = Date.now();
+      while (!predicate(await agents())) {
+        if (Date.now() - started > timeoutMs) throw new Error(`timed out waiting for ${label}: ${JSON.stringify(await agents())}`);
+        await Bun.sleep(50);
+      }
+    };
+    await deadline('the CLI to run', found => found.some(agent => agent.status === 'running'), 15000);
+    const [running] = await agents();
+    expect(running).toMatchObject({ name: 'Claude Code', model: 'claude-haiku-5-5', status: 'running' });
+    const pid = harness.core.procs.liveOf(threadId).find(record => `process:${threadId}:${record.pid}:${record.startedAt}` === running!.id)?.pid as number;
+    expect(isRunning(pid)).toBe(true);
+
+    writeFileSync(join(workDir, 'end'), '');
+    await until('the nested job to end the CLI', () => !isRunning(pid), 5000);
+    // The next load tick finds the exit the port never posted.
+    await deadline('the CLI to leave the running count', found => !found.some(agent => agent.status === 'running'), 10000);
+    expect(harness.core.procs.liveOf(threadId).map(record => record.pid)).not.toContain(pid);
+    // The journal alone, as a restarted core or a client that reconnects reads it.
+    const ended = nativeAgents(harness.core.journal, threadId).find(agent => agent.id === running!.id);
+    expect(ended?.status).toBe('stopped');
+    expect(ended?.finishedAt).toBeGreaterThanOrEqual(running!.startedAt);
+
+    writeFileSync(join(workDir, 'exit'), '');
+    await launcher.exited;
+  }, 45000);
 
   test('a CPU cap set to 0 or 100 at runtime lifts the cap the global job already had', async () => {
     const client = await harness.connect();
