@@ -348,6 +348,7 @@ jobs:
       # Core data directories, worktrees and Chrome profiles go to the runner's
       # temp drive (D: on Windows), as in the E2E shards (docs/ci.md#build-cost).
       - run: bun run --cwd packages/core test
+        if: ${{ !cancelled() && (success() || runner.os == 'Windows' && steps.native_providers.outcome == 'success') }}
         env:
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}

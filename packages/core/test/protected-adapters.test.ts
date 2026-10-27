@@ -1,6 +1,6 @@
 import {afterEach, describe, expect, test} from 'bun:test';
 import {copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
-import {join} from 'node:path';
+import {dirname, join} from 'node:path';
 import {TOOL_FREE_CONTEXT, type PermissionMode, type ThreadSummary} from '@boite/contracts';
 import {createPiDriver} from '../src/drivers/pi.ts';
 import {createAcpDriver} from '../src/drivers/acp.ts';
@@ -60,14 +60,24 @@ describe.skipIf(!native)('native protected extensions', () => {
     const logs: string[] = [];
     let approvals = 0, spawns = 0;
     const workspaces: string[] = [];
+    const processes: {pid: number | undefined; cwd: string | undefined; events: Record<string, unknown>[]}[] = [];
     const ctx: TurnContext = {thread: {...thread, contextMode: {...TOOL_FREE_CONTEXT}}, account, provider, accountEnv, protectedExecution, prompt: 'Run the deterministic fixture.', attachments: [], sessionId: null,
       turn: {id: 'synthetic-turn', threadId: thread.id} as TurnContext['turn'], warmProcessMinutes: 1,
       emit: {startMessage: () => 'synthetic-message', delta: () => {}, part: () => {}, patchTool: () => {}, complete: () => {}},
       log: (_level, text) => logs.push(text), diagnostic: (_level, text) => logs.push(text), commands: () => {}, context: () => {},
       askQuestion: () => {throw new Error('No question');}, requestPermission: () => {approvals++; return Object.assign(Promise.resolve('allow' as const), {requestId: 'synthetic-approval', withdraw() {}});},
       spawn: () => {throw new Error('Control must use the tracked child route');},
-      spawnChild: (cmd, args, opts) => {spawns++; if (opts?.cwd) workspaces.push(opts.cwd); return core.procs.spawnChild(control, cmd, args, {...opts,
-        env: {PATH: process.env.PATH, SystemRoot: process.env['SystemRoot'], HOME: accountDir, LANG: 'C.UTF-8', ...accountEnv, ...opts?.env}});},
+      spawnChild: (cmd, args, opts) => {
+        spawns++; if (opts?.cwd) workspaces.push(opts.cwd);
+        const child = core.procs.spawnChild(control, cmd, args, {...opts,
+          env: {PATH: process.env.PATH, SystemRoot: process.env['SystemRoot'], HOME: accountDir, LANG: 'C.UTF-8', ...accountEnv, ...opts?.env}});
+        const captured = {pid: child.pid, cwd: opts?.cwd, events: [] as Record<string, unknown>[]};
+        processes.push(captured);
+        child.once('exit', (code, signal) => captured.events.push({event: 'exit', at: Date.now(), code, signal}));
+        child.once('close', (code, signal) => captured.events.push({event: 'close', at: Date.now(), code, signal}));
+        child.once('error', error => captured.events.push({event: 'error', at: Date.now(), error: error.message}));
+        return child;
+      },
       killTree: () => {core.procs.killTree(control); core.procs.killTree(thread.id);},
     };
     driver = protocol === 'pi' ? createPiDriver() : createAcpDriver({loadSdk: () => import('@agentclientprotocol/sdk')});
@@ -128,6 +138,14 @@ describe.skipIf(!native)('native protected extensions', () => {
     expect(api.requests).toHaveLength(before);
     expect(core.procs.liveCount(control)).toBe(0);
     driver.shutdown?.();
-    await waitFor(() => workspaces.every(path => !existsSync(path)));
+    await waitFor(() => workspaces.every(path => !existsSync(path))).catch(error => {
+      try {
+        console.error(JSON.stringify({stage: 'execution.adapter.cleanup-timeout', protocol, helper: process.env.BOITE_WINDOWS_SANDBOX_PATH,
+          processes, cleanup: logs.filter(line => line.startsWith('execution.bridge.cleanup:')),
+          workspaces: workspaces.map(cwd => ({cwd, present: existsSync(cwd),
+            entries: existsSync(dirname(cwd)) ? [...new Bun.Glob('**/*').scanSync({cwd: dirname(cwd), dot: true, onlyFiles: false, followSymlinks: false})] : []}))}));
+      } catch (snapshotError) {console.error(`execution.adapter.cleanup-snapshot: ${String(snapshotError)}`);}
+      throw error;
+    });
   }, 90000);
 });
