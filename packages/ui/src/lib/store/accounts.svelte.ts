@@ -2,6 +2,7 @@ import { RpcErrorCode, providerEnabled, subscriptionProxyName, subscriptionProxy
 import type {
   Account,
   HarnessUpdate,
+  LocalAcpCommand,
   ProviderId,
   ProviderInstallState,
   ProviderRejected,
@@ -388,6 +389,45 @@ export class Accounts {
     const generation = this.ctx.clientGeneration;
     try {
       const { loaded, rejected } = await client.call('providers.setEnabled', { providerId, enabled });
+      if (!this.ctx.currentClient(client, generation)) return false;
+      this.providers = loaded;
+      this.rejectedProviders = rejected;
+      return true;
+    } catch (error) {
+      if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
+      return false;
+    }
+  }
+
+  /**
+   * Write a local ACP command as a provider on this store's machine. A refusal
+   * comes back to the form with the field it names instead of a toast.
+   */
+  async addLocalProvider(command: LocalAcpCommand): Promise<{ ok: true; providerId: ProviderId } | { ok: false; field: string | null; message: string }> {
+    const client = this.ctx.client;
+    if (!client || !this.ctx.store.owner) return { ok: false, field: null, message: '' };
+    const generation = this.ctx.clientGeneration;
+    try {
+      const { providerId, loaded, rejected } = await client.call('providers.addLocal', command);
+      if (this.ctx.currentClient(client, generation)) {
+        this.providers = loaded;
+        this.rejectedProviders = rejected;
+      }
+      return { ok: true, providerId };
+    } catch (error) {
+      const data = error instanceof RpcFailure ? error.data : null;
+      const field = typeof data === 'object' && data !== null && typeof (data as { field?: unknown }).field === 'string' ? (data as { field: string }).field : null;
+      return { ok: false, field, message: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  /** Delete a provider added on this machine. Refused by the core for a shipped one or while one of its turns runs. */
+  async removeLocalProvider(providerId: ProviderId): Promise<boolean> {
+    const client = this.ctx.client;
+    if (!client || !this.ctx.store.owner) return false;
+    const generation = this.ctx.clientGeneration;
+    try {
+      const { loaded, rejected } = await client.call('providers.removeLocal', { providerId });
       if (!this.ctx.currentClient(client, generation)) return false;
       this.providers = loaded;
       this.rejectedProviders = rejected;

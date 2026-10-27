@@ -151,6 +151,31 @@ async function unavailable(env: ContractEnv): Promise<{ provider: ProviderSummar
 
 export const SCENARIOS: Record<string, Scenario> = {
   ...SHARED_SCENARIOS,
+  'providers.addLocal writes an ACP provider with a default account, providers.removeLocal takes it away, each refusal names its field': async (env) => {
+    const heard = record(env, ['providers.updated']);
+    const added = await env.call('providers.addLocal', { name: 'Contract Local', command: 'bun', args: ['acp', 'two words'], env: { CONTRACT_LOCAL: '1' } });
+    same(added.providerId, 'contract-local', 'the id the name turns into');
+    const summary = added.loaded.find((entry) => entry.id === 'contract-local');
+    check(summary !== undefined, 'the new provider is not listed');
+    same([summary.protocol, summary.source, summary.available, summary.login], ['acp', 'user', true, false], 'the new provider');
+    check(heard.events.some((event) => (event.payload as RpcEvents['providers.updated']).loaded.some((entry) => entry.id === 'contract-local')), 'no providers.updated carried the new provider');
+    const account = (await env.call('accounts.list', {})).find((entry) => entry.providerId === 'contract-local');
+    check(account !== undefined && account.isolationDir === null && account.status === 'ok', 'the new provider has no default account on its own configuration');
+
+    const add = (patch: Record<string, unknown>) => env.call('providers.addLocal', { name: 'Other', command: 'bun', args: [], env: {}, ...patch });
+    same((await refusedWith(add({ name: 'Contract  local!' }), RpcErrorCode.InvalidParams, ['expected']))['field'], 'name', 'a name whose id is taken');
+    same((await refusedWith(add({ name: 'Echo' }), RpcErrorCode.InvalidParams))['providerId'], 'echo', 'a shipped id');
+    same((await refusedWith(add({ command: 'dir/agent' }), RpcErrorCode.InvalidParams))['field'], 'command', 'a relative path');
+    same((await refusedWith(add({ args: [''] }), RpcErrorCode.InvalidParams))['field'], 'args[0]', 'an empty argument');
+    same((await refusedWith(add({ env: { 'NOT-A-NAME': 'x' } }), RpcErrorCode.InvalidParams))['field'], 'env.NOT-A-NAME', 'a bad variable name');
+
+    same((await refusedWith(env.call('providers.removeLocal', { providerId: 'echo' }), RpcErrorCode.Refused))['field'], 'providerId', 'removing a shipped provider');
+    await refusedWith(env.call('providers.removeLocal', { providerId: 'contract-missing' }), RpcErrorCode.NotFound);
+    const removed = await env.call('providers.removeLocal', { providerId: 'contract-local' });
+    check(!removed.loaded.some((entry) => entry.id === 'contract-local'), 'the removed provider is still listed');
+    check(!(heard.events.at(-1)?.payload as RpcEvents['providers.updated']).loaded.some((entry) => entry.id === 'contract-local'), 'the last providers.updated still lists it');
+    heard.stop();
+  },
   'agents.runtime.configure keeps the route it saved, refuses a stale revision and follows the profile': async (env) => {
     const setup = await echo(env);
     check(setup.levels.length >= 2, 'the echo model offers fewer than two effort levels');

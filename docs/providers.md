@@ -842,6 +842,42 @@ and another turn while a version 1 database is locked and its plugin API is
 incompatible. It needs no login or external model. Windows and macOS remain
 unchecked by this run.
 
+## A local ACP command
+
+The Providers page has a Local ACP command card for any agent that speaks ACP
+over stdio: a name, the command that starts it, its arguments one per field and
+its environment variables. `providers.addLocal` checks each field
+(`checkLocalAcpCommand` in `packages/contracts/src/local-acp.ts`, which the
+in-memory client runs too) and refuses with the field it names (`name`,
+`command`, `args[1]`, `env.KEY`), which the form marks.
+
+- The id comes from the name: lowercase letters, digits and dashes. A name
+  whose id a provider already has, or whose `<id>.json` already exists, is
+  refused; nothing is overwritten.
+- The command is a program on PATH or an absolute path. A relative path is
+  refused, and so is a program this machine cannot start; on Windows a `.cmd`,
+  `.bat` or `.ps1` launcher is refused with the program to enter instead.
+- Arguments go to the program as written, one argument per field, with no shell
+  and no quoting. `{home}` and the other load-time tokens expand as in any
+  descriptor.
+- Environment values are saved in plain text in the provider file. An API key
+  belongs in the agent's own sign-in.
+
+The core writes an ordinary user descriptor to `<dataDir>/providers/<id>.json`
+(`localAcpDescriptor` in `packages/core/src/providers/local-command.ts`) and
+reloads, so the loader, the ACP driver and `providers.dryRun` treat it like a
+file written by hand. It has no login and no isolation: the default account
+starts the agent with its own sign-in and settings. Its only model is
+`default`, which leaves the agent on the model it is configured with until the
+models probe reads the agent's list. A file that fails to load is deleted again
+and the refusal is returned.
+
+The provider's details offer Remove provider. `providers.removeLocal` refuses a
+shipped provider and a provider with a turn running, releases its warm
+processes and deletes the file. Accounts and threads stay, and come back when
+the same name is added again. Both methods are the owner's; there is no edit,
+only remove and add.
+
 ## Turning a provider off
 
 Every provider has a switch on the Providers page, for a machine that has
