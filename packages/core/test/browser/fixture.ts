@@ -45,9 +45,12 @@ const STALLED_CALL = / failed: the browser did not answer \S+ within \d+ seconds
  */
 export class CoreFailures {
   readonly lines: string[] = [];
+  /** Failed calls whose stalled step has not reported yet: only a report heard after the call answers it. */
   #calls = 0;
-  #stalled = 0;
-  #late = 0;
+  /** Stalled steps still owed a late answer. */
+  #owed = 0;
+  /** Late answers heard before their step's probe reported, which can take 1 s more than the answer. */
+  #early = 0;
   #heard = () => {};
   #timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -55,18 +58,21 @@ export class CoreFailures {
 
   record(message: string, event: unknown): void {
     // What a sleeping tab's stalled step turned out to be explains a wake that failed (`browser/sleep.ts`).
+    // A step's call fails before its probe and its late answer report, and a freeze that stalled fails no call.
     if (event === 'rpc.failed') { if (STALLED_CALL.test(message)) this.#calls++; }
-    else if (event === 'browser.sleep-stalled') this.#stalled++;
-    else if (event === 'browser.sleep-late') this.#late++;
-    else return;
+    else if (event === 'browser.sleep-stalled') {
+      if (this.#calls > 0) this.#calls--;
+      if (this.#early > 0) this.#early--; else this.#owed++;
+    } else if (event === 'browser.sleep-late') {
+      if (this.#owed > 0) this.#owed--; else this.#early++;
+    } else return;
     this.lines.push(message);
     this.#heard();
   }
 
   /** False when the window ended before every stalled step's probe and late answer arrived. */
   async settle(): Promise<boolean> {
-    // A freeze that stalled fails no call, and a failed call's probe may not have answered yet.
-    const waiting = () => { const steps = Math.max(this.#calls, this.#stalled); return this.#stalled < steps || this.#late < steps; };
+    const waiting = () => this.#calls > 0 || this.#owed > 0;
     if (!waiting()) return true;
     let ended = false;
     const end = this.wait(this.windowMs).then(() => { ended = true; });

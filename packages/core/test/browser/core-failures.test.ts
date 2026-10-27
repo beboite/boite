@@ -66,6 +66,21 @@ test('every stalled step, a freeze that failed no call included, gets its own la
   expect(failures.lines.at(-1)).toBe(NEVER);
 });
 
+test('a freeze diagnosed in full earlier does not answer for a wake that fails later', async () => {
+  const { failures } = controlledWindow();
+  const FREEZE_STALLED = STALLED.replace('Emulation.setFocusEmulationEnabled', 'Page.setWebLifecycleState');
+  failures.record(FREEZE_STALLED, 'browser.sleep-stalled');
+  failures.record(NEVER, 'browser.sleep-late');
+  failures.record(RPC, 'rpc.failed');
+  const settling = failures.settle();
+  expect(await settled(settling)).toBe(false);
+  failures.record(STALLED, 'browser.sleep-stalled');
+  expect(await settled(settling)).toBe(false);
+  failures.record(LATE, 'browser.sleep-late');
+  expect(await settling).toBe(true);
+  expect(failures.lines).toEqual([FREEZE_STALLED, NEVER, RPC, STALLED, LATE]);
+});
+
 test('a window that ends before the late answer settles false with what was heard', async () => {
   const { failures, end } = controlledWindow();
   failures.record(RPC, 'rpc.failed');
