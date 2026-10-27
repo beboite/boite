@@ -450,6 +450,13 @@ use all three endpoint fields, so colliding project IDs remain separate. A
 new board worker's public address comes from the scoped directory rather
 than being constructed by the UI.
 
+Manage opens three tabs: Sharing holds board and local hosting consent,
+Tasks holds job submission and results, and Protection holds access activity
+and file exceptions. Agent selection and host limits expand on demand. Task
+drafts survive tab changes; submitting a job folds its form, and New task
+reopens it. Git result details expand separately. These controls use the same
+owner permissions on desktop and paired phones.
+
 ### Identity and association
 
 `SharedProjectRef` is `(ownerCoreId, coreId, projectId)`. `ownerCoreId` is the

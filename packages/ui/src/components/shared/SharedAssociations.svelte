@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { ArrowRight, Link2, RefreshCw } from '@lucide/svelte';
   import type { Contact, ContactOffer, SharedProjectRef, SharedProjectScope } from '@boite/contracts';
   import type { Store } from '../../lib/store.svelte';
   import { errorText } from '../../lib/errors';
@@ -60,15 +61,15 @@
 </script>
 
 <div class="associations" data-testid="shared-associations" data-project={projectId}>
-  <button type="button" class="ghost small" disabled={busy || !thread} onclick={() => void refresh()} data-testid="shared-associations-refresh">{strings.shared.refresh}</button>
+  <div class="toolbar"><span class="label"><Link2 size={13} />{strings.shared.heading}</span><button type="button" class="ghost icon small" aria-label={strings.shared.refresh} title={strings.shared.refresh} disabled={busy || !thread} onclick={() => void refresh()} data-testid="shared-associations-refresh"><RefreshCw size={13} /></button></div>
   {#each projects as project (project.shared.id)}
     <div class="row" data-testid="shared-association" data-state={project.shared.state}>
-      <span>{contact.offers.find(o => keyOf(remoteOf(o)) === keyOf(project.remote))?.name ?? strings.shared.heading} · {strings.shared.state[project.shared.state]}</span>
+      <span class="project-name">{contact.offers.find(o => keyOf(remoteOf(o)) === keyOf(project.remote))?.name ?? strings.shared.heading}<small>{strings.shared.state[project.shared.state]}</small></span>
       {#if project.shared.state === 'pending' && sameSharedProject(project.shared.projects[1], project.local) && store.owner}
         <button type="button" class="small" disabled={busy} onclick={() => void decide(project.shared.id, true)} data-testid="shared-association-accept">{strings.shared.accept}</button>
         <button type="button" class="ghost small" disabled={busy} onclick={() => void decide(project.shared.id, false)}>{strings.shared.decline}</button>
       {:else if project.shared.state === 'active' && thread}
-        <button type="button" class="ghost small" onclick={() => { selected = {threadId: thread!.id, sharedProjectId: project.shared.id}; }} data-testid="shared-association-open">{strings.shared.heading}</button>
+        <button type="button" class="ghost small" onclick={() => { selected = {threadId: thread!.id, sharedProjectId: project.shared.id}; }} data-testid="shared-association-open">{strings.shared.manage}<ArrowRight size={13} /></button>
       {/if}
     </div>
   {/each}
@@ -88,8 +89,13 @@
 
 <style>
   .associations { padding: 0 0 12px; }
+  .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .label { display: flex; align-items: center; gap: 6px; font-size: var(--text-xs); color: var(--color-muted-foreground); }
+  .toolbar button { display: grid; place-items: center; padding: 4px; }
   .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-block: 8px; font-size: var(--text-sm); }
   .row > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .project-name { display: grid; gap: 3px; }
+  small { color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .hint, .error { color: var(--color-muted-foreground); font-size: var(--text-xs); line-height: 1.5; } .error { color: var(--color-danger); }
   @media (max-width: 720px) { button { min-height: var(--touch-target); } }
 </style>

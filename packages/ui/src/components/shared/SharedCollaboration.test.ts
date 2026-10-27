@@ -86,6 +86,29 @@ test('the existing board starts one claimed goal, shows owner/machine/checklist 
   expect(el('board-sharing').textContent).toContain('Access revoked');
 });
 
+test('sharing opens with consent, keeps task drafts across tabs and supports keyboard navigation', async () => {
+  const {store, a, localScope, base} = await setup();
+  show(SharedProjectDialog, {store, scope: localScope, onclose() {}}); await settle();
+  expect(el('shared-tab-sharing').getAttribute('aria-selected')).toBe('true');
+  expect(el('shared-panel-sharing').hidden).toBe(false);
+  expect(el('shared-panel-tasks').hidden).toBe(true);
+  expect(el('shared-panel-protection').hidden).toBe(true);
+  await click('shared-board-consent');
+  expect((await a.call('sharedProjects.get', localScope)).shared.access[0].board).toBe(true);
+  await click('shared-tab-tasks');
+  await fill('shared-compute-task', 'Keep this draft'); await fill('shared-compute-base', base);
+  await click('shared-tab-protection');
+  expect(el('shared-panel-tasks').hidden).toBe(true);
+  el('shared-tab-protection').dispatchEvent(new KeyboardEvent('keydown', {key: 'Home', bubbles: true})); await settle();
+  expect(document.activeElement).toBe(el('shared-tab-sharing'));
+  expect(el('shared-panel-sharing').hidden).toBe(false);
+  el('shared-tab-sharing').dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowRight', bubbles: true})); await settle();
+  expect(document.activeElement).toBe(el('shared-tab-tasks'));
+  expect(el('shared-panel-tasks').hidden).toBe(false);
+  expect(el<HTMLInputElement>('shared-compute-task').value).toBe('Keep this draft');
+  expect(el<HTMLInputElement>('shared-compute-base').value).toBe(base);
+});
+
 test('host consent/contribution autosave, supported routes, job follow/cancel and protection stay in the owning Store', async () => {
   const {store, a, b, localScope, base, bs} = await setup();
   const calls = vi.spyOn(a, 'call');
@@ -94,22 +117,27 @@ test('host consent/contribution autosave, supported routes, job follow/cancel an
   el<HTMLDetailsElement>('shared-host-settings').open = true; await settle();
   await click('shared-profile-conversation'); await fill('shared-contribution', '4'); await click('shared-compute-consent');
   await vi.waitFor(async () => expect((await a.call('sharedProjects.get', localScope)).shared.access[0].compute).toMatchObject({enabled: true, maxConcurrent: 4, profiles: ['conversation']}));
+  await click('shared-tab-tasks');
   await fill('shared-compute-base', base); await fill('shared-compute-task', 'Check the shared project');
   await vi.waitFor(() => expect(el<HTMLButtonElement>('shared-compute-start').disabled).toBe(false));
-  expect([...el('shared-compute-start').closest('form')!.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input,textarea')].map(input => [input.value, input.checkValidity()])).toEqual([[base, true], ['Check the shared project', true]]);
+  expect([...el('shared-compute-start').closest('form')!.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input,textarea')].map(input => [input.value, input.checkValidity()])).toEqual([['Check the shared project', true], [base, true]]);
   await click('shared-compute-start');
   expect(calls.mock.calls.filter(([method]) => method === 'sharedCompute.start')).toHaveLength(1);
   expect(el<HTMLInputElement>('shared-profile-conversation').disabled).toBe(true);
   expect(el<HTMLInputElement>('shared-compute-consent').disabled).toBe(false);
   expect(document.querySelector('[data-testid=shared-compute] [role=alert]')?.textContent ?? '').toBe('');
   await vi.waitFor(() => expect(el('shared-job')).not.toBeNull());
+  expect(el('shared-new-task').getAttribute('aria-expanded')).toBe('false');
   const jobId = el('shared-job').dataset.job!;
   b.finishSharedCompute(jobId, 'Verified result'); await settle(); await click('shared-job-follow');
   await vi.waitFor(() => expect(el('shared-job-detail').textContent).toContain('Verified result'));
   expect(el('shared-job-detail').textContent).toContain(base);
+  await click('shared-new-task');
+  expect(el('shared-new-task').getAttribute('aria-expanded')).toBe('true');
   await fill('shared-compute-task', 'Second shared job'); await click('shared-compute-start');
   await vi.waitFor(() => expect(el('shared-job-cancel')).not.toBeNull()); await click('shared-job-cancel');
   await vi.waitFor(async () => expect((await a.call('sharedCompute.list', localScope)).some(j => j.status === 'cancelled')).toBe(true));
+  await click('shared-tab-sharing');
   await click('shared-compute-consent');
   await vi.waitFor(() => expect(el<HTMLInputElement>('shared-profile-conversation').disabled).toBe(false));
   await click('shared-profile-conversation');
@@ -130,6 +158,7 @@ test('a paired phone can send and follow existing work while host administration
   expect(document.querySelector('[data-testid=shared-compute-start]')).toBeNull();
   expect(el('shared-board-consent').hasAttribute('disabled')).toBe(true);
   expect(document.querySelector('[data-testid=shared-project-revoke]')).toBeNull();
+  await click('shared-tab-tasks');
   await vi.waitFor(() => expect(el('shared-job-follow')).not.toBeNull());
   await click('shared-job-follow');
   expect(el('shared-job-detail').textContent).toContain('Running');
