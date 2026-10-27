@@ -1497,6 +1497,48 @@ loses those folders once before its next start
 ([browser](browser.md#processes-and-profiles)); the size of a profile after
 that was not measured.
 
+## Where an agent's tokens go
+
+Each model call re-reads its whole context, from the cache while it is warm,
+so a block costs its size times the calls it stays for.
+`scripts/token-audit.ts` reads Claude Code transcripts and splits that sum by
+what the context holds; its header explains the attribution.
+
+```sh
+bun scripts/token-audit.ts --days 7 --chars-per-token 2.5
+```
+
+One owner's machine, the 7 days to 2026-10-27: 86,196 calls in 1,560 stretches
+between compactions, a mean context of 104k tokens, compaction at 166k (the
+`autoCompactWindow: 200000` of that user's settings). At API rates relative
+to input, cache reads made 52% of the cost, 1 hour cache writes 28% and output
+20%.
+
+| What the context held | Share of the sum of context |
+|---|---|
+| System prompt and tool definitions | 17.7% |
+| Claude Code attachments: instructions files 5.4%, files attached again after a compaction 5.0%, skill listing 3.5% | 17.5% |
+| Read results | 16.6% |
+| Earlier thinking | 13.2% |
+| Shell results | 10.7% |
+| Compaction summaries, 20k characters at the median | 6.8% |
+| Grep results | 6.7% |
+| Text Boite adds: guide, notices, delegation and coordination messages | 1.3% |
+
+The script replays the same calls under other policies:
+
+| Policy | Sum of context | Cost |
+|---|---|---|
+| Compact at 120k | −27.2% | −7.6% |
+| Compact at 150k | −12.1% | +0.2% |
+| Clear tool results older than 10 calls, cache rewrites not counted | −22.2% | not modelled |
+| Cap each tool result at 5k tokens | −2.2% | not modelled |
+| 5 minute cache instead of 1 hour | unchanged | +9.2% |
+
+A lower threshold costs a summary and a rewritten cache at each extra
+compaction, which is why the cost falls far less than the context. Automatic
+compaction is the owner's setting ([context](context.md#automatic-compaction)).
+
 ## Benches
 
 ```sh
