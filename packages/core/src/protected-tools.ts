@@ -7,7 +7,7 @@ export function protectedTools(procs: ProcRegistry, id: string, check: () => voi
   if (!policy) throw new Error('execution.thread: native capability required before tools');
   let queue: Promise<unknown> = Promise.resolve();
   const execution: ProtectedDriverExecution = {fingerprint: policy.fingerprint, toolsAllowed,
-    check: () => {check(); procs.protection.assert(id);},
+    check: () => {check(); procs.protection.assert(id, policy.capabilityId);},
     execute: (command, args, cwd) => {
       const run = queue.then(async () => {
         execution.check();
@@ -16,7 +16,7 @@ export function protectedTools(procs: ProcRegistry, id: string, check: () => voi
         const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.proc.stdout).text(), new Response(child.proc.stderr).text()]);
         await procs.waitForExit(id, [child.record.pid]);
         execution.check();
-        changed(procs.protection.flush(id));
+        changed(await procs.protection.publish(id, policy.capabilityId));
         return {code: code ?? -1, stdout, stderr};
       });
       queue = run.catch(() => {}); return run;

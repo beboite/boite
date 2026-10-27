@@ -98,10 +98,15 @@ terminated. Each load sample therefore reads the exit code of every tracked
 handle, and a process that has exited is reported as it would be from its
 exit packet. A packet that arrives later matches no live record.
 
-Before protected publication, the core queries the held thread job's membership.
-An occupied or unreadable job refuses publication. An empty job reconciles its
-captured exits through the normal handle and creation-identity checks before
-the live registry is checked, without waiting for completion-port delivery.
+After root-exit telemetry settles, protected tools wait up to five seconds for
+every thread of their captured capability to drain. Native membership can retain
+a console after its exit notification. Each pass queries the held job and checks
+the live registry; an empty job reconciles captured exits through the normal
+handle and creation-identity checks, without waiting for completion-port delivery.
+The final synchronous publication gate still refuses an occupied or unreadable
+job at the deadline. Root telemetry has its own five-second budget. Replacing or
+revoking the captured capability interrupts publication; an old tool cannot
+publish through or revoke the replacement preparing on the same thread.
 
 For a native ordering investigation, `BOITE_DIAGNOSE_JOB_EVENTS=1` writes
 `WINDOWS_JOB_EVENT` records to host stderr: worker packet/action/sequence,

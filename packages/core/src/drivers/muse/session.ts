@@ -99,6 +99,7 @@ export class MuseSession {
   private killTree: (() => void) | null = null;
   private quotaSink: SessionContext['quota'] | null = null;
   private contextSink: SessionContext['context'] | null = null;
+  private logSink: SessionContext['log'] | null = null;
   /**
    * The running turn's items, by id, for the deltas that name only the item.
    * Item ids are per turn: the map is emptied when a turn ends, and an item of
@@ -344,6 +345,7 @@ export class MuseSession {
     ctx.protectedExecution?.check();
     this.quotaSink = ctx.quota ?? null;
     this.contextSink = ctx.context;
+    this.logSink = ctx.log;
     const executable = museExecutable(ctx.provider);
     const posture = MODE_POSTURE[ctx.thread.permissionMode];
     const declared = profileFor(ctx.provider)?.launch?.args ?? [];
@@ -486,7 +488,8 @@ export class MuseSession {
     this.ended = true;
     this.closing = true;
     this.clearIdle();
-    this.protection?.close();
+    try { this.protection?.close(this.processClosed); }
+    catch (error) { this.logSink?.('error', `muse: protected cleanup failed: ${logMessageOf(error)}`); }
     this.protection = null;
     // The running turn ends now, while the journal is still open, not from the
     // child's close event, which can fire after core shutdown closed it.

@@ -32,8 +32,10 @@ export class ExecutionProtections {
   policy(threadId: string): ExecutionPolicy | null { return this.bindings.get(threadId)?.policy ?? null; }
   controlScope(threadId: string): string | null { return this.bindings.get(threadId)?.controlId ?? null; }
   get available(): boolean { return !!this.boundary && (this.boundary.available?.() ?? false); }
-  assert(threadId: string): void {
+  assert(threadId: string, capabilityId?: string): void {
     const lease = this.bindings.get(threadId);
+    // A stale tool may not revoke the replacement bound to the same thread.
+    if (capabilityId !== undefined && lease?.policy.capabilityId !== capabilityId) throw new Error('execution.scope: captured capability was replaced');
     if (!lease) throw new Error('execution.thread: expected an installed capability');
     try {this.check(lease);} catch (error) {
       processEventDiagnostic('protection.assert-refused', {threadId, capabilityId: lease.policy.capabilityId, closed: lease.closed, field: refusalField(error)});
@@ -103,6 +105,21 @@ export class ExecutionProtections {
 
   assertTerminal(threadId: string): void {
     if (this.bindings.has(threadId) || this.refused.has(threadId)) throw new Error('execution.terminal: protected tools require controlled standard pipes');
+  }
+
+  /** Native membership can outlive root exit and its completion-port packet. */
+  async publish(threadId: string, capabilityId: string): Promise<readonly string[]> {
+    this.assert(threadId, capabilityId);
+    const lease = this.bindings.get(threadId)!;
+    const deadline = Date.now() + 5000;
+    while ([...lease.threads].some(id => this.live(id) > 0) && Date.now() < deadline) {
+      await new Promise<void>(resolve => setTimeout(resolve, 25));
+      this.assert(threadId, capabilityId);
+    }
+    this.assert(threadId, capabilityId);
+    // The deadline ends the wait, never the guard: occupied/unknown jobs
+    // still refuse and revoke through the synchronous publication gate.
+    return this.flush(threadId);
   }
 
   flush(threadId: string): readonly string[] {
