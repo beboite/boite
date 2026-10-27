@@ -276,14 +276,26 @@ describe('the Device panel over RPC', () => {
   });
 
   test('a failed iOS capture deletes its file, and a shutdown during the boot or a failed one keeps its error', async () => {
-    const sdk = fakeSdk({ sims: [{ udid: 'A1B2-C3D4', name: 'iPhone 16', runtime: 'com.apple.CoreSimulator.SimRuntime.iOS-18-2', state: 'Shutdown' }], simBootMs: 1000, screenshotFails: 'Error creating the image' }, { adb: false, emulator: false, xcrun: true });
+    const sdk = fakeSdk({ sims: [{ udid: 'A1B2-C3D4', name: 'iPhone 16', runtime: 'com.apple.CoreSimulator.SimRuntime.iOS-18-2', state: 'Shutdown' }], simBootGate: 'boot', screenshotFails: 'Error creating the image' }, { adb: false, emulator: false, xcrun: true });
     sdkEnv = { os: 'darwin', env: { PATH: sdk.xcode }, home: empty() };
+    const at = async (gate: string) => {
+      const deadline = Date.now() + 5000;
+      while (!sdk.waiting(gate) && Date.now() < deadline) await Bun.sleep(20);
+    };
     await agent.call('devices.open', { threadId, deviceId: 'A1B2-C3D4' });
-    // Still Shutdown while `simctl boot` runs: that answer is no power-off, since the boot would start it after the close.
-    const deadline = Date.now() + 5000;
-    while (!sdk.calls().includes('xcrun simctl boot A1B2-C3D4') && Date.now() < deadline) await Bun.sleep(20);
+    await at('boot');
+    // Still Shutdown while `simctl boot` runs: that answer is no power-off, since the boot starts it after the close,
+    // whether shutdown answers before the boot ends or after.
     expect(await thrown(agent.call('devices.close', { threadId, shutdown: true }))).toThrow('current state: Shutdown');
+    sdk.set({ shutdownGate: 'shutdown' });
+    const closing = thrown(agent.call('devices.close', { threadId, shutdown: true }));
+    await at('shutdown');
+    sdk.release('boot');
     expect((await ready('A1B2-C3D4')).state).toBe('ready');
+    sdk.release('shutdown');
+    expect(await closing).toThrow('current state: Shutdown');
+    expect((await agent.call('devices.sessions', { threadId })).sessions).toHaveLength(1);
+    expect(sdk.state().sims![0]!.state).toBe('Booted');
     expect(await thrown(owner.call('devices.frame', { threadId, deviceId: 'A1B2-C3D4' }))).toThrow('Error creating the image');
     const [shot] = screenshots(sdk.calls());
     expect(existsSync(dirname(shot!))).toBe(false);

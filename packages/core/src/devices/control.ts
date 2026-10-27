@@ -479,12 +479,13 @@ export class MobileDevices {
   }
 
   async #shutdown(target: Located): Promise<void> {
+    const booting = this.#boots.has(target.id);
     const run = target.platform === 'android'
       ? await this.#run(this.#adb().adb, ['-s', target.serial!, 'emu', 'kill'], COMMAND_TIMEOUT_MS)
       : await this.#run(this.#xcrun(), ['simctl', 'shutdown', target.id], COMMAND_TIMEOUT_MS);
     // A simulator someone already shut down is the state asked for; simctl still answers with an error.
-    // Not while its boot is pending: `simctl boot` could still start it once the session is gone.
-    if (target.platform === 'ios' && run.code !== 0 && !this.#boots.has(target.id) && /Unable to shutdown device in current state: Shutdown/i.test(run.stderr)) return;
+    // Not while a boot was or is pending: `simctl boot` could start it after that answer.
+    if (target.platform === 'ios' && run.code !== 0 && !booting && !this.#boots.has(target.id) && /Unable to shutdown device in current state: Shutdown/i.test(run.stderr)) return;
     if (run.code !== 0) throw refused(`powering ${target.name} off failed: ${this.#why(run)}`, { deviceId: target.id });
   }
 

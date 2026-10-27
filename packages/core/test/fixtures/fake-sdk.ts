@@ -38,8 +38,10 @@ export interface FakeSdkState {
   clipboardUnconfirmed?: boolean;
   /** Delays the server's final log and exit, so the core must enforce its shutdown deadline. */
   scrcpyExitDelayMs?: number;
-  /** How long `simctl boot` takes to return. */
-  simBootMs?: number;
+  /** `simctl boot` waits until `fakeSdk().release(simBootGate)`; the simulator stays Shutdown meanwhile. */
+  simBootGate?: string;
+  /** `simctl shutdown` reads the simulator's state, then waits until `fakeSdk().release(shutdownGate)` to answer. */
+  shutdownGate?: string;
   /** `simctl io screenshot` writes a partial file, prints this and fails. */
   screenshotFails?: string;
   /** `simctl shutdown` prints this and fails, whatever the simulator's state. */
@@ -143,6 +145,10 @@ export function fakeSdk(state: Partial<FakeSdkState> = {}, tools: { adb?: boolea
       const state = JSON.parse(readFileSync(join(root, 'state.json'), 'utf8')) as FakeSdkState;
       writeFileSync(join(root, 'state.json'), JSON.stringify({ ...state, running: {} }));
     },
+    /** Whether a call is waiting at this gate. */
+    waiting: (name: string) => existsSync(join(root, `${name}.waiting`)),
+    /** Lets the calls waiting at this gate, and later ones, go on. */
+    release: (name: string) => writeFileSync(join(root, name), ''),
     /** Changes what the fake device and its scrcpy server do from the next call on. */
     set: (change: Partial<FakeSdkState>) => {
       const state = JSON.parse(readFileSync(join(root, 'state.json'), 'utf8')) as FakeSdkState;
@@ -286,6 +292,13 @@ async function scrcpyServer(root: string, serial: string, state: FakeSdkState, a
   return 0;
 }
 
+/** Marks `<name>.waiting`, then waits for `<name>` (30 s at most). */
+async function gate(root: string, name: string): Promise<void> {
+  writeFileSync(join(root, `${name}.waiting`), '');
+  const started = Date.now();
+  while (!existsSync(join(root, name)) && Date.now() - started < 30_000) await Bun.sleep(20);
+}
+
 async function main(root: string, tool: string, args: string[]): Promise<number> {
   const statePath = join(root, 'state.json');
   const read = () => JSON.parse(readFileSync(statePath, 'utf8')) as FakeSdkState;
@@ -374,8 +387,7 @@ async function main(root: string, tool: string, args: string[]): Promise<number>
       case 'boot': {
         if (!sim) return 1;
         if (sim.state === 'Booted') { process.stderr.write('Unable to boot device in current state: Booted\n'); return 149; }
-        // The simulator stays Shutdown until `simctl boot` returns.
-        if (state.simBootMs) await Bun.sleep(state.simBootMs);
+        if (state.simBootGate) await gate(root, state.simBootGate);
         const now = read();
         now.sims!.find((entry) => entry.udid === sim.udid)!.state = 'Booted';
         write(now);
@@ -384,6 +396,7 @@ async function main(root: string, tool: string, args: string[]): Promise<number>
       case 'bootstatus': return sim?.state === 'Booted' ? 0 : 1;
       case 'shutdown':
         if (!sim) return 1;
+        if (state.shutdownGate) await gate(root, state.shutdownGate);
         if (state.shutdownFails) { process.stderr.write(`${state.shutdownFails}\n`); return 149; }
         if (sim.state === 'Shutdown') { process.stderr.write('An error was encountered processing the command (domain=com.apple.CoreSimulator.SimError, code=405):\nUnable to shutdown device in current state: Shutdown\n'); return 149; }
         sim.state = 'Shutdown'; write(state); return 0;
