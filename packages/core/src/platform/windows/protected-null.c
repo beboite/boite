@@ -404,7 +404,9 @@ DWORD protected_null_run(HANDLE job, PROCESS_INFORMATION *root, PSID package, PS
       if (e.dwDebugEventCode == LOAD_DLL_DEBUG_EVENT && e.u.LoadDll.hFile && !CloseHandle(e.u.LoadDll.hFile)) ok = 0;
       if (e.dwDebugEventCode == EXCEPTION_DEBUG_EVENT) continuation = DBG_EXCEPTION_NOT_HANDLED;
     } else switch (e.dwDebugEventCode) {
-      case CREATE_THREAD_DEBUG_EVENT: if (!d.stopping) ok = nb_add_thread(p, e.dwThreadId, e.u.CreateThread.hThread); break;
+      case CREATE_THREAD_DEBUG_EVENT:
+        if (!d.stopping) ok = nb_add_thread(p, e.dwThreadId, e.u.CreateThread.hThread);
+        break;
       case LOAD_DLL_DEBUG_EVENT:
         if (!d.stopping) ok = nb_image(p, e.u.LoadDll.hFile, e.u.LoadDll.lpBaseOfDll);
         if (e.u.LoadDll.hFile && !CloseHandle(e.u.LoadDll.hFile)) ok = 0;
@@ -432,7 +434,9 @@ DWORD protected_null_run(HANDLE job, PROCESS_INFORMATION *root, PSID package, PS
           nb_stop(&d, &error, 0, &drain);
         }
         retire = 1; break;
-      case UNLOAD_DLL_DEBUG_EVENT: if ((uintptr_t)e.u.UnloadDll.lpBaseOfDll == p->ntdll) ok = 0; break;
+      case UNLOAD_DLL_DEBUG_EVENT:
+        if ((uintptr_t)e.u.UnloadDll.lpBaseOfDll == p->ntdll) ok = 0;
+        break;
       case OUTPUT_DEBUG_STRING_EVENT: break;
       default: ok = 0;
     }
