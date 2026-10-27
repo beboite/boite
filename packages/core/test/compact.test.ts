@@ -191,10 +191,49 @@ describe('automatic compaction', () => {
     const compacted = client.next('turn.finished', t => t.threadId === threadId && t.execution?.operation === 'compact');
     await client.call('threads.focus', { threadId });
     expect(await compacted).toMatchObject({ status: 'done', execution: { automatic: true } });
-    await client.call('threads.focus', { threadId: null });
+    client.close();
+  });
+
+  test('a compaction that keeps more than the limit is not chained by the next looks', async () => {
+    // Each look brings a new context reading; without a guard every one compacted again, with no prompt between.
+    const restore = setDriver('echo', { ...echoDriver, startTurn(ctx) {
+      if (ctx.turn.execution?.operation !== 'compact') return echoDriver.startTurn(ctx);
+      return echoDriver.startTurn({ ...ctx, context: (use) => ctx.context({ ...use, tokens: 1_500 }) });
+    } });
+    const client = await h.connect();
+    try {
+      const { threadId } = await quiet(client);
+      await turn(client, threadId, 'x'.repeat(950));
+      await client.call('settings.set', { autoCompact: { tokens: 1000, moments: [] } });
+      const compacted = client.next('turn.finished', t => t.threadId === threadId && t.execution?.operation === 'compact');
+      await client.call('threads.focus', { threadId });
+      await compacted;
+      expect((await client.call('threads.get', { threadId })).context?.tokens).toBe(1_500);
+      for (let look = 0; look < 3; look++) {
+        await client.call('threads.focus', { threadId: null });
+        await client.call('threads.focus', { threadId });
+        await pause(60);
+      }
+      expect((await compactions(client, threadId)).map(t => t.status)).toEqual(['done']);
+    } finally { restore(); client.close(); }
+  });
+
+  test('a shown thread whose agent names its compact command only after preparing still compacts', async () => {
+    // An ACP session restored after a restart advertises `/compact` once prepared, after the focus that showed it.
+    const client = await h.connect();
+    const { threadId } = await quiet(client);
+    await turn(client, threadId, 'x'.repeat(950));
+    await client.call('settings.set', { autoCompact: { tokens: 1000, moments: [] } });
+    const threads = h.core.threads;
+    const refusal = threads.compactRefusal.bind(threads);
+    threads.compactRefusal = () => 'this agent has not advertised a compact command';
     await client.call('threads.focus', { threadId });
     await pause(120);
-    expect((await compactions(client, threadId)).map(t => t.status)).toEqual(['done']);
+    expect(await compactions(client, threadId)).toEqual([]);
+    threads.compactRefusal = refusal;
+    const compacted = client.next('turn.finished', t => t.threadId === threadId && t.execution?.operation === 'compact');
+    threads.agentState.noteCommands(threadId, [{ name: 'compact', description: null, hint: null }]);
+    expect(await compacted).toMatchObject({ status: 'done', execution: { automatic: true } });
     client.close();
   });
 

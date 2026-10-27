@@ -33,10 +33,16 @@ export const AUTO_COMPACT_LABEL = 'Automatic compaction';
  */
 export class AutoCompaction {
   private readonly timers = new Map<ThreadId, ReturnType<typeof setTimeout>>();
-  /** The context reading each shown thread was last compacted for, so one that failed is not retried at every look. */
-  private readonly shownAt = new Map<ThreadId, number>();
+  private readonly unlisten: () => void;
 
-  constructor(private readonly core: Core, private readonly threads: ThreadStore) {}
+  constructor(private readonly core: Core, private readonly threads: ThreadStore) {
+    // An ACP agent names its commands only once its session is prepared, after the client showed the thread.
+    this.unlisten = core.bus.onCommitted((name, payload) => {
+      if (name !== 'thread.commands') return;
+      const { threadId } = payload as { threadId: ThreadId };
+      if (this.threads.focus.viewed(threadId)) queueMicrotask(() => this.shown(threadId));
+    });
+  }
 
   /** Called once a finished turn and its thread are saved. */
   turnFinished(thread: ThreadSummary, turn: Turn): void {
@@ -81,15 +87,17 @@ export class AutoCompaction {
    * quiet before the limit was lowered, or whose timer a restart dropped. A
    * copy compacted in the background starts only below the limit, and its next
    * prompt would wait for the agent to compact first, so it compacts now, while
-   * the user reads and types. Once per context reading.
+   * the user reads and types. A compaction never chains into another, even
+   * one that kept more than the limit or failed: the last turn decides.
    */
   shown(threadId: ThreadId): void {
+    if (this.core.stopping || this.core.journal.isClosed()) return;
     const thread = this.core.journal.getThread(threadId);
     const reading = thread?.context ?? null;
-    if (thread === null || reading === null || this.timers.has(threadId) || this.shownAt.get(threadId) === reading.at) return;
+    if (thread === null || reading === null || this.timers.has(threadId)) return;
     const limit = effectiveCompaction(this.core.settings.get(), thread).autoCompact?.tokens ?? null;
     if (limit === null || reading.tokens < limit) return;
-    this.shownAt.set(threadId, reading.at);
+    if (this.core.journal.lastTurn(threadId)?.execution?.operation === 'compact') return;
     this.fire(threadId);
   }
 
@@ -105,7 +113,7 @@ export class AutoCompaction {
   close(): void {
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
-    this.shownAt.clear();
+    this.unlisten();
   }
 
   /**

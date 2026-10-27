@@ -197,8 +197,10 @@ lowered the limit, or a restart dropped its timer. When a client shows it
 (`threads.focus`), the core compacts it at once under the same checks, while
 the user reads and types, instead of letting the next prompt wait for the
 agent's own blocking compaction. A background copy cannot help there, since
-one starts only below the limit. This runs once per context reading, so a
-compaction that failed is not retried at every look. A prompt that crosses the
+one starts only below the limit. A compaction never chains into another: when
+the thread's last turn is one, failed or still over the limit, a look starts
+nothing. An ACP agent names its `compact` command only once its session is
+prepared, so that announcement, on a shown thread, is checked the same way. A prompt that crosses the
 limit by itself is compacted by the agent before it is sent, as above. The in-memory client implements `turn-end`
 and the independent token limit after a turn, not when a thread is shown; it
 has no background work or prompt cache.
