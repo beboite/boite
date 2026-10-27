@@ -316,6 +316,16 @@ the caller and a live stdout-handle control. The candidate must equal the
 captured parent handle and be absent at that instant; a numeric collision or
 incomplete query leaves the experiment incomplete. This avoids issuing invalid
 handle I/O under a debugger, which can raise an application exception.
+The breakaway control accepts either an access-denied creation or a completed
+fixed-image probe whose kernel binding proves that it stayed in the private
+LPAC job. A successful creation flag alone proves neither escape nor confinement.
+Probe children retain all token, image, startup, event and handle checks; they
+cannot replace the ordinary workload children. Expiry requires an automatic
+stop request after the deadline while the scope was live, followed by actual
+session cleanup and zero live processes. The observer waits for that cleanup
+within its existing deadline rather than stopping at the first empty process
+count. Raw `NtSuspendThread` status identifies a failed suspension; a failure
+still drains the job and never counts as a suspended or safely retired thread.
 
 A skip passes in a ruleset, so a draft must not satisfy it:
 

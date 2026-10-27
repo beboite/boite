@@ -2,7 +2,8 @@ import {describe, expect, test} from 'bun:test';
 import {mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {isAbsolute, join, relative, sep} from 'node:path';
-import {createBrokerFixture, credentialHandleAbsent, brokerSource, classifyBroker, combineVerdicts, runLocalContracts, type BrokerVerdict} from './windows-null-broker-spike.ts';
+import {createBrokerFixture, credentialHandleAbsent, brokerSource, classifyBroker, combineVerdicts, observeBrokerExpiry, runLocalContracts, type BrokerExpiryReceipt, type BrokerVerdict} from './windows-null-broker-spike.ts';
+import {ExecutionProtections} from '../src/execution-protection.ts';
 
 const bind = 'NB_BIND pid=10 parent=1 generation=root package=S-1-15-2-1-2-3 lpac=1 capabilities=1 registry=1 job=1 dup=1';
 const end = 'NB_END error=0 active=0 owned=0 suspended=0 pending=0 delegations=0';
@@ -84,6 +85,7 @@ test('shared native scheduler and output-span contracts: queued trap B cannot su
   expect(result.out).toContain('qos-snapshot=1');
   expect(result.out).toContain('create-abi=1');
   expect(result.out).toContain('credential-snapshot=1');
+  expect(result.out).toContain('breakaway-dispatch=1');
 });
 
 test('source generation pins the production reference and rejects a second replacement', () => {
@@ -187,6 +189,9 @@ test('native admission reconciles every delegation, measurement and suspension',
   const without=(prefix:string)=>uniform.split('\n').filter(line=>!line.startsWith(prefix)).join('\n');
   for (const prefix of ['NB_DELEGATE','NB_MEASUREMENT','NB_RESUME']) expect(classifyBroker(without(prefix),'native',false,nativeImages).experimentComplete).toBe(false);
   for (const [a,b] of [['previous=1 ok=1','previous=1 ok=0'],['hostClosed=1','hostClosed=0'],['owner=11 previous=1','owner=12 previous=1'],['sequence=2 ','sequence=1 ']]) expect(classifyBroker(uniform.replace(a!,b!),'native',false,nativeImages).experimentComplete).toBe(false);
+  const suspension='NB_SUSPEND pid=10 tid=12 owner=11 previous=0';
+  expect(classifyBroker(capture.replace(suspension,suspension+' status=0x00000000'),'native',false,nativeImages).kind).toBe('positive');
+  expect(classifyBroker(capture.replace(suspension,suspension+' status=0xc000004b'),'native',false,nativeImages).experimentComplete).toBe(false);
   const qos='NB_QOS pid=10 length=12 level=2 tracking=0 effective=1 copied=1';
   const withInput=input.replace('qos=0','qos=1');
   const withQos=capture.replace(input,`${withInput}\n${qos}`);
@@ -249,4 +254,74 @@ test('an authenticated console is traced but cannot stand in for a workload chil
   expect(classifyBroker(actual,'native').experimentComplete).toBe(false);
   expect(classifyBroker(actual.replace('NB_DRAIN pid=10 code=125 ok=1',''),'native',false,expected).experimentComplete).toBe(false);
   expect(classifyBroker(actual.replace(`sha=${nativeSha} role=target`,`sha=${consoleSha} role=console`),'native',false,expected).experimentComplete).toBe(false);
+});
+
+test('expiry observation awaits automatic session cleanup and rejects an already dead scope',async()=>{
+  const root=mkdtempSync(join(tmpdir(),'boite-expiry-observer-'));
+  for(const premature of [false,true]) {
+    const receipt:BrokerExpiryReceipt={stopRequestedAt:null,liveAtStop:false,closedAt:null};
+    let live=0;
+    const stopping=Promise.withResolvers<void>(), release=Promise.withResolvers<void>();
+    const leases=new ExecutionProtections({async open(){return {launch(){throw new Error('unused');},flush(){},close(){receipt.closedAt=Date.now();}};}},
+      async()=>({code:0,stdout:'',stderr:''}),async()=>{
+        receipt.stopRequestedAt=Date.now();receipt.liveAtStop=live>0;live=0;stopping.resolve();await release.promise;
+      },()=>live);
+    try {
+      const expiresAt=Date.now()+100,readyAt=Date.now();
+      await leases.install('expiry',{scope:{kind:'job',id:'expiry',associationId:'synthetic',grantRevision:1},checkout:root,credentialPaths:[],expiresAt},()=>{});
+      live=premature?0:1;
+      await stopping.promise; // Real automatic expiry has stopped the scope, close is still pending.
+      let settled=false;
+      const observed=observeBrokerExpiry(()=>live,receipt,readyAt,expiresAt,Date.now()+1000).then(value=>{settled=true;return value;});
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      release.resolve();
+      expect(await observed).toBe(!premature);
+      expect(receipt.stopRequestedAt!>=expiresAt).toBe(true);
+    } finally {release.resolve();await leases.close();}
+  }
+  rmSync(root,{recursive:true,force:true});
+});
+
+test('a successful breakaway call must prove the child stayed in the captured private job',()=>{
+  const original=positiveCapture(true).split('\n');
+  const where=original.findIndex(line=>line==='NB_DENY pid=40 name=breakaway denied=1 error=5');
+  original.splice(where,1,
+    'NB_EVENT pid=50 tid=51 code=3',bind.replace('pid=10 parent=1 generation=root','pid=50 parent=40 generation=child'),
+    identity.replace('pid=10','pid=50'),`NB_PROCESS_IMAGE pid=50 sha=${nativeSha} role=target identity=1`,
+    'NB_HANDLE pid=50 tid=0 kind=process action=own','NB_HANDLE pid=50 tid=51 kind=thread action=own',
+    'NB_EVENT pid=50 tid=51 code=6','NB_EVENT pid=50 tid=51 code=1','NB_CHECK pid=50 name=breakaway-child ok=1',
+    'NB_EVENT pid=50 tid=51 code=5','NB_EXIT pid=50 code=0x00000000',
+    'NB_HANDLE pid=50 tid=51 kind=thread action=close','NB_HANDLE pid=50 tid=0 kind=process action=close',
+    'NB_BREAKAWAY pid=40 created=1 child=50 error=0 exit=0 waited=1 closed=1');
+  let event=0;const capture=original.map(line=>line.startsWith('NB_EVENT')?line.replace(/^NB_EVENT(?: number=\d+)? /,`NB_EVENT number=${++event} `):line).join('\n');
+  expect(classifyBroker(capture,'bun',false,expectedImages).kind).toBe('positive');
+  for(const [a,b] of [['pid=50 parent=40','pid=50 parent=10'],['child=50','child=99'],['pid=50 code=0x00000000','pid=50 code=0x0000007d'],
+    ['waited=1','waited=0'],['closed=1','closed=0'],['pid=50 name=breakaway-child ok=1','pid=50 name=breakaway-child ok=0']]) {
+    expect(classifyBroker(capture.replace(a!,b!),'bun',false,expectedImages).experimentComplete).toBe(false);
+  }
+  const receipt='NB_BREAKAWAY pid=40 created=1 child=50 error=0 exit=0 waited=1 closed=1';
+  expect(classifyBroker(capture.replace(receipt,''),'bun',false,expectedImages).experimentComplete).toBe(false);
+  expect(classifyBroker(capture.replace(receipt,receipt+'\n'+receipt),'bun',false,expectedImages).experimentComplete).toBe(false);
+  const check='NB_CHECK pid=50 name=breakaway-child ok=1';
+  const early=capture.replace(check,'').replace('NB_EVENT number=1 ',check+'\nNB_EVENT number=1 ');
+  expect(classifyBroker(early,'bun',false,expectedImages).experimentComplete).toBe(false);
+  expect(classifyBroker(capture.replace(receipt,'').replace('NB_EXIT pid=40 code=0x00000000','NB_EXIT pid=40 code=0x00000000\n'+receipt),'bun',false,expectedImages).experimentComplete).toBe(false);
+  expect(classifyBroker(capture.replace(check,'').replace('NB_EXIT pid=50 code=0x00000000',check+'\nNB_EXIT pid=50 code=0x00000000'),'bun',false,expectedImages).experimentComplete).toBe(false);
+  expect(classifyBroker(capture.replace(receipt,'').replace('NB_EXIT pid=40 code=0x00000000',receipt+'\nNB_EXIT pid=40 code=0x00000000'),'bun',false,expectedImages).experimentComplete).toBe(false);
+  const binding=bind.replace('pid=10 parent=1 generation=root','pid=50 parent=40 generation=child');
+  for(const [a,b] of [['job=1','job=0'],['lpac=1','lpac=0'],['capabilities=1','capabilities=2']]) {
+    expect(classifyBroker(capture.replace(binding,binding.replace(a!,b!)),'bun',false,expectedImages).experimentComplete).toBe(false);
+  }
+  expect(classifyBroker(capture.replace(`pid=50 sha=${nativeSha} role=target`,`pid=50 sha=${bunSha} role=target`),'bun',false,expectedImages).experimentComplete).toBe(false);
+});
+
+test('expiry evidence rejects cleanup after its deadline and non-causal stop receipts',async()=>{
+  const now=Date.now(),receipt:BrokerExpiryReceipt={stopRequestedAt:now-40,liveAtStop:true,closedAt:now};
+  expect(await observeBrokerExpiry(()=>0,receipt,now-100,now-50,now-10)).toBe(false);
+  for(const invalid of [{...receipt,stopRequestedAt:null},{...receipt,stopRequestedAt:now-60},{...receipt,liveAtStop:false}]) {
+    expect(await observeBrokerExpiry(()=>0,invalid,now-100,now-50,now+1000)).toBe(false);
+  }
+  expect(await observeBrokerExpiry(()=>0,{...receipt,closedAt:null},now-100,now-50,now-10)).toBe(false);
+  expect(await observeBrokerExpiry(()=>0,receipt,null,now-50,now+1000)).toBe(false);
 });

@@ -22,7 +22,7 @@ const decimal = (value?: string) => !!value && /^(?:0|[1-9]\d*)$/.test(value) &&
 const hex = (value?: string) => !!value && /^0x[0-9a-f]{8}$/.test(value);
 const negativeStatus = (value?: string) => hex(value) && Number.parseInt(value!, 16) >= 0x80000000;
 const known = new Set(['BIND','IMAGE','PROCESS_IMAGE','PRIMITIVE','END','FAILURE','POINTER','EVENT','HANDLE','SUSPEND','RESUME','DEFER',
-  'DRAIN','INPUT','QOS','PASSTHROUGH','DELEGATE','EXCEPTION','EXIT','OPEN','MODE','OBJECT','CHECK','DENY','CREDENTIAL','OFF','READY','DETACHED','BUN','ROLLBACK','MEASUREMENT','TRANSFER']);
+  'DRAIN','INPUT','QOS','PASSTHROUGH','DELEGATE','EXCEPTION','EXIT','OPEN','MODE','OBJECT','CHECK','DENY','BREAKAWAY','CREDENTIAL','OFF','READY','DETACHED','BUN','ROLLBACK','MEASUREMENT','TRANSFER']);
 function parse(text: string): Row[] | null {
   const rows: Row[] = [];
   for (const line of text.split(/\r?\n/)) {
@@ -62,11 +62,12 @@ function completeTrace(rows: Row[], bindings: Row[]): boolean {
       continue;
     }
     if (row.tag === 'CREDENTIAL' && !live.has(pid)) return false;
+    if ((row.tag==='BREAKAWAY'||row.tag==='CHECK'&&row.name==='breakaway-child')&&!live.has(pid))return false;
     if (['SUSPEND','RESUME','DEFER'].includes(row.tag!)) {
       if (!live.has(pid) || !threads?.has(tid) || !threads.has(row.owner!) || tid === row.owner) return false;
       const key = `${pid}:${tid}`, previous = held.get(key);
       if (row.tag === 'SUSPEND') {
-        if (previous || !decimal(row.previous) || Number(row.previous) >= 0xffffffff || (owners.has(pid) && owners.get(pid) !== row.owner)) return false;
+        if (previous || !decimal(row.previous) || Number(row.previous) >= 0xffffffff || (row.status!==undefined&&row.status!=='0x00000000') || (owners.has(pid) && owners.get(pid) !== row.owner)) return false;
         owners.set(pid, row.owner!); held.set(key, {owner: row.owner!, previous: Number(row.previous), deferred: false});
       } else if (row.tag === 'DEFER') {
         if (!previous || previous.owner !== row.owner || previous.deferred) return false;
@@ -131,8 +132,10 @@ function fullNativeProof(rows: Row[], pid: string, credential?: string): boolean
   if (modes.length !== 2 || !unique(modes, r => r.async!) || modes.some(r => !['0','1'].includes(r.async!) || r.status !== '0x00000000' || r.ok !== '1' || !hex(r.mode) || !hex(r.granted) || !!(Number.parseInt(r.mode!,16) & 0x20) !== (r.async === '0')) ||
       objects.length !== 1 || objects[0]!.same !== '0x00000000' || objects[0]!.different !== '0xc00001ac' || objects[0]!.ok !== '1') return false;
   const denied = records('DENY').filter(r => r.pid === pid);
-  const expected = ['ambient','excluded','hostfile','credential','hostprocess','direct','acl','forged-path','breakaway','network'];
-  if (denied.length !== expected.length || expected.some(name => denied.filter(r => r.name === name && r.denied === '1').length !== 1)) return false;
+  const expected = ['ambient','excluded','hostfile','credential','hostprocess','direct','acl','forged-path','network'];
+  const refused=denied.filter(r=>r.name==='breakaway'), created=records('BREAKAWAY').filter(r=>r.pid===pid);
+  if (refused.length+created.length!==1 || refused.some(r=>r.denied!=='1'||r.error!=='5') ||
+      denied.length !== expected.length+refused.length || expected.some(name => denied.filter(r => r.name === name && r.denied === '1').length !== 1)) return false;
   const errors: Record<string, string> = {ambient:'5',excluded:'5',hostfile:'5',credential:'0',hostprocess:'5',direct:String(0xc0000022),acl:String(0xc00000bb),'forged-path':String(0xc0000022),breakaway:'5'};
   if (denied.some(r => !decimal(r.error) || (r.error === '0' && r.name!=='credential') || (errors[r.name!] && r.error !== errors[r.name!]))) return false;
   if (!credentialProof(rows,pid,credential) || denied.find(r=>r.name==='credential')?.proof!=='snapshot') return false;
@@ -181,6 +184,24 @@ function completeTraffic(rows: Row[]): boolean {
   return true;
 }
 type ExpectedImages = {root: string; native: string; console?: string; credential?: string};
+function breakawayChildren(rows: Row[], bindings: Row[], expected?: ExpectedImages): Set<string> | null {
+  const probes=rows.filter(r=>r.tag==='BREAKAWAY'), checks=rows.filter(r=>r.tag==='CHECK'&&r.name==='breakaway-child');
+  if (!unique(probes,r=>r.pid!) || !unique(probes,r=>r.child!) || checks.length!==probes.length) return null;
+  const children=new Set<string>();
+  for(const probe of probes) {
+    const binding=bindings.find(b=>b.pid===probe.child), parent=bindings.find(b=>b.pid===probe.pid);
+    const image=rows.find(r=>r.tag==='PROCESS_IMAGE'&&r.pid===probe.child), parentImage=rows.find(r=>r.tag==='PROCESS_IMAGE'&&r.pid===probe.pid);
+    const startup=rows.find(r=>r.tag==='IMAGE'&&r.pid===probe.child);
+    const check=checks.find(r=>r.pid===probe.child), exit=rows.find(r=>r.tag==='EXIT'&&r.pid===probe.child), parentExit=rows.find(r=>r.tag==='EXIT'&&r.pid===probe.pid);
+    if (!expected || probe.created!=='1'||probe.error!=='0'||probe.exit!=='0'||probe.waited!=='1'||probe.closed!=='1'||
+        !binding||!parent||binding.generation!=='child'||binding.parent!==parent.pid||!check||check.ok!=='1'||
+        image?.role!=='target'||image.sha!==expected.native||parentImage?.role!=='target'||parentImage.sha!==expected.native||
+        !startup||exit?.code!=='0x00000000'||!parentExit||rows.indexOf(startup)>rows.indexOf(check)||rows.indexOf(check)>rows.indexOf(exit)||rows.indexOf(exit)>rows.indexOf(probe)||rows.indexOf(probe)>rows.indexOf(parentExit)) return null;
+    children.add(probe.child!);
+  }
+  if(probes.some(r=>children.has(r.pid!)))return null; // No recursive control probes.
+  return children;
+}
 function workloadBindings(rows: Row[], bindings: Row[], expected?: ExpectedImages): Row[] | null {
   const images = rows.filter(r => r.tag === 'PROCESS_IMAGE');
   if (images.length !== bindings.length || !unique(images,r=>r.pid!)) return null;
@@ -204,7 +225,9 @@ function workloadBindings(rows: Row[], bindings: Row[], expected?: ExpectedImage
       if(drain.pid!==root.pid||drain.code!=='125'||drain.ok!=='1'||rows.indexOf(drain)<rows.indexOf(rootExit)||rows.indexOf(drain)>rows.indexOf(exit)) return null;
     }
   }
-  return bindings.filter(b=>targetIds.has(b.pid));
+  const probes=breakawayChildren(rows,bindings,expected);
+  if(!probes)return null;
+  return bindings.filter(b=>targetIds.has(b.pid)&&!probes.has(b.pid!));
 }
 export function classifyBroker(text: string, scenario: string, timedOut = false, expectedImages?: ExpectedImages): BrokerVerdict {
   if (timedOut) return verdict('timeout');
@@ -337,7 +360,19 @@ export async function runLocalContracts(): Promise<{code: number | null; out: st
     const binary = join(scratch, process.platform==='win32'?'contracts.exe':'contracts');
     const compiled = await boundedCapture(procs, 'contracts-build', compiler, ['-std=c11','-O2','-Wall','-Wextra','-Werror',join(diagnostics,'contracts.c'),'-o',binary], scratch, selectedEnvironment(), 15000);
     if (compiled.code !== 0 || compiled.timedOut) return compiled;
-    return await boundedCapture(procs, 'contracts-run', binary, [], scratch, selectedEnvironment(), 5000);
+    const contracts=await boundedCapture(procs, 'contracts-run', binary, [], scratch, selectedEnvironment(), 5000);
+    if(contracts.code!==0||contracts.timedOut)return contracts;
+    // Compile the real dispatch prefix and caller arity. OS stubs only isolate
+    // argument routing; this harness makes no Windows isolation claim.
+    const fixture=readFileSync(join(diagnostics,'fixture.h'),'utf8'), start=fixture.indexOf('static int nb_fixture('),
+      end=fixture.indexOf('  if (!wcscmp(scenario, L"host-path")) {',start), arity=/command_line\((\d+), probe_args\)/.exec(fixture)?.[1];
+    if(start<0||end<start||!arity)throw new Error('fixture dispatch contract: expected actual entry and probe call');
+    const dispatch=join(scratch,'dispatch.c'), executable=join(scratch,process.platform==='win32'?'dispatch.exe':'dispatch');
+    writeFileSync(dispatch,`#include <stdio.h>\n#include <wchar.h>\n#include <assert.h>\n#define SEM_FAILCRITICALERRORS 1\n#define SEM_NOGPFAULTERRORBOX 2\n#define SEM_NOOPENFILEERRORBOX 4\n#define SetErrorMode(flags) ((void)(flags))\nstatic int nb_resolve(void){return 1;}\nstatic int nb_control_handles(void){return 1;}\nstatic unsigned long GetCurrentProcessId(void){return 1;}\n${fixture.slice(start,end)}  return 125;\n}\nint main(void){wchar_t *args[]={L"fixture",L"--broker-fixture",L"breakaway",NULL};assert(nb_fixture(${arity},args)==0);assert(nb_fixture(2,args)==125);assert(nb_fixture(${Number(arity)+1},args)!=0);args[2]=L"unknown";assert(nb_fixture(${arity},args)==125);puts("NB_LOCAL breakaway-dispatch=1");return 0;}\n`);
+    const built=await boundedCapture(procs,'dispatch-build',compiler,['-std=c11','-O2','-Wall','-Wextra','-Werror',dispatch,'-o',executable],scratch,selectedEnvironment(),15000);
+    if(built.code!==0||built.timedOut)return built;
+    const routed=await boundedCapture(procs,'dispatch-run',executable,[],scratch,selectedEnvironment(),5000);
+    return {...routed,out:contracts.out+routed.out,err:contracts.err+routed.err};
   } finally {procs.killAll(); await procs.close(); journal.close(); rmSync(scratch, {recursive: true, force: true});}
 }
 
@@ -418,6 +453,13 @@ const ignore = ignored.code===0, argv=pipe;
 console.error('NB_BUN pid='+process.pid+' ignore='+Number(ignore)+' pipe='+Number(pipe)+' argv='+Number(argv)+' denials='+Number(denied&&nativeCode===0)+' network='+Number(network));
 if(!ignore||!pipe||!denied||nativeCode!==0||!network) process.exit(1);
 `;
+
+export interface BrokerExpiryReceipt {stopRequestedAt: number | null; liveAtStop: boolean; closedAt: number | null}
+export async function observeBrokerExpiry(live: () => number, receipt: BrokerExpiryReceipt, readyAt: number | null, expiresAt: number, deadline: number): Promise<boolean> {
+  while ((live() || receipt.closedAt === null) && Date.now() < deadline) await Bun.sleep(25);
+  return readyAt !== null && readyAt < expiresAt && receipt.stopRequestedAt !== null && receipt.stopRequestedAt >= expiresAt &&
+    receipt.liveAtStop && receipt.closedAt !== null && receipt.closedAt >= receipt.stopRequestedAt && receipt.closedAt <= deadline && !live();
+}
 
 export function createBrokerFixture(scratch: string) {
   // setup replaces this directory's DACL and propagates inherited ACL changes.
@@ -502,6 +544,7 @@ async function nativeCases(procs: ProcRegistry, helper: string, scratch: string,
       if (Object.values(outcomes).some(r => ['negative','unsupported','setup','timeout'].includes(r.kind))) break;
       const id = `${compiler}-lifetime-${reason}`;
       let sessionClosed = false;
+      const expiryReceipt: BrokerExpiryReceipt = {stopRequestedAt:null,liveAtStop:false,closedAt:null};
       const leases = new ExecutionProtections({available:()=>true, async open(policy,check) {
         /* Diagnostic session only: prerequisite still performs an actual LPAC
          * launch. This does not alter WindowsExecutionBoundary admission. */
@@ -511,13 +554,16 @@ async function nativeCases(procs: ProcRegistry, helper: string, scratch: string,
           assertExecutionPolicy(policy);
           if(sessionClosed||command!==capturedNative||cwd!==project)throw new Error('captured diagnostic launch mismatch');
           return {command:helper,args:['run-broker',profile,project,capturedNative,...args],cwd:scratch,env};
-        },flush(){},close(){sessionClosed=true;}};
+        },flush(){},close(){sessionClosed=true;expiryReceipt.closedAt=Date.now();}};
       }},async (controlId,command,args,cwd,environment)=>{
         const c=await boundedCapture(procs,controlId,command,args,cwd,environment??env,30000);
         const archive=`${compiler}-lifetime-${reason}-prerequisite`;
         writeFileSync(join(output,archive+'.stdout.txt'),c.out); writeFileSync(join(output,archive+'.stderr.txt'),c.err);
         calls.push({id:controlId,kind:'lifecycle-prerequisite',archive,...c});persist();return {code:c.code??125,stdout:c.out,stderr:c.err};
-      },scope=>procs.stopAndWait(scope),scope=>procs.liveCount(scope));
+      },scope=>{
+        if(scope===id&&expiryReceipt.stopRequestedAt===null){expiryReceipt.stopRequestedAt=Date.now();expiryReceipt.liveAtStop=procs.liveCount(scope)>0;}
+        return procs.stopAndWait(scope);
+      },scope=>procs.liveCount(scope));
       activeLeases.push(leases);
       const expiresAt=Date.now()+(reason==='expiry'?20000:90000);
       await leases.install(id,{scope:{kind:'job',id,associationId:'synthetic',grantRevision:1},checkout:project,credentialPaths:[excluded],
@@ -547,8 +593,7 @@ async function nativeCases(procs: ProcRegistry, helper: string, scratch: string,
       if (reason==='revoke') {await leases.revoke(id);action=sessionClosed;}
       else if(reason==='expiry') {
         const expires=Date.now()+25000;
-        while(procs.liveCount(id)&&Date.now()<expires)await Bun.sleep(25);
-        action=sessionClosed&&!procs.liveCount(id);
+        action=await observeBrokerExpiry(()=>procs.liveCount(id),expiryReceipt,readyAt,expiresAt,expires);
       } else if(reason==='launcher-death') {
         const launcher=kernel.symbols.OpenProcess(0x100001,0,child.record.pid);
         if(launcher){action=kernel.symbols.TerminateProcess(launcher,125)!==0;kernel.symbols.CloseHandle(launcher);}
@@ -568,7 +613,7 @@ async function nativeCases(procs: ProcRegistry, helper: string, scratch: string,
         bindings.every(r=>held.some(h=>String(h.pid)===r.pid)) && held.every(h=>kernel.symbols.WaitForSingleObject(h.handle,5000)===0);
       const closed = held.every(h=>kernel.symbols.CloseHandle(h.handle)!==0);
       writeFileSync(join(output,`${compiler}-lifetime-${reason}.stderr.txt`),text);
-      calls.push({id,reason,expiresAt,readyAt,actionStartedAt,actionFinishedAt,ready,action,drained,held:held.map(h=>h.pid),exited,closed,tooLarge});
+      calls.push({id,reason,expiresAt,readyAt,actionStartedAt,actionFinishedAt,expiryReceipt,ready,action,drained,held:held.map(h=>h.pid),exited,closed,tooLarge});
       outcomes[reason] = ready && action && drained && exited && closed && !tooLarge ? verdict('positive') : verdict('incomplete');
       evidence.unrun=evidence.unrun.filter(name=>name!==reason); persist();
       await leases.close();

@@ -15,12 +15,17 @@ static HANDLE nb_thread_handle(NB_PROCESS *p, DWORD id) {
   return NULL;
 }
 static int nb_hold(void *ctx, uint32_t id) {
-  NB_PROCESS *p = ctx; HANDLE t = nb_thread_handle(p, id); DWORD old = t ? SuspendThread(t) : (DWORD)-1;
-  DWORD error=old==(DWORD)-1?(t?GetLastError():ERROR_INVALID_HANDLE):0,exit_code=0;
+  typedef NTSTATUS (NTAPI *suspend_thread)(HANDLE,PULONG);
+  typedef ULONG (NTAPI *status_error)(NTSTATUS);
+  suspend_thread suspend=(suspend_thread)(void *)GetProcAddress(GetModuleHandleW(L"ntdll.dll"),"NtSuspendThread");
+  status_error to_error=(status_error)(void *)GetProcAddress(GetModuleHandleW(L"ntdll.dll"),"RtlNtStatusToDosError");
+  NB_PROCESS *p = ctx; HANDLE t = nb_thread_handle(p, id); ULONG previous=0;
+  NTSTATUS status=t&&suspend&&to_error?suspend(t,&previous):NB_INVALID;
+  DWORD old=status==0?previous:(DWORD)-1,error=status==0?0:to_error?to_error(status):ERROR_NOT_SUPPORTED,exit_code=0;
   DWORD wait=old==(DWORD)-1&&t?WaitForSingleObject(t,0):WAIT_TIMEOUT;
   int queried=old==(DWORD)-1&&t&&GetExitCodeThread(t,&exit_code);
-  fwprintf(stderr, L"NB_SUSPEND pid=%lu tid=%lu owner=%lu previous=%lu error=%lu wait=%lu exitKnown=%d exitCode=%lu\n",
-    p->id, (DWORD)id, (DWORD)p->step.owner, old,error,wait,queried,exit_code);
+  fwprintf(stderr, L"NB_SUSPEND pid=%lu tid=%lu owner=%lu previous=%lu error=%lu wait=%lu exitKnown=%d exitCode=%lu status=0x%08lx\n",
+    p->id, (DWORD)id, (DWORD)p->step.owner, old,error,wait,queried,exit_code,(DWORD)status);
   return old != (DWORD)-1;
 }
 static int nb_release(void *ctx, uint32_t id) {

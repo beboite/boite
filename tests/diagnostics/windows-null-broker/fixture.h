@@ -219,13 +219,25 @@ static int nb_denials(int count, wchar_t **args) {
   if (h) CloseHandle(h);
   ok = ok && status == NB_DENIED && !h;
   wchar_t image[32768]; GetModuleFileNameW(NULL, image, 32768);
-  wchar_t *line = command_line(1, &args[0]); STARTUPINFOW startup; PROCESS_INFORMATION child;
+  wchar_t *probe_args[] = {args[0], L"--broker-fixture", L"breakaway"};
+  wchar_t *line = command_line(3, probe_args); STARTUPINFOW startup; PROCESS_INFORMATION child;
   ZeroMemory(&startup, sizeof(startup)); startup.cb = sizeof(startup); ZeroMemory(&child, sizeof(child));
-  BOOL created = line && CreateProcessW(image, line, NULL, NULL, FALSE, CREATE_BREAKAWAY_FROM_JOB | CREATE_SUSPENDED | CREATE_NO_WINDOW, NULL, NULL, &startup, &child);
+  startup.dwFlags=STARTF_USESTDHANDLES;startup.hStdInput=GetStdHandle(STD_INPUT_HANDLE);startup.hStdOutput=GetStdHandle(STD_OUTPUT_HANDLE);startup.hStdError=GetStdHandle(STD_ERROR_HANDLE);
+  BOOL created = line && CreateProcessW(image, line, NULL, NULL, TRUE, CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW, NULL, NULL, &startup, &child);
   error = created ? 0 : GetLastError();
-  fwprintf(stderr, L"NB_DENY pid=%lu name=breakaway denied=%d error=%lu\n", GetCurrentProcessId(), !created && error == ERROR_ACCESS_DENIED, error);
-  if (created) {TerminateProcess(child.hProcess, 125); CloseHandle(child.hThread); CloseHandle(child.hProcess);}
-  free(line); ok = ok && !created && error == ERROR_ACCESS_DENIED;
+  if (created) {
+    DWORD code=125; int waited=WaitForSingleObject(child.hProcess,20000)==WAIT_OBJECT_0&&GetExitCodeProcess(child.hProcess,&code);
+    if(!waited)TerminateProcess(child.hProcess,125);
+    int closed=CloseHandle(child.hThread); if(!CloseHandle(child.hProcess))closed=0;
+    /* A nested job may permit this flag while the outer private job retains the
+     * child. Only the debugger's exact job/token/image/trace binding proves it. */
+    fwprintf(stderr,L"NB_BREAKAWAY pid=%lu created=1 child=%lu error=0 exit=%lu waited=%d closed=%d\n",GetCurrentProcessId(),child.dwProcessId,code,waited,closed);
+    ok=ok&&waited&&code==0&&closed;
+  } else {
+    fwprintf(stderr, L"NB_DENY pid=%lu name=breakaway denied=%d error=%lu\n", GetCurrentProcessId(), error == ERROR_ACCESS_DENIED, error);
+    ok=ok&&error==ERROR_ACCESS_DENIED;
+  }
+  free(line);
   WSADATA data; int startup_error = WSAStartup(MAKEWORD(2, 2), &data), network_denied = startup_error != 0, net_error = startup_error;
   SOCKET socket_handle = INVALID_SOCKET;
   if (!startup_error) {
@@ -251,9 +263,14 @@ static int nb_denials(int count, wchar_t **args) {
   return ok && network_denied;
 }
 static int nb_fixture(int count, wchar_t **args) {
-  if (count < 4 || !nb_resolve()) return 125;
+  if (count < 3 || !nb_resolve()) return 125;
   const wchar_t *scenario = args[2];
   SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+  if (!wcscmp(scenario,L"breakaway")) {
+    int ok=count==3&&nb_control_handles();
+    fwprintf(stderr,L"NB_CHECK pid=%lu name=breakaway-child ok=%d\n",GetCurrentProcessId(),ok);return ok?0:1;
+  }
+  if(count<4)return 125;
   if (!wcscmp(scenario, L"host-path")) {
     if (count != 11) return 125;
     HANDLE h = NULL; NTSTATUS status = nb_host_path(args[6], &h); char bytes[64]; DWORD used = 0;
