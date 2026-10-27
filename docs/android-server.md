@@ -33,7 +33,7 @@ once), then run the install command it shows, for the stable or nightly
 channel:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/beboite/boite/main/apps/android-server/termux/install.sh | bash -s -- --channel stable
+curl -fsSL https://raw.githubusercontent.com/mtsu-dev/boite/main/apps/android-server/termux/install.sh | bash -s -- --channel stable
 ```
 
 `install.sh`:

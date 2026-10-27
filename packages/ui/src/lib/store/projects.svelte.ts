@@ -416,6 +416,18 @@ export class Projects {
     }
   }
 
+  async renameProject(projectId: ProjectId, name: string): Promise<void> {
+    const client = this.ctx.client;
+    const generation = this.ctx.clientGeneration;
+    if (!client) return;
+    try {
+      const project = await client.call('projects.rename', { projectId, name });
+      if (this.ctx.currentClient(client, generation)) this.upsertProject(project);
+    } catch (error) {
+      if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
+    }
+  }
+
   async setProjectWorktreeDefault(projectId: ProjectId, enabled: boolean): Promise<void> {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;

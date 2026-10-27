@@ -10,14 +10,14 @@ import type { CliIo } from './cli.ts';
 import { Usage } from './cli-args.ts';
 
 export const SECRET_HELP = `boite secret: ask the user for a key on a card, then use it by ref without ever seeing it.
-  boite secret list                                   names of the keys kept for this project
-  boite secret ask <NAME> --why "<reason>" [--placeholder "<example>"] [--timeout <minutes>] [--replace]
+  boite secret list                                   compatibility: reports that no keys are stored
+  boite secret ask <NAME> --why "<reason>" [--placeholder "<example>"] [--timeout <minutes>]
                                                       prints: saved secret:<ref> | declined | cancelled | timed_out
   boite secret write <ref> --env-file <path> --key <VAR> [--allow-unignored]
                                                       writes VAR=<value> into a git-ignored file of this conversation
   boite secret run <ref> --as <VAR> -- <cmd> [args...] runs cmd with the value in env var VAR, output masked
   boite secret pipe <ref> -- <cmd> [args...]          runs cmd with the value on stdin, output masked
-Never ask for a secret in chat. Refs: secret:<id> (this conversation, 24 h) or secret:project/<NAME> (kept).
+Never ask for a secret in chat. Refs: secret:<id>, single-use, in memory for at most 10 minutes and only during the requesting turn.
 This is not a sandbox: a value written to a file can be read back with a shell, and then it reaches the model.`;
 
 export interface SecretCliResult {
@@ -57,11 +57,10 @@ export async function secretCommand(args: string[], io: CliIo, client: CoreClien
   if (action === 'list') {
     if (rest.length > 0) throw new Usage('boite secret list takes no arguments');
     const result = await client.call('secrets.list', { threadId });
-    const memory = result.storage === 'memory' ? ['note: no system vault answers here; kept keys live in memory until Boite stops'] : [];
-    return { lines: [...(result.secrets.length ? result.secrets.map(secret => `secret:project/${secret.name}`) : ['no key kept for this project']), ...memory], value: result };
+    return { lines: ['Secret Drop stores no project keys; ask for a new single-use ref'], value: result };
   }
   if (action === 'ask') {
-    const parsed = flags(rest, { values: ['why', 'placeholder', 'timeout', 'request-id'], booleans: ['replace'] });
+    const parsed = flags(rest, { values: ['why', 'placeholder', 'timeout', 'request-id'], booleans: [] });
     const name = parsed.positional[0];
     if (name === undefined || parsed.positional.length > 1) throw new Usage('boite secret ask needs one NAME, e.g. OPENAI_API_KEY');
     const why = parsed.values.get('why');
@@ -73,10 +72,10 @@ export async function secretCommand(args: string[], io: CliIo, client: CoreClien
     const placeholder = parsed.values.get('placeholder');
     const result = await client.call('secrets.ask', {
       threadId, name, reason: why, timeoutMinutes: timeout, requestId,
-      ...(placeholder === undefined ? {} : { placeholder }), ...(parsed.booleans.has('replace') ? { replace: true } : {}),
+      ...(placeholder === undefined ? {} : { placeholder }),
     });
     const line = result.outcome === 'saved' ? `saved ${result.ref}` : result.outcome;
-    const memory = result.outcome === 'saved' && result.storage === 'memory' ? ['note: no system vault answers here; the value lives in memory until Boite stops'] : [];
+    const memory = result.outcome === 'saved' ? ['note: single-use ref; expires in 10 minutes, when this turn ends or when Boite stops'] : [];
     return { lines: [line, ...memory], value: result };
   }
   if (action === 'write') {

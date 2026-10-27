@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -32,6 +32,20 @@ afterEach(async () => {
 });
 
 describe('procs', () => {
+  test.each([false, true])('close releases the platform after protection failure and retains release errors=%s', async releaseFails => {
+    const protectionError = new Error('protection close failed'), releaseError = new Error('platform release failed');
+    let releases = 0;
+    const platform: ProcessPlatform = {...createPosixPlatform('linux', null), release: async () => {releases++; if (releaseFails) throw releaseError;}};
+    const registry = new ProcRegistry(harness.core.journal, new Bus(), platform);
+    const close = spyOn(registry.protection, 'close').mockRejectedValue(protectionError);
+    try {
+      const closing = registry.close(); expect(registry.close()).toBe(closing);
+      const error = await closing.catch(error => error);
+      expect(releases).toBe(1);
+      if (releaseFails) {expect(error).toBeInstanceOf(AggregateError); expect(error.errors).toEqual([protectionError, releaseError]);}
+      else expect(error).toBe(protectionError);
+    } finally {close.mockRestore();}
+  });
   test.skipIf(process.platform !== 'win32')('spawnChild keeps native exit usage after the node exit callback', async () => {
     const threadId = 'native-child-usage';
     const child = harness.core.procs.spawnChild(threadId, process.execPath, ['-e', 'setTimeout(() => {}, 250)'], {

@@ -36,6 +36,23 @@ async function routedClients() {
   return { source: source!, gateway: gateway!, outside: outside! };
 }
 
+test('updating a contact preserves both local and group project offers and notifies the recipient', async () => {
+  const {gateway, outside} = await routedClients();
+  await gateway.call('contacts.grant', {coreId: 'core-outside', projectId: 'p-boite'});
+  await gateway.call('contacts.grant', {coreId: 'core-outside', machine: 'core-source', projectId: 'p-boite'});
+  const offered = (await outside.call('contacts.get', {})).contacts.find(contact => contact.coreId === 'core-gateway')!.offers;
+  expect(offered.map(offer => offer.sharedProject)).toEqual([
+    {ownerCoreId: 'core-gateway', coreId: 'core-gateway', projectId: 'p-boite'},
+    {ownerCoreId: 'core-gateway', coreId: 'core-source', projectId: 'p-boite'},
+  ]);
+  let events = 0; outside.on('contacts.updated', () => {events++;});
+  for (const update of [{name: 'Renamed contact'}, {trusted: true}]) {
+    await gateway.call('contacts.update', {coreId: 'core-outside', ...update});
+    expect((await outside.call('contacts.get', {})).contacts.find(contact => contact.coreId === 'core-gateway')!.offers).toEqual(offered);
+  }
+  expect(events).toBe(2);
+});
+
 test('a group contact keeps both sides of its exchange in the initiating conversation', async () => {
   const { source, gateway, outside } = await routedClients();
   expect((await source!.call('collaboration.contacts', { threadId: 't-trace' })).map(contact => contact.coreId)).toContain('core-outside');

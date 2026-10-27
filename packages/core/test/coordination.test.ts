@@ -279,6 +279,15 @@ test('an unreachable coordination check names the destination without broadcasti
   } finally { log.mockRestore(); }
 });
 
+test('manual peer trust rejects malformed public keys as invalid parameters without storing trust', async () => {
+  const { h, owner } = await setup();
+  const peer = { ...h.core.coordination.identity(), coreId: 'a'.repeat(64), publicKey: 'not a public key' };
+  expect((await rejection(owner.call('collaboration.trust', { peer }))).reason).toMatchObject({
+    rpc: { code: RpcErrorCode.InvalidParams, message: 'peer.publicKey: expected Ed25519' },
+  });
+  expect(await owner.call('collaboration.peers', {})).toEqual([]);
+});
+
 test('signed peer errors expose validation messages but hide unexpected implementation details', async () => {
   const one = await setup(); const two = await setup();
   const cardA = one.h.core.coordination.identity(), cardB = two.h.core.coordination.identity();

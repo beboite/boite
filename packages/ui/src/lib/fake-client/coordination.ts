@@ -85,7 +85,7 @@ function mailbox(source: FakeContext, gateway: FakeContext, threadId: string, co
 }
 
 export function contactSender(source: FakeContext, gateway: FakeContext, threadId: string, contactId: string): AgentContact {
-  const from = contactOf(source, source.thread(threadId), source.identity.coreId, source.identity.name);
+  const from = fakeAgentContact(source, source.thread(threadId), source.identity.coreId, source.identity.name);
   return gateway === source ? from : { ...from, coreId: gateway.identity.coreId, threadId: mailbox(source, gateway, threadId, contactId).id };
 }
 
@@ -172,7 +172,7 @@ function coordinationView(ctx: FakeContext, threadId: ThreadId): CoordinationVie
 }
 
 /** A thread as other agents see it, with the fields the real core describes it by. */
-function contactOf(ctx: FakeContext, thread: Thread, coreId: string, machine: string): AgentContact {
+export function fakeAgentContact(ctx: FakeContext, thread: Thread, coreId: string, machine: string): AgentContact {
   const config = coordinationConfig(ctx, thread.id);
   const project = ctx.projects.find(entry => entry.id === thread.projectId);
   return {
@@ -198,13 +198,13 @@ function reachable(ctx: FakeContext, threadId: ThreadId): { contact: AgentContac
   if (source.archived || sourceConfig.mode === 'off') return [];
   const found = [...ctx.threads.values()]
     .filter(thread => thread.id !== threadId && !thread.archived && coordinationConfig(ctx, thread.id).mode !== 'off' && (thread.projectId === source.projectId || sourceConfig.remote && coordinationConfig(ctx, thread.id).remote))
-    .map(thread => ({ contact: contactOf(ctx, thread, ctx.identity.coreId, ctx.identity.name), core: ctx }));
+    .map(thread => ({ contact: fakeAgentContact(ctx, thread, ctx.identity.coreId, ctx.identity.name), core: ctx }));
   if (sourceConfig.remote) for (const peer of trusted(ctx)) {
     const target = cores.get(peer.coreId);
     if (!target || !trusts(target, ctx.identity.coreId)) continue;
     for (const thread of target.threads.values()) {
       const config = coordinationConfig(target, thread.id);
-      if (!thread.archived && config.mode !== 'off' && config.remote) found.push({ contact: contactOf(target, thread, peer.coreId, peer.name), core: target });
+      if (!thread.archived && config.mode !== 'off' && config.remote) found.push({ contact: fakeAgentContact(target, thread, peer.coreId, peer.name), core: target });
     }
   }
   if (sourceConfig.remote) for (const { gateway, contact } of fakeContactRoutes(ctx)) {
@@ -213,7 +213,7 @@ function reachable(ctx: FakeContext, threadId: ThreadId): { contact: AgentContac
     if (!target) continue;
     for (const thread of target.threads.values()) {
       const config = coordinationConfig(target, thread.id);
-      if (!thread.archived && config.mode !== 'off' && config.remote && openedTo(target, gateway, thread)) found.push({ contact: contactOf(target, thread, contact.coreId, contact.name), core: target });
+      if (!thread.archived && config.mode !== 'off' && config.remote && openedTo(target, gateway, thread)) found.push({ contact: fakeAgentContact(target, thread, contact.coreId, contact.name), core: target });
     }
   }
   return found;
@@ -278,7 +278,7 @@ export function coordinationMethods(ctx: FakeContext) {
       if (source.archived || sourceConfig.mode === 'off') return { agents: [], unavailable: [] };
       const agents = [...ctx.threads.values()]
         .filter(thread => thread.id !== threadId && !thread.archived && (thread.projectId === source.projectId || sourceConfig.remote && coordinationConfig(ctx, thread.id).remote))
-        .map(thread => contactOf(ctx, thread, ctx.identity.coreId, ctx.identity.name))
+        .map(thread => fakeAgentContact(ctx, thread, ctx.identity.coreId, ctx.identity.name))
         .filter(agent => agent.mode !== 'off')
         .sort((a, b) => (b.activeAt ?? 0) - (a.activeAt ?? 0));
       const unavailable: string[] = [];
@@ -288,7 +288,7 @@ export function coordinationMethods(ctx: FakeContext) {
         for (const thread of target.threads.values()) {
           const config = coordinationConfig(target, thread.id);
           if (thread.archived || config.mode === 'off' || !config.remote) continue;
-          agents.push(contactOf(target, thread, peer.coreId, peer.name));
+          agents.push(fakeAgentContact(target, thread, peer.coreId, peer.name));
         }
       }
       for (const row of reachable(ctx, threadId)) if (!agents.some(agent => agent.coreId === row.contact.coreId && agent.threadId === row.contact.threadId)) agents.push(row.contact);
@@ -332,7 +332,7 @@ export function coordinationMethods(ctx: FakeContext) {
       const at = Math.max(nextMailTime(ctx, source.id), nextMailTime(destination!, target.id));
       const letter: AgentLetter = {
         id: params.requestId,
-        from: contactOf(ctx, source, ctx.identity.coreId, ctx.identity.name),
+        from: fakeAgentContact(ctx, source, ctx.identity.coreId, ctx.identity.name),
         to: params.to,
         toTitle: target?.title ?? ctx.peers.get(params.to.coreId)?.name ?? params.to.threadId,
         toProject: destination!.projects.find(project => project.id === target.projectId)?.name,

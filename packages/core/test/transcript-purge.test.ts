@@ -8,6 +8,7 @@ import { Core } from '../src/core.ts';
 import { newToken } from '../src/ids.ts';
 import { claudeProjectFolder } from '../src/imports/claude.ts';
 import { claudeSessionFixture, FIXTURE_SESSION_ID } from './fixtures/claude-session.ts';
+import { removeTranscripts } from '../src/threads/transcript-purge.ts';
 import { echoThread, startTestCore, testProject } from './harness.ts';
 import type { TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
@@ -110,7 +111,7 @@ test('a purge never touches transcripts outside a directory Boite made for the a
   }
 });
 
-test('a session re-imported while its deleted thread waits keeps its transcript through a purge, and none starts while one is removed', async () => {
+test('an import admitted after journal expiry keeps its transcript through cleanup, and none starts while one is removed', async () => {
   const project = await testProject(harness, client);
   const account = await client.call('accounts.add', { providerId: 'claude', label: 'isolated' });
   if (account.isolationDir === null) throw new Error('the account must be isolated');
@@ -121,10 +122,11 @@ test('a session re-imported while its deleted thread waits keeps its transcript 
   await client.call('threads.remove', { threadId });
   harness.core.journal.db.query('UPDATE thread_deletions SET deleted_at = ? WHERE root_id = ?').run(Date.now() - 2 * 86_400_000, threadId);
 
-  // The import stops at its read of the transcript; the purge runs across it.
+  // Expire the journal reservation before cleanup starts reading the disk.
+  // A recoverable deletion now refuses reimport; a fully expired one does not.
+  expect(harness.core.journal.purgeDeletedThreads(Date.now())).toBe(1);
   const importing = harness.core.imports.run({ projectId: project.id, accountId: account.id, sessionId: FIXTURE_SESSION_ID });
-  harness.core.threads.purgeDeleted();
-  expect(await harness.core.threads.transcriptPurge).toEqual([]);
+  expect(await removeTranscripts(harness.core, [{ accountId: account.id, sessionId: FIXTURE_SESSION_ID }])).toEqual([]);
   const again = await importing;
   expect(existsSync(current.file)).toBe(true);
   expect(existsSync(current.side)).toBe(true);

@@ -36,6 +36,7 @@ export const strings = {
       projects: 'Projects',
       model: 'Model',
       effort: 'Reasoning effort',
+      eventWakes: 'Wake automatically for project and desk events',
       autoMemory: 'Update memory after each task',
       subagents: 'Subagents',
       dailyBudget: 'Daily budget for its own wakes',

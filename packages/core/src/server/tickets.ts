@@ -29,7 +29,7 @@ export async function ticketedFile(core: Core, ticket: string, range: string | n
     'x-content-type-options': 'nosniff',
     'content-disposition': attachmentDisposition(opened.name),
   };
-  return fdResponse(opened.handle, opened.size, range, headers);
+  return fdResponse(opened.handle, opened.size, range, headers, opened.permit);
 }
 
 /**
@@ -57,14 +57,14 @@ export async function viewPage(core: Core, ticket: string, gzip: boolean): Promi
     'content-security-policy': `sandbox ${VIEW_SANDBOX}; ${VIEW_CONTENT_POLICY}`,
     vary: 'accept-encoding',
   };
-  if (gzip) {
+  if (gzip && !opened.permit) {
     const compressed = await openViewCopy(`${opened.path}${VIEW_GZIP_SUFFIX}`);
     if (compressed !== null) {
       void opened.handle.close();
       return fdResponse(compressed.handle, compressed.size, null, { ...headers, 'content-encoding': 'gzip' });
     }
   }
-  return fdResponse(opened.handle, opened.size, null, headers);
+  return fdResponse(opened.handle, opened.size, null, headers, opened.permit);
 }
 
 /** The gzipped copy of a view, opened without following a link; null when it is missing or not a file. */

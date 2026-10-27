@@ -8,6 +8,7 @@
   import { composerPlaceholder } from '../lib/composer-placeholder';
   import { attachFiles, receiveDroppedFiles } from '../lib/composer-attachments';
   import { rewindComposerEdit } from '../lib/composer-edit';
+  import { editWhole } from '../lib/reading-window';
   import { fitHeight, selfSizing } from '../lib/composer-size';
   import { editComposerInput, insertImageReference, removeImageReferences, touchesImageReference, trackImageSend } from '../lib/composer-images';
   import { checkpoint, editKind, recordEdit, resetHistory, settled } from '../lib/composer-history';
@@ -29,6 +30,7 @@
   import ComposerBar from './ComposerBar.svelte';
   import ComposerIntent from './ComposerIntent.svelte';
   import ComposerQueue from './ComposerQueue.svelte';
+  import ComposerSpeechPreview from './ComposerSpeechPreview.svelte';
   import MentionMenu from './MentionMenu.svelte';
   import SlashMenu from './SlashMenu.svelte';
   import ThreadActivity from './ThreadActivity.svelte';
@@ -66,6 +68,8 @@
   let highlightedImage = $state<Attachment | null>(null);
   /** Where ArrowUp stands in this thread's sent prompts, or null outside recall. */
   let recall = $state<number | null>(null);
+  let recallRead = $state<Promise<boolean> | null>(null);
+  $effect(() => { if (recall === null) recallRead = null; });
   /** The box has the keyboard: one of the two things that open the slash menu. */
   let focused = $state(false);
   /** Escape shuts the menu on text it keeps, until that text changes again. */
@@ -133,7 +137,7 @@
   // An answer counts the card's picks, needs no model and cannot wait in the outbox.
   let canSend = $derived(
     (text.trim().length > 0 || attachments.length > 0 || (reply ? !!repliesOf(store).picks[reply.id]?.length : previewReferences.length > 0)) &&
-      readingFiles === 0 &&
+      readingFiles === 0 && recallRead === null &&
       !attachments.some(unresolvedAssetId) &&
       (reply !== null || choice !== null || target !== null) &&
       (store.connection === 'ready' || (offline && !reply)) &&
@@ -363,9 +367,7 @@
     if (side.submit(inputStore, inputKey, prompt)) { requestAnimationFrame(grow); return; }
     const editedThread = state.editing ? inputStore.openThread : null;
     const edited = state.editing ? await rewindComposerEdit(inputStore, inputKey, state, prompt, images, references) : null; if (edited === false) return;
-    // A queue that still holds something takes this prompt too, whatever the
-    // thread's status: sending it on its own would put it ahead of prompts the
-    // user typed first. Sending is also how he resumes a queue a refusal paused.
+    // The queue keeps this prompt behind earlier entries; sending resumes a paused queue.
     if (!editedThread && (inputStore.busy || state.queued.length > 0 || state.sending || offline)) {
       // Written while the machine is away, it joins the outbox: its own request id and the chips' model and effort.
       inputStore.queuePrompt(inputKey, { text: prompt, attachments: images, afterBoundary: store.inputBoundaries[key]?.boundary, ...(references.length ? { previewReferences: references } : {}) },
@@ -383,8 +385,7 @@
     const local = edited ? edited.local : inputStore.stageSend(inputKey, prompt, images, references);
     // Undo never brings back a prompt that left.
     if (local) { emptyBox(state); resetHistory(state); recall = null; requestAnimationFrame(grow); }
-    // A rewind can finish after navigation: the replacement belongs to the
-    // captured thread and machine, whichever conversation is on screen now.
+    // A rewind's replacement belongs to the captured thread and machine, even after navigation.
     const accepted = await (editedThread
       ? inputStore.send(prompt, inputKey, images, references)
       : nextDraft
@@ -517,19 +518,26 @@
     return true;
   }
 
-  /**
-   * A sent prompt back in the box. On a thread at rest it comes back as the
-   * message to edit, pictures and files included: sending replaces it and
-   * what followed. A running thread only recalls the words, to queue again.
-   * Edit mode asks what `MessageList`'s `branchable` asks, the rules of a rewind.
-   */
+  /** An idle thread recalls a fully hydrated edit; a running thread recalls words to queue. */
   function recallPrompt(prompt: SentPrompt) {
     const state = stateForInput();
     const edit = !store.busy && state.queued.length === 0 && thread !== null && (!!thread.agentSessionId || thread.projectId !== null);
+    if (edit) {
+      const owner = store, inputKey = key, at = recall;
+      const message = thread?.messages.find(message => message.id === prompt.id);
+      if (!message) return;
+      checkpoint(state);
+      const loading = editWhole(owner, inputKey, message, () => store === owner && key === inputKey && recall === at && recallRead === loading);
+      recallRead = loading;
+      void loading.then(applied => {
+        if (applied) { caret = state.text.length; requestAnimationFrame(grow); }
+      }).finally(() => { if (recallRead === loading) recallRead = null; });
+      return;
+    }
+    recallRead = null;
     restorePrompt(prompt.text, prompt.previewReferences);
-    if (edit) state.attachments = prompt.attachments;
-    else if (state.editing) state.attachments = [];
-    state.editing = edit ? prompt.id : null;
+    if (state.editing) state.attachments = [];
+    state.editing = null;
   }
 
   /** Leaves edit mode: the box empties, nothing was rewound. */
@@ -539,7 +547,7 @@
     state.editing = null;
     state.attachments = [];
     state.previewReferences = [];
-    recall = null;
+    recall = null; recallRead = null;
     put('');
     focusInitial(box, box?.closest<HTMLElement>('[data-testid=composer]'));
   }
@@ -690,7 +698,7 @@
       // question away with the turn. Skip and the stop button still end it.
       event.preventDefault();
       if (target) target.stop?.(); else void store.stop();
-    } else if (event.key === 'Escape' && composer?.editing) {
+    } else if (event.key === 'Escape' && (composer?.editing || recallRead !== null)) {
       event.preventDefault();
       cancelEdit();
     }
@@ -788,12 +796,7 @@
       onhover={(index) => (mentions.at = index)}
     />
 
-    {#if speechStatus}
-      <div class="speech-preview" class:error={speechError} data-testid="dictation-preview">
-        <span class="speech-status" role={speechError ? 'alert' : 'status'}>{speechStatus}</span>
-        {#if speechPreview}<p aria-live="polite" aria-atomic="true">{speechPreview}</p>{/if}
-      </div>
-    {/if}
+    <ComposerSpeechPreview status={speechStatus} preview={speechPreview} error={speechError} />
 
     <ComposerBar bind:this={toolbar} {store} {key} {target} {bot} {provider} {canSend} answering={!!reply} sendLabel={reply ? strings.composer.replySend : undefined} bind:choice bind:picking bind:dictating
       onsubmit={() => void submit()}
@@ -807,10 +810,6 @@
 </div>
 
 <style>
-  .speech-preview { padding: 0 14px 6px; min-width: 0; }
-  .speech-status { font-size: var(--text-xs); color: var(--color-muted-foreground); }
-  .speech-preview.error .speech-status { color: var(--color-danger); }
-  .speech-preview p { margin: 2px 0 0; font-size: var(--text-sm); line-height: 1.5; color: var(--color-foreground); overflow-wrap: anywhere; max-height: 3em; overflow-y: auto; }
   .composer-wrap {
     position: relative;
     flex: none;
@@ -886,8 +885,6 @@
 
   @media (max-width: 720px) {
     .composer { --composer-rest: var(--shadow-e1); border-radius: var(--radius-xl); }
-    .speech-preview { padding: 0 16px 8px; }
-    .speech-status { color: var(--color-accent); }
     textarea, .input-mirror { font-size: var(--text-md); }
     .composer-wrap, .composer-wrap.centered {
       padding: 8px 12px max(10px, env(safe-area-inset-bottom));

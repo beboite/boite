@@ -1,0 +1,90 @@
+/** External correspondence retains its execution authority with the history that consumed it. */
+import {realpathSync} from 'node:fs';
+import type {AgentLetter} from '@boite/contracts';
+import type {Core} from '../core.ts';
+import {refused} from '../errors.ts';
+import type {AccessBinding} from './access-scopes.ts';
+import {incomingContact} from './human-letters.ts';
+
+interface LetterScope {bindings: AccessBinding[]; legacy: boolean; peers: string[]}
+const checkedHistory = new WeakMap<Core, Set<string>>();
+
+function storedScope(core: Core, threadId: string): LetterScope | null {
+  const saved = core.journal.getSetting(`shared-file-letters:${threadId}`) as LetterScope | null;
+  if (saved) return saved;
+  let checked = checkedHistory.get(core);
+  if (!checked) {checked = new Set(); checkedHistory.set(core, checked);}
+  if (checked.has(threadId)) return null;
+  checked.add(threadId);
+  // Older cores delivered mail without a captured boundary. Never infer a new
+  // grant for that history or silently resume its unrestricted native session.
+  const rows = core.journal.db.query("SELECT DISTINCT json_extract(data,'$.contact.coreId') AS peer FROM coordination_letters WHERE thread_id=? AND direction='in' AND status IN ('delivered','uncertain') AND json_type(data,'$.contact.coreId')='text'").all(threadId) as {peer: string}[];
+  if (!rows.length) return null;
+  const scope: LetterScope = {bindings: [], legacy: true, peers: rows.map(r => r.peer)};
+  core.journal.setSetting(`shared-file-letters:${threadId}`, scope);
+  core.sharedAccess.execution.reconcile();
+  return scope;
+}
+
+export function letterScope(core: Core, threadId: string): LetterScope {
+  const bindings: AccessBinding[] = [], peers = new Set<string>(), seen = new Set<string>();
+  let thread = core.journal.getThread(threadId), legacy = false;
+  while (thread && !seen.has(thread.id)) {
+    seen.add(thread.id);
+    const scope = storedScope(core, thread.id);
+    if (scope) {
+      legacy ||= scope.legacy;
+      for (const peer of scope.peers) peers.add(peer);
+      for (const binding of scope.bindings) if (!bindings.some(b => b.job.sharedProjectId === binding.job.sharedProjectId && b.job.grantRevision === binding.job.grantRevision && b.checkoutPath === binding.checkoutPath)) bindings.push({...binding, threadId});
+    }
+    // A remote job starts a fresh session with the remote task and its own
+    // captured host grant/checkout. Its host parent supplies the account/profile,
+    // never conversation history. Descendants still inherit this job's letters.
+    if (core.sharedCompute.journal.worker(thread.id)) break;
+    thread = thread.parentThreadId ? core.journal.getThread(thread.parentThreadId) : null;
+  }
+  return {bindings, legacy, peers: [...peers]};
+}
+
+/** Called before wake, steer and hook delivery. Unsupported native sessions never see the letter. */
+export function protectLetters(core: Core, threadId: string, letters: AgentLetter[]): void {
+  // Core-formatted request answers still contain the contact's untrusted reason.
+  const external = letters.filter(l => l.contact);
+  if (!external.length) return;
+  const thread = core.threads.require(threadId);
+  const protocol = core.providers.require(thread.providerId).protocol;
+  if (!core.sharedAccess.execution.support(protocol, thread.providerId, thread.permissionMode).supported || protocol === 'echo' && thread.permissionMode !== 'default') throw refused('shared file policy: contact letter execution requires a protected provider route');
+  const captured = core.sharedAccess.bound(threadId);
+  const associations = captured ? [captured, ...(captured.additional ?? [])].map(b => b.job.sharedProjectId) : [];
+  if (protocol !== 'echo' && ['queued', 'running', 'waiting'].includes(thread.status)
+    && external.some(l => !l.sharedProjectId || !associations.includes(l.sharedProjectId))) {
+    throw refused('shared file policy: new contact authority waits until the native turn is idle');
+  }
+  if (protocol !== 'echo' && !captured) {
+    // An ordinary running session has unrestricted tools. Hold the letter until
+    // that turn ends; it must never be steered into the old process.
+    if (['queued', 'running', 'waiting'].includes(thread.status)) throw refused('shared file policy: contact letter waits for protected native preparation after the local turn');
+    core.threads.releaseAgent(threadId);
+  }
+  const scope = storedScope(core, threadId) ?? {bindings: [], legacy: false, peers: []};
+  for (const letter of external) {
+    if (!scope.peers.includes(letter.contact!.coreId)) scope.peers.push(letter.contact!.coreId);
+    if (!letter.sharedProjectId) {scope.legacy = true; continue;}
+    // This validates the current association and canonical sender, even on a resumed inbox.
+    const peer = core.contacts.peers().find(p => p.coreId === letter.from.coreId);
+    if (!peer) throw refused('letter.from: expected the current contact route');
+    incomingContact(core, letter, peer);
+    const shared = core.sharedProjects.require(letter.sharedProjectId), {local, index} = core.sharedProjects.endpoints(shared);
+    core.sharedProjects.assertActive(shared);
+    if (!scope.bindings.some(b => b.job.sharedProjectId === shared.id)) scope.bindings.push({
+      job: {id: null, sharedProjectId: shared.id, grantRevision: shared.access[index].revision, source: letter.from.sharedThread!},
+      checkoutPath: realpathSync(thread.cwd), threadId,
+      actor: letter.origin === 'contact-human' ? {kind: 'human', project: letter.from.sharedThread!.project} : {kind: 'agent', project: letter.from.sharedThread!.project, threadId: letter.from.sharedThread!.threadId, address: letter.from.sharedThread!.address, agent: 'shared agent'},
+    });
+    // Source identities never come from a thread-id alias.
+    if (thread.projectId !== local.projectId) throw refused('letter.to: expected the captured project');
+  }
+  core.journal.setSetting(`shared-file-letters:${threadId}`, scope);
+  core.sharedAccess.execution.reconcile();
+  core.sharedAccess.assertTurn(threadId);
+}

@@ -5,8 +5,13 @@ import { nativeAgentPartSql } from './native-agent-parts.ts';
 import { addPartBlobCodecs, createPartBlobs } from './part-blobs.ts';
 import { createCommandLines } from './processes.ts';
 import { parseJson } from './rows.ts';
+import { createSharedProjects } from '../contacts/project-journal.ts';
+import { createSharedBoard } from '../contacts/board-journal.ts';
+import { createSharedCompute } from '../contacts/compute-journal.ts';
+import { createSharedAccess } from '../contacts/access-journal.ts';
+import { createSharedReview } from '../contacts/review-journal.ts';
 
-export const SCHEMA_VERSION = 38;
+export const SCHEMA_VERSION = 43;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -450,6 +455,11 @@ export function migrate(db: Database, file: string): { from: number; to: number 
     db.exec('ALTER TABLE turns ADD COLUMN quiet INTEGER NOT NULL DEFAULT 0;');
     version = 38;
   }
+  createSharedProjects(db);
+  createSharedBoard(db);
+  createSharedCompute(db);
+  createSharedAccess(db);
+  createSharedReview(db);
   version = Math.max(version, SCHEMA_VERSION);
   if (row?.user_version !== version) db.exec(`PRAGMA user_version = ${version}`);
   return { from: row?.user_version ?? 0, to: version };

@@ -73,6 +73,12 @@ asynchronously, so the core keeps serving while it starts. The child's own kill
 runs once taskkill ends, since `/T` needs the root alive to find the tree, and
 `killAll` at shutdown waits for both.
 
+Independent cores in one process share the native drain, with an opaque job
+scope per registry and thread. Starts, exits, guards and controls use that same
+scope. Equal public thread IDs in different cores stay independent; closing a
+registry removes only its routes, jobs and guarded PIDs. A restarted registry
+gets fresh scopes, so delayed events cannot attach to its replacement.
+
 Codex initialization can temporarily use normal priority for at most 30 seconds.
 The driver restores below-normal priority on ready, failure or Stop; the registry
 also restores it on exit or deadline. A refused downgrade retries every 250 ms.
@@ -92,6 +98,34 @@ rows and load while remaining in totals, known by their image name or, when
 that read fails on a host caught as it starts, by a command line that starts
 the system's own `conhost.exe`. Terminating a job requires explicit
 exit reconciliation because the port may report only the empty-job event.
+A job nested inside a thread's job, such as the one a test suite's own core
+gives the CLIs it starts, posts no exit to the thread's job when it is
+terminated. Each load sample therefore reads the exit code of every tracked
+handle, and a process that has exited is reported as it would be from its
+exit packet. A packet that arrives later matches no live record.
+
+After root-exit telemetry settles, protected tools wait up to five seconds for
+every thread of their captured capability to drain. Native membership can retain
+a console after its exit notification. Each pass queries the held job and checks
+the live registry; an empty job reconciles captured exits through the normal
+handle and creation-identity checks, without waiting for completion-port delivery.
+The final synchronous publication gate still refuses an occupied or unreadable
+job at the deadline. Root telemetry has its own five-second budget. Replacing or
+revoking the captured capability interrupts publication; an old tool cannot
+publish through or revoke the replacement preparing on the same thread.
+
+For a native ordering investigation, `BOITE_DIAGNOSE_JOB_EVENTS=1` writes
+`WINDOWS_JOB_EVENT` records to host stderr: worker packet/action/sequence,
+main-thread receipt, captured creation identity and registry admission or
+rejection. Protection records identify the captured capability, native and
+registry membership, refusal phase, revocation and process-stop requests. Probe
+records distinguish deadline termination from a completed command. The native
+protected-tools and provider/shared CI steps enable it for both helpers.
+Publication snapshots include the PID list from that same native membership
+query and the existing captured and ignored PID sets, without reopening a PID.
+It records no commands, environment or paths and changes no exit, wait or
+publication decision. A later PID lookup without a valid creation time cannot
+identify the incarnation retained by the registry.
 
 `process.started` and `process.exited` carry the available PID, parent PID,
 executable, command line, timestamps, exit code, CPU time, peak memory and I/O.
@@ -298,7 +332,7 @@ grouped problems, threads, log file sizes, the ends of `core-output.log` and
 `shell-error.log`, then the timeline oldest first, one `formatLogLine` per
 record. It covers the last 24 hours by default, at most 20,000 records.
 
-`diagnostics.issue` drafts a GitHub issue for `beboite/boite`: the user's
+`diagnostics.issue` drafts a GitHub issue for `mtsu-dev/boite`: the user's
 description, the environment, the problems and as many of the newest log lines
 as fit. With `submit: true` it runs `gh issue create` under the core's own
 `gh` login and returns the issue URL; without a signed-in `gh` it returns a

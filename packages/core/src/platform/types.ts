@@ -1,6 +1,7 @@
 import type { MachineGpu, MachineVolume, ResourceByteUsage, Settings, TraceCapability } from '@boite/contracts';
 import type { ServerUpdatePlatform } from '../server-update/types.ts';
 import type { CgroupMemory } from './linux-cgroup.ts';
+import type { NativeExecutionBoundary } from './protected.ts';
 
 export interface NativeProcessInfo {
   exe: string;
@@ -127,25 +128,19 @@ export interface WindowCapture {
   frames(id: string): WindowFrames;
 }
 
-/**
- * The system's own store for a secret value: DPAPI on Windows, the Keychain on
- * macOS, the Secret Service (libsecret) on Linux, or memory when none answers.
- * Values go in and out as bytes; the caller zeroes what `take` hands back.
- */
+/** Delete-only access to vaults used by older Boite releases. Never read or store a value. */
 export interface SecretVault {
   readonly kind: 'dpapi' | 'keychain' | 'libsecret' | 'memory';
-  /** False for memory: everything is lost when the core stops. */
   readonly persistent: boolean;
-  put(id: string, value: Uint8Array): Promise<void>;
-  /** A fresh copy of the value, or null when none is stored under `id`. */
-  take(id: string): Promise<Uint8Array | null>;
   delete(id: string): Promise<void>;
-  /** Every id stored, where the backend can say (DPAPI and memory); null elsewhere. */
+  /** Every id stored where the backend supports enumeration; null elsewhere. */
   ids?(): Promise<string[] | null>;
 }
 
 /** OS services used by the shared process registry. No native imports here. */
 export interface ProcessPlatform {
+  /** Model tool execution only. Trusted account/control processes never gain authority from this descriptor. */
+  protectedExecution?: NativeExecutionBoundary;
   serverUpdates?: ServerUpdatePlatform;
   /** Absolute path of the tailscale CLI, or null when it is not installed. */
   tailscaleCli?(): string | null;
@@ -162,6 +157,8 @@ export interface ProcessPlatform {
   capability(): TraceCapability;
   applySettings(settings: Settings): void;
   attach(threadId: string, pid: number): boolean;
+  /** Reconcile captured exits when the native job is empty; true if occupied or unreadable. */
+  hasProcesses?(threadId: string): boolean;
   /** Normal priority during agent initialization; platform CPU and memory caps still apply. */
   startup?(threadId: string, active: boolean): void;
   terminate(threadId: string): boolean;

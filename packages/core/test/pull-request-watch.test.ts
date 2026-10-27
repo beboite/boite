@@ -184,7 +184,7 @@ test('CI wakes on its first failure and on its verdict, not on each check that f
   const rabbit = { name: 'CodeRabbit', context: true, status: 'PENDING' };
   let memory = initialMemory(since);
   const step = (runs: Run[]) => { const result = evaluate(memory, detail(runs), null); memory = result.next; return result.changes; };
-  // beboite/boite requires "PR title", done in seconds, and "CI required", which exists only once every job finished.
+  // mtsu-dev/boite requires "PR title", done in seconds, and "CI required", which exists only once every job finished.
   expect(step([title, job('Core tests', running), job('Build UI', running), rabbit])).toEqual([]);
   expect(step([title, job('Core tests'), job('Build UI', running), rabbit])).toEqual([]);
   expect(step([title, job('Core tests'), job('Build UI'), gate(running), rabbit])).toEqual([]);
@@ -243,7 +243,7 @@ test('the base branch names what it requires through its rulesets and its classi
 });
 
 test('a draft passes on the required checks it reports, without waiting for one it never reports', () => {
-  // beboite/boite's draft run names its planning job apart, so a draft never satisfies the ruleset (docs/ci.md#draft-pull-requests).
+  // mtsu-dev/boite's draft run names its planning job apart, so a draft never satisfies the ruleset (docs/ci.md#draft-pull-requests).
   const required = ['Plan and repository checks', 'Build UI'];
   const draft = parseDetail(detailJson([{ name: 'Plan and repository checks (draft)' }, { name: 'Build UI' }], { isDraft: true }));
   expect(draft.draft).toBe(true);
@@ -443,7 +443,7 @@ test('a watch reads first without waking, wakes once per change with links, and 
 
 test('a check the base branch requires holds "passed" back until it reported', async () => {
   const { owner, threadId, github, watches, drive } = await watchedThread();
-  // beboite/boite's ruleset requires "PR title", done in seconds, and "CI required", created only once every other job ended.
+  // mtsu-dev/boite's ruleset requires "PR title", done in seconds, and "CI required", created only once every other job ended.
   github.rules = ['PR title', 'CI required'];
   const title = { name: 'PR title', workflow: 'pr title', required: true };
   github.runs = [{ ...title, status: 'IN_PROGRESS', conclusion: '' }];

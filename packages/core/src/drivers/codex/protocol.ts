@@ -1,4 +1,12 @@
-import type { NativeAgentUpdate, PermissionMode, ThreadContextMode, ToolStatus } from '@boite/contracts';
+import type { HookOutcome, NativeAgentUpdate, PermissionMode, ThreadContextMode, ToolStatus } from '@boite/contracts';
+
+/** `hook/completed` statuses as the ledger counts them; `running` is not an end. */
+export const HOOK_OUTCOMES: Record<string, HookOutcome> = {
+  completed: 'ok',
+  failed: 'failed',
+  blocked: 'blocked',
+  stopped: 'stopped',
+};
 
 /** What the agent sees as `clientInfo.name`. */
 export const CLIENT_NAME = 'boite';
@@ -71,7 +79,7 @@ export const PROBE_TIMEOUT_MS = 20_000;
 export const PROBE_MAX_PAGES = 10;
 
 /** How long a failed request waits for the child's exit before blaming itself. */
-export const EXIT_GRACE_MS = 500;
+export { EXIT_GRACE_MS } from '../exit.ts';
 
 /** Codex names no tool for a shell command, so the card carries the usual one. */
 export const COMMAND_TOOL_NAME = 'Bash';

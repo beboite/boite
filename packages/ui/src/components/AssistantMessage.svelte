@@ -10,8 +10,7 @@
   import { planOf } from '../lib/plan';
   import PermissionCard from './PermissionCard.svelte';
   import PlanCard from './PlanCard.svelte';
-  import QuestionCard from './QuestionCard.svelte';
-  import SecretCard from './SecretCard.svelte';
+  import Deferred, { parts } from './Deferred.svelte';
   import { openQuestionPage } from '../lib/question-page';
   import SettingRequestCard from './SettingRequestCardLoader.svelte';
   import AgentSettingCard from './AgentSettingCardLoader.svelte';
@@ -176,7 +175,7 @@
       {:else if part.type === 'question'}
         {@const asked = store.pendingQuestions.find((q) => q.id === part.questionId)}
         {@const reply = replyOf(store, part.questionId)}
-        <QuestionCard
+        <Deferred part={parts.QuestionCard}>{#snippet children(QuestionCard)}<QuestionCard
           text={part.text}
           options={part.options}
           allowText={part.allowText}
@@ -192,9 +191,9 @@
           onwrite={() => writeAnswer(store, part.questionId)}
           page={part.open?.url}
           onopen={() => openQuestionPage(store, message.threadId, part.questionId)}
-        />
+        />{/snippet}</Deferred>
       {:else if part.type === 'secret_request'}
-        <SecretCard {store} threadId={message.threadId} {part} />
+        <Deferred part={parts.SecretCard}>{#snippet children(SecretCard)}<SecretCard {store} threadId={message.threadId} {part} />{/snippet}</Deferred>
       {:else if part.type === 'compaction'}
         <div class="compaction" data-testid="compaction-part" data-trigger={part.trigger}>
           <span class="rule"></span>

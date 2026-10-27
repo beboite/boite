@@ -14,6 +14,22 @@ const cores: TestCore[] = [];
 const restores: (() => void)[] = [];
 afterEach(async () => { for (const h of cores.splice(0)) await h.stop(); for (const restore of restores.splice(0)) restore(); });
 
+test('the native bot eventWakes boolean card reads, validates, applies and reverses without pausing the bot', async () => {
+  const { h, owner, agent, worker, run, profile, cards } = await setup();
+  await owner.call('turns.start', { threadId: worker, prompt: 'Configure the bot.' });
+  await waitFor(() => settled(h, worker));
+  expect((await run(['settings', 'bot', 'eventWakes', '--bot', 'Ada'], worker)).out).toContain('eventWakes true');
+  expect((await run(['settings', 'bot', 'request', 'eventWakes', 'sometimes', '--bot', 'Ada', '--why', 'Batch project news.'], worker)).code).not.toBe(0);
+  for (const enabled of [false, true]) {
+    expect((await run(['settings', 'bot', 'request', 'eventWakes', String(enabled), '--bot', 'Ada', '--why', 'Batch project news.'], worker)).code).toBe(0);
+    const card = cards(worker).find(q => q.agentSetting?.key === 'eventWakes')!;
+    expect(card.agentSetting?.previous).toBe(!enabled);
+    await owner.call('agents.settings.apply', { threadId: worker, questionId: card.id });
+    expect(h.core.workforce.resident.config(agent.id).eventWakes).toBe(enabled);
+    expect(profile().status).toBe('active');
+  }
+});
+
 /** An echo driver that records every prompt per thread and answers in one line. */
 function recording(): Map<string, string[]> {
   const prompts = new Map<string, string[]>();

@@ -73,6 +73,8 @@ export const fr: Translation = {
     projectMenu: 'Actions du projet',
     copyPath: 'Copier le chemin',
     manageProject: 'Gérer le projet',
+    renameProject: 'Renommer le projet',
+    projectName: 'Nom du projet',
     worktreeDefault: 'Worktree par défaut',
     autoArchiveMergedPr: 'Masquer les conversations des PR mergées',
     autoRemoveWorktrees: 'Supprimer les worktrees terminés',

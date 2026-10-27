@@ -61,6 +61,17 @@ models` lists the choices.
 | `output` | The JSON shape the step must return: `"string"`, `"number"`, `"boolean"`, `"any"`, `[shape]` or `{ "key": shape }` |
 | `worktree` | Optional. `true` runs the step in a git worktree of its own on a new branch from the conversation's HEAD, as `delegate spawn --worktree` does ([delegation](delegation.md#children-in-their-own-worktree)). The step's `worktree` record, `boite workflow show` and the run's summary name the branch to merge, or say it was removed with nothing in it |
 
+The optional `compute` field selects an explicitly offered shared-project host:
+`{ sharedProjectId, host: { ownerCoreId, coreId, projectId }, profileId, baseCommit }`.
+The base is a full commit ID. The host owns model, effort, permissions, context
+and checkout; combining this target with `model`, `profile`, `effort`, `context`
+or `worktree` is refused.
+
+`host.coreId` may differ from `host.ownerCoreId` when an explicitly associated
+project executes on a group member. Preserve the complete tuple from the
+shared directory; a public relay thread alias is not an execution host or an
+owner credential. Restart and cancellation keep the captured host/job identity.
+
 A path reads a step's structured output, or its final answer when it has none.
 On a fanned-out step, `review.bugs` collects the bugs of every item into one
 list. The core checks the whole plan before anything starts: a name that is no profile,
@@ -104,6 +115,25 @@ there. A step's result is collected once its worktree is kept or removed.
 | Structured output | | 16,000 characters of JSON |
 
 `maxConcurrent` controls this run. The team adds no concurrency or turn quota.
+For a plan containing shared-compute steps, the default and maximum concurrency
+ceiling in this table do not apply. A positive explicit plan limit still holds,
+and each host enforces its own contribution/resource settings. This permits
+four host-local and five remote shared executions without changing ordinary
+local plans or adding an exchange/hop limit. In a mixed plan, ordinary steps
+keep the default local concurrency of three unless the plan specifies an
+explicit limit. Shared steps can still start while those local slots are full;
+an explicit plan limit counts both kinds together. Existing step and payload
+bounds remain.
+
+Shared executions keep `instance.compute` with their job, owning endpoint,
+worker and verified Git result. A remote worker ID is never used as a local
+`threadId`. The durable job identity is saved before dispatch, so reconnect or
+restart before the response reattaches the same job. A host restart leaves an
+interrupted job uncertain; retry first confirms its cancellation before asking
+for another job. Results arrive through scoped Contacts notifications; no extra
+runner or polling timer is created. Shared result shape mismatches fail the step
+and require explicit retry; the local runner's automatic correction is not sent
+to another owner's host.
 
 ## Failure, stop and restart
 

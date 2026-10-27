@@ -212,7 +212,7 @@
             return;
           }
           const data = file.dataDeferred ? await store!.loadMessageAttachment(threadId!, messageId!, partIndex!) : file.data;
-          if (disposed) return;
+          if (disposed || data === null) return;
           body = decodeBase64(data);
           mime = file.mimeType;
           if (mime === 'application/pdf' && new TextDecoder().decode(body.subarray(0, 5)) !== '%PDF-') mime = 'application/octet-stream';

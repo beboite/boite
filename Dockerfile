@@ -60,7 +60,7 @@ ENV NODE_ENV=production \
     PATH=/home/node/.local/bin:/opt/agents/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
 LABEL org.opencontainers.image.title="boite-server" \
       org.opencontainers.image.description="Self-hosted coding agent manager with a web UI" \
-      org.opencontainers.image.source="https://github.com/beboite/boite" \
+      org.opencontainers.image.source="https://github.com/mtsu-dev/boite" \
       org.opencontainers.image.licenses="MIT"
 WORKDIR /workspace
 USER node

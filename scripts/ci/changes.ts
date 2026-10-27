@@ -64,6 +64,13 @@ export function needsWorkflowLint(files: string[]): boolean {
   return files.some((file) => /^\.github\/(workflows|actions)\//.test(file) || file.startsWith('scripts/ci/'));
 }
 
+/** Protection and shared inputs need the actual Windows boundary, including on drafts. */
+export function needsNativeWindows(files: string[]): boolean {
+  return files.some((file) => /^packages\/core\/(src\/(platform\/|execution-|drivers\/(?:[^/]+\/)?protected[^/]*\.ts$|contacts\/native-execution\.ts$)|bin\/install-windows-sandbox\.ts$|test\/protected)/.test(file)
+    || ['package.json', 'bun.lock', '.github/workflows/ci.yml', '.github/actions/setup/action.yml', 'scripts/ci/changes.ts', 'scripts/ci/changes.test.ts'].includes(file))
+    || Object.values(affectedChecks(files)).every(Boolean);
+}
+
 // Linux builds on the oldest runner that carries WebKitGTK 4.1: its glibc (2.35)
 // is the floor for every Linux user a published package can serve. Intel macOS
 // is cross-built on Apple Silicon and smoke-tested under Rosetta: the Intel
@@ -91,8 +98,8 @@ export const CORE_ALL: CoreRunner[] = [...CORE_PR, { os: 'macos-15-intel', name:
 // `pr` gates a merge, in the pull request and again in the merge queue, `warm`
 // follows it on main, `full` is a release or a manual run. Main runs the extra
 // portable architectures, the Intel Mac core suite, and refreshes caches.
-// `draft` is a draft pull request: only the Linux checks run, and marking it
-// ready runs `pr` (docs/ci.md#draft-pull-requests).
+// `draft` normally runs the Linux checks; protection inputs add native Windows.
+// Marking it ready runs `pr` (docs/ci.md#draft-pull-requests).
 // A push event alone provides no proof that its tree passed PR tests, so every
 // mode runs the affected suites. A main push compares with the last main commit
 // whose CI passed, not the previous push: a cancelled or failed run's changes
@@ -109,17 +116,19 @@ export function ciMode(event: string, force: boolean, draft = false): Mode {
 }
 
 // A draft keeps the Linux core suite, type checks, UI tests and focused checks;
-// Windows, macOS, desktop packages, E2E, stress, Docker and the APKs wait for
-// the ready pull request.
+// Protection inputs also select Windows core/native tests; macOS, desktop
+// packages, E2E, stress, Docker and the APKs wait for the ready pull request.
 const CORE_DRAFT: CoreRunner[] = CORE_PR.slice(0, 1);
 
-export function plan(checks: ReturnType<typeof affectedChecks>, mode: Mode) {
+export function plan(checks: ReturnType<typeof affectedChecks>, mode: Mode, nativeWindows = false) {
   if (mode === 'draft') {
-    const draft = plan({ ...checks, desktop: false, server: false, android: false, androidServer: false, stress: false }, 'pr');
-    return { ...draft, coreRunners: JSON.stringify(CORE_DRAFT) };
+    const draft = plan({ ...checks, desktop: false, server: false, android: false, androidServer: false, stress: false }, 'pr', nativeWindows);
+    const runners = nativeWindows ? CORE_PR.filter((runner) => runner.os === 'ubuntu-24.04' || runner.os === 'windows-2025') : CORE_DRAFT;
+    return { ...draft, coreRunners: JSON.stringify(runners) };
   }
   return {
     ...checks,
+    nativeWindows,
     // Full suites already cover these focused checks.
     telemetry: checks.telemetry && !checks.core,
     e2eTypes: checks.e2eTypes && !checks.web,
@@ -162,6 +171,7 @@ if (import.meta.main) {
   if (mainPush && base) console.log(`Comparing with ${base}, the last main commit whose CI passed`);
   let checks = affectedChecks(['unknown']);
   let workflows = true;
+  let nativeWindows = true;
   if (!force && base && /^[a-f0-9]{40}$/.test(base) && !/^0+$/.test(base)) {
     // A move between packages affects both its old and new runtime.
     const diff = Bun.spawnSync(['git', 'diff', '--no-renames', '--name-only', '-z', base, 'HEAD'], { stdout: 'pipe', stderr: 'pipe' });
@@ -169,9 +179,10 @@ if (import.meta.main) {
     const files = diff.stdout.toString().split('\0').filter(Boolean);
     checks = affectedChecks(files);
     workflows = needsWorkflowLint(files);
+    nativeWindows = needsNativeWindows(files);
   }
   const mode = ciMode(process.env.GITHUB_EVENT_NAME ?? '', force, process.env.DRAFT === 'true');
-  const output = Object.entries({ ...plan(checks, mode), workflows, mode }).map(([key, value]) => `${key}=${value}\n`).join('');
+  const output = Object.entries({ ...plan(checks, mode, nativeWindows), workflows, mode }).map(([key, value]) => `${key}=${value}\n`).join('');
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, output);
   process.stdout.write(output);
 }

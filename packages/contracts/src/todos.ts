@@ -1,5 +1,6 @@
 import type { ProjectId, ThreadId, Timestamp } from './ids';
 import type { GoalChecklist } from './threads';
+import type { SharedBoardCard } from './shared-projects';
 
 /**
  * One card of a project's todo list, shared by every thread of the project.
@@ -18,6 +19,8 @@ export interface Todo {
   goalThreadId?: ThreadId | null;
   /** That conversation's goal as the board draws it, read on every send and never stored. Missing once the goal is gone. */
   goal?: TodoGoal;
+  /** A shared card keeps its canonical association; foreign thread IDs are never local links. */
+  shared?: { sharedProjectId: string; card: SharedBoardCard };
 }
 
 /**
@@ -47,8 +50,8 @@ export interface TodosRpcMethods {
    * `goalThreadId` links the card to the `/goal2` conversation the board started for it, a thread of
    * the same project, or unlinks it with null.
    */
-  'todos.update': { params: { threadId: ThreadId; todoId: string; status?: Todo['status']; text?: string; goalThreadId?: ThreadId | null }; result: Todo };
-  'todos.remove': { params: { threadId: ThreadId; todoId: string }; result: { ok: true } };
+  'todos.update': { params: { threadId: ThreadId; todoId: string; status?: Todo['status']; text?: string; goalThreadId?: ThreadId | null; sharedProjectId?: string }; result: Todo };
+  'todos.remove': { params: { threadId: ThreadId; todoId: string; sharedProjectId?: string }; result: { ok: true } };
 }
 
 export interface TodosRpcEvents {

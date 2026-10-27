@@ -1,3 +1,6 @@
+/** Grace for a terminating child's final pipe records and exit diagnostic. */
+export const EXIT_GRACE_MS = 500;
+
 /** Wait for exit and optional stdio closure within one deadline, retaining any known exit code. */
 export function exitWithin(exited: Promise<number | null> | null, ms: number, closed?: Promise<void>): Promise<number | null | undefined> {
   if (exited === null) return Promise.resolve(undefined);

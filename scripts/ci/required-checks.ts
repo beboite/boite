@@ -91,7 +91,7 @@ export function compareRuleset(names: string[], rules: Rule[] | { rules?: Rule[]
 
 /** The rules main's pull requests merge under, or undefined when this token cannot read them. */
 async function liveRules(): Promise<Rule[] | undefined> {
-  const { GITHUB_API_URL: api = 'https://api.github.com', GITHUB_REPOSITORY: repo = 'beboite/boite', GH_TOKEN: token } = process.env;
+  const { GITHUB_API_URL: api = 'https://api.github.com', GITHUB_REPOSITORY: repo = 'mtsu-dev/boite', GH_TOKEN: token } = process.env;
   try {
     const response = await fetch(`${api}/repos/${repo}/rules/branches/main`, {
       headers: { accept: 'application/vnd.github+json', ...(token ? { authorization: `Bearer ${token}` } : {}) },

@@ -142,12 +142,26 @@ export function exitCodeOf(api: ProcessReads, handle: number): number | null {
   return value === STILL_ACTIVE ? null : value | 0;
 }
 
+/** Raw held-handle status for diagnostics: 259 is distinct from an API failure. */
+export function exitStatusOf(api: Pick<ProcessReads, 'exitCode'> & {lastError(): number}, handle: number): {read: boolean; code: number | null; error: number} {
+  const code = new Uint32Array(1);
+  const read = api.exitCode(handle, code);
+  const error = read ? 0 : api.lastError();
+  return {read, code: read ? code[0] ?? 0 : null, error};
+}
+
 export function cpuMsOf(api: ProcessReads, handle: number): number | null {
   const times = new Uint8Array(32);
   if (!api.processTimes(handle, times)) return null;
   const view = new DataView(times.buffer);
   const total = view.getBigUint64(OFF_KERNEL_TIME, true) + view.getBigUint64(OFF_USER_TIME, true);
   return Math.round(Number(total) / 10_000);
+}
+
+export function peakMemoryOf(api: ProcessReads, entry: {handle: number; peakMemoryBytes: number}): number | null {
+  const memory = workingSetOf(api, entry.handle);
+  const peak = Math.max(memory?.peak ?? 0, entry.peakMemoryBytes);
+  return peak > 0 ? peak : null;
 }
 
 /** Open the current PID owner for this read and always release its handle. */

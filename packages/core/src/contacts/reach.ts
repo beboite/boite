@@ -18,7 +18,8 @@ export class ContactReach {
 
   /** This core's projects opened to the contact: through its own link, or through the member the contact is linked to. */
   private grantsHere(coreId: string): Pick<ContactGrant, 'projectId' | 'readThreads'>[] {
-    return [...(this.contacts.find(coreId)?.grants.filter(grant => !grant.machine) ?? []), ...this.contacts.members.relayedOf(coreId).flatMap(entry => entry.grants)];
+    return [...(this.contacts.find(coreId)?.grants.filter(grant => !grant.machine) ?? []), ...this.contacts.members.relayedOf(coreId).flatMap(entry => entry.grants)]
+      .filter(grant => !this.contacts.policyRevoked(coreId, grant.projectId));
   }
 
   private grantFor(coreId: string, threadId: string): Pick<ContactGrant, 'projectId' | 'readThreads'> | undefined {
@@ -35,6 +36,7 @@ export class ContactReach {
   mayReach(coreId: string, threadId: string): boolean {
     const thread = this.core.journal.getThread(threadId);
     if (!thread || thread.archived || !this.contacts.isContact(coreId)) return false;
+    if (thread.projectId && this.contacts.policyRevoked(coreId, thread.projectId)) return false;
     if (this.grantFor(coreId, threadId)) return true;
     const at = this.recent()[threadId]?.[coreId];
     return typeof at === 'number' && Date.now() - at <= REPLY_WINDOW_MS;

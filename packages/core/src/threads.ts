@@ -603,7 +603,7 @@ export class ThreadStore {
     return this.moves.userMove(threadId, projectId, stopBackground);
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: ActivityTurn, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], startedBy?: ThreadLink, sentFrom: SentFrom | null = null): Turn {
+  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: ActivityTurn, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], startedBy?: ThreadLink, sentFrom: SentFrom | null = null, persistAdmission?: () => (() => void)): Turn {
     if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
     let thread = this.require(threadId);
     this.codeCheckpoints.assertAvailable(thread.cwd);
@@ -624,6 +624,8 @@ export class ThreadStore {
     if (autonomous !== null) this.core.agentRuntime.admit(thread, autonomous);
     // A signed-out or removed account hands the thread to another of its agent (`threads/account-fallback.ts`).
     thread = followAgent(this.core, thread);
+    this.core.sharedCompute?.assertTurn(threadId);
+    this.core.sharedAccess?.assertTurn(threadId);
     const provider = this.core.providers.require(thread.providerId);
     const account = this.core.accounts.require(thread.accountId);
     if (account.providerId !== provider.id) throw refused(`accountId: account ${account.id} belongs to provider ${account.providerId}; expected provider ${provider.id}`, {
@@ -638,6 +640,7 @@ export class ThreadStore {
     checkStoredEffort(provider, thread.accountId, thread.model, thread.effort);
     checkStoredSpeed(provider, thread.accountId, thread.model, thread.speed ?? null);
     checkAttachments(attachments, provider);
+    this.core.sharedAccess.uploads(threadId, attachments);
 
     if (!operation && !activity && !startedBy) {
       const expanded = this.core.brain.expandPrompt(prompt, this.agentState.commands.get(threadId));
@@ -698,6 +701,7 @@ export class ThreadStore {
     this.core.bus.afterCommit(() => {
       const accepted = this.core.journal.db.transaction(() => {
         let reservation: (() => void) | undefined;
+        let admitted: (() => void) | undefined;
         this.core.journal.append({ type: 'turn.queued', threadId, version: 1, payload: turn }, () => {
           reservation = this.core.delegation.prepareTurnReservation(threadId, operation);
           this.core.journal.putTurn(turn);
@@ -705,6 +709,7 @@ export class ThreadStore {
           this.core.journal.putMessage(message);
           if (moved) this.core.journal.deleteSetting(`${MOVE_NOTE_PREFIX}${threadId}`);
           if (clientRequestId) this.core.journal.putTurnRequest(threadId, clientRequestId, fingerprint, turn.id, message.id);
+          admitted = persistAdmission?.();
         });
         const dismissal = !activity && !operation ? this.core.activity.prepareUserPrompt(threadId, !nativeCommandPrompt(prompt)) : undefined;
         this.core.bus.emit('message.started', message);
@@ -712,9 +717,10 @@ export class ThreadStore {
         // A status that stays queued tells nobody: the row still loses its pending move note.
         if (moved && this.core.journal.getThread(threadId)?.status === 'queued') this.core.bus.emit('thread.updated', this.withLoad(this.require(threadId)));
         this.setStatus(threadId, 'queued');
-        return { reservation, dismissal };
+        return { reservation, dismissal, admitted };
       })();
       // Nothing in memory consumes the wake or resumes the agent until the prompt exists on disk.
+      accepted.admitted?.();
       accepted.reservation?.();
       // A turn of the user's own, once accepted, takes whatever the agent wrote by itself first; a keepalive leaves it for the next.
       if (operation !== 'background' && operation !== 'keepalive') this.deferred.pendingWakes.delete(threadId);
@@ -766,6 +772,7 @@ export class ThreadStore {
    * its exit, and with no `turn.finished` to follow nothing else would sweep it.
    */
   releaseAgent(threadId: ThreadId): void {
+    void this.core.procs.protection.revoke(threadId).catch(() => {});
     this.agentState.cancelBackground(threadId);
     releaseThread(threadId);
     this.core.procs.sweepSoon(threadId);

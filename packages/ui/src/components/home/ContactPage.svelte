@@ -15,6 +15,7 @@
   import ProjectTile from '../ProjectTile.svelte';
   import FingerprintWords from './FingerprintWords.svelte';
   import RequestCard from './RequestCard.svelte';
+  import SharedAssociations from '../shared/SharedAssociations.svelte';
 
   /**
    * One contact, picked in the thread list: its name (a click renames it) and
@@ -204,6 +205,7 @@
         disabled={busy}
         data-testid="contact-revoke-{grant.projectId}" onclick={() => void stopSharing(owner, grant.projectId, grant.machine, name)}><X size={15} /></button>
     </div>
+    {#if home}<SharedAssociations store={home.store} contact={owner.state?.contacts.find(c => c.coreId === contact.coreId) ?? contact} projectId={grant.projectId} />{/if}
   {:else}
     <p class="hint none">{labels.nothingOpen}</p>
   {/each}
@@ -216,7 +218,7 @@
 
 <section class="card" data-testid="contact-offers">
   <h2>{fill(labels.theyShare, { name: contact.name })}</h2>
-  {#each contact.offers as offer (offer.projectId)}
+  {#each contact.offers as offer (JSON.stringify([offer.sharedProject?.ownerCoreId ?? contact.coreId, offer.sharedProject?.coreId ?? contact.coreId, offer.projectId]))}
     <div class="switch-row" data-testid="contact-offer-{offer.projectId}">
       <span class="text project"><span class="initial" aria-hidden="true">{initialsOf(offer.name).slice(0, 1)}</span><span class="ui-label">{offer.name}</span></span>
     </div>

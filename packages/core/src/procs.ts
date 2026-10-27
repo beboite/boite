@@ -6,7 +6,7 @@ import type { Journal } from './journal.ts';
 import { MemoryGuard } from './memory-guard.ts';
 import { currentOs } from './paths.ts';
 import type { MemoryProcess } from './memory-guard-logic.ts';
-import { processPlatform } from './platform/index.ts';
+import { registryPlatform } from './platform/index.ts';
 import { type KnownProcess, type ProcessIdentity, unseenIdentity } from './process-identity.ts';
 import { killBunChild, stopGroup } from './platform/posix-kill.ts';
 import type { GuardStatus, NativeProcessExit, NativeProcessInfo, ProcessPlatform } from './platform/types.ts';
@@ -16,27 +16,12 @@ import { orphansOf, parentAtStart } from './process-orphans.ts';
 import { forgetOnMissing, resolveSpawnCommand, startResolved } from './spawn-command.ts';
 import { BUSY_CPU_PERCENT, IDLE_LOAD_INTERVAL_MS, LOAD_INTERVAL_MS, LoadPace, worthPushing } from './load-pace.ts';
 import { launchOf } from './git/command.ts';
+import { ExecutionProtections } from './execution-protection.ts';
+import { closeProcessResources, protectionRunner } from './protection-runner.ts';
+import { processEventDiagnostic } from './process-event-diagnostics.ts';
 
-export interface SpawnOptions {
-  /** Bounded normal-priority initialization, ended explicitly when the agent is ready. */
-  startup?: boolean;
-  /** Direct spawns are agent roots unless the caller identifies a tool process. */
-  agentRoot?: boolean;
-  cwd?: string | undefined;
-  env?: Record<string, string | undefined> | undefined;
-  /**
-   * `spawn` only: this many more pipes, the child's descriptors 3, 4 and on,
-   * whose ends this process holds in `fds`. The agent browser speaks the
-   * DevTools protocol over two of them instead of a port anyone could reach.
-   */
-  extraPipes?: number;
-  /**
-   * `spawn` only: let the child show its windows; Windows applies `windowsHide`
-   * to a GUI program's first window too. The focus and audio guards then leave
-   * the thread's processes, its job's included, alone: they are the user's app.
-   */
-  showWindow?: boolean;
-}
+import type { SpawnOptions } from './process-spawn-types.ts';
+export type { SpawnOptions } from './process-spawn-types.ts';
 
 export type ChildProcess = Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
 
@@ -121,6 +106,7 @@ export interface ProcRegistryOptions {
  */
 export class ProcRegistry {
   readonly memory: MemoryGuard;
+  readonly protection: ExecutionProtections;
   mask = (_threadId: ThreadId, text: string): string => text; // secrets: a shell can expand `boite secret run`'s variable into a traced command line
   private readonly unassigned = new Set<number>();
   private readonly startups = new Map<ThreadId, { pid: number; timer: ReturnType<typeof setTimeout> }>();
@@ -165,9 +151,10 @@ export class ProcRegistry {
   constructor(
     private readonly journal: Journal,
     private readonly bus: Bus,
-    readonly platform: ProcessPlatform = processPlatform,
+    readonly platform: ProcessPlatform = registryPlatform(),
     private readonly options: ProcRegistryOptions = {},
   ) {
+    this.protection = new ExecutionProtections(platform.protectedExecution, protectionRunner(this), id => this.stopAndWait(id), id => (platform.hasProcesses?.(id) ? 1 : 0) + this.liveCount(id));
     this.memory = new MemoryGuard(bus, platform);
     this.resources = new ResourceCollection(platform);
     this.orphanGraceMs = options.orphanGraceMs ?? ORPHAN_GRACE_MS;
@@ -281,17 +268,18 @@ export class ProcRegistry {
     this.exitTimers.clear();
     for (const timer of this.forgetTimers.values()) clearTimeout(timer);
     this.forgetTimers.clear();
-    this.closing = this.platform.release();
+    this.closing = closeProcessResources(this.protection, this.platform);
     return this.closing;
   }
 
   spawn(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedProcess {
     this.assertAccepting();
-    const [command, env] = launchOf(cmd, { ...process.env, ...(opts.env ?? {}) });
+    const protectedLaunch = this.protection.launch(threadId, cmd, args, opts);
+    const [command, env] = launchOf(protectedLaunch?.command ?? cmd, protectedLaunch?.env ?? { ...process.env, ...(opts.env ?? {}) });
     const extra = Math.max(0, Math.floor(opts.extraPipes ?? 0));
     const proc = startResolved(command, env, (executable) => Bun.spawn({
-      cmd: [executable, ...args],
-      cwd: opts.cwd,
+      cmd: [executable, ...(protectedLaunch?.args ?? args)],
+      cwd: protectedLaunch?.cwd ?? opts.cwd,
       env,
       ...(extra
         ? { stdio: ['ignore', 'pipe', 'pipe', ...Array.from({ length: extra }, () => 'pipe' as const)] as ['ignore', 'pipe', 'pipe'] }
@@ -328,10 +316,11 @@ export class ProcRegistry {
    */
   spawnPiped(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedPipedProcess {
     this.assertAccepting();
-    const [command, env] = launchOf(cmd, opts.env ?? process.env);
+    const protectedLaunch = this.protection.launch(threadId, cmd, args, opts);
+    const [command, env] = launchOf(protectedLaunch?.command ?? cmd, protectedLaunch?.env ?? opts.env ?? process.env);
     const proc = startResolved(command, env, (executable) => Bun.spawn({
-      cmd: [executable, ...args],
-      cwd: opts.cwd,
+      cmd: [executable, ...(protectedLaunch?.args ?? args)],
+      cwd: protectedLaunch?.cwd ?? opts.cwd,
       env,
       stdin: 'pipe',
       stdout: 'pipe',
@@ -364,6 +353,7 @@ export class ProcRegistry {
    */
   spawnTerminal(threadId: ThreadId, cmd: string, args: string[], opts: TerminalSpawnOptions): SpawnedTerminal {
     this.assertAccepting();
+    this.protection.assertTerminal(threadId);
     const proc = Bun.spawn({
       cmd: [cmd, ...args],
       cwd: opts.cwd,
@@ -427,10 +417,11 @@ export class ProcRegistry {
    */
   spawnChild(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedChild {
     this.assertAccepting();
-    const [command, env] = launchOf(cmd, opts.env);
+    const protectedLaunch = this.protection.launch(threadId, cmd, args, opts);
+    const [command, env] = launchOf(protectedLaunch?.command ?? cmd, protectedLaunch?.env ?? opts.env);
     const executable = resolveSpawnCommand(command, env ?? process.env);
-    const child = spawnNodeChild(executable, args, {
-      cwd: opts.cwd,
+    const child = spawnNodeChild(executable, protectedLaunch?.args ?? args, {
+      cwd: protectedLaunch?.cwd ?? opts.cwd,
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
@@ -513,6 +504,8 @@ export class ProcRegistry {
       this.live.set(threadId, byPid);
     }
     const entry: Entry = { record, identity, ...control };
+    processEventDiagnostic('registry.start-accepted', {threadId, pid: record.pid, startedAt: identity.startedAt,
+      incarnation: identity.incarnation, root: entry.root});
     entry.parent = parentAtStart(byPid, entry);
     byPid.set(record.pid, entry);
     // Both spawn paths and the job's own grandchild events land here, so this is
@@ -638,6 +631,7 @@ export class ProcRegistry {
     this.finishStartup(threadId);
     const byPid = this.live.get(threadId);
     const entries = byPid === undefined ? [] : [...byPid.values()];
+    processEventDiagnostic('registry.stop-requested', {threadId, registered: entries.length});
     const terminated = this.platform.terminate(threadId);
     for (const entry of entries) {
       if (terminated && !this.unassigned.has(entry.record.pid)) continue;
@@ -739,6 +733,10 @@ export class ProcRegistry {
 
   private onExit(threadId: ThreadId, pid: number, code: number | null, fromJob?: NativeProcessExit, expected?: ProcessRecord): void {
     const entry = this.live.get(threadId)?.get(pid);
+    processEventDiagnostic('registry.exit-received', {threadId, pid, native: fromJob !== undefined, tracked: entry !== undefined,
+      recordMatches: expected === undefined || expected === entry?.record, startedAt: fromJob?.startedAt ?? null,
+      incarnation: fromJob?.incarnation ?? null, currentStartedAt: entry?.identity.startedAt ?? null,
+      currentIncarnation: entry?.identity.incarnation ?? null});
     if (entry === undefined) return;
     if (expected !== undefined && entry.record !== expected) return;
     if (fromJob !== undefined) {
@@ -764,6 +762,8 @@ export class ProcRegistry {
     this.exitTimers.delete(pid);
     this.unassigned.delete(pid);
     this.live.get(threadId)?.delete(pid);
+    processEventDiagnostic('registry.exit-accepted', {threadId, pid, native: fromJob !== undefined, code,
+      startedAt: entry.identity.startedAt, incarnation: entry.identity.incarnation});
     const known = this.known.get(threadId)?.get(pid);
     if (known !== undefined && known.identity === entry.identity) known.exitedAt = Date.now();
     if ((this.live.get(threadId)?.size ?? 0) === 0) {

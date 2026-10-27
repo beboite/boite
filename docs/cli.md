@@ -426,7 +426,7 @@ boite open trace|tasks|changes|files [dir]
 boite status                     git status: branch, upstream, one row per change
 boite ask <question> [option ...] [--multiple] [--open <url>]
 boite secret list
-boite secret ask <NAME> --why <reason> [--placeholder <example>] [--timeout <minutes>] [--replace]
+boite secret ask <NAME> --why <reason> [--placeholder <example>] [--timeout <minutes>]
 boite secret write <ref> --env-file <path> --key <VAR> [--allow-unignored]
 boite secret run <ref> --as <VAR> -- <cmd> [args ...]
 boite secret pipe <ref> -- <cmd> [args ...]
@@ -738,11 +738,18 @@ MCP tools `boite_settings` and `boite_settings_request` do the same.
 `settings bot [key]` reads a bot's settings a card may change: `name`,
 `domain` (its role), `instructions`, `avatar`, `status` (`active`, `paused`,
 `archived`), `projects` (those entrusted to it), `model`, `effort`,
-`autoMemory` (the memory pass), `subagents` and `dailyBudget` (dollars a day,
+`autoMemory` (the memory pass), `eventWakes` (automatic project and desk wakes),
+`subagents` and `dailyBudget` (dollars a day,
 or `null` for none). It prints the bot's name, each value and, for status,
 projects, models and efforts, the choices; the listing cuts long instructions
 to their start, one key or `--json` prints them whole. `--bot <name or id>`
 names the bot; in a bot's own conversation it defaults to that bot.
+`eventWakes` defaults to `true`. Setting it to `false` keeps the bot active for
+user messages and routines while project and desk facts wait durably for the
+next admitted routine. Permission checks run again before delivery. Facts are
+journaled with that routine once, including after a restart; failed admission
+keeps them queued. Creation and instruction-change wakes keep their behavior.
+
 `settings bot request <key> <value> --why <text>` draws the card. `name`,
 `domain`, `instructions`, `avatar` and `status` take the words as typed
 (`name Gargouille (Sécurité)`), and `instructions --instructions-file <path>`
@@ -856,7 +863,7 @@ agent access on. Changing a data-directory flag does not change that.
 and, with `--out`, also writes it relative to the working directory.
 `issue draft` prints the issue body and a prefilled GitHub link without
 sending anything. From the owner's terminal, `issue submit` creates it on
-`beboite/boite` with `gh` when `gh` is signed in, or prints that link and the
+`mtsu-dev/boite` with `gh` when `gh` is signed in, or prints that link and the
 export to attach. Inside a thread, `issue submit` publishes nothing: the
 issue would be public and signed by the owner's GitHub login, so the agent
 gives the user the link and the user submits it, or submits it from
