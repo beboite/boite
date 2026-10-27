@@ -716,9 +716,9 @@ descriptor uses additional fields available to other providers:
 `quirks: ["antigravity"]` folds a tool call's command, working directory and
 output under one spelling and draws an `interaction_` permission request as the
 agent's own question; its modes are `default`, `auto_edit` and `yolo`, with no
-plan mode. A `start_subagent` call (titled `Running start_subagent` or `Run
-start_subagent?`, without `_meta.is_mcp_tool_call`) carries the batch it
-launched as `nativeAgents`, listed in Subagents: the call returns once the batch
+plan mode. An `invoke_subagent` call (titled `Running invoke_subagent` or `Run
+invoke_subagent?`; agents before 1.4.1 name it `start_subagent`; without
+`_meta.is_mcp_tool_call`) carries the batch it launched as `nativeAgents`, listed in Subagents: the call returns once the batch
 is launched, its output is the launch's description, and the agent reports no
 child ids, names, models or results, so the batch stays running while the turn
 runs and reads unknown after it; only a failed launch is final, with its error.
