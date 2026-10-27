@@ -148,7 +148,7 @@
     if (viewing) URL.revokeObjectURL(viewing.items[0]!.src);
     viewing = { items: [item], index: 0 };
   }
-  /** A `iew block opens as a page the conversation's machine serves. */
+  /** A ```view block opens as a page the conversation's machine serves. */
   const drawing = $derived.by((): RichMarkdownOptions => {
     const owner = store;
     return { onenlarge: enlarge, viewBlock: owner ? html => owner.viewBlock(html) : undefined };
