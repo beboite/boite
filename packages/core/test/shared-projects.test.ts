@@ -91,8 +91,28 @@ test('two owners explicitly associate colliding ids; scoped threads and readThre
   expect(await thrown(a.client.call('sharedProjects.read', { ...scope, target: remote.ref }))).toThrow('readThreads');
   const local = directory.threads.find(t => t.ref.project.coreId === a.coreId)!;
   expect((await a.client.call('sharedProjects.read', { ...scope, target: local.ref })).contact.coreId).toBe(a.coreId);
-  await b.client.call('contacts.grant', { coreId: a.coreId, projectId: b.ref.projectId, readThreads: true });
-  expect((await a.client.call('sharedProjects.read', { ...scope, target: remote.ref })).contact.coreId).toBe(b.coreId);
+  const request = b.h.core.coordination.request.bind(b.h.core.coordination);
+  const accessQueued = Promise.withResolvers<void>(), releaseAccess = Promise.withResolvers<void>();
+  b.h.core.coordination.request = async (peer, operation, payload) => {
+    if (operation === 'contact.project' && (payload as {method?: string}).method === 'access') {
+      accessQueued.resolve();
+      await releaseAccess.promise;
+    }
+    return request(peer, operation, payload);
+  };
+  try {
+    await b.client.call('contacts.grant', { coreId: a.coreId, projectId: b.ref.projectId, readThreads: true });
+    await accessQueued.promise;
+    // The owner RPC commits locally; the peer must reject the old revision
+    // until its durable access notification has been delivered.
+    expect(await thrown(a.client.call('sharedProjects.read', { ...scope, target: remote.ref }))).toThrow('grantRevision');
+    releaseAccess.resolve();
+    await b.h.core.sharedProjects.flush(a.coreId);
+    expect((await a.client.call('sharedProjects.read', { ...scope, target: remote.ref })).contact.coreId).toBe(b.coreId);
+  } finally {
+    releaseAccess.resolve();
+    b.h.core.coordination.request = request;
+  }
   expect(await thrown(a.client.call('sharedProjects.read', { ...scope, target: { project: { ...b.ref, projectId: privateProject.id }, threadId: privateThread.id, address: { coreId: b.coreId, threadId: privateThread.id } } }))).toThrow('target.project');
   await a.client.call('contacts.update', { coreId: b.coreId, name: 'Renamed contact' });
   expect((await a.client.call('sharedProjects.get', scope)).contact.name).toBe('Renamed contact');
@@ -187,6 +207,7 @@ test('revocation closes the immutable association, including bare legacy reads, 
 test('a buffered read cannot return data after readThreads or its local source grant changed', async () => {
   const { a, b, scope } = await associated();
   await b.client.call('contacts.grant', { coreId: a.coreId, projectId: b.ref.projectId, readThreads: true });
+  await b.h.core.sharedProjects.flush(a.coreId);
   const target = (await a.client.call('sharedProjects.threads', scope)).threads.find(t => t.ref.project.coreId === b.coreId)!.ref;
   const original = a.h.core.coordination.request.bind(a.h.core.coordination);
   let changed = false;
@@ -268,6 +289,7 @@ test('subscriptions invalidate only their connection/source/association and rele
 test('an active association remains readable after restart; a reconnected subscriber receives fresh scoped changes', async () => {
   const { a, b, scope } = await associated();
   await b.client.call('contacts.grant', { coreId: a.coreId, projectId: b.ref.projectId, readThreads: true });
+  await b.h.core.sharedProjects.flush(a.coreId);
   const events: unknown[] = [];
   const off = a.client.on('sharedProjects.changed', p => events.push(p));
   await a.client.call('sharedProjects.subscribe', { ...scope, enabled: true });
