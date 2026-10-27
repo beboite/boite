@@ -198,3 +198,41 @@ test('a queued command runs with the experiments its prompt was queued with, not
   await vi.waitFor(async () => expect((await client.call('threads.get', { threadId: thread.id })).activity?.goal).toMatchObject({ objective: 'Ship the release', review: expect.anything() }));
   expect(await userTexts(client, thread.id)).not.toContain('/goal2 Ship the release');
 });
+
+test.each(['running', 'idle'] as const)('queued %s inputs follow the live permission mode instead of the captured one', async state => {
+  const client = await ready(25);
+  const thread = await client.call('threads.get', { threadId: 't-trace' });
+  const choice = choiceOf(thread);
+  const before = thread.turns.length;
+  const active = state === 'running' ? await client.call('turns.start', { threadId: thread.id, prompt: 'Keep working ' + 'Continue reviewing the workspace. '.repeat(100) }) : null;
+  const queued = value('');
+  queued.input.paused = true;
+  queued.input.queued.push({ id: `live-mode-${state}`, text: 'Follow the current mode', attachments: [], choice });
+  const saved = await client.call('composer.put', { section: 'inputs', id: thread.id, expectedRevision: 0, value: queued });
+  await client.call('threads.update', { threadId: thread.id, permissionMode: 'yolo' });
+  queued.input.paused = false;
+  await client.call('composer.put', { section: 'inputs', id: thread.id, expectedRevision: saved.record.revision, value: queued, sendNow: true });
+  await vi.waitFor(async () => expect(await queuedIds(client, thread.id)).toEqual([]));
+  const current = await client.call('threads.get', { threadId: thread.id });
+  expect(current.permissionMode).toBe('yolo');
+  expect(current.turns).toHaveLength(before + 1);
+  expect(current.turns.at(-1)?.execution?.permissionMode).toBe('yolo');
+  const message = current.messages.find(message => message.parts.some(part => part.type === 'text' && part.text === 'Follow the current mode'));
+  expect(message?.turnId).toBe(active?.id ?? current.turns.at(-1)?.id);
+});
+
+test('a live mode update does not hide an effort change and return in the fake', async () => {
+  const client = await ready(25);
+  const thread = await client.call('threads.get', { threadId: 't-trace' });
+  await client.call('turns.start', { threadId: thread.id, prompt: 'Keep reviewing. '.repeat(100) });
+  const next = value('');
+  next.input.queued.push({ id: 'mode-after-effort-return', text: 'Wait for the new selection', attachments: [], choice: choiceOf(thread) });
+  await client.call('composer.put', { section: 'inputs', id: thread.id, expectedRevision: 0, value: next });
+  await client.call('threads.update', { threadId: thread.id, effort: thread.effort === 'high' ? 'low' : 'high' });
+  await client.call('threads.update', { threadId: thread.id, effort: thread.effort });
+  await client.call('threads.update', { threadId: thread.id, permissionMode: 'yolo' });
+  const saved = (await client.call('composer.list', {})).find(row => row.id === thread.id)!;
+  await client.call('composer.put', { section: 'inputs', id: thread.id, expectedRevision: saved.revision, value: saved.value, sendNow: true });
+  expect(await queuedIds(client, thread.id)).toEqual(['mode-after-effort-return']);
+  expect(await userTexts(client, thread.id)).not.toContain('Wait for the new selection');
+});

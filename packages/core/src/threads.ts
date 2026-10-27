@@ -318,7 +318,7 @@ export class ThreadStore {
       const modeChanged = next.permissionMode !== thread.permissionMode;
       if (modeChanged) next.selectionVersion = (thread.selectionVersion ?? 0) + 1;
       const saved = this.save(next, 'thread.updated');
-      if (modeChanged) this.runner.changePermissionMode(thread.id, next.permissionMode);
+      if (modeChanged) this.runner.changePermissionMode(thread.id, next.permissionMode, thread, next);
       return saved;
     }
     const account = this.core.accounts.require(params.accountId ?? thread.accountId);

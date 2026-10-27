@@ -418,6 +418,7 @@ export function threadMethods(ctx: FakeContext) {
       if (changedModel || speed !== (thread.speed ?? null)) checkSpeed(ctx, nextProviderId, nextAccountId, model, speed);
       checkSelection(ctx, thread, params);
       const before = [thread.accountId, thread.model, thread.effort, thread.speed, thread.permissionMode].join('\0');
+      const executionBefore = [thread.providerId, thread.accountId, thread.model, thread.effort, thread.speed ?? null].join('\0');
       if (params.accountId !== undefined && params.accountId !== thread.accountId) {
         const account = ctx.accounts.find((entry) => entry.id === params.accountId);
         const provider = account && ctx.providers.find((entry) => entry.id === account.providerId);
@@ -458,6 +459,12 @@ export function threadMethods(ctx: FakeContext) {
         }
       }
       if (before !== [thread.accountId, thread.model, thread.effort, thread.speed, thread.permissionMode].join('\0')) thread.selectionVersion = (thread.selectionVersion ?? 0) + 1;
+      // Native mode changes are synchronous here; align only a mode-only transition from this execution's own version.
+      if (params.permissionMode !== undefined && executionBefore === [thread.providerId, thread.accountId, thread.model, thread.effort, thread.speed ?? null].join('\0')) {
+        for (const turn of thread.turns) if (turn.status === 'running' && turn.execution?.selectionVersion === version) {
+          turn.execution.selectionVersion = thread.selectionVersion ?? 0;
+        }
+      }
       return ctx.touch(thread);
     },
     'threads.retitle': async (params) => writeTitle(ctx, ctx.thread(params.threadId)),

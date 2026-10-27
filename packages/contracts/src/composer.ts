@@ -5,6 +5,7 @@ import type { ExperimentId } from './setting-requests';
 export interface ComposerChoice {
   providerId: string;
   accountId: string;
+  /** Initial mode for a new thread; existing threads use their live permission selection. */
   permissionMode: PermissionMode;
   model: string | null;
   effort: string | null;

@@ -63,13 +63,13 @@ export class TurnRunner {
     return this.attempts.isPaused(threadId);
   }
 
-  changePermissionMode(threadId: ThreadId, mode: PermissionMode): void {
-    this.attempts.changePermissionMode(threadId, mode);
+  changePermissionMode(threadId: ThreadId, mode: PermissionMode, before: ThreadSummary, next: ThreadSummary): void {
+    this.attempts.changePermissionMode(threadId, mode, before, next);
   }
 
   /** What a saved selection means for the turn that is running: its mode, its effort and its speed. */
   selectionChanged(before: ThreadSummary, next: ThreadSummary): void {
-    if (next.permissionMode !== before.permissionMode) this.attempts.changePermissionMode(next.id, next.permissionMode);
+    if (next.permissionMode !== before.permissionMode) this.attempts.changePermissionMode(next.id, next.permissionMode, before, next);
     if (next.effort !== before.effort || next.speed !== before.speed) this.attempts.changeSettings(next.id, next);
   }
 

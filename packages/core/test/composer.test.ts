@@ -130,11 +130,11 @@ test('a known failed draft creation cleans its workspace and permits retrying th
   } finally { creation.create = create; }
 });
 
-function scripted(steer?: (text: string) => Promise<boolean>) {
+function scripted(steer?: (text: string) => Promise<boolean>, livePermissions?: () => Promise<boolean>) {
   let context!: TurnContext, finish!: (result: TurnResult) => void;
   restore = setDriver('echo', { protocol: 'echo', startTurn(ctx) {
     context = ctx;
-    return { done: new Promise(resolve => { finish = resolve; }), stop() { finish({ status: 'stopped', sessionId: null, usage: null }); }, ...(steer ? { steer } : {}) };
+    return { done: new Promise(resolve => { finish = resolve; }), stop() { finish({ status: 'stopped', sessionId: null, usage: null }); }, ...(steer ? { steer } : {}), ...(livePermissions ? { setPermissionMode: livePermissions } : {}) };
   } });
   return { context: () => context, finish: () => finish({ status: 'done', sessionId: null, usage: null }) };
 }
@@ -183,6 +183,86 @@ test('steering waits for a tool boundary, locks only the captured item and prese
   a.close();
 });
 
+test('a queued prompt steers after the running turn accepts a live permission mode change', async () => {
+  h = await startTestCore();
+  const owner = await h.connect();
+  const { threadId } = await echoThread(h, owner);
+  const thread = h.core.threads.require(threadId);
+  const choice = { providerId: thread.providerId, accountId: thread.accountId, model: thread.model, effort: thread.effort, speed: thread.speed ?? null, permissionMode: thread.permissionMode };
+  const inputs: string[] = [];
+  const applied = Promise.withResolvers<boolean>();
+  let called = false;
+  const driver = scripted(async text => { inputs.push(text); return true; }, () => { called = true; return applied.promise; });
+  const turn = await owner.call('turns.start', { threadId, prompt: 'keep working' });
+  await waitFor(() => h.core.threads.runner.handles.has(threadId));
+  await owner.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: 0, value: { input: { ...value('').input, queued: [{ id: 'live-mode-followup', text: 'follow up under live permissions', attachments: [], choice }] } } });
+  await owner.call('threads.update', { threadId, permissionMode: 'yolo' });
+  await waitFor(() => called);
+  const message = driver.context().emit.startMessage('assistant');
+  driver.context().emit.part(message, 0, { type: 'tool', toolId: 'mode-read', name: 'Read', input: {}, output: 'ok', status: 'done' });
+  await Bun.sleep(30);
+  expect(inputs).toEqual([]); // The native mode setter has not accepted yet.
+  applied.resolve(true);
+  await waitFor(() => h.core.journal.getTurn(turn.id)?.execution?.permissionMode === 'yolo');
+  await Bun.sleep(30);
+  expect(inputs).toEqual(['follow up under live permissions']);
+  await waitFor(() => h.core.composer.storage.get('inputs', threadId).value?.input.queued.length === 0);
+  expect(h.core.journal.listTurns(threadId)).toHaveLength(1);
+  expect(h.core.journal.getTurn(turn.id)?.execution?.permissionMode).toBe('yolo');
+  expect(h.core.journal.listMessages(threadId).find(message => message.parts.some(part => part.type === 'text' && part.text === 'follow up under live permissions'))?.turnId).toBe(turn.id);
+  driver.finish();
+});
+
+test.each([
+  ['preparing', false], ['queued', false], ['preparing', true], ['queued', true],
+] as const)('a mode requested while %s reaches native startup and preserves an intervening account return=%s', async (phase, changedAccount) => {
+  h = await startTestCore();
+  const owner = await h.connect();
+  const { threadId, accountId } = await echoThread(h, owner);
+  const modes: string[] = [], inputs: string[] = [];
+  let context!: TurnContext;
+  const done = Promise.withResolvers<TurnResult>();
+  restore = setDriver('echo', { protocol: 'echo', startTurn(ctx) {
+    context = ctx; modes.push(ctx.thread.permissionMode);
+    return { done: done.promise, stop() { done.resolve({ status: 'stopped', sessionId: null, usage: null }); },
+      async steer(text) { inputs.push(text); return true; } };
+  } });
+  const execution = h.core.sharedAccess.execution, prepare = execution.prepare;
+  const entered = Promise.withResolvers<void>(), ready = Promise.withResolvers<void>();
+  let calls = 0, release = () => {};
+  try {
+    if (phase === 'queued') release = holdAccountTurns(h, accountId);
+    else execution.prepare = function(id) {
+      if (id === threadId && ++calls === 2) { entered.resolve(); return ready.promise; }
+      return prepare.call(this, id);
+    };
+    const turn = await owner.call('turns.start', { threadId, prompt: 'keep working after admission and preparation' });
+    if (phase === 'queued') expect(h.core.journal.getTurn(turn.id)?.status).toBe('queued');
+    else await entered.promise;
+    await owner.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: 0, value: { input: { ...value('').input, queued: [{ id: 'startup-mode-followup', text: 'steer after the requested mode starts', attachments: [] }] } } });
+    if (changedAccount) {
+      const other = await owner.call('accounts.add', { providerId: 'echo', label: 'Intervening picker' });
+      await owner.call('threads.update', { threadId, accountId: other.id });
+      await owner.call('threads.update', { threadId, accountId, model: 'echo' });
+    }
+    await owner.call('threads.update', { threadId, permissionMode: 'plan' });
+    release(); release = () => {}; ready.resolve();
+    await waitFor(() => h.core.threads.runner.handles.has(threadId));
+    expect(modes).toEqual(['plan']); // Captured at driver start, not read later from a mutable context.
+    const message = context.emit.startMessage('assistant');
+    context.emit.part(message, 0, { type: 'tool', toolId: 'startup-mode-read', name: 'Read', input: {}, output: 'ok', status: 'done' });
+    await Bun.sleep(30);
+    if (changedAccount) {
+      expect(inputs).toEqual([]);
+      expect(h.core.composer.storage.get('inputs', threadId).value?.input.queued.map(item => item.id)).toEqual(['startup-mode-followup']);
+    } else {
+      expect(inputs).toEqual(['steer after the requested mode starts']);
+      expect(h.core.journal.getTurn(turn.id)?.execution?.selectionVersion).toBe(h.core.threads.require(threadId).selectionVersion);
+      expect(h.core.journal.listTurns(threadId)).toHaveLength(1);
+    }
+  } finally { release(); ready.resolve(); execution.prepare = prepare; }
+});
+
 test('a queue for the newer picker waits instead of steering into a captured execution on another account', async () => {
   h = await startTestCore();
   const a = await h.connect();
@@ -207,6 +287,62 @@ test('a queue for the newer picker waits instead of steering into a captured exe
   await waitFor(() => driver.context().thread.accountId === accountB.id);
   expect(h.core.journal.listTurns(threadId)).toHaveLength(2);
   driver.finish();
+});
+
+test('a permission-mode native restart keeps queued steering in the original turn', async () => {
+  h = await startTestCore();
+  const owner = await h.connect();
+  const { threadId } = await echoThread(h, owner);
+  const contexts: TurnContext[] = [], inputs: string[] = [];
+  restore = setDriver('echo', { protocol: 'echo', startTurn(context) {
+    contexts.push(context);
+    const done = Promise.withResolvers<TurnResult>();
+    return { done: done.promise, stop() { done.resolve({ status: 'stopped', sessionId: 'native-session', usage: null }); },
+      async steer(text) { inputs.push(text); return true; } };
+  } });
+  const turn = await owner.call('turns.start', { threadId, prompt: 'keep working' });
+  await waitFor(() => h.core.threads.runner.handles.has(threadId));
+  await owner.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: 0, value: { input: { ...value('').input, queued: [{ id: 'restarted-mode-followup', text: 'follow up after native restart', attachments: [] }] } } });
+  await owner.call('threads.update', { threadId, permissionMode: 'yolo' });
+  await waitFor(() => contexts.length === 2);
+  expect(contexts[1]!.thread.permissionMode).toBe('yolo');
+  const message = contexts[1]!.emit.startMessage('assistant');
+  contexts[1]!.emit.part(message, 0, { type: 'tool', toolId: 'restart-mode-read', name: 'Read', input: {}, output: 'ok', status: 'done' });
+  await waitFor(() => h.core.composer.storage.get('inputs', threadId).value?.input.queued.length === 0);
+  expect(inputs).toEqual(['follow up after native restart']);
+  expect(h.core.journal.listTurns(threadId)).toHaveLength(1);
+  expect(h.core.journal.getTurn(turn.id)?.execution).toMatchObject({ permissionMode: 'yolo', selectionVersion: h.core.threads.require(threadId).selectionVersion });
+  await owner.call('turns.stop', { threadId });
+});
+
+test.each(['before', 'during'] as const)('a live mode update never conceals an account change and return %s native confirmation', async timing => {
+  h = await startTestCore();
+  const owner = await h.connect();
+  const { threadId, accountId } = await echoThread(h, owner);
+  const accountB = await owner.call('accounts.add', { providerId: 'echo', label: 'Other selection' });
+  const inputs: string[] = [];
+  const applied = Promise.withResolvers<boolean>();
+  let called = false;
+  const driver = scripted(async text => { inputs.push(text); return true; }, () => { called = true; return applied.promise; });
+  const turn = await owner.call('turns.start', { threadId, prompt: 'keep working' });
+  await waitFor(() => h.core.threads.runner.handles.has(threadId));
+  await owner.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: 0, value: { input: { ...value('').input, queued: [{ id: 'selection-return-followup', text: 'must wait for the new selection', attachments: [] }] } } });
+  const changeAndReturn = async () => {
+    await owner.call('threads.update', { threadId, accountId: accountB.id });
+    await owner.call('threads.update', { threadId, accountId, model: 'echo' });
+  };
+  if (timing === 'before') await changeAndReturn();
+  await owner.call('threads.update', { threadId, permissionMode: 'yolo' });
+  await waitFor(() => called);
+  if (timing === 'during') await changeAndReturn();
+  applied.resolve(true);
+  await waitFor(() => h.core.journal.getTurn(turn.id)?.execution?.permissionMode === 'yolo');
+  const message = driver.context().emit.startMessage('assistant');
+  driver.context().emit.part(message, 0, { type: 'tool', toolId: 'selection-return', name: 'Read', input: {}, output: 'ok', status: 'done' });
+  await Bun.sleep(30);
+  expect(inputs).toEqual([]);
+  expect(h.core.composer.storage.get('inputs', threadId).value?.input.queued.map(item => item.id)).toEqual(['selection-return-followup']);
+  await owner.call('turns.stop', { threadId });
 });
 
 test('an uncertain native steering acknowledgement is held through a restart', async () => {
@@ -451,19 +587,19 @@ test('a captured execution keeps its account, model and effort without changing 
   const nextAccount = await a.call('accounts.add', { providerId: 'echo', label: 'New picker' });
   const choice = { providerId: 'echo', accountId, model: 'captured-model', effort: 'high', permissionMode: 'default' as const };
   await a.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: 0, value: { input: { ...value().input, paused: true, queued: [{ id: 'captured-input', text: 'use captured selection', attachments: [], choice }] } } });
-  await a.call('threads.update', { threadId, accountId: nextAccount.id, model: 'picker-model', effort: null });
+  await a.call('threads.update', { threadId, accountId: nextAccount.id, model: 'picker-model', effort: null, permissionMode: 'yolo' });
   h.core.journal.putThread({ ...h.core.threads.require(threadId), sessionId: 'picker-session', sessionResumeAt: 'picker-message' });
   const current = h.core.composer.storage.get('inputs', threadId);
   current.value!.input.paused = false;
   const driver = scripted();
   await a.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: current.revision, value: current.value });
   await waitFor(() => h.core.threads.runner.handles.has(threadId));
-  expect(driver.context().thread).toMatchObject({ accountId, model: 'captured-model', effort: 'high' });
+  expect(driver.context().thread).toMatchObject({ accountId, model: 'captured-model', effort: 'high', permissionMode: 'yolo' });
   expect(driver.context().thread).toMatchObject({ sessionId: null, sessionResumeAt: null });
-  expect(h.core.threads.require(threadId)).toMatchObject({ accountId: nextAccount.id, model: 'picker-model', effort: null });
+  expect(h.core.threads.require(threadId)).toMatchObject({ accountId: nextAccount.id, model: 'picker-model', effort: null, permissionMode: 'yolo' });
   driver.finish();
   await waitFor(() => h.core.journal.listTurns(threadId).some(turn => turn.status === 'done'));
-  expect(h.core.threads.require(threadId)).toMatchObject({ accountId: nextAccount.id, model: 'picker-model', effort: null });
+  expect(h.core.threads.require(threadId)).toMatchObject({ accountId: nextAccount.id, model: 'picker-model', effort: null, permissionMode: 'yolo' });
 });
 
 test('server-admitted but never-started turns resume after restart while legacy turns stay held', async () => {

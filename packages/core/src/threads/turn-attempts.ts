@@ -113,8 +113,31 @@ export class TurnAttempts {
     live.settings.change({ effort: selection.effort, speed: selection.speed ?? null });
   }
 
-  changePermissionMode(threadId: ThreadId, mode: PermissionMode): void {
-    this.livePermissions.get(threadId)?.change(mode);
+  changePermissionMode(threadId: ThreadId, mode: PermissionMode, before: ThreadSummary, next: ThreadSummary): void {
+    const state = this.liveSettings.get(threadId)?.state;
+    const modeOnly = before.providerId === next.providerId && before.accountId === next.accountId && before.model === next.model
+      && before.effort === next.effort && (before.speed ?? null) === (next.speed ?? null);
+    const permissions = this.livePermissions.get(threadId);
+    if (!permissions) {
+      // Queued turns have no native controller yet. Retain only an unbroken
+      // mode-only version chain; startup will pass the live mode to the driver.
+      if (modeOnly) for (const turn of this.core.journal.listTurnsFor(threadId, [])) {
+        if (turn.status !== 'queued' || !turn.execution || (turn.execution.selectionVersion ?? 0) !== (before.selectionVersion ?? 0)) continue;
+        turn.execution = { ...turn.execution, permissionMode: mode, selectionVersion: next.selectionVersion ?? 0 };
+        this.core.journal.putTurn(turn);
+      }
+      return;
+    }
+    permissions.change(mode, () => {
+      const execution = state?.running.execution;
+      // Mode is live; other picker changes, including a change and return, stay fenced.
+      if (!modeOnly || !state || !execution || (execution.selectionVersion ?? 0) !== (before.selectionVersion ?? 0)) return;
+      state.thread.selectionVersion = next.selectionVersion;
+      state.running.execution = { ...execution, selectionVersion: next.selectionVersion ?? 0 };
+      this.core.journal.putTurn(state.running);
+      const current = this.core.journal.getThread(threadId);
+      if (current) this.core.bus.emit('thread.updated', current);
+    });
   }
 
   async run(queued: Turn, state: TurnAttemptState, target: TurnAttemptTarget, permissions: LivePermissions): Promise<TurnResult> {
@@ -163,9 +186,11 @@ export class TurnAttempts {
       // A retry or delayed provider preparation cannot outlive shared host consent.
       this.core.sharedCompute?.assertTurn(threadId);
       this.core.sharedAccess?.assertTurn(threadId);
-      state.thread.permissionMode = permissions.mode;
       const protection = this.core.sharedAccess.execution.prepare(threadId);
       if (protection) await protection;
+      // Preparation can yield while the user changes modes. Read it only
+      // once the native context and handle can be constructed without yielding.
+      state.thread.permissionMode = permissions.mode;
       const note = afterUpdate;
       afterUpdate = null;
       // The resumed session already holds what the first attempt took from the thread.

@@ -10,6 +10,7 @@ export class LivePermissions {
   restarting = false;
   private handle: TurnHandle | null = null;
   private pending = Promise.resolve();
+  private readonly confirmations = new Set<() => void>();
   private finished = Promise.withResolvers<void>();
 
   constructor(mode: PermissionMode, private readonly restart: (handle: TurnHandle) => void,
@@ -21,6 +22,9 @@ export class LivePermissions {
     this.handle = handle;
     this.finished = Promise.withResolvers<void>();
     this.restarting = false;
+    // A replacement starts with the latest requested mode in its native context.
+    for (const confirmed of this.confirmations) confirmed();
+    this.confirmations.clear();
   }
 
   detach(): void {
@@ -28,8 +32,9 @@ export class LivePermissions {
     this.finished.resolve();
   }
 
-  change(mode: PermissionMode): void {
+  change(mode: PermissionMode, confirmed?: () => void): void {
     this.mode = mode;
+    if (confirmed) this.confirmations.add(confirmed);
     const handle = this.handle;
     const finished = this.finished.promise;
     if (!handle || this.restarting) return;
@@ -45,7 +50,11 @@ export class LivePermissions {
         timer?.unref?.();
         const applied = await Promise.race([handle.setPermissionMode!(mode), finished.then(() => null), timeout]);
         if (this.handle !== handle || applied === null) return;
-        if (applied) { this.applied(mode); return; }
+        if (applied) {
+          this.applied(mode);
+          if (confirmed && this.confirmations.delete(confirmed)) confirmed();
+          return;
+        }
       } catch {
         // A refused setter cannot leave the active turn on the previous permissions.
       } finally {

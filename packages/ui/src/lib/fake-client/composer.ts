@@ -20,6 +20,12 @@ const sameChoice = (a?: ComposerChoice, b?: ComposerChoice) => {
   return digest(a) === digest(b);
 };
 
+/** Permission mode stays live; the other execution settings remain frozen. */
+function sameExecutionChoice(a: ComposerChoice, b: ComposerChoice): boolean {
+  return a.providerId === b.providerId && a.accountId === b.accountId && a.model === b.model
+    && a.effort === b.effort && (a.speed ?? null) === (b.speed ?? null);
+}
+
 /** One fake core's durable composer, shared by explicit peer clients only. */
 export class FakeComposerState {
   readonly records = new Map<string, ComposerRecord>();
@@ -140,7 +146,7 @@ export class FakeComposerState {
       const requestId = head.request?.id ?? head.id;
       if (running) {
         const turn = thread.turns.findLast(turn => turn.status === 'running');
-        if (!turn || JSON.stringify(choiceOf({ ...thread, ...turn.execution })) !== JSON.stringify(choiceOf(head.choice ?? thread))) return;
+        if (!turn || !sameExecutionChoice(choiceOf({ ...thread, ...turn.execution }), choiceOf(head.choice ?? thread))) return;
         const outcome = await methods['turns.steer']({ threadId: row.id, turnId: turn.id, ...payload, clientRequestId: requestId, expectedSelectionVersion: thread.selectionVersion ?? 0 });
         if (!outcome.accepted) { this.boundaries.delete(row.id); return; }
       } else {
@@ -150,7 +156,7 @@ export class FakeComposerState {
         else {
           const chosen = head.request?.choice ?? head.choice;
           const selection = choiceOf(thread);
-          if (chosen) Object.assign(thread, chosen);
+          if (chosen) Object.assign(thread, chosen, { permissionMode: selection.permissionMode });
           // `turns.start` fixes the turn's execution before its first await: the whole picker goes back at once, before any update can land.
           const started = methods['turns.start']({ threadId: row.id, ...payload, clientRequestId: requestId });
           if (chosen) Object.assign(thread, selection);
