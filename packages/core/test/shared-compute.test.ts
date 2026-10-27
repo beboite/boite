@@ -124,25 +124,45 @@ test('core shutdown drains a held child worktree inspection before closing its j
 
 test('host opt-in runs four local and five remote children on the owning accounts and returns git provenance', async () => {
   const { a, b, scope, baseCommit, enable } = await pair();
-  expect(await thrown(a.client.call('sharedCompute.start', { ...scope, requestId: 'disabled', host: b.ref, profileId: 'conversation', baseCommit, task: 'fixture' }))).toThrow('compute');
-  await enable(a); await enable(b);
-  const jobs = await Promise.all(Array.from({ length: 9 }, (_, n) => a.client.call('sharedCompute.start', {
-    ...scope, requestId: `job-${n}`, host: n < 4 ? a.ref : b.ref, profileId: 'conversation', baseCommit, task: `fixture ${n}`,
-  })));
-  const results = await Promise.all(jobs.map(job => done(a, scope, job)));
-  expect(new Set(results.map(j => j.worker!.threadId)).size).toBe(9);
-  for (const job of results) {
-    const host = job.host.coreId === a.coreId ? a : b;
-    const worker = host.h.core.threads.require(job.worker!.threadId);
-    expect(worker.accountId).toBe(host.accountId);
-    expect(worker.projectId).toBe(host.ref.projectId);
-    expect(worker.parentThreadId).toBe(host.threadId);
-    expect(worker.cwd).not.toBe(host.path);
-    expect(job.result).toMatchObject({ repository: 'example.invalid/fixtures/shared', baseCommit, commit: baseCommit, dirty: false });
-    expect(await git(host.h, worker.cwd, 'rev-parse', 'HEAD')).toBe(job.result!.commit);
-    expect(await git(host.h, worker.cwd, 'symbolic-ref', '--short', 'HEAD')).toBe(job.result!.branch);
-    expect(JSON.stringify(job)).not.toContain(host.accountId);
-    expect(JSON.stringify(job)).not.toContain(host.path);
+  let phase = 'disabled';
+  try {
+    expect(await thrown(a.client.call('sharedCompute.start', { ...scope, requestId: 'disabled', host: b.ref, profileId: 'conversation', baseCommit, task: 'fixture' }))).toThrow('compute');
+    phase = 'enable';
+    await enable(a); await enable(b);
+    phase = 'start';
+    const jobs = await Promise.all(Array.from({ length: 9 }, (_, n) => a.client.call('sharedCompute.start', {
+      ...scope, requestId: `job-${n}`, host: n < 4 ? a.ref : b.ref, profileId: 'conversation', baseCommit, task: `fixture ${n}`,
+    })));
+    phase = 'finish';
+    const results = await Promise.all(jobs.map(job => done(a, scope, job)));
+    expect(new Set(results.map(j => j.worker!.threadId)).size).toBe(9);
+    for (const job of results) {
+      phase = `provenance:${job.id}`;
+      const host = job.host.coreId === a.coreId ? a : b;
+      const worker = host.h.core.threads.require(job.worker!.threadId);
+      expect(worker.accountId).toBe(host.accountId);
+      expect(worker.projectId).toBe(host.ref.projectId);
+      expect(worker.parentThreadId).toBe(host.threadId);
+      expect(worker.cwd).not.toBe(host.path);
+      expect(job.result).toMatchObject({ repository: 'example.invalid/fixtures/shared', baseCommit, commit: baseCommit, dirty: false });
+      expect(await git(host.h, worker.cwd, 'rev-parse', 'HEAD')).toBe(job.result!.commit);
+      expect(await git(host.h, worker.cwd, 'symbolic-ref', '--short', 'HEAD')).toBe(job.result!.branch);
+      expect(JSON.stringify(job)).not.toContain(host.accountId);
+      expect(JSON.stringify(job)).not.toContain(host.path);
+    }
+  } catch (error) {
+    for (const {h, coreId} of [a, b]) {
+      try {
+        console.error(JSON.stringify({stage: 'shared-compute.fanout-failed', phase, coreId,
+          logs: await h.core.logs.query({limit: 100, minLevel: 'warn'}),
+          jobs: h.core.sharedCompute.journal.all(scope.sharedProjectId).map(({role, job}) => ({
+            role, id: job.id, status: job.status, revision: job.revision, error: job.error, worker: job.worker?.threadId,
+            worktree: job.worker && h.core.delegation.worktrees.get(job.worker.threadId),
+          })),
+        }));
+      } catch (snapshotError) {console.error(`shared-compute.fanout-snapshot: ${String(snapshotError)}`);}
+    }
+    throw error;
   }
 }, 45000);
 
