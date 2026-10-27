@@ -1,3 +1,4 @@
+import {createRequire} from 'node:module';
 import {readFileSync, writeFileSync, mkdirSync} from 'node:fs';
 import {dirname, join, resolve, isAbsolute} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
@@ -6,7 +7,7 @@ import {mock} from 'bun:test';
 
 export const jobsPath = resolve(import.meta.dir, '../../../packages/core/src/platform/windows/jobs.ts');
 export const workerPath = join(dirname(jobsPath), 'jobs-worker.ts');
-export const jobsHash = '1005a96fc78320bafca64ba92202e7853c583412d90c6dcfed446085e9ae0f5d';
+export const jobsHash = 'b9003d7f628facad78de187fb4ad6a6e71bc4d0a5d6c68365ac872aac70327a4';
 export const workerHash = 'e0b93fcb4ddb0e9d8155cd203bfa67bcb1ac0715318a23ca2bdb19b2ecdcc29f';
 const runtime = pathToFileURL(join(import.meta.dir, 'ownership-trace.ts')).href;
 const ledger = pathToFileURL(join(import.meta.dir, 'ownership-ledger.ts')).href;
@@ -20,8 +21,8 @@ function once(source: string, before: string, after: string): string {
   return source.replace(before, after);
 }
 function imports(source: string, original: string): string {
-  return source.replace(/from (['"])(\.[^'"\n]+)\1/g, (_, quote: string, name: string) =>
-    `from ${quote}${pathToFileURL(resolve(dirname(original), name)).href}${quote}`);
+  return source.replace(/from (['"])(\.[^'"\n]+|@boite\/contracts)\1/g, (_, quote: string, name: string) =>
+    `from ${quote}${pathToFileURL(name.startsWith('.') ? resolve(dirname(original), name) : createRequire(original).resolve(name)).href}${quote}`);
 }
 export function instrumentJobs(source: string, generatedWorker: string): string {
   if (sha256(source) !== jobsHash) throw new Error('jobs.ts source drift: review and repin ownership trace');

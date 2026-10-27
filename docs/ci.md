@@ -3,8 +3,9 @@
 Changes land through squash-merged pull requests. The repository's merge policy
 requires every check a pull request reports ([check names](#check-names)),
 `PR title` included, forbids direct pushes, force pushes and
-deletion of `main`, and permits admin bypass only when merging a PR. CODEOWNERS
-requests reviews; approval is not required. The `release tags` policy protects
+deletion of `main`, and permits admin bypass only when merging a PR. No review
+is requested or required: the repository has no CODEOWNERS, whose automatic
+requests mailed the owner every event of each contributor's pull request. The `release tags` policy protects
 `v*` tags from movement and deletion while allowing their creation.
 
 `PR title` runs `scripts/ci/pr-title.ts` on title edits. The squash title is
@@ -123,7 +124,7 @@ reports. Its tests pin all of them, refuse a matrix or an expression in a name
 (the draft expression aside, see [draft pull requests](#draft-pull-requests)), and check each written-out job against
 `CORE_ALL` and `PORTABLE_ALL`. On main and in a release, the `Ruleset check
 names` job runs it with `--live`, which reads the rules for `main`
-(`repos/beboite/boite/rules/branches/main`, public) and fails on a check the
+(`repos/mtsu-dev/boite/rules/branches/main`, public) and fails on a check the
 ruleset lacks or one no pull request reports. No job needs it: the tests still
 run, and once the ruleset matches, a rerun of that job alone turns the run
 green. Pull requests skip it, so it is not required. `--ruleset <file>`
@@ -666,7 +667,7 @@ repository's custom domain, `APP_ORIGIN` in the contracts
 ([phone](phone.md#the-app-on-its-own-address)). It packs the site itself so
 `/.well-known/assetlinks.json` ships, which `upload-pages-artifact` would leave
 out as a hidden folder. Pages must use GitHub Actions as its source, and the
-domain's DNS names `beboite.github.io`.
+domain's DNS names `mtsu-dev.github.io`.
 
 ## Pull request reviews
 
@@ -733,7 +734,8 @@ dispatching publication on the same published tag.
 The registry is `ghcr.io/<owner>/<repository>/boite-server`. Anonymous pulls
 require public GHCR package visibility. Publishing uses `GITHUB_TOKEN`, without
 a registry-password secret. CI does not contact a production host or migrate
-Boite Legacy's separate `ghcr.io/beboite/boite-server` package.
+Boite Legacy's separate `ghcr.io/beboite/boite-server` package. Images published
+before the move to `mtsu-dev` stay under `ghcr.io/beboite/boite/boite-server`.
 
 ## Automatic changelog
 
@@ -749,7 +751,7 @@ cover the tables, commit ranges, grouping and announcements.
 `.github/topics.json` holds the GitHub topics. Review it before applying:
 
 ```sh
-gh api repos/beboite/boite/topics --method PUT --input .github/topics.json
+gh api repos/mtsu-dev/boite/topics --method PUT --input .github/topics.json
 ```
 
 This changes topics only; the About description is separate repository metadata.

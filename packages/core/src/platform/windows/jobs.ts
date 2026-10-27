@@ -10,14 +10,15 @@
 import { cpus, totalmem } from 'node:os';
 import { dlopen, FFIType, ptr } from 'bun:ffi';
 import type { Pointer } from 'bun:ffi';
-import type { TraceCapability } from '@boite/contracts';
+import { KILL_EXIT_CODE, type TraceCapability } from '@boite/contracts';
 import type { JobsWorkerMessage, JobsWorkerStart } from './jobs-worker.ts';
 import { describeWorkerError, workerEntry } from './worker-entry.ts';
 import { resolveMemoryLimits } from '../../memory-limits.ts';
 import { StartupPriority } from './startup-priority.ts';
 import { processEventDiagnostic } from '../../process-event-diagnostics.ts';
 import { listJobPids } from './jobs-packets.ts';
-import { applyCpuCap, applyMemoryLimit, cpuRateOfJob, memoryLimitOfJob as readMemoryLimit } from './job-limits.ts';
+import { applyCpuCap, applyMemoryLimit, cpuRateOfJob, memoryLimitOfJob as readMemoryLimit,
+  OFF_TOTAL_USER_TIME, OFF_TOTAL_KERNEL_TIME, OFF_ACTIVE_PROCESSES, ACCOUNTING_SIZE } from './job-limits.ts';
 import {
   commandLineOf,
   consoleHost,
@@ -61,16 +62,6 @@ const PROCESS_QUERY_INFORMATION = 0x400;
 /** What OpenProcess says for a pid no process holds any more. */
 const ERROR_INVALID_PARAMETER = 87;
 const STILL_ACTIVE = 259;
-const KILL_EXIT_CODE = 9;
-
-/** JOBOBJECT_BASIC_ACCOUNTING_INFORMATION.TotalUserTime, in 100 ns units. */
-const OFF_TOTAL_USER_TIME = 0;
-/** ...TotalKernelTime. */
-const OFF_TOTAL_KERNEL_TIME = 8;
-/** ...ActiveProcesses. */
-const OFF_ACTIVE_PROCESSES = 40;
-/** The accounting struct plus its IO_COUNTERS tail. */
-const ACCOUNTING_SIZE = 96;
 
 const INVALID_HANDLE_VALUE = 0xffffffffffffffffn;
 const INFINITE = 0xffffffff;
@@ -465,18 +456,27 @@ export function sampleThreadJob(threadId: string): ProcessSample | null {
 
   let memoryBytes = 0;
   const workingSets: { pid: number; bytes: number; committedBytes: number }[] = [];
+  const ended: [number, TrackedProcess][] = [];
   for (const pid of job.pids) {
     const entry = tracked.get(pid);
     if (entry === undefined || entry.threadId !== threadId) continue;
+    const status = exitStatusOf(api, entry.handle);
     if (process.env.BOITE_DIAGNOSE_JOB_EVENTS === '1') processEventDiagnostic('jobs.sample-held', {threadId, pid,
       startedAt: entry.identity?.startedAt ?? null, incarnation: entry.identity?.incarnation ?? null,
-      ...exitStatusOf(api, entry.handle), activeProcesses: view.getUint32(OFF_ACTIVE_PROCESSES, true)});
+      ...status, activeProcesses: view.getUint32(OFF_ACTIVE_PROCESSES, true)});
+    // A job nested in this one and ended by TerminateJobObject (a test suite's
+    // core ending its CLIs) posts no exit here, and the port promises none anyway.
+    if (status.read && status.code !== STILL_ACTIVE) { ended.push([pid, entry]); continue; }
     const memory = workingSetOf(api, entry.handle);
     if (memory === null) continue;
     memoryBytes += memory.workingSet;
     workingSets.push({ pid, bytes: memory.workingSet, committedBytes: memory.committedBytes });
     if (memory.peak > entry.peakMemoryBytes) tracked.set(pid, { ...entry, peakMemoryBytes: memory.peak });
   }
+  // Reported once the registry's sample, which reads its entries, is done. A late packet matches no live record.
+  if (ended.length > 0) queueMicrotask(() => {
+    for (const [pid, entry] of ended) if (tracked.get(pid)?.handle === entry.handle) onProcessExited(threadId, pid);
+  });
 
   return { processes: view.getUint32(OFF_ACTIVE_PROCESSES, true), cpuPercent, memoryBytes, workingSets,
     cpuMeasured, memoryMeasured: workingSets.length > 0 };

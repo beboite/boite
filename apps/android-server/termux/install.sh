@@ -2,7 +2,7 @@
 # Installs Boite server in Termux (docs/android-server.md). The Boite Server
 # app shows the command that runs it:
 #
-#   curl -fsSL https://raw.githubusercontent.com/beboite/boite/main/apps/android-server/termux/install.sh | bash -s -- --channel stable
+#   curl -fsSL https://raw.githubusercontent.com/mtsu-dev/boite/main/apps/android-server/termux/install.sh | bash -s -- --channel stable
 #
 # It installs the Termux packages the agents need, the Bun build for Android
 # pinned below, and the `boite-server` command. That command then downloads the
@@ -15,7 +15,7 @@ set -euo pipefail
 BUN_VERSION=1.4.4
 BUN_SHA256=d72e42c60e895ccbc16144bb1e0e0ad7ee384841c35b5501a7ec28b4d6d759c9
 
-REPOSITORY=beboite/boite
+REPOSITORY=mtsu-dev/boite
 REF=main
 CHANNEL=stable
 BUNDLE=

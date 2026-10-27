@@ -127,7 +127,7 @@ export class FakeClient implements ObservableClient {
     this.#stopWorking = seedWorking(ctx, options.working ?? 0);
     if (options.watchDemo) {
       const at = Date.now();
-      const watch = (number: number) => ({ url: `https://github.com/beboite/boite/pull/${number}`, repository: 'beboite/boite', number, since: at - 600_000 });
+      const watch = (number: number) => ({ url: `https://github.com/mtsu-dev/boite/pull/${number}`, repository: 'mtsu-dev/boite', number, since: at - 600_000 });
       ctx.thread('t-trace').pullRequestWatches = [
         { ...watch(512), paused: null, seen: { checkedAt: at - 30_000, head: '3e535df', base: 'main', checks: { total: 26, running: 4, failed: 1 }, conflicting: false } },
         { ...watch(498), paused: { reason: 'rate-limit', until: at + 240_000, message: 'API rate limit exceeded' }, seen: { checkedAt: at - 300_000, head: '2f257f4', base: 'main', checks: { total: 26, running: 0, failed: 0 }, conflicting: true } },

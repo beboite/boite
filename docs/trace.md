@@ -92,6 +92,12 @@ rows and load while remaining in totals, known by their image name or, when
 that read fails on a host caught as it starts, by a command line that starts
 the system's own `conhost.exe`. Terminating a job requires explicit
 exit reconciliation because the port may report only the empty-job event.
+A job nested inside a thread's job, such as the one a test suite's own core
+gives the CLIs it starts, posts no exit to the thread's job when it is
+terminated. Each load sample therefore reads the exit code of every tracked
+handle, and a process that has exited is reported as it would be from its
+exit packet. A packet that arrives later matches no live record.
+
 Before protected publication, the core queries the held thread job's membership.
 An occupied or unreadable job refuses publication. An empty job reconciles its
 captured exits through the normal handle and creation-identity checks before
@@ -315,7 +321,7 @@ grouped problems, threads, log file sizes, the ends of `core-output.log` and
 `shell-error.log`, then the timeline oldest first, one `formatLogLine` per
 record. It covers the last 24 hours by default, at most 20,000 records.
 
-`diagnostics.issue` drafts a GitHub issue for `beboite/boite`: the user's
+`diagnostics.issue` drafts a GitHub issue for `mtsu-dev/boite`: the user's
 description, the environment, the problems and as many of the newest log lines
 as fit. With `submit: true` it runs `gh issue create` under the core's own
 `gh` login and returns the issue URL; without a signed-in `gh` it returns a

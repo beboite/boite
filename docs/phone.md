@@ -19,7 +19,8 @@ another thread waits on the user, the title menu and a Browser button. The threa
 list opens on its search field, with the display options at its right end:
 the view, by project or recent, and the grouping switches. Choosing recent
 or custom project ordering stays on the desktop. Project cards have a menu
-for their archived conversations and management; an existing custom order
+for renaming them, their archived conversations and management. Renaming is
+available to paired devices and changes only the display name. An existing custom order
 also adds Move up and Move down. Actions follow the
 connection's owner or paired-device permissions. The composer stays at the
 bottom of the available viewport, above the keyboard when it is open. A touch

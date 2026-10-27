@@ -5,10 +5,9 @@ use tauri::{AppHandle, Emitter, Manager, State, Webview};
 use tauri_plugin_updater::{Update, UpdaterExt};
 use sha2::{Digest, Sha256};
 
-const RELEASES: &str = "https://api.github.com/repos/beboite/boite/releases";
-/// Where a release's files may live. The repository moves from `beboite` to
-/// `mtsu-dev`: GitHub then answers the old listing with the new owner's URLs,
-/// while manifests published before the move keep the old ones.
+const RELEASES: &str = "https://api.github.com/repos/mtsu-dev/boite/releases";
+/// Where a release's files may live. The repository moved from `beboite` to
+/// `mtsu-dev` on 2026-10-26; manifests published before the move name the old owner.
 const DOWNLOADS: [&str; 2] = ["https://github.com/mtsu-dev/boite/releases/download/", "https://github.com/beboite/boite/releases/download/"];
 
 /// Whether `url` is a file of the release tagged `tag`, under either owner.

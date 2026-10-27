@@ -97,10 +97,13 @@ own provider process do not appear as children.
 After a core restart, an old trace without an exit stays in history as Status
 unknown unless the current process registry confirms it is still running.
 
-Windows records descendant starts and exits through its process jobs. Linux and
-macOS record only direct processes, so a CLI launched inside another shell can
-remain outside this view. Provider-native agents and Boite-managed children use
-their existing lifecycle on every platform.
+Windows records descendant starts and exits through its process jobs. When the
+job never reports an exit, for example after a nested job is terminated, the
+next load sample finds it within four seconds and the active count drops.
+A CLI that Boite or its job ended exits with code 9 and reads Stopped; any
+other nonzero code reads Failed. Linux and macOS record only direct processes, so a CLI launched inside another
+shell can remain outside this view. Provider-native agents and Boite-managed
+children use their existing lifecycle on every platform.
 
 A successful spawn call is not a completed child. Missing individual states,
 background launch acknowledgements, and unfinished children after a parent

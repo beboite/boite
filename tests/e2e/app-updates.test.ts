@@ -74,10 +74,10 @@ test('the footer button and Machines both reach updates, and the foot fits its c
   expect(await page.text(id('updates-version'))).toContain('2.0.0-beta.1');
   expect((await page.text(id('updates-found'))).trim()).toBe('2.0.0-nightly.8');
   expect(await page.text(id('app-update-status'))).toContain('Restart to finish');
-  expect(await page.evaluate(`document.querySelector('${id('app-update-changelog')}').href`)).toBe('https://github.com/beboite/boite/releases/tag/v2.0.0-nightly.8');
+  expect(await page.evaluate(`document.querySelector('${id('app-update-changelog')}').href`)).toBe('https://github.com/mtsu-dev/boite/releases/tag/v2.0.0-nightly.8');
   await page.evaluate('window.__openedRelease = null; window.open = (url) => { window.__openedRelease = url; return null; }');
   await page.click(id('app-update-changelog'));
-  expect(await page.evaluate('window.__openedRelease')).toBe('https://github.com/beboite/boite/releases/tag/v2.0.0-nightly.8');
+  expect(await page.evaluate('window.__openedRelease')).toBe('https://github.com/mtsu-dev/boite/releases/tag/v2.0.0-nightly.8');
   await capture('release-desktop');
 }, 30_000);
 

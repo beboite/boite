@@ -113,6 +113,13 @@ resulting client credential are retained. See [machines](machines.md) and
 
 ## Projects and worktrees
 
+A project's action menu offers Rename on desktop and phone. It changes the
+display name through `projects.rename`, retains the folder and conversations,
+and broadcasts `project.updated` to other clients. Paired devices may rename
+too. Trimmed names must contain 1 to 1024 UTF-16 code units; the core rejects
+larger names before journaling or broadcasting. The system drafts project
+keeps its localized name.
+
 Owners open a folder through the project dialog by selecting its machine and
 browsing or typing an absolute path. `projects.browse` is owner-only; the native
 folder picker is available only on the shell's local core. Dropping a desktop
@@ -1124,6 +1131,12 @@ the selection. Typing groups by word, pause and direction; deleting a selection,
 paste, cut, a picture added or removed and every text the app writes are steps
 of their own, so deleting everything and typing by mistake comes back in two
 undos, pictures included. A sent prompt clears that history.
+
+ArrowUp on an idle thread loads the recalled prompt's deferred attachments
+before entering edit mode, like the message's Edit button. A late load cannot
+replace a new draft, another recall or another visit. Submitting an edit
+validates its current attachments and page references before rewinding history;
+attachments deliberately removed from the recalled prompt stay removed.
 
 Original file links in the local desktop thread may open through the system
 application, with executable links retaining their explicit local behavior.

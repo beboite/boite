@@ -1,3 +1,12 @@
+/** JOBOBJECT_BASIC_ACCOUNTING_INFORMATION.TotalUserTime, in 100 ns units. */
+export const OFF_TOTAL_USER_TIME = 0;
+/** ...TotalKernelTime. */
+export const OFF_TOTAL_KERNEL_TIME = 8;
+/** ...ActiveProcesses. */
+export const OFF_ACTIVE_PROCESSES = 40;
+/** The accounting struct plus its IO_COUNTERS tail. */
+export const ACCOUNTING_SIZE = 96;
+
 interface JobWriter {
   setJobInfo(job: number, klass: number, buffer: Uint8Array): boolean;
 }
