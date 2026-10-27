@@ -137,7 +137,7 @@ async function auditFile(path: string, project: string) {
   const tools = new Map<string, string>();
   let live: Live = new Map();
   let pending: Pending[] = [];
-  let lastCtx = 0, lastOut = 0, lastId = '', first = true, seq: number[] = [], lastAt = 0, sessionCtx = 0;
+  let lastCtx = 0, lastOut = 0, lastId = '', first = true, seq: number[] = [], lastAt = 0, sessionCtx = 0, compacted = false;
   // Open result blocks of this segment, so their stay can be counted.
   let open: { tool: string; tokens: number; from: number }[] = [];
   let segCalls = 0;
@@ -160,6 +160,7 @@ async function auditFile(path: string, project: string) {
       closeSegment();
       pending = [];
       sessionCtx = 0;
+      compacted = true;
       continue;
     }
     // prompt_snapshot records the system prompt and deferred_tools_record is bookkeeping: neither is a message.
@@ -211,7 +212,9 @@ async function auditFile(path: string, project: string) {
         for (const b of pending) { add(live, b.cat, est(b) * scale); add(added, b.cat, est(b) * scale); add(uses, b.cat, 1); }
         first = false;
         segments++;
-        postCompact.push(ctx);
+        // A session's first call carries no summary: only a call after a boundary sizes a compacted context.
+        if (compacted) postCompact.push(ctx);
+        compacted = false;
       } else {
         const delta = ctx - lastCtx;
         if (delta < 0) {
@@ -339,8 +342,8 @@ console.log(`- calls 5-60 min after the previous one: ${cache.gap5to60} (${M(cac
 console.log(`- input price units with the 1h lifetime: ${M(cache.cost1h)}; same calls with 5 min: ${M(cache.cost5m)} (${pct(cache.cost5m - cache.cost1h, cache.cost1h)})`);
 
 const median = (a: number[]) => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)] ?? 0;
-console.log(`\n## Compaction: median context before ${Math.round(median(preCompact) / 1000)}k, median first call of a segment ${Math.round(median(postCompact) / 1000)}k, median summary ${median(summaries)} chars (~${(median(summaries) / CPT / 1000).toFixed(1)}k tokens)`);
-const base = median(postCompact.filter((_, i) => i > 0)) || 30_000;
+console.log(`\n## Compaction: median context before ${Math.round(median(preCompact) / 1000)}k, median first call after one ${Math.round(median(postCompact) / 1000)}k, median summary ${median(summaries)} chars (~${(median(summaries) / CPT / 1000).toFixed(1)}k tokens)`);
+const base = median(postCompact) || 30_000;
 for (const T of [60_000, 80_000, 100_000, 120_000, 150_000, 200_000]) {
   let sim = 0, extra = 0, n = 0;
   for (const s of sequences) {

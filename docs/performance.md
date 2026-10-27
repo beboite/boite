@@ -1508,9 +1508,9 @@ what the context holds; its header explains the attribution.
 bun scripts/token-audit.ts --days 7 --chars-per-token 2.5
 ```
 
-One owner's machine, the 7 days to 2026-10-27: 86,196 calls in 1,560 stretches
+One owner's machine, the 7 days to 2026-10-27: 86,238 calls in 1,561 stretches
 between compactions, a mean context of 104k tokens, compaction at 166k (the
-`autoCompactWindow: 200000` of that user's settings). At API rates relative
+`autoCompactWindow: 200000` of that user's settings) down to 44k at the median. At API rates relative
 to input, cache reads made 52% of the cost, 1 hour cache writes 28% and output
 20%.
 
@@ -1524,13 +1524,15 @@ to input, cache reads made 52% of the cost, 1 hour cache writes 28% and output
 | Compaction summaries, 20k characters at the median | 6.8% |
 | Grep results | 6.7% |
 | Text Boite adds: guide, notices, delegation and coordination messages | 1.3% |
+| Tool calls the agent wrote: shell 3.5%, Write 1.9%, Edit 1.4% | 7.8% |
+| The rest: the agent's and the user's text, other tool results, images | 1.7% |
 
 The script replays the same calls under other policies:
 
 | Policy | Sum of context | Cost |
 |---|---|---|
-| Compact at 120k | −27.2% | −7.6% |
-| Compact at 150k | −12.1% | +0.2% |
+| Compact at 120k | −26.1% | −6.6% |
+| Compact at 150k | −11.7% | +0.8% |
 | Clear tool results older than 10 calls, cache rewrites not counted | −22.2% | not modelled |
 | Cap each tool result at 5k tokens | −2.2% | not modelled |
 | 5 minute cache instead of 1 hour | unchanged | +9.2% |
