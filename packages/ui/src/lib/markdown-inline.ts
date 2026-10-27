@@ -56,7 +56,7 @@ function protectPaths(md: MarkdownParser): void {
     }
     const matched = text(state, silent);
     if (matched && path && path.index < state.pos) {
-      state.pending = state.pending.slice(0, -(state.pos - path.index));
+      if (!silent) state.pending = state.pending.slice(0, -(state.pos - path.index));
       state.pos = path.index;
     }
     return matched;
@@ -68,6 +68,18 @@ function protectPaths(md: MarkdownParser): void {
 function parser(rich: boolean): MarkdownParser {
   const md = new MarkdownIt({ html: false, linkify: rich });
   md.linkify.set({ fuzzyLink: false, fuzzyEmail: false });
+  const label = md.helpers.parseLinkLabel;
+  const lastBracket = new WeakMap<StateInline, number>();
+  md.helpers = { ...md.helpers, parseLinkLabel(state, start, disableNested) {
+    // Inline links need ] and ); reference links only need ]. Skip impossible lookahead.
+    let last = lastBracket.get(state);
+    if (last === undefined) {
+      last = state.src.lastIndexOf(']');
+      if (!state.env.references) last = Math.min(last, state.src.lastIndexOf(')'));
+      lastBracket.set(state, last);
+    }
+    return last <= start ? -1 : label(state, start, disableNested);
+  } };
   if (rich) {
     protectPaths(md);
     const destination = md.helpers.parseLinkDestination;
@@ -118,6 +130,8 @@ function parser(rich: boolean): MarkdownParser {
   md.renderer.rules.s_open = () => '<del>';
   md.renderer.rules.s_close = () => '</del>';
   md.inline.ruler.before('escape', 'boite_math', (state, silent) => {
+    const marker = state.src.charCodeAt(state.pos);
+    if (marker !== 36 && marker !== 92) return false;
     const source = state.src.slice(state.pos);
     const match = /^(?:\$\$(.+?)\$\$|\\\[(.+?)\\\]|\\\((.+?)\\\))/.exec(source);
     const tex = (match?.[1] ?? match?.[2] ?? match?.[3] ?? '').trim();

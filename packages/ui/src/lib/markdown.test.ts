@@ -49,6 +49,11 @@ describe('renderMarkdown', () => {
     expect(renderMarkdown('**Read /tmp/__pycache__**', true)).toBe('<p><strong>Read <a href="#file" data-file-path="/tmp/__pycache__">/tmp/__pycache__</a></strong></p>');
   });
 
+  test('an unfinished link label with a path preserves the preceding text', () => {
+    expect(renderMarkdown('prefix [bad src/a.ts', true)).toBe('<p>prefix [bad <a href="#file" data-file-path="src/a.ts">src/a.ts</a></p>');
+    expect(renderMarkdown('prefix [bad src/a.ts][missing] (later)', true)).toBe('<p>prefix [bad <a href="#file" data-file-path="src/a.ts">src/a.ts</a>][missing] (later)</p>');
+  });
+
   test('inline code keeps emphasis and links literal', () => {
     expect(renderMarkdown('`**literal**` and **bold**')).toBe('<p><code>**literal**</code> and <strong>bold</strong></p>');
     expect(renderMarkdown('`[x](https://example.test)`')).toBe('<p><code>[x](https://example.test)</code></p>');
