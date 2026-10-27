@@ -577,6 +577,10 @@ test('a published view keeps each source content override through ticket renewal
 
 test('a disappeared shared checkout returns a policy refusal', async () => {
   const {b, worker, agent} = await fixture();
+  // The job is admitted before turn preparation finishes. On Windows its Git
+  // processes still hold the checkout until the driver starts its response.
+  const turn = b.h.core.journal.lastTurn(worker.id)!;
+  await waitFor(() => [...b.h.core.journal.walkTurnMessages(worker.id, turn.id)].some(message => message.role === 'assistant'));
   const moved = worker.cwd + '-removed';
   renameSync(worker.cwd, moved);
   try {

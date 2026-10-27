@@ -6,7 +6,7 @@ import type { Journal } from './journal.ts';
 import { MemoryGuard } from './memory-guard.ts';
 import { currentOs } from './paths.ts';
 import type { MemoryProcess } from './memory-guard-logic.ts';
-import { processPlatform } from './platform/index.ts';
+import { registryPlatform } from './platform/index.ts';
 import { type KnownProcess, type ProcessIdentity, unseenIdentity } from './process-identity.ts';
 import { killBunChild, stopGroup } from './platform/posix-kill.ts';
 import type { GuardStatus, NativeProcessExit, NativeProcessInfo, ProcessPlatform } from './platform/types.ts';
@@ -151,7 +151,7 @@ export class ProcRegistry {
   constructor(
     private readonly journal: Journal,
     private readonly bus: Bus,
-    readonly platform: ProcessPlatform = processPlatform,
+    readonly platform: ProcessPlatform = registryPlatform(),
     private readonly options: ProcRegistryOptions = {},
   ) {
     this.protection = new ExecutionProtections(platform.protectedExecution, protectionRunner(this), id => this.stopAndWait(id), id => (platform.hasProcesses?.(id) ? 1 : 0) + this.liveCount(id));

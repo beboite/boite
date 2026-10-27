@@ -5,11 +5,12 @@ import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { RpcErrorCode } from '@boite/contracts';
 import type { ProcessRecord, ThreadSummary } from '@boite/contracts';
-import { cpuRateOfGlobalJob, memoryLimitOfJob, releaseThreadJob, sampleThreadJob } from '../src/platform/windows/jobs.ts';
+import { cpuRateOfGlobalJob, memoryLimitOfJob } from '../src/platform/windows/jobs.ts';
 import { commandLineOf, consoleHost, startedAs, whenCommandLineReads, type ProcessReads } from '../src/platform/windows/process-reads.ts';
 import { jobPacketAction, MSG_JOB_MEMORY_LIMIT, MSG_NEW_PROCESS } from '../src/platform/windows/jobs-packets.ts';
 import { resolveMemoryLimits } from '../src/memory-limits.ts';
 import { nativeAgents } from '../src/native-agents.ts';
+import { nativeScopeOf } from '../src/platform/scoped.ts';
 import { processPlatform } from '../src/platform/index.ts';
 import { STARTUP_PRIORITY } from '../src/procs.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
@@ -67,26 +68,51 @@ afterEach(async () => {
 });
 
 describeWindows('windows job objects', () => {
+  test('closing another core with the same thread ID preserves native descendants and their trace', async () => {
+    const a = harness.core.procs, b = await startTestCore();
+    const id = 'same-public-thread';
+    try {
+      const root = a.spawn(id, 'cmd', ['/c', 'ping -n 30 127.0.0.1']);
+      const other = b.core.procs.spawn(id, 'cmd', ['/c', 'ping -n 30 127.0.0.1']);
+      await until('both owners to trace their descendants', () => a.liveOf(id).some(isPing) && b.core.procs.liveOf(id).some(isPing), 10000);
+      const descendant = a.liveOf(id).find(isPing)!;
+      expect(b.core.procs.liveOf(id).map(row => row.pid)).not.toContain(descendant.pid);
+      expect(a.liveOf(id).map(row => row.pid)).not.toContain(other.record.pid);
+      await b.stop();
+      expect(isRunning(root.record.pid)).toBe(true);
+      expect(isRunning(descendant.pid)).toBe(true);
+      const next = a.spawn(id, 'cmd', ['/c', 'ping -n 30 127.0.0.1']);
+      await until('the surviving owner to trace new descendants', () => a.liveOf(id).filter(isPing).length === 2, 10000);
+      const owned = a.liveOf(id).map(row => row.pid);
+      a.killTree(id);
+      await Promise.all([root.exited, next.exited]);
+      await until('the owning job to stop all its descendants', () => owned.every(pid => !isRunning(pid)) && a.liveCount(id) === 0, 10000);
+      const history = harness.core.journal.listProcesses(id, 20);
+      expect(history.filter(row => owned.includes(row.pid))).toHaveLength(4);
+      expect(history.every(row => row.exitedAt !== null)).toBe(true);
+    } finally {await b.stop();}
+  }, 30000);
+
   test('load samples only the owning thread and drops its exited and forgotten pids', async () => {
     const procs = harness.core.procs;
     const first = procs.spawn('sample-first', 'ping', ['-n', '30', '127.0.0.1']);
     const second = procs.spawn('sample-second', 'ping', ['-n', '30', '127.0.0.1']);
     await until('both sample roots to be tracked', () =>
-      sampleThreadJob('sample-first')?.workingSets?.some(row => row.pid === first.record.pid) === true
-      && sampleThreadJob('sample-second')?.workingSets?.some(row => row.pid === second.record.pid) === true, 10000);
-    expect(sampleThreadJob('sample-first')?.workingSets?.map(row => row.pid)).toEqual([first.record.pid]);
-    expect(sampleThreadJob('sample-second')?.workingSets?.map(row => row.pid)).toEqual([second.record.pid]);
+      procs.platform.sample('sample-first')?.workingSets?.some(row => row.pid === first.record.pid) === true
+      && procs.platform.sample('sample-second')?.workingSets?.some(row => row.pid === second.record.pid) === true, 10000);
+    expect(procs.platform.sample('sample-first')?.workingSets?.map(row => row.pid)).toEqual([first.record.pid]);
+    expect(procs.platform.sample('sample-second')?.workingSets?.map(row => row.pid)).toEqual([second.record.pid]);
     procs.killTree('sample-first');
     await first.exited;
     await until('the first root to leave the live registry', () => procs.liveCount('sample-first') === 0, 5000);
-    expect(sampleThreadJob('sample-first')?.workingSets).toEqual([]);
-    expect(sampleThreadJob('sample-first')?.memoryBytes).toBe(0);
-    expect(sampleThreadJob('sample-second')?.workingSets?.map(row => row.pid)).toEqual([second.record.pid]);
-    releaseThreadJob('sample-first');
-    expect(sampleThreadJob('sample-first')).toBeNull();
+    expect(procs.platform.sample('sample-first')?.workingSets).toEqual([]);
+    expect(procs.platform.sample('sample-first')?.memoryBytes).toBe(0);
+    expect(procs.platform.sample('sample-second')?.workingSets?.map(row => row.pid)).toEqual([second.record.pid]);
+    procs.platform.forget('sample-first');
+    expect(procs.platform.sample('sample-first')).toBeNull();
     await procs.killAll();
     await procs.close();
-    expect(sampleThreadJob('sample-second')).toBeNull();
+    expect(procs.platform.sample('sample-second')).toBeNull();
   }, 30000);
 
   test('launch priority expires without a ready signal and keeps caps and other threads unchanged', async () => {
@@ -97,10 +123,10 @@ describeWindows('windows job objects', () => {
       harness.core.procs.spawn('background', 'ping', ['-n', '30', '127.0.0.1']);
       const client = await harness.connect();
       await client.call('settings.set', { threadMemoryCapMb: 500, agentCpuCapPercent: 50 });
-      expect(memoryLimitOfJob('initializing')).toMatchObject({ priority: 0x20, flags: 0x2220, bytes: Math.floor(500 * 1048576 * 1.1 / 4096) * 4096 });
-      expect(memoryLimitOfJob('background')?.priority).toBe(0x4000);
+      expect(memoryLimitOfJob(nativeScopeOf(harness.core.procs.platform, 'initializing'))).toMatchObject({ priority: 0x20, flags: 0x2220, bytes: Math.floor(500 * 1048576 * 1.1 / 4096) * 4096 });
+      expect(memoryLimitOfJob(nativeScopeOf(harness.core.procs.platform, 'background'))?.priority).toBe(0x4000);
       expect(cpuRateOfGlobalJob()).toEqual({ flags: 5, rate: 5000 });
-      await until('launch priority to expire', () => memoryLimitOfJob('initializing')?.priority === 0x4000, 6000);
+      await until('launch priority to expire', () => memoryLimitOfJob(nativeScopeOf(harness.core.procs.platform, 'initializing'))?.priority === 0x4000, 6000);
       expect(harness.core.procs.liveCount('initializing')).toBeGreaterThan(0);
       expect(cpuRateOfGlobalJob()).toEqual({ flags: 5, rate: 5000 });
     } finally {
@@ -116,16 +142,16 @@ describeWindows('windows job objects', () => {
       await client.call('settings.set', { agentMemoryBudgetPercent: percent, threadMemoryCapMb: cap });
       const resolved = resolveMemoryLimits(harness.core.settings.get(), totalBytes);
       expect(memoryLimitOfJob(null)).toMatchObject({ flags: 0x2200, bytes: Math.floor(Math.min(resolved.budgetMb * 1048576 * 1.1, totalBytes * 0.9) / 4096) * 4096 });
-      expect(memoryLimitOfJob('memory-cap')).toEqual({ flags: 0x2220, priority: 0x4000, bytes: Math.floor(resolved.threadMemoryCapMb * 1048576 * 1.1 / 4096) * 4096 });
+      expect(memoryLimitOfJob(nativeScopeOf(harness.core.procs.platform, 'memory-cap'))).toEqual({ flags: 0x2220, priority: 0x4000, bytes: Math.floor(resolved.threadMemoryCapMb * 1048576 * 1.1 / 4096) * 4096 });
       expect(cpuRateOfGlobalJob()).toEqual({ flags: 5, rate: 7500 });
     }
     await client.call('settings.set', { memoryProtection: false });
     expect(memoryLimitOfJob(null)).toMatchObject({ flags: 0x2000, bytes: 0 });
-    expect(memoryLimitOfJob('memory-cap')).toEqual({ flags: 0x2020, priority: 0x4000, bytes: 0 });
+    expect(memoryLimitOfJob(nativeScopeOf(harness.core.procs.platform, 'memory-cap'))).toEqual({ flags: 0x2020, priority: 0x4000, bytes: 0 });
     expect(cpuRateOfGlobalJob()).toEqual({ flags: 5, rate: 7500 });
     await client.call('settings.set', { memoryProtection: true });
     expect(memoryLimitOfJob(null)?.flags).toBe(0x2200);
-    expect(memoryLimitOfJob('memory-cap')?.flags).toBe(0x2220);
+    expect(memoryLimitOfJob(nativeScopeOf(harness.core.procs.platform, 'memory-cap'))?.flags).toBe(0x2220);
     harness.core.procs.killTree('memory-cap');
     await child.exited;
   });
@@ -327,7 +353,7 @@ describeWindows('windows job objects', () => {
     // A process in a thread job is what builds the global job the cap lives on.
     const child = harness.core.procs.spawn(threadId, 'ping', ['-n', '30', '127.0.0.1'], { startup: true });
     expect(cpuRateOfGlobalJob()).not.toBeNull();
-    expect(memoryLimitOfJob(threadId)?.priority).toBe(0x20);
+    expect(memoryLimitOfJob(nativeScopeOf(harness.core.procs.platform, threadId))?.priority).toBe(0x20);
 
     const rateAfter = async (percent: number): Promise<{ flags: number; rate: number } | null> => {
       await client.call('settings.set', { agentCpuCapPercent: percent });
@@ -336,7 +362,7 @@ describeWindows('windows job objects', () => {
     // ENABLE | HARD_CAP, and the rate in hundredths of a percent.
     expect(await rateAfter(3)).toEqual({ flags: 0x5, rate: 300 });
     expect(await rateAfter(0)).toEqual({ flags: 0, rate: 0 });
-    expect(memoryLimitOfJob(threadId)?.priority).toBe(0x4000);
+    expect(memoryLimitOfJob(nativeScopeOf(harness.core.procs.platform, threadId))?.priority).toBe(0x4000);
     expect(await rateAfter(40)).toEqual({ flags: 0x5, rate: 4000 });
     expect(await rateAfter(100)).toEqual({ flags: 0, rate: 0 });
 
@@ -344,7 +370,7 @@ describeWindows('windows job objects', () => {
       await rateAfter(percent);
       const uncappedId = `uncapped-start-${percent}`;
       const uncapped = harness.core.procs.spawn(uncappedId, 'ping', ['-n', '30', '127.0.0.1'], { startup: true });
-      expect(memoryLimitOfJob(uncappedId)?.priority).toBe(0x4000);
+      expect(memoryLimitOfJob(nativeScopeOf(harness.core.procs.platform, uncappedId))?.priority).toBe(0x4000);
       expect(cpuRateOfGlobalJob()).toEqual({ flags: 0, rate: 0 });
       harness.core.procs.killTree(uncappedId);
       await uncapped.exited;

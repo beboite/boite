@@ -6,7 +6,6 @@ import {startTestCore, waitFor, type TestCore} from './harness.ts';
 import {policyFile} from '../src/contacts/file-policy.ts';
 import type {ProtectedExecutionInput} from '../src/execution-policy.ts';
 import {publicationState} from './fixtures/native-windows-publication.ts';
-import {sampleThreadJob} from '../src/platform/windows/jobs.ts';
 
 let harness: TestCore | undefined;
 afterEach(async () => {await harness?.stop(); harness = undefined;});
@@ -113,7 +112,7 @@ describe.skipIf(!native)('native Windows protected execution', () => {
         pid: record.pid, parentPid: record.parentPid, exe: record.exe, startedAt: record.startedAt, exitedAt: record.exitedAt}));
     });
     const observe = (phase: string, rootPid: number) => console.error('WINDOWS_PUBLICATION_STATE', JSON.stringify({phase, rootPid,
-      at: performance.now(), job: sampleThreadJob('override'), live: publicationState(procs.liveOf('override'))}));
+      at: performance.now(), job: procs.platform.sample('override'), live: publicationState(procs.liveOf('override'))}));
     try {
       const secret = join(root, '.env'); writeFileSync(secret, 'SYNTHETIC_PROTECTED');
       linkSync(secret, join(root, 'secret-alias'));

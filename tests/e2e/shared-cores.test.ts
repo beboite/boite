@@ -12,15 +12,16 @@ test.each(['unsubscribe','disconnect'] as const)('a member lease closes after it
   try {
     const offered=await a.client.call('sharedProjects.offer',{coreId:b.coreId,projectId:a.ref.projectId,remote:m.ref,requestId:'lease-member'});
     const scope={threadId:a.threadId,sharedProjectId:offered.shared.id};
+    const subscriptions=m.h.core.sharedProjects.subscriptions as unknown as {leases:Map<string,unknown>;timer:unknown};
     await m.client.call('sharedProjects.decide',{sharedProjectId:scope.sharedProjectId,accept:true,requestId:'accept-lease'});
     await a.client.call('sharedProjects.subscribe',{...scope,enabled:true});
+    expect(subscriptions.leases.size).toBe(1);
     await m.client.call('sharedProjects.configure',{sharedProjectId:scope.sharedProjectId,board:true});
     await waitFor(()=>a.h.core.sharedProjects.require(scope.sharedProjectId).access[1].revision===m.h.core.sharedProjects.require(scope.sharedProjectId).access[1].revision);
     if(action==='disconnect') a.client.close();
     else await a.client.call('sharedProjects.subscribe',{...scope,enabled:false});
     await m.client.call('threads.update',{threadId:m.threadId,title:'After member unsubscribe'});
-    await new Promise(resolve=>setTimeout(resolve,250));
-    const subscriptions=m.h.core.sharedProjects.subscriptions as unknown as {leases:Map<string,unknown>;timer:unknown};
+    await waitFor(()=>subscriptions.leases.size===0&&subscriptions.timer===null);
     expect(subscriptions.leases.size).toBe(0);
     expect(subscriptions.timer).toBeNull();
   } finally {await f.close();}
@@ -142,6 +143,12 @@ test('a member initiates the association, survives restart and cancels only its 
     await f.restart(m);
     expect((await m.client.call('sharedProjects.get',scope)).shared.authority).toEqual(m.ref);
     const stopped = await m.client.call('sharedCompute.cancel', {...scope,jobId:job.id,requestId:'reverse-stop'});
+    if (stopped.status !== 'cancelled') {
+      const workerId = a.h.core.sharedCompute.journal.get(job.id, 'host')?.job.worker?.threadId;
+      console.error('REVERSE_COMPUTE_ADMISSION', JSON.stringify({job: stopped, host: a.h.core.sharedCompute.journal.get(job.id, 'host')?.job,
+        processes: workerId ? a.h.core.journal.listProcesses(workerId, 100) : [],
+        logs: workerId ? await a.h.core.logs.query({threadId: workerId, limit: 100}) : []}));
+    }
     expect(stopped.status).toBe('cancelled');
     expect(a.h.core.sharedCompute.journal.get(job.id,'host')!.job.result).toBeNull();
     expect(a.h.core.journal.getTurn(turn.id)?.status).toBe('running');

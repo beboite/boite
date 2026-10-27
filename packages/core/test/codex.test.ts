@@ -12,6 +12,7 @@ import { codexQuotaDetails } from '../src/quota-details.ts';
 import { consumeCodexReset } from '../src/drivers/codex/models.ts';
 import { CodexRateLimits } from '../src/drivers/codex/rate-limits.ts';
 import type { CodexRpc } from '../src/drivers/codex/rpc.ts';
+import { nativeScopeOf } from '../src/platform/scoped.ts';
 import { memoryLimitOfJob, cpuRateOfGlobalJob } from '../src/platform/windows/jobs.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import { TITLE_RETRY } from '../src/threads/retitle.ts';
@@ -1252,7 +1253,7 @@ describe('codex driver', () => {
     await client.call('turns.start', { threadId, prompt: 'expensive prompt' });
     await waitFor(() => fakeLog().includes('thread/start'));
     if (process.platform === 'win32') {
-      expect(memoryLimitOfJob(threadId)?.priority).toBe(0x20);
+      expect(memoryLimitOfJob(nativeScopeOf(harness!.core.procs.platform, threadId))?.priority).toBe(0x20);
       expect(cpuRateOfGlobalJob()).toEqual({ flags: 5, rate: 7500 });
     }
     expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
@@ -1260,7 +1261,7 @@ describe('codex driver', () => {
     expect(done.status).toBe('stopped');
     expect(done.error).toBeNull();
     expect(fakeLog()).not.toContain('turn/start');
-    if (process.platform === 'win32') expect(memoryLimitOfJob(threadId)?.priority).toBe(0x4000);
+    if (process.platform === 'win32') expect(memoryLimitOfJob(nativeScopeOf(harness!.core.procs.platform, threadId))?.priority).toBe(0x4000);
     // The thread the agent opened is kept for the next turn.
     expect((await client.call('threads.get', { threadId })).sessionId).not.toBeNull();
   });
@@ -1328,11 +1329,11 @@ describe('codex driver', () => {
     await runTurn(warmClient, warmThread, 'first');
     expect(warm.started).toHaveLength(1);
     expect(warm.exited).toHaveLength(0);
-    if (process.platform === 'win32') expect(memoryLimitOfJob(warmThread)?.priority).toBe(0x4000);
+    if (process.platform === 'win32') expect(memoryLimitOfJob(nativeScopeOf(harness!.core.procs.platform, warmThread))?.priority).toBe(0x4000);
     await runTurn(warmClient, warmThread, 'second');
     expect(warm.started).toHaveLength(1);
     expect(warm.exited).toHaveLength(0);
-    if (process.platform === 'win32') expect(memoryLimitOfJob(warmThread)?.priority).toBe(0x4000);
+    if (process.platform === 'win32') expect(memoryLimitOfJob(nativeScopeOf(harness!.core.procs.platform, warmThread))?.priority).toBe(0x4000);
     // One process, so one `initialize` and one `thread/start` for the two turns.
     expect(countLines('initialize')).toBe(1);
     await stopCore();

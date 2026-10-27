@@ -73,6 +73,12 @@ asynchronously, so the core keeps serving while it starts. The child's own kill
 runs once taskkill ends, since `/T` needs the root alive to find the tree, and
 `killAll` at shutdown waits for both.
 
+Independent cores in one process share the native drain, with an opaque job
+scope per registry and thread. Starts, exits, guards and controls use that same
+scope. Equal public thread IDs in different cores stay independent; closing a
+registry removes only its routes, jobs and guarded PIDs. A restarted registry
+gets fresh scopes, so delayed events cannot attach to its replacement.
+
 Codex initialization can temporarily use normal priority for at most 30 seconds.
 The driver restores below-normal priority on ready, failure or Stop; the registry
 also restores it on exit or deadline. A refused downgrade retries every 250 ms.
