@@ -359,8 +359,15 @@ export class ContactMailboxes {
     if (!this.mailboxes().length) return;
     // A queued provider wake can return an uncertain receipt; refresh it until settled.
     this.init();
-    // The indexed retry order keeps both selection and deserialization within the batch.
-    const next = (this.core.journal.db.query("SELECT letter.mailbox, letter.direction, letter.data FROM temp.contact_route_attempts AS retry CROSS JOIN contact_route_letters AS letter WHERE letter.id = retry.id AND letter.mailbox = retry.mailbox AND letter.direction = 'in' ORDER BY retry.attempt, retry.createdAt, retry.id, retry.mailbox LIMIT ?").all(4 + this.busy.size) as Row[]).map(row => JSON.parse(row.data) as StoredLetter);
+    // Reserve one slot for an older retry; new arrivals cannot postpone it until expiry.
+    const select = "SELECT letter.id, letter.mailbox, letter.direction, letter.data FROM temp.contact_route_attempts AS retry CROSS JOIN contact_route_letters AS letter WHERE letter.id = retry.id AND letter.mailbox = retry.mailbox AND letter.direction = 'in' AND retry.id NOT IN (SELECT value FROM json_each(?))";
+    const order = 'ORDER BY retry.attempt, retry.createdAt, retry.id, retry.mailbox';
+    const excluded = [...this.busy];
+    const retry = this.core.journal.db.query(`${select} AND retry.attempt > 0 ${order} LIMIT 1`).get(JSON.stringify(excluded)) as (Row & { id: string }) | null;
+    if (retry) excluded.push(retry.id);
+    const remaining = this.core.journal.db.query(`${select} ${order} LIMIT ?`).all(JSON.stringify(excluded), 4 - (retry ? 1 : 0)) as Row[];
+    // Both indexed selections skip in-flight letters before reading at most four payloads.
+    const next = (retry ? [retry, ...remaining] : remaining).map(row => JSON.parse(row.data) as StoredLetter);
     for (const letter of next) {
       if (this.busy.has(letter.wire.id)) continue;
       this.core.journal.db.query('UPDATE temp.contact_route_attempts SET attempt = ? WHERE id = ? AND mailbox = ?').run(++this.attempt, letter.wire.id, letter.mailbox);
