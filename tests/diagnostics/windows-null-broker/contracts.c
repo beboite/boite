@@ -1,9 +1,14 @@
 #include "contracts.h"
 #include <assert.h>
 #include <stdio.h>
-typedef struct {int count[4]; unsigned suspended, resumed;} TRACE;
-static int hold(void *ctx, uint32_t id) {TRACE *t = ctx; assert(id < 4); ++t->count[id]; ++t->suspended; return 1;}
-static int release(void *ctx, uint32_t id) {TRACE *t = ctx; assert(id < 4 && t->count[id] == 1); --t->count[id]; ++t->resumed; return 1;}
+typedef struct {int count[5]; unsigned suspended, resumed, terminating, failing;} TRACE;
+static int hold(void *ctx, uint32_t id) {
+  TRACE *t = ctx; assert(id < 5);
+  if (t->failing & (1u << id)) return 0;
+  if (t->terminating & (1u << id)) return 2;
+  ++t->count[id]; ++t->suspended; return 1;
+}
+static int release(void *ctx, uint32_t id) {TRACE *t = ctx; assert(id < 5 && t->count[id] == 1); --t->count[id]; ++t->resumed; return 1;}
 static int query(void *ctx, uintptr_t address, NB_REGION *r) {
   int mode = *(int *)ctx;
   *r = (NB_REGION){address & ~(uintptr_t)4095, 4096, 1, 1, 0};
@@ -38,6 +43,32 @@ int main(void) {
   assert(t.count[1] == 1 && t.count[2] == 0);
   assert(nb_finish(&s, 2, release, &t));
   assert(t.suspended == t.resumed && t.count[1] == 0 && t.count[2] == 0 && t.count[3] == 0);
+  NB_STEP parked = {0}; TRACE parking = {.terminating = 1u << 3};
+  assert(nb_join(&parked, 1, hold, &parking) && nb_join(&parked, 2, hold, &parking) && nb_join(&parked, 3, hold, &parking));
+  /* A terminating sibling was NOT suspended. Keep int3 intact and park A. */
+  assert(nb_begin(&parked, 1, 0x100, hold, &parking) == 2);
+  assert(parking.count[1] == 1 && parking.count[2] == 1 && parking.count[3] == 0);
+  assert(parked.phase == NB_WAIT_EXIT && !nb_finish(&parked, 1, release, &parking));
+  assert(!nb_replayed(&parked, 1, 0x100) && !nb_depart(&parked, 1) && !nb_depart(&parked, 2) && !nb_depart(&parked, 99));
+  assert(nb_defer(&parked, 2)); /* B's queued trap remains held throughout parking. */
+  parking.terminating |= 1u << 4;
+  assert(nb_join(&parked, 4, hold, &parking) && parking.count[4] == 0);
+  assert(nb_wake(&parked, release, &parking) && parked.phase == NB_WAIT_EXIT);
+  assert(nb_depart(&parked, 3)); /* The adapter continues this real exit first. */
+  assert(nb_wake(&parked, release, &parking) && parked.phase == NB_WAIT_EXIT && parking.count[1] == 1);
+  assert(nb_depart(&parked, 4));
+  assert(nb_wake(&parked, release, &parking) && parked.phase == NB_REPLAYING && parking.count[1] == 0 && parking.count[2] == 1);
+  assert(nb_wake(&parked, release, &parking)); /* Cannot resume owner twice. */
+  assert(!nb_replayed(&parked, 2, 0x100) && !nb_replayed(&parked, 1, 0x200));
+  assert(nb_replayed(&parked, 1, 0x100) && !nb_replayed(&parked, 1, 0x100));
+  assert(nb_finish(&parked, 1, release, &parking)); /* Trap rearmed before B resumes. */
+  assert(parking.suspended == parking.resumed && !parking.count[1] && !parking.count[2]);
+  for (unsigned failure = 1; failure <= 2; ++failure) {
+    NB_STEP bad = {0}; TRACE failing = {.terminating = 1u << 3, .failing = 1u << failure};
+    assert(nb_join(&bad, 1, hold, &failing) && nb_join(&bad, 2, hold, &failing) && nb_join(&bad, 3, hold, &failing));
+    assert(nb_begin(&bad, 1, 0x100, hold, &failing) == NB_HOLD_FAILED);
+    /* An unknown sibling failure or failed owner park never exposes the instruction. */
+  }
   int mode = 0;
   assert(nb_outputs(0x1000, 0x2000, query, &mode));
   assert(nb_output_span(0x1ff8, 16, 8, query, &mode));
@@ -89,5 +120,5 @@ int main(void) {
   assert(!nb_credential_absent(handles,sizeof(handles),candidate,control));
   count=0; memcpy(handles,&count,8);
   assert(!nb_credential_absent(handles,sizeof(handles),candidate,control));
-  puts("NB_LOCAL queued-replay=1 balanced=1 progress=2 pointer-contracts=1 qos-snapshot=1 create-abi=1 credential-snapshot=1"); return 0;
+  puts("NB_LOCAL queued-replay=1 balanced=1 progress=2 pointer-contracts=1 qos-snapshot=1 create-abi=1 credential-snapshot=1 terminating-replay=1"); return 0;
 }

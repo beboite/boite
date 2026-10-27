@@ -26,7 +26,8 @@ static int nb_hold(void *ctx, uint32_t id) {
   int queried=old==(DWORD)-1&&t&&GetExitCodeThread(t,&exit_code);
   fwprintf(stderr, L"NB_SUSPEND pid=%lu tid=%lu owner=%lu previous=%lu error=%lu wait=%lu exitKnown=%d exitCode=%lu status=0x%08lx\n",
     p->id, (DWORD)id, (DWORD)p->step.owner, old,error,wait,queried,exit_code,(DWORD)status);
-  return old != (DWORD)-1;
+  if ((DWORD)status == 0xc000004b) return NB_TERMINATING;
+  return old != (DWORD)-1 ? NB_HELD : NB_HOLD_FAILED;
 }
 static int nb_release(void *ctx, uint32_t id) {
   NB_PROCESS *p = ctx; HANDLE t = nb_thread_handle(p, id); DWORD old = t ? ResumeThread(t) : (DWORD)-1;
@@ -295,7 +296,9 @@ static int nb_exception(NB_DEBUG *d, NB_PROCESS *p, DEBUG_EVENT *e, DWORD *conti
   int site = address == p->sites[0] ? 0 : address == p->sites[1] ? 1 : -1;
   if (nb_enabled && code == EXCEPTION_BREAKPOINT && site >= 0 && p->image) {
     if (!thread || !GetThreadContext(thread, &c) || c.Rip != address + 1 || (c.EFlags & 0x100)) return 0;
-    if (p->step.owner) {
+    int replay = p->step.owner == e->dwThreadId && nb_replayed(&p->step, e->dwThreadId, address);
+    if (replay) fwprintf(stderr, L"NB_REPLAY pid=%lu tid=%lu\n", p->id, e->dwThreadId);
+    if (p->step.owner && !replay) {
       if (!nb_defer(&p->step, e->dwThreadId)) return 0;
       c.Rip = address;
       if (!SetThreadContext(thread, &c)) return 0;
@@ -303,15 +306,23 @@ static int nb_exception(NB_DEBUG *d, NB_PROCESS *p, DEBUG_EVENT *e, DWORD *conti
     } else {
       int delegated = nb_delegate(d, p, e->dwThreadId, &c, site);
       if (delegated < 0) return 0;
+      if (delegated && replay && !nb_finish(&p->step, e->dwThreadId, nb_release, p)) return 0;
       if (!delegated) {
-        if (!nb_begin(&p->step, e->dwThreadId, address, nb_hold, p)) return 0;
+        int begun = replay ? NB_HELD : nb_begin(&p->step, e->dwThreadId, address, nb_hold, p);
+        if (!begun) return 0;
+        if (begun == NB_TERMINATING) {
+          unsigned waiting = 0;
+          for (unsigned i = 0; i < NB_THREADS; ++i) waiting += p->step.threads[i].live && p->step.threads[i].terminating;
+          fwprintf(stderr, L"NB_PARK pid=%lu tid=%lu waiting=%u\n", p->id, e->dwThreadId, waiting);
+          *continuation = DBG_REPLY_LATER; return 1;
+        }
         p->flags = c.EFlags; c.Rip = address; c.EFlags |= 0x100;
         if (!nb_patch(p, address, p->originals[site]) || !SetThreadContext(thread, &c)) return 0;
       }
     }
     *continuation = DBG_CONTINUE; return 1;
   }
-  if (code == EXCEPTION_SINGLE_STEP && p->step.owner == e->dwThreadId) {
+  if (code == EXCEPTION_SINGLE_STEP && p->step.owner == e->dwThreadId && p->step.phase == NB_STEPPING) {
     if (!thread || !GetThreadContext(thread, &c) || c.Rip != p->step.site + 3 ||
         !nb_patch(p, p->step.site, 0xcc)) return 0;
     c.EFlags = p->flags;
@@ -387,7 +398,7 @@ static DWORD nb_debug_loop(HANDLE job, PROCESS_INFORMATION *root, PSID package, 
     ++d.events;
     pending = 1;
     fwprintf(stderr, L"NB_EVENT number=%u pid=%lu tid=%lu code=%lu\n", d.events, e.dwProcessId, e.dwThreadId, e.dwDebugEventCode);
-    NB_PROCESS *p = nb_process(&d, e.dwProcessId); DWORD continuation = DBG_CONTINUE; int ok = 1, retire = 0;
+    NB_PROCESS *p = nb_process(&d, e.dwProcessId); DWORD continuation = DBG_CONTINUE; int ok = 1, retire = 0, departed = 0;
     if (e.dwDebugEventCode == CREATE_PROCESS_DEBUG_EVENT) {
       if (p || d.stopping) ok = 0;
       else {
@@ -428,8 +439,10 @@ static DWORD nb_debug_loop(HANDLE job, PROCESS_INFORMATION *root, PSID package, 
         break;
       case EXIT_THREAD_DEBUG_EVENT: {
         NB_THREAD_STATE *t = nb_thread(&p->step, e.dwThreadId);
-        if (!d.stopping && (!t || t->held || p->step.owner == e.dwThreadId)) ok = 0;
-        if (t) t->live = 0;
+        if (!d.stopping) {
+          departed = t && t->terminating;
+          if (!nb_depart(&p->step, e.dwThreadId)) ok = 0;
+        } else if (t) t->live = 0;
         for (unsigned i = 0; i < NB_THREADS; ++i) if (p->threads[i].id == e.dwThreadId) {
           if (!CloseHandle(p->threads[i].handle)) ok = 0;
           else fwprintf(stderr, L"NB_HANDLE pid=%lu tid=%lu kind=thread action=close\n", p->id, p->threads[i].id);
@@ -455,6 +468,10 @@ static DWORD nb_debug_loop(HANDLE job, PROCESS_INFORMATION *root, PSID package, 
      * Kernel debug process/thread handles are NEVER closed by this adapter. */
     if (!ContinueDebugEvent(e.dwProcessId, e.dwThreadId, continuation)) {error = GetLastError(); break;}
     pending = 0;
+    if (departed && ok && !d.stopping) {
+      fwprintf(stderr, L"NB_RETIRED pid=%lu tid=%lu continued=1\n", p->id, e.dwThreadId);
+      if (!nb_wake(&p->step, nb_release, p)) ok = 0;
+    }
     if (retire && p && !nb_close_process(p)) ok = 0;
     if (!ok && !d.stopping) {
       error = ERROR_NOT_SUPPORTED; d.stopping = 1; drain_deadline = GetTickCount64() + 8000;

@@ -324,8 +324,14 @@ cannot replace the ordinary workload children. Expiry requires an automatic
 stop request after the deadline while the scope was live, followed by actual
 session cleanup and zero live processes. The observer waits for that cleanup
 within its existing deadline rather than stopping at the first empty process
-count. Raw `NtSuspendThread` status identifies a failed suspension; a failure
-still drains the job and never counts as a suspended or safely retired thread.
+count. Raw `NtSuspendThread` status identifies a failed suspension. An exact
+`STATUS_THREAD_IS_TERMINATING` parks the untouched breakpoint owner using
+[`DBG_REPLY_LATER`](https://learn.microsoft.com/en-us/windows/win32/api/debugapi/nf-debugapi-continuedebugevent).
+The owner resumes only after every terminating sibling's real thread-exit event
+has been continued; its replay is decoded again before any trap removal.
+Successful sibling suspensions remain held until the trap is rearmed. A failed
+park, an unexpected status or a missing exit/replay still drains the job within
+the existing deadline. Failed suspensions never count as held or retired threads.
 
 A skip passes in a ruleset, so a draft must not satisfy it:
 

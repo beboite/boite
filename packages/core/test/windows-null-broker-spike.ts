@@ -21,7 +21,7 @@ const verdict = (kind: BrokerVerdict['kind']): BrokerVerdict => ({kind, experime
 const decimal = (value?: string) => !!value && /^(?:0|[1-9]\d*)$/.test(value) && Number.isSafeInteger(Number(value));
 const hex = (value?: string) => !!value && /^0x[0-9a-f]{8}$/.test(value);
 const negativeStatus = (value?: string) => hex(value) && Number.parseInt(value!, 16) >= 0x80000000;
-const known = new Set(['BIND','IMAGE','PROCESS_IMAGE','PRIMITIVE','END','FAILURE','POINTER','EVENT','HANDLE','SUSPEND','RESUME','DEFER',
+const known = new Set(['BIND','IMAGE','PROCESS_IMAGE','PRIMITIVE','END','FAILURE','POINTER','EVENT','HANDLE','SUSPEND','RESUME','DEFER','PARK','RETIRED','REPLAY',
   'DRAIN','INPUT','QOS','PASSTHROUGH','DELEGATE','EXCEPTION','EXIT','OPEN','MODE','OBJECT','CHECK','DENY','BREAKAWAY','CREDENTIAL','OFF','READY','DETACHED','BUN','ROLLBACK','MEASUREMENT','TRANSFER']);
 function parse(text: string): Row[] | null {
   const rows: Row[] = [];
@@ -45,13 +45,38 @@ function completeTrace(rows: Row[], bindings: Row[]): boolean {
   const created = new Set<string>(), loaded = new Set<string>(), startup = new Set<string>();
   const held = new Map<string, {owner: string; previous: number; deferred: boolean}>();
   const owners = new Map<string, string>();
+  const terminating = new Map<string, string>(), parks = new Map<string, 'parking'|'waiting'|'ready'>();
+  let currentEvent: Row | undefined;
   const ownership = new Map<string, string>();
   let eventNumber = 0;
   for (const row of rows) {
     const pid = row.pid!, tid = row.tid!, threads = processes.get(pid);
+    if (parks.has(pid)&&['INPUT','QOS','DELEGATE','PASSTHROUGH','MEASUREMENT','TRANSFER'].includes(row.tag!))return false;
+    if (row.tag === 'PARK') {
+      if (currentEvent?.pid!==pid||currentEvent.tid!==tid||currentEvent.code!=='1'||
+          parks.get(pid)!=='parking'||owners.get(pid)!==tid||!decimal(row.waiting)||row.waiting==='0'||
+          [...terminating.entries()].filter(([key,owner])=>key.startsWith(`${pid}:`)&&owner===tid).length!==Number(row.waiting)||
+          [...threads??[]].some(id=>!held.has(`${pid}:${id}`)&&!terminating.has(`${pid}:${id}`))) return false;
+      parks.set(pid,'waiting'); continue;
+    }
+    if (row.tag === 'RETIRED') {
+      const key=`${pid}:${tid}`;
+      if (parks.get(pid)!=='waiting'||terminating.get(key)!==owners.get(pid)||row.continued!=='1'||
+          currentEvent?.pid!==pid||currentEvent.tid!==tid||currentEvent.code!=='4'||threads?.has(tid)||
+          ownership.get(`${pid}:thread:${tid}`)!=='close') return false;
+      terminating.delete(key); continue;
+    }
+    if (row.tag === 'REPLAY') {
+      if (parks.get(pid)!=='ready'||owners.get(pid)!==tid||currentEvent?.pid!==pid||currentEvent.tid!==tid||currentEvent.code!=='1')return false;
+      parks.delete(pid);
+      if (![...held.keys()].some(k=>k.startsWith(`${pid}:`)))owners.delete(pid);
+      continue;
+    }
     if (row.tag === 'HANDLE') {
       const key = `${pid}:${row.kind}:${tid}`;
       if (!handles.has(key)) return false;
+      if (row.action==='close'&&row.kind==='thread'&&terminating.has(`${pid}:${tid}`)&&
+          (currentEvent?.pid!==pid||currentEvent.tid!==tid||currentEvent.code!=='4'||threads?.has(tid)))return false;
       if (row.action === 'own' && !ownership.has(key)) ownership.set(key, 'own');
       else if (row.action === 'close' && ownership.get(key) === 'own') ownership.set(key, 'close');
       else return false;
@@ -64,22 +89,42 @@ function completeTrace(rows: Row[], bindings: Row[]): boolean {
     if (row.tag === 'CREDENTIAL' && !live.has(pid)) return false;
     if ((row.tag==='BREAKAWAY'||row.tag==='CHECK'&&row.name==='breakaway-child')&&!live.has(pid))return false;
     if (['SUSPEND','RESUME','DEFER'].includes(row.tag!)) {
-      if (!live.has(pid) || !threads?.has(tid) || !threads.has(row.owner!) || tid === row.owner) return false;
+      if (!live.has(pid) || !threads?.has(tid) || !threads.has(row.owner!)) return false;
       const key = `${pid}:${tid}`, previous = held.get(key);
       if (row.tag === 'SUSPEND') {
-        if (previous || !decimal(row.previous) || Number(row.previous) >= 0xffffffff || (row.status!==undefined&&row.status!=='0x00000000') || (owners.has(pid) && owners.get(pid) !== row.owner)) return false;
+        if (previous || terminating.has(key) || (owners.has(pid) && owners.get(pid) !== row.owner)) return false;
+        if (currentEvent?.pid!==pid || !(currentEvent.code==='1'&&currentEvent.tid===row.owner ||
+            currentEvent.code==='2'&&currentEvent.tid===tid&&tid!==row.owner))return false;
+        if (row.status==='0xc000004b') {
+          if (tid===row.owner||row.previous!=='4294967295'||row.error!=='5'||(parks.has(pid)&&parks.get(pid)!=='waiting'))return false;
+          owners.set(pid,row.owner!); terminating.set(key,row.owner!); continue;
+        }
+        if (!decimal(row.previous)||Number(row.previous)>=0xffffffff||(row.status!==undefined&&row.status!=='0x00000000'))return false;
+        if (tid===row.owner) {
+          if (row.status!=='0x00000000'||row.error!=='0'||currentEvent.code!=='1'||parks.has(pid)||
+              ![...terminating.keys()].some(k=>k.startsWith(`${pid}:`)))return false;
+          parks.set(pid,'parking');
+        }
         owners.set(pid, row.owner!); held.set(key, {owner: row.owner!, previous: Number(row.previous), deferred: false});
       } else if (row.tag === 'DEFER') {
-        if (!previous || previous.owner !== row.owner || previous.deferred) return false;
+        if (tid===row.owner || !previous || previous.owner !== row.owner || previous.deferred) return false;
         previous.deferred = true;
       } else {
         if (!previous || previous.owner !== row.owner || !decimal(row.previous) || Number(row.previous) !== previous.previous + 1) return false;
+        if (tid===row.owner) {
+          if (parks.get(pid)!=='waiting'||[...terminating.keys()].some(k=>k.startsWith(`${pid}:`)))return false;
+          parks.set(pid,'ready');
+        } else if (parks.has(pid)||[...terminating.keys()].some(k=>k.startsWith(`${pid}:`)))return false;
         held.delete(key);
-        if (![...held.keys()].some(k => k.startsWith(`${pid}:`))) owners.delete(pid);
+        if (!parks.has(pid)&&![...held.keys()].some(k => k.startsWith(`${pid}:`))) owners.delete(pid);
       }
       continue;
     }
     if (row.tag !== 'EVENT') continue;
+    // The initial park is one synchronous exception transaction. A new event
+    // proves it was continued before the owner park was recorded.
+    if ([...terminating.keys()].some(key=>parks.get(key.split(':')[0]!)!=='waiting'))return false;
+    currentEvent=row;
     if (row.number !== String(++eventNumber) || !bound.has(pid) || !decimal(tid) || tid === '0') return false;
     const code = row.code;
     if (code === '3') {
@@ -108,7 +153,7 @@ function completeTrace(rows: Row[], bindings: Row[]): boolean {
       else if (code !== '7' && code !== '8') return false;
     }
   }
-  if (held.size || owners.size) return false;
+  if (held.size || owners.size || terminating.size || parks.size) return false;
   if (live.size || created.size !== bound.size || loaded.size !== bound.size || startup.size !== bound.size) return false;
   return ownership.size === handles.size && [...ownership.values()].every(action => action === 'close');
 }

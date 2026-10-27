@@ -38,6 +38,45 @@ describe('Null broker evidence admission', () => {
     expect(classifyBroker(negative.replace('action=close','action=own'),'primitive').experimentComplete).toBe(false);
     expect(classifyBroker(negative.replace(primitiveDelegate,'').replace('delegations=1','delegations=0'),'primitive').experimentComplete).toBe(false);
   });
+  test('terminating siblings require a parked trap, continued exit and the actual replay', () => {
+    const parked = [
+      'NB_EVENT number=4 pid=10 tid=12 code=2', 'NB_HANDLE pid=10 tid=12 kind=thread action=own',
+      'NB_EVENT number=5 pid=10 tid=11 code=1',
+      'NB_SUSPEND pid=10 tid=12 owner=11 previous=4294967295 error=5 wait=258 exitKnown=1 exitCode=259 status=0xc000004b',
+      'NB_SUSPEND pid=10 tid=11 owner=11 previous=0 error=0 wait=258 exitKnown=0 exitCode=0 status=0x00000000',
+      'NB_PARK pid=10 tid=11 waiting=1', 'NB_EVENT number=6 pid=10 tid=12 code=4',
+      'NB_HANDLE pid=10 tid=12 kind=thread action=close', 'NB_RETIRED pid=10 tid=12 continued=1',
+      'NB_RESUME pid=10 tid=11 owner=11 previous=1', 'NB_EVENT number=7 pid=10 tid=11 code=1', 'NB_REPLAY pid=10 tid=11',
+    ];
+    const text = [bind,identity,...trace.slice(0,6),...parked,input,primitiveDelegate,denial,...trace.slice(6).map(r=>r.replace('number=4','number=8')),negativeEnd].join('\n');
+    expect(classifyBroker(text,'primitive').kind).toBe('negative');
+    for (const row of parked) expect(classifyBroker(text.replace(row,''),'primitive').experimentComplete).toBe(false);
+    for (const [before,after] of [['0xc000004b','0xc0000022'],['NB_PARK pid=10 tid=11 waiting=1','NB_PARK pid=10 tid=11 waiting=0'],['continued=1','continued=0']]) {
+      expect(classifyBroker(text.replace(before!,after!),'primitive').experimentComplete).toBe(false);
+    }
+    const exit=parked.slice(6,9).join('\n'), wake=parked[9]!;
+    expect(classifyBroker(text.replace(exit,'').replace(wake,`${wake}\n${exit}`),'primitive').experimentComplete).toBe(false);
+    expect(classifyBroker(text.replace(parked[11]!,'').replace(parked[10]!,`${parked[11]}\n${parked[10]}`),'primitive').experimentComplete).toBe(false);
+    expect(classifyBroker(text.replace(parked[11]!,'').replace(primitiveDelegate,`${primitiveDelegate}\n${parked[11]}`),'primitive').experimentComplete).toBe(false);
+    const owner = parked[4]!, close = parked[7]!, park = parked[5]!;
+    const mutations = (capture: string) => [
+      capture.replace(owner,owner.replace(' status=0x00000000','').replace('error=0','error=5')),
+      capture.replace(owner,owner.replace('error=0','error=5')),
+      capture.replace(owner,owner.replace(' status=0x00000000','')),
+      capture.replace(owner,owner.replace(' error=0','')),
+      capture.replace(park,'').replace(parked[8]!,`${park}\n${parked[8]}`),
+      capture.replace(close,'').replace(/NB_EVENT number=\d+ pid=10 tid=12 code=4/,match=>`${close}\n${match}`),
+      capture.replace(owner,`NB_EVENT number=0 pid=10 tid=11 code=1\n${owner}`).replace(/NB_EVENT number=\d+/g,((number=0)=>()=>`NB_EVENT number=${++number}`)()),
+    ];
+    let number = 0;
+    const complete = positiveCapture().replace(/NB_SUSPEND pid=10 tid=12 owner=11[\s\S]*?NB_HANDLE pid=10 tid=12 kind=thread action=close/,parked.slice(2).join('\n'))
+      .replace(/NB_EVENT number=\d+/g,()=>`NB_EVENT number=${++number}`);
+    expect(classifyBroker(complete,'native',false,nativeImages).kind).toBe('positive');
+    expect([
+      ...mutations(text).map(capture=>classifyBroker(capture,'primitive').experimentComplete),
+      ...mutations(complete).map(capture=>classifyBroker(capture,'native',false,nativeImages).experimentComplete),
+    ]).toEqual(Array(14).fill(false));
+  });
   test('timeouts, unsupported images and setup failures are never negative proof', () => {
     for (const kind of ['timeout', 'unsupported', 'setup'] as const) expect(classifyBroker(`${negative}\nNB_FAILURE kind=${kind} code=50`, 'primitive').kind).toBe(kind);
     expect(classifyBroker(negative, 'primitive', true).kind).toBe('timeout');
@@ -86,6 +125,7 @@ test('shared native scheduler and output-span contracts: queued trap B cannot su
   expect(result.out).toContain('create-abi=1');
   expect(result.out).toContain('credential-snapshot=1');
   expect(result.out).toContain('breakaway-dispatch=1');
+  expect(result.out).toContain('terminating-replay=1');
 });
 
 test('source generation pins the production reference and rejects a second replacement', () => {
