@@ -72,7 +72,7 @@ export class CoreFailures {
 
   /** False when the window ended before every stalled step's probe and late answer arrived. */
   async settle(): Promise<boolean> {
-    const waiting = () => this.#calls > 0 || this.#owed > 0;
+    const waiting = () => this.#calls > 0 || this.#owed > 0 || this.#early > 0;
     if (!waiting()) return true;
     let ended = false;
     const end = this.wait(this.windowMs).then(() => { ended = true; });

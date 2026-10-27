@@ -81,6 +81,16 @@ test('a freeze diagnosed in full earlier does not answer for a wake that fails l
   expect(failures.lines).toEqual([FREEZE_STALLED, NEVER, RPC, STALLED, LATE]);
 });
 
+test('a freeze whose late answer came before its probe keeps the core until the probe reports', async () => {
+  const { failures } = controlledWindow();
+  failures.record(NEVER, 'browser.sleep-late');
+  const settling = failures.settle();
+  expect(await settled(settling)).toBe(false);
+  failures.record(STALLED, 'browser.sleep-stalled');
+  expect(await settling).toBe(true);
+  expect(failures.lines).toEqual([NEVER, STALLED]);
+});
+
 test('a window that ends before the late answer settles false with what was heard', async () => {
   const { failures, end } = controlledWindow();
   failures.record(RPC, 'rpc.failed');
