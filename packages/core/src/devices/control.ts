@@ -24,6 +24,9 @@ import {
   type Settings,
   type ThreadId,
 } from '@boite/contracts';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
 import { machineName } from '../paths.ts';
@@ -479,6 +482,8 @@ export class MobileDevices {
     const run = target.platform === 'android'
       ? await this.#run(this.#adb().adb, ['-s', target.serial!, 'emu', 'kill'], COMMAND_TIMEOUT_MS)
       : await this.#run(this.#xcrun(), ['simctl', 'shutdown', target.id], COMMAND_TIMEOUT_MS);
+    // A simulator someone already shut down is the state asked for; simctl still answers with an error.
+    if (target.platform === 'ios' && run.code !== 0 && /Unable to shutdown device in current state: Shutdown/i.test(run.stderr)) return;
     if (run.code !== 0) throw refused(`powering ${target.name} off failed: ${this.#why(run)}`, { deviceId: target.id });
   }
 
@@ -490,7 +495,7 @@ export class MobileDevices {
     const png = (async () => {
       const run = target.platform === 'android'
         ? await this.#run(this.#adb().adb, ['-s', target.serial!, 'exec-out', 'screencap', '-p'], COMMAND_TIMEOUT_MS)
-        : await this.#run(this.#xcrun(), ['simctl', 'io', target.id, 'screenshot', '--type=png', '-'], COMMAND_TIMEOUT_MS);
+        : await this.#simctlScreenshot(target);
       const size = run.code === 0 ? pngSize(run.stdout) : undefined;
       if (!size) throw refused(`the screen of ${target.name} could not be captured: ${this.#why(run) || 'not a PNG'}`, { deviceId: target.id });
       return { bytes: run.stdout, ...size, hash: new Bun.CryptoHasher('sha1').update(run.stdout).digest('hex') };
@@ -499,6 +504,22 @@ export class MobileDevices {
     this.#captures.set(target.id, capture);
     png.catch(() => { if (this.#captures.get(target.id) === capture) this.#captures.delete(target.id); });
     return png;
+  }
+
+  /** Since Xcode 27, `screenshot -` writes a file named `-` instead of stdout: simctl writes to a private folder, removed once read. */
+  async #simctlScreenshot(target: Located): Promise<Run> {
+    const xcrun = this.#xcrun();
+    let directory: string | undefined;
+    try {
+      directory = await mkdtemp(join(tmpdir(), 'boite-simctl-'));
+      const file = join(directory, 'screen.png');
+      const run = await this.#run(xcrun, ['simctl', 'io', target.id, 'screenshot', '--type=png', file], COMMAND_TIMEOUT_MS);
+      return run.code === 0 ? { ...run, stdout: await readFile(file) } : run;
+    } catch (error) {
+      return { code: null, stdout: new Uint8Array(), stderr: error instanceof Error ? error.message : String(error), timedOut: false };
+    } finally {
+      if (directory) await rm(directory, { recursive: true, force: true });
+    }
   }
 
   #inputArgs(target: Located, input: MobileDeviceInput): string[] {

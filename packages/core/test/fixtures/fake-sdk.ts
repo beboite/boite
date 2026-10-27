@@ -38,6 +38,10 @@ export interface FakeSdkState {
   clipboardUnconfirmed?: boolean;
   /** Delays the server's final log and exit, so the core must enforce its shutdown deadline. */
   scrcpyExitDelayMs?: number;
+  /** `simctl io screenshot` writes a partial file, prints this and fails. */
+  screenshotFails?: string;
+  /** `simctl shutdown` prints this and fails, whatever the simulator's state. */
+  shutdownFails?: string;
 }
 
 /** A control message the fake scrcpy server received, decoded. */
@@ -370,8 +374,21 @@ async function main(root: string, tool: string, args: string[]): Promise<number>
         if (sim.state === 'Booted') { process.stderr.write('Unable to boot device in current state: Booted\n'); return 149; }
         sim.state = 'Booted'; write(state); return 0;
       case 'bootstatus': return sim?.state === 'Booted' ? 0 : 1;
-      case 'shutdown': if (!sim) return 1; sim.state = 'Shutdown'; write(state); return 0;
-      case 'io': if (sim?.state !== 'Booted') return 1; process.stdout.write(png(SCREEN.width, SCREEN.height, state.screen)); return 0;
+      case 'shutdown':
+        if (!sim) return 1;
+        if (state.shutdownFails) { process.stderr.write(`${state.shutdownFails}\n`); return 149; }
+        if (sim.state === 'Shutdown') { process.stderr.write('An error was encountered processing the command (domain=com.apple.CoreSimulator.SimError, code=405):\nUnable to shutdown device in current state: Shutdown\n'); return 149; }
+        sim.state = 'Shutdown'; write(state); return 0;
+      case 'io': {
+        // Xcode 27 writes the screenshot to the file it is given, `-` included: the core's cwd is read-only.
+        const file = args.at(-1)!;
+        if (sim?.state !== 'Booted') return 1;
+        if (file === '-') { process.stderr.write('An error was encountered processing the command (domain=NSCocoaErrorDomain, code=642):\nYou can\u2019t save the file \u201c-\u201d because the volume \u201cMacintosh HD\u201d is read only.\n'); return 1; }
+        writeFileSync(file, state.screenshotFails ? 'half a PNG' : png(SCREEN.width, SCREEN.height, state.screen));
+        if (state.screenshotFails) { process.stderr.write(`${state.screenshotFails}\n`); return 1; }
+        out(`Wrote screenshot to: ${file}\n`);
+        return 0;
+      }
     }
   }
   process.stderr.write(`unknown call ${tool} ${args.join(' ')}\n`);
