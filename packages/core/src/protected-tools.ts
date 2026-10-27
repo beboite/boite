@@ -14,6 +14,7 @@ export function protectedTools(procs: ProcRegistry, id: string, check: () => voi
         if (!toolsAllowed) throw new Error('execution.tool: the host context disables tools');
         const child = procs.spawn(id, command, args, {cwd: cwd ?? policy.checkout, agentRoot: false});
         const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.proc.stdout).text(), new Response(child.proc.stderr).text()]);
+        await procs.waitForExit(id, [child.record.pid]);
         execution.check();
         changed(procs.protection.flush(id));
         return {code: code ?? -1, stdout, stderr};

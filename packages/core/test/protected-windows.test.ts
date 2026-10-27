@@ -1,6 +1,6 @@
 import {afterEach, describe, expect, test} from 'bun:test';
 import type {Pointer} from 'bun:ffi';
-import {copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync} from 'node:fs';
+import {copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {startTestCore, waitFor, type TestCore} from './harness.ts';
@@ -12,6 +12,45 @@ afterEach(async () => {await harness?.stop(); harness = undefined;});
 const native = process.platform === 'win32' && process.env.BOITE_TEST_NATIVE_EXECUTION === '1';
 
 describe.skipIf(!native)('native Windows protected execution', () => {
+  test('directory name measurements retain the failing volume and compare a system-volume private view', async () => {
+    const {procs, root, input} = await setup();
+    const fixture = join(import.meta.dir, 'fixtures/native-windows-volume.ts');
+    copyFileSync(fixture, join(root, 'volume.ts'));
+    writeFileSync(join(root, 'answer.js'), 'export const answer = 42;\n');
+    const host = procs.spawn('volume-host', process.execPath, [fixture], {cwd: root});
+    const [code, out, err] = await Promise.all([host.exited, new Response(host.proc.stdout).text(), new Response(host.proc.stderr).text()]);
+    expect(code, err).toBe(0);
+    console.error('WINDOWS_VOLUME_HOST', out.trim());
+    expect(JSON.parse(out).build).toMatchObject({status: 0, output: true});
+    rmSync(join(root, 'volume-dist'), {recursive: true, force: true});
+    // This second view changes only its scratch volume. The host checkout and
+    // Bun, LPAC, admission, ACLs, native helper and build command stay the same.
+    const systemTemp = process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Temp');
+    for (const variant of ['runner', 'system'] as const) {
+      if (variant === 'system' && (!systemTemp || systemTemp.slice(0, 2).toLowerCase() !== process.env.SystemRoot?.slice(0, 2).toLowerCase())) {
+        console.error('WINDOWS_VOLUME_SYSTEM unavailable'); continue;
+      }
+      const saved = {TEMP: process.env.TEMP, TMP: process.env.TMP};
+      try {
+        if (variant === 'system') {mkdirSync(systemTemp!, {recursive: true}); process.env.TEMP = systemTemp; process.env.TMP = systemTemp;}
+        await procs.protection.install(`volume-${variant}`, input(), () => {});
+      } finally {
+        for (const key of ['TEMP', 'TMP'] as const) {
+          if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key];
+        }
+      }
+      try {
+        const launch = procs.protection.launch(`volume-${variant}`, process.execPath, ['volume.ts'], {cwd: root});
+        const child = procs.spawn(`volume-${variant}`, process.execPath, ['volume.ts'], {cwd: root});
+        const [code, out, err] = await Promise.all([child.exited, new Response(child.proc.stdout).text(), new Response(child.proc.stderr).text()]);
+        console.error('WINDOWS_VOLUME_PRIVATE', JSON.stringify({variant, mode: launch?.args[0], code, out, err}));
+        expect(code, err).toBe(0);
+        // Diagnostic only: useful-workload build=true remains a separate gate.
+        expect(JSON.parse(out).observations.length).toBe(6);
+      } finally {await procs.protection.release(`volume-${variant}`);}
+    }
+  }, 120000);
+
   test('an ordinary native process edits, builds and tests without host file authority', async () => {
     harness = await startTestCore();
     const root = join(harness.dataDir, 'project'), outside = join(harness.dataDir, 'outside');
@@ -55,6 +94,7 @@ describe.skipIf(!native)('native Windows protected execution', () => {
       expect(result.breakaway).toEqual({created: true, denied: false, pid: expect.any(Number), waited: true, exit: 0, closed: true});
       expect(result.breakaway.pid).toBeGreaterThan(0);
     } else expect(result.breakaway).toEqual({created: false, denied: true, pid: 0, waited: false, exit: null, closed: true});
+    await procs.waitForExit('windows-native', [handleProbe.record.pid, child.record.pid]);
     procs.protection.flush('windows-native');
     expect(readFileSync(join(root, 'answer.js'), 'utf8')).toContain('42');
     expect(existsSync(join(root, 'dist/answer.js'))).toBe(true);
@@ -174,5 +214,6 @@ async function setup() {
 async function execute(id: string, script: string, cwd: string) {
   const child = harness!.core.procs.spawn(id, process.execPath, ['-e', script], {cwd});
   const [code, out, err] = await Promise.all([child.exited, new Response(child.proc.stdout).text(), new Response(child.proc.stderr).text()]);
+  await harness!.core.procs.waitForExit(id, [child.record.pid]);
   expect(code, err).toBe(0); return out;
 }
