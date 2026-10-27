@@ -139,6 +139,11 @@ Settings > Appearance > Buttons can hide the Worktree switch on desktop and in
 the phone's options sheet. This device preference preserves the draft's choice
 and the project's default.
 
+Thread worktree registration, recovery, branch rename and rollback commands serialize
+by the canonical Git common directory. Linked checkouts share that queue; other
+repositories and running jobs remain independent. Queued preparation rechecks
+cancellation before spawning, and queue time counts against an explicit timeout.
+
 With `worktree: {}`, `threads.create` runs `git worktree add -b` before writing
 the thread, with `-c checkout.workers=0` (one checkout worker per core) unless
 the repository's or the user's git config sets `checkout.workers`; the core
