@@ -7,6 +7,7 @@
  * everything it touches and reads codes, data keys and events, never message
  * text: the words may change, the refusal may not.
  */
+import { SHARED_SCENARIOS } from './shared-projects.ts';
 import {
   GROUP_INVITE_PREFIX,
   PROJECT_NAME_MAX,
@@ -23,6 +24,8 @@ import {
 } from '../../packages/contracts/src/index.ts';
 
 export interface ContractEnv {
+  /** Another isolated Contacts core, with no real account or public network. */
+  newContact(): Promise<ContractEnv>;
   call<M extends RpcMethodName>(method: M, params: RpcParams<M>): Promise<RpcResult<M>>;
   on<E extends RpcEventName>(event: E, handler: (payload: RpcEvents[E]) => void): () => void;
   /** A folder that exists, a new one per call. */
@@ -147,6 +150,7 @@ async function unavailable(env: ContractEnv): Promise<{ provider: ProviderSummar
 }
 
 export const SCENARIOS: Record<string, Scenario> = {
+  ...SHARED_SCENARIOS,
   'agents.runtime.configure keeps the route it saved, refuses a stale revision and follows the profile': async (env) => {
     const setup = await echo(env);
     check(setup.levels.length >= 2, 'the echo model offers fewer than two effort levels');

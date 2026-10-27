@@ -246,6 +246,7 @@ export function sessionKey(ctx: SessionContext): string {
     accountId: ctx.account.id,
     providerId: ctx.provider.id,
     env: ctx.accountEnv,
+    protection: ctx.protectedExecution?.fingerprint ?? null,
   });
 }
 

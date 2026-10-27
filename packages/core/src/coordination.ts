@@ -6,17 +6,22 @@ import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentTranscri
 import { checkMatchExtras, checkRemoteContact, checkTranscript, searchContacts, searchWords, transcript } from './coordination-lookup.ts';
 import { PeerDesk } from './coordination-peer.ts';
 import { CoordinationBridge } from './coordination-bridge.ts';
-import { dropGroupRead, groupPeers, migrateGroupPeer } from './coordination-group.ts';
+import { dropGroupRead, groupPeers } from './coordination-group.ts';
 import { address, coordinationGuide, coordinationUrl, LETTER_TTL_MS, letterPrompt, RESIDENT_LETTER_TTL_MS, same, text } from './coordination-letter.ts';
 import { projectName, senderContext, withProjects, withRelations } from './coordination-relation.ts';
-import { boundedBody, firstAnswer, MAX_BODY, PeerGone, PeerRefusal, post, ROUTE, settle, type Answer, type Envelope, type Operation } from './coordination-wire.ts';
+import { firstAnswer, PeerGone, PeerRefusal, post, settle, type Answer, type Envelope, type Operation } from './coordination-wire.ts';
 import { checkTailnetName } from './contacts/invite.ts';
+import { outgoingContact, incomingContact } from './contacts/human-letters.ts';
+import {protectLetters} from './contacts/letter-scopes.ts';
+import type { Connection } from './router.ts';
+import { projectCoordination } from './contacts/project-coordination.ts';
 import { pack, SEALED } from './group/seal.ts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unavailable } from './errors.ts';
 import { isAgentHeld } from './agents/runtime.ts';
-import type { Connection } from './router.ts';
 import { ContactMailboxes } from './contacts/mailboxes.ts';
+import { forwardCoordination } from './coordination-rpc.ts';
+import { trustCoordination } from './coordination-trust.ts';
 
 const HOUR = 3_600_000;
 /** How long a delivered, expired, rejected or uncertain letter stays in the journal. */
@@ -141,26 +146,7 @@ export class Coordination {
     }
     return { ok: true };
   }
-  trust(peer: CoordinationPeer): CoordinationPeer {
-    if (!peer) throw invalidParams('peer: expected a public contact card');
-    const publicKey = text(peer.publicKey, 'peer.publicKey', 1000);
-    const parsed = createPublicKey(publicKey);
-    if (parsed.asymmetricKeyType !== 'ed25519') throw invalidParams('peer.publicKey: expected Ed25519');
-    const canonical = parsed.export({ type: 'spki', format: 'pem' }).toString();
-    const coreId = createHash('sha256').update(canonical).digest('hex');
-    if (coreId !== peer.coreId || coreId === this.self('').coreId) throw invalidParams('peer.coreId: expected the other machine public key fingerprint');
-    if (this.core.contacts.isContact(coreId)) throw refused('peer.coreId: that core is a contact; contacts are linked in Contacts');
-    for (const field of ['readThreads', 'viaClient'] as const) if (peer[field] !== undefined && typeof peer[field] !== 'boolean') throw invalidParams(`peer.${field}: expected a boolean`);
-    const previous = this.peers().find(p => p.coreId === coreId);
-    const checked = { coreId, name: text(peer.name, 'peer.name', 100), url: coordinationUrl(peer.url), publicKey: canonical,
-      readThreads: peer.readThreads ?? previous?.readThreads ?? false,
-      viaClient: peer.viaClient ?? previous?.viaClient ?? false };
-    const peers = this.peers().filter(p => p.coreId !== coreId);
-    if (peers.length >= 32) throw refused('at most 32 coordination peers');
-    this.core.journal.setSetting('coordination:peers', [...peers, checked]);
-    if (this.core.group.peers().some(peer => peer.coreId === coreId)) migrateGroupPeer(this.core, checked);
-    return checked;
-  }
+  trust(peer: CoordinationPeer): CoordinationPeer { return trustCoordination(this.core, peer); }
   untrust(coreId: string, preserveGroupRead = false): { ok: true } {
     if (!preserveGroupRead) dropGroupRead(this.core, coreId);
     this.core.journal.setSetting('coordination:peers', this.peers().filter(p => p.coreId !== coreId));
@@ -319,7 +305,7 @@ export class Coordination {
     if (config.remote) {
       const found = await Promise.all(this.trusted().map(async peer => {
         try {
-          const remote = await this.exchange(peer, 'directory', {}) as AgentContact[];
+          const remote = await projectCoordination(this.core, threadId, peer, 'directory', {}) as AgentContact[];
           if (!this.trusted().some(p => p.coreId === peer.coreId)) throw new Error('peer revoked');
           if (!Array.isArray(remote) || remote.length > 100) throw new Error('invalid remote directory');
           return { peer, contacts: remote.map(a => checkRemoteContact(a, peer)) };
@@ -343,7 +329,7 @@ export class Coordination {
     if (!config.remote || config.mode === 'off') return { results: [], unavailable: [] };
     const found = await Promise.all(peers.map(async peer => {
       try {
-        const answer = await this.exchange(peer, operation, payload);
+        const answer = await projectCoordination(this.core, threadId, peer, operation, payload);
         if (!this.trusted().some(p => p.coreId === peer.coreId)) throw new Error('peer revoked');
         return { peer, result: check(answer, peer), failed: null };
       } catch (error) { return { peer, result: null, failed: error instanceof PeerRefusal ? `${peer.name} (${error.message})` : peer.name }; }
@@ -448,7 +434,7 @@ export class Coordination {
     }
     return false;
   }
-  async send(params: RpcParams<'collaboration.send'>): Promise<AgentLetter> {
+  async send(params: RpcParams<'collaboration.send'>, human = false, connection?: Connection): Promise<AgentLetter> {
     const to = address(params.to, 'to');
     const local = to.coreId === this.self('').coreId;
     const resident = local ? this.core.workforce.projects.over(params.threadId, to.threadId) : null;
@@ -457,7 +443,7 @@ export class Coordination {
     if (config.paused) throw refused('coordination paused by the owner');
     const body = text(params.text, 'text');
     const requestId = text(params.requestId, 'requestId', 128);
-    const fingerprint = createHash('sha256').update(JSON.stringify([to, body, params.replyTo ?? null])).digest('hex');
+    const fingerprint = createHash('sha256').update(JSON.stringify([to, body, params.replyTo ?? null, ...(human ? ['contact-human'] : [])])).digest('hex');
     const existing = this.core.journal.db.query('SELECT data, fingerprint FROM coordination_letters WHERE thread_id = ? AND request_id = ?').get(params.threadId, requestId) as Row | null;
     if (existing) {
       if (existing.fingerprint !== fingerprint) throw refused('requestId already used for different content');
@@ -478,8 +464,7 @@ export class Coordination {
       const peer = this.trusted().find(p => p.coreId === to.coreId);
       const route = peer ? undefined : await this.mailboxes.resolve(params.threadId, to.coreId);
       if (!peer && !route) throw refused('destination machine is not trusted for coordination');
-      if (this.core.contacts.isContact(to.coreId) || route) this.core.contacts.reach.checkSendTier(params.threadId, to.coreId);
-      // Route discovery awaited another core; the source's latest settings win.
+      if (!human && (this.core.contacts.isContact(to.coreId) || route)) this.core.contacts.checkSendTier(params.threadId, to.coreId);
       from = this.contact(params.threadId, resident !== null);
       if (!this.config(params.threadId).remote || this.config(params.threadId).paused) throw refused('coordination permissions changed; retry the send');
       // No directory round trip on send: a disconnected recipient can receive after reconnect.
@@ -492,14 +477,18 @@ export class Coordination {
       const letter = JSON.parse(previous.data) as AgentLetter;
       if (!same(letter.from, to) || !same(letter.to, from)) throw refused('replyTo must name an incoming message from this recipient');
     }
-    // Recheck budgets after all validation, before the synchronous durable write.
+    const provenance = await outgoingContact(this.core, from, to, human, connection);
+    this.contact(params.threadId, resident !== null); if (this.config(params.threadId).paused) throw refused('coordination paused by the owner');
+    if (to.coreId !== from.coreId && !this.config(params.threadId).remote) throw refused('coordination permissions changed; retry the send');
+    const raced = this.rows('thread_id = ? AND request_id = ?', params.threadId, requestId)[0];
+    if (raced) { if (raced.fingerprint !== fingerprint) throw refused('requestId already used for different content'); return JSON.parse(raced.data) as AgentLetter; }
     const createdAt = Date.now();
     const contact = this.core.contacts.known(to.coreId) ?? this.mailboxes.route(params.threadId, to.coreId);
     const letter: AgentLetter = { ...(resident ? { origin: 'resident' as const } : {}), id: randomUUID(), from, to, toTitle, toProject, toMachine, text: body, replyTo: params.replyTo ?? null, createdAt, expiresAt: createdAt + (resident ? RESIDENT_LETTER_TTL_MS : LETTER_TTL_MS), status: 'queued', error: null,
-      ...(contact ? { contact: { coreId: contact.coreId, name: contact.name } } : {}) };
+      ...(contact ? { contact: { coreId: contact.coreId, name: contact.name } } : {}), ...provenance };
     this.core.journal.append({ type: 'coordination.sent', threadId: from.threadId, version: 1, payload: letter }, () => this.put(letter, 'out', from.threadId, requestId, fingerprint));
     // It may hear back from that contact for a while, even outside the projects opened to it.
-    if (contact && this.core.contacts.isContact(contact.coreId)) this.core.contacts.reach.noteSent(from.threadId, contact.coreId);
+    if (contact) this.core.contacts.reach.noteSent(from.threadId, contact.coreId);
     this.core.threads.runner.noteMail(from.threadId, letter.createdAt);
     // The thread's turns now report back to the agent that wrote to it.
     if (resident) this.core.workforce.projects.follow(resident.id, to.threadId);
@@ -523,23 +512,27 @@ export class Coordination {
     if (!peer && letter.origin === 'resident' && !resident) throw refused('the project is no longer entrusted to this bot');
     // A contact reaches the projects opened to it and the threads that wrote to it, nothing else: an unknown thread reads the same.
     const contact = routed ?? (peer ? this.core.contacts.known(peer.coreId) : undefined);
-    if (contact && !routed && !this.core.contacts.reach.mayReach(contact.coreId, letter.to.threadId)) throw refused('letter.to: not a thread of a project opened to you');
+    if (contact && !routed && !this.core.contacts.mayReach(contact.coreId, letter.to.threadId)) throw refused('letter.to: not a thread of a project opened to you');
     const target = this.contact(letter.to.threadId, resident);
     const config = this.config(target.threadId);
     const from = peer ? checkRemoteContact(letter.from, peer) : this.contact(letter.from.threadId, resident);
     if (peer && !config.remote) throw refused('recipient has not enabled cross-machine coordination');
-    if (contact && !(routed && letter.origin === 'contact')) this.core.contacts.reach.checkAttestedTier(from.agent, contact.coreId);
+    const provenance = routed ? (letter.origin === 'contact-human' ? {origin: 'contact-human' as const, from: {...from, agent: undefined}} : {}) : incomingContact(this.core, { ...letter, from }, peer);
+    if (routed && letter.origin !== 'contact' && letter.origin !== 'contact-human') this.core.contacts.checkAttestedTier(from.agent, contact?.coreId);
     for (const row of this.rows('id = ?', letter.id)) {
       const known = JSON.parse(row.data) as AgentLetter;
-      if (!same(known.from, from) || !same(known.to, target) || known.text !== letter.text || known.replyTo !== letter.replyTo) throw refused('message id already used for different content');
+      if (!same(known.from, from) || !same(known.to, target) || known.text !== letter.text || known.replyTo !== letter.replyTo || (known.origin === 'contact-human') !== (letter.origin === 'contact-human')) throw refused('message id already used for different content');
     }
     const existing = this.find(letter.id, 'in');
-    if (existing) return existing;
+    if (existing) {
+      if (!same(existing.from, from) || !same(existing.to, target) || existing.text !== letter.text || existing.replyTo !== letter.replyTo || (existing.origin === 'contact-human') !== (letter.origin === 'contact-human')) throw refused('message id already used for different content');
+      return existing;
+    }
     if (!Number.isSafeInteger(letter.createdAt) || !Number.isSafeInteger(letter.expiresAt) || letter.createdAt > Date.now() + 60_000 || letter.expiresAt <= Date.now() || letter.expiresAt > letter.createdAt + (resident || routed && letter.origin === 'contact' ? RESIDENT_LETTER_TTL_MS : LETTER_TTL_MS)) throw refused('message expired or timestamps invalid');
     const origin = resident ? 'resident' as const : routed && letter.origin === 'contact' ? 'contact' as const : undefined;
     const accepted: AgentLetter = { ...(origin ? { origin } : {}), id: letter.id, from, to: this.self(target.threadId), toTitle: target.title, toProject: target.project, toMachine: target.machine, text: text(letter.text, 'letter.text'), replyTo: letter.replyTo === null ? null : text(letter.replyTo, 'letter.replyTo', 100), createdAt: Date.now(), expiresAt: letter.expiresAt, status: 'received', error: null,
       // The name this owner gave the contact, never the sender's word.
-      ...(contact ? { contact: { coreId: contact.coreId, name: contact.name } } : {}) };
+      ...(contact ? { contact: { coreId: contact.coreId, name: contact.name } } : {}), ...provenance };
     return this.acceptLetter(accepted);
   }
   /** Keeps a letter this core wrote or checked itself, once by its id, then hands it to a thread waiting for it or wakes its thread. */
@@ -626,7 +619,7 @@ export class Coordination {
 
   instructions(threadId: string): string {
     const config = this.config(threadId);
-    return config.mode === 'off' ? '' : coordinationGuide(config.paused, config.remote && (this.core.contacts.list().length > 0 || this.core.group.peers().length > 0));
+    return config.mode === 'off' ? '' : coordinationGuide(config.paused, config.remote && (this.core.contacts.list().length > 0 || this.core.contacts.members.relayed().length > 0 || this.core.group.peers().length > 0));
   }
 
   /** Hook delivery: one batch at a provider's next safe tool boundary. */
@@ -635,6 +628,7 @@ export class Coordination {
     if (this.delivering.has(threadId)) return null;
     const letters = this.inbox(threadId);
     if (!letters.length) return null;
+    protectLetters(this.core, threadId, letters);
     this.restoreProject(threadId);
     const prompt = letterPrompt(letters, senderContext(this.core, this.self('').coreId, threadId));
     this.core.threads.noteCoordination(threadId, turnId, prompt);
@@ -661,8 +655,11 @@ export class Coordination {
       if (!recipient.remote) return false;
       const routed = this.mailboxes.mayReceive(letter);
       if (routed !== null) return routed;
-      if (!this.trusted().some(peer => peer.coreId === letter.from.coreId)) return false;
-      return !this.core.contacts.isContact(letter.from.coreId) || this.core.contacts.reach.mayReach(letter.from.coreId, letter.to.threadId);
+      if (this.core.contacts.ownsAnswer(letter)) return true;
+      const peer = this.trusted().find(peer => peer.coreId === letter.from.coreId);
+      if (!peer) return false;
+      try { incomingContact(this.core, letter, peer); } catch { return false; }
+      return !this.core.contacts.isContact(letter.from.coreId) || this.core.contacts.mayReach(letter.from.coreId, letter.to.threadId);
     }
     const sender = this.config(letter.from.threadId);
     if (sender.mode === 'off') return false;
@@ -679,6 +676,7 @@ export class Coordination {
     const letters = this.rows("thread_id = ? AND direction = 'in' AND status = 'uncertain'", threadId)
       .map(row => JSON.parse(row.data) as AgentLetter).filter(letter => letter.error === 'Queued for provider delivery');
     if (!letters.length || this.closed || letters.some(letter => letter.expiresAt <= Date.now() || !this.mayReceive(letter))) return false;
+    protectLetters(this.core, threadId, letters);
     this.restoreProject(threadId);
     for (const letter of letters) this.update(letter, 'uncertain', `Awaiting provider turn ${turnId}`);
     return true;
@@ -709,6 +707,7 @@ export class Coordination {
     if (!letters.length) return;
     this.delivering.add(threadId);
     try {
+      protectLetters(this.core, threadId, letters);
       const prompt = letterPrompt(letters, senderContext(this.core, this.self('').coreId, threadId));
       if (thread.status === 'running') {
         if (!this.core.threads.canSteer(threadId)) return;
@@ -833,7 +832,11 @@ export class Coordination {
   private async exchange(peer: CoordinationPeer, operation: Operation, payload: unknown): Promise<unknown> {
     this.identityKey();
     // A contact another member of the group holds is asked through that member.
-    if (this.core.contacts.isRelayPeer(peer)) return this.core.contacts.members.send(peer, operation, payload);
+    if (this.core.contacts.isRelayPeer(peer)) {
+      const via = this.core.contacts.members.via(peer.coreId);
+      if (!via) throw unavailable(`${peer.name} is linked to a machine that left this group`);
+      return this.core.contacts.members.send(via, peer.coreId, operation, payload);
+    }
     // Signed and sealed anew for every address tried, the owner's app included: the same request sent twice
     // is a replay at a machine both addresses lead to, refused there, and every operation bears being asked twice.
     const routes = this.core.group.routes(peer.coreId);
@@ -875,15 +878,7 @@ export class Coordination {
   }
   /** A signed request from another core, answered by the desk (`coordination-peer.ts`). */
   http(request: Request): Promise<Response> { return this.desk.http(request); }
-  /** The owner app forwards the original signed envelope, without changing any peer permission. */
-  async forward(params: RpcParams<'collaboration.bridge.forward'>): Promise<CoordinationBridgeResponse> {
-    const coreId = text(params.coreId, 'coreId', 100);
-    if (typeof params.body !== 'string' || Buffer.byteLength(params.body) > MAX_BODY) throw invalidParams('body: expected at most 262144 bytes');
-    if (typeof params.signature !== 'string' || params.signature.length > 1000) throw invalidParams('signature: expected at most 1000 characters');
-    const response = await this.http(new Request(`http://127.0.0.1${ROUTE}`, { method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-boite-peer': coreId, 'x-boite-signature': params.signature }, body: params.body }));
-    return { status: response.status, body: await boundedBody(response.body), signature: response.headers.get('x-boite-signature') ?? '' };
-  }
+  forward(params: RpcParams<'collaboration.bridge.forward'>): Promise<CoordinationBridgeResponse> { return forwardCoordination(this.core, params); }
   beginClose(): void {
     if (this.closed) return;
     this.closed = true;

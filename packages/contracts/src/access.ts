@@ -14,6 +14,8 @@ import type { RpcEventName, RpcMethodName } from './index.ts';
  * may turn the owner's saved subscription gateway on or off, never its kind,
  * URLs or key. The only paths a device names are read-only, inside a thread's
  * working tree.
+ * Reserved shared-project methods stay owner-only until their handlers and
+ * association scope checks are installed; see docs/contacts.md for permissions.
  */
 export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
   // A paired phone lists the owner's agents with their state, desk and routines; talking to one is
@@ -32,6 +34,12 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // A phone's own rendering errors and failed calls land in the owner's diagnostics, bounded per connection.
   'diagnostics.report',
   'collaboration.directory',
+  'contacts.sendHuman', // A paired human sends a contact letter, never an agent impersonation or host approval.
+  // Exact associated-project views and connection-owned invalidations; administration remains owner-only.
+  'sharedProjects.list', 'sharedProjects.get', 'sharedProjects.threads', 'sharedProjects.search', 'sharedProjects.read', 'sharedProjects.subscribe',
+  'sharedBoard.get', 'sharedBoard.apply', 'sharedBoard.start', // Board actions on a paired phone recheck bilateral consent and its canonical local worker.
+  'sharedCompute.models', 'sharedCompute.list', 'sharedCompute.get', 'sharedCompute.send', 'sharedCompute.cancel', // Paired humans follow and cancel scoped jobs; admission and host policy stay owner/agent-only.
+  'sharedAccess.get', // Sanitized activity of an explicit association; host paths, overrides and reviewer configuration stay owner-only.
   // Dictation uses the owner's configured engine. Devices cannot change paths or credentials.
   'speech.status',
   'speech.transcribe',
@@ -201,6 +209,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
 
 /** Push events must not bypass the read permissions enforced on RPC calls. */
 export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
+  'sharedProjects.changed', // Direct delivery only to the connection's exact subscribed association and source.
   'threads.pullRequestsChanged', // Links already readable on the subscribed conversation.
   'browser.remoteChanged', // The subscribed conversation's agent tabs, as browser.remoteStatus says.
   'devices.changed', // The subscribed conversation's Device panel sessions, as devices.sessions returns them.
@@ -233,6 +242,7 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
 
 /** The server also checks the thread or project scope of these agent events. */
 export const AGENT_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
+  'sharedProjects.changed', // Direct delivery only to this agent's exact subscribed association and source.
   // The server restricts this invalidation to the agent's own subscribed thread.
   'delegation.changed',
   'thread.activity', 'todos.updated', 'collaboration.changed',

@@ -156,6 +156,7 @@ export class CodeCheckpoints {
 
   /** Hold the workspace through both the file restoration and the journal cut. */
   async rewind<T>(thread: ThreadSummary, turnIds: string[], messageId: string, cut: (files: FileResult) => T): Promise<T> {
+    this.core.sharedAccess.denyTool(thread.id);
     this.rewinding.add(thread.id);
     try {
       await this.trims.get(thread.id);

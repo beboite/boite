@@ -120,20 +120,24 @@ export class TurnAttempts {
     const { threadId, turnId } = state;
     const { provider, account, driver } = target;
     if (this.stopRequested.has(threadId)) return { status: 'stopped', sessionId: state.thread.sessionId, usage: null };
-    const checkpoint = this.threads.codeCheckpoints.begin(state.thread, turnId);
-    if (checkpoint && driver.prepare) {
-      const context = this.threads.contexts.makeSessionContext(state.thread, provider, account);
-      void driver.prepare(context, { forTurn: true }).catch(error => {
-        if (!this.stopRequested.has(threadId)) this.core.log('warn', `preparing the turn failed: ${String(error)}`, { source: provider.id, threadId, event: 'provider.prepareFailed' });
-      });
-    }
-    try { if (checkpoint) await checkpoint; }
-    catch (error) {
+    try {
+      const protection = this.core.sharedAccess.execution.prepare(threadId);
+      if (protection) await protection;
+      const checkpoint = this.threads.codeCheckpoints.begin(state.thread, turnId);
+      if (checkpoint && driver.prepare) {
+        const context = this.threads.contexts.makeSessionContext(state.thread, provider, account);
+        void driver.prepare(context, { forTurn: true }).catch(error => {
+          if (!this.stopRequested.has(threadId)) this.core.log('warn', `preparing the turn failed: ${String(error)}`, { source: provider.id, threadId, event: 'provider.prepareFailed' });
+        });
+      }
+      if (checkpoint) await checkpoint;
+    } catch (error) {
       releaseThread(threadId);
+      void this.core.procs.protection.revoke(threadId).catch(() => {});
       this.core.procs.killTree(threadId);
+      if (this.stopRequested.has(threadId)) return { status: 'stopped', sessionId: state.thread.sessionId, usage: null };
       throw error;
-    }
-    this.preparing.delete(threadId);
+    } finally { this.preparing.delete(threadId); }
     if (this.stopRequested.has(threadId)) return { status: 'stopped', sessionId: state.thread.sessionId, usage: null };
 
     // Keep consumed input so a retry on a fresh session sends it too.
@@ -155,7 +159,12 @@ export class TurnAttempts {
     let afterCapacity = false;
     for (;;) {
       attempt += 1;
+      // A retry or delayed provider preparation cannot outlive shared host consent.
+      this.core.sharedCompute?.assertTurn(threadId);
+      this.core.sharedAccess?.assertTurn(threadId);
       state.thread.permissionMode = permissions.mode;
+      const protection = this.core.sharedAccess.execution.prepare(threadId);
+      if (protection) await protection;
       const note = afterUpdate;
       afterUpdate = null;
       // The resumed session already holds what the first attempt took from the thread.
@@ -457,6 +466,7 @@ export class TurnAttempts {
   }
 
   stopRunning(threadId: ThreadId): boolean {
+    void this.core.procs.protection.revoke(threadId).catch(() => {});
     const waiting = this.retryWaits.get(threadId);
     if (waiting !== undefined) {
       this.stopRequested.add(threadId);

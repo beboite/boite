@@ -65,6 +65,7 @@ export function listen(ctx: StoreContext, client: Client): void {
           ctx.serverUpdater.reset();
           if (s.owner && !s.localCore) { void ctx.serverUpdater.load(); void ctx.serverUpdater.loadDesktop(); }
           void s.reload();
+          ctx.shared.reconnected();
           ctx.terminals.reconnected(client);
           if (!s.owner) layout.checkPushKinds(client);
         }
@@ -137,6 +138,7 @@ export function listen(ctx: StoreContext, client: Client): void {
     const preloaded = threads.preloads.thread(threadId);
     if (preloaded) preloaded.activity = activity;
   });
+  on('sharedProjects.changed', scope => ctx.shared.changed(scope));
   on('collaboration.changed', ({ threadId }) => {
     if (s.openThread?.id === threadId) void s.loadCoordination(threadId, false);
   });

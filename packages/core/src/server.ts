@@ -781,6 +781,8 @@ export function startServer(options: ServerOptions): RunningServer {
   };
 
   const broadcast = (name: RpcEventName, payload: EventPayload): void => {
+    // These invalidations belong to explicit association watches, never the global bus.
+    if (name === 'sharedProjects.changed') return;
     const scoped =
       name === 'threads.pullRequestsChanged' ||
       name.startsWith('message.') ||
@@ -820,6 +822,13 @@ export function startServer(options: ServerOptions): RunningServer {
       // that thread open; an agent socket still gets its own thread's.
       if (name === 'thread.activity' && connection.identity.principal !== 'agent' && (threadId === null || !connection.subscriptions.has(threadId))) continue;
       if (name === 'todos.updated' && !mayReadTodos(core, connection, (payload as RpcEvents['todos.updated']).projectId)) continue;
+      if (name === 'todos.updated' && connection.identity.principal === 'agent') {
+        const event = payload as RpcEvents['todos.updated'];
+        if (connection.identity.threadId === null) continue;
+        // Local cards stay readable when remote coordination/model policy closes the shared projection.
+        connection.sendEvent(name, {...event, todos: core.sharedBoard.visibleTodos(connection.identity.threadId, event.todos, connection)});
+        continue;
+      }
       // A shell's bytes go to the windows that attached it. Its exit still goes to every owner window: one
       // that lays the pane out without having attached it, a background tab say, drops the pane then.
       if (name === 'terminal.output' && !core.terminals.watches((payload as RpcEvents['terminal.output']).id, connection.id)) continue;

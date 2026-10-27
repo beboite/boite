@@ -7,11 +7,11 @@
    * the contact, set by this core from its own list and never by the sender.
    * Dashed, so it never reads as one of this owner's own agents.
    */
-  let { name }: { name: string } = $props();
-  const label = $derived(fill(strings.agentMessages.remote, { name }));
+  let { name, human = false }: { name: string; human?: boolean } = $props();
+  const label = $derived(human ? `${strings.shared.human} · ${name}. ${strings.shared.external}` : fill(strings.agentMessages.remote, { name }));
 </script>
 
-<span class="remote" title={label} aria-label={label} data-testid="agent-remote-chip"><Globe size={11} strokeWidth={2} aria-hidden="true" /><span class="name">{name}</span></span>
+<span class="remote" class:human title={label} aria-label={label} data-testid="agent-remote-chip"><Globe size={11} strokeWidth={2} aria-hidden="true" /><span class="name">{human ? `${strings.shared.human} · ${name}` : name}</span></span>
 
 <style>
   .remote {
@@ -29,5 +29,6 @@
     line-height: 16px;
   }
   .remote :global(svg) { flex: none; }
+  .remote.human { max-width: 28ch; }
   .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

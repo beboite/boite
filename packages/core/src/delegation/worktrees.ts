@@ -17,6 +17,7 @@ const KEY = 'delegation-worktree:';
  */
 export class ChildWorktrees {
   private readonly settling = new Map<ThreadId, Promise<void>>();
+  private closed = false;
 
   constructor(private readonly core: Core, private readonly changed: (threadId: ThreadId) => void) {}
 
@@ -26,6 +27,12 @@ export class ChildWorktrees {
 
   /** A turn has ended and the worktree is being looked at: a wait for its result goes on. */
   isSettling(threadId: ThreadId): boolean { return this.settling.has(threadId); }
+
+  /** Called after turn and shared-job producers stop, while their journal is still open. */
+  async close(): Promise<void> {
+    this.closed = true;
+    await Promise.allSettled([...this.settling.values()]);
+  }
 
   private save(threadId: ThreadId, worktree: DelegationWorktree): void {
     this.core.journal.setSetting(`${KEY}${threadId}`, worktree);
@@ -90,7 +97,7 @@ export class ChildWorktrees {
         await this.core.worktrees.resumePreparation(threadId, project, record.branch, record.path, record.base, assertActive);
         return this.mark(threadId, { ...record, state: 'active' });
       }
-      const base = await this.core.worktrees.head(threadId, parent.projectId === thread.projectId ? parent.cwd : project.path);
+      const base = this.core.sharedCompute?.journal.worker(threadId)?.input.baseCommit ?? await this.core.worktrees.head(threadId, parent.projectId === thread.projectId ? parent.cwd : project.path);
       await this.core.worktrees.add(threadId, project, record.branch, record.path, {
         assertActive,
         beforeMutation: () => {
@@ -115,6 +122,9 @@ export class ChildWorktrees {
   settle(threadId: ThreadId): Promise<void> | null {
     const running = this.settling.get(threadId);
     if (running) return running;
+    if (this.closed) return null;
+    const compute = this.core.sharedCompute?.journal.worker(threadId);
+    if (compute?.stopping || compute && ['cancelled', 'revoked'].includes(compute.job.status)) return null;
     const record = this.get(threadId);
     if (!record || record.state !== 'active') return null;
     const job = this.inspect(threadId, record).finally(() => {
@@ -132,7 +142,7 @@ export class ChildWorktrees {
       if (!existsSync(record.path)) return this.save(threadId, { ...record, state: 'kept', error: 'its folder is gone; the branch stays' });
       const project: Project = this.core.projects.require(thread.projectId);
       const { commits, dirty } = await this.core.worktrees.changes(threadId, record.path, record.base);
-      if (commits > 0 || dirty) return this.save(threadId, { branch: record.branch, path: record.path, base: record.base, state: 'kept', commits, dirty });
+      if (commits > 0 || dirty || this.core.sharedCompute?.journal.worker(threadId)) return this.save(threadId, { branch: record.branch, path: record.path, base: record.base, state: 'kept', commits, dirty });
       // A warm agent process keeps the folder as its working directory; Windows refuses to delete it then.
       this.core.threads.releaseAgent(threadId);
       const removed = await this.core.worktrees.remove(threadId, project, { branch: record.branch, path: record.path });

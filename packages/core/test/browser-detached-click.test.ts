@@ -46,8 +46,9 @@ function clicking(stage: string, failure: Failure) {
       }
     }
     if (command.method === 'Runtime.evaluate') {
-      if (detached) readsAfterDetach++;
-      const value = command.params.expression.includes('return K.checked(') ? false : command.params.expression.includes('return K.point(')
+      // A failed pointer move still runs the existing best-effort observer cleanup.
+      if (detached && !command.params.expression.includes('K.stopPointer()')) readsAfterDetach++;
+      const value = command.params.expression.includes('return K.pointerMoved(') ? true : command.params.expression.includes('return K.checked(') ? false : command.params.expression.includes('return K.point(')
         ? { x: 10, y: 20 }
         : { url: 'https://fixture.invalid', title: 'Popup', ready: 'complete', token: 'document', leaving: false };
       relay.receive(JSON.stringify({ id: command.id, result: { result: { value } } }));

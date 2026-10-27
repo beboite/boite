@@ -523,6 +523,8 @@ export class GroupStore {
     this.absorb(theirs);
     if (this.roster === null) return { left: true };
     if (digestOf(this.roster) === digestOf(theirs)) this.acked.set(peer.coreId, digestOf(theirs));
+    // A restarted member may have pre-admission relay copies even when its roster is current.
+    if (liveCores(this.roster).some(core => core.coreId === peer.coreId) && this.core.contacts.list().some(contact => this.core.contacts.members.holdersOf(contact.coreId).includes(peer.coreId))) this.core.contacts.members.mark([peer.coreId]);
     return { roster: this.roster };
   }
 

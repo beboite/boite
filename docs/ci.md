@@ -64,6 +64,12 @@ dependency is required too.
 | Dependencies, shared builds, other workflows and unknown paths | All checks |
 | Release or manual full run | All checks, except jobs the caller replaces through explicit inputs |
 
+Contacts changes exercise the core/fake contract scenarios plus the real
+three-core `shared-cores.test.ts` and browser `shared-collaboration.test.ts`
+fixtures. A local Linux run verifies path and admission logic but does not
+replace the native Windows process/file checks selected by CI. Fixture-only
+echo execution must not be reported as external-provider sandbox coverage.
+
 A pull request whose selection includes desktop also runs [Bundle growth](#bundle-growth).
 
 The changes job always installs frozen dependencies, runs `bun audit`, local
@@ -250,8 +256,96 @@ inspector answers only when the JavaScript thread is free.
 
 A draft pull request runs `draft` mode: the changes job, the Linux x64 core
 suite, type checks and UI tests, and the focused telemetry and E2E type checks,
-each only when its paths changed. Windows, macOS, desktop packages, E2E,
-stress, Docker and the APKs wait: their checks skip.
+each only when its paths changed. Protection code, protected fixtures and shared
+toolchain inputs also select the existing `Core tests (Windows x64)` job.
+It builds the userspace sandbox helper, runs the opt-in native protection fixture
+and keeps the ordinary Windows core suite. No extra required check name is added.
+Other drafts leave Windows out. macOS, desktop packages, E2E, stress, Docker and
+the APKs wait: their checks skip.
+
+The Windows job also archives `windows-null-access-matrix`: a standalone,
+opt-in comparison of host and LPAC NUL opens with four requested access masks.
+It derives the frozen historical v1 helper in
+`tests/diagnostics/windows-protected-reference.c` and preserves that reference's
+admission probe. Its non-blocking result reports experiment completeness;
+the native production suites still decide acceptance.
+It also compares the captured Null descriptor with duplicated host and LPAC
+tokens using AccessCheck; an added package ACE exists only in memory.
+These DACL verdicts do not demonstrate a device open or cover the full SACL
+and driver checks.
+The same capture tests a named suffix under the real Null device, using NT and
+Win32 opens in both host and LPAC phases. It records device characteristics and
+checks EOF and discarded writes on successful Null opens. A complete refusal
+is diagnostic evidence; it does not admit a tool or replace the original probe.
+
+The separate `windows-lpac-parent-spike` artifact records a process-broker
+prerequisite under SDK and MinGW. An opt-in fixture tests host-created children
+with an LPAC parent, the same job and kernel child-process restrictions.
+Its non-blocking result decides only this attribute combination, including
+parent identity, inherited client handles and the child's own creation refusal.
+It neither brokers NUL nor changes the blocking production admission probe.
+
+The opt-in `windows-null-broker-spike` artifact tests a different primitive:
+the host opens the fixed real Null device afresh for each request and duplicates
+only that handle into a captured LPAC process. A task-local debugger adapter
+exercises ordinary native and Bun callers, ordinary descendants, file modes,
+denials, output-pointer failures and cleanup. It requires an exact verified
+x64 ntdll image and startup site; an unsupported image or partial capture leaves
+the experiment incomplete. Both compiler outcomes must agree. This diagnostic
+always reports `productionAccepted=false`; its non-blocking CI step does not
+replace the blocking native production protection tests. The production v2 helper has
+its own explicitly linked Null broker module; diagnostic reference hashes never
+attest that production executable. Required useful-tool, provider/shared and
+Muse MSP scenarios execute with both SDK and MinGW helpers. The Windows core
+job has a 30-minute budget for both matrices and the general suite. A run on
+2026-10-27 spent nearly eight minutes in setup/diagnostics, then exceeded its
+old 15-minute budget during the second provider matrix. Individual scenario
+deadlines and all admission checks remain unchanged. Shared Git fixtures set
+their synthetic identity in each repository, including the commit consumer,
+and ignore host system/global Git configuration.
+Once the helpers build, provider preparation and both provider matrices run
+even if protected-tools tests fail. A failed preparation still blocks those
+matrices; cancellation stops them. Each test step retains its failing exit code.
+The setup ACL root contains only the private view, runtime and home. Synthetic
+host files and the process journal stay outside that subtree so inherited ACL
+changes cannot invalidate the host control or prevent journal cleanup. The same
+native host-path read must succeed both before and after setup.
+Console auxiliaries require kernel-event file identity against the system
+reference and an independently captured hash. They retain LPAC, startup, event
+and cleanup evidence; workload-child requirements never count them. A job-drain
+record must precede any accepted auxiliary exit with code 125. Completed calls
+and outstanding scenarios remain in the manifest if a later prerequisite fails.
+The adapter snapshots a validated security-quality-of-service descriptor into
+host-local storage for the fixed Null open. Invalid output spans pass through
+to the original syscall under the captured LPAC token, without a host open or
+remote write. Pointer admission still requires matching statuses for both
+transports, unchanged sentinels, zero handle growth and a successful valid open.
+The x64 adapter decodes `EaLength` as a 32-bit `ULONG`; unused upper stack-slot
+bytes cannot reject an ordinary call. It records both halves of that slot to
+attribute a remaining rejection. Bun stage markers and forwarded-exception
+context locate runtime failures without suppressing application exceptions or
+relaxing workload admission.
+Credential non-inheritance is checked with a complete handle-table snapshot of
+the caller and a live stdout-handle control. The candidate must equal the
+captured parent handle and be absent at that instant; a numeric collision or
+incomplete query leaves the experiment incomplete. This avoids issuing invalid
+handle I/O under a debugger, which can raise an application exception.
+The breakaway control accepts either an access-denied creation or a completed
+fixed-image probe whose kernel binding proves that it stayed in the private
+LPAC job. A successful creation flag alone proves neither escape nor confinement.
+Probe children retain all token, image, startup, event and handle checks; they
+cannot replace the ordinary workload children. Expiry requires an automatic
+stop request after the deadline while the scope was live, followed by actual
+session cleanup and zero live processes. The observer waits for that cleanup
+within its existing deadline rather than stopping at the first empty process
+count. Raw `NtSuspendThread` status identifies a failed suspension. An exact
+`STATUS_THREAD_IS_TERMINATING` parks the untouched breakpoint owner using
+[`DBG_REPLY_LATER`](https://learn.microsoft.com/en-us/windows/win32/api/debugapi/nf-debugapi-continuedebugevent).
+The owner resumes only after every terminating sibling's real thread-exit event
+has been continued; its replay is decoded again before any trap removal.
+Successful sibling suspensions remain held until the trap is rearmed. A failed
+park, an unexpected status or a missing exit/replay still drains the job within
+the existing deadline. Failed suspensions never count as held or retired threads.
 
 A skip passes in a ruleset, so a draft must not satisfy it:
 

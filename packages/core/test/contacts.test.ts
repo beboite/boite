@@ -100,7 +100,7 @@ test('a granted project is all a contact sees: letters cross both ways, an ungra
   await hostClient.call('contacts.grant', { coreId: guestId, projectId: open.id });
   // The host announces what it opened, down the link.
   await waitFor(() => guest.core.contacts.find(hostId)?.offers.some(offer => offer.name === 'alpha') === true, 10000);
-  expect((await guestClient.call('contacts.get', {})).contacts[0]?.offers).toEqual([{ projectId: open.id, name: 'alpha' }]);
+  expect((await guestClient.call('contacts.get', {})).contacts[0]?.offers).toEqual([{ projectId: open.id, name: 'alpha', sharedProject: {ownerCoreId:hostId,coreId:hostId,projectId:open.id} }]);
   const contacts = await guest.core.contacts.forThread(guestThread);
   expect(contacts).toEqual([{ name: guest.core.contacts.find(hostId)!.name, coreId: hostId, projects: ['alpha'], link: 'connected' }]);
 

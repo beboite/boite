@@ -95,6 +95,7 @@ export class ActivityStore {
         this.states.delete(threadId);
         core.journal.deleteSetting(`activity:${threadId}`);
         core.journal.deleteSetting(`activity-input:${threadId}`);
+        core.journal.deleteSetting(`activity:shared:${threadId}`);
       }
     });
   }
@@ -135,7 +136,7 @@ export class ActivityStore {
     if (goal?.checklist && goal.status !== 'complete') this.tracker.message(threadId, text);
   }
 
-  set(params: RpcParams<'threads.activity.set'>): ThreadActivity {
+  set(params: RpcParams<'threads.activity.set'>, sharedClaim?: {sharedProjectId: string; cardId: string; claimId: string}): ThreadActivity {
     const thread = this.core.journal.getThread(params.threadId);
     if (!thread || thread.archived) throw refused('activity requires an existing, unarchived thread');
     const attachments = params.attachments ?? [];
@@ -150,6 +151,9 @@ export class ActivityStore {
       this.stopReview(params.threadId);
       this.bounced.delete(params.threadId);
       state.goal = params.goal === null ? null : { objective: params.goal.objective.trim(), status: 'active', iterations: 0, error: null, ...(params.goal.review ? { review: newReview(), checklist: newChecklist() } : {}) };
+      // This second argument is core-only. An ordinary RPC goal replacement cannot inherit another claim's stop authority.
+      if (sharedClaim && params.goal) this.core.journal.setSetting(`activity:shared:${params.threadId}`, sharedClaim);
+      else this.core.journal.deleteSetting(`activity:shared:${params.threadId}`);
     }
     if (params.loop !== undefined) {
       if (params.loop !== null) validateLoop(params.loop);

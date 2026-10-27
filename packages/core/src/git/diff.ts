@@ -19,6 +19,8 @@ function cut(data: Uint8Array): { text: string; truncated: boolean } {
 }
 
 export async function gitDiff(core: Core, params: RpcParams<'git.diff'>): Promise<GitDiff> {
+  // A path filter cannot protect historical blobs or Git's configurable external helpers.
+  core.sharedAccess.denyTool(params.threadId);
   const threadId = params.threadId;
   const cwd = threadCwd(core, threadId);
   const found = resolveInside(cwd, params.path, 'git.diff path');

@@ -158,7 +158,7 @@ export class ContactMailboxes {
     const route = this.route(letter.from.threadId, letter.to.coreId);
     if (!route) throw refused('route: the group contact route is no longer available');
     const from = this.source(letter.from.threadId, letter.status === 'queued');
-    try { this.core.contacts.reach.checkSendTier(letter.from.threadId); }
+    try { this.core.contacts.checkSendTier(letter.from.threadId); }
     catch (error) { throw new PeerRefusal(messageOf(error)); }
     const answer = await this.request(route, { action: 'deliver', from, letter, receipt: letter.status !== 'queued' }) as AgentLetter | { retry: true };
     if ('retry' in answer) throw unavailable('The contact is unreachable; retrying until expiry');
@@ -187,7 +187,7 @@ export class ContactMailboxes {
     const route = this.route(params.threadId, found[0]!.coreId);
     if (!route) throw refused('route: the group contact route is no longer available');
     const from = this.source(params.threadId, true);
-    this.core.contacts.reach.checkSendTier(params.threadId);
+    this.core.contacts.checkSendTier(params.threadId);
     const gitRemote = gitRemoteOf(this.core.threads.require(params.threadId).cwd);
     const answer = await this.request(route, { action: 'ask', from, coreId: route.coreId, id: randomUUID(), text: text(params.text, 'text'), ...(gitRemote ? { gitRemote } : {}) }) as ContactRequest;
     this.source(params.threadId);
@@ -212,7 +212,10 @@ export class ContactMailboxes {
       return this.core.coordination.receiveRouted(letter, route.name);
     }
     const from = checkRemoteContact(p?.from as AgentContact, peer);
-    if (p.action === 'contacts') return this.core.contacts.available().map(contact => ({ ...contact, admission: this.core.contacts.find(contact.coreId)!.addedAt }));
+    if (p.action === 'contacts') return this.core.contacts.available().flatMap(contact => {
+      const direct = this.core.contacts.find(contact.coreId);
+      return direct ? [{...contact, admission: direct.addedAt}] : [];
+    });
     const contactId = p.action === 'deliver' ? address(p.letter?.to as AgentContact, 'letter.to').coreId : text(p.coreId, 'route.coreId', 100);
     if (this.core.contacts.find(contactId)?.addedAt !== p.admission) throw refused('route: the gateway contact admission changed; discover its contacts again');
     if (p.action === 'lookup') {
@@ -227,7 +230,7 @@ export class ContactMailboxes {
       return answer;
     }
     if (p.action === 'ask') {
-      this.core.contacts.reach.checkAttestedTier(from.agent);
+      this.core.contacts.checkAttestedTier(from.agent);
       const contact = this.contact(text(p.coreId, 'route.coreId', 100));
       const box = this.mailbox(from, contact);
       const id = text(p.id, 'route.ask.id', 100);
@@ -241,7 +244,7 @@ export class ContactMailboxes {
     if (p.action !== 'deliver') throw refused('route.action: expected contacts, lookup, ask, deliver or return');
     const canonical = p.letter!;
     if (!same(address(canonical.from, 'letter.from'), from)) throw refused('letter.from: expected the authenticated initiating conversation');
-    this.core.contacts.reach.checkAttestedTier(from.agent);
+    this.core.contacts.checkAttestedTier(from.agent);
     this.timestamps(canonical, LETTER_TTL_MS);
     const contact = this.contact(address(canonical.to, 'letter.to').coreId);
     const box = this.mailbox(from, contact, canonical.createdAt);
@@ -293,11 +296,15 @@ export class ContactMailboxes {
     if (!box || letter.to.coreId !== this.self()) throw refused('letter.to: unknown contact mailbox');
     this.valid(box);
     const from = checkRemoteContact(letter.from, this.contact(peer.coreId));
-    this.core.contacts.reach.checkAttestedTier(from.agent);
+    const human = letter.origin === 'contact-human';
+    if (letter.origin !== undefined && !['agent', 'contact-human'].includes(letter.origin)) throw refused('letter.origin: expected contact agent or attested contact-human');
+    if (human && this.core.contacts.find(peer.coreId)?.capabilities?.humanLetters !== 1) throw refused('letter.origin: contact-human requires negotiated humanLetters support');
+    if (!human) this.core.contacts.checkAttestedTier(from.agent);
     this.timestamps(letter, LETTER_TTL_MS);
     if (letter.replyTo !== null && !this.rows("mailbox = ? AND direction = 'out' AND id = ?", box.id, letter.replyTo).length) throw refused('replyTo: expected a letter sent from this contact mailbox');
     const accepted: AgentLetter = { ...letter, from, text: text(letter.text, 'letter.text'), status: 'received', error: null, contact: { coreId: box.coreId, name: box.name } };
-    delete accepted.origin;
+    if (human) { delete accepted.from.agent; accepted.origin = 'contact-human'; }
+    else delete accepted.origin;
     const canonical = { ...accepted, to: { coreId: box.source.coreId, threadId: box.source.threadId }, toTitle: box.source.title, toProject: box.source.project, toMachine: box.source.machine };
     const stored = this.store(box.id, 'in', accepted, canonical);
     queueMicrotask(() => this.tick());
@@ -334,7 +341,7 @@ export class ContactMailboxes {
     const fingerprint = createHash('sha256').update(JSON.stringify([wire.id, wire.from.coreId, wire.from.threadId, wire.to, wire.text, wire.replyTo])).digest('hex');
     const existing = this.rows('mailbox = ? AND direction = ? AND id = ?', mailbox, direction, wire.id)[0];
     if (existing) {
-      if (existing.fingerprint !== fingerprint) throw refused('message id already used for different content');
+      if (existing.fingerprint !== fingerprint || (existing.wire.origin === 'contact-human') !== (wire.origin === 'contact-human')) throw refused('message id already used for different content');
       return existing;
     }
     const stored = { mailbox, direction, wire, canonical, fingerprint };
