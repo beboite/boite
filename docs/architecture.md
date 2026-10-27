@@ -80,6 +80,14 @@ activity events are scoped to subscribed threads as well as principal access.
 Questions from bots' threads also reach owner and paired-device
 clients without a subscription, so an agent's row and desk see a card the user
 must answer.
+`composer.updated` reaches owner and paired devices without a thread
+subscription. The owning core stores revised drafts, replies and pending
+prompts separately from message history; their attachments are content-addressed
+assets. Compare-and-swap and tombstones protect edits across reconnects.
+Removing references collects unused assets; live records and pending uploads
+retain their bytes without loading attachment bodies during text saves.
+The core drains accepted queues even when every client is closed, waking only
+records with queued input and targeting thread events to that thread's record.
 Subscribing does not prepare a provider session. A reconnect reads pending cards
 from `permissions.list`; an answered, ended or withdrawn request leaves the list
 and emits `permission.resolved`. Driver cancellation withdraws the card instead
@@ -307,6 +315,9 @@ held with its original turn, input receipt and execution selection. Desktop and
 phone offer Resume and Discard through `turns.recover`; neither creates a second
 input. Work that may already have reached a provider is never replayed by this
 recovery path. Explicit restart handoff keeps its own authorization rules.
+Server-owned composer queues may resume never-started turns admitted by their
+durable delivery ledger. A native submission whose acceptance is uncertain
+stays held for review; it is never submitted again automatically.
 
 A turn a provider refused for availability retries at capacity within the same
 turn, or, with `autoResumeLimitedThreads`, resumes after a usage limit's reset
@@ -352,7 +363,7 @@ Checkpoint capture and native preparation can run together, but prompt dispatch
 waits for the checkpoint. This transient preparation does not extend post-turn
 retention. Stop or checkpoint failure releases it before a prompt can leave.
 
-Attachments selected in the composer upload through connection-owned leases.
+Direct sends upload attachments through connection-owned leases.
 Completed upload IDs replace only the wire bytes when sending; durable drafts
 retain the original bytes. The core validates ownership, metadata and SHA-256
 before restoring the original attachment for validation and journaling. Leases

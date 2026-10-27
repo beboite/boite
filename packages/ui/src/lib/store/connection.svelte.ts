@@ -446,7 +446,7 @@ export class Connection {
       this.pairingRequired = false;
       void this.#handOverKey(client, core);
       void s.reload();
-      await Promise.all([this.ctx.drafts.start(), this.reloading?.essential]);
+      await Promise.all([this.ctx.drafts.start().then(() => this.ctx.currentClient(client, generation) ? this.ctx.sync.resync() : undefined), this.reloading?.essential]);
     } catch (error) {
       if (!this.ctx.currentClient(client, generation)) return;
       this.connection = client.state;

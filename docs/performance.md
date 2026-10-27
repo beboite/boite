@@ -959,6 +959,24 @@ limits expensive work while streaming, typing and scrolling:
   E2E captures wait through `settleAnimations()`, which ignores it. The "phone
   streaming behind list" scenario measures it.
 
+### Composer synchronization
+
+The core persists changed composer records independently of message history.
+Typing coalesces over 400 ms; attachment bytes upload separately once, and
+subsequent puts and broadcasts contain metadata only. Asset validation reads
+stored kind, MIME type, name and byte count without loading the body. Queue
+wakeups use an index of records with pending prompts, targeted by thread.
+
+On 2026-10-27, `bun test tests/e2e/composer-persistence.test.ts
+tests/e2e/chat-steering.test.ts` passed both production-UI scenarios. The first
+used a real core, desktop browser and paired phone-width browser. Adding a
+1 MiB file and making 100 text edits at 10 ms intervals sent one asset upload
+and five composer puts containing 2,000 bytes total. None of those puts carried
+attachment bytes. Scheduling can change the put count; this measures wire
+payload, not network framing or a before/after latency comparison. The same
+test verifies that queues drain with both browsers closed and that drafts and
+consumed state survive a core restart.
+
 ### A long turn is many rows
 
 Inline view placement keeps the same timeline array when streamed text leaves

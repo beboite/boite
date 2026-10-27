@@ -31,6 +31,7 @@ import { requestSince } from './journal/request-since.ts';
 import { usageByBucket, usageByThread, type UsageSumRow, type UsageThreadRow } from './journal/usage-sums.ts';
 import { sent, type Projection } from './journal/sent.ts';
 import { threadSessions, type NativeSession } from './threads/native-sessions.ts';
+import { deleteComposerInput } from './journal/composer-assets.ts';
 
 export interface JournalOptions {
   /** Where a write that fails on a timer, with no caller to throw to, is reported. */
@@ -75,6 +76,7 @@ export interface SessionRow {
  */
 export class Journal {
   readonly db: Database;
+  collectComposerAssets?: (assetIds: string[]) => void;
   /** The streaming write path: deltas and the parts of messages still streaming. */
   private readonly stream: StreamBuffer;
   private readonly processes: ProcessRows;
@@ -359,9 +361,7 @@ export class Journal {
   /** Erase conversation history and its dependent records in one transaction, before client notifications. */
   deleteThreads(threadIds: string[]): void {
     if (threadIds.length === 0) return;
-    // Foreign keys are off, so the ON DELETE CASCADE clauses never fire: every
-    // table keyed by thread is cleared here, events included, so a removed
-    // project's prompts and tool output leave the disk.
+    // Foreign keys are off: clear dependent records, including unsent composer input.
     this.db.transaction(() => {
       for (const table of ['background_observations', 'turn_requests', 'turns', 'messages', 'native_agent_messages', 'part_blobs', 'streaming_parts', 'media_previews', 'media_displays', 'processes', 'command_lines', 'coordination_letters', 'coordination_wakes', 'events']) {
         const query = this.db.query(`DELETE FROM ${table} WHERE thread_id = ?`);
@@ -376,7 +376,8 @@ export class Journal {
         this.db.query('DELETE FROM workflow_steps WHERE thread_id = ? OR run_id IN (SELECT id FROM workflow_runs WHERE root_id = ?)').run(id, id);
         this.db.query('DELETE FROM workflow_requests WHERE run_id IN (SELECT id FROM workflow_runs WHERE root_id = ?)').run(id);
         this.db.query('DELETE FROM workflow_runs WHERE root_id = ?').run(id);
-        for (const prefix of ['merged-pr-archive:', 'linked-pull-requests:', 'pr-watches:', 'activity:', 'activity-input:', 'move-note:', 'compaction-tail:', 'memory-notices:', 'coordination:', 'coordination-autopause:', 'delegation:', 'delegation-turns:', 'delegation-episode:', 'delegation-worktree:', 'spawn-origin:', 'spawns:', 'worktree-removed:']) this.deleteSetting(`${prefix}${id}`);
+        deleteComposerInput(this.db, id, this.collectComposerAssets);
+        for (const prefix of ['merged-pr-archive:', 'linked-pull-requests:', 'pr-watches:', 'activity:', 'activity-input:', 'activity-choice:', 'move-note:', 'compaction-tail:', 'memory-notices:', 'coordination:', 'coordination-autopause:', 'delegation:', 'delegation-turns:', 'delegation-episode:', 'delegation-worktree:', 'spawn-origin:', 'spawns:', 'worktree-removed:']) this.deleteSetting(`${prefix}${id}`);
         this.db.query('DELETE FROM threads WHERE id = ?').run(id);
         this.db.query('DELETE FROM thread_deletions WHERE thread_id = ?').run(id);
       }
@@ -385,7 +386,6 @@ export class Journal {
   }
 
   // -- sessions -------------------------------------------------------------
-
   putSession(row: SessionRow): void {
     this.db
       .query(

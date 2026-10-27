@@ -3,10 +3,7 @@ import { assertIdleFamily } from './threads/completion.ts';
 import { repositoryOf, type MergedPrProof } from './pull-requests.ts';
 import { previewReferencesError, previewPrompt, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type ActivityTurn, type AgentProfile } from '@boite/contracts';
 import type {
-  Account,
-  AccountId,
-  Attachment,
-  PreviewReference,
+  Account, AccountId, Attachment, ComposerChoice, PreviewReference,
   SentFrom,
   ThreadLink,
   ImageMimeType,
@@ -321,7 +318,7 @@ export class ThreadStore {
       const modeChanged = next.permissionMode !== thread.permissionMode;
       if (modeChanged) next.selectionVersion = (thread.selectionVersion ?? 0) + 1;
       const saved = this.save(next, 'thread.updated');
-      if (modeChanged) this.runner.changePermissionMode(thread.id, next.permissionMode);
+      if (modeChanged) this.runner.changePermissionMode(thread.id, next.permissionMode, thread, next);
       return saved;
     }
     const account = this.core.accounts.require(params.accountId ?? thread.accountId);
@@ -603,7 +600,7 @@ export class ThreadStore {
     return this.moves.userMove(threadId, projectId, stopBackground);
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: ActivityTurn, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], startedBy?: ThreadLink, sentFrom: SentFrom | null = null, persistAdmission?: () => (() => void)): Turn {
+  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: ActivityTurn, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], startedBy?: ThreadLink, sentFrom: SentFrom | null = null, persistAdmission?: () => (() => void), executionChoice?: ComposerChoice): Turn {
     if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
     let thread = this.require(threadId);
     this.codeCheckpoints.assertAvailable(thread.cwd);
@@ -623,7 +620,16 @@ export class ThreadStore {
     const autonomous = autonomousSource(operation, activity, clientRequestId);
     if (autonomous !== null) this.core.agentRuntime.admit(thread, autonomous);
     // A signed-out or removed account hands the thread to another of its agent (`threads/account-fallback.ts`).
-    thread = followAgent(this.core, thread);
+    if (executionChoice) {
+      const provider = this.core.providers.require(executionChoice.providerId);
+      const account = this.core.accounts.require(executionChoice.accountId);
+      if (account.providerId !== provider.id || account.status === 'unauthenticated') throw refused('the queued account is unavailable; choose an account and enqueue this input again');
+      const model = checkModel(provider, account.id, executionChoice.model);
+      const sameAccount = thread.providerId === provider.id && thread.accountId === account.id;
+      thread = { ...thread, providerId: provider.id, accountId: account.id, model,
+        effort: checkEffort(provider, account.id, model, executionChoice.effort), speed: checkSpeed(provider, account.id, model, executionChoice.speed ?? null),
+        ...(!sameAccount ? { sessionId: null, sessionResumeAt: null } : {}) };
+    } else thread = followAgent(this.core, thread);
     this.core.sharedCompute?.assertTurn(threadId);
     this.core.sharedAccess?.assertTurn(threadId);
     const provider = this.core.providers.require(thread.providerId);
@@ -673,8 +679,9 @@ export class ThreadStore {
       execution: {
         providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
         effort: thread.effort, speed: thread.speed ?? null, permissionMode: thread.permissionMode, sessionId: thread.sessionId,
-        ...(thread.sessionId !== null && thread.sessionResumeAt ? { sessionResumeAt: thread.sessionResumeAt } : {}),
+        ...(thread.sessionId !== null && thread.sessionResumeAt ? { sessionResumeAt: thread.sessionResumeAt } : executionChoice ? { sessionResumeAt: null } : {}),
         sessionGeneration: thread.sessionGeneration ?? 0, selectionVersion: thread.selectionVersion ?? 0,
+        ...(executionChoice ? { frozenSelection: true as const } : {}),
         ...(operation ? { operation } : {}),
         ...(automatic ? { automatic: true as const } : {}),
       },
@@ -700,8 +707,7 @@ export class ThreadStore {
     // Accept the prompt and its queued status in one commit before starting the driver.
     this.core.bus.afterCommit(() => {
       const accepted = this.core.journal.db.transaction(() => {
-        let reservation: (() => void) | undefined;
-        let admitted: (() => void) | undefined;
+        let reservation: (() => void) | undefined, admitted: (() => void) | undefined;
         this.core.journal.append({ type: 'turn.queued', threadId, version: 1, payload: turn }, () => {
           reservation = this.core.delegation.prepareTurnReservation(threadId, operation);
           this.core.journal.putTurn(turn);

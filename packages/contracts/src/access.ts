@@ -18,6 +18,8 @@ import type { RpcEventName, RpcMethodName } from './index.ts';
  * association scope checks are installed; see docs/contacts.md for permissions.
  */
 export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
+  // Paired apps share the owner's composer and its validated, content-addressed attachments.
+  'composer.list', 'composer.put', 'composer.asset.put', 'composer.asset.get',
   // A paired phone lists the owner's agents with their state, desk and routines; talking to one is
   // `turns.start` on its thread, which the device already reaches.
   'agents.snapshot',
@@ -209,6 +211,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
 
 /** Push events must not bypass the read permissions enforced on RPC calls. */
 export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
+  'composer.updated', // Same metadata composer.list exposes, without attachment bytes or subscription routing.
   'sharedProjects.changed', // Direct delivery only to the connection's exact subscribed association and source.
   'threads.pullRequestsChanged', // Links already readable on the subscribed conversation.
   'browser.remoteChanged', // The subscribed conversation's agent tabs, as browser.remoteStatus says.

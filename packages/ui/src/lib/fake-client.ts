@@ -6,6 +6,7 @@ import { sharedAccessMethods } from './fake-client/shared-access';
 import { sharedLetterMethods } from './fake-client/shared-letters';
 import { sharedState, sharedContact, reconcileShared, refusedShared } from './fake-client/shared-state';
 import { startupMethods, resetStartup } from './fake-client/startup';
+import { composerMethods } from './fake-client/composer';
 import { seedWorking } from './fake-client/working-seed';
 import { sweepMergedPrFixtures, type MergedPrFixture } from './fake-client/merged-pr-archive';
 import {
@@ -116,6 +117,7 @@ export class FakeClient implements ObservableClient {
     this.#ctx = ctx;
     this.#methods = this.#answer(ctx);
     this.#missing = new Set(options.missing ?? []);
+    ctx.core.features = { ...ctx.core.features, composerPersistence: !this.#missing.has('composer.list') };
     this.#agentSettings = agentSettingMethods(ctx);
     registerCore(ctx);
     seed(ctx);
@@ -163,6 +165,11 @@ export class FakeClient implements ObservableClient {
 
   get state(): ClientState {
     return this.#ctx.bus.state;
+  }
+
+  /** A second device connected to this fake core's shared composer. */
+  composerPeer(options: Omit<FakeClientOptions, 'composerState'> = {}): FakeClient {
+    return new FakeClient({ ...options, composerState: this.#ctx.composer });
   }
 
   get core(): CoreInfo | null {
@@ -258,6 +265,7 @@ export class FakeClient implements ObservableClient {
 
   close(): void {
     const ctx = this.#ctx;
+    ctx.composer.detach(ctx);
     this.#stopWorking();
     closeSideQuestions(ctx);
     closeSecrets(ctx);
@@ -319,6 +327,7 @@ export class FakeClient implements ObservableClient {
       throw new RpcFailure({ code: RpcErrorCode.Internal, message: 'connection changed before RPC dispatch' });
     }
     if (this.#missing.has(method)) throw new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: `unknown method ${method}` });
+    if (bus.principal === 'agent' && method.startsWith('composer.')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is not one of the agent's methods` });
     // The fixture has no thread-bound agent token; do not widen this scoped read.
     if (bus.principal === 'agent' && (method === 'threads.capabilities' || method === 'threads.mergeBack')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} requires a thread-bound agent identity` });
     if (bus.principal === 'agent' && (method === 'core.logs' || method === 'projects.setAutoArchiveMergedPr' || method === 'projects.setAutoRemoveWorktrees' || method === 'quotas.reset')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is not one of the agent's methods` });
@@ -488,6 +497,7 @@ export class FakeClient implements ObservableClient {
         return { core: ctx.core, principal: ctx.bus.principal };
       },
       ...brainMethods(ctx),
+      ...composerMethods(ctx, () => methods),
       ...logMethods(ctx),
       ...serverUpdateMethods(ctx),
       ...retryMethods(ctx),
