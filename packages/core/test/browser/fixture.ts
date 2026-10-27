@@ -29,6 +29,10 @@ const SHOP = `<!doctype html><title>Shop</title>
 <div id="cover" style="position:absolute;left:0;top:400px;width:200px;height:60px;background:#ccc">Cover</div>
 <p id="note">Free delivery</p>`;
 
+// A page that loads its data from an API with a credential, as most sites do: `browser network` finds the call.
+const APP = `<!doctype html><title>App</title>
+<button id="load" onclick="fetch('/api/items?page=2&token=abc123', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer s3cret-value' }, body: JSON.stringify({ query: 'shoes', password: 'hunter2' }) }).then(r => r.json()).then(d => document.title = 'loaded ' + d.items.length)">Load</button>`;
+
 export const DOWNLOAD_SCRIPT = '#!/bin/sh\necho downloaded\n';
 export const DOWNLOAD_PROGRAM = Buffer.concat([Buffer.from('MZ'), Buffer.alloc(126)]);
 
@@ -53,6 +57,10 @@ export function createBrowserFixture() {
       agents.set(path, request.headers.get('user-agent'));
       if (path === '/') return new Response(PAGE, { headers: { 'content-type': 'text/html' } });
       if (path === '/shop') return new Response(SHOP, { headers: { 'content-type': 'text/html' } });
+      if (path === '/app') return new Response(APP, { headers: { 'content-type': 'text/html' } });
+      if (path === '/api/items') return (request.method === 'POST' ? request.json() as Promise<{ query?: string }> : Promise.resolve({ query: undefined }))
+        .then(body => Response.json({ items: ['red', 'blue'], query: body.query ?? null, next: 'cursor-2', sessionToken: 'tok-999' }));
+      if (path === '/api/fail') return Response.json({ error: 'the shelf is empty' }, { status: 500 });
       if (path === '/later') return later.response.then(() => new Response('released'));
       if (path === '/later/done') { later.complete(); return new Response('done'); }
       if (path === '/sent') return new Response(`<title>Sent</title><h1>Thanks ${new URL(request.url).searchParams.get('name')}</h1>`, { headers: { 'content-type': 'text/html' } });

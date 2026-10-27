@@ -52,6 +52,8 @@ import { automate, awaitDocument, documentToken, PAGE_ACTIONS } from './browser/
 import { pageFrames } from './browser/page-frames.ts';
 import { sleepState, TabSleep } from './browser/sleep.ts';
 import { BrowserDownloads } from './browser/downloads.ts';
+import { BrowserRecipes } from './browser/recipes.ts';
+import { networkCapture, networkCalls, networkDetail, NETWORK_BUFFERS, NO_NETWORK_BUFFERS, watchNetwork } from './browser/network.ts';
 
 /** The process scope of the agent browser's own processes, in the trace and the registry. */
 export const BROWSER_SCOPE = 'system:browser';
@@ -78,6 +80,7 @@ export class AgentBrowser {
   readonly #remote: RemoteDrive;
   readonly #host = new BrowserHost();
   readonly #downloads: BrowserDownloads;
+  readonly #recipes: BrowserRecipes;
   #tabs = new Map<string, Tab>();
   /** Per conversation, its tabs in opening order and the active one. */
   #threads = new Map<ThreadId, { order: string[]; active: string | null }>();
@@ -106,6 +109,7 @@ export class AgentBrowser {
       ? `A sleeping tab's page answered ${method} ${after} ms after it was sent`
       : `A sleeping tab's page never answered ${method}: ${after.message}`, { source: 'browser', event: 'browser.sleep-late', threadId: tab.threadId, data: { method } });
     this.#downloads = new BrowserDownloads(() => core.dataDir, message => core.log('warn', message));
+    this.#recipes = new BrowserRecipes(() => core.dataDir);
     this.#engines = new BrowserEngines(core, this.#host, () => this.findBrowser(), this.#machine, BROWSER_SCOPE,
       engine => this.#targets(engine), id => this.#drop(id), this.#downloads);
     this.#remote = new RemoteDrive({
@@ -220,7 +224,7 @@ export class AgentBrowser {
     const { sessionId } = await engine.cdp.send<{ sessionId: string }>('Target.attachToTarget', { targetId, flatten: true });
     const tab: Tab = {
       id: `browser:${crypto.randomUUID()}`, threadId, engine, targetId, sessionId, url, title: '',
-      preset: null, orientation: 'portrait', colorScheme: 'system', diagnostics: [], dropped: 0, history: [], requests: new Map(),
+      preset: null, orientation: 'portrait', colorScheme: 'system', diagnostics: [], dropped: 0, history: [], requests: new Map(), network: null,
       recorder: null, discarded: false, frame: null, screen: screenTurns(), off: [], frames: new Set(), acting: false, sleep: sleepState(),
       page: {
         session: sessionId,
@@ -233,17 +237,18 @@ export class AgentBrowser {
     tab.page.frames = pageFrames(engine.cdp, sessionId, on);
     watchPage(tab, on, (accept, promptText) => void engine.cdp.send('Page.handleJavaScriptDialog', { accept, ...(promptText === undefined ? {} : { promptText }) }, sessionId).catch(() => {}),
       url => { tab.url = url; tab.page.frameRefs?.clear(); this.#remote.stale(tab); this.#changed(threadId); this.#engines.saveCookiesSoon(engine); });
+    watchNetwork(() => tab.network, on);
     on('Page.frameAttached', params => { if (tab.frames.size < 500) tab.frames.add(String(params.frameId)); });
     on('Page.frameNavigated', params => { const frame = params.frame as { id: string }; if (tab.frames.size < 500) tab.frames.add(String(frame.id)); });
     // A frame moving to another process (`swap`) is still the page's: only a removed one goes.
     on('Page.frameDetached', params => { if (params.reason !== 'swap') tab.frames.delete(String(params.frameId)); });
     // Before its first request: the page, its workers and its requests say what a browser with a window says.
     if (engine.identity) await engine.cdp.send('Emulation.setUserAgentOverride', { userAgent: engine.identity.userAgent, userAgentMetadata: engine.identity.metadata }, sessionId).catch(() => {});
-    // Nothing reads response bodies (`Network.getResponseBody`): Chromium keeps none for this tab.
+    // Only `browser network` reads response bodies (`Network.getResponseBody`): until it starts, Chromium keeps none for this tab.
     await Promise.all([
       engine.cdp.send('Page.enable', {}, sessionId),
       engine.cdp.send('Runtime.enable', {}, sessionId),
-      engine.cdp.send('Network.enable', { maxTotalBufferSize: 0, maxResourceBufferSize: 0 }, sessionId),
+      engine.cdp.send('Network.enable', NO_NETWORK_BUFFERS, sessionId),
     ]);
     // A window opened by a page may have navigated before it was attached: its address is read once now.
     const current = await engine.cdp.send<{ targetInfo: { url: string; title: string } }>('Target.getTargetInfo', { targetId }).catch(() => null);
@@ -399,6 +404,12 @@ export class AgentBrowser {
         return { value: { machine: this.#machine, default: defaultId, profiles: [DEFAULT_BROWSER_PROFILE, ...profiles.map(profile => profile.id), PRIVATE_BROWSER_PROFILE].map(id => ({ id, name: this.#profileName(id), kept: id !== PRIVATE_BROWSER_PROFILE })) } };
       }
       case 'profile-add': return { value: this.#addProfile(action.name) };
+      // Recipes are kept for the whole machine and need no tab: the agent's CLI runs them.
+      case 'recipes': return { value: { recipes: this.#recipes.list() } };
+      case 'recipe-get': return { value: this.#recipes.get(action.name) };
+      case 'recipe-save': return { value: this.#recipes.save(action) };
+      case 'recipe-delete': this.#recipes.delete(action.name); return { value: { ok: true } };
+      case 'recipe-result': return { value: this.#recipes.result(action.name, action.ok, action.error) };
       case 'open': {
         // agent-browser's `open` drives the current tab; a named profile opens a tab of its own.
         const current = action.reuse && action.profile === undefined ? this.#threads.get(threadId)?.active : null;
@@ -468,7 +479,7 @@ export class AgentBrowser {
 
   /** Keeps operation names only: typed values and evaluated code can hold passwords. */
   async #track<T>(tab: Tab, action: BrowserAction, run: () => Promise<T>): Promise<T> {
-    if (['snapshot', 'get', 'diagnostics', 'recording-read'].includes(action.kind)) return run();
+    if (['snapshot', 'get', 'diagnostics', 'recording-read', 'network', 'network-detail'].includes(action.kind)) return run();
     const at = Date.now(); let ok = true, error: string | undefined;
     try { return await run(); }
     catch (cause) { ok = false; error = cause instanceof Error ? cause.message.slice(0, 300) : String(cause).slice(0, 300); throw cause; }
@@ -531,6 +542,23 @@ export class AgentBrowser {
         return { tabId: tab.id, screenshot: { mime: 'image/png', base64: shot.data } };
       }
       case 'diagnostics': return done(this.#diagnostics(tab, action.clear));
+      case 'network': {
+        const started = !tab.network;
+        if (started) {
+          await this.#send(tab, 'Network.enable', NETWORK_BUFFERS);
+          tab.network = networkCapture();
+        }
+        return done({ capturing: true, started, calls: networkCalls(tab.network!, action.filter) });
+      }
+      case 'network-detail': {
+        if (!tab.network) throw refused('network capture is off in this tab; browser network starts it');
+        const detail = await networkDetail(tab.network, action.callId, (method, params) => this.#send(tab, method, params) as never);
+        if (!detail) throw refused(`no call ${action.callId} in this tab's capture; browser network lists them`);
+        return done(detail);
+      }
+      case 'network-stop':
+        if (tab.network) { tab.network = null; await this.#send(tab, 'Network.enable', NO_NETWORK_BUFFERS); }
+        return done({ capturing: false });
       case 'recording-start': {
         if (tab.recorder?.running) throw refused('a browser recording is already running in this tab');
         if (tab.recorder?.result) throw refused('download or discard the previous recording first');
