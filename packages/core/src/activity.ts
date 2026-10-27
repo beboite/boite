@@ -1,4 +1,4 @@
-import type { ActivityTurn, AgentTask, Attachment, GoalReview, MessagePart, RpcParams, ThreadActivity, ThreadSummary, Turn } from '@boite/contracts';
+import type { ActivityTurn, AgentTask, Attachment, ComposerChoice, GoalReview, MessagePart, RpcParams, ThreadActivity, ThreadSummary, Turn } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
 import { isAgentHeld } from './agents/runtime.ts';
@@ -135,7 +135,7 @@ export class ActivityStore {
     if (goal?.checklist && goal.status !== 'complete') this.tracker.message(threadId, text);
   }
 
-  set(params: RpcParams<'threads.activity.set'>): ThreadActivity {
+  set(params: RpcParams<'threads.activity.set'>, executionChoice?: ComposerChoice): ThreadActivity {
     const thread = this.core.journal.getThread(params.threadId);
     if (!thread || thread.archived) throw refused('activity requires an existing, unarchived thread');
     const attachments = params.attachments ?? [];
@@ -156,12 +156,17 @@ export class ActivityStore {
       state.loop = params.loop === null ? null : { prompt: params.loop.prompt.trim(), intervalMs: params.loop.intervalMs, maxIterations: params.loop.maxIterations ?? null, status: 'active', iterations: 0, nextRunAt: Date.now(), error: null, history: [] };
     }
     const pending = this.pendingAttachments(params.threadId);
+    const choices = (this.core.journal.getSetting(`activity-choice:${params.threadId}`) as Partial<Record<'goal' | 'loop', ComposerChoice>> | undefined) ?? {};
     for (const kind of ['goal', 'loop'] as const) if (params[kind] !== undefined) {
       const key = `${params.threadId}:${kind}`;
       this.generations.set(key, (this.generations.get(key) ?? 0) + 1);
       if (params[kind] && attachments.length) pending[kind] = structuredClone(attachments);
       else delete pending[kind];
+      if (params[kind] && executionChoice) choices[kind] = executionChoice;
+      else delete choices[kind];
     }
+    if (Object.keys(choices).length) this.core.journal.setSetting(`activity-choice:${params.threadId}`, choices);
+    else this.core.journal.deleteSetting(`activity-choice:${params.threadId}`);
     this.saveAttachments(params.threadId, pending);
     this.states.set(params.threadId, state);
     this.save(params.threadId);
@@ -350,7 +355,8 @@ export class ActivityStore {
     try {
       const pending = this.pendingAttachments(threadId);
       const turnActivity: ActivityTurn = { kind, iteration, ...(feedback ? { review: feedback } : {}), ...(checklist ? { checklist } : {}) };
-      const turn = this.core.threads.startTurn(threadId, prompt, pending[kind] ?? [], undefined, undefined, turnActivity);
+      const choice = (this.core.journal.getSetting(`activity-choice:${threadId}`) as Partial<Record<'goal' | 'loop', ComposerChoice>> | undefined)?.[kind];
+      const turn = this.core.threads.startTurn(threadId, prompt, pending[kind] ?? [], undefined, undefined, turnActivity, undefined, undefined, [], undefined, null, choice);
       delete pending[kind];
       this.saveAttachments(threadId, pending);
       this.ownTurns.set(turn.id, { kind, generation: this.generations.get(`${threadId}:${kind}`) ?? 0, iteration });

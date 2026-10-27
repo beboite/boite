@@ -817,8 +817,11 @@ devices you intend to give that control.
   journal is on the core. Prompts
   written in a thread that was open before the connection went wait in the
   device's outbox (`docs/machines.md`), and go out once it is back, even after
-  the PWA was closed in between. A new conversation sent from a draft waits
-  there too, and starts once the core is back.
+  the PWA was closed in between. Input that never reached the core requires a
+  client to reconnect first. Once synchronized, the core runs pending prompts
+  and draft starts with every app closed. Drafts, unsent replies and their
+  attachments are shared by the owner's paired devices; incognito input stays
+  in client memory.
 - A phone is added with a QR code or a link somebody shows it, within ten
   minutes. There is no discovery on the network. Adding it
   once is enough for every machine of its [group](groups.md).

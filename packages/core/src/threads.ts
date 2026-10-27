@@ -6,6 +6,7 @@ import type {
   Account,
   AccountId,
   Attachment,
+  ComposerChoice,
   PreviewReference,
   SentFrom,
   ThreadLink,
@@ -603,7 +604,7 @@ export class ThreadStore {
     return this.moves.userMove(threadId, projectId, stopBackground);
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: ActivityTurn, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], startedBy?: ThreadLink, sentFrom: SentFrom | null = null): Turn {
+  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: ActivityTurn, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], startedBy?: ThreadLink, sentFrom: SentFrom | null = null, executionChoice?: ComposerChoice): Turn {
     if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
     let thread = this.require(threadId);
     this.codeCheckpoints.assertAvailable(thread.cwd);
@@ -623,7 +624,16 @@ export class ThreadStore {
     const autonomous = autonomousSource(operation, activity, clientRequestId);
     if (autonomous !== null) this.core.agentRuntime.admit(thread, autonomous);
     // A signed-out or removed account hands the thread to another of its agent (`threads/account-fallback.ts`).
-    thread = followAgent(this.core, thread);
+    if (executionChoice) {
+      const provider = this.core.providers.require(executionChoice.providerId);
+      const account = this.core.accounts.require(executionChoice.accountId);
+      if (account.providerId !== provider.id || account.status === 'unauthenticated') throw refused('the queued account is unavailable; choose an account and enqueue this input again');
+      const model = checkModel(provider, account.id, executionChoice.model);
+      const sameAccount = thread.providerId === provider.id && thread.accountId === account.id;
+      thread = { ...thread, providerId: provider.id, accountId: account.id, model,
+        effort: checkEffort(provider, account.id, model, executionChoice.effort), speed: checkSpeed(provider, account.id, model, executionChoice.speed ?? null),
+        ...(!sameAccount ? { sessionId: null, sessionResumeAt: null } : {}) };
+    } else thread = followAgent(this.core, thread);
     const provider = this.core.providers.require(thread.providerId);
     const account = this.core.accounts.require(thread.accountId);
     if (account.providerId !== provider.id) throw refused(`accountId: account ${account.id} belongs to provider ${account.providerId}; expected provider ${provider.id}`, {
@@ -670,8 +680,9 @@ export class ThreadStore {
       execution: {
         providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
         effort: thread.effort, speed: thread.speed ?? null, permissionMode: thread.permissionMode, sessionId: thread.sessionId,
-        ...(thread.sessionId !== null && thread.sessionResumeAt ? { sessionResumeAt: thread.sessionResumeAt } : {}),
+        ...(thread.sessionId !== null && thread.sessionResumeAt ? { sessionResumeAt: thread.sessionResumeAt } : executionChoice ? { sessionResumeAt: null } : {}),
         sessionGeneration: thread.sessionGeneration ?? 0, selectionVersion: thread.selectionVersion ?? 0,
+        ...(executionChoice ? { frozenSelection: true as const } : {}),
         ...(operation ? { operation } : {}),
         ...(automatic ? { automatic: true as const } : {}),
       },

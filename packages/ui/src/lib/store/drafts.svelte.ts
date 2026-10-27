@@ -15,7 +15,9 @@ export type Input = Composer['composerStates'][string];
  */
 type SavedDraft = { draft: Draft; choice: Choice | null; input: Input; parked: number };
 type Journal = { updatedAt?: number; inputs?: Record<string, unknown>; drafts?: Record<string, unknown> };
-type Source = { section: 'inputs' | 'drafts'; id: string; input: Input; draft?: Draft; parked?: number };
+type Source = { section: 'inputs' | 'drafts'; id: string; input: Input; draft?: Draft; parked?: number; choice?: Choice | null };
+/** One composer as it is now: a thread's box and queue, or a draft with its project and choice. */
+export type LiveSource = Source;
 type CachedEntry = { section: Source['section']; id: string; value: unknown; serialized: string; updatedAt: number; backedUp: boolean };
 const entryKey = (section: Source['section'], id: string) => JSON.stringify([section, id]);
 /** A draft's row: its words, and whether it was sent while its machine was away and waits for it, or was refused. */
@@ -85,10 +87,16 @@ export class Drafts {
   #due = 0;
   /** When `resume` last opened a draft: the open one outranks every draft parked before it. */
   #opened = 0;
+  /** Drafts restored from a journal entry without a `choice` field. */
+  #choiceUnsaved = new Set<string>();
 
   constructor(private readonly ctx: StoreContext) {}
 
   get readable(): boolean { return this.#hydrated && this.#durableReady; }
+  /** The journal, or its synchronous backup, has been read into the composers. */
+  get hydrated(): boolean { return this.#hydrated; }
+  /** This host and data directory's journal key, null before `start`. */
+  get storageKey(): string | null { return this.#key; }
 
   async start(): Promise<void> {
     if (this.#stop) return;
@@ -142,12 +150,14 @@ export class Drafts {
     this.#revision = Math.max(this.#revision, typeof data?.updatedAt === 'number' && Number.isFinite(data.updatedAt) ? data.updatedAt : 0);
     if (!data || typeof data !== 'object') return;
     for (const [id, input] of Object.entries(data.inputs ?? {})) {
+      // A record the core settled on this connection is newer than this copy.
+      if (this.ctx.sync.claims('inputs', id)) continue;
       const restored = restoreInput(input, assets);
       if (restored && vacant(this.ctx.composer.composerStates[id])) this.ctx.composer.composerStates[id] = restored;
     }
     for (const [key, value] of Object.entries(data.drafts ?? {})) {
       const entry = value as Partial<SavedDraft> | null;
-      if (!entry?.draft || (entry.draft.projectId !== null && typeof entry.draft.projectId !== 'string')) continue;
+      if (!entry?.draft || (entry.draft.projectId !== null && typeof entry.draft.projectId !== 'string') || this.ctx.sync.claims('drafts', key)) continue;
       const input = restoreInput(entry.input, assets);
       const createdAt = entry.draft.createdAt;
       const parked = typeof entry.parked === 'number' && Number.isFinite(entry.parked) ? entry.parked : 0;
@@ -155,8 +165,10 @@ export class Drafts {
       if (input && vacant(this.saved[key]?.input)) this.saved[key] = {
         draft: { id: key, projectId: entry.draft.projectId, worktree: entry.draft.worktree === true, worktreeExplicit: true,
           ...(typeof createdAt === 'number' && Number.isFinite(createdAt) ? { createdAt } : {}) },
-        choice: null, input, parked
+        choice: savedChoice(entry.choice), input, parked
       };
+      // A journal written before drafts kept their choice cannot tell a default from a lost choice.
+      if (!('choice' in entry)) this.#choiceUnsaved.add(key);
     }
     // A landing draft nobody wrote in becomes the project's latest saved
     // draft, id included, so one input never shows as two drafts.
@@ -165,6 +177,7 @@ export class Drafts {
     if (current && saved && vacant(this.ctx.composer.composerStates.draft)) {
       this.ctx.composer.composerStates.draft = saved.input;
       s.draft = current.worktreeExplicit ? { ...current, id: saved.draft.id, ...(saved.draft.createdAt === undefined ? {} : { createdAt: saved.draft.createdAt }) } : { ...saved.draft };
+      if (!s.draftChoice && saved.choice) s.draftChoice = { ...saved.choice };
     }
   }
 
@@ -245,6 +258,7 @@ export class Drafts {
     this.#assetIds.clear();
     this.#storedAssetIds.clear();
     this.#failedEntries.clear();
+    this.#choiceUnsaved.clear();
     this.saved = {};
   }
 
@@ -294,6 +308,15 @@ export class Drafts {
       if (!best || entry.parked > best.parked || (entry.parked === best.parked && (entry.draft.createdAt ?? 0) > (best.draft.createdAt ?? 0))) best = entry;
     }
     return best;
+  }
+
+  /**
+   * Words that met another device's newer ones in the same box: they become a
+   * new draft of the project, so neither is lost.
+   */
+  keepAside(projectId: string | null, box: Pick<Input, 'text' | 'attachments' | 'previewReferences'>): void {
+    const draft = newDraft(projectId, false);
+    this.saved[draftKey(draft)] = { draft, choice: null, input: { ...empty(), ...box }, parked: created() };
   }
 
   /** Drops one draft by its key. The open draft's composer is left to the caller. */
@@ -406,10 +429,32 @@ export class Drafts {
     }
   }
 
+  /** Every composer the journal would save, by section and id. */
+  localSources(): { section: Source['section']; id: string }[] {
+    return this.#sources().map(({ section, id }) => ({ section, id }));
+  }
+
+  /** The composer a shared record names, or null when this device has none. */
+  liveSource(section: Source['section'], id: string): LiveSource | null {
+    if (section === 'inputs') {
+      const input = this.ctx.composer.composerStates[id];
+      return id !== 'draft' && input ? { section, id, input } : null;
+    }
+    const open = this.#openSource();
+    if (open?.id === id) return open;
+    const saved = this.saved[id];
+    return saved ? { section, id, input: saved.input, draft: { ...saved.draft }, parked: saved.parked, choice: saved.choice } : null;
+  }
+
+  isIncognito(source: Source): boolean { return this.#incognito(source); }
+
+  /** Whether a draft came back from a journal that predates saved choices, so its null choice says nothing. */
+  choiceUnsaved(id: string): boolean { return this.#choiceUnsaved.has(id); }
+
   #sources(): Source[] {
     const sources: Source[] = Object.entries(this.ctx.composer.composerStates)
       .filter(([id]) => id !== 'draft').map(([id, input]) => ({ section: 'inputs', id, input }));
-    const drafts = new Map<string, Source>(Object.entries(this.saved).map(([id, entry]) => [id, { section: 'drafts', id, input: entry.input, draft: { ...entry.draft }, parked: entry.parked }]));
+    const drafts = new Map<string, Source>(Object.entries(this.saved).map(([id, entry]) => [id, { section: 'drafts', id, input: entry.input, draft: { ...entry.draft }, parked: entry.parked, choice: entry.choice }]));
     const open = this.#openSource();
     if (open) drafts.set(open.id, open);
     return [...sources, ...drafts.values()];
@@ -420,7 +465,7 @@ export class Drafts {
     const input = this.ctx.composer.composerStates.draft;
     if (!current || !input) return null;
     const id = draftKey(current);
-    return { section: 'drafts', id, input, draft: { ...current }, parked: Math.max(this.saved[id]?.parked ?? 0, this.#opened) };
+    return { section: 'drafts', id, input, draft: { ...current }, parked: Math.max(this.saved[id]?.parked ?? 0, this.#opened), choice: this.ctx.store.draftChoice };
   }
 
   #removeMissing(sources: Source[]): void {
@@ -434,7 +479,7 @@ export class Drafts {
     try {
       // Nothing typed into an incognito conversation or its draft reaches the device's storage.
       const input = source && hasContent(source.input) && !this.#incognito(source) ? savedInput(source.input, this.#assetId) : null;
-      const value = input && source ? source.section === 'drafts' ? { draft: source.draft, input, parked: source.parked ?? 0 } : input : null;
+      const value = input && source ? source.section === 'drafts' ? { draft: source.draft, input, parked: source.parked ?? 0, choice: source.choice ? $state.snapshot(source.choice) : null } : input : null;
       const stored = this.#storedAssetIds;
       // Until a strict durable write succeeds, keep inline bytes in the atomic
       // backup too. This also preserves old journals without IndexedDB.
@@ -450,6 +495,7 @@ export class Drafts {
         const updatedAt = this.#revision = Math.max(Date.now(), this.#revision + 1);
         const entry = { section: source?.section ?? previous!.section, id: source?.id ?? previous!.id, value, serialized, updatedAt, backedUp: false };
         this.#entries.set(key, entry);
+        if (!source || !this.#incognito(source)) this.ctx.sync.touched(entry.section, entry.id, value === null);
         // Each atomic entry includes its own revision; null is a deletion tombstone.
         // The old complete v1 backup remains available throughout migration.
         try { localStorage.setItem(`${this.#key}:entry:${key}`, `{"updatedAt":${updatedAt},"value":${serialized}}`); entry.backedUp = true; }
@@ -563,13 +609,20 @@ export class Drafts {
   }
 }
 
+/** A draft's saved choice, or null for a default or a value that is not one. */
+function savedChoice(value: unknown): Choice | null {
+  const raw = value as Partial<Choice> | null | undefined;
+  return raw && typeof raw === 'object' && typeof raw.providerId === 'string' && typeof raw.accountId === 'string' ? { ...raw } as Choice : null;
+}
+
 function savedInput(input: Input, assetId: (bytes: string) => string) {
   const file = (item: Attachment) => ({ kind: item.kind, mimeType: item.mimeType, name: item.name,
     assetId: unresolvedAssetId(item) ?? assetId(item.data), ...(unresolvedAssetId(item) ? {} : { data: item.data }) });
   // `$state.snapshot` hands anything but an object to `structuredClone`, which an absent list costs on every key.
   return { text: input.text, editing: input.editing ?? null, attachments: input.attachments.map(file),
     previewReferences: input.previewReferences && $state.snapshot(input.previewReferences),
-    queued: input.queued.map(item => ({ text: item.text, attachments: item.attachments.map(file), previewReferences: item.previewReferences && $state.snapshot(item.previewReferences),
+    queued: input.queued.map(item => ({ ...(item.id ? { id: item.id } : {}), ...(item.choice ? { choice: $state.snapshot(item.choice) } : {}),
+      text: item.text, attachments: item.attachments.map(file), previewReferences: item.previewReferences && $state.snapshot(item.previewReferences),
       ...(item.request ? { request: $state.snapshot(item.request) } : {}) })) };
 }
 
@@ -595,7 +648,9 @@ function restoreInput(value: unknown, assets: Map<string, string>): Input | null
   const raw = value as { text: string; editing?: unknown; queued?: unknown; previewReferences?: unknown; attachments?: unknown };
   const queued: Input['queued'] = Array.isArray(raw.queued) ? raw.queued.filter(item => item && typeof item.text === 'string').map(item => {
     const request = outboxRequest(item.request);
-    return { text: item.text, attachments: attachments(item.attachments, assets), previewReferences: references(item.previewReferences), ...(request ? { request } : {}) };
+    const id = typeof item.id === 'string' && /^[A-Za-z0-9_-]{8,128}$/.test(item.id) ? item.id : request?.id;
+    const choice = item.choice && typeof item.choice === 'object' && typeof item.choice.providerId === 'string' && typeof item.choice.accountId === 'string' ? item.choice as Choice : undefined;
+    return { ...(id ? { id } : {}), ...(choice ? { choice } : {}), text: item.text, attachments: attachments(item.attachments, assets), previewReferences: references(item.previewReferences), ...(request ? { request } : {}) };
   }) : [];
   return { ...empty(), text: raw.text, editing: typeof raw.editing === 'string' ? raw.editing : null,
     previewReferences: references(raw.previewReferences),

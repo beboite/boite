@@ -108,6 +108,7 @@ export class TurnAttempts {
   changeSettings(threadId: ThreadId, selection: Pick<ThreadSummary, 'accountId' | 'model' | 'effort' | 'speed'>): void {
     const live = this.liveSettings.get(threadId);
     if (live === undefined) return;
+    if (live.state.running.execution?.frozenSelection) return;
     if (selection.accountId !== live.state.thread.accountId || selection.model !== live.state.thread.model) return;
     live.settings.change({ effort: selection.effort, speed: selection.speed ?? null });
   }
@@ -359,7 +360,7 @@ export class TurnAttempts {
     state.thread = { ...state.thread, sessionId: result.sessionId ?? state.thread.sessionId, sessionResumeAt: null };
     if (state.running.execution) state.running = { ...state.running, execution: { ...state.running.execution, sessionId: state.thread.sessionId, sessionResumeAt: null } };
     const current = this.core.journal.getThread(state.threadId);
-    if (current && (current.sessionGeneration ?? 0) === (state.thread.sessionGeneration ?? 0)) {
+    if (current && current.providerId === state.thread.providerId && current.accountId === state.thread.accountId && (current.sessionGeneration ?? 0) === (state.thread.sessionGeneration ?? 0)) {
       saveThread(this.core, { ...current, sessionId: state.thread.sessionId, sessionResumeAt: null }, 'thread.updated');
     }
   }

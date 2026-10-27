@@ -36,6 +36,8 @@ export interface CoreInfo {
     draftPreparation?: boolean;
     /** Connection-owned attachment uploads resolved by turns.start. */
     attachmentUploads?: boolean;
+    /** Durable per-record composer CAS, shared assets and core-owned queue delivery. */
+    composerPersistence?: boolean;
     /** `ui.reveal` takes `coreId` on a thread or an agent target and opens it on that machine. An older core drops the field and opens this core's. */
     revealMachines?: boolean;
     /** A load sample reaches a client whose hello `accepts` `thread.load` as that event alone, not as a whole `thread.updated` row. */

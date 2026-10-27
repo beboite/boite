@@ -21,9 +21,16 @@ import { setExperiment } from '../lib/experiments';
 
 let running: Record<string, unknown> | null = null;
 
-const test = fixtureTest.extend<{ app: void }>({
+/** A core without composer records: the frontend delivers its queues itself, which these tests watch. */
+const OLD_CORE = ['composer.list'];
+
+const test = fixtureTest.extend<{ app: void; oldCoreApp: void }>({
   app: async ({}, use) => {
     await mountOnFake();
+    await use();
+  },
+  oldCoreApp: async ({}, use) => {
+    await mountOnFake(undefined, OLD_CORE);
     await use();
   },
 });
@@ -70,7 +77,7 @@ test('an intact preview mention never opens file completion, while editing it re
   expect(mentionMenu()).not.toBeNull();
 });
 
-test('preview references survive queuing and a failed drain, and stashing refuses without changing the draft', async ({ app: _app }) => {
+test('preview references survive queuing and a failed drain, and stashing refuses without changing the draft', async ({ oldCoreApp: _app }) => {
   await store.open('t-trace');
   await waitFor(() => !store.busy);
   await type('Change the selected control');
@@ -165,8 +172,8 @@ async function type(text: string): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-async function mountOnFake(delayMs?: number): Promise<void> {
-  window.history.replaceState(null, '', '/?fake=1&open=recent');
+async function mountOnFake(delayMs?: number, missing?: string[]): Promise<void> {
+  window.history.replaceState(null, '', `/?fake=1&open=recent${missing ? `&missing=${missing.join(',')}` : ''}`);
   const target = document.createElement('div');
   document.body.appendChild(target);
   // The store is a singleton: the previous test's thread and its draft would
@@ -181,7 +188,7 @@ async function mountOnFake(delayMs?: number): Promise<void> {
   closeTour();
   running = mount(App, { target });
   await waitFor(() => store.booted && store.openThread !== null);
-  if (delayMs !== undefined) { store.attach(new FakeClient({ delayMs })); await store.connect(); }
+  if (delayMs !== undefined) { store.attach(new FakeClient({ delayMs, ...(missing ? { missing } : {}) })); await store.connect(); }
 }
 
 /** One finished turn on the thread that is open, sent from the composer. */
@@ -699,7 +706,7 @@ test('reconnecting queues a send instead of sending it, and a new thread queues 
   expect(store.draftEntries.find(entry => entry.active)).toMatchObject({ text: 'a new thread', queued: 'waiting' });
 });
 
-test('ArrowUp removes the latest queued prompt and restores its images for editing', async ({ app: _app }) => {
+test('ArrowUp removes the latest queued prompt and restores its images for editing', async ({ oldCoreApp: _app }) => {
   await store.open('t-trace');
   store.openThread!.status = 'running';
   await type('first pending');
@@ -751,7 +758,7 @@ test('Escape in the box that answers a question keeps the question and its turn'
   expect(document.querySelector('[data-testid=question-card][data-state=pending]')).not.toBeNull();
 });
 
-test('a thread of a machine that dropped still opens and queues its prompts until the machine is back', async ({ app: _app }) => {
+test('a thread of a machine that dropped still opens and queues its prompts until the machine is back', async ({ oldCoreApp: _app }) => {
   await store.open('t-trace');
   await waitFor(() => !store.busy);
   const other = store.threads.find((t) => t.id === 't-descriptors')!;
@@ -784,7 +791,7 @@ test('a thread of a machine that dropped still opens and queues its prompts unti
   await waitFor(() => asked('threads.get') && asked('collaboration.get') && asked('workflows.list') && asked('delegation.get'));
 });
 
-test('an outbox prompt the core refuses shows why, holds the next one, and goes again on Send again', async ({ app: _app }) => {
+test('an outbox prompt the core refuses shows why, holds the next one, and goes again on Send again', async ({ oldCoreApp: _app }) => {
   await store.open('t-descriptors');
   await waitFor(() => !store.busy);
   const fake = store.client as FakeClient;
@@ -849,7 +856,7 @@ test('Enter in the emptied composer holds pending input behind an approval', asy
 });
 
 test('Send now submits a follow-up without interrupting the live agent', async () => {
-  await mountOnFake(40);
+  await mountOnFake(40, OLD_CORE);
   await store.open('t-trace');
   await type('Keep reading [tools]');
   press('Enter');
@@ -1770,7 +1777,7 @@ test('Escape shuts the slash menu and keeps what is typed', async ({ app: _app }
   expect(input().value).toBe('/whisper ');
 });
 
-test('queued prompts survive settings and wait for a ready connection', async ({ app: _app }) => {
+test('queued prompts survive settings and wait for a ready connection', async ({ oldCoreApp: _app }) => {
   await store.open('t-trace');
   store.openThread!.status = 'running';
   await type('queue through settings');
@@ -1794,7 +1801,7 @@ test('queued prompts survive settings and wait for a ready connection', async ({
   ]);
 });
 
-test('a refused prompt keeps its place in the queue and the next send resumes it in order', async ({ app: _app }) => {
+test('a refused prompt keeps its place in the queue and the next send resumes it in order', async ({ oldCoreApp: _app }) => {
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
   const client = store.client!;
@@ -1834,7 +1841,7 @@ test('a refused prompt keeps its place in the queue and the next send resumes it
   expect(sent).toEqual(['P1\n\nP2\n\nP3']);
 });
 
-test('a turn the core opened on its own holds the prompt, then sends it without an error', async ({ app: _app }) => {
+test('a turn the core opened on its own holds the prompt, then sends it without an error', async ({ oldCoreApp: _app }) => {
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
   const client = store.client!;

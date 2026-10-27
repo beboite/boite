@@ -370,7 +370,8 @@
     // The queue keeps this prompt behind earlier entries; sending resumes a paused queue.
     if (!editedThread && (inputStore.busy || state.queued.length > 0 || state.sending || offline)) {
       // Written while the machine is away, it joins the outbox: its own request id and the chips' model and effort.
-      inputStore.queuePrompt(inputKey, { text: prompt, attachments: images, afterBoundary: store.inputBoundaries[key]?.boundary, ...(references.length ? { previewReferences: references } : {}) },
+      // Every queued prompt keeps the chips it was written with: a later change of the picker does not redirect it.
+      inputStore.queuePrompt(inputKey, { text: prompt, attachments: images, afterBoundary: store.inputBoundaries[key]?.boundary, choice: $state.snapshot(sendChoice), ...(references.length ? { previewReferences: references } : {}) },
         offline ? { choice: $state.snapshot(sendChoice) } : undefined);
       state.editing = null;
       emptyBox(state);

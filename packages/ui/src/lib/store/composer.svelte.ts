@@ -33,8 +33,12 @@ export type OutboxRequest = {
   start?: { projectId: string; worktree: boolean; incognito: boolean };
 };
 
-/** A prompt waiting behind a running turn or for its machine, with what it was written with. */
-export type QueuedPrompt = { text: string; attachments: Attachment[]; previewReferences?: PreviewReference[]; afterBoundary?: string; request?: OutboxRequest };
+/**
+ * A prompt waiting behind a running turn or for its machine, with what it was
+ * written with. `id` is stable for as long as it waits, which is how the core
+ * and every device tell it apart; `choice` is the chips' selection when it was queued.
+ */
+export type QueuedPrompt = { id?: string; text: string; attachments: Attachment[]; previewReferences?: PreviewReference[]; afterBoundary?: string; choice?: Choice; request?: OutboxRequest };
 
 /** What became of one outbox prompt: taken, still to send, or refused with the core's reason. */
 export type Delivery = 'sent' | 'wait' | { failed: string };
@@ -115,6 +119,8 @@ export class Composer {
         const s = this.ctx.store;
         if (s.connection !== 'ready') { this.probed.clear(); return; }
         for (const [threadId, state] of Object.entries(this.composerStates)) {
+          // A core that keeps composer records runs the queue itself.
+          if (threadId === DRAFT_STASH_KEY || this.ctx.sync.deferred(threadId)) continue;
           // A refused outbox prompt holds the ones behind it: they were written after it.
           if (!state.queued.length || state.sending || state.paused || state.queued[0]!.request?.failed !== undefined) continue;
           const thread = s.openThread?.id === threadId ? s.openThread : s.threads.find(row => row.id === threadId);
@@ -159,6 +165,8 @@ export class Composer {
     const head = state.queued[0]!.request;
     if (head?.failed !== undefined || (head && thread.status === 'running')) return;
     state.paused = false;
+    // The core keeps the queue: it is told to skip its wait for a tool boundary.
+    if (this.ctx.sync.deferred(threadId)) { await this.ctx.sync.sendNow(threadId); return; }
     if (thread.status !== 'running') { await drainQueue(s, threadId, state); return; }
     const turnId = s.openThread?.id === threadId ? s.openThread.turns.findLast(turn => turn.status === 'running')?.id : this.inputBoundaries[threadId]?.turnId;
     if (isActivityCommand(state.queued[0]!.text)) { s.error = strings.composer.queueWaitForEnd; return; }
@@ -517,11 +525,13 @@ export class Composer {
   queuePrompt(threadId: string, entry: QueuedPrompt, outbox?: { choice: Choice | null; id?: string; head?: boolean }): void {
     this.composerStates[threadId] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };
     const state = this.composerStates[threadId]!;
-    const queued: QueuedPrompt = outbox
-      ? { ...entry, request: { id: outbox.id ?? secureId(), choice: outbox.choice ? { ...outbox.choice } : null, queuedAt: Date.now(), ...(outbox.id ? { sent: true as const } : {}) } }
-      : entry;
+    const request = outbox ? { id: outbox.id ?? secureId(), choice: outbox.choice ? { ...outbox.choice } : null, queuedAt: Date.now(), ...(outbox.id ? { sent: true as const } : {}) } : undefined;
+    const queued: QueuedPrompt = { ...entry, id: entry.id ?? request?.id ?? secureId(), ...(request ? { request } : {}) };
     if (outbox?.head) { takeOutgoing(state); state.queued.unshift(queued); } else state.queued.push(queued);
     if (outbox) { this.ctx.drafts.persist(threadId); void this.ctx.drafts.flush(); }
+    const draft = threadId === DRAFT_STASH_KEY ? this.ctx.store.draft : null;
+    if (threadId !== DRAFT_STASH_KEY) this.ctx.sync.queued('inputs', threadId);
+    else if (draft) this.ctx.sync.queued('drafts', draftKey(draft));
   }
 
   /** A refused outbox prompt goes again, under the same request id: its content has not changed. */

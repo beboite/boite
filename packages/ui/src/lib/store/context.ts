@@ -5,6 +5,7 @@ import type { Store } from '../store.svelte';
 import { Accounts } from './accounts.svelte';
 import { Composer } from './composer.svelte';
 import { Drafts } from './drafts.svelte';
+import { ComposerSync } from './composer-sync.svelte';
 import { Connection } from './connection.svelte';
 import { Delegation } from './delegation.svelte';
 import { Imports } from './imports.svelte';
@@ -59,6 +60,7 @@ export class StoreContext {
   readonly imports: Imports;
   readonly composer: Composer;
   readonly drafts: Drafts;
+  readonly sync: ComposerSync;
   readonly draftStartup: DraftStartup;
   readonly requests: Requests;
   readonly delegation: Delegation;
@@ -81,6 +83,7 @@ export class StoreContext {
     this.imports = new Imports(this);
     this.composer = new Composer(this);
     this.drafts = new Drafts(this);
+    this.sync = new ComposerSync(this);
     this.draftStartup = new DraftStartup(this);
     this.requests = new Requests(this);
     this.delegation = new Delegation(this);

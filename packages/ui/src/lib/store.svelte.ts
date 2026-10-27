@@ -170,6 +170,7 @@ export class Store {
     listen(ctx, client);
     ctx.off.push(modelFavorites.register(ctx.models.favoritesTarget));
     ctx.off.push(ctx.composer.watchQueues());
+    ctx.off.push(ctx.sync.watch());
     ctx.off.push(ctx.draftStartup.watch());
     ctx.off.push(watchIncognito(ctx));
     // Each machine hears about this window's own failures. Unit tests drive
@@ -189,6 +190,7 @@ export class Store {
     ctx.serverUpdater.reset();
     ctx.terminals.dropSessions();
     ctx.drafts.stop();
+    ctx.sync.stop();
     ctx.workbench.resetMemory();
     ctx.delegation.coordinationEpoch++;
     this.coordination = null;

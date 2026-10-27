@@ -6,7 +6,7 @@ import { addPartBlobCodecs, createPartBlobs } from './part-blobs.ts';
 import { createCommandLines } from './processes.ts';
 import { parseJson } from './rows.ts';
 
-export const SCHEMA_VERSION = 38;
+export const SCHEMA_VERSION = 39;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -449,6 +449,19 @@ export function migrate(db: Database, file: string): { from: number; to: number 
   if (!db.query("SELECT 1 FROM pragma_table_info('turns') WHERE name = 'quiet'").get()) {
     db.exec('ALTER TABLE turns ADD COLUMN quiet INTEGER NOT NULL DEFAULT 0;');
     version = 38;
+  }
+  if (version < 39) {
+    db.exec(`CREATE TABLE IF NOT EXISTS composer_records (
+      section TEXT NOT NULL, id TEXT NOT NULL, revision INTEGER NOT NULL, updated_at INTEGER NOT NULL, value TEXT,
+      PRIMARY KEY (section, id)) WITHOUT ROWID;
+      CREATE TABLE IF NOT EXISTS composer_assets (
+        id TEXT PRIMARY KEY, attachment TEXT NOT NULL, kind TEXT NOT NULL, mime_type TEXT NOT NULL, name TEXT, bytes INTEGER NOT NULL
+      ) WITHOUT ROWID;
+      CREATE TABLE IF NOT EXISTS composer_deliveries (
+        id TEXT PRIMARY KEY, section TEXT NOT NULL, record_id TEXT NOT NULL,
+        status TEXT NOT NULL, thread_id TEXT, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL
+      ) WITHOUT ROWID;`);
+    version = 39;
   }
   version = Math.max(version, SCHEMA_VERSION);
   if (row?.user_version !== version) db.exec(`PRAGMA user_version = ${version}`);

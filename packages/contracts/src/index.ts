@@ -1,4 +1,6 @@
 import type { AgentsRpcMethods, AgentsRpcEvents } from './agents';
+import type { ComposerRpcMethods, ComposerRpcEvents } from './composer';
+export * from './composer';
 import type { WorkflowsRpcMethods, WorkflowsRpcEvents } from './workflows';
 import type { BrowserRpcMethods, BrowserRpcEvents, BrowserProfile } from './browser';
 import type { PullRequestsRpcMethods, PullRequestsRpcEvents, PullRequestWatch } from './pull-requests';
@@ -107,6 +109,7 @@ export { nativeAgentsOfTool, collectNativeAgents } from './native-agents.ts';
 export { collectProcessAgents, processAgentCommand } from './process-agents.ts';
 
 export interface RpcMethods extends
+  ComposerRpcMethods,
   AgentsRpcMethods,
   WorkflowsRpcMethods,
   BrowserRpcMethods,
@@ -151,6 +154,7 @@ export type RpcParams<M extends RpcMethodName> = RpcMethods[M]['params'];
 export type RpcResult<M extends RpcMethodName> = RpcMethods[M]['result'];
 
 export interface RpcEvents extends
+  ComposerRpcEvents,
   AgentsRpcEvents,
   WorkflowsRpcEvents,
   BrowserRpcEvents,

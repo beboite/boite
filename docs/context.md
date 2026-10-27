@@ -364,16 +364,34 @@ and the user follow the work.
 
 ## Durable drafts
 
-Unsent input is device-local, scoped to each core and data directory. New
-conversations keep a draft per project; existing conversations keep their own
-reply. IndexedDB uses strict transaction durability, with a synchronous text
-backup in `localStorage` on each keystroke. The journal writes 800 ms after
+The owning core stores unsent input and pending prompts in SQLite. Owner and
+paired-device clients share new-conversation drafts and each thread's reply
+through revised `composer` records. Compare-and-swap rejects stale writes;
+tombstones keep a cleared record from reappearing after reconnect. Concurrent
+text is retained as a separate draft instead of overwritten.
+
+Typing sends only the changed record, coalesced over 400 ms. Attachments upload
+once as content-addressed assets; records and broadcasts carry their IDs and
+metadata. Other devices fetch bytes when that composer opens. The core validates
+metadata and byte limits without reading attachment bodies on each text edit.
+
+IndexedDB remains the device's offline cache and migration source, with strict
+transaction durability and a synchronous text backup in `localStorage` on each
+keystroke. The journal writes 800 ms after
 typing pauses and at least every five seconds while it continues. Attachments,
 failed backups, explicit flush, page hiding and navigation flush immediately.
 A local core changing port retains the same drafts.
 
-Queued input restores paused. The durable record includes attachments and page
-references. Storage errors keep input in memory and show the reason. Reads and
+Accepted queues run on the core without an open client, including after restart
+when delivery is known to be safe. Unconfirmed provider submissions stay held.
+A restored ordinary queue whose previous acceptance cannot be proved stays
+paused until explicitly resumed.
+Input written while the core is unreachable stays on the device until a client
+reconnects and synchronizes it. Incognito input stays in client memory and uses
+the client delivery path; older cores retain device-local persistence.
+
+The durable record includes attachments and page references. Storage errors
+keep input in memory and show the reason. Reads and
 writes have a three-second deadline; a failed read cannot overwrite unread
 durable drafts. Once readable, the text backup merges with them. Missing
 attachment bytes keep removable placeholders and their IDs through text edits;
