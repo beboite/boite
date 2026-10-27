@@ -8,7 +8,7 @@ const bind = 'NB_BIND pid=10 parent=1 generation=root package=S-1-15-2-1-2-3 lpa
 const end = 'NB_END error=0 active=0 owned=0 suspended=0 pending=0 delegations=0';
 const identity = 'NB_IMAGE pid=10 sha=160ef9b82e2895ef48fa031cb1cf683a8b123febf7cf7d5590cd3104864424b3 exports=1 startup=1';
 const denial = 'NB_PRIMITIVE pid=10 status=0xc0000022 opened=0 hostClosed=1 remoteClosed=1';
-const trace = ['NB_EVENT number=1 pid=10 tid=11 code=3','NB_PROCESS_IMAGE pid=10 sha='+'a'.repeat(64),
+const trace = ['NB_EVENT number=1 pid=10 tid=11 code=3','NB_PROCESS_IMAGE pid=10 sha='+'a'.repeat(64)+' role=target identity=1',
   'NB_HANDLE pid=10 tid=0 kind=process action=own','NB_HANDLE pid=10 tid=11 kind=thread action=own',
   'NB_EVENT number=2 pid=10 tid=11 code=6','NB_EVENT number=3 pid=10 tid=11 code=1',
   'NB_EVENT number=4 pid=10 tid=11 code=5','NB_EXIT pid=10 code=0x00000000',
@@ -47,6 +47,7 @@ describe('Null broker evidence admission', () => {
     for (const line of pointerRows) expect(classifyBroker(text.replace(line, ''), 'pointers').experimentComplete).toBe(false);
     for (const [a,b] of [['handles=0','handles=1'], ['unchanged=1','unchanged=0'], ['opened=0','opened=1']]) expect(classifyBroker(text.replace(a!,b!), 'pointers').experimentComplete).toBe(false);
     expect(classifyBroker(`${text}\n${pointerRows[0]}`, 'pointers').experimentComplete).toBe(false);
+    expect(classifyBroker(text.replace('transport=off name=boundary status=0xc0000005','transport=off name=boundary status=0xc0000022'),'pointers').experimentComplete).toBe(false);
   });
   test('compiler disagreement and absent compilers do not complete the experiment', () => {
     const verdict = (kind: BrokerVerdict['kind']): BrokerVerdict => ({kind, experimentComplete: kind === 'positive' || kind === 'negative', productionAccepted: false});
@@ -84,7 +85,7 @@ function fullNative(pid: number): string[] {
   const rows: string[] = [];
   for (let api=0; api<3; api++) for (let access=0; access<3; access++) {
     const grant = access===1 ? api===0 ? '0x00120196' : '0x00120116' : access===0 ? '0x00120089' : '0x0012019f';
-    rows.push(`NB_OPEN pid=${pid} api=${api} access=${access} async=0 disposition=1 status=0x00000000 type=2 device=21 granted=${grant} mode=0x00000020 eof=${access===1?0:2} written=${access===0?0:8192} ok=1`);
+    rows.push(`NB_OPEN pid=${pid} api=${api} access=${access} async=0 disposition=1 status=0x00000000 statusKnown=1 win32Error=0 type=2 device=21 granted=${grant} mode=0x00000020 eof=${access===1?0:2} written=${access===0?0:8192} ok=1`);
   }
   for (let async=0; async<2; async++) rows.push(`NB_MODE pid=${pid} async=${async} status=0x00000000 mode=${async?'0x00000000':'0x00000020'} granted=0x0012019f ok=1`);
   rows.push(`NB_OBJECT pid=${pid} same=0x00000000 different=0xc00001ac ok=1`);
@@ -100,7 +101,7 @@ function positiveCapture(bun=false): string {
   for (const pid of pids) {
     event(pid,3);
     rows.push(bind.replace('pid=10 parent=1 generation=root',`pid=${pid} parent=${pid===10?1:10} generation=${pid===10?'root':'child'}`),
-      identity.replace('pid=10',`pid=${pid}`),`NB_PROCESS_IMAGE pid=${pid} sha=${bun&&pid!==40?bunSha:nativeSha}`,
+      identity.replace('pid=10',`pid=${pid}`),`NB_PROCESS_IMAGE pid=${pid} sha=${bun&&pid!==40?bunSha:nativeSha} role=target identity=1`,
       `NB_HANDLE pid=${pid} tid=0 kind=process action=own`,`NB_HANDLE pid=${pid} tid=${pid+1} kind=thread action=own`);
     event(pid,6); event(pid,1);
   }
@@ -118,7 +119,8 @@ function positiveCapture(bun=false): string {
 test('complete native capture preserves the observed Win32 WRITE attributes',()=>{
   const capture=positiveCapture();
   expect(classifyBroker(capture,'native').kind).toBe('positive');
-  expect(classifyBroker(capture.replace('api=0 access=1 async=0 disposition=1 status=0x00000000 type=2 device=21 granted=0x00120196','api=0 access=1 async=0 disposition=1 status=0x00000000 type=2 device=21 granted=0x00120116'),'native').experimentComplete).toBe(false);
+  expect(classifyBroker(capture.replace('statusKnown=1','statusKnown=0'),'native').experimentComplete).toBe(false);
+  expect(classifyBroker(capture.replace('api=0 access=1 async=0 disposition=1 status=0x00000000 statusKnown=1 win32Error=0 type=2 device=21 granted=0x00120196','api=0 access=1 async=0 disposition=1 status=0x00000000 statusKnown=1 win32Error=0 type=2 device=21 granted=0x00120116'),'native').experimentComplete).toBe(false);
 });
 
 test('native admission reconciles every delegation, measurement and suspension',()=>{
@@ -153,4 +155,28 @@ test('setup ACL propagation cannot reach synthetic host controls or the process 
     expect(readFileSync(journal,'utf8')).toBe('synthetic control state');
     expect(readdirSync(fixture.boundary).sort()).toEqual(['home','runtime','view']);
   } finally {rmSync(scratch,{recursive:true,force:true});}
+});
+
+
+test('an authenticated console is traced but cannot stand in for a workload child',()=>{
+  const consoleSha='c'.repeat(64), expected={root:nativeSha,native:nativeSha,console:consoleSha};
+  const capture=positiveCapture();
+  const lines=capture.split('\n');
+  // Creation while the root is live, then console exit only after root exit/drain.
+  const insert=lines.findIndex(line=>line.includes('pid=10 tid=11 code=6'));
+  lines.splice(insert,0,'NB_EVENT pid=50 tid=51 code=3',
+    bind.replace('pid=10 parent=1 generation=root','pid=50 parent=10 generation=child'),
+    identity.replace('pid=10','pid=50'),`NB_PROCESS_IMAGE pid=50 sha=${consoleSha} role=console identity=1`,
+    'NB_HANDLE pid=50 tid=0 kind=process action=own','NB_HANDLE pid=50 tid=51 kind=thread action=own',
+    'NB_EVENT pid=50 tid=51 code=6','NB_EVENT pid=50 tid=51 code=1');
+  lines.splice(-1,0,'NB_DRAIN pid=10 code=125 ok=1','NB_EVENT pid=50 tid=51 code=5','NB_EXIT pid=50 code=0x0000007d',
+    'NB_HANDLE pid=50 tid=51 kind=thread action=close','NB_HANDLE pid=50 tid=0 kind=process action=close');
+  let event=0;const actual=lines.map(line=>line.startsWith('NB_EVENT')?line.replace(/^NB_EVENT(?: number=\d+)? /,`NB_EVENT number=${++event} `):line).join('\n');
+  expect(classifyBroker(actual,'native',false,expected).kind).toBe('positive');
+  for(const [a,b] of [[consoleSha,'d'.repeat(64)],['role=console identity=1','role=console identity=0'],['pid=50 parent=10','pid=50 parent=50'],['pid=50 code=0x0000007d','pid=50 code=0x00000001']]) {
+    expect(classifyBroker(actual.replace(a!,b!),'native',false,expected).experimentComplete).toBe(false);
+  }
+  expect(classifyBroker(actual,'native').experimentComplete).toBe(false);
+  expect(classifyBroker(actual.replace('NB_DRAIN pid=10 code=125 ok=1',''),'native',false,expected).experimentComplete).toBe(false);
+  expect(classifyBroker(actual.replace(`sha=${nativeSha} role=target`,`sha=${consoleSha} role=console`),'native',false,expected).experimentComplete).toBe(false);
 });

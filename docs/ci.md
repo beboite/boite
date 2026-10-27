@@ -296,6 +296,11 @@ The setup ACL root contains only the private view, runtime and home. Synthetic
 host files and the process journal stay outside that subtree so inherited ACL
 changes cannot invalidate the host control or prevent journal cleanup. The same
 native host-path read must succeed both before and after setup.
+Console auxiliaries require kernel-event file identity against the system
+reference and an independently captured hash. They retain LPAC, startup, event
+and cleanup evidence; workload-child requirements never count them. A job-drain
+record must precede any accepted auxiliary exit with code 125. Completed calls
+and outstanding scenarios remain in the manifest if a later prerequisite fails.
 
 A skip passes in a ruleset, so a draft must not satisfy it:
 

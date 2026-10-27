@@ -75,10 +75,10 @@ static int nb_open_cases(void) {
   for (unsigned api = 0; api < 3 && ok; ++api) for (unsigned mode = 0; mode < 3 && ok; ++mode) {
     HANDLE h = NULL; IO_STATUS_BLOCK io; ZeroMemory(&io, sizeof(io));
     DWORD rights[] = {GENERIC_READ, GENERIC_WRITE, GENERIC_READ | GENERIC_WRITE};
-    DWORD access = rights[mode] | SYNCHRONIZE; NTSTATUS status = 0;
+    DWORD access = rights[mode] | SYNCHRONIZE, win32_error = 0; NTSTATUS status = 0;
     if (!api) {
       h = CreateFileW(L"NUL", rights[mode], 3, NULL, OPEN_EXISTING, 0, NULL);
-      if (h == INVALID_HANDLE_VALUE) {h = NULL; status = NB_DENIED;}
+      if (h == INVALID_HANDLE_VALUE) {win32_error = GetLastError(); h = NULL; status = NB_INVALID;}
     } else if (api == 1) {
       wchar_t text[] = L"\\Device\\Null"; UNICODE_STRING name = {sizeof(text) - 2, sizeof(text), text};
       OBJECT_ATTRIBUTES oa; ZeroMemory(&oa, sizeof(oa)); oa.Length = sizeof(oa); oa.ObjectName = &name; oa.Attributes = 0x40;
@@ -86,8 +86,8 @@ static int nb_open_cases(void) {
     } else status = nb_fixture_native(nb_create, &h, &io, access, 0x60, 1);
     NB_BASIC basic; NB_DEVICE device; ULONG actual_mode = 0;
     ok = status >= 0 && h && nb_measure(h, &basic, &actual_mode, &device) && nb_io(h, mode != 1, mode != 0, 0);
-    fwprintf(stderr, L"NB_OPEN pid=%lu api=%u access=%u async=0 disposition=1 status=0x%08lx type=%u device=%lu granted=0x%08lx mode=0x%08lx eof=%u written=%u ok=%d\n",
-      GetCurrentProcessId(), api, mode, (DWORD)status, ok ? 2u : 0u, ok ? device.Type : 0, ok ? basic.GrantedAccess : 0,
+    fwprintf(stderr, L"NB_OPEN pid=%lu api=%u access=%u async=0 disposition=1 status=0x%08lx statusKnown=%d win32Error=%lu type=%u device=%lu granted=0x%08lx mode=0x%08lx eof=%u written=%u ok=%d\n",
+      GetCurrentProcessId(), api, mode, (DWORD)status, !win32_error, win32_error, ok ? 2u : 0u, ok ? device.Type : 0, ok ? basic.GrantedAccess : 0,
       actual_mode, mode == 1 ? 0u : 2u, mode == 0 ? 0u : 8192u, ok);
     if (h && !CloseHandle(h)) ok = 0;
   }

@@ -166,7 +166,7 @@ static int nb_decode_create(NB_PROCESS *p, const CONTEXT *c, NB_REQUEST *r) {
   ULONGLONG args[7];
   if (!nb_read(p, c->Rsp + 40, args, sizeof(args))) return 0;
   r->file_attributes = (ULONG)args[1]; r->share = (ULONG)args[2]; r->disposition = (ULONG)args[3]; r->options = (ULONG)args[4];
-  r->unsupported = !!args[0] || !!args[5] || !!args[6]; return 1;
+  r->unsupported = (!!args[0]) | ((!!args[5]) << 1) | ((!!args[6]) << 2); return 1;
 }
 static int nb_rollback(NB_PROCESS *p, HANDLE target) {
   HANDLE local = NULL;
@@ -186,6 +186,8 @@ static int nb_delegate(NB_DEBUG *d, NB_PROCESS *p, DWORD tid, CONTEXT *c, int ap
       !nb_read(p, c->Rsp, &r.ret, 8) || !r.ret || (api ? !nb_decode_open(p, c, &r) : !nb_decode_create(p, c, &r))) return -1;
   const ACCESS_MASK allowed = FILE_READ_DATA | FILE_WRITE_DATA | FILE_APPEND_DATA | FILE_READ_EA | FILE_WRITE_EA |
     FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE | GENERIC_READ | GENERIC_WRITE;
+  fwprintf(stderr, L"NB_INPUT pid=%lu api=%ls attributes=0x%08lx security=%d qos=%d extra=%d fileAttributes=0x%08lx share=%lu\n",
+    p->id, api ? L"open" : L"create", r.oa.Attributes, !!r.oa.SecurityDescriptor, !!r.oa.SecurityQualityOfService, r.unsupported, r.file_attributes, r.share);
   NTSTATUS status; IO_STATUS_BLOCK io; ZeroMemory(&io, sizeof(io)); HANDLE host = NULL, target = NULL;
   NB_BASIC basic; NB_DEVICE device; ULONG mode = 0; int opened = 0, closed = 1, rollback = 1;
   BYTE old_handle[8], old_io[16]; int valid = nb_outputs(r.handle, r.iosb, nb_query_region, p);
@@ -296,6 +298,19 @@ static int nb_exception(NB_DEBUG *d, NB_PROCESS *p, DEBUG_EVENT *e, DWORD *conti
   fwprintf(stderr, L"NB_EXCEPTION pid=%lu tid=%lu code=0x%08lx first=%lu forwarded=1\n", p->id, e->dwThreadId, code, e->u.Exception.dwFirstChance);
   return 1;
 }
+static int nb_console_image(HANDLE image, const char *image_sha) {
+  wchar_t system[MAX_PATH]; UINT size = GetSystemDirectoryW(system, MAX_PATH);
+  if (!size || size + 13 >= MAX_PATH) return -1;
+  memcpy(system + size, L"\\conhost.exe", sizeof(L"\\conhost.exe"));
+  HANDLE reference = CreateFileW(system, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, 0, NULL);
+  if (reference == INVALID_HANDLE_VALUE) return -1;
+  BY_HANDLE_FILE_INFORMATION a, b; char sha[65];
+  int ok = GetFileInformationByHandle(image, &a) && GetFileInformationByHandle(reference, &b) && nb_file_sha(reference, sha);
+  int same = ok && a.dwVolumeSerialNumber == b.dwVolumeSerialNumber && a.nFileIndexHigh == b.nFileIndexHigh && a.nFileIndexLow == b.nFileIndexLow;
+  if (same && strcmp(image_sha, sha)) ok = 0;
+  if (!CloseHandle(reference)) ok = 0;
+  return !ok ? -1 : same;
+}
 static DWORD nb_parent(HANDLE process) {
   typedef NTSTATUS (NTAPI *query_process)(HANDLE, ULONG, PVOID, ULONG, PULONG);
   struct {NTSTATUS status; PVOID peb; ULONG_PTR affinity; LONG priority; ULONG_PTR pid, parent;} basic;
@@ -363,7 +378,11 @@ static DWORD nb_debug_loop(HANDLE job, PROCESS_INFORMATION *root, PSID package, 
           if (ok) ok = nb_binding(&d, p, 1) && nb_add_thread(p, e.dwThreadId, e.u.CreateProcessInfo.hThread);
           char sha[65];
           if (ok) ok = e.u.CreateProcessInfo.hFile && nb_file_sha(e.u.CreateProcessInfo.hFile, sha);
-          if (ok) fwprintf(stderr, L"NB_PROCESS_IMAGE pid=%lu sha=%hs\n", p->id, sha);
+          if (ok) {
+            int console = nb_console_image(e.u.CreateProcessInfo.hFile, sha);
+            if (console < 0 || (console && p->id == d.root)) ok = 0;
+            else fwprintf(stderr, L"NB_PROCESS_IMAGE pid=%lu sha=%hs role=%ls identity=1\n", p->id, sha, console ? L"console" : L"target");
+          }
         }
       }
       if (e.u.CreateProcessInfo.hFile && !CloseHandle(e.u.CreateProcessInfo.hFile)) ok = 0;
@@ -392,7 +411,12 @@ static DWORD nb_debug_loop(HANDLE job, PROCESS_INFORMATION *root, PSID package, 
       case EXIT_PROCESS_DEBUG_EVENT:
         fwprintf(stderr, L"NB_EXIT pid=%lu code=0x%08lx\n", p->id, e.u.ExitProcess.dwExitCode);
         if (!d.stopping && (!p->startup || !p->image || p->step.owner)) ok = 0;
-        if (p->id == d.root) {*root_exit = e.u.ExitProcess.dwExitCode; d.stopping = 1; drain_deadline = GetTickCount64() + 8000; TerminateJobObject(job, 125);}
+        if (p->id == d.root) {
+          *root_exit = e.u.ExitProcess.dwExitCode; d.stopping = 1; drain_deadline = GetTickCount64() + 8000;
+          BOOL drained = TerminateJobObject(job, 125);
+          fwprintf(stderr, L"NB_DRAIN pid=%lu code=125 ok=%d\n", p->id, !!drained);
+          if (!drained) {error = GetLastError(); ok = 0;}
+        }
         retire = 1; break;
       case UNLOAD_DLL_DEBUG_EVENT: if ((uintptr_t)e.u.UnloadDll.lpBaseOfDll == p->ntdll) ok = 0; break;
       case OUTPUT_DEBUG_STRING_EVENT: break;

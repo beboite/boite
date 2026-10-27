@@ -22,7 +22,7 @@ const decimal = (value?: string) => !!value && /^(?:0|[1-9]\d*)$/.test(value) &&
 const hex = (value?: string) => !!value && /^0x[0-9a-f]{8}$/.test(value);
 const negativeStatus = (value?: string) => hex(value) && Number.parseInt(value!, 16) >= 0x80000000;
 const known = new Set(['BIND','IMAGE','PROCESS_IMAGE','PRIMITIVE','END','FAILURE','POINTER','EVENT','HANDLE','SUSPEND','RESUME','DEFER',
-  'DELEGATE','EXCEPTION','EXIT','OPEN','MODE','OBJECT','CHECK','DENY','OFF','READY','DETACHED','BUN','ROLLBACK','MEASUREMENT','TRANSFER']);
+  'DRAIN','INPUT','DELEGATE','EXCEPTION','EXIT','OPEN','MODE','OBJECT','CHECK','DENY','OFF','READY','DETACHED','BUN','ROLLBACK','MEASUREMENT','TRANSFER']);
 function parse(text: string): Row[] | null {
   const rows: Row[] = [];
   for (const line of text.split(/\r?\n/)) {
@@ -109,7 +109,7 @@ function fullNativeProof(rows: Row[], pid: string): boolean {
   const records = (tag: string) => rows.filter(r => r.tag === tag);
   const opens = records('OPEN').filter(r => r.pid === pid), modes = records('MODE').filter(r => r.pid === pid), objects = records('OBJECT').filter(r => r.pid === pid);
   if (opens.length !== 9 || !unique(opens, r => `${r.api}:${r.access}`) || opens.some(r => !['0','1','2'].includes(r.api!) || !['0','1','2'].includes(r.access!) ||
-      r.async !== '0' || r.disposition !== '1' || r.status !== '0x00000000' || r.type !== '2' || r.device !== '21' || r.ok !== '1' ||
+      r.async !== '0' || r.disposition !== '1' || r.status !== '0x00000000' || r.statusKnown !== '1' || r.win32Error !== '0' || r.type !== '2' || r.device !== '21' || r.ok !== '1' ||
       r.eof !== (r.access === '1' ? '0' : '2') || r.written !== (r.access === '0' ? '0' : '8192') || !hex(r.granted) || !hex(r.mode) || !(Number.parseInt(r.mode!,16) & 0x20) ||
       r.granted !== (r.access === '1' && r.api === '0' ? '0x00120196' : ['0x00120089','0x00120116','0x0012019f'][Number(r.access)]))) return false;
   if (modes.length !== 2 || !unique(modes, r => r.async!) || modes.some(r => !['0','1'].includes(r.async!) || r.status !== '0x00000000' || r.ok !== '1' || !hex(r.mode) || !hex(r.granted) || !!(Number.parseInt(r.mode!,16) & 0x20) !== (r.async === '0')) ||
@@ -144,7 +144,33 @@ function completeTraffic(rows: Row[]): boolean {
   }
   return true;
 }
-export function classifyBroker(text: string, scenario: string, timedOut = false, expectedImages?: {root: string; native: string}): BrokerVerdict {
+type ExpectedImages = {root: string; native: string; console?: string};
+function workloadBindings(rows: Row[], bindings: Row[], expected?: ExpectedImages): Row[] | null {
+  const images = rows.filter(r => r.tag === 'PROCESS_IMAGE');
+  if (images.length !== bindings.length || !unique(images,r=>r.pid!)) return null;
+  const consoles = images.filter(r=>r.role==='console'), targets=images.filter(r=>r.role==='target');
+  if (images.some(r=>r.identity!=='1'||!/^[0-9a-f]{64}$/.test(r.sha??'')||!bindings.some(b=>b.pid===r.pid)) || consoles.length+targets.length!==images.length) return null;
+  const root=bindings.find(b=>b.generation==='root');
+  if (!root || !targets.some(r=>r.pid===root.pid)) return null;
+  if (expected && (targets.find(r=>r.pid===root.pid)?.sha!==expected.root || targets.some(r=>r.sha!==expected.root&&r.sha!==expected.native))) return null;
+  const targetIds=new Set(targets.map(r=>r.pid));
+  if (bindings.some(b=>b!==root&&!targetIds.has(b.parent))) return null;
+  const consoleParents=new Set<string>();
+  for(const image of consoles) {
+    const binding=bindings.find(b=>b.pid===image.pid)!;
+    if (!expected?.console || expected.console===expected.root || expected.console===expected.native || image.sha!==expected.console || consoleParents.has(binding.parent!)) return null;
+    consoleParents.add(binding.parent!);
+    const exit=rows.find(r=>r.tag==='EXIT'&&r.pid===image.pid), rootExit=rows.find(r=>r.tag==='EXIT'&&r.pid===root.pid);
+    if (exit && exit.code!=='0x00000000') {
+      const drains=rows.filter(r=>r.tag==='DRAIN');
+      if(exit.code!=='0x0000007d'||!rootExit||drains.length!==1) return null;
+      const drain=drains[0]!;
+      if(drain.pid!==root.pid||drain.code!=='125'||drain.ok!=='1'||rows.indexOf(drain)<rows.indexOf(rootExit)||rows.indexOf(drain)>rows.indexOf(exit)) return null;
+    }
+  }
+  return bindings.filter(b=>targetIds.has(b.pid));
+}
+export function classifyBroker(text: string, scenario: string, timedOut = false, expectedImages?: ExpectedImages): BrokerVerdict {
   if (timedOut) return verdict('timeout');
   const rows = parse(text); if (!rows) return verdict('incomplete');
   const records = (tag: string) => rows.filter(r => r.tag === tag);
@@ -162,11 +188,11 @@ export function classifyBroker(text: string, scenario: string, timedOut = false,
       !['lpac','registry','job','dup','capabilities'].every(k => r[k] === '1') ||
       (r !== root && (r.generation !== 'child' || !bindings.some(parent => parent.pid === r.parent)))) ||
       images.some(r => !bindings.some(b => b.pid === r.pid) || r.sha !== ntdllHash || r.exports !== '1' || r.startup !== '1')) return verdict('incomplete');
-  if (!completeTrace(rows, bindings) || !completeTraffic(rows)) return verdict('incomplete');
-  const processImages = records('PROCESS_IMAGE');
-  if (expectedImages && (processImages.find(r => r.pid === root.pid)?.sha !== expectedImages.root ||
-      processImages.some(r => r.sha !== expectedImages.root && r.sha !== expectedImages.native))) return verdict('incomplete');
-  if (!['primitive','unhandled','root-exit'].includes(scenario) && records('EXIT').some(r => r.code !== '0x00000000')) return verdict('incomplete');
+  const workload = workloadBindings(rows,bindings,expectedImages);
+  if (!workload || !completeTrace(rows, bindings) || !completeTraffic(rows)) return verdict('incomplete');
+  const processImages = records('PROCESS_IMAGE').filter(r=>workload.some(b=>b.pid===r.pid));
+  const workloadExits = records('EXIT').filter(r=>workload.some(b=>b.pid===r.pid));
+  if (!['primitive','unhandled','root-exit'].includes(scenario) && workloadExits.some(r => r.code !== '0x00000000')) return verdict('incomplete');
   const bound = (r: Row) => !!bindings.find(b => b.pid === r.pid);
   const primitives = records('PRIMITIVE');
   if (scenario === 'primitive') return primitives.length === 1 && bound(primitives[0]!) && primitives[0]!.status === '0xc0000022' &&
@@ -188,7 +214,7 @@ export function classifyBroker(text: string, scenario: string, timedOut = false,
       ambient.length===1&&ambient[0]!.pid===off[0]!.pid&&ambient[0]!.denied==='1'&&ambient[0]!.error==='5' ? verdict('positive') : verdict('incomplete');
   }
   if (scenario === 'handled' || scenario === 'unhandled') {
-    const expected = scenario === 'handled' ? '0xe0424242' : '0xe0434343', exceptions = records('EXCEPTION').filter(r => r.code === expected), exits = records('EXIT');
+    const expected = scenario === 'handled' ? '0xe0424242' : '0xe0434343', exceptions = records('EXCEPTION').filter(r => r.code === expected), exits = workloadExits;
     if (!exceptions.length || exceptions.some(r => !bound(r) || r.forwarded !== '1') || exits.length !== 1 || !bound(exits[0]!)) return verdict('incomplete');
     return scenario === 'handled' ? records('CHECK').filter(r => r.name === 'handled' && r.ok === '1').length === 1 && exits[0]!.code === '0x00000000' ? verdict('positive') : verdict('incomplete') :
       exceptions.some(r => r.first === '0') && exits[0]!.code === expected ? verdict('positive') : verdict('incomplete');
@@ -198,9 +224,9 @@ export function classifyBroker(text: string, scenario: string, timedOut = false,
       transfer.length === 1 && transfer[0]!.pid === rollback[0]!.pid && transfer[0]!.remoteClosed === '1' && transfer[0]!.hostClosed === '1' && transfer[0]!.injected === '1' ? verdict('positive') : verdict('incomplete');
   }
   if (scenario === 'native' || scenario === 'root-exit') {
-    const child = bindings.find(r => r.generation === 'child' && r.parent === root.pid);
-    if (bindings.length !== 2 || !child || processImages.some(r => r.sha !== processImages.find(i => i.pid === root.pid)!.sha)) return verdict('incomplete');
-    for (const generation of scenario === 'native' ? bindings : [root]) if (!fullNativeProof(rows,generation.pid!)) return verdict('incomplete');
+    const child = workload.find(r => r.generation === 'child' && r.parent === root.pid);
+    if (workload.length !== 2 || !child || processImages.some(r => r.sha !== processImages.find(i => i.pid === root.pid)!.sha)) return verdict('incomplete');
+    for (const generation of scenario === 'native' ? workload : [root]) if (!fullNativeProof(rows,generation.pid!)) return verdict('incomplete');
     if (records('CHECK').filter(r => r.pid === root.pid && r.name === 'ordinary-child' && r.ok === '1').length !== 1 ||
         records('EXIT').find(r => r.pid === root.pid)?.code !== '0x00000000') return verdict('incomplete');
     if (scenario === 'root-exit' && (records('READY').filter(r => r.pid === child.pid && r.wait === '1').length !== 1 ||
@@ -208,8 +234,8 @@ export function classifyBroker(text: string, scenario: string, timedOut = false,
     return verdict('positive');
   }
   if (scenario === 'bun') {
-    const bun = records('BUN'), children = bindings.filter(r => r !== root), native = processImages.filter(r => r.sha === expectedImages?.native);
-    if (!expectedImages || expectedImages.root === expectedImages.native || bindings.length !== 4 || children.some(r => r.parent !== root.pid) || native.length !== 1 ||
+    const bun = records('BUN'), children = workload.filter(r => r !== root), native = processImages.filter(r => r.sha === expectedImages?.native);
+    if (!expectedImages || expectedImages.root === expectedImages.native || workload.length !== 4 || children.some(r => r.parent !== root.pid) || native.length !== 1 ||
         !children.some(r => r.pid === native[0]!.pid) || bun.length !== 1 || bun[0]!.pid !== root.pid || !['ignore','pipe','argv','denials','network'].every(k => bun[0]![k] === '1') ||
         !fullNativeProof(rows,native[0]!.pid!) || !records('DELEGATE').some(r => r.pid === root.pid && r.opened === '1' && r.status === '0x00000000')) return verdict('incomplete');
     return verdict('positive');
@@ -328,17 +354,18 @@ export function createBrokerFixture(scratch: string) {
   return {boundary, project, runtime, home, host, excluded, ambient: join(boundary,'ambient-probe')};
 }
 
-async function nativeCases(procs: ProcRegistry, helper: string, scratch: string, output: string, compiler: string) {
+async function nativeCases(procs: ProcRegistry, helper: string, scratch: string, output: string, compiler: string, entry: Record<string,unknown>, persist: () => void) {
   const {boundary, project, runtime, home, host, excluded, ambient} = createBrokerFixture(scratch);
   const capturedNative = join(runtime,'null-broker-fixture.exe'), capturedBun = join(runtime,'bun.exe');
   copyFileSync(helper,capturedNative); copyFileSync(process.execPath,capturedBun);
-  const capturedImages = {native: hash(readFileSync(capturedNative)), bun: hash(readFileSync(capturedBun))};
+  const windows = process.env.SystemRoot || 'C:\\Windows';
+  const capturedImages = {native: hash(readFileSync(capturedNative)), bun: hash(readFileSync(capturedBun)), console: hash(readFileSync(join(windows,'System32','conhost.exe')))};
   const profile = `boite.null-broker.${randomUUID()}`, calls: Record<string,unknown>[] = [];
   const run = async (id: string, args: string[], env = selectedEnvironment(), timeout = 60000) => {
     const result = await boundedCapture(procs, `${compiler}-${id}`, helper,args,scratch,env,timeout);
     writeFileSync(join(output,`${compiler}-${id}.stdout.txt`),result.out);
     writeFileSync(join(output,`${compiler}-${id}.stderr.txt`),result.err);
-    calls.push({id,command:[helper,...args],...result}); return result;
+    calls.push({id,command:[helper,...args],...result}); persist(); return result;
   };
   const {dlopen, FFIType, ptr} = await import('bun:ffi');
   const kernel = dlopen('kernel32.dll', {
@@ -352,13 +379,15 @@ async function nativeCases(procs: ProcRegistry, helper: string, scratch: string,
   const activeLeases: ExecutionProtections[]=[];
   const listener = Bun.listen({hostname:'127.0.0.1',port:0,socket:{open(socket){connections++; socket.end('SYNTHETIC_NETWORK');},data(){}}});
   const cleanups: string[] = [];
+  const expected=['off','pointers','rollback','native','handled','unhandled','root-exit','bun','cancel','revoke','expiry','launcher-death'];
   const outcomes: Record<string, BrokerVerdict> = {};
+  const evidence = {capturedImages,calls,outcomes,unrun:[...expected],connections:0,cleanupErrors:cleanups,verdict:verdict('incomplete')};
+  entry.native = evidence;
   try {
     const security = Buffer.alloc(24); security.writeUInt32LE(24); security.writeUInt32LE(1,16);
     credential = kernel.symbols.CreateFileW(ptr(Buffer.from(`${excluded}\0`,'utf16le')),0x80000000,7,ptr(security),3,0,null);
     if (!credential || Number(credential) === -1) throw new Error('synthetic credential open failed');
     prepared = true;
-    const windows = process.env.SystemRoot || 'C:\\Windows';
     const env = {PATH:`${runtime};${join(windows,'System32')}`,SystemRoot:windows,WINDIR:windows,
       COMSPEC:join(windows,'System32','cmd.exe'),HOME:home,USERPROFILE:home,APPDATA:home,LOCALAPPDATA:home,TEMP:join(home,'temp'),TMP:join(home,'temp'),
       CI:'1',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'NUL'};
@@ -378,12 +407,12 @@ async function nativeCases(procs: ProcRegistry, helper: string, scratch: string,
       const target = scenario === 'bun' ? capturedBun : capturedNative;
       const args = scenario === 'bun' ? [join(project,'bun-fixture.js'),ambient,excluded,join(host,'ordinary.txt'),String(credential),String(process.pid),`http://127.0.0.1:${listener.port}`,capturedNative] : targetArgs(scenario);
       const capture = await run(scenario,[command,profile,project,target,...args],env);
-      const expectedImages = {root: scenario === 'bun' ? capturedImages.bun : capturedImages.native, native: capturedImages.native};
+      const expectedImages = {root: scenario === 'bun' ? capturedImages.bun : capturedImages.native, native: capturedImages.native, console: capturedImages.console};
       let result = classifyBroker(capture.err,scenario,capture.timedOut,expectedImages);
       const primitive=classifyBroker(capture.err,'primitive',capture.timedOut,expectedImages);
       if(scenario!=='off'&&outcomes.off?.kind==='positive'&&primitive.kind==='negative'&&!capture.overflow&&!connections)result=primitive;
       else if (capture.overflow || (scenario !== 'unhandled' && capture.code !== 0) || connections) result = verdict('incomplete');
-      outcomes[scenario] = result;
+      outcomes[scenario] = result; evidence.unrun=evidence.unrun.filter(name=>name!==scenario); persist();
       /* A primitive failure cannot be relabelled a positive or silently skipped.
        * Preserve remaining cases as explicitly unrun rather than repeat failure. */
       if (['negative','unsupported','setup','timeout'].includes(result.kind)) break;
@@ -398,7 +427,7 @@ async function nativeCases(procs: ProcRegistry, helper: string, scratch: string,
         /* Diagnostic session only: prerequisite still performs an actual LPAC
          * launch. This does not alter WindowsExecutionBoundary admission. */
         const baseline=await check(helper,['run-off',profile,project,capturedNative,...targetArgs('off')],scratch,env);
-        if(baseline.code!==0||classifyBroker(baseline.stderr,'off').kind!=='positive')throw new Error('lifecycle LPAC prerequisite incomplete');
+        if(baseline.code!==0||classifyBroker(baseline.stderr,'off',false,{root:capturedImages.native,native:capturedImages.native,console:capturedImages.console}).kind!=='positive')throw new Error('lifecycle LPAC prerequisite incomplete');
         return {launch(command,args,cwd) {
           assertExecutionPolicy(policy);
           if(sessionClosed||command!==capturedNative||cwd!==project)throw new Error('captured diagnostic launch mismatch');
@@ -406,7 +435,9 @@ async function nativeCases(procs: ProcRegistry, helper: string, scratch: string,
         },flush(){},close(){sessionClosed=true;}};
       }},async (controlId,command,args,cwd,environment)=>{
         const c=await boundedCapture(procs,controlId,command,args,cwd,environment??env,30000);
-        calls.push({id:controlId,kind:'lifecycle-prerequisite',...c});return {code:c.code??125,stdout:c.out,stderr:c.err};
+        const archive=`${compiler}-lifetime-${reason}-prerequisite`;
+        writeFileSync(join(output,archive+'.stdout.txt'),c.out); writeFileSync(join(output,archive+'.stderr.txt'),c.err);
+        calls.push({id:controlId,kind:'lifecycle-prerequisite',archive,...c});persist();return {code:c.code??125,stdout:c.out,stderr:c.err};
       },scope=>procs.stopAndWait(scope),scope=>procs.liveCount(scope));
       activeLeases.push(leases);
       await leases.install(id,{scope:{kind:'job',id,associationId:'synthetic',grantRevision:1},checkout:project,credentialPaths:[excluded],
@@ -446,14 +477,23 @@ async function nativeCases(procs: ProcRegistry, helper: string, scratch: string,
       let timer: ReturnType<typeof setTimeout> | undefined;
       const drained = await Promise.race([Promise.all([collecting,discarding]).then(()=>true),new Promise<false>(resolve=>{timer=setTimeout(()=>resolve(false),6000);})]); clearTimeout(timer);
       if (!drained) await Promise.allSettled([reader.cancel(),stdout.cancel()]);
-      const exited = held.length===2 && held.every(h=>kernel.symbols.WaitForSingleObject(h.handle,5000)===0);
+      const rows=parse(text)??[], bindings=rows.filter(r=>r.tag==='BIND');
+      const roles=workloadBindings(rows,bindings,{root:capturedImages.native,native:capturedImages.native,console:capturedImages.console});
+      const root=bindings.find(r=>r.generation==='root');
+      const images=rows.filter(r=>r.tag==='IMAGE');
+      const identity=!!root&&images.length===bindings.length&&unique(images,r=>r.pid!)&&bindings.every(r=>r.package===root.package&&
+        ['lpac','registry','job','dup','capabilities'].every(k=>r[k]==='1')&&images.some(i=>i.pid===r.pid&&i.sha===ntdllHash&&i.exports==='1'&&i.startup==='1'));
+      const exited = identity && roles?.length===2 && held.length===bindings.length && unique(bindings,r=>r.pid!) &&
+        bindings.every(r=>held.some(h=>String(h.pid)===r.pid)) && held.every(h=>kernel.symbols.WaitForSingleObject(h.handle,5000)===0);
       const closed = held.every(h=>kernel.symbols.CloseHandle(h.handle)!==0);
       writeFileSync(join(output,`${compiler}-lifetime-${reason}.stderr.txt`),text);
       calls.push({id,reason,ready,action,drained,held:held.map(h=>h.pid),exited,closed,tooLarge});
       outcomes[reason] = ready && action && drained && exited && closed && !tooLarge ? verdict('positive') : verdict('incomplete');
+      evidence.unrun=evidence.unrun.filter(name=>name!==reason); persist();
       await leases.close();
     }
   } finally {
+    evidence.connections = connections;
     for(const lease of activeLeases)try{await lease.close();}catch(error){cleanups.push(`lease cleanup ${String(error)}`);}
     listener.stop(true);
     if (credential && !kernel.symbols.CloseHandle(credential)) cleanups.push('synthetic credential close failed'); kernel.close();
@@ -461,11 +501,12 @@ async function nativeCases(procs: ProcRegistry, helper: string, scratch: string,
       const userenv = dlopen('userenv.dll',{DeleteAppContainerProfile:{args:[FFIType.ptr],returns:FFIType.i32}});
       try {const status=userenv.symbols.DeleteAppContainerProfile(ptr(Buffer.from(`${profile}\0`,'utf16le')));if(status!==0&&(status>>>0)!==0x80070002)cleanups.push(`profile cleanup ${status>>>0}`);} finally {userenv.close();}
     }
+    persist();
   }
-  const expected=['off','pointers','rollback','native','handled','unhandled','root-exit','bun','cancel','revoke','expiry','launcher-death'];
   const clean=!connections&&!cleanups.length, complete=clean&&expected.every(name=>outcomes[name]?.kind==='positive');
   const negative=clean&&outcomes.off?.kind==='positive'&&Object.values(outcomes).some(r=>r.kind==='negative');
-  return {capturedImages,calls,outcomes,connections,cleanupErrors:cleanups,verdict:complete?verdict('positive'):negative?verdict('negative'):verdict('incomplete')};
+  evidence.verdict = complete?verdict('positive'):negative?verdict('negative'):verdict('incomplete');
+  return evidence;
 }
 
 if (import.meta.main) {
@@ -498,7 +539,7 @@ if (import.meta.main) {
       writeFileSync(join(output,`${compiler.name}-compile.stdout.txt`),built.out);writeFileSync(join(output,`${compiler.name}-compile.stderr.txt`),built.err);
       if(built.code!==0||built.timedOut||built.overflow)throw new Error('strict compile failed');
       result.helperSha256=hash(readFileSync(helper));
-      if(!compileOnly) {const native=await nativeCases(procs,helper,scratch,output,compiler.name);result.native=native;result.verdict=native.verdict;if(!native.verdict.experimentComplete)failed=true;}
+      if(!compileOnly) {const native=await nativeCases(procs,helper,scratch,output,compiler.name,result,save);result.native=native;result.verdict=native.verdict;if(!native.verdict.experimentComplete)failed=true;}
       console.log(`NULL_BROKER compiler=${compiler.name} compiled=1 native=${!compileOnly} experimentComplete=${result.verdict?(result.verdict as BrokerVerdict).experimentComplete:0} productionAccepted=0`);
     } catch(error) {result.error=String(error);failed=true;console.error(String(error));}
     finally {
