@@ -126,9 +126,11 @@ test('a copy is refused from another conversation or project without being used 
   // Put away: erased at once, and still gone once the conversation comes back.
   const second = await saveSecret(h, owner, threadId, 'API_KEY', value);
   expect(await vault.ids()).toHaveLength(0);
-  await stopTurn(h, owner, threadId);
+  // Deliver the notification before archiving can also finish the turn.
+  h.core.bus.emit('thread.updated', { ...h.core.threads.get(threadId), archived: true });
+  expect(h.core.journal.runningTurn(threadId)).not.toBeNull();
+  expect(await thrown(owner.call('secrets.use', { threadId, ref: second, use: { ...quiet, cwd: h.dataDir } }))).toThrow('erased or never existed');
   await owner.call('threads.archive', { threadId, archived: true });
-  await waitFor(() => h.core.secrets.index.data.transit.length === 0);
   expect(await vault.ids()).toEqual([]);
   expect(await thrown(owner.call('secrets.use', { threadId, ref: second, use: { ...quiet, cwd: h.dataDir } }))).toThrow('archived conversation');
   await owner.call('threads.archive', { threadId, archived: false });
@@ -144,20 +146,24 @@ test('deleting the conversation or its project erases what it held', async () =>
   const projectId = h.core.threads.get(threadId).projectId!;
   const value = secretValue();
   await holdTurn(h, owner, threadId);
-  await saveSecret(h, owner, threadId, 'API_KEY', value);
-  await stopTurn(h, owner, threadId);
+  const ref = await saveSecret(h, owner, threadId, 'API_KEY', value);
+  // Exercise each removal notification while its turn and ref are still live.
+  h.core.bus.emit('thread.removed', { threadId });
+  expect(h.core.journal.runningTurn(threadId)).not.toBeNull();
+  expect(await thrown(owner.call('secrets.use', { threadId, ref, use: { ...quiet, cwd: h.dataDir } }))).toThrow('erased or never existed');
   await owner.call('threads.remove', { threadId });
-  await waitFor(() => h.core.secrets.index.data.transit.length === 0);
   expect(await vault.ids()).toEqual([]);
 
   const next = (await owner.call('threads.create', { projectId, providerId: 'echo', accountId, title: 'next' })).id;
   await holdTurn(h, owner, next);
-  await saveSecret(h, owner, next, 'API_KEY', value);
-  await saveSecret(h, owner, next, 'DEPLOY_TOKEN', `${value}-second`);
+  const refs = [await saveSecret(h, owner, next, 'API_KEY', value), await saveSecret(h, owner, next, 'DEPLOY_TOKEN', `${value}-second`)];
   expect(await vault.ids()).toHaveLength(0);
-  await stopTurn(h, owner, next);
+  h.core.bus.emit('project.removed', { projectId });
+  expect(h.core.journal.runningTurn(next)).not.toBeNull();
+  for (const ref of refs) {
+    expect(await thrown(owner.call('secrets.use', { threadId: next, ref, use: { ...quiet, cwd: h.dataDir } }))).toThrow('erased or never existed');
+  }
   await owner.call('projects.remove', { projectId });
-  await waitFor(() => h.core.secrets.index.data.transit.length === 0 && h.core.secrets.index.data.kept.length === 0);
   expect(await vault.ids()).toEqual([]);
   expect(await leaks(h, value)).toEqual([]);
 });
