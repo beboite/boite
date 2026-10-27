@@ -82,6 +82,7 @@ test('shared native scheduler and output-span contracts: queued trap B cannot su
   expect(result.code, result.err).toBe(0);
   expect(result.out).toContain('NB_LOCAL queued-replay=1 balanced=1 progress=2 pointer-contracts=1');
   expect(result.out).toContain('qos-snapshot=1');
+  expect(result.out).toContain('create-abi=1');
 });
 
 test('source generation pins the production reference and rejects a second replacement', () => {

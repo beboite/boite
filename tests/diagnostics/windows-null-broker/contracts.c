@@ -64,5 +64,17 @@ int main(void) {
   memory.readable = 0; assert(!nb_snapshot_qos(0x1000, &snapshot, read_qos, &memory));
   unsigned reads = memory.reads;
   assert(!nb_snapshot_qos(UINTPTR_MAX - 4, &snapshot, read_qos, &memory) && memory.reads == reads);
-  puts("NB_LOCAL queued-replay=1 balanced=1 progress=2 pointer-contracts=1 qos-snapshot=1"); return 0;
+  uint64_t args[7] = {0};
+  assert(nb_create_extras(args) == 0);
+  args[6] = UINT64_C(0xfeedface00000000);
+  assert(nb_create_extras(args) == 0); /* Upper ULONG slot bytes are unspecified. */
+  args[6] |= 1;
+  assert(nb_create_extras(args) == 4);
+  args[6] = UINT64_C(0xfeedface00000000); args[0] = UINT64_C(0x100000000);
+  assert(nb_create_extras(args) == 1); /* Pointers still occupy the full slot. */
+  args[0] = 0; args[5] = UINT64_C(0x100000000);
+  assert(nb_create_extras(args) == 2);
+  args[0] = 1; args[6] |= 1;
+  assert(nb_create_extras(args) == 7);
+  puts("NB_LOCAL queued-replay=1 balanced=1 progress=2 pointer-contracts=1 qos-snapshot=1 create-abi=1"); return 0;
 }

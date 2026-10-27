@@ -155,7 +155,7 @@ static int nb_image(NB_PROCESS *p, HANDLE file, void *base) {
   p->image = 1; return 1;
 }
 
-typedef struct {uintptr_t handle, iosb, ret; ACCESS_MASK access; OBJECT_ATTRIBUTES oa; ULONG share, disposition, options, file_attributes; int unsupported;} NB_REQUEST;
+typedef struct {uintptr_t handle, iosb, ret; ACCESS_MASK access; OBJECT_ATTRIBUTES oa; ULONG share, disposition, options, file_attributes, ea_length, ea_length_high; int unsupported;} NB_REQUEST;
 /* Separate signatures: stack[5..6] for NtOpenFile, stack[5..11] for NtCreateFile.
  * The 32-byte register shadow space starts at rsp+8, argument five at rsp+40. */
 static int nb_decode_open(NB_PROCESS *p, const CONTEXT *c, NB_REQUEST *r) {
@@ -167,7 +167,8 @@ static int nb_decode_create(NB_PROCESS *p, const CONTEXT *c, NB_REQUEST *r) {
   ULONGLONG args[7];
   if (!nb_read(p, c->Rsp + 40, args, sizeof(args))) return 0;
   r->file_attributes = (ULONG)args[1]; r->share = (ULONG)args[2]; r->disposition = (ULONG)args[3]; r->options = (ULONG)args[4];
-  r->unsupported = (!!args[0]) | ((!!args[5]) << 1) | ((!!args[6]) << 2); return 1;
+  r->ea_length = (ULONG)args[6]; r->ea_length_high = (ULONG)(args[6] >> 32);
+  r->unsupported = nb_create_extras(args); return 1;
 }
 static int nb_rollback(NB_PROCESS *p, HANDLE target) {
   HANDLE local = NULL;
@@ -187,8 +188,8 @@ static int nb_delegate(NB_DEBUG *d, NB_PROCESS *p, DWORD tid, CONTEXT *c, int ap
       !nb_read(p, c->Rsp, &r.ret, 8) || !r.ret || (api ? !nb_decode_open(p, c, &r) : !nb_decode_create(p, c, &r))) return -1;
   const ACCESS_MASK allowed = FILE_READ_DATA | FILE_WRITE_DATA | FILE_APPEND_DATA | FILE_READ_EA | FILE_WRITE_EA |
     FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE | GENERIC_READ | GENERIC_WRITE;
-  fwprintf(stderr, L"NB_INPUT pid=%lu api=%ls attributes=0x%08lx security=%d qos=%d extra=%d fileAttributes=0x%08lx share=%lu\n",
-    p->id, api ? L"open" : L"create", r.oa.Attributes, !!r.oa.SecurityDescriptor, !!r.oa.SecurityQualityOfService, r.unsupported, r.file_attributes, r.share);
+  fwprintf(stderr, L"NB_INPUT pid=%lu api=%ls attributes=0x%08lx security=%d qos=%d extra=%d fileAttributes=0x%08lx share=%lu eaLength=%lu eaLengthHigh=0x%08lx\n",
+    p->id, api ? L"open" : L"create", r.oa.Attributes, !!r.oa.SecurityDescriptor, !!r.oa.SecurityQualityOfService, r.unsupported, r.file_attributes, r.share, r.ea_length, r.ea_length_high);
   NTSTATUS status; IO_STATUS_BLOCK io; ZeroMemory(&io, sizeof(io)); HANDLE host = NULL, target = NULL;
   NB_BASIC basic; NB_DEVICE device; ULONG mode = 0; int opened = 0, closed = 1, rollback = 1;
   BYTE old_handle[8], old_io[16]; int valid = nb_outputs(r.handle, r.iosb, nb_query_region, p);
@@ -309,7 +310,12 @@ static int nb_exception(NB_DEBUG *d, NB_PROCESS *p, DEBUG_EVENT *e, DWORD *conti
     *continuation = DBG_CONTINUE; return 1;
   }
   if (p->step.owner == e->dwThreadId) return 0;
-  fwprintf(stderr, L"NB_EXCEPTION pid=%lu tid=%lu code=0x%08lx first=%lu forwarded=1\n", p->id, e->dwThreadId, code, e->u.Exception.dwFirstChance);
+  int context = thread && GetThreadContext(thread, &c);
+  ULONGLONG stack[4] = {0}; int stack_read = context && nb_read(p, c.Rsp, stack, sizeof(stack));
+  fwprintf(stderr, L"NB_EXCEPTION pid=%lu tid=%lu code=0x%08lx first=%lu forwarded=1 address=0x%016llx context=%d rip=0x%016llx rcx=0x%016llx stackRead=%d stack0=0x%016llx stack1=0x%016llx stack2=0x%016llx stack3=0x%016llx ntdll=0x%016llx\n",
+    p->id, e->dwThreadId, code, e->u.Exception.dwFirstChance, (unsigned long long)address, context,
+    (unsigned long long)c.Rip, (unsigned long long)c.Rcx, stack_read,
+    stack[0], stack[1], stack[2], stack[3], (unsigned long long)p->ntdll);
   return 1;
 }
 static int nb_console_image(HANDLE image, const char *image_sha) {

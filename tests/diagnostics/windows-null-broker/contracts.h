@@ -67,6 +67,10 @@ static int nb_outputs(uintptr_t handle, uintptr_t iosb, nb_query_fn query, void 
 /* A target address is read once, never handed to the host's object manager. */
 typedef struct {uint32_t length, level; uint8_t tracking, effective, padding[2];} NB_QOS;
 typedef int (*nb_read_fn)(void *, uintptr_t, void *, size_t);
+/* NtCreateFile's final stack argument is ULONG in an eight-byte x64 slot. */
+static int nb_create_extras(const uint64_t args[7]) {
+  return (!!args[0]) | ((!!args[5]) << 1) | ((!!(uint32_t)args[6]) << 2);
+}
 static int nb_snapshot_qos(uintptr_t address, NB_QOS *out, nb_read_fn read, void *ctx) {
   memset(out, 0, sizeof(*out));
   if (!address) return 1;

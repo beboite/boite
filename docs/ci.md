@@ -306,6 +306,11 @@ host-local storage for the fixed Null open. Invalid output spans pass through
 to the original syscall under the captured LPAC token, without a host open or
 remote write. Pointer admission still requires matching statuses for both
 transports, unchanged sentinels, zero handle growth and a successful valid open.
+The x64 adapter decodes `EaLength` as a 32-bit `ULONG`; unused upper stack-slot
+bytes cannot reject an ordinary call. It records both halves of that slot to
+attribute a remaining rejection. Bun stage markers and forwarded-exception
+context locate runtime failures without suppressing application exceptions or
+relaxing workload admission.
 
 A skip passes in a ruleset, so a draft must not satisfy it:
 

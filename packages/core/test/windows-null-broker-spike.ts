@@ -335,6 +335,8 @@ import {readFileSync} from 'node:fs';
 import {dlopen, FFIType, ptr} from 'bun:ffi';
 const [ambient,excluded,hostfile,credential,hostpid,url,native] = process.argv.slice(2);
 const args = ['quote" and spaces','trailing\\','$(echo unsafe)'];
+// Diagnostic breadcrumbs only. Admission still requires NB_BUN and full child evidence.
+const stage = name => console.error('BUN_STAGE pid='+process.pid+' name='+name);
 async function child(argv, stdio, input) {
   const p = spawn(process.execPath, argv, {stdio}); let out = '', err = '';
   p.stdout?.on('data', b => out += b); p.stderr?.on('data', b => err += b);
@@ -342,12 +344,19 @@ async function child(argv, stdio, input) {
   if (p.stdin) p.stdin.end(input ?? '');
   const result = await done; return {...result,out,err};
 }
+stage('ignore-begin');
 const ignored = await child(['-e','process.exit(0)'], 'ignore');
+stage('ignore-end');
 const program = 'const input=await Bun.stdin.text(); process.stdout.write(JSON.stringify({input,args:process.argv.slice(1)}));';
+stage('pipe-begin');
 const piped = await child(['-e',program,...args], ['pipe','pipe','pipe'], 'bounded input');
+stage('pipe-end');
 const pipe = piped.code === 0 && piped.out === JSON.stringify({input:'bounded input',args});
+stage('files-begin');
 let denied = true;
 for (const path of [ambient,excluded,hostfile]) {try {readFileSync(path); denied=false;} catch (e) {if(e.code!=='EACCES'&&e.code!=='EPERM') denied=false;}}
+stage('files-end');
+stage('ffi-begin');
 const k = dlopen('kernel32.dll', {
  OpenProcess:{args:[FFIType.u32,FFIType.i32,FFIType.u32],returns:FFIType.ptr},
  ReadFile:{args:[FFIType.ptr,FFIType.ptr,FFIType.u32,FFIType.ptr,FFIType.ptr],returns:FFIType.i32},
@@ -355,14 +364,24 @@ const k = dlopen('kernel32.dll', {
  GetLastError:{args:[],returns:FFIType.u32},
 });
 try {
- const h=k.symbols.OpenProcess(0x50,0,Number(hostpid)); if(h){denied=false;k.symbols.CloseHandle(h);}
+ stage('ffi-openprocess-begin');
+ const h=k.symbols.OpenProcess(0x50,0,Number(hostpid));
+ stage('ffi-openprocess-end');
+ if(h){denied=false;k.symbols.CloseHandle(h);}
  const bytes=Buffer.alloc(32),used=Buffer.alloc(4);
+ stage('ffi-read-begin');
  if(k.symbols.ReadFile(Number(credential),ptr(bytes),32,ptr(used),null)) denied=false;
-} finally {k.close();}
+ stage('ffi-read-end');
+} finally {stage('ffi-close-begin');k.close();stage('ffi-close-end');}
+stage('ffi-end');
+stage('network-begin');
 let network = true; try {await fetch(url,{signal:AbortSignal.timeout(1500)}); network=false;} catch {}
+stage('network-end');
 /* Ordinary child exercises the full synthetic native denial fixture too. */
+stage('native-begin');
 const nativeChild = spawn(native,['--broker-fixture','child','child',ambient,excluded,hostfile,credential,hostpid,new URL(url).port,'synthetic'],{stdio:'inherit'});
 const nativeCode = await new Promise((resolve,reject)=>{nativeChild.once('error',reject);nativeChild.once('exit',resolve);});
+stage('native-end');
 const ignore = ignored.code===0, argv=pipe;
 console.error('NB_BUN pid='+process.pid+' ignore='+Number(ignore)+' pipe='+Number(pipe)+' argv='+Number(argv)+' denials='+Number(denied&&nativeCode===0)+' network='+Number(network));
 if(!ignore||!pipe||!denied||nativeCode!==0||!network) process.exit(1);
