@@ -41,9 +41,6 @@ function digest(text: string): string {
 const references = (refs: PreviewReference[] | undefined) => refs?.length ? $state.snapshot(refs) as PreviewReference[] : undefined;
 const boxEmpty = (input: Local['input'] | undefined) => !input || (!input.text && !input.attachments.length && !input.previewReferences?.length);
 const hasContent = (local: Local | null) => !!local && (!boxEmpty(local.input) || local.input.queued.length > 0 || !!local.input.editing);
-/** A queued prompt gets its id before a merge or a put compares queues: one without, from a refused send or an old journal, would read as gone. */
-const stamped = (local: Local | null) => { for (const entry of local?.input.queued ?? []) entry.id ??= entry.request?.id ?? secureId(); return local; };
-
 /**
  * The composer records a core keeps for every device of its owner: each
  * thread's box and queue, each draft. The device-local journal stays the
@@ -276,8 +273,10 @@ export class ComposerSync {
     return this.ctx.drafts.liveSource(section, id);
   }
 
+  /** Every local read gives legacy queued prompts an identity, including reads after a network wait or during recovery. */
   #localOf(source: LiveSource | null): Local | null {
     if (!source) return null;
+    for (const entry of source.input.queued) entry.id ??= entry.request?.id ?? secureId();
     const local: Local = { input: source.input };
     if (source.section === 'drafts') { local.draft = source.draft; local.choice = source.choice; local.parked = source.parked; }
     return hasContent(local) ? local : null;
@@ -407,7 +406,7 @@ export class ComposerSync {
     const source = this.#source(key);
     if (source && this.ctx.drafts.isIncognito(source)) return;
     const base = known ?? EMPTY_KNOWN;
-    const local = stamped(this.#restored(key, source, known, record.value));
+    const local = this.#restored(key, source, known, record.value);
     const mine = this.#parts(this.#shape(local));
     const remote = this.#toLocal(record.value);
     const before = record.section === 'drafts' ? this.#queuedIds(local) : [];
@@ -580,7 +579,7 @@ export class ComposerSync {
     if (this.#inflight.has(key)) return;
     const source = this.#source(key);
     if (source && this.ctx.drafts.isIncognito(source)) { this.#dirty.delete(key); return; }
-    let local = stamped(this.#localOf(source));
+    let local = this.#localOf(source);
     const known = this.#known.get(key);
     const files = local ? [...local.input.attachments, ...local.input.queued.flatMap(entry => entry.attachments)] : [];
     // A file still waiting for the journal's bytes has nothing to upload yet: the record waits with it.

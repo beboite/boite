@@ -615,6 +615,35 @@ test('a queued prompt without an id, as a refused send leaves it, survives anoth
   });
 });
 
+test.each(['composer.asset.put', 'composer.put'] as const)('an id-less prompt restored during %s survives and reaches the core with an identity', async heldMethod => {
+  const desk = await device('desk', new FakeClient({ delayMs: 0 }));
+  const file = { kind: 'file' as const, mimeType: 'text/plain', name: 'notes.txt', data: btoa('Upload in flight') };
+  desk.store.composerStates['t-trace'] = { text: '', attachments: heldMethod === 'composer.asset.put' ? [file] : [], queued: [], sending: false, paused: true };
+  let release!: () => void, started!: () => void;
+  let hold: Promise<void> | undefined = new Promise(resolve => { release = resolve; });
+  const inFlight = new Promise<void>(resolve => { started = resolve; });
+  desk.calls.mockImplementation(async (method, params) => {
+    const answer = await desk.original(method, params);
+    if (method === heldMethod && hold) { const gate = hold; hold = undefined; started(); await gate; }
+    return answer;
+  });
+  queue(desk.store, 't-trace', 'Already queued');
+  await inFlight;
+  // A cached queue written before ids were required becomes local while the request is pending.
+  desk.store.composerStates['t-trace']!.queued.push({ text: 'Recovered from an old journal', attachments: [] });
+  release();
+  const texts = ['Already queued', 'Recovered from an old journal'];
+  await vi.waitFor(async () => {
+    const remote = (await recordOf(desk.client, 'inputs', 't-trace'))?.value?.input.queued;
+    const local = desk.store.composerStates['t-trace']?.queued;
+    expect(remote?.map(entry => entry.text)).toEqual(texts);
+    expect(local?.map(entry => entry.text)).toEqual(texts);
+    expect(remote?.every(entry => !!entry.id)).toBe(true);
+    expect(local?.map(entry => entry.id)).toEqual(remote?.map(entry => entry.id));
+    expect(new Set(remote?.map(entry => entry.id)).size).toBe(texts.length);
+  });
+});
+
 test('a send the core refuses as early joins the queue, though a put of that queue is still on its way', async () => {
   const desk = await device('desk', new FakeClient({ delayMs: 0 }));
   desk.store.composerStates['t-trace'] = { text: '', attachments: [], queued: [], sending: false, paused: true };
