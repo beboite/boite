@@ -69,9 +69,9 @@ export async function stopTurn(h: TestCore, owner: CoreClient, threadId: string)
 }
 
 /** `boite secret ask` from `client`; resolves once the card is drawn, with the call still waiting for the answer. */
-export async function openCard(h: TestCore, client: CoreClient, threadId: string, name: string, extra: { replace?: boolean; requestId?: string } = {}) {
+export async function openCard(h: TestCore, client: CoreClient, threadId: string, name: string, extra: { requestId?: string } = {}) {
   const requestId = extra.requestId ?? `sreq_${crypto.randomUUID().replaceAll('-', '')}`;
-  const asked = client.call('secrets.ask', { threadId, name, reason: 'to call the API in the tests', requestId, ...(extra.replace ? { replace: true } : {}) });
+  const asked = client.call('secrets.ask', { threadId, name, reason: 'to call the API in the tests', requestId });
   // A refusal before the card is drawn fails the wait, not a later tick.
   let failure: unknown = null;
   asked.catch((error: unknown) => { failure = error; });
@@ -83,9 +83,9 @@ export async function openCard(h: TestCore, client: CoreClient, threadId: string
 }
 
 /** Asks, answers with `value` from `owner` and gives back the ref. */
-export async function saveSecret(h: TestCore, owner: CoreClient, threadId: string, name: string, value: string, keep = false): Promise<string> {
+export async function saveSecret(h: TestCore, owner: CoreClient, threadId: string, name: string, value: string): Promise<string> {
   const { requestId, asked } = await openCard(h, owner, threadId, name);
-  await owner.call('secrets.answer', { threadId, requestId, value, keep });
+  await owner.call('secrets.answer', { threadId, requestId, value });
   const result = await asked;
   if (result.outcome !== 'saved' || result.ref === null) throw new Error(`the card closed as ${result.outcome}`);
   return result.ref;

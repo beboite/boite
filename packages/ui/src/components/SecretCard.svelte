@@ -6,11 +6,10 @@
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { showDockedQuestion } from '../lib/question-dock.svelte';
-  import InfoTip from './InfoTip.svelte';
 
   /**
    * A key the agent asked for with `boite secret ask`. The value goes from this
-   * field to the core's vault in one call and is dropped right after: it is
+   * field to the core's memory in one call and is dropped right after: it is
    * never drawn again, kept in a draft or handed to the composer. The agent
    * only ever gets a ref.
    */
@@ -27,9 +26,6 @@
 
   /** What is typed, held only until Save sends it. */
   let value = $state('');
-  /** Starts ticked when the card replaces the kept key; unticking saves a one-off copy instead. */
-  let keepChoice = $state<{ requestId: string; checked: boolean } | null>(null);
-  const keep = $derived(keepChoice?.requestId === part.requestId ? keepChoice.checked : part.replace === true);
   let busy = $state(false);
   let error = $state<string | null>(null);
   /** Whether this connection may carry a value (`secrets.list`); null until it answers. */
@@ -39,13 +35,16 @@
   const expired = $derived(part.expiresAt !== undefined && part.expiresAt <= now);
   const open = $derived(part.status === 'pending' && !expired);
   const plain = $derived(encrypted === false);
-  const project = $derived((store.threads.find((thread) => thread.id === threadId)?.projectId ?? null) !== null);
   const outcome = $derived(
-    part.status === 'saved' ? fill(part.kept ? s.savedKept : s.saved, { name: part.name })
+    part.status === 'saved' ? fill(s.saved, { name: part.name })
       : part.status === 'declined' ? fill(s.declined, { name: part.name })
       : part.status === 'cancelled' ? fill(s.cancelled, { name: part.name })
       : fill(s.timedOut, { name: part.name })
   );
+
+  $effect(() => {
+    if (!open) value = '';
+  });
 
   // The card stops taking an answer the moment its deadline passes, before the core says so.
   $effect(() => {
@@ -72,7 +71,7 @@
     if (!open || plain || busy || value.length === 0 || !client) return;
     busy = true;
     error = null;
-    const sending = client.call('secrets.answer', { threadId, requestId: part.requestId, value, keep: project && keep });
+    const sending = client.call('secrets.answer', { threadId, requestId: part.requestId, value });
     value = '';
     try {
       await sending;
@@ -121,9 +120,6 @@
 {:else if open}
   <div class="secret" data-testid="secret-card" data-state="pending" role="group" aria-label={s.cardLabel}>
     <p class="reason" data-testid="secret-reason">{part.reason}</p>
-    {#if part.replace}
-      <p class="muted note" data-testid="secret-replaces">{s.replaces}</p>
-    {/if}
     <div class="field-row">
     <span class="field-glyph" aria-hidden="true"><LockKeyhole size={16} /></span>
     <input
@@ -165,22 +161,14 @@
       <p class="error note" role="alert" data-testid="secret-error">{error}</p>
     {/if}
     <div class="actions">
-      {#if project}
-        <div class="keep-row">
-          <label class="keep">
-            <input type="checkbox" data-testid="secret-keep" bind:checked={() => keep, (checked) => keepChoice = { requestId: part.requestId, checked }} disabled={plain || busy} />
-            <span>{s.keep}</span>
-          </label>
-          <InfoTip text={part.replace ? `${s.keepHint} ${s.keepReplaceHint}` : s.keepHint} topic={s.keep} />
-        </div>
-      {/if}
+      <p class="muted note" data-testid="secret-transit">{s.transit}</p>
       <button type="button" class="ghost" data-testid="secret-decline" disabled={busy} onmousedown={keepFocus} onclick={decline}
         ><span class="ui-label">{s.decline}</span></button
       >
     </div>
   </div>
 {:else}
-  <div class="secret closed" data-testid="secret-card" data-state={part.status === 'pending' ? 'timed_out' : part.status} data-kept={part.kept ? 'true' : undefined}>
+  <div class="secret closed" data-testid="secret-card" data-state={part.status === 'pending' ? 'timed_out' : part.status}>
     <span class="glyph"><KeyRound size={15} strokeWidth={1.75} /></span>
     <span class="outcome ui-label" data-testid="secret-outcome" title={outcome}>{outcome}</span>
   </div>
@@ -261,26 +249,6 @@
     -webkit-text-security: none;
   }
 
-  .keep {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-  }
-
-  .keep input {
-    flex: none;
-    margin: 0;
-  }
-
-  /* The app's `label > span` is a field caption; here the span is the checkbox's own text. */
-  .keep > span {
-    margin: 0;
-    color: var(--color-foreground);
-    font-size: inherit;
-    min-width: 0;
-  }
-
   .actions {
     display: flex;
     align-items: center;
@@ -289,7 +257,6 @@
     justify-content: space-between;
   }
 
-  .keep-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
   .actions > button { margin-inline-start: auto; color: var(--color-muted-foreground); }
   .field-row { display: flex; align-items: center; gap: 8px; position: relative; }
   .field-row > button { flex: none; }

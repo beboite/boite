@@ -1,159 +1,112 @@
 # Secrets
 
-An agent that needs an API key asks for it on a card with a masked field, then
-uses it by ref. The value goes from the card to the system vault and from the
-vault to a file or a command. It never passes through the chat, the model's
-prompt or the agent's output. The code is `packages/core/src/secrets/` for the
-store, `platform/secret-vault.ts` for the vaults, `secret-cli.ts` for
-`boite secret`, and `SecretCard.svelte` for the card.
+Secret Drop is a temporary tunnel from a masked card to one file operation or
+command. The core holds the value in process memory only. It never saves it in
+DPAPI, Keychain, Secret Service, the journal or logs, and never sends the value
+to the agent as a result. There is no project key store or keep option.
+
+The implementation is `packages/core/src/secrets/`, `secret-cli.ts`, and the UI
+component `SecretCard.svelte`.
 
 ## The flow
 
-1. The agent runs `boite secret list`. A key the project already keeps is used
-   by its ref, with no card.
-2. Otherwise it runs `boite secret ask API_KEY --why "to call the billing API"`.
-   A card opens in the conversation with a masked field, the reason, and a
-   **Keep for this project** box, unticked.
-3. The user pastes the key and saves, or declines. The value is in the vault
-   before the card shows "saved".
-4. The command prints one line: `saved secret:<ref>`, `declined`, `cancelled`
-   or `timed_out`.
-5. The agent hands the ref to `boite secret write`, `run` or `pipe`.
+1. The agent runs `boite secret ask API_KEY --why "to call the billing API"`.
+2. The user enters a value on the masked card and sends it, or declines.
+3. The command prints `saved secret:<id>`, `declined`, `cancelled` or `timed_out`.
+4. The agent passes the ref to one `write`, `run` or `pipe` operation.
 
 ```sh
-boite secret list
-boite secret ask <NAME> --why <reason> [--placeholder <example>] [--timeout <minutes>] [--replace]
+boite secret ask <NAME> --why <reason> [--placeholder <example>] [--timeout <minutes>]
 boite secret write <ref> --env-file <path> --key <VAR> [--allow-unignored]
 boite secret run <ref> --as <VAR> -- <cmd> [args ...]
 boite secret pipe <ref> -- <cmd> [args ...]
 ```
 
-`NAME` is upper case: a letter, then letters, digits and `_`, at most 64. No
-command prints a value, and `--json` gives the same fields without one.
+Names are uppercase letters, digits and `_`, starting with a letter, at most
+64 characters. Values are 1 to 16,384 UTF-8 bytes. No CLI result includes one.
 
-- `write` sets `VAR=<value>` in an env file and keeps the file's other lines
-  and line endings. A value with spaces, quotes, `$`, `#` or a backslash is
-  double-quoted and escaped the way dotenv parsers read it. The file must be inside the conversation's folder,
-  not tracked by git, and ignored by git unless `--allow-unignored` is passed.
-  A refusal names the field and the expected value.
-- `run` starts the command with the value in the environment variable `VAR`.
-- `pipe` writes the value to the command's standard input.
+## Lifetime
 
-`run` and `pipe` go through `procs.spawnPiped`, like every agent process, in
-the conversation's folder or a `cwd` inside it. They print the command's output
-with the value masked and exit with its code. A command still running after 10
-minutes is stopped and exits 124. The output kept is cut at 1 MB per stream.
+Every fresh request opens a card. A ref belongs only to the conversation,
+project and running turn that requested it. It is consumed atomically when a
+use begins, including an operation that subsequently fails; concurrent calls
+cannot reuse it. A new operation needs a new card and ref.
 
-## Refs
+Unused values are wiped after ten minutes, when the requesting turn ends,
+when the conversation is archived or removed, when its project is removed,
+or when the core stops, whichever comes first. A restart loses every ref.
+The timer erases expired values automatically; `use` also checks the deadline
+before handing anything to a command. The buffer held during an operation is
+wiped when that operation finishes.
 
-| Ref | Made when | Lasts until |
-|---|---|---|
-| `secret:<id>` | the box is unticked (the default) | the conversation is archived or removed, 24 hours pass, or a core with a memory vault restarts |
-| `secret:project/<NAME>` | the box is ticked | the user deletes it in project settings, or the project is removed |
+The pending card waits ten minutes by default, with `--timeout` from 1 to 60
+minutes. This deadline covers answering the card, not the value's lifetime.
+Stop, turn completion, disconnecting the last waiting `ask` client, and timeout
+close an unanswered card. A retried request with the same request ID gets its
+original card or receipt; a consumed or expired receipt cannot revive a value.
 
-A transit copy belongs to the conversation that asked and to its project. It
-can be used several times until it is erased. A use from another conversation
-or another project is refused, and the ref still works in its own.
+Only pending card locations are persisted in `<data>/secrets/index.json`, so
+startup can close cards left open by a crash. New transit values and their
+metadata never enter that index.
 
-A kept key serves every conversation of its project. `ask` on a name the
-project keeps returns its ref without a card. `ask --replace` shows the card
-again, and the old key is replaced only when the user saves the new one;
-ticking the box on a name the project keeps is a replace too. Each use updates
-the key's `lastUsedAt`, which project settings show.
+## Destinations
 
-The core sweeps at startup and when the next transit copy expires: it erases
-expired copies and copies whose conversation is archived or gone. The DPAPI and
-memory vaults can list their entries, so the sweep also erases the ones no
-index line names. The Keychain and Secret Service vaults cannot, so an entry
-whose erasure failed stays there.
+- `run` gives the value to one command as the environment variable `VAR`.
+- `pipe` gives it to one command on standard input.
+- `write` sets `VAR=<value>` in an env file, preserving other lines and line
+  endings. The destination must be inside the conversation's folder, untracked
+  by git and ignored unless `--allow-unignored` is explicit. Special characters
+  are quoted for dotenv parsers. The destination file remains after delivery:
+  it is a file the operation requested, not a Boite secret store.
 
-## The card
+Commands use `procs.spawnPiped`, run inside the conversation's folder, and
+return output with the value masked. Their default deadline is ten minutes,
+an hour at most; a timed out command exits 124. Output is capped at 1 MB per
+stream.
 
-Pending secret requests share the question dock above the message box. They
-stay visible while the user reads older output, and the timeline keeps a link
-back to the request. Answered requests leave a one-line receipt. The dock reads
-pending metadata independently of history pages, including after reconnecting;
-no secret value enters that snapshot or the ordinary composer.
+## Transport and card
 
-A card can be answered once, and only while the turn that asked is running. The
-turn ending, the user pressing Stop, the agent's command being killed, or the
-timeout (10 minutes, `--timeout` up to 60) closes it as `cancelled` or
-`timed_out`. A core that stops with a card open closes it as `cancelled` when
-it starts again.
+Pending requests stay in the question dock above the composer, independently
+of history paging. The timeline keeps only metadata and a receipt. The field
+never becomes a composer draft. A value can travel only over loopback,
+Tailscale or an HTTPS link; a phone on plain HTTP can decline but cannot send a
+value. A group relay must also attest to its client's encrypted hop.
 
-Answering with a value needs an encrypted link: the desktop app, loopback, an
-HTTPS page or a Tailscale address. A phone on plain HTTP sees the card with
-"Answer from the PC or over HTTPS", can decline, and cannot send a value. The
-Tailscale check is by the socket's address, and counts only while this machine
-is on a tailnet. A phone relayed by another machine of the group counts only
-when its hop to that machine was encrypted too: the relaying machine says so in
-the `X-Boite-Relayed-Link` header.
+Agents can ask for and use refs only in their own conversation. Owners and
+paired devices can read pending metadata and answer cards, with the encrypted
+link requirement enforced by the real core.
 
-## Permissions
+## Migration from the project key store
 
-| Method | Owner | Agent | Paired device |
-|---|---|---|---|
-| `secrets.ask`, `secrets.use` | yes | its own conversation | no |
-| `secrets.list` | yes | its own project | yes |
-| `secrets.answer` with a value | over an encrypted link | no | over an encrypted link |
-| `secrets.answer` declining | yes | no | yes |
-| `secrets.delete` | yes | no | over an encrypted link |
+Startup erases all legacy kept keys and transit copies without reading or
+decrypting them. On Windows it deletes the sealed blob files, including
+orphaned blobs it can enumerate. On macOS and Linux it deletes indexed entries
+through the system tool; those backends cannot enumerate unindexed entries.
+A failed deletion retains its cleanup metadata, logs a warning and retries
+once a minute. An unavailable vault is never treated as successful deletion.
+Legacy entries are never listed or usable, even while cleanup is pending.
 
-The reasons are recorded beside `AGENT_METHODS` in `packages/core/src/access.ts`
-and `DEVICE_METHODS` in `packages/contracts/src/access.ts`.
+The old `keep: true`, `replace: true` and project refs are refused. The legacy
+`secrets.list` RPC and `boite secret list` remain compatible with older clients
+and guides but always report no stored keys and memory-only storage.
 
-## The vault on each OS
+## Masking and limits
 
-| OS | Vault | Where |
-|---|---|---|
-| Windows | DPAPI (`CryptProtectData`, no prompt) | sealed `<id>.bin` blobs in `<data>/secrets/`, which open only for this Windows user on this machine |
-| macOS | Keychain, through `security` | the login keychain, service `boite-secret` |
-| Linux | Secret Service, through `secret-tool` | the session's keyring (GNOME Keyring, KWallet) |
-| any | memory | this process only |
+The core retains keyed hashes, not values, for masking the conversation's
+text, thinking, tools, terminal, process command lines, logs and diagnostic
+exports. Hashes remain available after delivery until the core stops, so late
+output is still masked. The exact and URL-encoded forms become `•••• (<NAME>)`.
+Values shorter than eight bytes are not masked. Streamed chunks are masked
+individually and completed messages are masked again; a value split across
+chunks can appear while streaming, or when cut at an output limit.
 
-The vault loads when the first secret is saved or used, and at startup when
-`<data>/secrets/index.json` exists: the startup sweep reads every stored value
-back to restore the masks, which on macOS and Linux runs `security` or
-`secret-tool` once per value. An entry it cannot read is logged and skipped,
-not erased. When no system vault answers, Boite keeps values in memory, and `boite secret ask` and
-`list` tell the agent that they are lost when Boite stops. On macOS and Linux
-the value reaches the tool as hex on its standard input, never as an argument.
+Core-owned byte buffers are wiped. JavaScript strings from the received frame,
+JSON parsing and environment blocks cannot be reliably zeroed and remain until
+garbage collection. Memory-only storage does not protect against swap, crash
+dumps or a compromised host.
 
-`<data>/secrets/index.json` holds names, ids, conversations and dates, never a
-value.
-
-Values are `Uint8Array` in the core and are zeroed with `fill(0)` after each
-use. Some copies cannot be wiped: the JSON-RPC frame that carries the answer,
-the JavaScript string it is parsed into, the environment block given to `run`,
-and the buffers of a tool on macOS and Linux. They stay in memory until they
-are collected.
-
-## Masking
-
-The exact value and its URL-encoded form become `•••• (<NAME>)` in:
-
-- text, thinking and tool output that the agent's conversation records;
-- the thread terminal's output;
-- `run` and `pipe` output;
-- the command lines of the conversation's processes, which the trace keeps,
-  for a shell that expands the variable `run` gave it;
-- Boite's own logs, and so diagnostics exports.
-
-A transit copy masks its own conversation. A kept key masks every conversation
-of its project. The masks hold a keyed hash of each value, not the value, under
-a key drawn for each process, so after a restart the startup sweep reads the
-values from the vault to build them again.
-
-Values shorter than 8 bytes are not masked: masking them would hide ordinary
-words in the conversation. Streamed text is masked per chunk, and each message
-is masked again when it closes, so a value split across two chunks can show
-while it streams. A value cut in two by the 1 MB output limit is not masked.
-
-## What this is not
-
-This is not a sandbox. An agent that can run a shell can `cat .env`, print the
-variable inside `run`, or send the value anywhere; whatever it reads goes to
-its provider like any other output. Masking hides the value in Boite's chat,
-logs and exports, not in the provider's copy of the conversation. The card
-keeps the key out of the chat; the agent's tools still decide what happens to
-it next.
+The tunnel does not sandbox the receiving command. A shell can read a file it
+was given, print an environment variable or transmit the value. Boite masks its
+own recorded output, but tools that send a value to a model provider expose it
+to that provider. Secret Drop does not erase a requested destination file or
+control what the receiving command stores.

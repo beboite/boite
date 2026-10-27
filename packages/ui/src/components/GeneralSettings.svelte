@@ -79,7 +79,7 @@
   <WorktreesCard {store} />
   <WindowAllowlistCard {store} />
   <WindowExclusionsCard {store} />
-  <SecretsCard {store} />
+  <SecretsCard />
   <!-- Profiles also configure the core's agent browser from a plain web client. -->
   {#if here.owner}<BrowserProfilesCard />{/if}
 

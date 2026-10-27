@@ -106,7 +106,10 @@ test('the app answers the core as a browser: a target is a webview, its session 
   // Its page closing it is the shell's destroyed surface: the core hears a closed page.
   shell.emit({ type: 'destroyed', id: 'agent-popup-1-0' });
   await settle();
-  expect(core.replies('work')).toContainEqual({ method: 'Target.targetDestroyed', params: { targetId: 'agent-popup-1-0' } });
+  expect(core.replies('work').filter(reply => reply.params?.targetId === 'agent-popup-1-0')).toEqual([
+    { method: 'Target.detachedFromTarget', params: { sessionId: 'agent-popup-1-0', targetId: 'agent-popup-1-0' } },
+    { method: 'Target.targetDestroyed', params: { targetId: 'agent-popup-1-0' } },
+  ]);
   // One whose opener the relay does not drive is closed at once.
   shell.emit({ type: 'popup', id: 'agent-gone', popup: 'agent-popup-1-1', url: 'about:blank' });
   expect(shell.destroyed).toContain('agent-popup-1-1');

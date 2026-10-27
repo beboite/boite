@@ -51,7 +51,7 @@
   });
 
   function secretPart(request: SecretRequest): Extract<MessagePart, { type: 'secret_request' }> {
-    return { type: 'secret_request', requestId: request.id, name: request.name, reason: request.reason, placeholder: request.placeholder, replace: request.replace, status: request.status, ref: request.ref, expiresAt: request.expiresAt };
+    return { type: 'secret_request', requestId: request.id, name: request.name, reason: request.reason, placeholder: request.placeholder, status: request.status, ref: request.ref, expiresAt: request.expiresAt };
   }
   let waits = $derived(store.pendingPermissions.filter((request) => children.has(request.threadId)));
   let shownId = $state<string | null>(null);

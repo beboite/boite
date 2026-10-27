@@ -105,7 +105,7 @@ export class Requests {
     if (!thread) return [];
     return thread.messages.flatMap(message => message.parts.flatMap(part => part.type === 'secret_request' && part.status === 'pending' ? [{
       id: part.requestId, threadId: thread.id, turnId: message.turnId, name: part.name,
-      reason: part.reason, placeholder: part.placeholder, replace: part.replace ?? false,
+      reason: part.reason, placeholder: part.placeholder,
       status: part.status, ref: part.ref, createdAt: message.createdAt,
       expiresAt: part.expiresAt ?? Number.POSITIVE_INFINITY
     }] : []));
