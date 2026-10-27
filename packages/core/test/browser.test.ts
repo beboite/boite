@@ -218,6 +218,22 @@ real('a target that moves away from the native pointer is not clicked, and the n
   expect(await evaluate('clicks')).toEqual([true]);
 }, 150_000);
 
+real('native pointer movement retries a selector temporarily changed by hover', async () => {
+  const {agent, threadId} = browserFixture;
+  await agent.call('browser.command', {threadId, action: {kind: 'open', url: url()}});
+  await evaluate(`document.body.innerHTML = '<button class="ready">Hover</button>';
+    window.clicks = [];
+    const button = document.querySelector('button');
+    button.addEventListener('click', event => clicks.push(event.isTrusted));
+    button.addEventListener('pointermove', event => {
+      if (!event.isTrusted) return;
+      button.className = 'hovering';
+      setTimeout(() => button.className = 'ready', 100);
+    }, {once: true}); true`);
+  await agent.call('browser.command', {threadId, action: {kind: 'click', selector: '.ready'}});
+  expect(await evaluate('clicks')).toEqual([true]);
+}, 150_000);
+
 real('a burst of windows opened at once stops at the conversation tab limit', async () => {
   const { agent, threadId } = browserFixture;
   // The desktop app's webviews let a page open many windows, and so does the core's Chromium (`chromiumArgs`).

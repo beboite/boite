@@ -87,7 +87,7 @@ export async function publishArtifact(core: Core, params: RpcParams<'artifacts.p
       id: newId('msg_'), threadId: thread.id, turnId: turn.id, role: 'assistant', state: 'complete', createdAt: Date.now(),
       parts: [part],
     };
-    core.sharedAccess.published(thread.id, message.id, [params.path]);
+    core.sharedAccess.published(thread.id, message.id, [permit]);
     core.journal.append({ type: 'artifact.published', threadId: thread.id, version: 1, payload: message }, () => core.journal.putMessage(message));
     committed = true;
     if (core.threads.runner.handles.has(thread.id) && core.journal.getTurn(turn.id)?.status === 'running') {

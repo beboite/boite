@@ -530,16 +530,17 @@ test('host overrides are exact, action/job/grant bound, expiring, revocable and 
   } finally {agent.close();}
 }, 30000);
 
-test('published message tickets, inline dependencies and ordinary binary tickets lose authority on override or grant revoke', async () => {
+test.each(['.env.png', 'report.png'])('published %s tickets lose authority on override or grant revoke', async path => {
   const {b, sharedProjectId, job, worker, agent} = await fixture();
   try {
     await waitFor(() => b.h.core.journal.lastTurn(worker.id)?.status === 'running');
-    writeFileSync(join(worker.cwd, '.env.png'), 'TOKEN=publication-secret-canary');
-    const override = await b.client.call('sharedAccess.override', {sharedProjectId, requestId: 'publish', override: {path: '.env.png', actions: ['publish'], jobId: job.id, reason: 'fixture', expiresAt: Date.now() + 60000}});
-    const message = await agent.call('artifacts.publish', {threadId: worker.id, path: '.env.png'});
+    const content = 'TOKEN=publication-secret-canary\n' + (path === 'report.png' ? 'x'.repeat(2 * 1024 * 1024) : '');
+    writeFileSync(join(worker.cwd, path), content);
+    const override = await b.client.call('sharedAccess.override', {sharedProjectId, requestId: 'publish', override: {path, actions: ['publish'], jobId: job.id, reason: 'fixture', expiresAt: Date.now() + 60000}});
+    const message = await agent.call('artifacts.publish', {threadId: worker.id, path});
     const params = {threadId: worker.id, messageId: message.id, partIndex: 0, ticket: true};
     const attachment = await b.client.call('messages.attachment', params);
-    expect(await (await fetch(`${b.h.url}${attachment.url}`)).text()).toBe('TOKEN=publication-secret-canary');
+    expect(await (await fetch(`${b.h.url}${attachment.url}`)).text()).toBe(content);
     expect((await fetch(`${b.h.url}${attachment.url}`)).headers.get('cache-control')).toBe('no-store');
     await b.client.call('sharedAccess.revokeOverride', {sharedProjectId, overrideId: override.id});
     expect((await fetch(`${b.h.url}${attachment.url}`)).status).toBe(404);
@@ -551,4 +552,34 @@ test('published message tickets, inline dependencies and ordinary binary tickets
     await b.client.call('sharedProjects.revoke', {sharedProjectId, requestId: 'revoke'});
     expect((await fetch(`${b.h.url}${file.url}`)).status).toBe(404);
   } finally {agent.close();}
+}, 30000);
+
+
+test('a published view keeps each source content override through ticket renewal', async () => {
+  const {b, sharedProjectId, job, worker, agent} = await fixture();
+  try {
+    writeFileSync(join(worker.cwd, 'index.html'), '<!doctype html><img src="report.png">');
+    writeFileSync(join(worker.cwd, 'report.png'), 'TOKEN=view-secret-canary');
+    const override = await b.client.call('sharedAccess.override', {sharedProjectId, requestId: 'view-publish', override: {path: 'report.png', actions: ['publish'], jobId: job.id, reason: 'fixture', expiresAt: Date.now() + 60000}});
+    b.h.core.browser.probe = async () => ({errors: [], heights: [100, 100]});
+    const {message} = await agent.call('artifacts.view', {threadId: worker.id, path: 'index.html'});
+    const part = message.parts[0];
+    if (part?.type !== 'artifact') throw new Error('fixture expected a published view');
+    const params = {threadId: worker.id, messageId: message.id, artifactId: part.id, view: true as const};
+    const ticket = await b.client.call('artifacts.read', params);
+    expect(await (await fetch(`${b.h.url}${ticket.url}`)).text()).toContain(Buffer.from('TOKEN=view-secret-canary').toString('base64'));
+    await b.client.call('sharedAccess.revokeOverride', {sharedProjectId, overrideId: override.id});
+    expect((await fetch(`${b.h.url}${ticket.url}`)).status).toBe(404);
+    expect(await thrown(b.client.call('artifacts.read', params))).toThrow('shared file policy');
+  } finally {agent.close();}
+}, 30000);
+
+
+test('a disappeared shared checkout returns a policy refusal', async () => {
+  const {b, worker, agent} = await fixture();
+  const moved = worker.cwd + '-removed';
+  renameSync(worker.cwd, moved);
+  try {
+    expect(() => b.h.core.sharedAccess.file(worker.id, 'ordinary.txt')).toThrow('shared file policy: expected the captured job checkout');
+  } finally {renameSync(moved, worker.cwd); agent.close();}
 }, 30000);

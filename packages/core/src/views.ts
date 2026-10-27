@@ -219,7 +219,6 @@ const notReady = (problems: string[], method = 'artifacts.view') => refused(`${m
 async function prepareView(core: Core, params: { threadId: string; path: string }, method: string) {
   const thread = core.threads.require(params.threadId);
   const permit = core.sharedAccess.file(thread.id, params.path, 'publish');
-  const sources = [params.path];
   const permits = permit ? [permit] : [];
   if (thread.archived) throw refused(`${method} needs an active thread`, { threadId: thread.id });
   const turn = core.journal.lastTurn(thread.id);
@@ -238,12 +237,12 @@ async function prepareView(core: Core, params: { threadId: string; path: string 
   const built = buildView(source, dirname(found.absolute), thread.cwd, permit ? path => {
     const logical = relative(thread.cwd, path).split(sep).join('/');
     const dependency = core.sharedAccess.file(thread.id, logical, 'publish')!;
-    sources.push(logical); permits.push(dependency); return dependency;
+    permits.push(dependency); return dependency;
   } : undefined);
   if (built.problems.length) throw notReady(built.problems, method);
   const data = Buffer.from(viewDocument(built.html), 'utf8');
   if (data.length > VIEW_MAX_BYTES) throw refused(`${method} page is ${(data.length / 1024 / 1024).toFixed(1)} MB with its files embedded; the limit is 4 MB. Use smaller images.`, { path: params.path });
-  return { thread, turn, found, source, data, permit, permits, sources };
+  return { thread, turn, found, source, data, permit, permits };
 }
 
 /** Render a disposable draft. No journal entry, panel request or browser tab is created. */
@@ -288,7 +287,7 @@ export async function checkView(core: Core, params: RpcParams<'artifacts.viewChe
  * in two where the command ran: only the answer's own line places it.
  */
 export async function publishView(core: Core, params: RpcParams<'artifacts.view'>): Promise<RpcResult<'artifacts.view'>> {
-  const { thread, turn, found, source, data, permit, permits, sources } = await prepareView(core, params, 'artifacts.view');
+  const { thread, turn, found, source, data, permit, permits } = await prepareView(core, params, 'artifacts.view');
 
   const id = randomUUID();
   const directory = join(core.dataDir, 'artifacts');
@@ -318,7 +317,7 @@ export async function publishView(core: Core, params: RpcParams<'artifacts.view'
       id: newId('msg_'), threadId: thread.id, turnId: turn.id, role: 'assistant', state: 'complete', createdAt: Date.now(),
       parts: [{ type: 'artifact', id, name, mimeType: VIEW_MIME, bytes: data.length, view }],
     };
-    core.sharedAccess.published(thread.id, message.id, sources);
+    core.sharedAccess.published(thread.id, message.id, permits);
     core.journal.append({ type: 'artifact.published', threadId: thread.id, version: 1, payload: message }, () => core.journal.putMessage(message));
     committed = true;
     core.bus.emit('message.started', message);

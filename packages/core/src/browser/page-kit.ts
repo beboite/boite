@@ -377,7 +377,8 @@ function agentKit() {
     };
     doc.addEventListener('pointermove', moved, true);
     K.pointerMoved = (x, y) => {
-      if (!received || !el.isConnected || operable(K.find(target)) !== el) return false;
+      if (!received || !el.isConnected) return false;
+      try { if (operable(K.find(target)) !== el) return false; } catch { return false; }
       const point = inward(doc.defaultView ?? window, x, y);
       return !!point && hits(el, doc.elementFromPoint(point.x, point.y));
     };

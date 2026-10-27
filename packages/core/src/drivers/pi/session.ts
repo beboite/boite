@@ -581,7 +581,7 @@ export class PiSession {
     if (this.ended) return;
     this.ended = true;
     this.closing = true;
-    this.protection?.close(this.exited ?? undefined);
+    this.protection?.close(this.exited ?? this.processClosed);
     this.protection = null;
     this.clearIdle();
     const turn = this.current;

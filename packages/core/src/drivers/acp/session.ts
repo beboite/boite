@@ -491,8 +491,8 @@ export class AcpSession {
       throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
     }
 
-    const temp = launchTemp(ctx.provider, ctx.account.isolationDir);
     this.protection = protectedAcp(ctx, () => this.current, profile?.launch?.args ?? []);
+    const temp = launchTemp(ctx.provider, ctx.account.isolationDir);
     let child: SpawnedChild;
     const native = ctx.provider.id === 'opencode-v2';
     const password = native ? randomBytes(32).toString('base64url') : null;
@@ -661,7 +661,7 @@ export class AcpSession {
     if (this.ended) return;
     this.ended = true;
     this.closing = true;
-    this.protection?.close(this.exited ?? undefined);
+    this.protection?.close(this.exited ?? Promise.resolve());
     this.protection = null;
     this.clearIdle();
     this.commands.clear();
