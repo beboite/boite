@@ -1138,20 +1138,41 @@ Windows kernel attributes fail closed before a model tool runs. The launcher
 creates and releases its own window station and desktop, including in a
 noninteractive session; it does not alter a host station or desktop ACL.
 It also sets a package-specific default DACL on the suspended job token for new
-private IPC objects. Admission requires the existing NUL device to admit LPAC
-read/write, because native child runtimes open it for ignored standard streams.
-`protected-tool.exe --diagnose-null` prints that device's existing DACL without
-changing it. Server 2025 build 26100 currently fails this prerequisite; build
-26200 passes the complete native fixture. The backend uses the actual access
-probe, rather than assuming a particular version is sufficient.
+private IPC objects. Helper protocol version 2 first runs the real admission
+probe through direct LPAC execution. Only an empty-output exit 125 with the
+exact NUL access-denied diagnostic permits repeating that same probe through
+`run-null-broker`. A successful probe pins the mode and helper file identity and
+bytes for the session; every other failure refuses admission.
+
+The broker adds task-local process debugging while preserving the same LPAC,
+sole registry capability, three standard handles and exact private job. Before
+continuing each process creation it verifies that job, package, NOALLAPPPKG and
+capability identity. It brokers only exact Null requests, opening the fixed real
+`\Device\Null` afresh and duplicating that handle with its requested access and
+mode. Other paths execute in the target token. Invalid output memory passes
+through to the real syscall. Application exceptions remain forwarded. A single
+step owner per process, continued thread exits and parked-event replay protect
+concurrent calls. Process/thread ledgers grow with the live workload; only
+startup, owned steps and draining have deadlines, not the entire tool session.
+
+This broker currently requires the pinned x64 ntdll SHA256
+`160ef9b82e2895ef48fa031cb1cf683a8b123febf7cf7d5590cd3104864424b3`, its
+verified exports and loader site. Unsupported images fail closed. Installations
+whose direct probe succeeds keep direct execution. `protected-tool.exe
+--diagnose-null` prints the existing device DACL without changing it. Historical
+build 26100 direct NUL failures and the positive build 26200 native fixture do
+not prove this new production integration; current-head native CI decides it.
 The native Windows CI lane runs inside the existing Windows core check, including protection
 changes on a draft PR. It uses synthetic directories/accounts and deterministic
 local provider APIs. Its fixture checks useful builds/tests, secret paths,
 junctions/hardlinks, inheritable handles, host process access, offline networking,
-read-only overrides, expiry/revoke/root-exit descendants and cleanup. Separate
-native driver and shared-access scenarios exercise Claude, Codex, OpenCode and pi.
-Native Muse Windows admission is a separate gate; the Linux Muse result does not
-establish it. macOS has no protected execution backend.
+read-only overrides, expiry/revoke/root-exit descendants and cleanup. A successful
+breakaway creation must finish its captured child's lifetime before the root
+exits, under the broker's exact-job and LPAC binding. The suite also exceeds the
+old diagnostic's cumulative process limit. Native driver/shared-access and Muse
+MSP admission scenarios run with both SDK and MinGW helpers. Their Windows
+results remain required; Linux results do not establish them. macOS has no
+protected execution backend.
 
 ### Client transport
 

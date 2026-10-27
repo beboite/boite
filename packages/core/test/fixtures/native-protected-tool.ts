@@ -3,13 +3,14 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import type {Pointer} from 'bun:ffi';
 
-const [outside, credential, inheritedFd, hostPid] = process.argv.slice(2);
+const [outside, credential, inheritedFd, hostPid, generationProbe] = process.argv.slice(2);
 if (process.platform === 'win32') {
   const {dlopen, FFIType, ptr} = await import('bun:ffi');
   const kernel = dlopen('kernel32.dll', {
     OpenProcess: {args: [FFIType.u32, FFIType.i32, FFIType.u32], returns: FFIType.ptr},
     CloseHandle: {args: [FFIType.ptr], returns: FFIType.i32},
     CreateProcessW: {args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.i32, FFIType.u32, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32},
+    ResumeThread: {args: [FFIType.ptr], returns: FFIType.u32},
     TerminateProcess: {args: [FFIType.ptr, FFIType.u32], returns: FFIType.i32},
     GetLastError: {args: [], returns: FFIType.u32},
     WaitForSingleObject: {args: [FFIType.ptr, FFIType.u32], returns: FFIType.u32},
@@ -35,13 +36,30 @@ if (process.platform === 'win32') {
   if (handle) kernel.symbols.CloseHandle(handle);
   const startup = Buffer.alloc(104), processInfo = Buffer.alloc(24);
   startup.writeUInt32LE(104);
-  const line = Buffer.from(`"${process.execPath}" -e "setInterval(()=>{},1000)"\0`, 'utf16le');
-  const escaped = kernel.symbols.CreateProcessW(null, ptr(line), null, null, 0, 0x01000000 | 0x08000000, null, null, ptr(startup), ptr(processInfo));
-  const breakawayDenied = !escaped && kernel.symbols.GetLastError() === 5;
-  if (escaped) {
+  const line = Buffer.from(`"${process.execPath}" -e "process.exit(0)"\0`, 'utf16le');
+  const created = kernel.symbols.CreateProcessW(null, ptr(line), null, null, 0,
+    0x01000000 | 0x08000000 | 4, null, null, ptr(startup), ptr(processInfo));
+  const creationError = created ? 0 : kernel.symbols.GetLastError();
+  let breakaway: {created: boolean; denied: boolean; pid: number; waited: boolean; exit: number | null; closed: boolean};
+  if (!created) breakaway = {created: false, denied: creationError === 5, pid: 0, waited: false, exit: null, closed: true};
+  else {
     const childHandle = Number(processInfo.readBigUInt64LE()) as Pointer, threadHandle = Number(processInfo.readBigUInt64LE(8)) as Pointer;
-    kernel.symbols.TerminateProcess(childHandle, 125);
-    kernel.symbols.CloseHandle(threadHandle); kernel.symbols.CloseHandle(childHandle);
+    const pid = processInfo.readUInt32LE(16), tid = processInfo.readUInt32LE(20);
+    if (!childHandle || !threadHandle || !pid || !tid) throw new Error('Breakaway creation did not return its process/thread identity');
+    // The broker checks this actual CREATE_PROCESS against its private job and
+    // LPAC/package before continuing it. Keep the returned object handle until
+    // it has exited normally, while this fixture root is still running.
+    const resumed = kernel.symbols.ResumeThread(threadHandle) === 1;
+    const waited = resumed && kernel.symbols.WaitForSingleObject(childHandle, 15000) === 0;
+    const status = Buffer.alloc(4);
+    const known = waited && !!kernel.symbols.GetExitCodeProcess(childHandle, ptr(status));
+    if (!waited) {
+      kernel.symbols.TerminateProcess(childHandle, 125);
+      kernel.symbols.WaitForSingleObject(childHandle, 3000);
+    }
+    const threadClosed = !!kernel.symbols.CloseHandle(threadHandle), processClosed = !!kernel.symbols.CloseHandle(childHandle);
+    breakaway = {created: true, denied: false, pid, waited, exit: known ? status.readUInt32LE() : null, closed: threadClosed && processClosed};
+    if (!resumed || !waited || !known || breakaway.exit !== 0 || !breakaway.closed) throw new Error(`Breakaway lifetime incomplete: ${JSON.stringify(breakaway)}`);
   }
   // A descendant must retain LPAC, including exclusion of ambient application
   // package grants. The launcher's preflight checks only the first process.
@@ -97,10 +115,17 @@ console.log('child-checked');`], {encoding: 'utf8'});
   if (child.stdout?.includes('SYNTHETIC_PROTECTED')) exposed.push('child');
   if (child.stdout?.includes('ambient-readable')) exposed.push('child-ambient-grant');
   if (Object.values(process.env).some(value => value?.includes('SYNTHETIC_PROTECTED'))) exposed.push('environment');
+  // More than the prototype's cumulative 32-process table, without concurrent
+  // heavyweight runtimes. Every generation must finish before the next starts.
+  let generations = 0;
+  for (; generations < (generationProbe === 'grow-ledger' ? 40 : 0); generations++) {
+    const next = spawnSync(process.execPath, ['-e', 'process.exit(0)'], {encoding: 'utf8'});
+    if (next.status !== 0) throw new Error(`Descendant generation ${generations}: ${next.error ?? next.stderr}`);
+  }
   writeFileSync('answer.js', readFileSync('answer.js', 'utf8').replace('return 41', 'return 42'));
   const build = spawnSync(process.execPath, ['build', 'answer.js', '--outdir', 'dist', '--target', 'bun'], {encoding: 'utf8'});
   const check = spawnSync(process.execPath, ['test', 'answer.test.js'], {encoding: 'utf8'});
-  console.log(JSON.stringify({exposed, built: build.status === 0 && existsSync('dist/answer.js'), tested: check.status === 0, lowbox, hostProcessDenied, breakawayDenied}));
+  console.log(JSON.stringify({exposed, built: build.status === 0 && existsSync('dist/answer.js'), tested: check.status === 0, lowbox, hostProcessDenied, breakaway, generations}));
   if (build.status !== 0 || check.status !== 0) console.error(build.error, build.stderr, check.error, check.stderr);
   kernel.close(); advapi.close();
 } else {

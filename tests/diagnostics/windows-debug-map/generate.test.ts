@@ -4,14 +4,14 @@ import {generate, sha256, sourceHash, sourcePath} from './generate.ts';
 import {selectedEnvironment} from './environment.ts';
 import {loadWorkflow} from '../../../scripts/ci/required-checks.ts';
 
-test('generates only from the verified current production boundary and rejects source drift', () => {
+test('generates only from the frozen historical boundary and rejects source drift', () => {
   const original = readFileSync(sourcePath, 'utf8');
   expect(sha256(original)).toBe(sourceHash);
   const generated = generate(original);
   expect(generated).toContain('#include "routing.h"');
   expect(generated).toContain('(debug_mode ? DEBUG_PROCESS : 0)');
   expect(generated).not.toContain('INFINITE');
-  expect(() => generate(original + '\n')).toThrow('review and repin');
+  expect(() => generate(original + '\n')).toThrow('review diagnostic provenance');
   expect(readFileSync(sourcePath, 'utf8')).toBe(original);
 });
 

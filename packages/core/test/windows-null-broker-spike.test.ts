@@ -128,8 +128,8 @@ test('shared native scheduler and output-span contracts: queued trap B cannot su
   expect(result.out).toContain('terminating-replay=1');
 });
 
-test('source generation pins the production reference and rejects a second replacement', () => {
-  const original = readFileSync(new URL('../src/platform/windows/protected-tool.c', import.meta.url), 'utf8');
+test('source generation pins the historical reference and rejects a second replacement', () => {
+  const original = readFileSync(new URL('../../../tests/diagnostics/windows-protected-reference.c', import.meta.url), 'utf8');
   const generated = brokerSource(original);
   expect(generated).toContain('DEBUG_PROCESS');
   expect(generated).toContain('TOKEN_QUERY | TOKEN_ADJUST_DEFAULT, &child_token');

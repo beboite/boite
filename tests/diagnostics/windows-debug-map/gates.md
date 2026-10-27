@@ -23,7 +23,7 @@ native test allocate no native fixture. Cross compilation is not routing proof.
 
 ## Source provenance
 
-`generate.ts` reads the current `packages/core/src/platform/windows/protected-tool.c`
+`generate.ts` reads the frozen historical `tests/diagnostics/windows-protected-reference.c`
 and rejects any SHA256 other than
 `8f414f91eab4ed1e9a846ae3d0bac64eec11e5d924a2a811f998f91567b25f5a`.
 This is the unchanged source from commits `2f13085b` and `a174bb2b`.

@@ -41,11 +41,20 @@ describe.skipIf(!native)('native Windows protected execution', () => {
     expect(probeOut).not.toContain('SYNTHETIC_PROTECTED');
     if (probeCode === 0) expect(probeOut.trim()).toBe('denied');
     else {expect(probeCode, probeErr).toBe(8); expect(probeErr).toContain('3221225480');} // STATUS_INVALID_HANDLE under strict checking.
-    const child = procs.spawn('windows-native', process.execPath, ['tool.ts', outside, outside, String(handle), String(process.pid)], {cwd: root, env: {SYNTHETIC_KEY: 'SYNTHETIC_PROTECTED'}});
+    const child = procs.spawn('windows-native', process.execPath, ['tool.ts', outside, outside, String(handle), String(process.pid), 'grow-ledger'], {cwd: root, env: {SYNTHETIC_KEY: 'SYNTHETIC_PROTECTED'}});
     const [code, out, err] = await Promise.all([child.exited, new Response(child.proc.stdout).text(), new Response(child.proc.stderr).text()]);
     expect(code, err).toBe(0);
     native.symbols.CloseHandle(handle); native.close();
-    expect(JSON.parse(out), err).toEqual({exposed: [], built: true, tested: true, lowbox: true, hostProcessDenied: true, breakawayDenied: true});
+    const result = JSON.parse(out);
+    expect(result, err).toMatchObject({exposed: [], built: true, tested: true, lowbox: true, hostProcessDenied: true, generations: 40});
+    if (result.breakaway.created) {
+      // Helper success composes with its mandatory exact-job/LPAC binding on
+      // this child's CREATE_PROCESS; direct mode cannot supply that witness.
+      const launch = procs.protection.launch('windows-native', process.execPath, [], {cwd: root});
+      expect(launch?.args[0], err).toBe('run-null-broker');
+      expect(result.breakaway).toEqual({created: true, denied: false, pid: expect.any(Number), waited: true, exit: 0, closed: true});
+      expect(result.breakaway.pid).toBeGreaterThan(0);
+    } else expect(result.breakaway).toEqual({created: false, denied: true, pid: 0, waited: false, exit: null, closed: true});
     procs.protection.flush('windows-native');
     expect(readFileSync(join(root, 'answer.js'), 'utf8')).toContain('42');
     expect(existsSync(join(root, 'dist/answer.js'))).toBe(true);

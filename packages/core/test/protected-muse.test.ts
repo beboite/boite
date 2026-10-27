@@ -1,16 +1,47 @@
 import {afterEach, describe, expect, test} from 'bun:test';
-import {copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {TOOL_FREE_CONTEXT, type ThreadSummary} from '@boite/contracts';
+import {tmpdir} from 'node:os';
+import * as nativeProviders from './fixtures/prepare-native-providers.ts';
+import {TOOL_FREE_CONTEXT, type ProviderInstall, type ThreadSummary} from '@boite/contracts';
 import {createMuseDriver} from '../src/drivers/muse.ts';
 import type {Driver, TurnContext} from '../src/drivers/types.ts';
 import {protectedTools} from '../src/protected-tools.ts';
 import {protectedProviderApi} from './fixtures/protected-provider-api.ts';
 import {startTestCore, waitFor, type TestCore} from './harness.ts';
+import {thrown} from './settle.ts';
 
 let h: TestCore | undefined, driver: Driver | undefined, api: ReturnType<typeof protectedProviderApi> | undefined;
 afterEach(async () => {driver?.shutdown?.(); driver = undefined; api?.stop(); api = undefined; await h?.stop(); h = undefined;});
-const native = process.platform === 'linux' && process.env.BOITE_TEST_NATIVE_EXECUTION === '1';
+const native = ['linux', 'win32'].includes(process.platform) && process.env.BOITE_TEST_NATIVE_EXECUTION === '1';
+
+test('Windows Muse fixture verifies task-local native bytes and refuses tampering without retry', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'boite-muse-install-test-'));
+  const bytes = new TextEncoder().encode('synthetic native executable');
+  let tampered = false, unavailable = false, requests = 0;
+  const server = Bun.serve({hostname: '127.0.0.1', port: 0, fetch() {
+    requests++;
+    if (unavailable) return new Response('busy', {status: 503});
+    return new Response(tampered ? new Uint8Array(bytes.length).fill(1) : bytes);
+  }});
+  const install: ProviderInstall = {format: 'binary', version: '1.4.13-R6996.1',
+    url: `http://127.0.0.1:${server.port}/muse.exe`, sha256: new Bun.CryptoHasher('sha256').update(bytes).digest('hex'),
+    archiveBytes: bytes.length, files: [{path: 'muse.exe', bytes: bytes.length}]};
+  try {
+    const binary = await nativeProviders.prepareWindowsMuse(join(root, 'valid'), install);
+    expect(binary).toBe(join(root, 'valid', 'muse', 'muse-bin-1.4.13-R6996.1.exe'));
+    expect(readFileSync(binary)).toEqual(Buffer.from(bytes));
+    expect(readFileSync(join(root, 'valid', 'muse', '.muse-version'), 'utf8').trim()).toBe(install.version);
+    tampered = true;
+    expect(await thrown(nativeProviders.prepareWindowsMuse(join(root, 'tampered'), install))).toThrow(/hashes to/);
+    expect(existsSync(join(root, 'tampered', 'muse', '.muse-version'))).toBe(false);
+    expect(existsSync(join(root, 'tampered', 'muse', 'muse-bin-1.4.13-R6996.1.exe'))).toBe(false);
+    unavailable = true;
+    expect(await thrown(nativeProviders.prepareWindowsMuse(join(root, 'unavailable'), install))).toThrow(/0 retries/);
+    expect(existsSync(join(root, 'unavailable', 'muse', '.muse-version'))).toBe(false);
+    expect(requests).toBe(3);
+  } finally {server.stop(true); rmSync(root, {recursive: true, force: true});}
+});
 
 describe.skipIf(!native)('Muse protected production MSP', () => {
   test.each(['missing-required-server', 'unresolved-tool'] as const)('%s is refused by native admission before the first provider request', async fault => {
@@ -62,9 +93,11 @@ describe.skipIf(!native)('Muse protected production MSP', () => {
     writeFileSync(join(root, 'answer.js'), 'export function answer() { return 41; }\n');
     writeFileSync(join(root, 'answer.test.js'), "import {test, expect} from 'bun:test'; import {answer} from './answer.js'; test('answer', () => expect(answer()).toBe(42));\n");
     copyFileSync(join(import.meta.dir, 'fixtures/native-protected-tool.ts'), join(root, 'tool.ts'));
+    const markCommand = `"${process.execPath}" -e "require('fs').writeFileSync(process.argv[1],'ESCAPED')" "${marker}"`;
+    const readCommand = `"${process.execPath}" -e "process.stdout.write(require('fs').readFileSync(process.argv[1],'utf8'))" "${credential}"`;
     // Configured native discovery must not execute project/account code.
     mkdirSync(join(root, '.muse'));
-    writeFileSync(join(root, '.muse/hooks.json'), JSON.stringify({hooks: {PreToolUse: [{command: `touch ${marker}`}]}}));
+    writeFileSync(join(root, '.muse/hooks.json'), JSON.stringify({hooks: {PreToolUse: [{command: markCommand}]}}));
     const foreign = join(accountDir, 'foreign');
     mkdirSync(join(foreign, 'skills/host-only'), {recursive: true});
     writeFileSync(join(foreign, 'skills/host-only/SKILL.md'), '---\nname: host-only\ndescription: SYNTHETIC_FOREIGN_SKILL_SECRET\n---\nHost-only private instructions.\n');
@@ -80,12 +113,12 @@ describe.skipIf(!native)('Muse protected production MSP', () => {
     const execution = protectedTools(core.procs, thread.id, () => {}, paths => changed.push(...paths));
     api = protectedProviderApi('muse', [
       {name: 'mcp__boite_protected.boite_exec', input: {command: process.execPath, args: ['tool.ts', outside, credential, '999', String(process.pid)]}},
-      ...['muse.read_file', 'muse.shell', 'muse.workflow', 'read_file', 'muse.apply_patch', 'mcp__other.read'].map(name => ({name, input: {path: credential, command: `cat ${credential}; touch ${marker}`, script: `throw new Error('unprotected')`}})),
-      {name: 'mcp__boite_protected.boite_exec', input: {command: '/bin/cat', args: [credential], env: {ESCAPE: 'yes'}}},
+      ...['muse.read_file', 'muse.shell', 'muse.workflow', 'read_file', 'muse.apply_patch', 'mcp__other.read'].map(name => ({name, input: {path: credential, command: `${readCommand} && ${markCommand}`, script: `throw new Error('unprotected')`}})),
+      {name: 'mcp__boite_protected.boite_exec', input: {command: process.execPath, args: ['-e', "process.stdout.write(require('fs').readFileSync(process.argv[1],'utf8'))", credential], env: {ESCAPE: 'yes'}}},
     ]);
     writeFileSync(join(accountDir, 'muse/auth.json'), JSON.stringify({schema_version: 1, providers: {meta: {api_key: 'synthetic-fixture-account-key'}}}));
     writeFileSync(join(accountDir, 'muse/settings.json'), JSON.stringify({schema_version: 1, model: 'protected-model', endpoint_transport: {base_url: api.url, auth: 'bearer'},
-      hooks: {PreToolUse: [{command: `touch ${marker}`}]}, run: {toolset: ['read_file']}}));
+      hooks: {PreToolUse: [{command: markCommand}]}, run: {toolset: ['read_file']}}));
     const logs: string[] = []; let approvals = 0, spawns = 0;
     const ctx: TurnContext = {thread, account, provider, accountEnv: {XDG_CONFIG_HOME: accountDir, XDG_DATA_HOME: accountDir, XDG_STATE_HOME: accountDir, CODEX_HOME: foreign}, protectedExecution: execution,
       prompt: 'Run the deterministic fixture.', attachments: [], sessionId: null, turn: {id: 'synthetic-turn', threadId: thread.id} as TurnContext['turn'], warmProcessMinutes: 1,
@@ -104,8 +137,13 @@ describe.skipIf(!native)('Muse protected production MSP', () => {
     expect(wire.includes('SYNTHETIC_FOREIGN_SKILL_SECRET')).toBe(false);
     const outputs = api.requests.flatMap(body => (body as {input?: {type?: string; output?: unknown}[]}).input?.filter(item => item.type === 'function_call_output').map(item => item.output) ?? []);
     const toolResults = JSON.stringify(outputs).replaceAll('\\', '');
+    expect(toolResults).toContain('"exposed":[]');
     expect(toolResults.includes('"built":true')).toBe(true); expect(toolResults.includes('"tested":true')).toBe(true);
-    expect(wire).toContain('nestedNamespaceDenied'); expect(wire).toContain('tool unavailable');
+    if (process.platform === 'win32') {
+      expect(toolResults).toContain('"lowbox":true');
+      expect(toolResults).toContain('"hostProcessDenied":true');
+    } else expect(wire).toContain('nestedNamespaceDenied');
+    expect(wire).toContain('tool unavailable');
     expect(wire).not.toContain('SYNTHETIC_PROTECTED'); expect(wire).not.toContain('synthetic-fixture-account-key');
     expect(api.authorizations.every(value => value === 'Bearer synthetic-fixture-account-key')).toBe(true);
     // Native promptUnmatched admission and the host's OS command approval.
@@ -122,7 +160,7 @@ describe.skipIf(!native)('Muse protected production MSP', () => {
     expect(JSON.stringify(api.requests)).toContain('SANITIZED_COLD_REPLAY');
     driver.shutdown?.(); driver = createMuseDriver();
     const disabled = protectedTools(core.procs, thread.id, () => {}, () => {}, undefined, false), before = api.requests.length;
-    api.enqueue({name: 'mcp__boite_protected.boite_exec', input: {command: '/bin/touch', args: [marker]}});
+    api.enqueue({name: 'mcp__boite_protected.boite_exec', input: {command: process.execPath, args: ['-e', "require('fs').writeFileSync(process.argv[1],'ESCAPED')", marker]}});
     expect(await driver.startTurn({...ctx, protectedExecution: disabled}).done).toMatchObject({status: 'done'});
     expect(api.requests.slice(before).every(body => !(body as {tools?: unknown[]}).tools?.length)).toBe(true);
     expect(existsSync(marker)).toBe(false);

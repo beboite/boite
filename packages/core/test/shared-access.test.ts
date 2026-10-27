@@ -9,6 +9,7 @@ import { thrown } from './settle.ts';
 import { sharedExecutionProtection } from '../src/contacts/compute-policy.ts';
 import { snapshot } from '../src/threads/checkpoint-files.ts';
 import {protectedProviderApi} from './fixtures/protected-provider-api.ts';
+import {museExecutable} from '../src/drivers/muse/mapping.ts';
 import { COMPACTION_TAIL_PREFIX } from '../src/threads/background-compact.ts';
 
 const cores: TestCore[] = [], dirs: string[] = [];
@@ -83,13 +84,14 @@ test('shared compaction tails enforce upload policy before materializing histori
 
 type NativeProvider = 'claude' | 'codex' | 'muse' | 'opencode' | 'pi';
 const nativePlatforms = ['linux', 'win32'];
-const nativeProviders: NativeProvider[] = process.platform === 'win32' ? ['claude', 'codex', 'opencode', 'pi'] : ['claude', 'codex', 'muse', 'opencode', 'pi'];
+const nativeProviders: NativeProvider[] = ['claude', 'codex', 'muse', 'opencode', 'pi'];
 const nativeMode = (protocol: NativeProvider) => protocol === 'opencode' ? 'default' as const : 'yolo' as const;
 const nativeName = (protocol: NativeProvider, commit = false) => `${protocol === 'claude' ? 'mcp__boite_protected__' : protocol === 'muse' ? 'mcp__boite_protected.' : protocol === 'opencode' ? 'boite_protected_' : ''}boite_${commit ? 'commit' : 'exec'}`;
 const nativeCommand = (script: string) => ({command: process.execPath, args: ['-e', script]});
 const nativeRead = (file: string): [string, string[]] => [process.execPath, ['-e', `process.stdout.write(require('fs').readFileSync(${JSON.stringify(file)}, 'utf8'))`]];
 
 async function nativeHost(b: Awaited<ReturnType<typeof side>>, protocol: NativeProvider, api: ReturnType<typeof protectedProviderApi>) {
+  if (protocol === 'muse' && !process.env.BOITE_TEST_MUSE_CLI) throw new Error('Native Muse fixture requires task-owned BOITE_TEST_MUSE_CLI 1.4.13');
   const account = await b.client.call('accounts.add', {providerId: protocol, label: 'Synthetic native account'});
   b.h.core.journal.putAccount({...account, status: 'ok'});
   const accountDir = account.isolationDir!;
@@ -117,6 +119,11 @@ async function nativeHost(b: Awaited<ReturnType<typeof side>>, protocol: NativeP
     if (protocol === 'pi' && process.platform === 'win32') profile.executable = [{kind: 'npm', value: '@earendil-works/pi-coding-agent#pi'}];
     profile.isolation = {...profile.isolation, HOME: accountDir, ...(protocol === 'pi' ? {PI_CODING_AGENT_DIR: accountDir} : protocol === 'opencode' ? {XDG_CONFIG_HOME: accountDir, XDG_DATA_HOME: accountDir} : {}), ...(protocol === 'claude' ? {ANTHROPIC_API_KEY: 'synthetic-fixture-key', ANTHROPIC_BASE_URL: api.url,
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_AUTOUPDATER: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1'} : {})};
+  }
+  if (protocol === 'muse') {
+    // Resolve an official Windows .cmd launcher to its actual versioned program.
+    const executable = museExecutable(provider);
+    for (const profile of Object.values(provider.profiles)) if (profile) profile.executable = [{kind: 'file', value: executable}];
   }
   await b.client.call('threads.update', {threadId: b.threadId, accountId: account.id, model, permissionMode: nativeMode(protocol)});
   return account;

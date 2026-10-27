@@ -264,7 +264,8 @@ the APKs wait: their checks skip.
 
 The Windows job also archives `windows-null-access-matrix`: a standalone,
 opt-in comparison of host and LPAC NUL opens with four requested access masks.
-It derives a pinned copy of the production helper and preserves the original
+It derives the frozen historical v1 helper in
+`tests/diagnostics/windows-protected-reference.c` and preserves that reference's
 admission probe. Its non-blocking result reports experiment completeness;
 the native production suites still decide acceptance.
 It also compares the captured Null descriptor with duplicated host and LPAC
@@ -291,7 +292,10 @@ denials, output-pointer failures and cleanup. It requires an exact verified
 x64 ntdll image and startup site; an unsupported image or partial capture leaves
 the experiment incomplete. Both compiler outcomes must agree. This diagnostic
 always reports `productionAccepted=false`; its non-blocking CI step does not
-replace the original blocking native protection tests.
+replace the blocking native production protection tests. The production v2 helper has
+its own explicitly linked Null broker module; diagnostic reference hashes never
+attest that production executable. Required useful-tool, provider/shared and
+Muse MSP scenarios execute with both SDK and MinGW helpers.
 The setup ACL root contains only the private view, runtime and home. Synthetic
 host files and the process journal stay outside that subtree so inherited ACL
 changes cannot invalidate the host control or prevent journal cleanup. The same

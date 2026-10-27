@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync, mkdirSync} from 'node:fs';
 import {join, resolve} from 'node:path';
 
-export const sourcePath = resolve(import.meta.dir, '../../../packages/core/src/platform/windows/protected-tool.c');
+export const sourcePath = resolve(import.meta.dir, '../windows-protected-reference.c');
 export const sourceHash = '8f414f91eab4ed1e9a846ae3d0bac64eec11e5d924a2a811f998f91567b25f5a';
 export const sha256 = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
 
@@ -11,9 +11,9 @@ function once(source: string, before: string, after: string): string {
   return source.replace(before, after);
 }
 
-/** Pin the reviewed production boundary; emit a separate test helper, never edit it. */
+/** Pin the historical reviewed v1 boundary; emit a separate test helper, never edit it. */
 export function generate(source: string): string {
-  if (sha256(source) !== sourceHash) throw new Error('protected-tool.c changed: review and repin the diagnostic before running');
+  if (sha256(source) !== sourceHash) throw new Error('historical Windows reference changed: review diagnostic provenance before running');
   source = once(source, 'static int launch(int count, wchar_t **args) {',
     '#include "routing.h"\n#include "inspect.h"\n#include "setter.h"\n#include "creator.h"\n#include "target-creator.h"\n#include "retirement-timing.h"\n#include "live-root-fence.h"\n#include "stdio-root-fence.h"\n#include "debug-pipe.h"\n\nstatic int launch(int count, wchar_t **args) {');
   source = once(source, 'CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT, NULL, args[3]',
@@ -155,7 +155,7 @@ export function writeSource(output: string): Record<string, string> {
   const original = readFileSync(sourcePath, 'utf8');
   const source = generate(original);
   writeFileSync(join(output, 'debug-map.c'), source);
-  const hashes: Record<string, string> = {'protected-tool.c': sha256(original), 'debug-map.c': sha256(source)};
+  const hashes: Record<string, string> = {'windows-protected-reference.c': sha256(original), 'debug-map.c': sha256(source)};
   for (const file of ['routing.h', 'inspect.h', 'ownership.h', 'identity.h', 'startup-site.h', 'startup-site.json', 'roundtrip.h', 'setter.h', 'creator.h', 'target-creator.h', 'target-acl.h', 'helper-job.h', 'worker-lifetime.h', 'retirement-timing.h', 'directory-twin.h', 'anchor-overlap.h', 'live-root-fence.h', 'stdio-root-fence.h', 'debug-pipe.h']) {
     const bytes = readFileSync(join(import.meta.dir, file));
     writeFileSync(join(output, file), bytes);

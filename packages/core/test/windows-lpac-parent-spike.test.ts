@@ -127,7 +127,7 @@ describe('LPAC parent spike evidence', () => {
   });
 
   test('source derives an isolated launch while preserving every original production function', () => {
-    const original = readFileSync(new URL('../src/platform/windows/protected-tool.c', import.meta.url), 'utf8');
+    const original = readFileSync(new URL('../../../tests/diagnostics/windows-protected-reference.c', import.meta.url), 'utf8');
     const generated = spikeSource(original);
     const launch = original.slice(original.indexOf('static int launch('), original.indexOf('\nstatic int probe('));
     const probe = original.slice(original.indexOf('static int probe('), original.indexOf('\n/* Read-only diagnostic'));

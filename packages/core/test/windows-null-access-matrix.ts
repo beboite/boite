@@ -11,7 +11,7 @@ import {protectionRunner} from '../src/protection-runner.ts';
 import {capture, type Captured} from '../../../tests/diagnostics/windows-debug-map/capture.ts';
 import {selectedEnvironment} from '../../../tests/diagnostics/windows-debug-map/environment.ts';
 
-const sourcePath = join(import.meta.dir, '../src/platform/windows/protected-tool.c');
+const sourcePath = join(import.meta.dir, '../../../tests/diagnostics/windows-protected-reference.c');
 const sourceHash = '8f414f91eab4ed1e9a846ae3d0bac64eec11e5d924a2a811f998f91567b25f5a';
 const hash = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
 
@@ -434,7 +434,7 @@ function once(source: string, before: string, after: string): string {
 }
 
 export function matrixSource(source: string): string {
-  if (hash(source) !== sourceHash) throw new Error('protected-tool.c changed: review experiment provenance before running');
+  if (hash(source) !== sourceHash) throw new Error('historical Windows reference changed: review experiment provenance before running');
   source = once(source, 'static int launch(int count, wchar_t **args) {', `${instrumentation}\n${accessCheckInstrumentation}\nstatic int launch(int count, wchar_t **args) {`);
   source = once(source, 'TOKEN_QUERY | TOKEN_ADJUST_DEFAULT, &child_token', 'TOKEN_QUERY | TOKEN_ADJUST_DEFAULT | TOKEN_DUPLICATE, &child_token');
   source = once(source, '  DWORD token_error = checked ? 0 : GetLastError();',
@@ -604,7 +604,7 @@ if (import.meta.main) {
   const source = matrixSource(readFileSync(sourcePath, 'utf8'));
   const generated = join(output, 'null-access-matrix.c'); writeFileSync(generated, source);
   const results: Record<string, unknown>[] = [];
-  const manifest = {platform: process.platform, kernel: release(), bun: Bun.version, compileOnly, sourceHash,
+  const manifest = {platform: process.platform, kernel: release(), bun: Bun.version, compileOnly, sourceHash, referenceKind: 'historical-protected-helper-v1', referencePath: 'tests/diagnostics/windows-protected-reference.c',
     generatedSha256: hash(source), runnerSha256: hash(readFileSync(import.meta.path)), results, productionAccepted: false, experimentComplete: false};
   const save = () => writeFileSync(join(output, 'matrix.json'), JSON.stringify(manifest, null, 2) + '\n');
   save();
@@ -633,10 +633,10 @@ if (import.meta.main) {
       if (!compileOnly) {
         const baseline = await execute(`host-${compiler.name}`, helper, ['--matrix-host'], 10000); entry.host = baseline;
         if (baseline.code || baseline.timedOut || !completeSuffix(baseline.err, 'host')) throw new Error('host matrix or suffix experiment incomplete or unexpected NUL device');
-        const {WindowsExecutionBoundary} = await import('../src/platform/windows/protected.ts');
+        const {HistoricalWindowsExecutionBoundary} = await import('./fixtures/windows-historical-boundary.ts');
         const calls: Record<string, unknown>[] = []; entry.calls = calls;
         const runner = protectionRunner(procs);
-        protection = new ExecutionProtections(new WindowsExecutionBoundary(() => helper), async (id, ...args) => {
+        protection = new ExecutionProtections(new HistoricalWindowsExecutionBoundary(() => helper), async (id, ...args) => {
           const result = await runner(id, ...args); calls.push({command: args[0], args: args[1], ...result}); return result;
         }, id => procs.stopAndWait(id), id => procs.liveCount(id));
         const project = join(scratch, 'project'); mkdirSync(project); writeFileSync(join(project, 'ordinary.txt'), 'synthetic');
@@ -655,7 +655,7 @@ if (import.meta.main) {
           || !String(probe.stderr).includes('NULL_AMBIENT denied=1')) throw new Error('LPAC matrix, suffix/DACL experiment or original ambient refusal incomplete');
         const originalSucceeded = probe.code === 0 && probe.stdout === 'boite-windows-protected 1';
         const originalNulDenied = probe.code === 125 && String(probe.stderr).includes('execution.windows.probe.null-device: native call failed (5)');
-        if (!originalSucceeded && !originalNulDenied) throw new Error('original production probe ended unexpectedly');
+        if (!originalSucceeded && !originalNulDenied) throw new Error('historical reference probe ended unexpectedly');
         const suffixRows = String(probe.stderr).split(/\r?\n/).filter(line => line.startsWith('NULL_SUFFIX phase=lpac ') && line.includes(' target=suffix '));
         const opened = suffixRows.filter(line => line.includes(' opened=1 ')).length;
         entry.suffix = {experimentComplete: true, lpacOpened: opened, lpacAttempts: 6, allLpacModesOpened: opened === 6};

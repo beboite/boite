@@ -1,17 +1,13 @@
 import {dlopen, FFIType, ptr} from 'bun:ffi';
-import {createHash} from 'node:crypto';
-import {copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync} from 'node:fs';
+import {copyFileSync, existsSync, lstatSync, mkdirSync, realpathSync} from 'node:fs';
 import {basename, dirname, isAbsolute, join, relative, resolve} from 'node:path';
 import {inside} from '../../contacts/file-policy.ts';
-import {assertExecutionPolicy, executionIdentity, type ExecutionPolicy} from '../../execution-policy.ts';
+import {assertExecutionPolicy, type ExecutionPolicy} from '../../execution-policy.ts';
 import type {NativeExecutionBoundary, NativeExecutionSession, ProtectedLaunch, ProtectionRunner} from '../protected.ts';
 import {ProtectedCheckout} from '../protected-checkout.ts';
+import {admitWindowsExecution, windowsHelperIdentity, windowsHelperVersion, type WindowsLaunchMode} from './protected-admission.ts';
 
-const version = 'boite-windows-protected 1';
 const wide = (value: string) => Buffer.from(`${value}\0`, 'utf16le');
-// Windows may update only ChangeTime on first execution (for example an image
-// trust cache). Pin both the file object and actual bytes instead of that timestamp.
-const helperIdentity = (path: string) => `${executionIdentity(path)}:${createHash('sha256').update(readFileSync(path)).digest('hex')}`;
 
 /** A private LPAC identity plus a non-breakaway kernel job; never changes a host ACL. */
 export class WindowsExecutionBoundary implements NativeExecutionBoundary {
@@ -24,16 +20,17 @@ export class WindowsExecutionBoundary implements NativeExecutionBoundary {
     if (!candidate) throw new Error('execution.windows.helper: protected-tool.exe is required; build the userspace helper described in docs/contacts.md');
     const helper = realpathSync(candidate);
     if (!isAbsolute(helper) || !lstatSync(helper).isFile()) throw new Error('execution.windows.helper: expected a canonical native helper executable');
-    const identity = helperIdentity(helper);
+    const identity = windowsHelperIdentity(helper);
     const windows = realpathSync(process.env['SystemRoot'] || 'C:\\Windows');
     if (policy.credentialPaths.some(path => inside(windows, path) || inside(path, windows))
       || inside(windows, policy.checkout)) throw new Error('execution.windows.runtime: credentials and checkout must be outside the public Windows runtime');
     const checked = await run(helper, ['--version'], policy.checkout);
-    if (checked.code || checked.stdout !== version) throw new Error('execution.windows.helper: expected boite-windows-protected 1');
+    if (checked.code || checked.stdout !== windowsHelperVersion) throw new Error(`execution.windows.helper: expected ${windowsHelperVersion}`);
     const checkout = new ProtectedCheckout(policy), profile = `boite.tool.${policy.capabilityId}`;
     const runtime = join(checkout.scratch, 'runtime'), home = join(checkout.scratch, 'home');
     const binaries = new Map<string, string>(), aliases = new Map<string, string>();
     let prepared = false, closed = false;
+    let launchMode: WindowsLaunchMode = 'run';
     const close = () => {
       if (closed) return;
       // Core-owned FFI cleanup still runs after the captured runner has been revoked.
@@ -66,7 +63,7 @@ export class WindowsExecutionBoundary implements NativeExecutionBoundary {
       const launch = (command: string, args: string[], cwd: string): ProtectedLaunch => {
         if (closed) throw new Error('execution.windows: private view is closed');
         assertExecutionPolicy(policy); checkout.checkOverrides();
-        if (helperIdentity(helper) !== identity) throw new Error('execution.windows.helper: captured launcher bytes or file identity changed');
+        if (windowsHelperIdentity(helper) !== identity) throw new Error('execution.windows.helper: captured launcher bytes or file identity changed');
         if (!isAbsolute(cwd) || !inside(policy.checkout, resolve(cwd))) throw new Error('execution.cwd: expected a directory in the captured checkout');
         const local = resolve(checkout.root, relative(policy.checkout, cwd));
         if (realpathSync(local) !== local || !lstatSync(local).isDirectory()) throw new Error('execution.cwd: expected a real private checkout directory');
@@ -81,15 +78,15 @@ export class WindowsExecutionBoundary implements NativeExecutionBoundary {
           }
           executable = mapped;
         }
-        return {command: helper, args: ['run', profile, local, executable, ...args], cwd: checkout.scratch, env};
+        return {command: helper, args: [launchMode, profile, local, executable, ...args], cwd: checkout.scratch, env};
       };
       // No untrusted process is launched until its private ACLs and unique profile exist.
       prepared = true; // Also clean a profile if cancellation interrupts native setup after creation.
       const setup = await run(helper, ['setup', profile, checkout.scratch, checkout.root, runtime, home,
         ...policy.readOverrides.map(override => resolve(checkout.root, override.path))], checkout.scratch);
       if (setup.code || setup.stdout !== 'protected-native-prepared') throw new Error(`execution.windows.setup: native preparation failed (${setup.code}): ${setup.stderr.trim()}`);
-      const result = await run(helper, ['run', profile, checkout.root, probeExecutable, '--probe', join(checkout.scratch, 'ambient-probe')], checkout.scratch, env);
-      if (result.code || result.stdout !== version) throw new Error(`execution.windows.lpac: native protected launch failed (${result.code}): ${result.stderr.trim()}; no unprotected fallback`);
+      launchMode = await admitWindowsExecution({helper, identity, profile, checkout: checkout.root, probe: probeExecutable,
+        ambient: join(checkout.scratch, 'ambient-probe'), scratch: checkout.scratch, env}, run);
       assertExecutionPolicy(policy);
       return {launch, flush: () => checkout.flush(), close};
     } catch (error) {close(); throw error;}

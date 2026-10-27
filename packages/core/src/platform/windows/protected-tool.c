@@ -1,6 +1,7 @@
 /* Trusted launcher. No command interpreter, elevation, global ACL or firewall changes.
  * Build: Windows SDK clang, or x86_64-w64-mingw32-gcc, with userenv/advapi32/shell32/user32.
  * Only this process owns the non-inherited private job handle. */
+#define _CRT_SECURE_NO_WARNINGS
 #define _WIN32_WINNT 0x0A00
 #define UNICODE
 #define _UNICODE
@@ -13,7 +14,9 @@
 #include <stdlib.h>
 #include <wchar.h>
 
-#define VERSION L"boite-windows-protected 1"
+#include "protected-null.h"
+
+#define VERSION L"boite-windows-protected 2"
 #ifndef PROC_THREAD_ATTRIBUTE_ALL_APPLICATION_PACKAGES_POLICY
 #define PROC_THREAD_ATTRIBUTE_ALL_APPLICATION_PACKAGES_POLICY 0x2000f
 #endif
@@ -173,13 +176,13 @@ end:
   CloseHandle(token); return error;
 }
 
-static int launch(int count, wchar_t **args) {
+static int launch(int count, wchar_t **args, BOOL null_broker) {
   if (count < 5) return failure(L"launch.arguments", ERROR_INVALID_PARAMETER);
   PSID app = NULL; HANDLE job = NULL, streams[3] = {NULL, NULL, NULL};
   PSID *groups = NULL, *capability_sids = NULL; DWORD group_count = 0, capability_count = 0;
   SID_AND_ATTRIBUTES registry_read;
   LPPROC_THREAD_ATTRIBUTE_LIST list = NULL; PROCESS_INFORMATION child; ZeroMemory(&child, sizeof(child));
-  DWORD error = 0, exit_code = 125; wchar_t *line = NULL; BOOL initialized = FALSE;
+  DWORD error = 0, exit_code = 125; wchar_t *line = NULL; BOOL initialized = FALSE, broker_started = FALSE;
   const wchar_t *stage = L"launch.job";
   HWINSTA original_station = GetProcessWindowStation(), station = NULL; HDESK desktop = NULL;
   PSECURITY_DESCRIPTOR object_security = NULL;
@@ -240,7 +243,7 @@ static int launch(int count, wchar_t **args) {
   stage = L"launch.process";
   SECURITY_ATTRIBUTES child_security = {sizeof(child_security), object_security, FALSE};
   if (!CreateProcessW(args[4], line, &child_security, &child_security, TRUE, EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED |
-      CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT, NULL, args[3], &startup.StartupInfo, &child)) {error = GetLastError(); goto end;}
+      CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT | (null_broker ? DEBUG_PROCESS : 0), NULL, args[3], &startup.StartupInfo, &child)) {error = GetLastError(); goto end;}
   HANDLE child_token = NULL; DWORD is_container = 0, returned = 0;
   stage = L"launch.token";
   if (!OpenProcessToken(child.hProcess, TOKEN_QUERY | TOKEN_ADJUST_DEFAULT, &child_token)) {error = GetLastError(); goto end;}
@@ -263,8 +266,18 @@ static int launch(int count, wchar_t **args) {
   if (!checked) {error = token_error; goto end;}
   if (!is_container) {stage = L"launch.token.not-appcontainer"; error = ERROR_ACCESS_DENIED; goto end;}
   if (ResumeThread(child.hThread) == (DWORD)-1) {error = GetLastError(); goto end;}
+  if (null_broker) {
+    stage = L"launch.null-broker";
+    broker_started = TRUE;
+    error = protected_null_run(job, &child, app, registry_read.Sid, FALSE, &exit_code);
+    goto end;
+  }
   if (WaitForSingleObject(child.hProcess, INFINITE) != WAIT_OBJECT_0 || !GetExitCodeProcess(child.hProcess, &exit_code)) {error = GetLastError(); goto end;}
 end:
+  if (null_broker && child.hProcess && !broker_started) {
+    DWORD drained = protected_null_run(job, &child, app, registry_read.Sid, TRUE, &exit_code);
+    if (!error) error = drained;
+  }
   /* A successful root exit must not leave detached descendants holding the view. */
   if (job) {
     TerminateJobObject(job, 125);
@@ -302,7 +315,8 @@ static int probe(const wchar_t *path) {
   /* Native child runtimes open NUL even for piped stdio (ignored stdin).
    * Some Server kernels omit LPAC access on this existing system device. No
    * job-local ACL/token default can grant access to an existing host device;
-   * refuse admission before a prompt instead of failing a later model tool. */
+   * the caller may repeat this same probe with the bounded native Null broker.
+   * It must actually pass before the selected launch mode can be admitted. */
   file = CreateFileW(L"NUL", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
     NULL, OPEN_EXISTING, 0, NULL);
   if (file == INVALID_HANDLE_VALUE) return failure(L"probe.null-device", GetLastError());
@@ -332,7 +346,8 @@ int main(void) {
   else if (count == 2 && !wcscmp(args[1], L"--diagnose-null")) result = diagnose_null();
   else if (count == 3 && !wcscmp(args[1], L"--probe")) result = probe(args[2]);
   else if (count > 1 && !wcscmp(args[1], L"setup")) result = setup(count, args);
-  else if (count > 1 && !wcscmp(args[1], L"run")) result = launch(count, args);
+  else if (count > 1 && !wcscmp(args[1], L"run")) result = launch(count, args, FALSE);
+  else if (count > 1 && !wcscmp(args[1], L"run-null-broker")) result = launch(count, args, TRUE);
   else result = failure(L"arguments", ERROR_INVALID_PARAMETER);
   if (args) LocalFree(args);
   return result;

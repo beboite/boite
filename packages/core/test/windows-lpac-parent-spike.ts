@@ -11,7 +11,7 @@ import {protectionRunner} from '../src/protection-runner.ts';
 import {capture, type Captured} from '../../../tests/diagnostics/windows-debug-map/capture.ts';
 import {selectedEnvironment} from '../../../tests/diagnostics/windows-debug-map/environment.ts';
 
-const sourcePath = join(import.meta.dir, '../src/platform/windows/protected-tool.c');
+const sourcePath = join(import.meta.dir, '../../../tests/diagnostics/windows-protected-reference.c');
 const sourceHash = '8f414f91eab4ed1e9a846ae3d0bac64eec11e5d924a2a811f998f91567b25f5a';
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 
@@ -400,7 +400,7 @@ function once(source: string, before: string, after: string): string {
 }
 
 export function spikeSource(source: string): string {
-  if (hash(source) !== sourceHash) throw new Error('protected-tool.c changed: review spike provenance before running');
+  if (hash(source) !== sourceHash) throw new Error('historical Windows reference changed: review spike provenance before running');
   const start = source.indexOf('static int launch(int count, wchar_t **args) {');
   const end = source.indexOf('\nstatic int probe(', start);
   let launch = source.slice(start, end);
@@ -501,7 +501,7 @@ if (import.meta.main) {
   const generated = join(output, 'lpac-parent-spike.c'), source = spikeSource(readFileSync(sourcePath, 'utf8'));
   writeFileSync(generated, source);
   const results: CompilerSpikeResult[] = [];
-  const manifest = {platform: process.platform, kernel: release(), bun: Bun.version, sourceHash, generatedSha256: hash(source),
+  const manifest = {platform: process.platform, kernel: release(), bun: Bun.version, sourceHash, referenceKind: 'historical-protected-helper-v1', referencePath: 'tests/diagnostics/windows-protected-reference.c', generatedSha256: hash(source),
     runnerSha256: hash(readFileSync(import.meta.path)), compileOnly, results, productionAccepted: false, experimentComplete: false, kernelGatePassed: false, aggregationReason: 'compiler runs pending'};
   const save = () => writeFileSync(join(output, 'spike.json'), JSON.stringify(manifest, null, 2) + '\n'); save();
   const compilers = process.platform === 'win32' ? [{name: 'sdk', path: Bun.which('clang')}, {name: 'mingw', path: 'C:\\mingw64\\bin\\gcc.exe'}]
@@ -524,10 +524,10 @@ if (import.meta.main) {
       if (built.code || built.timedOut) throw new Error(`strict compile failed: ${compiler.name}`);
       entry.helperSha256 = hash(readFileSync(helper));
       if (!compileOnly) {
-        const {WindowsExecutionBoundary} = await import('../src/platform/windows/protected.ts');
+        const {HistoricalWindowsExecutionBoundary} = await import('./fixtures/windows-historical-boundary.ts');
         const calls: Record<string, unknown>[] = []; entry.calls = calls;
         const runner = protectionRunner(procs); let control: Captured | undefined, restricted: Captured | undefined;
-        protection = new ExecutionProtections(new WindowsExecutionBoundary(() => helper), async (id, ...call) => {
+        protection = new ExecutionProtections(new HistoricalWindowsExecutionBoundary(() => helper), async (id, ...call) => {
           const [command, args, cwd, environment] = call;
           if (args.includes('--probe')) {
             const fixture = ['0', 'space value', 'é雪', 'quote"tail\\', ''];
@@ -555,7 +555,7 @@ if (import.meta.main) {
         const probe = calls.find(call => (call.args as string[]).includes('--probe'));
         if (!probe || !control || !restricted) throw new Error('original probe or spike capture missing');
         if (!(probe.code === 125 && String(probe.stderr).includes('execution.windows.probe.null-device: native call failed (5)')) &&
-            !(probe.code === 0 && probe.stdout === 'boite-windows-protected 1')) throw new Error('original production probe ended unexpectedly');
+            !(probe.code === 0 && probe.stdout === 'boite-windows-protected 1')) throw new Error('historical reference probe ended unexpectedly');
         const verdict = spikeVerdict(control, restricted); entry.verdict = verdict;
         if (!verdict.complete) throw new Error(verdict.reason);
       }

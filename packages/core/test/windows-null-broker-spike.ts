@@ -11,7 +11,8 @@ import {assertExecutionPolicy} from '../src/execution-policy.ts';
 import {selectedEnvironment} from '../../../tests/diagnostics/windows-debug-map/environment.ts';
 
 const diagnostics = join(import.meta.dir, '../../../tests/diagnostics/windows-null-broker');
-const production = join(import.meta.dir, '../src/platform/windows/protected-tool.c');
+const reference = join(import.meta.dir, '../../../tests/diagnostics/windows-protected-reference.c');
+// Legacy manifest field retained for archive replay; hashes the historical v1 reference.
 export const productionHash = '8f414f91eab4ed1e9a846ae3d0bac64eec11e5d924a2a811f998f91567b25f5a';
 const ntdllHash = '160ef9b82e2895ef48fa031cb1cf683a8b123febf7cf7d5590cd3104864424b3';
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
@@ -357,7 +358,7 @@ function once(source: string, before: string, after: string): string {
   return source.replace(before, after);
 }
 export function brokerSource(original: string): string {
-  if (hash(original) !== productionHash) throw new Error('broker provenance: production helper changed');
+  if (hash(original) !== productionHash) throw new Error('broker provenance: historical reference changed');
   let source = once(original, '#include <windows.h>', '#include <winsock2.h>\n#include <windows.h>');
   source = once(source, 'static int launch(int count, wchar_t **args) {', '#include "debugger.h"\n#include "fixture.h"\nstatic int launch(int count, wchar_t **args) {');
   source = once(source, 'CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT,', 'DEBUG_PROCESS | CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT,');
@@ -685,15 +686,15 @@ if (import.meta.main) {
   if (!output || !isAbsolute(output) || (mode && !compileOnly)) throw new Error('usage: bun packages/core/test/windows-null-broker-spike.ts <fresh absolute artifact directory> [--compile-only]');
   if (!compileOnly && (process.platform !== 'win32' || process.env.BOITE_TEST_NULL_BROKER !== '1')) throw new Error('requires Windows and BOITE_TEST_NULL_BROKER=1; no native fixture allocated');
   if (existsSync(output)) throw new Error('fresh artifact directory required');
-  const source = brokerSource(readFileSync(production,'utf8'));
+  const source = brokerSource(readFileSync(reference,'utf8'));
   mkdirSync(output,{recursive:true});
   const generated = join(output,'null-broker.c'); writeFileSync(generated,source);
-  copyFileSync(production,join(output,'production-reference.c.txt'));
+  copyFileSync(reference,join(output,'production-reference.c.txt'));
   const hashes: Record<string,string> = {};
   for (const file of readdirSync(diagnostics).filter(f=>/\.[ch]$/.test(f))) {copyFileSync(join(diagnostics,file),join(output,file));hashes[file]=hash(readFileSync(join(diagnostics,file)));}
   for (const file of ['startup-site.h','startup-site.json']) {const path=join(import.meta.dir,'../../../tests/diagnostics/windows-debug-map',file);copyFileSync(path,join(output,file));hashes[file]=hash(readFileSync(path));}
   const results: Record<string,unknown>[]=[];
-  const manifest={platform:process.platform,kernel:release(),bun:Bun.version,compileOnly,productionHash,generatedSha256:hash(source),runnerSha256:hash(readFileSync(import.meta.path)),hashes,
+  const manifest={platform:process.platform,kernel:release(),bun:Bun.version,compileOnly,productionHash,referenceKind:'historical-protected-helper-v1',referencePath:'tests/diagnostics/windows-protected-reference.c',generatedSha256:hash(source),runnerSha256:hash(readFileSync(import.meta.path)),hashes,
     productionAccepted:false,experimentComplete:false,results};
   const save=()=>writeFileSync(join(output,'broker.json'),JSON.stringify(manifest,null,2)+'\n'); save();
   const compilers=process.platform==='win32'?[{name:'sdk',path:Bun.which('clang')},{name:'mingw',path:'C:\\mingw64\\bin\\gcc.exe'}]:[{name:'mingw-cross',path:Bun.which('x86_64-w64-mingw32-gcc')}];

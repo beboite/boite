@@ -319,6 +319,9 @@ jobs:
           retention-days: 3
       - name: Prepare synthetic native providers
         if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
         run: bun packages/core/test/fixtures/prepare-native-providers.ts
       - name: Native Windows provider and shared scopes
         if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
@@ -326,7 +329,18 @@ jobs:
           BOITE_TEST_NATIVE_EXECUTION: '1'
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
-        run: bun test packages/core/test/protected-drivers.test.ts packages/core/test/protected-adapters.test.ts packages/core/test/shared-access.test.ts -t 'native control|useful edits and child|protected .*(remote jobs|scopes retire)' --timeout 120000
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($helper in @('protected-tool.exe', 'protected-tool-mingw.exe')) {
+            Write-Host "Native provider/shared fixture helper: $helper"
+            $env:BOITE_WINDOWS_SANDBOX_PATH = "$env:RUNNER_TEMP\$helper"
+            bun test packages/core/test/protected-drivers.test.ts packages/core/test/protected-adapters.test.ts packages/core/test/shared-access.test.ts -t 'native control|useful edits and child|protected .*(remote jobs|scopes retire)' --timeout 120000
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+            bun test packages/core/test/protected-muse.test.ts --timeout 120000
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+          }
+          if ($failed) { exit 1 }
       # Core data directories, worktrees and Chrome profiles go to the runner's
       # temp drive (D: on Windows), as in the E2E shards (docs/ci.md#build-cost).
       - run: bun run --cwd packages/core test
