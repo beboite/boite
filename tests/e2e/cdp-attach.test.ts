@@ -97,8 +97,8 @@ test('requests in flight and failed requests retain what Chrome and each UI serv
     devtools!.send(willBeSent('3', `${idleBase}/assets/SettingsShell.js`, sent / 1_000));
     const failure = await page.waitFor('false', 1_300).then(() => 'answered', (error: unknown) => String(error));
     const line = (chunk: string) => failure.split('","').find((entry) => entry.includes(chunk)) ?? `no line for ${chunk} in ${failure}`;
-    expect(line('RightPanel.js')).toMatch(/; the UI server answered 200 \d+ ms after it was sent/);
-    expect(line('CommandPalette.js')).toMatch(/; no send time; newest record: the UI server answered 200 \d+ ms before devtools reported it/);
+    expect(line('RightPanel.js')).toMatch(/the UI server answered 200 \d+ ms after it was sent/);
+    expect(line('CommandPalette.js')).toMatch(/; no send time; newest record.*: the UI server answered 200 \d+ ms before devtools reported it/);
     expect(line('SettingsShell.js')).toMatch(/; the UI server never got it/);
 
     // Once loadingFailed removes a request, its network/server evidence must
@@ -106,10 +106,12 @@ test('requests in flight and failed requests retain what Chrome and each UI serv
     const failedSent = Date.now();
     expect(await (await fetch(`${base}/assets/RightPanel.js?ticket=private`)).text()).toBe('export {}');
     devtools!.send(willBeSent('1', `${base}/assets/RightPanel.js?ticket=private#pairing`, failedSent / 1_000));
+    // A second CDP request shares the URL/time window, but only one HTTP request reached the server.
+    devtools!.send(willBeSent('4', `${base}/assets/RightPanel.js?ticket=private#pairing`, failedSent / 1_000));
     devtools!.send(JSON.stringify({ method: 'Network.responseReceivedExtraInfo', params: { requestId: '1' } }));
     devtools!.send(JSON.stringify({ method: 'Network.responseReceived', params: { requestId: '1', response: { status: 200 } } }));
     devtools!.send(JSON.stringify({ method: 'Network.requestWillBeSentExtraInfo', params: { requestId: '2' } }));
-    for (const requestId of ['1', '2', '3']) devtools!.send(JSON.stringify({ method: 'Network.loadingFailed', params: { requestId, errorText: 'net::ERR_NO_BUFFER_SPACE' } }));
+    for (const requestId of ['1', '2', '3', '4']) devtools!.send(JSON.stringify({ method: 'Network.loadingFailed', params: { requestId, errorText: 'net::ERR_NO_BUFFER_SPACE' } }));
     // This call is a protocol barrier: all preceding events have been consumed.
     await page.evaluate('false');
     // A later response must not rewrite the server state captured at failure.
@@ -117,9 +119,10 @@ test('requests in flight and failed requests retain what Chrome and each UI serv
     const afterFailure = await page.waitFor('false', 1_300).then(() => 'answered', (error: unknown) => String(error));
     expect(afterFailure).toContain('In flight: []');
     const failed = JSON.parse(afterFailure.split('Failed requests: ')[1]!) as string[];
-    expect(failed).toHaveLength(3);
-    expect(failed[0]).toMatch(/RightPanel\.js net::ERR_NO_BUFFER_SPACE; at failure: answered, body pending for \d+ ms: the network service had its headers by \d+ ms after it was sent; the UI server answered 200 \d+ ms after it was sent/);
-    expect(failed[1]).toMatch(/CommandPalette\.js net::ERR_NO_BUFFER_SPACE; at failure: no response for \d+ ms: the network service sent it and has no headers; no send time; newest record: the UI server answered 200 \d+ ms before devtools reported it/);
+    expect(failed).toHaveLength(4);
+    expect(failed[3]).toMatch(/RightPanel\.js net::ERR_NO_BUFFER_SPACE; at failure: no response for \d+ ms: nothing from the network service .*; possible server match \(request identity unverified\): the UI server answered 200 \d+ ms after it was sent/);
+    expect(failed[0]).toMatch(/RightPanel\.js net::ERR_NO_BUFFER_SPACE; at failure: answered, body pending for \d+ ms: the network service had its headers by \d+ ms after it was sent; possible server match \(request identity unverified\): the UI server answered 200 \d+ ms after it was sent/);
+    expect(failed[1]).toMatch(/CommandPalette\.js net::ERR_NO_BUFFER_SPACE; at failure: no response for \d+ ms: the network service sent it and has no headers; no send time; newest record \(request identity unverified\): the UI server answered 200 \d+ ms before devtools reported it/);
     expect(failed[2]).toMatch(/SettingsShell\.js net::ERR_NO_BUFFER_SPACE; at failure: no response for \d+ ms: nothing from the network service .*; the UI server never got it/);
     expect(afterFailure).not.toContain('private');
     expect(afterFailure).not.toContain('pairing');
