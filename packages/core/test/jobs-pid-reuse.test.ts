@@ -1,10 +1,14 @@
 import {expect, spyOn, test} from 'bun:test';
-import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
-import type {NativeProcessInfo, NativeProcessExit, ProcessEventSink} from '../src/platform/types.ts';
+import type {NativeProcessInfo, NativeProcessExit, ProcessEventSink, ProcessPlatform} from '../src/platform/types.ts';
 import type {ProcessReads} from '../src/platform/windows/process-reads.ts';
+import {Bus} from '../src/bus.ts';
+import {ProcRegistry} from '../src/procs.ts';
+import {createPosixPlatform} from '../src/platform/posix.ts';
+import {startTestCore} from './harness.ts';
 
 interface PacketFixture {
   configure(api: Partial<ProcessReads> & {close(handle: number): void; lastError(): number;
@@ -13,6 +17,8 @@ interface PacketFixture {
   start(thread: string, pid: number, handle?: number): void;
   exit(thread: string, pid: number): void;
   sample(thread: string, pid: number): void;
+  hold(thread: string): void;
+  threadJobHasProcesses?(thread: string): boolean;
   terminateJobProcess(thread: string, pid: number): boolean;
   dispose(): void;
 }
@@ -29,13 +35,14 @@ async function fixture(): Promise<{registry: PacketFixture; close(): void}> {
   writeFileSync(file, source + `
 export function configure(api: Native, events: ProcessEventSink) { native = api; sink = events; }
 export const start = onProcessStarted, exit = reportExit;
+export function hold(thread: string) { threadJobs.set(thread, {handle: 1, pids: new Set()} as ThreadJob); }
 export function sample(thread: string, pid: number) {
   threadJobs.set(thread, {handle: 1, pids: new Set([pid]), lastCpu100ns: 0n, lastSampleAt: 0} as ThreadJob);
   sampleThreadJob(thread);
 }
 export function dispose() {
   for (const waiting of awaitingCommandLine.values()) waiting.cancel();
-  awaitingCommandLine.clear(); tracked.clear(); ignored.clear(); native = null; sink = null;
+  awaitingCommandLine.clear(); tracked.clear(); ignored.clear(); threadJobs.clear(); native = null; sink = null;
 }
 
 
@@ -125,3 +132,61 @@ test('a held-handle diagnostic distinguishes a running process from an unreadabl
     output.mockRestore(); close();
   }
 });
+
+for (const state of ['exited', 'still-active', 'unseen-member', 'unreadable-job'] as const) {
+  test(`publication reconciles captured exits before delayed job packets: ${state}`, async () => {
+    const {registry, close} = await fixture(), harness = await startTestCore();
+    const root = join(harness.dataDir, 'publication'); mkdirSync(root);
+    const creation = 116444736000001111n, closed: number[] = [];
+    let running = state === 'still-active', published = 0;
+    const platform: ProcessPlatform = {...createPosixPlatform('linux', null),
+      capability: () => ({os: 'windows', mode: 'events', note: 'held native job fixture'}),
+      hasProcesses: id => registry.threadJobHasProcesses?.(id) ?? false,
+      terminate: () => true,
+      retain: events => registry.configure({hasNt: false, lastError: () => 5,
+        openProcess: () => {throw new Error('must use the captured handle');},
+        close: handle => {closed.push(handle);}, imageName: () => false,
+        processTimes(_handle, out) {new DataView(out.buffer).setBigUint64(0, creation, true); return true;},
+        exitCode(_handle, out) {out[0] = running ? 259 : 0; return true;},
+        memoryInfo: () => false, ioCounters: () => false, terminateProcess: () => false,
+        queryJobInfo(_job, klass, out) {
+          expect(klass).toBe(3);
+          if (state === 'unreadable-job') return false;
+          if (state === 'unseen-member') {
+            const view = new DataView(out.buffer);
+            view.setUint32(0, 1, true); view.setUint32(4, 1, true); view.setBigUint64(8, 5678n, true);
+          }
+          return true;
+        },
+      }, events),
+      protectedExecution: {available: () => true, open: async () => ({
+        launch: (command, args, cwd) => ({command, args, cwd, env: {...process.env}}),
+        flush: () => {published++; return ['answer.js'];}, close() {},
+      })},
+    };
+    const procs = new ProcRegistry(harness.core.journal, new Bus(), platform), id = 'publication';
+    try {
+      await procs.protection.install(id, {scope: {kind: 'job', id: 'job', associationId: 'association', grantRevision: 1},
+        checkout: root, credentialPaths: [], executables: [process.execPath], expiresAt: Date.now() + 60000}, () => {});
+      registry.hold(id);
+      if (state === 'exited' || state === 'still-active') registry.start(id, 1234, 202);
+      if (state === 'exited') {
+        expect(procs.liveCount(id)).toBe(1);
+        expect(procs.protection.flush(id)).toEqual(['answer.js']);
+        expect(procs.liveCount(id)).toBe(0);
+        expect(harness.core.journal.listProcesses(id, 10)).toEqual([expect.objectContaining({
+          pid: 1234, exitCode: 0, exitedAt: expect.any(Number),
+        })]);
+        expect(closed).toEqual([202]);
+      } else {
+        expect(() => procs.protection.flush(id)).toThrow('tools must exit');
+        expect(procs.liveCount(id)).toBe(state === 'still-active' ? 1 : 0);
+        expect(closed).toEqual([]);
+      }
+      expect(published).toBe(state === 'exited' ? 1 : 0);
+    } finally {
+      running = false; registry.exit(id, 1234);
+      await procs.close(); close(); await harness.stop();
+    }
+  });
+}

@@ -92,6 +92,10 @@ rows and load while remaining in totals, known by their image name or, when
 that read fails on a host caught as it starts, by a command line that starts
 the system's own `conhost.exe`. Terminating a job requires explicit
 exit reconciliation because the port may report only the empty-job event.
+Before protected publication, the core queries the held thread job's membership.
+An occupied or unreadable job refuses publication. An empty job reconciles its
+captured exits through the normal handle and creation-identity checks before
+the live registry is checked, without waiting for completion-port delivery.
 
 For a native ordering investigation, `BOITE_DIAGNOSE_JOB_EVENTS=1` writes
 `WINDOWS_JOB_EVENT` records to host stderr: worker packet/action/sequence,

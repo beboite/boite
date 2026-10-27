@@ -6,8 +6,8 @@ import {mock} from 'bun:test';
 
 export const jobsPath = resolve(import.meta.dir, '../../../packages/core/src/platform/windows/jobs.ts');
 export const workerPath = join(dirname(jobsPath), 'jobs-worker.ts');
-export const jobsHash = 'c9662cdf4a9ef2a2bb4171f3e8f030a4f69bf9bba3664163d2c144ca3a8a4945';
-export const workerHash = '965d53bd9dc181b6db14db8f172250e1981efe27288aaa782bf3821c6896b541';
+export const jobsHash = '56a0b7d1d859ae943b837883582d8494c641769545406d20d886e2fb02e0e273';
+export const workerHash = 'e0b93fcb4ddb0e9d8155cd203bfa67bcb1ac0715318a23ca2bdb19b2ecdcc29f';
 const runtime = pathToFileURL(join(import.meta.dir, 'ownership-trace.ts')).href;
 const ledger = pathToFileURL(join(import.meta.dir, 'ownership-ledger.ts')).href;
 const reference = pathToFileURL(join(import.meta.dir, 'helper-reference.ts')).href;
@@ -39,8 +39,8 @@ export function instrumentJobs(source: string, generatedWorker: string): string 
   source = once(source, "      else if (message.kind === 'packet' && message.handle !== 0) api?.close(message.handle);",
     "      else if (message.kind === 'packet' && message.handle !== 0) {\n" +
     '        ownershipTrace.received(message); api?.close(message.handle);\n      }');
-  source = once(source, '    if (api.exitCode(entry.handle, code) && code[0] === STILL_ACTIVE) return;',
-    "    if (api.exitCode(entry.handle, code) && code[0] === STILL_ACTIVE) {\n" +
+  source = once(source, '    if (read && code[0] === STILL_ACTIVE) return;',
+    "    if (read && code[0] === STILL_ACTIVE) {\n" +
     "      ownershipTrace.stage(entry.handle, 'still-active-deferral', {threadId, pid}); return;\n    }");
   source = once(source, '  tracked.set(pid, { threadId, handle, peakMemoryBytes: 0, identity });',
     "  tracked.set(pid, { threadId, handle, peakMemoryBytes: 0, identity });\n" +
@@ -52,12 +52,12 @@ export function instrumentJobs(source: string, generatedWorker: string): string 
   source = once(source, 'function onJobPacket(message: number, key: number, pid: number, handle = 0): void {',
     "function onJobPacket(message: number, key: number, pid: number, handle = 0): void {\n" +
     "  ownershipTrace.event({event: 'job-packet', message, key, pid, handle});");
-  source = once(source, '  api.close(entry.handle);\n  sink?.exited(threadId, pid, exit);',
+  source = once(source, "  api.close(entry.handle);\n  processEventDiagnostic('jobs.exit-emitted',",
     "  ownershipTrace.event({event: 'owned-exit', pid, created: entry.identity?.incarnation ?? null, exitCode: exit.exitCode});\n" +
     '  const referenceJob = threadJobs.get(threadId);\n' +
     '  if (!ownershipTrace.preserve(() => helperReferenceSlot.retain(entry.handle, pid, entry.identity?.incarnation, threadId, exit.exitCode,\n' +
     '    referenceJob ? {threadJob: String(referenceJob.handle), jobKey: referenceJob.key, globalJob: String(globalJob), nestingRefused} : undefined))) api.close(entry.handle);\n' +
-    '  sink?.exited(threadId, pid, exit);');
+    "  processEventDiagnostic('jobs.exit-emitted',");
   source = imports(source, jobsPath);
   return `import {ownershipTrace, ownershipWorkerOptions} from ${JSON.stringify(runtime)};\n` +
     `import {HelperReferenceSlot, type HelperReferenceControl} from ${JSON.stringify(reference)};\n` +
@@ -75,15 +75,15 @@ export function instrumentJobs(source: string, generatedWorker: string): string 
 export function instrumentWorker(source: string): string {
   if (sha256(source) !== workerHash) throw new Error('jobs-worker.ts source drift: review and repin ownership trace');
   source = once(source, 'export type JobsWorkerMessage =', 'export type JobsWorkerMessage = (');
-  source = once(source, "  | { kind: 'packet'; message: number; key: number; pid: number; handle: number };",
-    `  | { kind: 'packet'; message: number; key: number; pid: number; handle: number }) & {ownershipTrace?: import(${JSON.stringify(ledger)}).Transfer};`);
+  source = once(source, "  | { kind: 'packet'; message: number; key: number; pid: number; handle: number; sequence?: number; workerId?: string };",
+    `  | { kind: 'packet'; message: number; key: number; pid: number; handle: number; sequence?: number; workerId?: string }) & {ownershipTrace?: import(${JSON.stringify(ledger)}).Transfer};`);
   source = once(source, '  scope.postMessage(message);',
     '  const transfer = ownershipTrace.sent(message);\n' +
     "  ownershipTrace.event({event: 'packet-send', message, transfer});\n" +
     '  scope.postMessage({...message, ownershipTrace: transfer});\n' +
     "  ownershipTrace.event({event: 'packet-posted', message, transfer});");
-  source = once(source, '    const handle = action === \'open\' ? Number(symbols.OpenProcess(start.inspectAccess, 0, pid) ?? 0) : 0;',
-    "    const handle = action === 'open' ? Number(symbols.OpenProcess(start.inspectAccess, 0, pid) ?? 0) : 0;\n" +
+  source = once(source, "    const openError = action === 'open' && handle === 0 ? symbols.GetLastError() : 0;",
+    "    const openError = action === 'open' && handle === 0 ? symbols.GetLastError() : 0;\n" +
     "    ownershipTrace.event({event: 'worker-packet', message, key, pid, action});\n" +
     "    if (action === 'open') ownershipTrace.acquired(handle, pid);");
   source = once(source, "  send({ kind: 'stopped' });", "  send({ kind: 'stopped' });\n  ownershipTrace.stop();");

@@ -154,7 +154,7 @@ export class ProcRegistry {
     readonly platform: ProcessPlatform = processPlatform,
     private readonly options: ProcRegistryOptions = {},
   ) {
-    this.protection = new ExecutionProtections(platform.protectedExecution, protectionRunner(this), id => this.stopAndWait(id), id => this.liveCount(id));
+    this.protection = new ExecutionProtections(platform.protectedExecution, protectionRunner(this), id => this.stopAndWait(id), id => (platform.hasProcesses?.(id) ? 1 : 0) + this.liveCount(id));
     this.memory = new MemoryGuard(bus, platform);
     this.resources = new ResourceCollection(platform);
     this.orphanGraceMs = options.orphanGraceMs ?? ORPHAN_GRACE_MS;

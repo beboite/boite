@@ -17,10 +17,7 @@ import { resolveMemoryLimits } from '../../memory-limits.ts';
 import { StartupPriority } from './startup-priority.ts';
 import { processEventDiagnostic } from '../../process-event-diagnostics.ts';
 import { listJobPids } from './jobs-packets.ts';
-import {
-  applyCpuCap, applyMemoryLimit, CLASS_CPU_RATE_CONTROL, CLASS_EXTENDED_LIMIT,
-  EXTENDED_LIMIT_SIZE, OFF_JOB_MEMORY_LIMIT, OFF_LIMIT_FLAGS, OFF_PRIORITY_CLASS,
-} from './job-limits.ts';
+import { applyCpuCap, applyMemoryLimit, cpuRateOfJob, memoryLimitOfJob as readMemoryLimit } from './job-limits.ts';
 import {
   commandLineOf,
   consoleHost,
@@ -301,22 +298,24 @@ export function setProcessLimits(next: ProcessLimits): void {
 
 /** The global job's CPU rate control as the kernel holds it. Read by the tests only. */
 export function cpuRateOfGlobalJob(): { flags: number; rate: number } | null {
-  const api = native;
-  if (api === null || globalJob === 0) return null;
-  const buffer = new Uint8Array(8);
-  if (!api.queryJobInfo(globalJob, CLASS_CPU_RATE_CONTROL, buffer)) return null;
-  const view = new DataView(buffer.buffer);
-  return { flags: view.getUint32(0, true), rate: view.getUint32(4, true) };
+  return native === null || globalJob === 0 ? null : cpuRateOfJob(native, globalJob);
 }
 
 /** The kernel's memory limit and flags. Null selects the global job; read by tests only. */
 export function memoryLimitOfJob(threadId: string | null): { flags: number; bytes: number; priority: number } | null {
   const handle = threadId === null ? globalJob : threadJobs.get(threadId)?.handle;
-  if (native === null || !handle) return null;
-  const buffer = new Uint8Array(EXTENDED_LIMIT_SIZE);
-  if (!native.queryJobInfo(handle, CLASS_EXTENDED_LIMIT, buffer)) return null;
-  const view = new DataView(buffer.buffer);
-  return { flags: view.getUint32(OFF_LIMIT_FLAGS, true), bytes: Number(view.getBigUint64(OFF_JOB_MEMORY_LIMIT, true)), priority: view.getUint32(OFF_PRIORITY_CLASS, true) };
+  return native === null || !handle ? null : readMemoryLimit(native, handle);
+}
+
+/** Publication must observe native membership before delayed completion-port callbacks. */
+export function threadJobHasProcesses(threadId: string): boolean {
+  const job = threadJobs.get(threadId);
+  if (job === undefined) return false;
+  const api = ensureNative();
+  const members = api === null ? null : listJobPids(api, job.handle);
+  if (members === null || members.size > 0) return true;
+  for (const pid of [...job.pids]) onProcessExited(threadId, pid);
+  return false;
 }
 
 export function jobsCapability(): TraceCapability {
