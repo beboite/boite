@@ -29,6 +29,57 @@ const SHOP = `<!doctype html><title>Shop</title>
 <div id="cover" style="position:absolute;left:0;top:400px;width:200px;height:60px;background:#ccc">Cover</div>
 <p id="note">Free delivery</p>`;
 
+/**
+ * How long a sleeping tab's step that missed its time is still listened to
+ * (`LATE_MS` in `browser/sleep.ts`): its late answer, or the timeout that says
+ * none came, is heard within it.
+ */
+const SLEEP_LATE_MS = 30_000;
+/** A call a stalled sleep step failed: its probe and its late answer arrive after the call's own failure. */
+const STALLED_CALL = / failed: the browser did not answer \S+ within \d+ seconds/;
+
+/**
+ * The causes of the calls that failed unexpectedly: a client only gets "Something went wrong".
+ * A stalled sleep step says what it was only after its call failed, so the
+ * core stays up until each one did, for `SLEEP_LATE_MS` at most.
+ */
+export class CoreFailures {
+  readonly lines: string[] = [];
+  #calls = 0;
+  #stalled = 0;
+  #late = 0;
+  #heard = () => {};
+  #timer: ReturnType<typeof setTimeout> | undefined;
+
+  constructor(private windowMs = SLEEP_LATE_MS, private wait = (ms: number) => new Promise<void>(resolve => { this.#timer = setTimeout(resolve, ms); })) {}
+
+  record(message: string, event: unknown): void {
+    // What a sleeping tab's stalled step turned out to be explains a wake that failed (`browser/sleep.ts`).
+    if (event === 'rpc.failed') { if (STALLED_CALL.test(message)) this.#calls++; }
+    else if (event === 'browser.sleep-stalled') this.#stalled++;
+    else if (event === 'browser.sleep-late') this.#late++;
+    else return;
+    this.lines.push(message);
+    this.#heard();
+  }
+
+  /** False when the window ended before every stalled step's probe and late answer arrived. */
+  async settle(): Promise<boolean> {
+    // A freeze that stalled fails no call, and a failed call's probe may not have answered yet.
+    const waiting = () => { const steps = Math.max(this.#calls, this.#stalled); return this.#stalled < steps || this.#late < steps; };
+    if (!waiting()) return true;
+    let ended = false;
+    const end = this.wait(this.windowMs).then(() => { ended = true; });
+    try {
+      while (waiting() && !ended) await Promise.race([end, new Promise<void>(resolve => { this.#heard = resolve; })]);
+    } finally {
+      clearTimeout(this.#timer);
+      this.#heard = () => {};
+    }
+    return !waiting();
+  }
+}
+
 export const DOWNLOAD_SCRIPT = '#!/bin/sh\necho downloaded\n';
 export const DOWNLOAD_PROGRAM = Buffer.concat([Buffer.from('MZ'), Buffer.alloc(126)]);
 
@@ -82,28 +133,30 @@ export function createBrowserFixture() {
   let harness: TestCore, owner: CoreClient, agent: CoreClient, threadId: string;
   let opened: { harness?: TestCore; owner?: CoreClient; agent?: CoreClient } = {};
   const hosts = new Set<() => Promise<void>>();
-  /** The causes of the calls that failed unexpectedly: a client only gets "Something went wrong". */
-  let failures: string[] = [];
+  let failures = new CoreFailures();
   beforeEach(async () => {
     later.release();
     later = laterGate();
     opened = {};
-    failures = [];
+    failures = new CoreFailures();
     opened.harness = harness = await startTestCore();
     const record = harness.core.logs.record.bind(harness.core.logs);
     harness.core.logs.record = (level, message, context = {}, at) => {
-      // What a sleeping tab's stalled step turned out to be explains a wake that failed (`browser/sleep.ts`).
-      if (context.event === 'rpc.failed' || context.event === 'browser.sleep-stalled' || context.event === 'browser.sleep-late') failures.push(message);
+      failures.record(message, context.event);
       record(level, message, context, at);
     };
     opened.owner = owner = await harness.connect();
     ({ threadId } = await echoThread(harness, owner));
     opened.agent = agent = await connect(harness.url, harness.core.agents.tokenFor(threadId), { client: { name: 'boite-cli', version: 'test' } });
   });
+  // The 60 s a browser shutdown hook gets (docs/development.md), after up to `SLEEP_LATE_MS` for a stalled sleep step's late answer.
   afterEach(async () => {
     later.release();
-    for (const failure of failures) console.error(`core: ${failure}`);
     const errors: unknown[] = [];
+    try {
+      if (!await failures.settle()) failures.lines.push(`a stalled sleep step's page did not answer within ${SLEEP_LATE_MS / 1000} s of the test's end`);
+    } catch (error) { errors.push(error); }
+    for (const failure of failures.lines) console.error(`core: ${failure}`);
     for (const close of hosts) {
       try { await close(); } catch (error) { errors.push(error); }
     }
@@ -111,7 +164,7 @@ export function createBrowserFixture() {
     try { opened.owner?.close(); } catch (error) { errors.push(error); }
     try { await opened.harness?.stop(); } catch (error) { errors.push(error); }
     if (errors.length) throw new AggregateError(errors, 'browser fixture cleanup failed');
-  });
+  }, 60_000 + SLEEP_LATE_MS);
 
   const evaluate = async (expression: string, tabId?: string) =>
     (await agent.call('browser.command', { threadId, ...(tabId ? { tabId } : {}), action: { kind: 'evaluate', expression } })).value;
