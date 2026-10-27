@@ -12,7 +12,8 @@ import {letterPrompt} from '../src/coordination-letter.ts';
 
 const scratch=tmpdir();
 const cores:TestCore[]=[],dirs:string[]=[],clients:CoreClient[]=[];
-afterEach(async()=>{for(const c of clients.splice(0))c.close();for(const c of cores.splice(0).reverse())await c.stop();for(const d of dirs.splice(0))rmSync(d,{recursive:true,force:true});});
+const observers=new Set<ReturnType<typeof setTimeout>>();
+afterEach(async()=>{for(const timer of observers)clearTimeout(timer);observers.clear();for(const c of clients.splice(0))c.close();for(const c of cores.splice(0).reverse())await c.stop();for(const d of dirs.splice(0))rmSync(d,{recursive:true,force:true});});
 async function side(name:string){
   const dataDir=mkdtempSync(join(scratch,'security-fixture-'));dirs.push(dataDir);
   const h=await startTestCore({dataDir});cores.push(h);
@@ -192,6 +193,10 @@ test.each(['owner','paired','restart'] as const)('SEC-03 mailbox routing preserv
         contactLinked:guest?s.h.core.contacts.linked(guest.id):false,offers:guest?s.h.core.contacts.find(guest.id)?.offers.length??0:0};
     } catch {return {unavailable:true};}
   };
+  const emit=(reason:'pending'|'failure')=>console.error(`SEC-03 ${reason}`,JSON.stringify({principal,phase,elapsedMs:performance.now()-started,phaseMs:performance.now()-phaseAt,attempts,host:state(host),guest:state(guest),member:state(member)}));
+  // Observe pending awaits before the 30s runner deadline; never settle them.
+  // A synchronously blocked event loop can also prevent this timer from running.
+  const observer=setTimeout(()=>{observers.delete(observer);emit('pending');},25_000);observers.add(observer);
   try {
   host=await side('gateway');mark('create guest');guest=await side('contact');mark('create member');member=await side('member');
   mark('create group');await host.h.core.group.create('Fixture');
@@ -238,7 +243,7 @@ test.each(['owner','paired','restart'] as const)('SEC-03 mailbox routing preserv
   expect(letterPrompt([got])).not.toContain('agents of a CONTACT');
   mark('idempotent human reply');expect((await writer.call('contacts.sendHuman',{threadId:guest.t.id,to:incoming.from,text:'Fixture human reply',replyTo:sent.id,requestId:'human-reply'})).id).toBe(reply.id);
   } catch(error) {
-    console.error('SEC-03 failure',JSON.stringify({principal,phase,elapsedMs:performance.now()-started,phaseMs:performance.now()-phaseAt,attempts,host:state(host),guest:state(guest),member:state(member)}));
+    emit('failure');
     throw error;
-  }
+  } finally {clearTimeout(observer);observers.delete(observer);}
 },30000);
