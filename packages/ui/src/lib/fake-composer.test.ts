@@ -128,3 +128,73 @@ test('a frozen queued turn only accepts steering with its own execution choice',
   expect(after.messages.some(message => message.parts.some(part => part.type === 'text' && part.text === 'Wait for the picker choice'))).toBe(false);
   expect((await client.call('composer.list', {})).find(row => row.id === thread.id)?.value?.input.queued.map(item => item.id)).toEqual(['picker-followup']);
 });
+
+const choiceOf = (thread: ComposerChoice): ComposerChoice => ({ providerId: thread.providerId, accountId: thread.accountId, permissionMode: thread.permissionMode,
+  model: thread.model, effort: thread.effort, speed: thread.speed ?? null });
+const queuedIds = async (client: FakeClient, id: string) => (await client.call('composer.list', {})).find(row => row.id === id)?.value?.input.queued.map(item => item.id) ?? [];
+const userTexts = async (client: FakeClient, id: string) => (await client.call('threads.get', { threadId: id })).messages.filter(message => message.role === 'user')
+  .flatMap(message => message.parts.flatMap(part => part.type === 'text' ? [part.text] : []));
+
+test('Send now outlasts a permission the turn waits on, and a queue emptied meanwhile leaves no Send now behind', async () => {
+  const client = await ready();
+  const thread = await client.call('threads.get', { threadId: 't-trace' });
+  const choice = choiceOf(thread);
+  const asked = async () => {
+    await vi.waitFor(async () => expect(await client.call('permissions.list', { threadId: thread.id })).toHaveLength(1));
+    return (await client.call('permissions.list', { threadId: thread.id }))[0]!.id;
+  };
+  const put = async (queued: ComposerValue['input']['queued'], sendNow = false) => {
+    const saved = (await client.call('composer.list', {})).find(row => row.id === thread.id);
+    const next = value('');
+    next.input.queued = queued;
+    await client.call('composer.put', { section: 'inputs', id: thread.id, expectedRevision: saved?.revision ?? 0, value: next, ...(sendNow ? { sendNow } : {}) });
+  };
+  await client.call('turns.start', { threadId: thread.id, prompt: '[permission] Write the notes' });
+  let request = await asked();
+  const turns = (await client.call('threads.get', { threadId: thread.id })).turns.length;
+  await put([{ id: 'urgent-steer', text: 'Also add a summary', attachments: [], choice }], true);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect(await queuedIds(client, thread.id)).toEqual(['urgent-steer']);
+  await client.call('permissions.answer', { requestId: request, decision: 'allow' });
+  await vi.waitFor(async () => expect(await queuedIds(client, thread.id)).toEqual([]));
+  await vi.waitFor(async () => expect((await client.call('threads.get', { threadId: thread.id })).status).toBe('idle'));
+  // Steered into the turn that asked: no turn of its own.
+  expect((await client.call('threads.get', { threadId: thread.id })).turns).toHaveLength(turns);
+  await client.call('turns.start', { threadId: thread.id, prompt: '[permission] Write more notes' });
+  request = await asked();
+  await put([{ id: 'withdrawn', text: 'Never mind', attachments: [], choice }], true);
+  await put([]);
+  await put([{ id: 'after-turn', text: 'Wait for this turn', attachments: [], choice }]);
+  await client.call('permissions.answer', { requestId: request, decision: 'allow' });
+  await vi.waitFor(async () => expect(await queuedIds(client, thread.id)).toEqual([]));
+  const after = await client.call('threads.get', { threadId: thread.id });
+  expect(after.turns).toHaveLength(turns + 2);
+  expect(await userTexts(client, thread.id)).toContain('Wait for this turn');
+});
+
+test('queued prompts share a turn when their choice is the same in any key order or speed form, and split where a boundary differs', async () => {
+  const client = await ready();
+  const thread = await client.call('threads.get', { threadId: 't-trace' });
+  const { speed: _speed, ...noSpeed } = choiceOf(thread);
+  const reordered = Object.fromEntries(Object.entries(choiceOf(thread)).reverse()) as unknown as ComposerChoice;
+  const seen = (await userTexts(client, thread.id)).length;
+  const input = value('');
+  input.input.queued = [
+    { id: 'batch-first', text: 'First', attachments: [], choice: noSpeed as ComposerChoice },
+    { id: 'batch-second', text: 'Second', attachments: [], choice: reordered },
+    { id: 'batch-after', text: 'After the tool', attachments: [], choice: choiceOf(thread), afterBoundary: 'tool-1' },
+  ];
+  await client.call('composer.put', { section: 'inputs', id: thread.id, expectedRevision: 0, value: input });
+  await vi.waitFor(async () => expect(await queuedIds(client, thread.id)).toEqual([]));
+  expect((await userTexts(client, thread.id)).slice(seen)).toEqual(['First\n\nSecond', 'After the tool']);
+});
+
+test('a queued command runs with the experiments its prompt was queued with, not the delivering app\'s', async () => {
+  const client = await ready();
+  const thread = await client.call('threads.get', { threadId: 't-trace' });
+  const input = value('');
+  input.input.queued.push({ id: 'reviewed-goal', text: '/goal2 Ship the release', attachments: [], choice: choiceOf(thread), experiments: ['goal2'] });
+  await client.call('composer.put', { section: 'inputs', id: thread.id, expectedRevision: 0, value: input });
+  await vi.waitFor(async () => expect((await client.call('threads.get', { threadId: thread.id })).activity?.goal).toMatchObject({ objective: 'Ship the release', review: expect.anything() }));
+  expect(await userTexts(client, thread.id)).not.toContain('/goal2 Ship the release');
+});

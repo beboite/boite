@@ -1,5 +1,6 @@
 import type { FileHandle } from 'node:fs/promises';
 import type { HeldBytes } from '../workdir.ts';
+import type { SharedFilePermit } from '../contacts/access-policy.ts';
 
 /**
  * Bytes a ticket of `FileTickets.mintBytes` names: an attachment of a message,
@@ -38,7 +39,7 @@ export function fileResponse(file: Blob | Uint8Array<ArrayBuffer>, range: string
 }
 
 /** The same range rules as `fileResponse`, read from a handle opened once. The handle closes with the body. */
-export function fdResponse(handle: FileHandle, size: number, range: string | null, headers: Record<string, string>): Response {
+export function fdResponse(handle: FileHandle, size: number, range: string | null, headers: Record<string, string>, permit?: SharedFilePermit): Response {
   headers = { ...headers, 'accept-ranges': 'bytes' };
   const asked = range === null ? null : /^bytes=(\d*)-(\d*)$/.exec(range.trim());
   let start = 0;
@@ -64,6 +65,7 @@ export function fdResponse(handle: FileHandle, size: number, range: string | nul
   }
   let offset = start;
   let remaining = length;
+  let tail = '';
   let closed = false;
   const close = (): void => {
     if (closed) return;
@@ -73,6 +75,7 @@ export function fdResponse(handle: FileHandle, size: number, range: string | nul
   const body = new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
+        permit?.check();
         if (remaining <= 0) {
           close();
           controller.close();
@@ -81,6 +84,10 @@ export function fdResponse(handle: FileHandle, size: number, range: string | nul
         const chunk = Math.min(remaining, 64 * 1024);
         const buffer = Buffer.alloc(chunk);
         const { bytesRead } = await handle.read(buffer, 0, chunk, offset);
+        if (permit) {
+          const text = buffer.subarray(0, bytesRead).toString('utf8');
+          permit.inspect(tail + text); tail = text.slice(-512);
+        }
         if (bytesRead <= 0) {
           close();
           controller.close();

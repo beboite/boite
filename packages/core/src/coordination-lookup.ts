@@ -2,6 +2,7 @@ import type { AgentContact, AgentMatch, AgentTranscriptEntry, CoordinationPeer, 
 import type { Database } from 'bun:sqlite';
 import { address, text } from './coordination-letter.ts';
 import { invalidParams } from './errors.ts';
+import { threadRef } from './contacts/project-policy.ts';
 
 /** At most this many words in a search; each costs one scan of the candidates' chat. */
 export const SEARCH_WORDS = 8;
@@ -48,13 +49,13 @@ const CHAT_TEXT = "j.value->>'type' = 'text' AND m.role IN ('user', 'assistant')
  * Contacts among `candidates` where every word appears in a field or in the
  * chat. Field matches rank first, then the most recently active.
  */
-export function searchContacts(db: Database, candidates: AgentContact[], words: string[], readChat = true): AgentMatch[] {
+export function searchContacts(db: Database, candidates: AgentContact[], words: string[], readChat = true, sanitize?: (value: string) => string): AgentMatch[] {
   if (candidates.length === 0) return [];
   const ids = JSON.stringify(candidates.map(contact => contact.threadId));
   const inChat = new Map<string, Set<string>>();
   for (const word of readChat ? words : []) {
-    const rows = db.query(`SELECT DISTINCT m.thread_id AS id FROM messages m, json_each(m.parts) j WHERE m.thread_id IN (SELECT value FROM json_each(?)) AND ${CHAT_TEXT} AND instr(lower(j.value->>'text'), ?) > 0`).all(ids, word) as { id: string }[];
-    inChat.set(word, new Set(rows.map(row => row.id)));
+    const rows = db.query(`SELECT DISTINCT m.thread_id AS id${sanitize ? ", j.value->>'text' AS text" : ''} FROM messages m, json_each(m.parts) j WHERE m.thread_id IN (SELECT value FROM json_each(?)) AND ${CHAT_TEXT} AND instr(lower(j.value->>'text'), ?) > 0`).all(ids, word) as { id: string; text?: string }[];
+    inChat.set(word, new Set(rows.filter(row => !sanitize || sanitize(row.text!) === row.text).map(row => row.id)));
   }
   const matches: AgentMatch[] = [];
   for (const contact of candidates) {
@@ -70,16 +71,16 @@ export function searchContacts(db: Database, candidates: AgentContact[], words: 
     }
     if (!all) continue;
     if (chatWords.length > 0) matched.add('chat');
-    matches.push({ ...contact, matched: [...matched], excerpts: chatWords.length > 0 ? excerpts(db, contact.threadId, chatWords) : [] });
+    matches.push({ ...contact, matched: [...matched], excerpts: chatWords.length > 0 ? excerpts(db, contact.threadId, chatWords, sanitize) : [] });
   }
   const fieldHits = (match: AgentMatch) => match.matched.filter(field => field !== 'chat').length;
   return matches.sort((a, b) => fieldHits(b) - fieldHits(a) || (b.activeAt ?? 0) - (a.activeAt ?? 0)).slice(0, SEARCH_RESULTS);
 }
 
 /** Up to three recent excerpts of one thread's chat, around the first word each message contains. */
-function excerpts(db: Database, threadId: string, words: string[]): string[] {
+function excerpts(db: Database, threadId: string, words: string[], sanitize?: (value: string) => string): string[] {
   const rows = db.query(`SELECT j.value->>'text' AS text FROM messages m, json_each(m.parts) j WHERE m.thread_id = ? AND ${CHAT_TEXT} AND instr(lower(j.value->>'text'), ?) > 0 ORDER BY m.created_at DESC LIMIT 3`).all(threadId, words[0]!) as { text: string }[];
-  return rows.map(row => excerpt(row.text, words.find(word => row.text.toLowerCase().includes(word)) ?? words[0]!));
+  return rows.filter(row => !sanitize || sanitize(row.text) === row.text).map(row => excerpt(row.text, words.find(word => row.text.toLowerCase().includes(word)) ?? words[0]!));
 }
 
 /**
@@ -88,7 +89,7 @@ function excerpts(db: Database, threadId: string, words: string[]): string[] {
  * loaded whole. `held` gives the current parts of a message still streaming,
  * whose row can be up to 30 seconds behind.
  */
-export function transcript(db: Database, threadId: string, limit: number, before: number | undefined, held?: (messageId: string) => Message | undefined): { entries: AgentTranscriptEntry[]; more: boolean } {
+export function transcript(db: Database, threadId: string, limit: number, before: number | undefined, held?: (messageId: string) => Message | undefined, sanitize?: (value: string) => string): { entries: AgentTranscriptEntry[]; more: boolean } {
   const entries: AgentTranscriptEntry[] = [];
   const cursor = before ?? Number.MAX_SAFE_INTEGER;
   let skip = 0;
@@ -100,8 +101,9 @@ export function transcript(db: Database, threadId: string, limit: number, before
       skip += 1;
       if (row.created_at >= (before ?? Number.MAX_SAFE_INTEGER)) continue;
       const parts = held?.(row.id)?.parts ?? JSON.parse(row.parts) as MessagePart[];
-      const text = spoken(parts);
-      const tools = parts.flatMap(part => part.type === 'tool' ? [part.name] : []);
+      const raw = spoken(parts);
+      const text = sanitize ? sanitize(raw) : raw;
+      const tools = parts.flatMap(part => part.type === 'tool' ? [sanitize ? sanitize(part.name) : part.name] : []);
       if (text.length === 0 && tools.length === 0) continue;
       entries.push({ id: row.id, role: row.role, at: row.created_at, text: text.length > ENTRY_TEXT ? `${text.slice(0, ENTRY_TEXT)} ...` : text, tools });
     }
@@ -140,6 +142,8 @@ export function checkRemoteContact(contact: AgentContact, peer: CoordinationPeer
   const project = optional(contact.project);
   const agent = optional(contact.agent);
   const branch = optional(contact.branch);
+  const sharedThread = contact.sharedThread === undefined ? undefined : threadRef(contact.sharedThread);
+  if (sharedThread && (sharedThread.address.coreId !== contact.coreId || sharedThread.address.threadId !== contact.threadId)) throw invalidParams('agent.sharedThread: expected this descriptor address');
   return {
     ...address(contact, 'agent'), title: text(contact.title, 'agent.title', 200), machine: peer.name, resources: typeof contact.resources === 'string' && contact.resources.length <= 500 ? contact.resources : '', status: contact.status, mode: contact.mode,
     ...(project === undefined ? {} : { project }), ...(agent === undefined ? {} : { agent }),
@@ -147,5 +151,6 @@ export function checkRemoteContact(contact: AgentContact, peer: CoordinationPeer
     ...(contact.lastCompletedAt === null || Number.isSafeInteger(contact.lastCompletedAt) && contact.lastCompletedAt! >= 0 ? { lastCompletedAt: contact.lastCompletedAt } : {}),
     ...(typeof contact.projectArchived === 'boolean' ? { projectArchived: contact.projectArchived } : {}),
     ...(typeof contact.paused === 'boolean' ? { paused: contact.paused } : {}),
+    ...(sharedThread === undefined ? {} : { sharedThread }),
   };
 }

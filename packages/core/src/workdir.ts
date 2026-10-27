@@ -23,6 +23,7 @@ import type { RpcContext } from './router.ts';
 import { newToken } from './ids.ts';
 import { currentOs } from './paths.ts';
 import { worktreeRoot } from './worktree.ts';
+import type { SharedFilePermit } from './contacts/access-policy.ts';
 
 /** How much of a file decides whether it is text: one NUL in there and it is not. */
 export const TEXT_PROBE_BYTES = 8000;
@@ -349,7 +350,7 @@ export function mediaOf(path: string): { kind: 'image' | 'video' | 'audio' | 'bi
  * `FILE_MAX_BYTES` takes the url too, whatever its extension says, so a
  * gigabyte of log never becomes one JSON frame.
  */
-export async function readFileContent(core: Core, cwd: string, path: string): Promise<FileContent> {
+export async function readFileContent(core: Core, cwd: string, path: string, permit?: SharedFilePermit): Promise<FileContent> {
   const found = existingInside(cwd, path, 'file', 'files.read path');
   const modifiedAt = Math.round(Number(found.stats.mtimeNs) / 1e6);
   const size = Number(found.stats.size);
@@ -357,6 +358,7 @@ export async function readFileContent(core: Core, cwd: string, path: string): Pr
   const handle = await openChecked(found.real, constants.O_RDONLY, found.stats.dev, found.stats.ino, 'files.read path', path);
   let ticketIdentity: string | null = null;
   try {
+    if (permit) permit.opened?.(found.real, await handle.stat({bigint: true}));
     if (size <= FILE_MAX_BYTES && media.mime === 'application/octet-stream') {
       const data = Buffer.alloc(size);
       let offset = 0;
@@ -366,6 +368,7 @@ export async function readFileContent(core: Core, cwd: string, path: string): Pr
         offset += bytesRead;
       }
       const read = data.subarray(0, offset);
+      permit?.inspect(read);
       if (!hasNul(read)) {
         const cut = read.length > FILE_MAX_BYTES;
         const text = new TextDecoder().decode(cut ? read.subarray(0, FILE_MAX_BYTES) : read);
@@ -380,15 +383,29 @@ export async function readFileContent(core: Core, cwd: string, path: string): Pr
         };
       }
     }
+    if (permit) {
+      // Inspect the whole captured file before minting a ticket. A byte range must not skip a credential marker.
+      const buffer = Buffer.alloc(64 * 1024);
+      let offset = 0, tail = '';
+      for (;;) {
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
+        if (!bytesRead) break;
+        const text = buffer.subarray(0, bytesRead).toString('utf8');
+        permit.inspect(tail + text); tail = text.slice(-512);
+        offset += bytesRead;
+      }
+      permit.opened?.(found.real, await handle.stat({bigint: true}));
+    }
     const held = await handle.stat({ bigint: true });
     ticketIdentity = `${found.real}|${held.dev}|${held.ino}|${held.size}|${held.mtimeNs}|${held.ctimeNs}`;
   } finally {
     await handle.close();
   }
   if (ticketIdentity === null) throw refused(`files.read path changed while it was opened: ${path}`, { what: 'files.read path', path });
+  permit?.check();
   // The identity comes from the handle, not a second walk. A parent swapped
   // before mint would otherwise bind the ticket to the new file.
-  const ticket = core.fileTickets.mint(found.real, media.mime, Date.now(), basename(found.absolute), ticketIdentity);
+  const ticket = core.fileTickets.mint(found.real, media.mime, Date.now(), basename(found.absolute), ticketIdentity, false, permit);
   return {
     kind: media.kind,
     path: found.relative,
@@ -508,12 +525,12 @@ interface BytesTicket {
  * names a path to the HTTP server.
  */
 export class FileTickets {
-  private readonly held = new Map<string, FileTicketTarget & { expiresAt: number; identity: string | null }>();
+  private readonly held = new Map<string, FileTicketTarget & { expiresAt: number; identity: string | null; permit?: SharedFilePermit }>();
   private readonly bytesHeld = new Map<string, BytesTicket>();
   /** The live ticket of each key, so a part asked again keeps its address and the client's HTTP cache. */
   private readonly bytesKeys = new Map<string, string>();
 
-  mint(path: string, mime: string, now = Date.now(), name?: string, identity?: string, view = false): string {
+  mint(path: string, mime: string, now = Date.now(), name?: string, identity?: string, view = false, permit?: SharedFilePermit): string {
     this.sweep(now);
     const ticket = newToken();
     this.held.set(ticket, {
@@ -523,6 +540,7 @@ export class FileTickets {
       ...(view ? { view: true as const } : {}),
       expiresAt: now + FILE_TICKET_TTL_MS,
       identity: identity ?? fileIdentity(path),
+      ...(permit ? {permit} : {}),
     });
     return ticket;
   }
@@ -539,6 +557,7 @@ export class FileTickets {
     this.sweep(now);
     const entry = this.held.get(ticket);
     if (entry === undefined) return null;
+    try { entry.permit?.check(); } catch { this.held.delete(ticket); return null; }
     if (entry.identity === null || fileIdentity(entry.path) !== entry.identity) {
       this.held.delete(ticket);
       return null;
@@ -572,7 +591,8 @@ export class FileTickets {
     if (entry === undefined) return null;
     // A picture still drawn keeps its address: a ticket lives ten minutes past its last use.
     entry.expiresAt = now + FILE_TICKET_TTL_MS;
-    const found = entry.read();
+    let found: HeldBytes | null;
+    try { found = entry.read(); } catch { found = null; }
     if (found === null) this.dropBytes(ticket, entry);
     return found;
   }
@@ -596,7 +616,7 @@ export class FileTickets {
    * Open the ticket's file without following a symlink swapped in after the
    * mint. The handle is the caller's to close. A mismatch drops the ticket.
    */
-  async open(ticket: string, now = Date.now()): Promise<{ handle: FileHandle; path: string; mime: string; name?: string; size: number; view?: true } | null> {
+  async open(ticket: string, now = Date.now()): Promise<{ handle: FileHandle; path: string; mime: string; name?: string; size: number; view?: true; permit?: SharedFilePermit } | null> {
     this.sweep(now);
     const entry = this.held.get(ticket);
     if (entry === undefined || entry.identity === null) {
@@ -605,6 +625,7 @@ export class FileTickets {
     }
     let handle: FileHandle;
     try {
+      entry.permit?.check();
       handle = await open(entry.path, constants.O_RDONLY | NOFOLLOW);
     } catch {
       this.held.delete(ticket);
@@ -612,6 +633,7 @@ export class FileTickets {
     }
     try {
       const stats = await handle.stat({ bigint: true });
+      entry.permit?.check();
       // The stored identity leads with the real path. Comparing the fstat tail
       // still rejects a swapped inode, including when the ticket named a link.
       const suffix = `|${stats.dev}|${stats.ino}|${stats.size}|${stats.mtimeNs}|${stats.ctimeNs}`;
@@ -620,10 +642,11 @@ export class FileTickets {
         await handle.close();
         return null;
       }
-      return { handle, path: entry.path, mime: entry.mime, ...(entry.name ? { name: entry.name } : {}), size: Number(stats.size), ...(entry.view ? { view: true as const } : {}) };
+      return { handle, path: entry.path, mime: entry.mime, ...(entry.name ? { name: entry.name } : {}), size: Number(stats.size), ...(entry.view ? { view: true as const } : {}), ...(entry.permit ? {permit: entry.permit} : {}) };
     } catch (error) {
       await handle.close();
-      throw error;
+      this.held.delete(ticket);
+      return null;
     }
   }
 
@@ -653,10 +676,23 @@ export function readCwd(core: Core, threadId: ThreadId, ctx: RpcContext, path?: 
 }
 
 export function registerWorkdirMethods(core: Core): void {
-  core.router.register('files.list', (params, ctx) => listDirectory(readCwd(core, params.threadId, ctx, params.path), params.path));
-  core.router.register('files.read', (params, ctx) => readFileContent(core, readCwd(core, params.threadId, ctx, params.path), params.path));
+  core.router.register('files.list', async (params, ctx) => {
+    const permit = core.sharedAccess.file(params.threadId, params.path || '.', 'read', true);
+    const entries = await listDirectory(readCwd(core, params.threadId, ctx, params.path), params.path);
+    permit?.check();
+    return permit ? entries.filter(entry => {
+      try { core.sharedAccess.file(params.threadId, `${params.path || '.'}/${entry.name}`, 'read', entry.kind === 'dir', true); return true; } catch { return false; }
+    }) : entries;
+  });
+  core.router.register('files.read', (params, ctx) => {
+    const permit = core.sharedAccess.file(params.threadId, params.path);
+    return readFileContent(core, readCwd(core, params.threadId, ctx, params.path), params.path, permit);
+  });
   // Owner only: a chat link the owner clicks, which may name a file in an ignored tree.
-  core.router.register('files.locate', (params) => locateFile(threadCwd(core, params.threadId), params.path));
+  core.router.register('files.locate', (params) => {
+    core.sharedAccess.file(params.threadId, params.path);
+    return locateFile(threadCwd(core, params.threadId), params.path);
+  });
   // Owner only, absent from both permission maps: the agent already has its own
   // hands on the disk, and a paired phone has no business writing a file.
   core.router.register('files.write', (params) =>

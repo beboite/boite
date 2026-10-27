@@ -3,7 +3,7 @@ name: ci
 on:
   push:
     branches: [main]
-  # A draft runs the Linux checks; ready_for_review starts the full run, and
+  # A draft runs Linux, plus native Windows for protection inputs; ready_for_review starts the full run, and
   # converted_to_draft cancels one in progress and fails its planning (changes job).
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
@@ -84,6 +84,7 @@ jobs:
       stress: ${{ steps.filter.outputs.stress }}
       portable: ${{ steps.filter.outputs.portable }}
       coreRunners: ${{ steps.filter.outputs.coreRunners }}
+      nativeWindows: ${{ steps.filter.outputs.nativeWindows }}
       stale: ${{ steps.stale.outputs.stale }}
     steps:
       # A rerun keeps its event: an old draft run rerun once the pull request
@@ -189,9 +190,168 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+      - name: Build userspace native helper
+        id: native_helper
+        if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        shell: pwsh
+        run: |
+          Write-Host "Native Windows kernel: $([Environment]::OSVersion.Version)"
+          bun packages/core/bin/install-windows-sandbox.ts "$env:RUNNER_TEMP\protected-tool.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun packages/core/bin/install-windows-sandbox.ts "$env:RUNNER_TEMP\protected-tool-mingw.exe" 'C:\mingw64\bin\gcc.exe'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-FileHash "$env:RUNNER_TEMP\protected-tool*.exe" -Algorithm SHA256 | Format-List
+          & "$env:RUNNER_TEMP\protected-tool.exe" --diagnose-null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "BOITE_WINDOWS_SANDBOX_PATH=$env:RUNNER_TEMP\protected-tool.exe" >> $env:GITHUB_ENV
+      - name: LPAC parent creation prerequisite (non-acceptance)
+        if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        continue-on-error: true
+        env:
+          BOITE_TEST_LPAC_PARENT_SPIKE: '1'
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          bun packages/core/test/windows-lpac-parent-spike.ts "$env:RUNNER_TEMP\lpac-parent-spike"
+          $spikeExit = $LASTEXITCODE
+          Write-Host "LPAC parent prerequisite exit=$spikeExit; not production acceptance"
+          exit $spikeExit
+      - name: Preserve LPAC parent prerequisite evidence
+        if: always() && runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-lpac-parent-spike
+          path: ${{ runner.temp }}/lpac-parent-spike/
+          retention-days: 3
+          if-no-files-found: error
+      - name: NUL access matrix (non-acceptance)
+        if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        continue-on-error: true
+        env:
+          BOITE_TEST_NULL_ACCESS_MATRIX: '1'
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          bun packages/core/test/windows-null-access-matrix.ts "$env:RUNNER_TEMP\null-access-matrix"
+          $matrixExit = $LASTEXITCODE
+          Write-Host "NUL access matrix exit=$matrixExit; not production acceptance"
+          exit $matrixExit
+      - name: Preserve NUL access matrix evidence
+        if: always() && runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-null-access-matrix
+          path: ${{ runner.temp }}/null-access-matrix/
+          retention-days: 3
+          if-no-files-found: error
+      - name: Real Null per-open broker falsifier (non-acceptance)
+        if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        continue-on-error: true
+        env:
+          BOITE_TEST_NULL_BROKER: '1'
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          bun packages/core/test/windows-null-broker-spike.ts "$env:RUNNER_TEMP\null-broker-spike"
+          $brokerExit = $LASTEXITCODE
+          Write-Host "Real Null broker falsifier exit=$brokerExit; not production acceptance"
+          exit $brokerExit
+      - name: Preserve real Null broker evidence
+        if: always() && runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-null-broker-spike
+          path: ${{ runner.temp }}/null-broker-spike/
+          retention-days: 3
+          if-no-files-found: error
+      - name: Diagnostic DEBUG_PROCESS descendant marker routing (non-acceptance)
+        if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        continue-on-error: true
+        env:
+          BOITE_TEST_DEBUG_MAP: '1'
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        shell: pwsh
+        run: |
+          # Preserve native status explicitly; stderr is diagnostic output, including on PS 5.
+          $ErrorActionPreference = 'Continue'
+          bun tests/diagnostics/windows-debug-map/run.ts "$env:RUNNER_TEMP\windows-debug-map"
+          $diagnosticExit = $LASTEXITCODE
+          Set-Content -Path "$env:RUNNER_TEMP\windows-debug-map\launcher-exit.txt" -Value $diagnosticExit
+          Write-Host "DEBUG_PROCESS diagnostic exit=$diagnosticExit; not production acceptance"
+          exit $diagnosticExit
+      - name: Preserve DEBUG_PROCESS diagnostic evidence
+        if: always() && runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-debug-map-diagnostic
+          path: ${{ runner.temp }}/windows-debug-map/
+          retention-days: 3
+          if-no-files-found: error
+      - name: Native Windows protected tools
+        if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        env:
+          BOITE_TEST_NATIVE_EXECUTION: '1'
+          BOITE_DIAGNOSE_JOB_EVENTS: '1'
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($helper in @('protected-tool.exe', 'protected-tool-mingw.exe')) {
+            Write-Host "Native fixture helper: $helper"
+            $env:BOITE_WINDOWS_SANDBOX_PATH = "$env:RUNNER_TEMP\$helper"
+            bun test packages/core/test/protected-windows.test.ts --timeout 120000
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+          }
+          if ($failed) { exit 1 }
+      - name: Preserve native helper comparison
+        if: always() && runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: protected-windows-helper-comparison
+          path: ${{ runner.temp }}/protected-tool*.exe
+          retention-days: 3
+      - name: Prepare synthetic native providers
+        id: native_providers
+        if: ${{ !cancelled() && runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true' && steps.native_helper.outcome == 'success' }}
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: bun packages/core/test/fixtures/prepare-native-providers.ts
+      - name: Native Windows provider and shared scopes
+        if: ${{ !cancelled() && runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true' && steps.native_providers.outcome == 'success' }}
+        env:
+          BOITE_TEST_NATIVE_EXECUTION: '1'
+          BOITE_DIAGNOSE_JOB_EVENTS: '1'
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($helper in @('protected-tool.exe', 'protected-tool-mingw.exe')) {
+            Write-Host "Native provider/shared fixture helper: $helper"
+            $env:BOITE_WINDOWS_SANDBOX_PATH = "$env:RUNNER_TEMP\$helper"
+            bun test packages/core/test/protected-drivers.test.ts packages/core/test/protected-adapters.test.ts packages/core/test/shared-access.test.ts -t 'native control|useful edits and child|protected .*(remote jobs|scopes retire)' --timeout 120000
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+            bun test packages/core/test/protected-muse.test.ts --timeout 120000
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+          }
+          if ($failed) { exit 1 }
       # Core data directories, worktrees and Chrome profiles go to the runner's
       # temp drive (D: on Windows), as in the E2E shards (docs/ci.md#build-cost).
       - run: bun run --cwd packages/core test
+        if: ${{ !cancelled() && (success() || runner.os == 'Windows' && steps.native_providers.outcome == 'success') }}
         env:
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
@@ -217,7 +377,8 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && github.event.pull_request.draft && (needs.changes.outputs.stale == 'true' || needs.changes.result != 'success' && needs.changes.outputs.stale != 'false') || success() && (needs.changes.outputs.core == 'true' && contains(needs.changes.outputs.coreRunners, '"os":"windows-2025"')) }}
     runs-on: windows-2025
-    timeout-minutes: 15
+    # Two native compiler/provider matrices follow roughly eight minutes of setup.
+    timeout-minutes: 30
     steps: *core-steps
 
   core-macos-arm64:

@@ -1,6 +1,7 @@
 import type { MachineGpu, MachineVolume, ResourceByteUsage, Settings, TraceCapability } from '@boite/contracts';
 import type { ServerUpdatePlatform } from '../server-update/types.ts';
 import type { CgroupMemory } from './linux-cgroup.ts';
+import type { NativeExecutionBoundary } from './protected.ts';
 
 export interface NativeProcessInfo {
   exe: string;
@@ -138,6 +139,8 @@ export interface SecretVault {
 
 /** OS services used by the shared process registry. No native imports here. */
 export interface ProcessPlatform {
+  /** Model tool execution only. Trusted account/control processes never gain authority from this descriptor. */
+  protectedExecution?: NativeExecutionBoundary;
   serverUpdates?: ServerUpdatePlatform;
   /** Absolute path of the tailscale CLI, or null when it is not installed. */
   tailscaleCli?(): string | null;
@@ -154,6 +157,8 @@ export interface ProcessPlatform {
   capability(): TraceCapability;
   applySettings(settings: Settings): void;
   attach(threadId: string, pid: number): boolean;
+  /** Reconcile captured exits when the native job is empty; true if occupied or unreadable. */
+  hasProcesses?(threadId: string): boolean;
   /** Normal priority during agent initialization; platform CPU and memory caps still apply. */
   startup?(threadId: string, active: boolean): void;
   terminate(threadId: string): boolean;

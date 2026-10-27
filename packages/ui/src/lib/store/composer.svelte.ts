@@ -1,6 +1,6 @@
 import { RpcErrorCode, PREVIEW_REFERENCES_PER_TURN, previewReferencesError, threadActive, type PreviewReference, type RpcParams } from '@boite/contracts';
 import { untrack } from 'svelte';
-import type { Attachment, Message, MessageId, MessagePart, ThreadId, ThreadSummary, Turn, TurnInFlightData } from '@boite/contracts';
+import type { Attachment, ExperimentId, Message, MessageId, MessagePart, SentFrom, ThreadId, ThreadSummary, Turn, TurnInFlightData } from '@boite/contracts';
 import { drainQueue, SENDING_PREFIX, sentPrompt } from '../composer-queue';
 import { restorePreviewMentions } from '../preview-mentions';
 import { activityCommand, isActivityCommand } from '../activity-command';
@@ -13,6 +13,7 @@ import { showPreviewReference } from '../preview-navigation';
 import { strings } from '../strings';
 import { unresolvedAssetId } from '../draft-attachments';
 import { secureId } from '../secure-id';
+import { readExperiments } from '../experiments';
 import type { Choice, Draft } from '../store.svelte';
 import type { StoreContext } from './context';
 import { draftKey } from './drafts.svelte';
@@ -38,7 +39,11 @@ export type OutboxRequest = {
  * written with. `id` is stable for as long as it waits, which is how the core
  * and every device tell it apart; `choice` is the chips' selection when it was queued.
  */
-export type QueuedPrompt = { id?: string; text: string; attachments: Attachment[]; previewReferences?: PreviewReference[]; afterBoundary?: string; choice?: Choice; request?: OutboxRequest };
+/**
+ * `experiments`: what this app had on when the prompt was queued, which the core runs it with.
+ * `sentFrom`: the app the core saw queue it, kept so the turn names it; null for one it could not tell.
+ */
+export type QueuedPrompt = { id?: string; text: string; attachments: Attachment[]; previewReferences?: PreviewReference[]; afterBoundary?: string; choice?: Choice; experiments?: ExperimentId[]; sentFrom?: SentFrom | null; request?: OutboxRequest };
 
 /** What became of one outbox prompt: taken, still to send, or refused with the core's reason. */
 export type Delivery = 'sent' | 'wait' | { failed: string };
@@ -526,7 +531,7 @@ export class Composer {
     this.composerStates[threadId] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };
     const state = this.composerStates[threadId]!;
     const request = outbox ? { id: outbox.id ?? secureId(), choice: outbox.choice ? { ...outbox.choice } : null, queuedAt: Date.now(), ...(outbox.id ? { sent: true as const } : {}) } : undefined;
-    const queued: QueuedPrompt = { ...entry, id: entry.id ?? request?.id ?? secureId(), ...(request ? { request } : {}) };
+    const queued: QueuedPrompt = { ...entry, id: entry.id ?? request?.id ?? secureId(), experiments: entry.experiments ?? readExperiments(), ...(request ? { request } : {}) };
     if (outbox?.head) { takeOutgoing(state); state.queued.unshift(queued); } else state.queued.push(queued);
     if (outbox) { this.ctx.drafts.persist(threadId); void this.ctx.drafts.flush(); }
     const draft = threadId === DRAFT_STASH_KEY ? this.ctx.store.draft : null;
@@ -732,7 +737,8 @@ export class Composer {
       if (request) return 'wait';
       const held = this.composerStates[early.thread.id]!;
       takeOutgoing(held);
-      held.queued.unshift({ text: prompt, attachments, ...(previewReferences.length ? { previewReferences } : {}) });
+      // An id and experiments from the start, as `queuePrompt` gives: a put already on its way cannot then merge it away.
+      held.queued.unshift({ id: secureId(), text: prompt, attachments, experiments: readExperiments(), ...(previewReferences.length ? { previewReferences } : {}) });
       // The queue shows it from here on.
       delete this.staged[early.thread.id];
       return 'sent';

@@ -1,7 +1,8 @@
 import { stat } from 'node:fs/promises';
-import { pullRequestAddress, type AccountId, type ClientPreferences, type ProviderId, type SentFrom, type ThreadId } from '@boite/contracts';
+import { pullRequestAddress, type AccountId, type ProviderId, type ThreadId } from '@boite/contracts';
 import type { Connection } from '../router.ts';
 import type { Core } from '../core.ts';
+import { promptOrigin } from '../client-preferences.ts';
 import { invalidParams, refused } from '../errors.ts';
 import type { ProviderProbe } from '../providers/probe.ts';
 import { defaultModel, needsModelDiscovery } from './selection.ts';
@@ -232,7 +233,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     return core.threads.recoverTurn(params);
   });
   core.router.register('turns.cancelRetry', (params) => ({ cancelled: core.threads.cancelRetry(params.threadId) }));
-  core.router.register('turns.steer', params => steerUser(core, core.threads, params));
+  core.router.register('turns.steer', (params, ctx) => steerUser(core, core.threads, params, promptOrigin(ctx.connection, core.clients.use(ctx.connection))));
   core.router.register('permissions.list', (params) => core.threads.listPermissions(params.threadId));
   core.router.register('permissions.answer', (params) => {
     core.threads.answerPermission({ requestId: params.requestId, decision: params.decision });
@@ -254,10 +255,4 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     });
     return { ok: true } as const;
   });
-}
-
-/** Where a prompt comes from, with the language its app speaks once the app said it. */
-function promptOrigin(connection: Connection, preferences: ClientPreferences | null): SentFrom | null {
-  const from = connection.sentFrom ?? null;
-  return from === null || preferences === null ? from : { ...from, language: preferences.language };
 }

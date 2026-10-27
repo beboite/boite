@@ -41,6 +41,8 @@ function digest(text: string): string {
 const references = (refs: PreviewReference[] | undefined) => refs?.length ? $state.snapshot(refs) as PreviewReference[] : undefined;
 const boxEmpty = (input: Local['input'] | undefined) => !input || (!input.text && !input.attachments.length && !input.previewReferences?.length);
 const hasContent = (local: Local | null) => !!local && (!boxEmpty(local.input) || local.input.queued.length > 0 || !!local.input.editing);
+/** A queued prompt gets its id before a merge or a put compares queues: one without, from a refused send or an old journal, would read as gone. */
+const stamped = (local: Local | null) => { for (const entry of local?.input.queued ?? []) entry.id ??= entry.request?.id ?? secureId(); return local; };
 
 /**
  * The composer records a core keeps for every device of its owner: each
@@ -58,12 +60,9 @@ export class ComposerSync {
   /** Records heard before the list answered, latest per key. */
   #early = new Map<string, ComposerRecord>();
   #known = new Map<string, Known>();
-  /** The core's last value per record, for a stale local copy to be put back to. */
-  #values = new Map<string, ComposerValue | null>();
   /** Asset ids the core holds: referenced by a record, uploaded or fetched. */
   #remoteAssets = new Set<string>();
   #dirty = new Set<string>();
-  #urgent = false;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #retry: ReturnType<typeof setTimeout> | undefined;
   #inflight = new Set<string>();
@@ -219,7 +218,7 @@ export class ComposerSync {
     this.#startup = true;
     this.#forced.clear();
     this.#listed = false;
-    this.#early.clear(); this.#known.clear(); this.#values.clear(); this.#remoteAssets.clear(); this.#dirty.clear(); this.#inflight.clear(); this.#stashed.clear();
+    this.#early.clear(); this.#known.clear(); this.#remoteAssets.clear(); this.#dirty.clear(); this.#inflight.clear(); this.#stashed.clear();
     this.#assetIds.clear(); this.#bytes.clear(); this.#fetching.clear(); this.#byteHashes.clear(); this.#homes.clear(); this.#left.clear();
     this.#metaKey = client && this.ctx.drafts.storageKey ? `${this.ctx.drafts.storageKey}:composer` : null;
     this.#meta = { entries: {}, assets: {} };
@@ -260,12 +259,10 @@ export class ComposerSync {
 
   #flushSoon(now: boolean): void {
     if (!this.#listed || !this.#dirty.size) return;
-    this.#urgent ||= now;
     if (this.#timer !== undefined && !now) return;
     clearTimeout(this.#timer);
     this.#timer = setTimeout(() => {
       this.#timer = undefined;
-      this.#urgent = false;
       for (const key of [...this.#dirty]) void this.#flush(key);
     }, now ? 0 : COALESCE_MS);
   }
@@ -319,6 +316,8 @@ export class ComposerSync {
       ...(entry.previewReferences?.length ? { previewReferences: references(entry.previewReferences) } : {}),
       ...(entry.afterBoundary ? { afterBoundary: entry.afterBoundary } : {}),
       ...(entry.choice ? { choice: { ...$state.snapshot(entry.choice) } } : {}),
+      ...(entry.experiments ? { experiments: [...entry.experiments] } : {}),
+      ...(entry.sentFrom !== undefined ? { sentFrom: entry.sentFrom && { ...entry.sentFrom } } : {}),
       ...(entry.request ? { request: $state.snapshot(entry.request) as ComposerQueuedPrompt['request'] } : {}) };
   }
 
@@ -365,6 +364,8 @@ export class ComposerSync {
       ...(entry.previewReferences?.length ? { previewReferences: entry.previewReferences } : {}),
       ...(entry.afterBoundary ? { afterBoundary: entry.afterBoundary } : {}),
       ...(entry.choice ? { choice: entry.choice as Choice } : {}),
+      ...(entry.experiments ? { experiments: [...entry.experiments] } : {}),
+      ...(entry.sentFrom !== undefined ? { sentFrom: entry.sentFrom && { ...entry.sentFrom } } : {}),
       ...(entry.request ? { request: { ...entry.request, choice: entry.request.choice as Choice | null } } : {}) }));
     const local: Local = { input: { text: value.input.text, attachments: value.input.attachments.map(file), previewReferences: value.input.previewReferences ?? [],
       queued, paused: value.input.paused, editing: value.input.editing ?? null } };
@@ -375,7 +376,6 @@ export class ComposerSync {
   }
 
   #know(key: string, record: ComposerRecord): void {
-    this.#values.set(key, record.value);
     const prior = this.#known.get(key)?.hash;
     const known: Known = { revision: record.revision, ...this.#parts(this.#shape(this.#toLocal(record.value))), ...(prior ? { prior } : {}) };
     this.#known.set(key, known);
@@ -393,7 +393,6 @@ export class ComposerSync {
     // A delayed list or event never takes a newer record back.
     if (known && record.revision < known.revision) return;
     if (known && record.revision === known.revision) {
-      this.#values.set(key, record.value);
       // Killed between the sync and the journal's copy: the device still holds the record before it.
       const source = this.#source(key);
       if (!this.#startup || (source && this.ctx.drafts.isIncognito(source))) return;
@@ -408,7 +407,7 @@ export class ComposerSync {
     const source = this.#source(key);
     if (source && this.ctx.drafts.isIncognito(source)) return;
     const base = known ?? EMPTY_KNOWN;
-    const local = this.#restored(key, source, known, record.value);
+    const local = stamped(this.#restored(key, source, known, record.value));
     const mine = this.#parts(this.#shape(local));
     const remote = this.#toLocal(record.value);
     const before = record.section === 'drafts' ? this.#queuedIds(local) : [];
@@ -581,8 +580,7 @@ export class ComposerSync {
     if (this.#inflight.has(key)) return;
     const source = this.#source(key);
     if (source && this.ctx.drafts.isIncognito(source)) { this.#dirty.delete(key); return; }
-    let local = this.#localOf(source);
-    for (const entry of local?.input.queued ?? []) entry.id ??= entry.request?.id ?? secureId();
+    let local = stamped(this.#localOf(source));
     const known = this.#known.get(key);
     const files = local ? [...local.input.attachments, ...local.input.queued.flatMap(entry => entry.attachments)] : [];
     // A file still waiting for the journal's bytes has nothing to upload yet: the record waits with it.
@@ -601,7 +599,7 @@ export class ComposerSync {
         if (epoch !== this.#epoch) return;
         local = this.#localOf(this.#source(key));
         value = this.#shape(local);
-        if (value && JSON.stringify(value).includes('"local:')) { this.#dirty.add(key); return; }
+        if (value && [...value.input.attachments, ...value.input.queued.flatMap(entry => entry.attachments)].some(file => file.assetId.startsWith('local:'))) { this.#dirty.add(key); return; }
         const sent = this.#parts(value);
         const expectedRevision = this.#known.get(key)?.revision ?? 0;
         const result = await client.call('composer.put', { section, id, expectedRevision, value, ...(sendNow ? { sendNow: true as const } : {}) });
@@ -640,7 +638,7 @@ export class ComposerSync {
         this.#stashed.delete(key); this.#early.delete(key); this.#forced.delete(key);
         this.#apply(key, null);
         this.ctx.drafts.persist(id);
-        this.#dirty.delete(key); this.#known.delete(key); this.#values.delete(key);
+        this.#dirty.delete(key); this.#known.delete(key);
         this.#saveMeta();
         return;
       }
@@ -680,7 +678,7 @@ export class ComposerSync {
   /** Each file's bytes once per session, under the id the core derives from them. */
   async #upload(client: Client, files: Attachment[]): Promise<void> {
     for (const file of files) {
-      if (unresolvedAssetId(file) !== undefined || this.#assetIds.get(file.data)?.has(fileMeta(file))) continue;
+      if (unresolvedAssetId(file) !== undefined || this.#assetOf(file) !== undefined) continue;
       const { assetId } = await client.call('composer.asset.put', { attachment: { kind: file.kind, mimeType: file.mimeType, data: file.data, name: file.name } as Attachment });
       this.#remember(file, assetId);
     }
@@ -694,6 +692,8 @@ export class ComposerSync {
         pending = client.call('composer.asset.get', { assetId }).then(attachment => {
           if (epoch !== this.#epoch) return;
           this.#remember(attachment, assetId);
+          // Kept like an upload's, so a restart does not send these bytes back up.
+          this.#saveMeta();
         }).catch(() => undefined).finally(() => this.#fetching.delete(assetId));
         this.#fetching.set(assetId, pending);
       }

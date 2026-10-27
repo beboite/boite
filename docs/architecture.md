@@ -84,6 +84,8 @@ must answer.
 subscription. The owning core stores revised drafts, replies and pending
 prompts separately from message history; their attachments are content-addressed
 assets. Compare-and-swap and tombstones protect edits across reconnects.
+Removing references collects unused assets; live records and pending uploads
+retain their bytes without loading attachment bodies during text saves.
 The core drains accepted queues even when every client is closed, waking only
 records with queued input and targeting thread events to that thread's record.
 Subscribing does not prepare a provider session. A reconnect reads pending cards
@@ -397,9 +399,29 @@ Every process starts through `procs.spawn`, `procs.spawnChild` or
 `packages/core/src/platform/`; drivers and RPC handlers do not import backends.
 The shell has its own native boundary under `apps/shell/src-tauri/src/platform/`.
 
-Windows Job Objects provide tree membership events and resource caps. Linux and
-macOS record direct children; their process-group termination cannot catch a
-child that starts its own session. The capability report exposes those limits.
+Protected tools install a host-owned `procs.protection` capability before their
+first spawn. It captures association/grant/checkout identity, optional selected
+provider/account/mode, credential paths and exact read overrides. Its immutable
+fingerprint belongs in the provider's warm-session key. The Linux implementation
+uses a private filtered checkout inside bubblewrap user/mount/PID/network
+namespaces and an inherited seccomp filter. All three registry launch APIs enforce
+it, and revocation kills namespace roots before removing their private view.
+Only validated project edits are copied back after tools exit and authority is
+rechecked. [Contacts](contacts.md#native-linux-tool-execution) describes setup,
+adapter obligations and native tests. This backend alone does not admit a provider.
+
+Windows protected tools use the same capture/publication policy with a private
+LPAC identity, task-owned directory ACLs and a non-breakaway Job Object. The
+native launcher atomically installs the lowbox, job and standard-handle allowlist
+before the process runs. The job's last handle kills descendants on launcher
+death, and root exit drains descendants before publication. Account/control
+processes stay separate. [Windows setup](contacts.md#native-windows-tool-execution)
+requires an explicitly built userspace helper. macOS has no protected execution
+backend and refuses these routes.
+
+Windows Job Objects provide tree membership events and resource caps. For ordinary
+processes, Linux and macOS record direct children; their process-group termination
+cannot catch a child that starts its own session. The capability report exposes those limits.
 [Trace](trace.md#platform-boundary) owns process records, caps, guards and shutdown.
 
 ## Drivers, one interface
@@ -577,6 +599,15 @@ member's desktop app gets a signed ticket from its own core for the others.
 Browser origins and coordination peers are read off the same roster. A member
 listens on its tailnet address beside the one it started on. [Groups](groups.md)
 describes the trust this assumes and where it stops.
+
+Contacts link different owners rather than adding group members. Explicit
+shared projects keep their association, board authority and execution on the
+selected original cores. A group gateway forwards only the bounded
+`contact.project` protocol under a current exact project grant, with canonical
+source/target endpoints and admission checks before and after the wait. It
+never turns that peer into an owner RPC client. File/tool enforcement and
+captured cancellation remain on the execution host. [Contacts](contacts.md)
+documents the protocol, acceptance evidence and unavailable provider isolation.
 
 ## The phone keeps the app
 

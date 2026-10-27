@@ -192,3 +192,18 @@ test('a contact still relayed by another member keeps the reply windows when one
   await waitFor(() => !member.core.group.peers().some(peer => peer.coreId === otherId), 10000);
   expect(member.core.coordination.trusted().some(peer => peer.coreId === guestId)).toBe(false);
 }, 30000);
+
+
+test('an authenticated group sync refreshes legacy relay copies without trusting missing admissions', async () => {
+  const {host, member, hostClient, memberClient, hostId, guestId, memberId} = await setup();
+  const gamma = await project(member, memberClient, 'legacy');
+  await hostClient.call('contacts.grant', {coreId: guestId, projectId: gamma.id, machine: memberId});
+  await waitFor(() => member.core.contacts.members.relayedOf(guestId).length === 1);
+  const copies = member.core.journal.getSetting('contacts:relayed') as {admission?: string}[];
+  member.core.journal.setSetting('contacts:relayed', copies.map(({admission, ...entry}) => entry));
+  expect(member.core.contacts.members.relayedOf(guestId)).toEqual([]);
+  const gateway = member.core.group.peers().find(peer => peer.coreId === hostId)!;
+  await member.core.coordination.request(gateway, 'group.sync', member.core.group.require());
+  await waitFor(() => member.core.contacts.members.relayedOf(guestId).length === 1);
+  expect(member.core.contacts.members.relayedOf(guestId)[0]?.admission).toBe(copies[0]?.admission);
+}, 30000);

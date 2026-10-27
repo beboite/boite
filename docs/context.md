@@ -384,6 +384,8 @@ A local core changing port retains the same drafts.
 
 Accepted queues run on the core without an open client, including after restart
 when delivery is known to be safe. Unconfirmed provider submissions stay held.
+Queued commands retain the enqueueing app's experiments, so a reviewed goal
+keeps its meaning after a restart or another device changes its preferences.
 A restored ordinary queue whose previous acceptance cannot be proved stays
 paused until explicitly resumed.
 Input written while the core is unreachable stays on the device until a client

@@ -210,6 +210,7 @@ export class ThreadCards {
     }
     const badFiles = answerAttachmentError(files);
     if (badFiles !== null) throw refused(badFiles.message, { questionId: request.id, ...badFiles.data });
+    this.core.sharedAccess.uploads(request.threadId, files);
     if (params.optionIds.length === 0 && text.length === 0 && files.length === 0) {
       throw refused('an answer needs an option or some text', { questionId: request.id });
     }

@@ -3,6 +3,7 @@ import { RpcErrorCode, type ComposerRecord, type RpcMethodName, type Thread } fr
 import { RpcFailure } from './client';
 import { FakeClient } from './fake-client';
 import { FakeComposerState } from './fake-client/composer';
+import { setExperiment } from './experiments';
 import { Store } from './store.svelte';
 
 // jsdom has no IndexedDB: the durable journal is a recorder here, and the
@@ -122,6 +123,24 @@ test('an attachment is uploaded once however often its box is saved, and fetched
   await vi.waitFor(() => expect(phone.store.composerStates['t-trace']?.attachments[0]?.data).toBe(file.data));
   expect(called(phone, 'composer.asset.get')).toHaveLength(1);
   expect(called(phone, 'composer.asset.put')).toHaveLength(0);
+  // Restarted, the phone that fetched the bytes still knows the core holds them.
+  await quiet();
+  stores.splice(stores.indexOf(phone.store), 1);
+  phone.store.detach();
+  const reloaded = await device('phone', desk.client.composerPeer({ delayMs: 0, principal: 'session' }));
+  await vi.waitFor(() => expect(reloaded.store.composerStates['t-trace']?.attachments[0]?.data).toBe(file.data));
+  reloaded.store.editComposerText('t-trace', 'See the notes file from the phone');
+  await vi.waitFor(async () => expect((await recordOf(desk.client, 'inputs', 't-trace'))?.value?.input).toMatchObject({ text: 'See the notes file from the phone', attachments: [{ name: 'notes.txt' }] }));
+  expect(called(reloaded, 'composer.asset.put')).toHaveLength(0);
+  // Restarted, the desk still knows the core holds those bytes and sends them up no more.
+  await quiet();
+  stores.splice(stores.indexOf(desk.store), 1);
+  desk.store.detach();
+  const back = await device('desk', desk.client.composerPeer({ delayMs: 0, principal: 'session' }));
+  await vi.waitFor(() => expect(back.store.composerStates['t-trace']?.attachments[0]?.data).toBe(file.data));
+  back.store.editComposerText('t-trace', 'See the notes file again');
+  await vi.waitFor(async () => expect((await recordOf(desk.client, 'inputs', 't-trace'))?.value?.input).toMatchObject({ text: 'See the notes file again', attachments: [{ name: 'notes.txt' }] }));
+  expect(called(back, 'composer.asset.put')).toHaveLength(0);
 });
 
 test('a shared queue is delivered once by the core, never by either frontend, and Send now tells the core', async () => {
@@ -342,7 +361,8 @@ test('a restart leaves running a queue the core holds, though the journal brings
   phone = await device('phone', desk.client.composerPeer({ delayMs: 0, principal: 'session' }));
   await vi.waitFor(() => expect(called(phone, 'composer.list')).toHaveLength(1));
   await quiet();
-  expect(phone.store.composerStates['t-scheduler']).toMatchObject({ paused: false, queued: [{ text: 'After the answer' }] });
+  // The origin the core stamped comes back with the entry, so the turn it starts still names it.
+  expect(phone.store.composerStates['t-scheduler']).toMatchObject({ paused: false, queued: [{ text: 'After the answer', sentFrom: null }] });
   expect(putsOf(phone, 't-scheduler')).toHaveLength(0);
   expect((await recordOf(desk.client, 'inputs', 't-scheduler'))?.value?.input).toMatchObject({ paused: false, queued: [{ text: 'After the answer' }] });
   // A prompt queued offline never reached the core: after another restart the queue waits paused, as before.
@@ -406,16 +426,20 @@ test('a restarted device keeps its draft\'s model and takes the record\'s only w
   await vi.waitFor(async () => expect((await recordOf(desk.client, 'drafts', id))?.value).toMatchObject({ input: { text: 'Keep my model' }, choice: null }));
 });
 
-test('a put the core keeps failing is tried again after a pause, not on every tick', async () => {
+test('a put the core keeps failing is tried again after a pause, not on every tick, and goes through once the core recovers', async () => {
   const desk = await device('desk', new FakeClient({ delayMs: 0 }));
+  let full = true;
   desk.calls.mockImplementation(async (method, params) => {
-    if (method === 'composer.put') throw new RpcFailure({ code: RpcErrorCode.Internal, message: 'disk full' });
+    if (method === 'composer.put' && full) throw new RpcFailure({ code: RpcErrorCode.Internal, message: 'disk full' });
     return desk.original(method, params);
   });
-  desk.store.editComposerText('t-trace', 'Never stored');
+  desk.store.editComposerText('t-trace', 'Stored once the disk has room');
   await new Promise(resolve => setTimeout(resolve, 2000));
   expect(putsOf(desk, 't-trace')).toHaveLength(1);
-});
+  full = false;
+  await vi.waitFor(async () => expect((await recordOf(desk.client, 'inputs', 't-trace'))?.value?.input.text).toBe('Stored once the disk has room'), { timeout: 8000 });
+  expect(putsOf(desk, 't-trace')).toHaveLength(2);
+}, 15_000);
 
 test('the open draft follows the worktree switch and model another device chose for it', async () => {
   const desk = await device('desk', new FakeClient({ delayMs: 0 }));
@@ -570,4 +594,79 @@ test('a permanently deleted thread clears its offline input and journal without 
   expect(reloaded.store.composerStates['t-trace']?.queued ?? []).toEqual([]);
   expect(putsOf(reloaded, 't-trace')).toHaveLength(0);
   expect(await recordOf(reloaded.client, 'inputs', 't-trace')).toBeUndefined();
+});
+
+test('a queued prompt without an id, as a refused send leaves it, survives another device changing the same queue', async () => {
+  const desk = await device('desk', new FakeClient({ delayMs: 0 }));
+  const phone = await device('phone', desk.client.composerPeer({ delayMs: 0, principal: 'session' }));
+  desk.store.composerStates['t-trace'] = { text: '', attachments: [], queued: [], sending: false, paused: true };
+  queue(desk.store, 't-trace', 'Already there');
+  await vi.waitFor(() => expect(phone.store.composerStates['t-trace']?.queued).toMatchObject([{ text: 'Already there' }]));
+  phone.client.drop();
+  await phone.client.settled();
+  phone.store.composerStates['t-trace']!.queued.unshift({ text: 'Refused while offline', attachments: [] });
+  queue(desk.store, 't-trace', 'Desk added');
+  await vi.waitFor(async () => expect((await recordOf(desk.client, 'inputs', 't-trace'))?.value?.input.queued).toHaveLength(2));
+  await phone.client.restore();
+  const texts = ['Already there', 'Desk added', 'Refused while offline'];
+  await vi.waitFor(async () => {
+    expect((await recordOf(desk.client, 'inputs', 't-trace'))?.value?.input.queued.map(entry => entry.text)).toEqual(texts);
+    for (const side of [desk, phone]) expect(side.store.composerStates['t-trace']?.queued.map(entry => entry.text)).toEqual(texts);
+  });
+});
+
+test('a send the core refuses as early joins the queue, though a put of that queue is still on its way', async () => {
+  const desk = await device('desk', new FakeClient({ delayMs: 0 }));
+  desk.store.composerStates['t-trace'] = { text: '', attachments: [], queued: [], sending: false, paused: true };
+  let release!: () => void, putting!: () => void;
+  let hold: Promise<void> | undefined = new Promise(resolve => { release = resolve; });
+  const inFlight = new Promise<void>(resolve => { putting = resolve; });
+  desk.calls.mockImplementation(async (method, params) => {
+    // The core has just opened a turn this device has not heard of.
+    if (method === 'turns.start') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread already has an in-flight turn',
+      data: { threadId: 't-trace', reason: 'turn-in-flight', thread: { ...desk.store.threads.find(row => row.id === 't-trace')!, status: 'running' } } });
+    const answer = await desk.original(method, params);
+    if (method === 'composer.put' && hold) { const gate = hold; hold = undefined; putting(); await gate; }
+    return answer;
+  });
+  queue(desk.store, 't-trace', 'Already queued');
+  await inFlight;
+  expect(await desk.store.send('Refused as early', 't-trace')).toBe(true);
+  release();
+  // The put's answer reads as a change of the core's (it stamps each entry): the held prompt follows the core's queue, as a new one of this device's does.
+  const texts = ['Already queued', 'Refused as early'];
+  await vi.waitFor(async () => {
+    expect(desk.store.composerStates['t-trace']?.queued.map(entry => entry.text)).toEqual(texts);
+    expect((await recordOf(desk.client, 'inputs', 't-trace'))?.value?.input.queued.map(entry => entry.text)).toEqual(texts);
+  });
+});
+
+test('words and file names that read like a local file id still reach the core, in the box and in the queue', async () => {
+  const desk = await device('desk', new FakeClient({ delayMs: 0 }));
+  const file = { kind: 'file' as const, mimeType: 'text/plain', name: '"local:notes".txt', data: btoa('Named oddly') };
+  desk.store.composerStates['t-trace'] = { text: '', attachments: [], queued: [], sending: false, paused: true };
+  queue(desk.store, 't-trace', 'Queued "local:cache" note');
+  desk.store.composerStates['t-trace']!.attachments.push({ ...file });
+  desk.store.editComposerText('t-trace', 'Box "local:cache" note');
+  await vi.waitFor(async () => expect((await recordOf(desk.client, 'inputs', 't-trace'))?.value?.input).toMatchObject({
+    text: 'Box "local:cache" note', attachments: [{ name: file.name }], queued: [{ text: 'Queued "local:cache" note' }] }));
+});
+
+test('a prompt queued offline runs with the experiments it was queued with, after a restart that turned them off', async () => {
+  const desk = await device('desk', new FakeClient({ delayMs: 0 }));
+  let phone = await device('phone', desk.client.composerPeer({ delayMs: 0, principal: 'session' }));
+  setExperiment('goal2', true);
+  phone.client.drop();
+  await phone.client.settled();
+  queue(phone.store, 't-trace', '/goal2 Ship the release');
+  stores.splice(stores.indexOf(phone.store), 1);
+  phone.store.detach();
+  phone.client.close();
+  setExperiment('goal2', false);
+  phone = await device('phone', desk.client.composerPeer({ delayMs: 0, principal: 'session' }));
+  await vi.waitFor(() => expect(phone.store.composerStates['t-trace']?.queued).toMatchObject([{ text: '/goal2 Ship the release' }]));
+  await phone.store.sendQueuedNow('t-trace');
+  await vi.waitFor(async () => expect((await phone.client.call('threads.get', { threadId: 't-trace' })).activity?.goal)
+    .toMatchObject({ objective: 'Ship the release', review: expect.anything() }));
+  expect(await delivered([desk, phone], 't-trace')).not.toContain('/goal2 Ship the release');
 });

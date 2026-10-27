@@ -15,6 +15,7 @@ import { thrown } from './settle.ts';
 
 let harness: TestCore;
 let client: CoreClient;
+const peers:TestCore[]=[];
 
 beforeAll(async () => {
   harness = await startTestCore();
@@ -22,15 +23,33 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  for (const peer of peers.splice(0)) await peer.stop();
   await harness.stop();
 });
 
-function env(): ContractEnv {
+function env(host=harness, owner=client, slowBoard?: {queued: number}): ContractEnv {
+  host.core.contacts.selfUrl=async()=>host.url;
   return {
-    call: (method, params) => client.call(method, params),
-    on: (event, handler) => client.on(event, handler),
-    newFolder: async () => mkdtempSync(join(harness.dataDir, 'project-')),
-    missingFolder: () => join(harness.dataDir, 'missing', 'folder'),
+    newContact:async()=>{
+      const peer=await startTestCore();peers.push(peer);
+      if(slowBoard){
+        const request=peer.core.coordination.request.bind(peer.core.coordination);
+        peer.core.coordination.request=async(target,operation,payload)=>{
+          const p=payload as {method?:string};
+          if(operation==='contact.project'&&p?.method==='board.apply')
+            await new Promise(resolve=>setTimeout(resolve,200));
+          return request(target,operation,payload);
+        };
+      }
+      return env(peer,await peer.connect(),slowBoard);
+    },
+    call: (method, params) => owner.call(method, params).then(result=>{
+      if(slowBoard&&method==='sharedBoard.apply'&&(result as {outcome?:string}).outcome==='queued')slowBoard.queued++;
+      return result;
+    }),
+    on: (event, handler) => owner.on(event, handler),
+    newFolder: async () => mkdtempSync(join(host.dataDir, 'project-')),
+    missingFolder: () => join(host.dataDir, 'missing', 'folder'),
     removeFolder: async (path) => rmSync(path, { recursive: true, force: true }),
     otherCase: (path) => (process.platform === 'win32' ? path.toUpperCase() : null),
   };
@@ -47,3 +66,8 @@ for (const [name, scenario] of Object.entries(SCENARIOS)) {
     expect(await thrown(scenario(env()))).toThrow();
   });
 }
+test('shared board contract awaits terminal receipts from a slow signed authority',async()=>{
+  const slowBoard={queued:0};
+  await SCENARIOS['shared projects, board receipts, human provenance and host-only protection agree across transports']!(env(harness,client,slowBoard));
+  expect(slowBoard.queued).toBeGreaterThan(0);
+});

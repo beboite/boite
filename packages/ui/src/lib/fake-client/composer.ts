@@ -4,13 +4,21 @@ import {
   decodedBytes, RpcErrorCode, type Attachment, type ComposerChoice, type ComposerQueuedPrompt,
   type ComposerRecord, type ComposerValue, type PreviewReference, type RpcEventName, type RpcEvents,
 } from '@boite/contracts';
-import { activityCommand, isActivityCommand } from '../activity-command';
+import { activityCommand } from '../activity-command';
 import { RpcFailure } from '../client';
+import { secureId } from '../secure-id';
 import type { FakeContext, FakeMethods } from './context';
 import { refusal } from './shared';
 
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const keyOf = (section: ComposerRecord['section'], id: string) => JSON.stringify([section, id]);
+/** The core's test (`isComposerActivity`): a command goes alone, whichever experiments then run it. */
+const isCommand = (text: string) => /^\/(goal2?|loop)(?:\s|$)/.test(text.trim());
+/** As `composerBatch` compares choices: key order and an absent speed do not count. */
+const sameChoice = (a?: ComposerChoice, b?: ComposerChoice) => {
+  const digest = (choice?: ComposerChoice) => JSON.stringify(Object.entries({ ...choice, speed: choice?.speed ?? null }).sort(([x], [y]) => x < y ? -1 : 1));
+  return digest(a) === digest(b);
+};
 
 /** One fake core's durable composer, shared by explicit peer clients only. */
 export class FakeComposerState {
@@ -20,7 +28,6 @@ export class FakeComposerState {
   readonly consumed = new Map<string, Set<string>>();
   readonly delivering = new Map<string, ComposerQueuedPrompt[]>();
   private pending = false;
-  private forced = new Set<string>();
   private methods = new Map<FakeContext, () => FakeMethods>();
   private boundaries = new Map<string, string>();
 
@@ -34,13 +41,15 @@ export class FakeComposerState {
   forgetThread(id: string): void {
     const key = keyOf('inputs', id);
     this.records.delete(key); this.consumed.delete(key);
-    this.boundaries.delete(id); this.forced.delete(id);
+    this.boundaries.delete(id);
   }
 
   write(section: ComposerRecord['section'], id: string, value: ComposerValue | null): ComposerRecord {
     const key = keyOf(section, id);
     const record = { section, id, revision: (this.records.get(key)?.revision ?? 0) + 1, updatedAt: Date.now(), value: copy(value) };
     this.records.set(key, record);
+    // As the core, a boundary or a Send now lasts only while the queue holds something.
+    if (section === 'inputs' && !value?.input.queued.length) this.boundaries.delete(id);
     for (const client of this.clients) client.emit('composer.updated', copy(record));
     return copy(record);
   }
@@ -49,7 +58,7 @@ export class FakeComposerState {
     if (event === 'composer.updated') return;
     if (event === 'turn.toolCompleted') {
       const boundary = payload as RpcEvents['turn.toolCompleted'];
-      this.boundaries.set(boundary.threadId, boundary.boundary);
+      if (this.records.get(keyOf('inputs', boundary.threadId))?.value?.input.queued.length) this.boundaries.set(boundary.threadId, boundary.boundary);
     }
     if (event === 'thread.removed') {
       const { threadId, undoable } = payload as RpcEvents['thread.removed'];
@@ -58,8 +67,10 @@ export class FakeComposerState {
     if (['turn.finished', 'turn.toolCompleted', 'permission.resolved', 'question.answered', 'thread.updated'].includes(event)) this.schedule(ctx);
   }
 
-  schedule(ctx: FakeContext, sendNow = false, only?: string): void {
-    if (sendNow && only !== undefined) this.forced.add(only);
+  /** Send now is a boundary of its own, as the core's: it waits out a request and goes at the next steering attempt. */
+  sendNow(id: string): void { this.boundaries.set(id, `manual-${secureId()}`); }
+
+  schedule(ctx: FakeContext): void {
     if (this.pending) return;
     this.pending = true;
     queueMicrotask(() => {
@@ -67,7 +78,7 @@ export class FakeComposerState {
       if (!this.clients.has(ctx)) return;
       for (const [key, row] of this.records) {
         if (!row.value?.input.queued.length || row.value.input.paused || this.delivering.has(key)) continue;
-        void this.deliver(ctx, key, this.forced.delete(row.id));
+        void this.deliver(ctx, key);
       }
     });
   }
@@ -97,18 +108,18 @@ export class FakeComposerState {
 
   private batch(queue: ComposerQueuedPrompt[]): ComposerQueuedPrompt[] {
     const head = queue[0]!;
-    if (head.request || isActivityCommand(head.text)) return [head];
+    if (head.request || isCommand(head.text)) return [head];
     const entries: ComposerQueuedPrompt[] = [];
     let files = 0, bytes = 0, refs = 0;
     for (const entry of queue) {
       const nextBytes = entry.attachments.reduce((sum, file) => sum + decodedBytes(this.assets.get(file.assetId)?.data ?? ''), 0);
-      if (entries.length && (entry.request || isActivityCommand(entry.text) || JSON.stringify(entry.choice) !== JSON.stringify(head.choice) || files + entry.attachments.length > ATTACHMENTS_PER_TURN || bytes + nextBytes > ATTACHMENTS_TOTAL_MAX_BYTES || refs + (entry.previewReferences?.length ?? 0) > PREVIEW_REFERENCES_PER_TURN)) break;
+      if (entries.length && (entry.request || isCommand(entry.text) || !sameChoice(entry.choice, head.choice) || JSON.stringify(entry.sentFrom ?? null) !== JSON.stringify(head.sentFrom ?? null) || entry.afterBoundary !== head.afterBoundary || files + entry.attachments.length > ATTACHMENTS_PER_TURN || bytes + nextBytes > ATTACHMENTS_TOTAL_MAX_BYTES || refs + (entry.previewReferences?.length ?? 0) > PREVIEW_REFERENCES_PER_TURN)) break;
       entries.push(entry); files += entry.attachments.length; bytes += nextBytes; refs += entry.previewReferences?.length ?? 0;
     }
     return entries;
   }
 
-  private async deliver(ctx: FakeContext, key: string, sendNow: boolean): Promise<void> {
+  private async deliver(ctx: FakeContext, key: string): Promise<void> {
     const row = this.records.get(key);
     const value = row?.value;
     const methods = this.methods.get(ctx)?.();
@@ -121,7 +132,7 @@ export class FakeComposerState {
     if ([...ctx.pendingPermissions.values()].some(item => item.request.threadId === row.id) || [...ctx.pendingQuestions.values()].some(item => item.request.threadId === row.id && !item.request.async)) return;
     const running = thread.status === 'running';
     const boundary = this.boundaries.get(row.id);
-    if (running && (head.request || isActivityCommand(head.text) || (!sendNow && (!boundary || head.afterBoundary === boundary)))) return;
+    if (running && (head.request || isCommand(head.text) || !boundary || head.afterBoundary === boundary)) return;
     const entries = this.batch(value.input.queued);
     this.delivering.set(key, entries);
     try {
@@ -131,16 +142,19 @@ export class FakeComposerState {
         const turn = thread.turns.findLast(turn => turn.status === 'running');
         if (!turn || JSON.stringify(choiceOf({ ...thread, ...turn.execution })) !== JSON.stringify(choiceOf(head.choice ?? thread))) return;
         const outcome = await methods['turns.steer']({ threadId: row.id, turnId: turn.id, ...payload, clientRequestId: requestId, expectedSelectionVersion: thread.selectionVersion ?? 0 });
-        if (!outcome.accepted) return;
+        if (!outcome.accepted) { this.boundaries.delete(row.id); return; }
       } else {
-        const command = activityCommand(payload.prompt);
+        this.boundaries.delete(row.id);
+        const command = activityCommand(payload.prompt, head.experiments ?? ctx.clientPreferences?.experiments ?? []);
         if (command) await methods['threads.activity.set']({ threadId: row.id, ...command, ...(payload.attachments.length ? { attachments: payload.attachments } : {}) });
         else {
           const chosen = head.request?.choice ?? head.choice;
           const selection = choiceOf(thread);
           if (chosen) Object.assign(thread, chosen);
-          try { await methods['turns.start']({ threadId: row.id, ...payload, clientRequestId: requestId }); }
-          finally { Object.assign(thread, selection); }
+          // `turns.start` fixes the turn's execution before its first await: the whole picker goes back at once, before any update can land.
+          const started = methods['turns.start']({ threadId: row.id, ...payload, clientRequestId: requestId });
+          if (chosen) Object.assign(thread, selection);
+          await started;
         }
       }
       const consumed = this.consumed.get(key) ?? new Set<string>();
@@ -215,11 +229,19 @@ export function composerMethods(ctx: FakeContext, methods: () => FakeMethods): P
         const consumed = state.consumed.get(key);
         value.input.queued = value.input.queued.filter(entry => !consumed?.has(entry.id));
         const selected = params.section === 'inputs' ? ctx.threads.get(params.id) : null;
-        for (const queued of value.input.queued) if (!queued.choice && selected) queued.choice = choiceOf(selected);
+        for (const queued of value.input.queued) {
+          if (!queued.choice && selected) queued.choice = choiceOf(selected);
+          // The first experiments the core saw for an item stay its own; an app that sent none lends its current ones.
+          const previous = existing.value?.input.queued.find(previous => previous.id === queued.id);
+          queued.experiments = previous?.experiments ?? queued.experiments ?? ctx.clientPreferences?.experiments ?? [];
+          // The core stamps the origin it first saw; the fake's one connection names no app.
+          queued.sentFrom = previous?.sentFrom !== undefined ? previous.sentFrom : null;
+        }
         for (const file of [...value.input.attachments, ...value.input.queued.flatMap(entry => entry.attachments)]) if (!state.assets.has(file.assetId)) throw refusal(`assetId ${file.assetId}: expected an uploaded composer attachment`);
       }
       const record = state.write(params.section, params.id, value);
-      state.schedule(ctx, params.sendNow === true, params.id);
+      if (params.section === 'inputs' && params.sendNow && value?.input.queued.length) state.sendNow(params.id);
+      state.schedule(ctx);
       return { accepted: true, record };
     },
     'composer.asset.put': async ({ attachment, incognito }) => {

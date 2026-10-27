@@ -30,6 +30,7 @@ import { answerPermission, drawUpdate, sessionNotificationOf } from './updates.t
 import { errorCodeOf, noteReady } from '../driver-log.ts';
 import { SessionRetention } from '../session-retention.ts';
 import { OpenCodeConnection } from './opencode-connection.ts';
+import {protectedAcp} from './protected.ts';
 
 /** A glog line at info severity: `I0921 09:51:32.917720 10292 main.py:80] ...`. */
 const GLOG_INFO = /^I\d{4} \d{2}:\d{2}:\d{2}\.\d+\s/;
@@ -122,6 +123,7 @@ export class AcpSession {
   private closing = false;
   private ended = false;
   private catalogValid = true;
+  private protection: ReturnType<typeof protectedAcp> = null;
 
   constructor(
     readonly key: string,
@@ -283,6 +285,7 @@ export class AcpSession {
   // -- the process ----------------------------------------------------------
 
   async setPermissionMode(turn: AcpTurn, mode: PermissionMode): Promise<boolean> {
+    if (turn.ctx.protectedExecution) return false;
     if (this.current !== turn || turn.isStopped || this.closing || this.ended) return false;
     const applied = await this.controls.applyMode({ ...turn.ctx, thread: { ...turn.ctx.thread, permissionMode: mode } });
     if (applied) turn.ctx.thread.permissionMode = mode;
@@ -316,6 +319,7 @@ export class AcpSession {
     }
     this.ctx = turn.ctx;
     try {
+      turn.ctx.protectedExecution?.check();
       await this.start(turn.ctx);
     } catch (error) {
       if (turn.isStopped) {
@@ -462,6 +466,8 @@ export class AcpSession {
     if (this.starting === null) {
       this.starting = noteReady(ctx, `${ctx.provider.id} ACP`, async () => {
         await this.open(ctx);
+        this.protection?.assertReady();
+        this.protection?.assertMcpReady();
         await this.controls.applyModel(ctx);
         await this.controls.applyConfig(ctx);
         await this.controls.applyMode(ctx);
@@ -485,6 +491,7 @@ export class AcpSession {
       throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
     }
 
+    this.protection = protectedAcp(ctx, () => this.current, profile?.launch?.args ?? []);
     const temp = launchTemp(ctx.provider, ctx.account.isolationDir);
     let child: SpawnedChild;
     const native = ctx.provider.id === 'opencode-v2';
@@ -495,8 +502,8 @@ export class AcpSession {
     const nativeArgs = [...launch.prefix, ...(profile?.launch?.args ?? ['acp']).filter(arg => arg !== 'acp'), 'serve', '--stdio', '--port', '0'];
     try {
       child = ctx.spawnChild(launch.executable, native ? nativeArgs : args, {
-        cwd: ctx.thread.cwd,
-        env: { ...agentEnv(ctx.provider, temp === null ? ctx.accountEnv : { ...ctx.accountEnv, ...temp.env }), ...(password === null ? {} : { OPENCODE_PASSWORD: password }) },
+        cwd: this.protection?.cwd ?? ctx.thread.cwd,
+        env: { ...agentEnv(ctx.provider, temp === null ? ctx.accountEnv : { ...ctx.accountEnv, ...temp.env }), ...this.protection?.env, ...(password === null ? {} : { OPENCODE_PASSWORD: password }) },
       });
     } catch (error) {
       void temp?.dispose();
@@ -527,7 +534,7 @@ export class AcpSession {
       .onNotification('session/update', sessionNotificationOf, ({ params }) => {
         if (params !== null) this.onUpdate(params);
       })
-      .onRequest('session/request_permission', ({ params }) => answerPermission(this.current, params))
+      .onRequest('session/request_permission', ({ params }) => this.protection ? Promise.resolve({outcome: {outcome: 'cancelled' as const}}) : answerPermission(this.current, params))
       .connect(stream!);
     this.connection = connection;
     this.agent = connection.agent;
@@ -539,7 +546,8 @@ export class AcpSession {
       clientCapabilities: {},
       clientInfo: { name: CLIENT_NAME, version: pkg.version },
     });
-    this.canLoad = init.agentCapabilities?.loadSession === true;
+    this.canLoad = !this.protection && init.agentCapabilities?.loadSession === true;
+    if (this.protection && (init.agentInfo?.name !== 'OpenCode' || init.agentInfo?.version !== '1.19.3')) throw new Error(`execution.acp.agentInfo: expected verified OpenCode 1.19.3, received ${init.agentInfo?.name} ${init.agentInfo?.version}`);
     this.canDelete = canDeleteSessions(init);
     this.imagesSupported = init.agentCapabilities?.promptCapabilities?.image === true;
     // The agent binary fills these: only text and numbers reach the log.
@@ -611,7 +619,7 @@ export class AcpSession {
     }
 
     const created = await connection.agent.request('session/new', {
-      cwd: ctx.thread.cwd,
+      cwd: this.protection?.cwd ?? ctx.thread.cwd,
       mcpServers: [],
     });
     this.sessionId = created.sessionId;
@@ -653,6 +661,8 @@ export class AcpSession {
     if (this.ended) return;
     this.ended = true;
     this.closing = true;
+    this.protection?.close(this.exited ?? Promise.resolve());
+    this.protection = null;
     this.clearIdle();
     this.commands.clear();
     const connection = this.connection;
@@ -758,6 +768,7 @@ export class AcpSession {
  */
 export function sessionKey(ctx: SessionContext): string {
   return JSON.stringify({
+    protection: ctx.protectedExecution?.fingerprint ?? null,
     permissionMode: isGrok(ctx.provider) ? ctx.thread.permissionMode : null,
     cwd: ctx.thread.cwd,
     contextMode: ctx.thread.contextMode,

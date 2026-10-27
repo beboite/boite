@@ -43,7 +43,7 @@ test('attachment assets survive restart, deduplicate and stay out of record broa
   const removedAsset = await a.call('composer.asset.put', { attachment: { ...attachment, data: 'cmVtb3ZlZA==' } });
   const removed = await a.call('composer.put', { section: 'drafts', id: 'removed-file-draft', expectedRevision: 0, value: { input: { ...value().input, attachments: [{ kind: attachment.kind, mimeType: attachment.mimeType, name: attachment.name, assetId: removedAsset.assetId }] } } });
   await a.call('composer.put', { section: 'drafts', id: 'removed-file-draft', expectedRevision: removed.record.revision, value: null });
-  expect(h.core.journal.db.query('SELECT count(*) AS n FROM composer_assets').get()).toEqual({ n: 2 });
+  expect(h.core.journal.db.query('SELECT count(*) AS n FROM composer_assets').get()).toEqual({ n: 1 });
   await h.stop(); h = await startTestCore({ dataDir: restartDir });
   const b = await h.connect();
   expect(await b.call('composer.asset.get', asset)).toEqual(attachment);
@@ -141,7 +141,8 @@ function scripted(steer?: (text: string) => Promise<boolean>) {
 
 test('steering waits for a tool boundary, locks only the captured item and preserves new typing', async () => {
   h = await startTestCore();
-  const a = await h.connect();
+  const a = await connect(h.url, h.token, { client: { name: 'pwa', version: '0', device: 'phone' } });
+  await a.call('client.preferences', { app: 'steering-origin', language: 'fr', experiments: [], labels: {} });
   const { threadId } = await echoThread(h, a);
   const inputs: string[] = [];
   let accept!: (value: boolean) => void;
@@ -163,6 +164,23 @@ test('steering waits for a tool boundary, locks only the captured item and prese
   current = h.core.composer.storage.get('inputs', threadId);
   expect(current.value?.input.text).toBe('typing while provider accepts');
   expect(h.core.journal.listTurns(threadId)).toHaveLength(1);
+  expect(h.core.journal.listMessages(threadId).find(message => message.role === 'user' && message.parts[0]?.type === 'text' && message.parts[0].text === 'do this next')?.parts[0]).toMatchObject({ sentFrom: { client: 'pwa', device: 'phone', language: 'fr' } });
+  const second = { ...current.value!, input: { ...current.value!.input, queued: [{ id: 'new-boundary-follow-up', text: 'wait for the next boundary', attachments: [] }] } };
+  await a.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: current.revision, value: second });
+  await Bun.sleep(30);
+  expect(inputs).toHaveLength(1);
+  driver.context().emit.part(message, 1, { type: 'tool', toolId: 'read-2', name: 'Read', input: {}, output: 'ok', status: 'done' });
+  await waitFor(() => inputs.length === 2); accept(true);
+  await waitFor(() => h.core.composer.storage.get('inputs', threadId).value?.input.queued.length === 0);
+  current = h.core.composer.storage.get('inputs', threadId);
+  const forced = { ...current.value!, input: { ...current.value!.input, paused: true, queued: [{ id: 'forced-after-pause', text: 'send once unpaused', attachments: [] }] } };
+  const paused = await a.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: current.revision, sendNow: true, value: forced });
+  await Bun.sleep(30); expect(inputs).toHaveLength(2);
+  forced.input.paused = false;
+  await a.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: paused.record.revision, value: forced });
+  await waitFor(() => inputs.length === 3); accept(true);
+  await waitFor(() => h.core.composer.storage.get('inputs', threadId).value?.input.queued.length === 0);
+  a.close();
 });
 
 test('a queue for the newer picker waits instead of steering into a captured execution on another account', async () => {
@@ -307,7 +325,7 @@ test.each([['goal', 'supported'], ['loop', 'supported'], ['goal', 'unsupported']
   h.core.providers.require('echo').protocol = 'acp';
   await a.call('providers.probe', { providerId: 'echo', accountId });
   const choice = { providerId: 'echo', accountId, model: 'discovered', effort: 'high', permissionMode: 'default' as const };
-  h.core.activity.set({ threadId, ...(kind === 'goal' ? { goal: { objective: 'complete captured work' } } : { loop: { prompt: 'complete captured work', intervalMs: 1000, maxIterations: 1 } }) }, choice);
+  h.core.activity.set({ threadId, ...(kind === 'goal' ? { goal: { objective: 'complete captured work' } } : { loop: { prompt: 'complete captured work', intervalMs: 1000, maxIterations: 1 } }) }, undefined, choice);
   h.core.activity.pauseAll(threadId);
   await h.stop();
   forgetProbes({ providerId: 'echo', accountId });
@@ -381,17 +399,47 @@ test('the core delivers an accepted queue with no connected client and deduplica
 });
 
 test('adjacent ordinary inputs share a bounded submission and all their ids remain deduplicated', async () => {
-  h = await startTestCore();
-  const a = await h.connect();
+  restartDir = mkdtempSync(join(tmpdir(), 'composer-origin-'));
+  h = await startTestCore({ dataDir: restartDir });
+  const a = await connect(h.url, h.token, { client: { name: 'pwa', version: '0', device: 'browser' } });
+  await a.call('client.preferences', { app: 'batch-origin', language: 'fr', experiments: [], labels: {} });
   const { threadId } = await echoThread(h, a);
   const queued = ['first', 'second'].map(text => ({ id: `batch-${text}`, text, attachments: [] }));
-  await a.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: 0, value: { input: { ...value().input, queued } } });
+  h.core.composer.stop();
+  const accepted = await a.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: 0, value: { input: { ...value().input, queued } } });
+  const b = await h.connect();
+  await b.call('client.preferences', { app: 'batch-other', language: 'en', experiments: [], labels: {} });
+  await b.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: accepted.record.revision, value: accepted.record.value });
+  a.close();
+  await h.stop();
+  h = await startTestCore({ dataDir: restartDir });
   await waitFor(() => h.core.journal.listTurns(threadId).some(turn => turn.status === 'done'));
   expect(h.core.journal.listTurns(threadId)).toHaveLength(1);
-  expect(h.core.journal.listMessages(threadId).find(message => message.role === 'user')?.parts[0]).toEqual({ type: 'text', text: 'first\n\nsecond' });
+  expect(h.core.journal.listMessages(threadId).find(message => message.role === 'user')?.parts[0]).toEqual({ type: 'text', text: 'first\n\nsecond', sentFrom: { client: 'pwa', device: 'browser', language: 'fr' } });
   const current = h.core.composer.storage.get('inputs', threadId);
-  await a.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: current.revision, value: { input: { ...value().input, queued } } });
+  const c = await h.connect();
+  await c.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: current.revision, value: { input: { ...value().input, queued } } });
   expect(h.core.composer.storage.get('inputs', threadId).value?.input.queued).toEqual([]);
+});
+
+test('prompts from different apps retain separate provenance when sharing a queue', async () => {
+  h = await startTestCore();
+  const a = await connect(h.url, h.token, { client: { name: 'pwa', version: '0', device: 'browser' } });
+  const b = await connect(h.url, h.token, { client: { name: 'pwa', version: '0', device: 'phone' } });
+  try {
+    await a.call('client.preferences', { app: 'browser-origin', language: 'fr', experiments: [], labels: {} });
+    await b.call('client.preferences', { app: 'phone-origin', language: 'en', experiments: [], labels: {} });
+    const { threadId } = await echoThread(h, a);
+    const first = await a.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: 0, value: { input: { ...value('').input, paused: true, queued: [{ id: 'browser-prompt', text: 'from browser', attachments: [] }] } } });
+    first.record.value!.input.queued.push({ id: 'phone-prompt', text: 'from phone', attachments: [] });
+    first.record.value!.input.paused = false;
+    await b.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: first.record.revision, value: first.record.value });
+    await waitFor(() => h.core.composer.storage.get('inputs', threadId).value?.input.queued.length === 0 && h.core.journal.listTurns(threadId).every(turn => turn.status === 'done'));
+    expect(h.core.journal.listMessages(threadId).filter(message => message.role === 'user').map(message => message.parts[0])).toEqual([
+      { type: 'text', text: 'from browser', sentFrom: { client: 'pwa', device: 'browser', language: 'fr' } },
+      { type: 'text', text: 'from phone', sentFrom: { client: 'pwa', device: 'phone', language: 'en' } },
+    ]);
+  } finally { a.close(); b.close(); }
 });
 
 test('a captured execution keeps its account, model and effort without changing the newer picker', async () => {
@@ -447,4 +495,38 @@ test('an archived project holds a queue even when its thread remains unarchived'
   expect(h.core.journal.listTurns(threadId)).toHaveLength(0);
   await a.call('projects.archive', { projectId, archived: false });
   await waitFor(() => h.core.journal.listTurns(threadId).some(turn => turn.status === 'done'));
+});
+
+test.each(['explicit', 'origin preferences'] as const)('queued goal2 retains %s semantics across another client and a cold restart', async source => {
+  restartDir = mkdtempSync(join(tmpdir(), 'composer-goal2-'));
+  h = await startTestCore({ dataDir: restartDir });
+  const a = await h.connect(), b = await h.connect();
+  const { threadId } = await echoThread(h, a);
+  await a.call('client.preferences', { app: 'origin-app', language: 'en', experiments: ['goal2'], labels: {} });
+  await b.call('client.preferences', { app: 'another-app', language: 'en', experiments: ['theme-grain'], labels: {} });
+  await b.call('client.preferences', { app: 'another-app', language: 'en', experiments: [], labels: {} });
+  h.core.composer.stop();
+  const first = await a.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: 0, value: { input: { ...value('').input, queued: [{ id: `reviewed-${source}`, text: '/goal2 keep the review', attachments: [], ...(source === 'explicit' ? { experiments: ['goal2' as const] } : {}) }] } } });
+  const changed = structuredClone(first.record.value!);
+  changed.input.queued[0]!.experiments = [];
+  await b.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: first.record.revision, value: changed });
+  a.close(); b.close();
+  await h.stop();
+  h = await startTestCore({ dataDir: restartDir });
+  await waitFor(() => h.core.activity.get(threadId).goal !== null || h.core.journal.listTurns(threadId).length > 0, 1000);
+  expect(h.core.activity.get(threadId).goal).toMatchObject({ objective: 'keep the review', review: expect.any(Object) });
+  expect(h.core.clients.current()).toBeNull();
+});
+
+test('a missing project in a delivered receipt does not abort startup of another eligible queue', async () => {
+  h = await startTestCore();
+  const a = await h.connect();
+  const { threadId } = await echoThread(h, a);
+  const thread = h.core.threads.require(threadId);
+  h.core.journal.putThread({ ...thread, id: 'orphan-thread', projectId: 'missing-project' });
+  h.core.composer.storage.reserve({ id: 'orphan-receipt', section: 'inputs', record_id: 'orphan-thread', status: 'delivered', thread_id: 'orphan-thread', request_id: 'orphan-request', fingerprint: '' }, false);
+  h.core.composer.storage.save('inputs', threadId, { input: { ...value('').input, queued: [{ id: 'eligible-startup-input', text: 'run despite the orphan', attachments: [], choice: { providerId: thread.providerId, accountId: thread.accountId, permissionMode: thread.permissionMode, model: thread.model, effort: thread.effort } }] } });
+  expect(() => h.core.composer.start()).not.toThrow();
+  await waitFor(() => h.core.journal.listTurns(threadId).some(turn => turn.status === 'done'));
+  expect(h.core.composer.storage.get('inputs', threadId).value?.input.queued).toEqual([]);
 });

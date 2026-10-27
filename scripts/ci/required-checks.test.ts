@@ -152,6 +152,49 @@ test('each core job runs on its CORE_ALL runner when coreRunners lists it', () =
   expect(pr.includes('"os":"ubuntu-24.04-arm"')).toBe(true);
 });
 
+test('protection changes run the native fixture inside the existing Windows core check', () => {
+  const ci = loadWorkflow('ci.yml');
+  const changes = ci.jobs.changes as Job & { outputs: Record<string, string> };
+  expect(changes.outputs.nativeWindows).toBe('${{ steps.filter.outputs.nativeWindows }}');
+  const windows = ci.jobs['core-windows-x64'] as Job & { 'timeout-minutes': number; steps: { id?: string; name?: string; if?: string; run?: string; env?: Record<string, string> }[] };
+  const helper = windows.steps.find(step => step.name === 'Build userspace native helper')!;
+  const native = windows.steps.find(step => step.name === 'Native Windows protected tools')!;
+  const prepare = windows.steps.find(step => step.name === 'Prepare synthetic native providers')!;
+  const providers = windows.steps.find(step => step.name === 'Native Windows provider and shared scopes')!;
+  expect(helper.id).toBe('native_helper');
+  expect(prepare).toMatchObject({id: 'native_providers', if: "${{ !cancelled() && runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true' && steps.native_helper.outcome == 'success' }}"});
+  expect(providers.if).toBe("${{ !cancelled() && runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true' && steps.native_providers.outcome == 'success' }}");
+  expect(windows['timeout-minutes']).toBe(30);
+  expect(providers.env).toMatchObject({BOITE_TEST_NATIVE_EXECUTION: '1', BOITE_DIAGNOSE_JOB_EVENTS: '1'});
+  expect(providers.run).toContain("@('protected-tool.exe', 'protected-tool-mingw.exe')");
+  expect(providers.run).toContain('bun test packages/core/test/protected-muse.test.ts --timeout 120000');
+  expect(helper.if).toBe("runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'");
+  expect(native.if).toBe(helper.if);
+  expect(helper.run).toContain('bun packages/core/bin/install-windows-sandbox.ts');
+  expect(helper.run).toContain('BOITE_WINDOWS_SANDBOX_PATH=');
+  expect(helper.run).toContain('$env:GITHUB_ENV');
+  // Preparation is a prerequisite for later matrices: every native command
+  // must stop before a later success can overwrite its exit status.
+  const helperLines = helper.run!.trim().split('\n');
+  const nativeCommands = helperLines.flatMap((line, index) => /^(?:bun |& )/.test(line) ? [index] : []);
+  expect(nativeCommands).toHaveLength(3);
+  for (const index of nativeCommands) {
+    expect(helperLines[index + 1]).toBe('if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }');
+  }
+  expect(windows.steps.indexOf(helper)).toBeLessThan(windows.steps.indexOf(native));
+  expect(native.env).toMatchObject({ BOITE_TEST_NATIVE_EXECUTION: '1', TEMP: '${{ runner.temp }}', TMP: '${{ runner.temp }}' });
+  expect(native.run).toBe(`$failed = $false
+foreach ($helper in @('protected-tool.exe', 'protected-tool-mingw.exe')) {
+  Write-Host "Native fixture helper: $helper"
+  $env:BOITE_WINDOWS_SANDBOX_PATH = "$env:RUNNER_TEMP\\$helper"
+  bun test packages/core/test/protected-windows.test.ts --timeout 120000
+  if ($LASTEXITCODE -ne 0) { $failed = $true }
+}
+if ($failed) { exit 1 }
+`);
+  expect(windows.steps.some(step => step.run === 'bun run --cwd packages/core test')).toBe(true);
+});
+
 test('each portable desktop job builds its PORTABLE_ALL platform when platforms lists it', () => {
   const jobs = Object.entries(loadWorkflow('desktop.yml').jobs).filter(([id]) => id.startsWith('portable-'));
   expect(jobs.map(([id, job]) => ({

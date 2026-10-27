@@ -37,7 +37,7 @@
   import SideAnswer from './SideAnswer.svelte';
   import { ComposerSide } from '../lib/composer-side.svelte';
   import PreviewReferences from './PreviewReferences.svelte';
-  import { chipChoice, sendToTarget, type ComposerTarget } from '../lib/composer-target';
+  import { chipChoice, queuedChoice, sendToTarget, type ComposerTarget } from '../lib/composer-target';
 
   /** A centred draft drops the bottom padding so its heading and input form one block. A `target` makes it an agent's box. */
   let { store, centered = false, target = null }: { store: Store; centered?: boolean; target?: ComposerTarget | null } = $props();
@@ -371,8 +371,10 @@
     if (!editedThread && (inputStore.busy || state.queued.length > 0 || state.sending || offline)) {
       // Written while the machine is away, it joins the outbox: its own request id and the chips' model and effort.
       // Every queued prompt keeps the chips it was written with: a later change of the picker does not redirect it.
-      inputStore.queuePrompt(inputKey, { text: prompt, attachments: images, afterBoundary: store.inputBoundaries[key]?.boundary, choice: $state.snapshot(sendChoice), ...(references.length ? { previewReferences: references } : {}) },
-        offline ? { choice: $state.snapshot(sendChoice) } : undefined);
+      // Chips that only show what the thread resolves to keep the thread's own selection, so the prompt can steer a turn left on the agent's default.
+      const kept = queuedChoice(inputStore, inputStore.openThread?.id === inputKey ? inputStore.openThread : null, $state.snapshot(sendChoice));
+      inputStore.queuePrompt(inputKey, { text: prompt, attachments: images, afterBoundary: store.inputBoundaries[key]?.boundary, choice: kept, ...(references.length ? { previewReferences: references } : {}) },
+        offline ? { choice: { ...kept } } : undefined);
       state.editing = null;
       emptyBox(state);
       resetHistory(state);

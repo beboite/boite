@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { previewReferencesError, type ComposerValue } from '@boite/contracts';
+import { APP_LANGUAGES, EXPERIMENT_IDS, previewReferencesError, type ComposerValue } from '@boite/contracts';
 import { invalidParams } from './errors.ts';
 
 const choice = z.object({
@@ -12,7 +12,8 @@ const attachment = z.object({ kind: z.enum(['image', 'file']), mimeType: z.strin
 const references = z.array(z.unknown()).optional();
 const queued = z.object({
   id: z.string().min(1), text: z.string(), attachments: z.array(attachment), previewReferences: references,
-  afterBoundary: z.string().optional(), choice: choice.optional(),
+  afterBoundary: z.string().optional(), choice: choice.optional(), experiments: z.array(z.enum(EXPERIMENT_IDS)).optional(),
+  sentFrom: z.object({ client: z.enum(['shell', 'pwa']), device: z.string().nullable(), language: z.enum(APP_LANGUAGES).optional() }).nullable().optional(),
   request: z.object({ id: z.string().min(1), choice: choice.nullable(), queuedAt: z.number().finite(), failed: z.string().optional(), sent: z.literal(true).optional(),
     start: z.object({ projectId: z.string().min(1), worktree: z.boolean(), incognito: z.boolean() }).optional() }).optional(),
 });

@@ -1,5 +1,5 @@
 import { untrack } from 'svelte';
-import { previewReferencesError, type Attachment, type PreviewReference } from '@boite/contracts';
+import { APP_LANGUAGES, EXPERIMENT_IDS, previewReferencesError, type Attachment, type PreviewReference, type SentFrom } from '@boite/contracts';
 import type { Choice, Draft } from '../store.svelte';
 import type { Composer, OutboxRequest } from './composer.svelte';
 import type { StoreContext } from './context';
@@ -622,6 +622,7 @@ function savedInput(input: Input, assetId: (bytes: string) => string) {
   return { text: input.text, editing: input.editing ?? null, attachments: input.attachments.map(file),
     previewReferences: input.previewReferences && $state.snapshot(input.previewReferences),
     queued: input.queued.map(item => ({ ...(item.id ? { id: item.id } : {}), ...(item.choice ? { choice: $state.snapshot(item.choice) } : {}),
+      ...(item.experiments ? { experiments: [...item.experiments] } : {}), ...(item.sentFrom !== undefined ? { sentFrom: item.sentFrom && { ...item.sentFrom } } : {}),
       text: item.text, attachments: item.attachments.map(file), previewReferences: item.previewReferences && $state.snapshot(item.previewReferences),
       ...(item.request ? { request: $state.snapshot(item.request) } : {}) })) };
 }
@@ -639,6 +640,14 @@ function outboxRequest(value: unknown): OutboxRequest | undefined {
     ...(raw.sent === true ? { sent: true as const } : {}), ...(start ? { start } : {}) };
 }
 
+/** The app a queued prompt came from as the core stamped it, null for an unidentified one, nothing for a stored value that is neither. */
+function sentFrom(value: unknown): SentFrom | null | undefined {
+  if (value === null) return null;
+  const raw = value as Partial<SentFrom> | undefined;
+  if (!raw || typeof raw !== 'object' || (raw.client !== 'shell' && raw.client !== 'pwa') || (raw.device !== null && typeof raw.device !== 'string')) return undefined;
+  return { client: raw.client, device: raw.device, ...(APP_LANGUAGES.includes(raw.language as never) ? { language: raw.language } : {}) };
+}
+
 function references(value: unknown): PreviewReference[] {
   return Array.isArray(value) && !previewReferencesError(value) ? value as PreviewReference[] : [];
 }
@@ -650,7 +659,9 @@ function restoreInput(value: unknown, assets: Map<string, string>): Input | null
     const request = outboxRequest(item.request);
     const id = typeof item.id === 'string' && /^[A-Za-z0-9_-]{8,128}$/.test(item.id) ? item.id : request?.id;
     const choice = item.choice && typeof item.choice === 'object' && typeof item.choice.providerId === 'string' && typeof item.choice.accountId === 'string' ? item.choice as Choice : undefined;
-    return { ...(id ? { id } : {}), ...(choice ? { choice } : {}), text: item.text, attachments: attachments(item.attachments, assets), previewReferences: references(item.previewReferences), ...(request ? { request } : {}) };
+    const experiments = Array.isArray(item.experiments) ? EXPERIMENT_IDS.filter(id => item.experiments.includes(id)) : undefined;
+    const origin = sentFrom(item.sentFrom);
+    return { ...(id ? { id } : {}), ...(choice ? { choice } : {}), ...(experiments ? { experiments } : {}), ...(origin !== undefined ? { sentFrom: origin } : {}), text: item.text, attachments: attachments(item.attachments, assets), previewReferences: references(item.previewReferences), ...(request ? { request } : {}) };
   }) : [];
   return { ...empty(), text: raw.text, editing: typeof raw.editing === 'string' ? raw.editing : null,
     previewReferences: references(raw.previewReferences),

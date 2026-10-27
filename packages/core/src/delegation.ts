@@ -433,7 +433,7 @@ export class Delegation {
    * one, and its answer never comes back as mail.
    */
   private stepOwned(threadId: string): boolean {
-    return this.core.workflows.owns(threadId) || this.core.activity.ownsReviewer(threadId) || this.core.activity.ownsTracker(threadId) || this.core.workforce.memory.owns(threadId);
+    return !!this.core.sharedCompute?.journal.worker(threadId) || this.core.workflows.owns(threadId) || this.core.activity.ownsReviewer(threadId) || this.core.activity.ownsTracker(threadId) || this.core.workforce.memory.owns(threadId);
   }
   /**
    * Whether a child's team lets its turn start. The scheduler passes the parent it
@@ -441,6 +441,7 @@ export class Delegation {
    * and each team's setting once.
    */
   canRun(threadId: string, parentThreadId?: string | null, configs?: Map<string, DelegationConfig>): boolean {
+    if (this.core.sharedCompute && !this.core.sharedCompute.canRun(threadId)) return false;
     const parentId = parentThreadId === undefined ? this.core.journal.getThread(threadId)?.parentThreadId : parentThreadId;
     if (!parentId) return true;
     let config = configs?.get(parentId);
@@ -451,6 +452,7 @@ export class Delegation {
     return !this.held(config, this.stepOwned(threadId));
   }
   prepareTurn(turn: Turn): boolean {
+    if (this.core.sharedCompute && !this.core.sharedCompute.canRun(turn.threadId)) return false;
     const thread = this.core.threads.require(turn.threadId);
     if (!thread.parentThreadId && turn.execution?.operation !== 'delegation') return true;
     const root = this.root(thread.id), config = this.config(root.id);

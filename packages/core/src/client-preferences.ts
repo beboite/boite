@@ -82,3 +82,9 @@ export class ClientPreferencesBook {
     return { language: this.latest.preferences.language, device: this.latest.from?.device ?? null, client: this.latest.from?.client ?? null };
   }
 }
+
+/** The submitting socket's origin, with the language its own app reported. */
+export function promptOrigin(connection: Connection, preferences: ClientPreferences | null): SentFrom | null {
+  const from = connection.sentFrom ?? null;
+  return from === null || preferences === null ? from : { ...from, language: preferences.language };
+}

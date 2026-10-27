@@ -1,5 +1,6 @@
-import type { Attachment, PreviewReference } from './messages';
+import type { Attachment, PreviewReference, SentFrom } from './messages';
 import type { PermissionMode } from './threads';
+import type { ExperimentId } from './setting-requests';
 
 export interface ComposerChoice {
   providerId: string;
@@ -33,6 +34,10 @@ export interface ComposerQueuedPrompt {
   previewReferences?: PreviewReference[];
   afterBoundary?: string;
   choice?: ComposerChoice;
+  /** The enqueueing app's experiments, retained across reconnect and restart. */
+  experiments?: ExperimentId[];
+  /** Origin captured by the core on acceptance; null means an unidentified client. */
+  sentFrom?: SentFrom | null;
   request?: {
     id: string;
     choice: ComposerChoice | null;

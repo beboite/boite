@@ -18,7 +18,7 @@ export function composerBatch(queue: ComposerQueuedPrompt[], storage: ComposerSt
   const ids = new Set<string>();
   const choice = (item: ComposerQueuedPrompt) => digest({ ...item.choice, speed: item.choice?.speed ?? null });
   for (const item of queue) {
-    if (result.entries.length && (first.request || item.request || isComposerActivity(first.text) || isComposerActivity(item.text) || choice(first) !== choice(item) || item.afterBoundary !== first.afterBoundary)) break;
+    if (result.entries.length && (first.request || item.request || isComposerActivity(first.text) || isComposerActivity(item.text) || choice(first) !== choice(item) || digest(first.sentFrom ?? null) !== digest(item.sentFrom ?? null) || item.afterBoundary !== first.afterBoundary)) break;
     const attachments = item.attachments.map(reference => storage.readAsset(reference.assetId));
     const weight = attachments.reduce((sum, attachment) => sum + decodedBytes(attachment.data), 0);
     if (result.entries.length && (result.attachments.length + attachments.length > ATTACHMENTS_PER_TURN || bytes + weight > ATTACHMENTS_TOTAL_MAX_BYTES || result.previewReferences.length + (item.previewReferences?.length ?? 0) > PREVIEW_REFERENCES_PER_TURN)) break;

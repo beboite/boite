@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ComposerChoice, ComposerQueuedPrompt, ComposerRecord, ComposerValue, RpcParams, ThreadSummary } from '@boite/contracts';
 import type { Core } from './core.ts';
 import type { Connection } from './router.ts';
+import { promptOrigin } from './client-preferences.ts';
 import { invalidParams, messageOf, notFound, refused } from './errors.ts';
 import { ComposerStorage, digest, recordKey, type Delivery } from './composer-storage.ts';
 import { composerValue } from './composer-validation.ts';
@@ -49,7 +50,7 @@ export class Composer {
       }
     });
     core.router.register('composer.list', (_params, ctx) => this.storage.list(ctx.connection.id));
-    core.router.register('composer.asset.put', (params, ctx) => this.storage.putAsset(params.attachment, params.incognito === true, ctx.connection.id));
+    core.router.register('composer.asset.put', (params, ctx) => this.storage.putAsset(params.attachment, params.incognito === true, ctx.connection));
     core.router.register('composer.asset.get', (params, ctx) => this.storage.getAsset(params.assetId, ctx.connection.id));
     core.router.register('composer.put', (params, ctx) => this.put(params, ctx.connection));
   }
@@ -75,7 +76,8 @@ export class Composer {
     for (const delivery of delivered) {
       if (!delivery.thread_id) continue;
       const thread = this.core.journal.getThread(delivery.thread_id);
-      if (!thread || thread.archived || (thread.projectId && this.core.projects.require(thread.projectId).archived)) continue;
+      const project = thread?.projectId ? this.core.journal.getProject(thread.projectId) : null;
+      if (!thread || thread.archived || (thread.projectId && (!project || project.archived))) continue;
       const receipt = this.core.journal.turnRequest(delivery.thread_id, delivery.request_id);
       const turn = receipt && this.core.journal.getTurn(receipt.turn_id);
       if (turn?.queueHold && turn.startedAt === null) {
@@ -104,6 +106,10 @@ export class Composer {
       this.storage.validateAssets(value, this.storage.privateMode(params.section, params.id, value), connection.id);
       value.input.queued = value.input.queued.filter(item => this.storage.delivery(item.id)?.status !== 'delivered');
       for (const item of value.input.queued) {
+        const previous = current.value?.input.queued.find(previous => previous.id === item.id);
+        const preferences = this.core.clients.use(connection);
+        item.experiments = previous?.experiments ?? item.experiments ?? preferences?.experiments ?? [];
+        item.sentFrom = previous?.sentFrom !== undefined ? previous.sentFrom : promptOrigin(connection, preferences);
         const delivery = this.storage.delivery(item.id);
         if (delivery && delivery.status !== 'delivered' && (delivery.section !== params.section || delivery.record_id !== params.id)) throw refused('composer.queued.id: this queued input already belongs to another composer');
         item.choice ??= item.request?.choice ?? value.choice ?? (thread ? choiceOf(thread) : undefined);
@@ -119,7 +125,10 @@ export class Composer {
       }
     }
     const record = this.atomic(() => this.storage.save(params.section, params.id, value, connection));
-    if (params.sendNow && params.section === 'inputs') this.boundaries.set(params.id, `manual-${randomUUID()}`);
+    if (params.section === 'inputs') {
+      if (!record.value?.input.queued.length) this.boundaries.delete(params.id);
+      else if (params.sendNow) this.boundaries.set(params.id, `manual-${randomUUID()}`);
+    }
     this.schedule([{ section: params.section, id: params.id }]);
     return { accepted: true, record };
   }
@@ -156,7 +165,7 @@ export class Composer {
     const key = recordKey(section, id);
     while (!this.closed && !this.core.stopping) {
       const record = this.storage.get(section, id), value = record.value;
-      if (!value || !value.input.queued.length) { this.storage.queued.delete(key); return; }
+      if (!value || !value.input.queued.length) { this.storage.queued.delete(key); if (section === 'inputs') this.boundaries.delete(id); return; }
       if (value.input.paused) return;
       const item = value.input.queued[0]!;
       const delivery = this.storage.delivery(item.id);
@@ -185,7 +194,7 @@ export class Composer {
           const turn = running;
           if (!turn) return;
           for (const entry of batch.entries) this.reserve(record, entry, id, batch.requestId);
-          const accepted = await Promise.race([this.stopped, steerUser(this.core, this.core.threads, { threadId: id, turnId: turn.id, prompt: batch.text, attachments, previewReferences: batch.previewReferences, clientRequestId: batch.requestId, expectedSelectionVersion: thread.selectionVersion ?? 0 })]);
+          const accepted = await Promise.race([this.stopped, steerUser(this.core, this.core.threads, { threadId: id, turnId: turn.id, prompt: batch.text, attachments, previewReferences: batch.previewReferences, clientRequestId: batch.requestId, expectedSelectionVersion: thread.selectionVersion ?? 0 }, batch.entries[0]!.sentFrom ?? null)]);
           if (!accepted || this.closed) return;
           if (!accepted.accepted) { for (const entry of batch.entries) this.storage.release(entry.id); this.boundaries.delete(id); return; }
           this.complete(section, id, batch.entries.map(entry => entry.id)); continue;
@@ -199,15 +208,15 @@ export class Composer {
         const current = this.core.journal.getThread(id);
         if (this.closed || this.core.stopping || !current || current.archived || (current.projectId && this.core.projects.require(current.projectId).archived)) return;
         if (current.projectId) await this.core.projects.requireFolder(current.projectId);
-        const activity = composerActivity(item.text, this.core.clients.current()?.experiments);
+        const activity = composerActivity(item.text, item.experiments ?? this.core.clients.current()?.experiments);
         this.atomic(() => {
           const target = this.core.journal.getThread(id);
           if (!target || target.archived || (target.projectId && this.core.projects.require(target.projectId).archived)) return;
           for (const entry of batch.entries) this.reserve(record, entry, id, batch.requestId);
           if (activity) {
             if (item.previewReferences?.length) throw refused('Activity commands do not accept page references.');
-            this.core.activity.set({ threadId: id, ...activity, attachments }, choice);
-          } else this.core.threads.startTurn(id, batch.text, attachments, current.selectionVersion ?? 0, undefined, undefined, batch.requestId, undefined, batch.previewReferences, undefined, null, undefined, choice);
+            this.core.activity.set({ threadId: id, ...activity, attachments }, undefined, choice);
+          } else this.core.threads.startTurn(id, batch.text, attachments, current.selectionVersion ?? 0, undefined, undefined, batch.requestId, undefined, batch.previewReferences, undefined, batch.entries[0]!.sentFrom ?? null, undefined, choice);
           this.complete(section, id, batch.entries.map(entry => entry.id));
         });
       } catch (error) {

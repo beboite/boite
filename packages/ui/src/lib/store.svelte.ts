@@ -134,6 +134,7 @@ export class Store {
   }
   get clientGeneration(): number { return this.#ctx.clientGeneration; }
   get navigationGeneration(): number { return this.#ctx.threads.openGeneration; }
+  get shared() { return this.#ctx.shared; }
   get serverUpdater() { return this.#ctx.serverUpdater; }
 
   // -------------------------------------------------------------------------
@@ -180,6 +181,7 @@ export class Store {
 
   detach(): void {
     const ctx = this.#ctx;
+    ctx.shared.reset();
     ctx.requests.resetSecrets();
     ctx.clientGeneration++;
     ctx.settings.brainCommands = [];

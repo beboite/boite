@@ -4,6 +4,7 @@ import { answerAttachmentError, decodedBytes, ATTACHMENTS_PER_TURN, ATTACHMENTS_
 import type { Core } from './core.ts';
 import { invalidParams, notFound, refused } from './errors.ts';
 import type { Connection } from './router.ts';
+import { collectStoredComposerAssets } from './journal/composer-assets.ts';
 
 type Row = { section: ComposerRecord['section']; id: string; revision: number; updated_at: number; value: string | null };
 export interface Delivery {
@@ -24,8 +25,11 @@ export class ComposerStorage {
   private readonly privateDeliveries = new Map<string, Delivery>();
   private readonly privateOwners = new Map<string, Connection>();
   private readonly privateAssetOwners = new Map<string, string>();
+  private readonly pendingAssets = new Map<string, Set<string>>();
+  private readonly connections = new Set<string>();
   readonly queued = new Map<string, Pick<ComposerRecord, 'section' | 'id'>>();
   constructor(private readonly core: Core) {
+    core.journal.collectComposerAssets = assets => this.collectAssets(assets);
     // No client can still be uploading here. Messages already own their bytes;
     // only live composer references retain an uploaded composer asset.
     core.journal.db.run(`DELETE FROM composer_assets WHERE id NOT IN (
@@ -44,12 +48,14 @@ export class ComposerStorage {
   owner(record: Pick<ComposerRecord, 'section' | 'id'>): Connection | undefined { return this.privateOwners.get(recordKey(record.section, record.id)); }
   forgetThread(threadId: string): void {
     const key = recordKey('inputs', threadId);
+    const assets = this.privateRecords.get(key)?.value;
     this.queued.delete(key); this.privateRecords.delete(key); this.privateOwners.delete(key);
     for (const [id, delivery] of this.privateDeliveries) {
       if (delivery.thread_id !== threadId && !(delivery.section === 'inputs' && delivery.record_id === threadId)) continue;
       if (delivery.section === 'drafts' && delivery.status === 'delivered') { delivery.thread_id = null; delivery.fingerprint = ''; }
       else this.privateDeliveries.delete(id);
     }
+    if (assets) this.collectAssets(this.references(assets).map(reference => reference.assetId));
   }
   requireOwner(record: Pick<ComposerRecord, 'section' | 'id'>, connectionId: string): void {
     const owner = this.owner(record);
@@ -75,11 +81,13 @@ export class ComposerStorage {
 
   save(section: ComposerRecord['section'], id: string, value: ComposerValue | null, owner?: Connection): ComposerRecord {
     const previous = this.get(section, id);
+    const references = value ? this.references(value).map(reference => reference.assetId) : [];
     const record = { section, id, value, revision: previous.revision + 1, updatedAt: Date.now() };
     if (this.privateMode(section, id, value)) {
       if (previous.revision && !this.privateRecords.has(recordKey(section, id))) throw refused('composer: a persisted composer cannot become incognito; use a new draft');
       const connection = this.privateOwners.get(recordKey(section, id)) ?? owner;
       if (!connection) throw refused('composer: an incognito record requires its originating connection');
+      this.track(connection);
       this.privateOwners.set(recordKey(section, id), connection);
       this.privateRecords.set(recordKey(section, id), record);
     } else this.core.journal.db.query(`INSERT INTO composer_records VALUES (?, ?, ?, ?, ?)
@@ -87,19 +95,60 @@ export class ComposerStorage {
       .run(section, id, record.revision, record.updatedAt, value === null ? null : JSON.stringify(value));
     if (value?.input.queued.length) this.queued.set(recordKey(section, id), { section, id });
     else this.queued.delete(recordKey(section, id));
+    for (const assetId of references) {
+      const pending = this.pendingAssets.get(assetId);
+      if (owner) pending?.delete(owner.id);
+      if (pending?.size === 0) this.pendingAssets.delete(assetId);
+    }
+    if (previous.value) this.collectAssets(this.references(previous.value).map(reference => reference.assetId).filter(assetId => !references.includes(assetId)));
     const privateOwner = this.privateOwners.get(recordKey(section, id));
     if (privateOwner) privateOwner.sendEvent('composer.updated', structuredClone(record));
     else this.core.bus.emit('composer.updated', structuredClone(record));
     return record;
   }
 
-  putAsset(attachment: Attachment, incognito = false, ownerId?: string): { assetId: string } {
+  putAsset(attachment: Attachment, incognito: boolean, owner: Connection): { assetId: string } {
     const error = answerAttachmentError([attachment]);
     if (error) throw invalidParams(`composer.asset.put: ${error.message}`);
-    const assetId = `${incognito ? 'private-' : ''}${digest(incognito ? [ownerId, attachment] : attachment)}`;
-    if (incognito) { this.privateAssets.set(assetId, structuredClone(attachment)); this.privateAssetOwners.set(assetId, ownerId!); }
+    this.track(owner);
+    const assetId = `${incognito ? 'private-' : ''}${digest(incognito ? [owner.id, attachment] : attachment)}`;
+    if (incognito) { this.privateAssets.set(assetId, structuredClone(attachment)); this.privateAssetOwners.set(assetId, owner.id); }
     else this.core.journal.db.query('INSERT OR IGNORE INTO composer_assets VALUES (?, ?, ?, ?, ?, ?)').run(assetId, JSON.stringify(attachment), attachment.kind, attachment.mimeType, attachment.name, decodedBytes(attachment.data));
+    const pending = this.pendingAssets.get(assetId) ?? new Set<string>();
+    pending.add(owner.id); this.pendingAssets.set(assetId, pending);
     return { assetId };
+  }
+
+  private track(connection: Connection): void {
+    if (this.connections.has(connection.id)) return;
+    this.connections.add(connection.id);
+    connection.onClose?.(() => {
+      this.connections.delete(connection.id);
+      const assets = new Set<string>(), records = new Set<string>();
+      for (const [key, owner] of this.privateOwners) if (owner.id === connection.id) {
+        const value = this.privateRecords.get(key)?.value;
+        if (value) for (const reference of this.references(value)) assets.add(reference.assetId);
+        this.privateRecords.delete(key); this.privateOwners.delete(key); this.queued.delete(key); records.add(key);
+      }
+      for (const [id, delivery] of this.privateDeliveries) if (records.has(recordKey(delivery.section, delivery.record_id))) this.privateDeliveries.delete(id);
+      for (const [id, ownerId] of this.privateAssetOwners) if (ownerId === connection.id) assets.add(id);
+      for (const [id, pending] of this.pendingAssets) if (pending.delete(connection.id)) {
+        if (!pending.size) this.pendingAssets.delete(id);
+        assets.add(id);
+      }
+      this.collectAssets(assets);
+    });
+  }
+
+  private collectAssets(assetIds: Iterable<string>): void {
+    const stored: string[] = [];
+    for (const id of new Set(assetIds)) {
+      if (this.pendingAssets.has(id)) continue;
+      if ([...this.privateRecords.values()].some(record => record.value && this.references(record.value).some(reference => reference.assetId === id))) continue;
+      if (!id.startsWith('private-')) { stored.push(id); continue; }
+      this.privateAssets.delete(id); this.privateAssetOwners.delete(id);
+    }
+    collectStoredComposerAssets(this.core.journal.db, stored);
   }
 
   readAsset(assetId: string): Attachment {

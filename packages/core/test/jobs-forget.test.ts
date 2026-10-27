@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Bus } from '../src/bus.ts';
 import { Journal } from '../src/journal.ts';
-import { processPlatform } from '../src/platform/index.ts';
+import { registryPlatform } from '../src/platform/index.ts';
 import { threadJobCount } from '../src/platform/windows/jobs.ts';
 import { ProcRegistry } from '../src/procs.ts';
 import { DEFAULT_SETTINGS } from '../src/settings.ts';
@@ -95,7 +95,7 @@ describeWindows('thread jobs of forgotten threads', () => {
     previousDataDir = process.env.BOITE_DATA_DIR;
     process.env.BOITE_DATA_DIR = directory;
     journal = new Journal(join(directory, 'journal.db'));
-    procs = new ProcRegistry(journal, new Bus(), processPlatform, { forgetDelayMs: FORGET_MS });
+    procs = new ProcRegistry(journal, new Bus(), registryPlatform(), { forgetDelayMs: FORGET_MS });
   });
 
   afterEach(async () => {
@@ -125,7 +125,7 @@ describeWindows('thread jobs of forgotten threads', () => {
     const waitForState = async (label: string, predicate: () => boolean): Promise<void> => {
       try { await waitFor(predicate, 5000); }
       catch (cause) {
-        const pending = ['warm-up', ...ids].map(id => ({ id, live: procs.liveCount(id), job: processPlatform.sample(id) }))
+        const pending = ['warm-up', ...ids].map(id => ({ id, live: procs.liveCount(id), job: procs.platform.sample(id) }))
           .filter(entry => entry.live > 0 || entry.job !== null);
         throw new Error(`${label}: ${threadJobCount()} thread jobs; ${JSON.stringify(pending)}`, { cause });
       }
@@ -196,9 +196,8 @@ describeWindows('thread jobs of forgotten threads', () => {
   test('a job forgotten before its console host exits closes once the host is gone', async () => {
     // The registry never traces a console host, and the one a piped `cmd` gets
     // exits after `cmd`. Forgetting at once puts the forget before that exit.
-    // One registry at a time: the jobs module reports to the last one created.
     await procs.close();
-    procs = new ProcRegistry(journal, new Bus(), processPlatform, { forgetDelayMs: 0 });
+    procs = new ProcRegistry(journal, new Bus(), registryPlatform(), { forgetDelayMs: 0 });
     // A cold drain Worker reports `cmd`'s exit late, and the registry's 1 s
     // fallback forgets after the host is gone. Warm it first.
     const quiet = async (id: string): Promise<void> => {
