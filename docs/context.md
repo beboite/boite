@@ -390,6 +390,11 @@ Input written while the core is unreachable stays on the device until a client
 reconnects and synchronizes it. Incognito input stays in client memory and uses
 the client delivery path; older cores retain device-local persistence.
 
+Undoable deletion retains core input. Permanent deletion erases reply records
+and linked delivery receipts, and reconnecting clients discard their stale
+reply caches. Delivered draft launches retain a deduplication receipt with no
+thread link or content fingerprint, so an old cache cannot launch them again.
+
 The durable record includes attachments and page references. Storage errors
 keep input in memory and show the reason. Reads and
 writes have a three-second deadline; a failed read cannot overwrite unread

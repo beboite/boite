@@ -8,6 +8,7 @@ import { assertDriverRunnable } from './drivers/index.ts';
 import type { ChildRoute } from './delegation/routes.ts';
 import { GoalTracker, modelRead, newChecklist } from './goal-tracker.ts';
 import type { ProviderProbe } from './providers/probe.ts';
+import { needsModelDiscovery } from './threads/selection.ts';
 
 const empty = (): ThreadActivity => ({ goal: null, loop: null, tasks: [] });
 type PendingAttachments = Partial<Record<'goal' | 'loop', Attachment[]>>;
@@ -42,6 +43,7 @@ export class ActivityStore {
   private readonly readingModels = new Set<string>();
   /** The goal generation and round whose reviewer already had its models read: one read per review. */
   private readonly modelsRead = new Map<string, string>();
+  private readonly readingTurnModels = new Set<string>();
   private closed = false;
 
   /** `threadJsonChecked`: the core validated visible thread JSON just before, with nothing written since. */
@@ -330,8 +332,8 @@ export class ActivityStore {
     return result;
   }
 
-  private run(threadId: string): void {
-    if (this.closed) return;
+  private run(threadId: string, discovered?: string): void {
+    if (this.closed || this.readingTurnModels.has(threadId)) return;
     const thread = this.core.journal.getThread(threadId);
     const state = this.states.get(threadId);
     if (!thread || !state || thread.archived) return;
@@ -349,13 +351,32 @@ export class ActivityStore {
     // Only the first turn after a review carries its findings; later ones have them in the history.
     const feedback = review && last && last.verdict !== 'pass' && review.delivered < review.verdicts.length ? { round: last.round, feedback: last.summary } : undefined;
     const list = kind === 'goal' ? state.goal!.checklist : undefined;
-    const checklist = list?.items.length ? { open: list.items.filter(item => item.status === 'open').map(item => item.text), bounced: this.bounced.delete(threadId) } : undefined;
     const prompt = `/${review ? 'goal2' : kind} ${kind === 'goal' ? state.goal!.objective : state.loop!.prompt}`;
     const iteration = state[kind]!.iterations + 1;
     try {
       const pending = this.pendingAttachments(threadId);
-      const turnActivity: ActivityTurn = { kind, iteration, ...(feedback ? { review: feedback } : {}), ...(checklist ? { checklist } : {}) };
       const choice = (this.core.journal.getSetting(`activity-choice:${threadId}`) as Partial<Record<'goal' | 'loop', ComposerChoice>> | undefined)?.[kind];
+      const provider = choice ? this.core.providers.require(choice.providerId) : null;
+      const generation = this.generations.get(`${threadId}:${kind}`) ?? 0;
+      const attempt = JSON.stringify([kind, generation, choice]);
+      if (choice && this.probe && provider && discovered !== attempt && needsModelDiscovery(provider, choice.accountId, choice.model, choice.effort, choice.speed ?? null)) {
+        const read = this.probe({ providerId: choice.providerId, accountId: choice.accountId, ...(provider.protocol === 'acp' && choice.model !== null && choice.effort !== null ? { model: choice.model } : {}) });
+        this.readingTurnModels.add(threadId);
+        void read.then(() => {
+          this.readingTurnModels.delete(threadId);
+          // Validate this attempt once, even when the target read has no effort
+          // metadata. A changed activity still discovers its own selection.
+          this.run(threadId, attempt);
+        }, error => {
+          this.readingTurnModels.delete(threadId);
+          if (this.closed || !this.core.journal.getThread(threadId)) return;
+          if (generation === (this.generations.get(`${threadId}:${kind}`) ?? 0) && this.states.get(threadId)?.[kind]?.status === 'active') this.stop(threadId, messageOf(error));
+          else this.schedule(threadId, 0);
+        });
+        return;
+      }
+      const checklist = list?.items.length ? { open: list.items.filter(item => item.status === 'open').map(item => item.text), bounced: this.bounced.delete(threadId) } : undefined;
+      const turnActivity: ActivityTurn = { kind, iteration, ...(feedback ? { review: feedback } : {}), ...(checklist ? { checklist } : {}) };
       const turn = this.core.threads.startTurn(threadId, prompt, pending[kind] ?? [], undefined, undefined, turnActivity, undefined, undefined, [], undefined, null, choice);
       delete pending[kind];
       this.saveAttachments(threadId, pending);

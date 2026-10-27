@@ -1,9 +1,9 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import type { ComposerChoice, ComposerRecord, ComposerValue } from '@boite/contracts';
+import { RpcErrorCode, type ComposerChoice, type ComposerRecord, type ComposerValue } from '@boite/contracts';
 import { FakeClient } from './fake-client';
 
 const clients: FakeClient[] = [];
-afterEach(() => { for (const client of clients.splice(0)) client.close(); });
+afterEach(() => { for (const client of clients.splice(0)) client.close(); vi.restoreAllMocks(); });
 async function ready(delayMs = 0) {
   const client = new FakeClient({ delayMs });
   clients.push(client);
@@ -11,6 +11,45 @@ async function ready(delayMs = 0) {
   return client;
 }
 const value = (text: string): ComposerValue => ({ input: { text, attachments: [], queued: [], paused: false } });
+
+test('soft deletion preserves composer input but purging rejects an offline resurrection', async () => {
+  const client = await ready();
+  const first = await client.call('composer.put', { section: 'inputs', id: 't-trace', expectedRevision: 0, value: value('Kept during undo') });
+  await client.call('threads.remove', { threadId: 't-trace' });
+  expect((await client.call('composer.list', {})).find(row => row.id === 't-trace')?.value?.input.text).toBe('Kept during undo');
+  const edited = await client.call('composer.put', { section: 'inputs', id: 't-trace', expectedRevision: first.record.revision, value: value('Offline edit during undo') });
+  expect(edited.accepted).toBe(true);
+  vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 366 * 86_400_000);
+  expect(await client.call('threads.deleted', {})).toEqual([]);
+  expect((await client.call('composer.list', {})).some(row => row.id === 't-trace')).toBe(false);
+  await expect(client.call('composer.put', { section: 'inputs', id: 't-trace', expectedRevision: 0, value: value('Must not reappear') }))
+    .rejects.toMatchObject({ code: RpcErrorCode.NotFound, data: { reason: 'thread-deleted', threadId: 't-trace', field: 'composer.id' } });
+});
+
+test('replaying a launched draft after purging its thread never creates a second thread', async () => {
+  const client = await ready();
+  const thread = await client.call('threads.get', { threadId: 't-trace' });
+  const choice: ComposerChoice = { providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
+    effort: thread.effort, permissionMode: thread.permissionMode, speed: thread.speed ?? null };
+  const draft = value('');
+  draft.draft = { projectId: thread.projectId, worktree: false };
+  draft.choice = choice;
+  draft.input.queued.push({ id: 'unacknowledged-first', text: 'Old first prompt', attachments: [], choice });
+  await client.call('composer.put', { section: 'drafts', id: 'unacknowledged-draft', expectedRevision: 0, value: draft });
+  let launched!: string;
+  await vi.waitFor(async () => {
+    const threads = await client.call('threads.list', {});
+    launched = threads.find(row => row.title === 'Old first prompt')!.id;
+    expect(launched).toBeTruthy();
+  });
+  await client.call('threads.remove', { threadId: launched });
+  vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 366 * 86_400_000);
+  await client.call('threads.deleted', {});
+  const saved = (await client.call('composer.list', {})).find(row => row.id === 'unacknowledged-draft')!;
+  await client.call('composer.put', { section: 'drafts', id: saved.id, expectedRevision: saved.revision, value: draft });
+  await vi.waitFor(async () => expect((await client.call('composer.list', {})).find(row => row.id === saved.id)?.value?.input.paused).toBe(true));
+  expect((await client.call('threads.list', {})).some(row => row.title === 'Old first prompt')).toBe(false);
+});
 
 test('composer records use revisions and share clearing with a paired client', async () => {
   const owner = await ready();

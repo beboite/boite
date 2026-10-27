@@ -456,8 +456,11 @@ describe('journal', () => {
       journal.db.query('INSERT INTO workflow_runs VALUES (?, ?, ?, ?, ?, ?)').run(id, `thr_${id}`, 'stopped', 1, 1, '{"task":"workflow prompt"}');
       journal.db.query('INSERT INTO workflow_steps VALUES (?, ?, ?)').run(`step_${id}`, id, 'step');
       journal.db.query('INSERT INTO workflow_requests VALUES (?, ?, ?, ?)').run(`thr_${id}`, id, id, id);
+      journal.db.query('INSERT INTO composer_records VALUES (?, ?, ?, ?, ?)').run('inputs', `thr_${id}`, 1, 1, '{"input":{"text":"unsent words","attachments":[],"queued":[],"paused":false}}');
+      journal.db.query('INSERT INTO composer_deliveries VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, 'inputs', `thr_${id}`, 'delivered', `thr_${id}`, id, 'fingerprint');
+      journal.db.query('INSERT INTO composer_deliveries VALUES (?, ?, ?, ?, ?, ?, ?)').run(`draft_${id}`, 'drafts', `draft_${id}`, 'delivered', `thr_${id}`, `launch_${id}`, 'draft fingerprint');
     }
-    const counts = () => ['threads', 'delegated_agents', 'delegation_messages', 'workflow_runs', 'workflow_steps', 'workflow_requests']
+    const counts = () => ['threads', 'delegated_agents', 'delegation_messages', 'workflow_runs', 'workflow_steps', 'workflow_requests', 'composer_records', 'composer_deliveries']
       .map(table => (journal.db.query(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n);
     // Refuse the last delete to prove earlier dependent deletes cannot commit alone.
     journal.setSetting('spawn-origin:thr_gone', { reported: false });
@@ -465,13 +468,15 @@ describe('journal', () => {
     journal.setSetting('spawn-origin:thr_keep', { reported: true });
     journal.db.exec("CREATE TRIGGER interrupt_delete BEFORE DELETE ON threads BEGIN SELECT RAISE(ABORT, 'interrupted removal'); END");
     expect(() => journal.deleteThreads(['thr_gone'])).toThrow('interrupted removal');
-    expect(counts()).toEqual([2, 2, 2, 2, 2, 2]);
+    expect(counts()).toEqual([2, 2, 2, 2, 2, 2, 2, 4]);
+    expect(journal.db.query("SELECT thread_id, fingerprint FROM composer_deliveries WHERE id = 'draft_gone'").get()).toEqual({ thread_id: 'thr_gone', fingerprint: 'draft fingerprint' });
     expect(journal.getSetting('spawn-origin:thr_gone')).toEqual({ reported: false });
     journal.db.exec('DROP TRIGGER interrupt_delete');
     journal.deleteThreads(['thr_gone']);
     journal.close();
     journal = new Journal(file);
-    expect(counts()).toEqual([1, 1, 1, 1, 1, 1]);
+    expect(counts()).toEqual([1, 1, 1, 1, 1, 1, 1, 3]);
+    expect(journal.db.query("SELECT thread_id, fingerprint FROM composer_deliveries WHERE id = 'draft_gone'").get()).toEqual({ thread_id: null, fingerprint: '' });
     expect(journal.getThread('thr_gone')).toBeNull();
     expect(journal.getThread('thr_keep')).not.toBeNull();
     expect(journal.getSetting('spawn-origin:thr_gone')).toBeUndefined();

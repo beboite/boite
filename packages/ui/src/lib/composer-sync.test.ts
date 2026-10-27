@@ -499,3 +499,75 @@ test('an attachment a restarted core dropped goes up again from the device that 
   expect(called(desk, 'composer.asset.put')).toHaveLength(2);
   expect([...core.assets.values()]).toEqual([file]);
 });
+
+test('a list that fails on a live link is asked again later, and what was typed meanwhile reaches the core', async () => {
+  const desk = await device('desk', new FakeClient({ delayMs: 0 }), { connect: false });
+  let lists = 0;
+  desk.calls.mockImplementation(async (method, params) => {
+    if (method === 'composer.list' && lists++ === 0) throw new RpcFailure({ code: RpcErrorCode.Internal, message: 'list timed out' });
+    return desk.original(method, params);
+  });
+  await desk.store.connect();
+  desk.store.editComposerText('t-trace', 'Typed after a failed list');
+  await vi.waitFor(async () => expect((await recordOf(desk.client, 'inputs', 't-trace'))?.value?.input.text).toBe('Typed after a failed list'), { timeout: 8000 });
+}, 15_000);
+
+test('a resync on the same link while a put is out leaves the record free for the next edit', async () => {
+  const desk = await device('desk', new FakeClient({ delayMs: 0 }));
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let held = false;
+  desk.calls.mockImplementation(async (method, params) => {
+    const answer = desk.original(method, params);
+    if (method === 'composer.put' && !held) { held = true; await gate; }
+    return answer;
+  });
+  desk.store.editComposerText('t-trace', 'First');
+  await vi.waitFor(() => expect(held).toBe(true));
+  // The connection's own resync after a reconnect to the same, still ready client.
+  const lists = called(desk, 'composer.list').length;
+  await desk.store.connect();
+  await vi.waitFor(() => expect(called(desk, 'composer.list').length).toBeGreaterThan(lists));
+  release();
+  await quiet();
+  desk.store.editComposerText('t-trace', 'Second');
+  await vi.waitFor(async () => expect((await recordOf(desk.client, 'inputs', 't-trace'))?.value?.input.text).toBe('Second'));
+});
+
+test('a permanently deleted thread clears its offline input and journal without retrying', async () => {
+  const core = new FakeComposerState();
+  const desk = await device('desk', new FakeClient({ delayMs: 0, composerState: core }));
+  desk.store.editComposerText('t-trace', 'Synced before deletion');
+  await vi.waitFor(async () => expect((await recordOf(desk.client, 'inputs', 't-trace'))?.value?.input.text).toBe('Synced before deletion'));
+  desk.client.drop();
+  await desk.client.settled();
+  desk.store.editComposerText('t-trace', 'Written offline');
+  desk.store.composerStates['t-trace']!.paused = true;
+  queue(desk.store, 't-trace', 'Queued offline');
+  desk.store.editComposerText('t-trace', 'Written offline after queuing');
+  // A different device purged the thread while this client missed its event.
+  core.records.clear();
+  let refused = 0;
+  desk.calls.mockImplementation(async (method, params) => {
+    if (method === 'composer.put' && (params as { id?: string }).id === 't-trace') {
+      refused++;
+      throw new RpcFailure({ code: RpcErrorCode.NotFound, message: 'composer.id: expected an existing thread', data: { reason: 'thread-deleted', threadId: 't-trace', field: 'composer.id' } });
+    }
+    return desk.original(method, params);
+  });
+  await desk.client.restore();
+  await vi.waitFor(() => expect(refused).toBe(1));
+  await vi.waitFor(() => {
+    expect(desk.store.composerStates['t-trace']?.text ?? '').toBe('');
+    expect(desk.store.composerStates['t-trace']?.queued ?? []).toEqual([]);
+  });
+  await new Promise(resolve => setTimeout(resolve, 5300));
+  expect(refused).toBe(1);
+  desk.store.detach();
+  const reloaded = await device('desk', new FakeClient({ delayMs: 0, composerState: core }));
+  await quiet();
+  expect(reloaded.store.composerStates['t-trace']?.text ?? '').toBe('');
+  expect(reloaded.store.composerStates['t-trace']?.queued ?? []).toEqual([]);
+  expect(putsOf(reloaded, 't-trace')).toHaveLength(0);
+  expect(await recordOf(reloaded.client, 'inputs', 't-trace')).toBeUndefined();
+});

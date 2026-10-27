@@ -1,10 +1,11 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import {
   answerAttachmentError, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, PREVIEW_REFERENCES_PER_TURN,
-  decodedBytes, type Attachment, type ComposerChoice, type ComposerQueuedPrompt,
+  decodedBytes, RpcErrorCode, type Attachment, type ComposerChoice, type ComposerQueuedPrompt,
   type ComposerRecord, type ComposerValue, type PreviewReference, type RpcEventName, type RpcEvents,
 } from '@boite/contracts';
 import { activityCommand, isActivityCommand } from '../activity-command';
+import { RpcFailure } from '../client';
 import type { FakeContext, FakeMethods } from './context';
 import { refusal } from './shared';
 
@@ -30,6 +31,12 @@ export class FakeComposerState {
 
   detach(ctx: FakeContext): void { this.clients.delete(ctx); this.methods.delete(ctx); }
 
+  forgetThread(id: string): void {
+    const key = keyOf('inputs', id);
+    this.records.delete(key); this.consumed.delete(key);
+    this.boundaries.delete(id); this.forced.delete(id);
+  }
+
   write(section: ComposerRecord['section'], id: string, value: ComposerValue | null): ComposerRecord {
     const key = keyOf(section, id);
     const record = { section, id, revision: (this.records.get(key)?.revision ?? 0) + 1, updatedAt: Date.now(), value: copy(value) };
@@ -45,8 +52,8 @@ export class FakeComposerState {
       this.boundaries.set(boundary.threadId, boundary.boundary);
     }
     if (event === 'thread.removed') {
-      const id = (payload as RpcEvents['thread.removed']).threadId;
-      if (this.records.get(keyOf('inputs', id))?.value) this.write('inputs', id, null);
+      const { threadId, undoable } = payload as RpcEvents['thread.removed'];
+      if (!undoable) this.forgetThread(threadId);
     }
     if (['turn.finished', 'turn.toolCompleted', 'permission.resolved', 'question.answered', 'thread.updated'].includes(event)) this.schedule(ctx);
   }
@@ -193,6 +200,10 @@ export function composerMethods(ctx: FakeContext, methods: () => FakeMethods): P
   return {
     'composer.list': async () => copy([...state.records.values()]),
     'composer.put': async params => {
+      if (params.section === 'inputs' && params.value !== null && !ctx.threads.has(params.id)
+        && ![...ctx.deletedThreads.values()].some(family => family.threads.some(thread => thread.id === params.id))) {
+        throw new RpcFailure({ code: RpcErrorCode.NotFound, message: 'composer.id: expected an existing thread; this conversation was permanently deleted', data: { reason: 'thread-deleted', threadId: params.id, field: 'composer.id' } });
+      }
       const key = keyOf(params.section, params.id);
       const existing = state.records.get(key) ?? { section: params.section, id: params.id, revision: 0, updatedAt: 0, value: null };
       if (params.expectedRevision !== existing.revision) return { accepted: false, record: copy(existing) };

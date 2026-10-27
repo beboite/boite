@@ -1,12 +1,15 @@
 import { afterEach, expect, test } from 'bun:test';
-import type { ComposerValue } from '@boite/contracts';
+import { RpcErrorCode, type ComposerValue } from '@boite/contracts';
 import { echoThread, holdAccountTurns, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { setDriver } from '../src/drivers/index.ts';
+import { forgetProbes, setDriver } from '../src/drivers/index.ts';
+import { echoDriver } from '../src/drivers/echo.ts';
+import { ModelProbes } from '../src/drivers/model-probes.ts';
+import { makeAgent } from './agent-fixture.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
-import { thrown } from './settle.ts';
+import { rejection, thrown } from './settle.ts';
 import { connect } from '../src/client.ts';
 
 let h: TestCore;
@@ -49,15 +52,19 @@ test('attachment assets survive restart, deduplicate and stay out of record broa
 });
 
 test('an offline first prompt creates one thread, transfers its queue and retains unsent draft text', async () => {
-  h = await startTestCore();
+  restartDir = mkdtempSync(join(tmpdir(), 'composer-draft-delete-'));
+  h = await startTestCore({ dataDir: restartDir });
   const a = await h.connect();
   const project = await a.call('projects.add', { path: h.dataDir });
   const account = (await a.call('accounts.list', {})).find(account => account.providerId === 'echo')!;
   const selected = { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' as const };
-  await a.call('composer.put', { section: 'drafts', id: 'offline-draft', expectedRevision: 0, value: { ...value('still being typed'), choice: selected, draft: { projectId: project.id, worktree: false }, input: { ...value('still being typed').input, queued: [{ id: 'offline-first', text: 'start from the offline queue', attachments: [] }] } } });
+  const first = await a.call('composer.put', { section: 'drafts', id: 'offline-draft', expectedRevision: 0, value: { ...value('still being typed'), choice: selected, draft: { projectId: project.id, worktree: false }, input: { ...value('still being typed').input, queued: [{ id: 'offline-first', text: 'start from the offline queue', attachments: [] }, { id: 'offline-followup', text: 'follow up in that conversation', attachments: [] }] } } });
+  const cached = structuredClone(first.record.value);
   a.close();
   await waitFor(() => h.core.journal.listThreads().some(thread => h.core.journal.listTurns(thread.id).some(turn => turn.status === 'done')));
   expect(h.core.journal.listThreads()).toHaveLength(1);
+  const firstThreadId = h.core.journal.listThreads()[0]!.id;
+  await waitFor(() => h.core.composer.storage.get('inputs', firstThreadId).value?.input.queued.length === 0);
   const records = h.core.composer.storage.list();
   expect(records.find(record => record.id === 'offline-draft')?.value?.input).toMatchObject({ text: 'still being typed', queued: [] });
   expect(records.find(record => record.section === 'inputs')?.value?.input).toMatchObject({ text: '', queued: [] });
@@ -73,6 +80,25 @@ test('an offline first prompt creates one thread, transfers its queue and retain
   await waitFor(() => h.core.journal.listThreads().every(thread => h.core.journal.listTurns(thread.id).some(turn => turn.status === 'done')));
   expect(h.core.composer.storage.get('drafts', retained.id).value?.input).toMatchObject({ text: '', queued: [], previewReferences: [reference] });
   for (const thread of h.core.journal.listThreads()) expect(JSON.stringify(h.core.journal.listMessages(thread.id))).not.toContain(reference.text);
+  await b.call('threads.remove', { threadId: firstThreadId });
+  h.core.journal.db.query('UPDATE thread_deletions SET deleted_at = 0 WHERE thread_id = ?').run(firstThreadId);
+  h.core.threads.purgeDeleted();
+  const current = h.core.composer.storage.get('drafts', retained.id);
+  await b.call('composer.put', { section: 'drafts', id: retained.id, expectedRevision: current.revision, value: cached });
+  await waitFor(() => h.core.journal.listThreads().length > 1 || h.core.composer.storage.get('drafts', retained.id).value?.input.paused === true);
+  expect(h.core.journal.listThreads()).toHaveLength(1);
+  expect(h.core.composer.storage.get('drafts', retained.id).value?.input.queued.map(item => item.id)).toEqual(['offline-first', 'offline-followup']);
+  expect(h.core.journal.db.query("SELECT section, status, thread_id, fingerprint FROM composer_deliveries WHERE section = 'drafts' AND thread_id IS NULL").all()).toEqual([{ section: 'drafts', status: 'delivered', thread_id: null, fingerprint: '' }]);
+  await h.stop(); h = await startTestCore({ dataDir: restartDir });
+  const c = await h.connect(), restarted = h.core.composer.storage.get('drafts', retained.id);
+  await c.call('composer.put', { section: 'drafts', id: retained.id, expectedRevision: restarted.revision, value: cached });
+  await waitFor(() => h.core.composer.storage.get('drafts', retained.id).value?.input.paused === true);
+  expect(h.core.journal.listThreads()).toHaveLength(1);
+  await c.call('projects.remove', { projectId: project.id });
+  expect(h.core.journal.db.query('SELECT section, status, thread_id, fingerprint FROM composer_deliveries').all()).toEqual([
+    { section: 'drafts', status: 'delivered', thread_id: null, fingerprint: '' },
+    { section: 'drafts', status: 'delivered', thread_id: null, fingerprint: '' },
+  ]);
 });
 
 test('a known failed draft creation cleans its workspace and permits retrying the same queued input', async () => {
@@ -208,16 +234,106 @@ test('a non-steering provider leaves waiting queues active after restart and del
 });
 
 test('archived and deleted targets cannot execute queued input', async () => {
-  h = await startTestCore();
+  restartDir = mkdtempSync(join(tmpdir(), 'composer-delete-restart-'));
+  h = await startTestCore({ dataDir: restartDir });
   const a = await h.connect();
   const { threadId } = await echoThread(h, a);
+  const projectId = h.core.threads.require(threadId).projectId!;
+  await a.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: 0, value: { input: { ...value().input, queued: [{ id: 'before-archive', text: 'delivered before archive', attachments: [] }] } } });
+  await waitFor(() => h.core.journal.listTurns(threadId).some(turn => turn.status === 'done'));
   await a.call('threads.archive', { threadId });
-  await a.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: 0, value: { input: { ...value().input, queued: [{ id: 'archive-input', text: 'must wait', attachments: [] }] } } });
+  const current = h.core.composer.storage.get('inputs', threadId);
+  await a.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: current.revision, value: { input: { ...value().input, queued: [{ id: 'archive-input', text: 'must wait', attachments: [] }] } } });
   await Bun.sleep(30);
-  expect(h.core.journal.listTurns(threadId)).toHaveLength(0);
+  expect(h.core.journal.listTurns(threadId)).toHaveLength(1);
   await a.call('threads.remove', { threadId });
   await Bun.sleep(30);
-  expect(h.core.journal.listTurns(threadId)).toHaveLength(0);
+  expect(h.core.journal.listTurns(threadId)).toHaveLength(1);
+  // Soft deletion is undoable; hard deletion must erase unsent input and receipts.
+  expect(h.core.composer.storage.get('inputs', threadId).value?.input.queued).toHaveLength(1);
+  const offline = h.core.composer.storage.get('inputs', threadId);
+  expect((await a.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: offline.revision, value: offline.value })).accepted).toBe(true);
+  await a.call('projects.remove', { projectId });
+  expect((await a.call('composer.list', {})).some(record => record.section === 'inputs' && record.id === threadId)).toBe(false);
+  expect(h.core.composer.storage.queued.has(JSON.stringify(['inputs', threadId]))).toBe(false);
+  expect(h.core.journal.db.query('SELECT COUNT(*) AS n FROM composer_deliveries WHERE thread_id = ? OR record_id = ?').get(threadId, threadId)).toEqual({ n: 0 });
+  const reconnected = await h.connect();
+  for (const expectedRevision of [0, offline.revision]) {
+    expect((await rejection(reconnected.call('composer.put', { section: 'inputs', id: threadId, expectedRevision, value: offline.value }))).reason).toMatchObject({ rpc: { code: RpcErrorCode.NotFound, data: { reason: 'thread-deleted', threadId, field: 'composer.id' } } });
+  }
+  expect((await a.call('composer.list', {})).some(record => record.id === threadId)).toBe(false);
+  expect(h.core.composer.storage.queued.has(JSON.stringify(['inputs', threadId]))).toBe(false);
+  await h.stop(); h = await startTestCore({ dataDir: restartDir });
+  const afterRestart = await h.connect();
+  for (const expectedRevision of [0, offline.revision]) {
+    expect((await rejection(afterRestart.call('composer.put', { section: 'inputs', id: threadId, expectedRevision, value: offline.value }))).reason).toMatchObject({ rpc: { code: RpcErrorCode.NotFound, data: { reason: 'thread-deleted', threadId, field: 'composer.id' } } });
+  }
+  expect((await afterRestart.call('composer.list', {})).some(record => record.id === threadId)).toBe(false);
+  expect(h.core.composer.storage.queued.has(JSON.stringify(['inputs', threadId]))).toBe(false);
+});
+
+test('queued input reaches a projectless persistent agent thread', async () => {
+  h = await startTestCore();
+  const a = await h.connect();
+  const { threadId } = await makeAgent(h, a);
+  expect(h.core.threads.require(threadId).projectId).toBeNull();
+  const before = h.core.journal.listTurns(threadId).length;
+  await a.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: 0, value: { input: { ...value().input, queued: [{ id: 'projectless-input', text: 'user input for the bot', attachments: [] }] } } });
+  await waitFor(() => h.core.journal.listTurns(threadId).length > before || h.core.composer.storage.get('inputs', threadId).value?.input.paused === true);
+  expect(h.core.journal.listTurns(threadId)).toHaveLength(before + 1);
+  await waitFor(() => h.core.journal.listTurns(threadId).at(-1)?.status === 'done');
+  expect(h.core.composer.storage.get('inputs', threadId).value?.input.queued).toEqual([]);
+});
+
+test.each([['goal', 'supported'], ['loop', 'supported'], ['goal', 'unsupported'], ['loop', 'unsupported']] as const)('a captured %s discovers model-specific ACP effort after restart: %s', async (kind, support) => {
+  const supported = support === 'supported';
+  restartDir = mkdtempSync(join(tmpdir(), 'composer-activity-model-'));
+  h = await startTestCore({ dataDir: restartDir });
+  const a = await h.connect();
+  const { threadId, accountId } = await echoThread(h, a);
+  let detailed = false;
+  const cache = new ModelProbes(async () => [{ id: 'discovered', name: 'Discovered', ...(detailed && supported ? { effort: { levels: [{ id: 'high', label: 'High' }] } } : {}) }]);
+  const modelReads: string[] = [], executions: { model: string | null; effort: string | null }[] = [];
+  restore = setDriver('acp', { ...echoDriver, protocol: 'acp', probe: ctx => {
+    if (ctx.model) { modelReads.push(ctx.model); detailed = true; cache.forget({ providerId: ctx.provider.id, accountId: ctx.accountId }); }
+    return cache.probe(ctx);
+  }, probedModels: (providerId, account) => cache.models(providerId, account), forgetProbes: filter => cache.forget(filter), startTurn(ctx) {
+    executions.push({ model: ctx.thread.model, effort: ctx.thread.effort });
+    const message = ctx.emit.startMessage('assistant');
+    ctx.emit.part(message, 0, { type: 'text', text: 'Done.\n[BOITE_GOAL_COMPLETE]' });
+    ctx.emit.complete(message, 'complete');
+    return { stop() {}, done: Promise.resolve({ status: 'done', sessionId: null, usage: null }) };
+  } });
+  h.core.providers.require('echo').protocol = 'acp';
+  await a.call('providers.probe', { providerId: 'echo', accountId });
+  const choice = { providerId: 'echo', accountId, model: 'discovered', effort: 'high', permissionMode: 'default' as const };
+  h.core.activity.set({ threadId, ...(kind === 'goal' ? { goal: { objective: 'complete captured work' } } : { loop: { prompt: 'complete captured work', intervalMs: 1000, maxIterations: 1 } }) }, choice);
+  h.core.activity.pauseAll(threadId);
+  await h.stop();
+  forgetProbes({ providerId: 'echo', accountId });
+  h = await startTestCore({ dataDir: restartDir });
+  h.core.providers.require('echo').protocol = 'acp';
+  const b = await h.connect();
+  await b.call('threads.activity.control', { threadId, kind, action: 'resume' });
+  await waitFor(() => ['complete', 'paused'].includes(h.core.activity.get(threadId)[kind]?.status ?? ''), 2000);
+  if (!supported) {
+    expect(h.core.activity.get(threadId)[kind]).toMatchObject({ status: 'paused', error: expect.stringContaining('reasoning effort') });
+    expect(executions).toEqual([]);
+    expect(modelReads).toEqual(['discovered']);
+    return;
+  }
+  expect(h.core.activity.get(threadId)[kind]).toMatchObject({ status: 'complete', error: null });
+  expect(executions).toEqual([{ model: 'discovered', effort: 'high' }]);
+  expect(modelReads).toEqual(['discovered']);
+  expect(h.core.threads.require(threadId).model).toBe('echo');
+  // The same cold model metadata is needed by ordinary input and draft launches.
+  detailed = false;
+  forgetProbes({ providerId: 'echo', accountId });
+  const section = kind === 'goal' ? 'inputs' : 'drafts', id = section === 'inputs' ? threadId : 'model-specific-draft';
+  await b.call('composer.put', { section, id, expectedRevision: 0, value: { choice, ...(section === 'drafts' ? { draft: { projectId: h.core.threads.require(threadId).projectId, worktree: false } } : {}), input: { ...value('').input, queued: [{ id: 'model-specific-input', text: 'use model-specific reasoning', attachments: [], choice }] } } });
+  await waitFor(() => executions.length === 2 || h.core.composer.storage.get(section, id).value?.input.paused === true);
+  expect(executions).toEqual([{ model: 'discovered', effort: 'high' }, { model: 'discovered', effort: 'high' }]);
+  expect(modelReads).toEqual(['discovered', 'discovered']);
 });
 
 test('incognito composer records and attachments are memory-only', async () => {

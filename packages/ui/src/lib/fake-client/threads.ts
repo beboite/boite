@@ -219,6 +219,7 @@ export function purgeDeletedThreads(ctx: FakeContext): void {
     if (family.deletedAt > before) continue;
     ctx.deletedThreads.delete(id);
     for (const thread of family.threads) {
+      ctx.composer.forgetThread(thread.id);
       ctx.mergedPrFixtures.delete(thread.id);
       ctx.mergedPrArchive.delete(thread.id);
       ctx.processes = ctx.processes.filter(p => p.threadId !== thread.id && !isThreadTerminal(thread.id, p.threadId));

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ComposerChoice, ComposerQueuedPrompt, ComposerRecord, ComposerValue, RpcParams, ThreadSummary } from '@boite/contracts';
 import type { Core } from './core.ts';
 import type { Connection } from './router.ts';
-import { invalidParams, messageOf, refused } from './errors.ts';
+import { invalidParams, messageOf, notFound, refused } from './errors.ts';
 import { ComposerStorage, digest, recordKey, type Delivery } from './composer-storage.ts';
 import { composerValue } from './composer-validation.ts';
 import { steerUser, userSteeringUnavailable } from './threads/user-steering.ts';
@@ -41,6 +41,12 @@ export class Composer {
         const thread = payload as { threadId?: string; id?: string };
         this.schedule([{ section: 'inputs', id: thread.threadId ?? thread.id! }]);
       } else if (name === 'project.updated') this.schedule(this.storage.queued.values());
+      else if (name === 'thread.removed' && !(payload as { undoable?: boolean }).undoable) {
+        const { threadId } = payload as { threadId: string };
+        this.storage.forgetThread(threadId);
+        this.pending.delete(recordKey('inputs', threadId)); this.dirty.delete(recordKey('inputs', threadId));
+        this.boundaries.delete(threadId);
+      }
     });
     core.router.register('composer.list', (_params, ctx) => this.storage.list(ctx.connection.id));
     core.router.register('composer.asset.put', (params, ctx) => this.storage.putAsset(params.attachment, params.incognito === true, ctx.connection.id));
@@ -82,6 +88,11 @@ export class Composer {
 
   put(params: RpcParams<'composer.put'>, connection: Connection): { accepted: boolean; record: ComposerRecord } {
     if (!params || !['inputs', 'drafts'].includes(params.section) || typeof params.id !== 'string' || !params.id || !Number.isSafeInteger(params.expectedRevision) || params.expectedRevision < 0) throw invalidParams('composer.put: expected section inputs/drafts, non-empty id and non-negative expectedRevision');
+    // Soft-deleted rows remain undoable. Missing rows cannot adopt an offline
+    // client's old input again, regardless of its remembered CAS revision.
+    if (params.section === 'inputs' && params.value !== null && !this.core.journal.db.query('SELECT 1 FROM threads WHERE id = ?').get(params.id)) {
+      throw notFound('composer.id: expected an existing thread; this conversation was permanently deleted', { reason: 'thread-deleted', threadId: params.id, field: 'composer.id' });
+    }
     this.storage.requireOwner(params, connection.id);
     const current = this.storage.get(params.section, params.id);
     if (current.revision !== params.expectedRevision) return { accepted: false, record: current };
@@ -145,7 +156,8 @@ export class Composer {
     const key = recordKey(section, id);
     while (!this.closed && !this.core.stopping) {
       const record = this.storage.get(section, id), value = record.value;
-      if (!value || value.input.paused || !value.input.queued.length) return;
+      if (!value || !value.input.queued.length) { this.storage.queued.delete(key); return; }
+      if (value.input.paused) return;
       const item = value.input.queued[0]!;
       const delivery = this.storage.delivery(item.id);
       if (delivery?.status === 'delivered') { this.complete(section, id, item.id); continue; }
@@ -179,13 +191,14 @@ export class Composer {
           this.complete(section, id, batch.entries.map(entry => entry.id)); continue;
         }
         this.boundaries.delete(id);
-        if (needsModelDiscovery(this.core.providers.require(choice.providerId), choice.accountId, choice.model, choice.effort, choice.speed ?? null)) {
-          await this.core.router.dispatch('providers.probe', { providerId: choice.providerId, accountId: choice.accountId }, { connection: this.connection });
+        const provider = this.core.providers.require(choice.providerId);
+        if (needsModelDiscovery(provider, choice.accountId, choice.model, choice.effort, choice.speed ?? null)) {
+          await this.core.router.dispatch('providers.probe', { providerId: choice.providerId, accountId: choice.accountId, ...(provider.protocol === 'acp' && choice.model !== null && choice.effort !== null ? { model: choice.model } : {}) }, { connection: this.connection });
         }
         // A discovery RPC can yield while the user archives the target or stops the core.
         const current = this.core.journal.getThread(id);
         if (this.closed || this.core.stopping || !current || current.archived || (current.projectId && this.core.projects.require(current.projectId).archived)) return;
-        await this.core.projects.requireFolder(current.projectId!);
+        if (current.projectId) await this.core.projects.requireFolder(current.projectId);
         const activity = composerActivity(item.text, this.core.clients.current()?.experiments);
         this.atomic(() => {
           const target = this.core.journal.getThread(id);
@@ -240,14 +253,16 @@ export class Composer {
     const projectId = item.request?.start?.projectId ?? draft?.projectId ?? this.core.projects.drafts().id;
     if (this.core.projects.require(projectId).archived) return;
     const launchId = `draft-${digest([record.section, record.id, item.id])}`;
-    if (this.storage.delivery(launchId)) throw refused('Core restarted during draft creation. Review this draft before starting a new one.');
+    const previous = this.storage.delivery(launchId);
+    if (previous) throw refused(previous.status === 'delivered' ? 'This draft already started a conversation. Review its queued messages before starting a new one.' : 'Core restarted during draft creation. Review this draft before starting a new one.');
     const params: RpcParams<'threads.create'> = { projectId, providerId: choice.providerId, accountId: choice.accountId, model: choice.model ?? undefined, effort: choice.effort, speed: choice.speed ?? null, permissionMode: choice.permissionMode, title: item.text.slice(0, 120),
       ...((item.request?.start?.worktree ?? draft?.worktree) ? { worktree: {} } : {}), ...((item.request?.start?.incognito ?? draft?.incognito) ? { incognito: true } : {}) };
     await this.core.projects.requireFolder(projectId);
     // Reuse discovery and draft workspace machinery, but keep publication and
     // the queue transfer in one commit so restart cannot create another thread.
-    if (needsModelDiscovery(this.core.providers.require(choice.providerId), choice.accountId, choice.model, choice.effort, choice.speed ?? null)) {
-      await this.core.router.dispatch('providers.probe', { providerId: choice.providerId, accountId: choice.accountId }, { connection: this.connection });
+    const provider = this.core.providers.require(choice.providerId);
+    if (needsModelDiscovery(provider, choice.accountId, choice.model, choice.effort, choice.speed ?? null)) {
+      await this.core.router.dispatch('providers.probe', { providerId: choice.providerId, accountId: choice.accountId, ...(provider.protocol === 'acp' && choice.model !== null && choice.effort !== null ? { model: choice.model } : {}) }, { connection: this.connection });
     }
     const ledger = new DraftReservationLedger(this.core);
     const mutations: DraftOwnership[] = [];
@@ -271,7 +286,7 @@ export class Composer {
         this.storage.save('inputs', planned.id, transferred, this.storage.owner(record));
         const retained = { ...latest, input: { ...latest.input, queued: [] } };
         this.storage.save(record.section, record.id, retained.input.text || retained.input.attachments.length || retained.input.previewReferences?.length ? retained : null);
-        this.storage.status(launchId, 'delivered');
+        this.storage.status(launchId, 'delivered', planned.id);
         ledger.forget(planned.id);
       });
       this.schedule([{ section: 'inputs', id: planned.id }]);

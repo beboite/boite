@@ -42,6 +42,15 @@ export class ComposerStorage {
   }
 
   owner(record: Pick<ComposerRecord, 'section' | 'id'>): Connection | undefined { return this.privateOwners.get(recordKey(record.section, record.id)); }
+  forgetThread(threadId: string): void {
+    const key = recordKey('inputs', threadId);
+    this.queued.delete(key); this.privateRecords.delete(key); this.privateOwners.delete(key);
+    for (const [id, delivery] of this.privateDeliveries) {
+      if (delivery.thread_id !== threadId && !(delivery.section === 'inputs' && delivery.record_id === threadId)) continue;
+      if (delivery.section === 'drafts' && delivery.status === 'delivered') { delivery.thread_id = null; delivery.fingerprint = ''; }
+      else this.privateDeliveries.delete(id);
+    }
+  }
   requireOwner(record: Pick<ComposerRecord, 'section' | 'id'>, connectionId: string): void {
     const owner = this.owner(record);
     if (owner && owner.id !== connectionId) throw notFound('composer.id: this private composer belongs to another connection');
@@ -143,10 +152,10 @@ export class ComposerStorage {
       .run(delivery.id, delivery.section, delivery.record_id, delivery.status, delivery.thread_id, delivery.request_id, delivery.fingerprint);
   }
 
-  status(id: string, status: Delivery['status']): void {
+  status(id: string, status: Delivery['status'], threadId?: string): void {
     const memory = this.privateDeliveries.get(id);
-    if (memory) memory.status = status;
-    else this.core.journal.db.query('UPDATE composer_deliveries SET status = ? WHERE id = ?').run(status, id);
+    if (memory) { memory.status = status; if (threadId !== undefined) memory.thread_id = threadId; }
+    else this.core.journal.db.query('UPDATE composer_deliveries SET status = ?, thread_id = COALESCE(?, thread_id) WHERE id = ?').run(status, threadId ?? null, id);
   }
 
   release(id: string): void {

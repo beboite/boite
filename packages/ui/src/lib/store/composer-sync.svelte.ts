@@ -254,7 +254,8 @@ export class ComposerSync {
 
   #later(): void {
     if (this.#retry !== undefined) return;
-    this.#retry = setTimeout(() => { this.#retry = undefined; this.#flushSoon(true); }, RETRY_MS);
+    // A list that failed is asked again: until one succeeds, nothing is sent.
+    this.#retry = setTimeout(() => { this.#retry = undefined; if (this.#listed) this.#flushSoon(true); else void this.resync(); }, RETRY_MS);
   }
 
   #flushSoon(now: boolean): void {
@@ -633,17 +634,30 @@ export class ComposerSync {
     } catch (error) {
       if (epoch !== this.#epoch) return;
       if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) { this.#refused = true; return; }
+      const details = error instanceof RpcFailure ? error.data as { reason?: unknown; threadId?: unknown } | undefined : undefined;
+      if (section === 'inputs' && error instanceof RpcFailure && error.code === RpcErrorCode.NotFound && details?.reason === 'thread-deleted' && details.threadId === id) {
+        // A missed permanent-deletion event must not keep an offline cache retrying forever.
+        this.#stashed.delete(key); this.#early.delete(key); this.#forced.delete(key);
+        this.#apply(key, null);
+        this.ctx.drafts.persist(id);
+        this.#dirty.delete(key); this.#known.delete(key); this.#values.delete(key);
+        this.#saveMeta();
+        return;
+      }
       this.#dirty.add(key);
       // A core that restarted dropped the assets nothing referenced: what this device holds the bytes of goes up again.
       if (error instanceof RpcFailure && error.message.includes('assetId') && this.#lost(this.#localOf(this.#source(key)))) return;
       failed = true;
       this.#later();
     } finally {
-      if (epoch === this.#epoch) {
+      // A resync on the same client outdates this answer, not the key: it is free again for the next put.
+      if (epoch === this.#epoch || this.#client === client) {
         this.#inflight.delete(key);
         const stashed = this.#stashed.get(key);
         this.#stashed.delete(key);
-        if (stashed) this.#receive(stashed);
+        // Under a list still on its way, the record waits for it like any early push.
+        if (stashed && !this.#listed) { if ((this.#early.get(key)?.revision ?? -1) < stashed.revision) this.#early.set(key, stashed); }
+        else if (stashed) this.#receive(stashed);
         // A failed put waits for the retry; typing meanwhile still saves at the usual pause.
         if (this.#dirty.has(key) && !failed) this.#flushSoon(false);
       }
