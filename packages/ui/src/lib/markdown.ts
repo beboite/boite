@@ -1,9 +1,9 @@
-import { BracketLinks, richInline, codeLinkHtml, threadAddress, threadLinkHtml } from './chat-links';
+import { inline, mathHtml } from './markdown-inline';
 /**
  * The markdown an agent answer needs: paragraphs, headings, nested and task
  * lists, block quotes, tables, rules, fenced and inline code, bold, italic,
- * strikethrough, links. Everything is escaped first, so the output is safe to
- * put in the page. No images: a `data:` picture arrives as a tool document,
+ * strikethrough, links. Inline structure follows CommonMark; rendered text and
+ * attributes are escaped. No images: a `data:` picture arrives as a tool document,
  * and an answer never fetches a remote one.
  *
  * A closed ```` ```mermaid ```` block and math between `$$…$$`, `\[…\]`,
@@ -19,57 +19,6 @@ function escape(text: string): string {
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;');
-}
-
-function inline(text: string, rich = false): string {
-  const code: string[] = [];
-  let marker = '\0';
-  while (text.includes(marker)) marker += '\0';
-  // The lead stands in for a lookbehind (Safari before 16.4 cannot parse one): a
-  // previous span always ends on a backtick, so consuming one character is equivalent.
-  const protectedText = text.replace(/(^|[^`])(`+)(.+?)\2(?!`)/g, (_match, lead: string, _ticks: string, value: string) => {
-    // A thread is linked even without rich links: opening it needs no file access.
-    const link = rich ? codeLinkHtml(value) : threadAddress(value) ? threadLinkHtml(value, value) : null;
-    code.push(`<code>${link ?? escape(value)}</code>`);
-    return `${lead}${marker}${code.length - 1}${marker}`;
-  }).replace(INLINE_MATH, (source: string, display?: string, bracket?: string, paren?: string) => {
-    // Math is found after code spans are set aside, so a formula in `code` stays code.
-    const tex = (display ?? bracket ?? paren ?? '').trim();
-    if (!tex || tex.includes('\0')) return source;
-    code.push(mathHtml('span', tex, source, paren === undefined));
-    return `${marker}${code.length - 1}${marker}`;
-  });
-  // Format around opaque spans, then restore them without parsing their contents.
-  return (rich ? richInline(protectedText, inlineFormatting) : inlineFormatting(protectedText)).split(marker).map((part, index) => index % 2 ? code[Number(part)]! : part).join('');
-}
-
-/** `$$…$$` and `\[…\]` (display) or `\(…\)` (inline) on one line. One `$` is a price, not math. */
-const INLINE_MATH = /\$\$(.+?)\$\$|\\\[(.+?)\\\]|\\\((.+?)\\\)/g;
-
-/** A formula as its source, marked for `lib/rich-markdown.ts`: `source` is what a copy gives back. */
-function mathHtml(tag: 'span' | 'div', tex: string, source: string, display: boolean): string {
-  return `<${tag} class="md-math"${display ? ' data-display' : ''} data-tex="${escape(tex)}" data-source="${escape(source)}">${escape(source)}</${tag}>`;
-}
-
-function inlineFormatting(text: string): string {
-  let out = escape(text);
-  out = out.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
-  out = out.replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, '$1<em>$2</em>');
-  out = out.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
-  return webLinks(out);
-}
-
-/** `[label](http://...)` as a link, in linear time where a regex retried from every `[`. */
-function webLinks(text: string): string {
-  if (!text.includes('](http')) return text;
-  const links = new BracketLinks(text, true);
-  let out = '';
-  let start = 0;
-  for (let link = links.next(0); link; link = links.next(link.end)) {
-    out += `${text.slice(start, link.index)}<a href="${link.target}" target="_blank" rel="noopener noreferrer">${link.label}</a>`;
-    start = link.end;
-  }
-  return out + text.slice(start);
 }
 
 const FENCE = /^```([\w+-]*)\s*$/;
@@ -178,7 +127,7 @@ export function renderMarkdown(source: string, rich = false): string {
 
   const flushParagraph = (): void => {
     if (paragraph.length === 0) return;
-    html.push(`<p>${paragraph.map(text => inline(text, rich)).join('\n')}</p>`);
+    html.push(`<p>${inline(paragraph.join('\n'), rich)}</p>`);
     paragraph = [];
   };
   const flushList = (): void => {

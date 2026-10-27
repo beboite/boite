@@ -944,8 +944,10 @@ limits expensive work while streaming, typing and scrolling:
 - Wheel listeners are passive: they release bottom following without
   cancelling browser scrolling. `MessageList.test.ts` guards the listener
   options.
-- Icon shapes and locale date formatters are reused. Markdown links are found
-  in one pass over a line, however many `[` it holds. Finished Markdown markup
+- Icon shapes and locale date formatters are reused. The Markdown regression
+  suite checks malformed links on lines of 32,000 characters. Inline link
+  lookahead skips unfinished labels when no closing bracket or destination
+  parenthesis remains. Finished Markdown markup
   has a four-million-character cache bound, highlighted code a
   two-million-character one shared by every view of the same text. A diff
   document's rows are computed once per whitespace mode and kept with it.

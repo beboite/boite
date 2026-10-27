@@ -1025,6 +1025,18 @@ clients, blocking questions and finished turns do not show typing. The dots
 pause on hidden pages and become static under reduced motion.
 `tests/e2e/chat-context.test.ts` checks these transitions and phone layout.
 
+Inline Markdown uses markdown-it with raw HTML disabled. Emphasis can wrap
+links and code, nest, and use underscores. Link labels retain inline formatting;
+balanced destinations, titles, escapes, entities and hard line breaks follow
+CommonMark. Boite adds file and thread links after parsing that structure,
+keeps formulas opaque, and turns remote images into links without fetching them.
+Automatic paths keep underscores literal. Windows destinations identified by a
+root or an unescaped separator preserve backslashes; other destinations retain
+CommonMark escapes and entity decoding.
+Block parsing and streaming boundaries remain in Boite's renderer.
+`tests/e2e/markdown.test.ts` covers these formats at desktop and phone widths;
+`tests/e2e/diagrams.test.ts` checks diagrams and formulas.
+
 Received agent mail appears on the right with the user accent; sent agent mail
 appears on the left with a neutral surface. Owner prompts keep the user style.
 The letter's creation time shows its age in the app's language, updates every
