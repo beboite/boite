@@ -25,6 +25,7 @@ export async function sharedCores() {
     h.core.contacts.setSettings({minTier: 2});
     const path = join(dataDir, 'project'); mkdirSync(path);
     await git(h, path, 'init', '-b', 'main');
+    await git(h, path, 'config', 'core.autocrlf', 'false');
     await git(h, path, 'remote', 'add', 'origin', 'https://example.invalid/fixtures/shared.git');
     await git(h, path, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'base');
     const project = await client.call('projects.add', {path, name});

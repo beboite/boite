@@ -736,6 +736,11 @@ Bun's baseline runtime, with `core/main.js` and split chunks in the adjacent
 runtime archive's SHA-256 and executable signature and caches it under
 `node_modules/.cache` for the running Bun version.
 
+The JavaScript build minifies identifiers as well as whitespace and syntax;
+function names in its stacks can differ from the source. The compiled sidecar
+keeps identifiers readable. `browser-page-kit.test.ts` evaluates the minified
+page script in a fresh realm, without the bundle's globals.
+
 `stage:core` places `jobs-worker.js`, `guard-worker.js` and
 `artifact-retention-worker.js` beside the core, with both CLI shims. The jobs
 worker supplies Windows process events; without it, tracing falls back to

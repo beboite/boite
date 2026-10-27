@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import {mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {isAbsolute, join, relative, sep} from 'node:path';
 import {createBrokerFixture, credentialHandleAbsent, brokerSource, classifyBroker, combineVerdicts, observeBrokerExpiry, runLocalContracts, type BrokerExpiryReceipt, type BrokerVerdict} from './windows-null-broker-spike.ts';
@@ -297,7 +297,7 @@ test('an authenticated console is traced but cannot stand in for a workload chil
 });
 
 test('expiry observation awaits automatic session cleanup and rejects an already dead scope',async()=>{
-  const root=mkdtempSync(join(tmpdir(),'boite-expiry-observer-'));
+  const root=realpathSync(mkdtempSync(join(tmpdir(),'boite-expiry-observer-')));
   for(const premature of [false,true]) {
     const receipt:BrokerExpiryReceipt={stopRequestedAt:null,liveAtStop:false,closedAt:null};
     let live=0;

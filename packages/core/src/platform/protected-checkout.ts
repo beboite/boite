@@ -17,7 +17,7 @@ export class ProtectedCheckout {
   private closed = false;
 
   constructor(readonly policy: ExecutionPolicy, temporary = tmpdir()) {
-    this.scratch = mkdtempSync(join(temporary, `boite-protected-${policy.capabilityId}-`));
+    this.scratch = mkdtempSync(join(realpathSync(temporary), `boite-protected-${policy.capabilityId}-`));
     this.root = join(this.scratch, 'checkout');
     try {
       mkdirSync(this.root, {mode: 0o700});

@@ -1,6 +1,6 @@
 import {createRequire} from 'node:module';
 import {expect, spyOn, test} from 'bun:test';
-import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -148,7 +148,7 @@ test('sampling reads the held status once for diagnostics and reconciles exits w
 for (const state of ['exited', 'still-active', 'unseen-member', 'ignored-member', 'unreadable-job'] as const) {
   test(`publication reconciles captured exits before delayed job packets: ${state}`, async () => {
     const {registry, close} = await fixture(), harness = await startTestCore();
-    const root = join(harness.dataDir, 'publication'); mkdirSync(root);
+    const root = join(realpathSync(harness.dataDir), 'publication'); mkdirSync(root);
     const creation = 116444736000001111n, closed: number[] = [];
     let running = state === 'still-active', published = 0, queries = 0;
     const previous = process.env.BOITE_DIAGNOSE_JOB_EVENTS;

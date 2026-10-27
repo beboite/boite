@@ -52,7 +52,7 @@ describe.skipIf(!native)('native Windows protected execution', () => {
     symlinkSync(outsideDirectory, join(root, 'outside-junction'), 'junction');
     copyFileSync(join(import.meta.dir, 'fixtures/native-protected-tool.ts'), join(root, 'tool.ts'));
     const procs = harness.core.procs;
-    await procs.protection.install('windows-native', {scope: {kind: 'job', id: 'native-job', associationId: 'association', grantRevision: 1},
+    const captured = await procs.protection.install('windows-native', {scope: {kind: 'job', id: 'native-job', associationId: 'association', grantRevision: 1},
       route: {providerId: 'native-fixture', accountId: 'host-account', permissionMode: 'yolo'}, checkout: root, credentialPaths: [outside], executables: [process.execPath], expiresAt: Date.now() + 120000}, () => {});
     const {dlopen, FFIType, ptr} = await import('bun:ffi');
     const native = dlopen('kernel32.dll', {CreateFileW: {args: [FFIType.ptr, FFIType.u32, FFIType.u32, FFIType.ptr, FFIType.u32, FFIType.u32, FFIType.ptr], returns: FFIType.ptr}, CloseHandle: {args: [FFIType.ptr], returns: FFIType.i32}});
@@ -82,7 +82,7 @@ describe.skipIf(!native)('native Windows protected execution', () => {
       expect(result.breakaway.pid).toBeGreaterThan(0);
     } else expect(result.breakaway).toEqual({created: false, denied: true, pid: 0, waited: false, exit: null, closed: true});
     await procs.waitForExit('windows-native', [handleProbe.record.pid, child.record.pid]);
-    procs.protection.flush('windows-native');
+    await procs.protection.publish('windows-native', captured.capabilityId);
     expect(readFileSync(join(root, 'answer.js'), 'utf8')).toContain('42');
     expect(existsSync(join(root, 'dist/answer.js'))).toBe(true);
   }, 120000);
@@ -118,7 +118,7 @@ describe.skipIf(!native)('native Windows protected execution', () => {
       const secret = join(root, '.env'); writeFileSync(secret, 'SYNTHETIC_PROTECTED');
       linkSync(secret, join(root, 'secret-alias'));
       const identity = policyFile(root, '.env').identity;
-      await procs.protection.install('override', input({readOverrides: [{path: '.env', identity, expiresAt: Date.now() + 60000}]}), () => {});
+      const captured = await procs.protection.install('override', input({readOverrides: [{path: '.env', identity, expiresAt: Date.now() + 60000}]}), () => {});
       const result = await execute('override', `const fs = require('fs'); let written = false, alias = false, host = false;
 const {dlopen,FFIType,ptr}=require('bun:ffi'); const acl=dlopen('advapi32.dll',{SetNamedSecurityInfoW:{args:[FFIType.ptr,FFIType.u32,FFIType.u32,FFIType.ptr,FFIType.ptr,FFIType.ptr,FFIType.ptr],returns:FFIType.u32}});
 const aclDenied=acl.symbols.SetNamedSecurityInfoW(ptr(Buffer.from('.env\\0','utf16le')),1,4,null,null,null,null)===5; acl.close();
@@ -127,7 +127,7 @@ try {fs.readFileSync('secret-alias'); alias=true;} catch {}
 try {fs.readFileSync(${JSON.stringify(secret)}); host=true;} catch {}
 console.log(JSON.stringify({text:fs.readFileSync('.env','utf8'),written,alias,host,aclDenied}));`, root, observe);
       expect(JSON.parse(result)).toEqual({text: 'SYNTHETIC_PROTECTED', written: false, alias: false, host: false, aclDenied: true});
-      procs.protection.flush('override');
+      await procs.protection.publish('override', captured.capabilityId);
       writeFileSync(secret, 'changed');
       expect(() => procs.spawn('override', process.execPath, ['-e', ''], {cwd: root})).toThrow('authorized file');
     } finally {stop();}

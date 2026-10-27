@@ -8,8 +8,7 @@
   import { permissionSentence } from '../lib/tool-summary';
   import { dockRoom, questionDock } from '../lib/question-dock.svelte';
   import { ignoreQuestions, releaseWaiting, replyOf, repliesOf, sendAnswer, writeAnswer } from '../lib/question-reply.svelte';
-  import QuestionCard from './QuestionCard.svelte';
-  import SecretCard from './SecretCard.svelte';
+  import Deferred, { parts } from './Deferred.svelte';
   import InfoTip from './InfoTip.svelte';
   import { openQuestionPage } from '../lib/question-page';
   import SettingRequestCard from './SettingRequestCardLoader.svelte';
@@ -242,7 +241,8 @@
                   {@render fromChild(child, 'activity-subagent-question')}
                 {/if}
                 {#if question.secret}
-                <SecretCard {store} threadId={question.threadId} part={secretPart(question.secret)} docked />
+                {@const secret = secretPart(question.secret)}
+                <Deferred part={parts.SecretCard}>{#snippet children(SecretCard)}<SecretCard {store} threadId={question.threadId} part={secret} docked />{/snippet}</Deferred>
                 {:else if question.agentSetting}
                 <AgentSettingCard
                   {store}
@@ -266,7 +266,7 @@
                   respond={(optionId) => store.answerQuestion(question.threadId, question.id, [optionId])}
                 />
                 {:else}
-                <QuestionCard
+                <Deferred part={parts.QuestionCard}>{#snippet children(QuestionCard)}<QuestionCard
                   text={question.text}
                   options={question.options}
                   allowText={question.allowText}
@@ -283,7 +283,7 @@
                   onwrite={child ? undefined : () => writeAnswer(store, question.id)}
                   page={question.open?.url}
                   onopen={() => openQuestionPage(store, question.threadId, question.id)}
-                />
+                />{/snippet}</Deferred>
                 {/if}
               </div>
             {/each}

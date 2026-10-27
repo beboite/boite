@@ -1,5 +1,5 @@
 import {expect, spyOn, test} from 'bun:test';
-import {mkdirSync} from 'node:fs';
+import {mkdirSync, realpathSync} from 'node:fs';
 import {join} from 'node:path';
 import {Bus} from '../src/bus.ts';
 import {ProcRegistry} from '../src/procs.ts';
@@ -13,7 +13,7 @@ for (const mode of ['root', 'descendant', 'native', 'inherited-native', 'unreada
   const descendant = mode === 'descendant';
   test(`tool publication drains delayed root telemetry: ${mode}`, async () => {
     const harness = await startTestCore(), bus = new Bus();
-    const root = join(harness.dataDir, 'project'); mkdirSync(root);
+    const root = join(realpathSync(harness.dataDir), 'project'); mkdirSync(root);
     let events!: ProcessEventSink, published = 0;
     let nativePending = false;
     const membershipRead = Promise.withResolvers<void>();
@@ -95,7 +95,7 @@ for (const mode of ['root', 'descendant', 'native', 'inherited-native', 'unreada
 }
 
 test('direct publication still refuses native members without waiting', async () => {
-  const harness = await startTestCore(), root = join(harness.dataDir, 'project'); mkdirSync(root);
+  const harness = await startTestCore(), root = join(realpathSync(harness.dataDir), 'project'); mkdirSync(root);
   let pending = false, published = 0;
   const procs = new ProcRegistry(harness.core.journal, new Bus(), {...createPosixPlatform('linux', null),
     hasProcesses: () => pending,
@@ -113,7 +113,7 @@ test('direct publication still refuses native members without waiting', async ()
 
 for (const phase of ['root-exit', 'native-drain', 'revoked-drain'] as const) {
   test(`an old tool cannot publish or revoke a replacement during ${phase}`, async () => {
-    const harness = await startTestCore(), root = join(harness.dataDir, 'project'); mkdirSync(root);
+    const harness = await startTestCore(), root = join(realpathSync(harness.dataDir), 'project'); mkdirSync(root);
     const paused = Promise.withResolvers<void>(), resume = Promise.withResolvers<void>(), opening = Promise.withResolvers<void>();
     let opens = 0, published = 0, pending = false, newClosed = false;
     const platform: ProcessPlatform = {...createPosixPlatform('linux', null),

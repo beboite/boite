@@ -20,7 +20,7 @@
   import { projectDrag, startProjectDrag } from '../lib/project-drag.svelte';
   import { activeProject, archiveCount, projectListMap, projectSections, projectThreadView, type ArchiveKind, type ProjectSection } from '../lib/project-threads.svelte';
   import ProjectViews from './ProjectViews.svelte';
-  import SharedProjectThreads from './shared/SharedProjectThreads.svelte';
+  import SharedProjectThreads from './shared/SharedProjectThreadsLoader.svelte';
   import RecentGroup from './RecentGroup.svelte';
   import RecentDone from './RecentDone.svelte';
   import ProjectThreadCounters from './ProjectThreadCounters.svelte';

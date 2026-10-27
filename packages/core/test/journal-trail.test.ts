@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -101,7 +101,12 @@ test('opening a journal builds no planner statistics; the retention ticks build 
     expect(journal.staleStatistics()).toEqual([]);
     // An empty outbox cannot retain statistics, but its first row must make it eligible.
     journal.db.query("INSERT INTO shared_project_outbox(contact_id, association_id, data) VALUES ('fixture', 'fixture', '{}')").run();
-    const populated = journal.staleStatistics(true);
+    // Older system SQLite does not list never-analyzed tables in PRAGMA optimize.
+    const query = journal.db.query.bind(journal.db);
+    const legacy = spyOn(journal.db, 'query').mockImplementation(sql =>
+      query(sql.startsWith('PRAGMA optimize=') ? 'SELECT NULL WHERE 0' : sql));
+    let populated: string[];
+    try { populated = journal.staleStatistics(true); } finally { legacy.mockRestore(); }
     expect(populated).toContain('ANALYZE "main"."shared_project_outbox"');
     for (const statement of populated) journal.analyze(statement);
     expect(stats()).toContain('shared_project_outbox');
