@@ -364,13 +364,23 @@ test('revoking one contact stops only its captured job, preserving another owner
   await b.client.call('sharedProjects.decide', {sharedProjectId: offered.shared.id, accept: true, requestId: 'accept-c'});
   await b.client.call('sharedProjects.configure', {sharedProjectId: offered.shared.id, computeThreadId: b.threadId, compute: {enabled: true, profiles: ['conversation'], permissionMode: 'default', maxConcurrent: null}});
   const params = {requestId: 'same-id', host: b.ref, profileId: 'conversation', baseCommit, task: '[sleep:20000]'};
-  const owned = await a.client.call('sharedCompute.start', {...scope, ...params});
-  const other = await c.client.call('sharedCompute.start', {...cscope, ...params});
-  expect(owned.id).not.toBe(other.id);
-  await waitFor(() => b.h.core.journal.getThread(owned.worker!.threadId)?.status === 'running');
-  const captured = b.h.core.procs.spawn(owned.worker!.threadId, process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {cwd: b.path});
+  const guard = b.h.core.sharedCompute.guardStart, admission = Promise.withResolvers<void>();
   const unrelated = b.h.core.procs.spawn(b.threadId, process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {cwd: b.path});
   try {
+    b.h.core.sharedCompute.guardStart = async (...args) => {
+      await guard(...args);
+      if (args[2].sharedProjectId === cscope.sharedProjectId) await admission.promise;
+    };
+    const owned = await a.client.call('sharedCompute.start', {...scope, ...params});
+    const other = await c.client.call('sharedCompute.start', {...cscope, ...params});
+    expect(owned.id).not.toBe(other.id);
+    await waitFor(() => b.h.core.journal.getThread(owned.worker!.threadId)?.status === 'running');
+    // A durable start receipt can precede admission of the other owner's worker.
+    expect(b.h.core.sharedCompute.journal.get(other.id, 'host')?.job.status).toBe('queued');
+    admission.resolve();
+    await waitFor(() => b.h.core.sharedCompute.journal.get(other.id, 'host')?.job.status === 'running'
+      && b.h.core.journal.getThread(other.worker!.threadId)?.status === 'running');
+    const captured = b.h.core.procs.spawn(owned.worker!.threadId, process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {cwd: b.path});
     await b.client.call('contacts.revoke', {coreId: a.coreId, projectId: b.ref.projectId});
     await waitFor(() => b.h.core.sharedCompute.journal.get(owned.id, 'host')?.job.status === 'revoked');
     expect(await captured.exited).not.toBe(0);
@@ -380,7 +390,10 @@ test('revoking one contact stops only its captured job, preserving another owner
     const cancel = await c.client.call('sharedCompute.cancel', {...cscope, jobId: other.id, requestId: 'cancel-c'});
     expect(cancel.status).toBe('cancelled');
     expect(b.h.core.procs.liveOf(b.threadId).some(p => p.pid === unrelated.record.pid)).toBe(true);
-  } finally {unrelated.proc.kill(); await unrelated.exited;}
+  } finally {
+    admission.resolve(); b.h.core.sharedCompute.guardStart = guard;
+    unrelated.proc.kill(); await unrelated.exited;
+  }
 }, 45000);
 
 test('host contribution and authenticated source boundaries reject arbitrary paths, accounts and forged artifacts', async () => {
