@@ -774,15 +774,19 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
   /** What a stalled page is still waiting on: whether the server never answered or the body never arrived. */
   #inFlight(): string[] {
     const now = Date.now();
-    return [...this.#requests.values()].filter((request) => now - (request.wall ?? request.at) > 1_000).slice(0, 10).map((request) => {
-      const sentAt = request.wall ?? request.at;
-      const wire = request.cache ? 'served from the cache'
-        : request.headers !== undefined ? `the network service had its headers by ${request.headers - sentAt} ms after it was sent`
-          : request.sent !== undefined ? 'the network service sent it and has no headers'
-            : 'nothing from the network service (not sent, or a service worker holds it)';
-      const server = uiServerSide(request.url, request.wall ?? null, request.at);
-      return `${request.url} ${request.answered ? 'answered, body pending' : 'no response'} for ${now - sentAt} ms: ${wire}${server === null ? '' : `; ${server}`}`;
-    });
+    return [...this.#requests.values()].filter((request) => now - (request.wall ?? request.at) > 1_000).slice(0, 10)
+      .map((request) => `${request.url} ${this.#requestState(request, now)}`);
+  }
+
+  /** Read the network and server evidence now, before loadingFailed removes it. */
+  #requestState(request: InFlight, now: number): string {
+    const sentAt = request.wall ?? request.at;
+    const wire = request.cache ? 'served from the cache'
+      : request.headers !== undefined ? `the network service had its headers by ${request.headers - sentAt} ms after it was sent`
+        : request.sent !== undefined ? 'the network service sent it and has no headers'
+          : 'nothing from the network service (not sent, or a service worker holds it)';
+    const server = uiServerSide(request.url, request.wall ?? null, request.at);
+    return `${request.answered ? 'answered, body pending' : 'no response'} for ${now - sentAt} ms: ${wire}${server === null ? '' : `; ${server}`}`;
   }
 
   /** Fails what waits and what comes next with the message devtools sent, then hangs up. */
@@ -916,7 +920,7 @@ In flight: ${JSON.stringify(this.#inFlight())}`);
     const request = this.#requests.get(id);
     if (!request) return;
     // Pairing and ticket query strings belong to the test, never to its failure log.
-    this.#networkFailures.push(`${request.url.split(/[?#]/, 1)[0]} ${reason}`);
+    this.#networkFailures.push(`${request.url.split(/[?#]/, 1)[0]} ${reason}; at failure: ${this.#requestState(request, Date.now())}`);
     if (this.#networkFailures.length > 10) this.#networkFailures.shift();
   }
 }

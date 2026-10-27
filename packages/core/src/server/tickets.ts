@@ -4,7 +4,7 @@ import { constants } from 'node:fs';
 import { open, type FileHandle } from 'node:fs/promises';
 import type { Core } from '../core.ts';
 import { VIEW_GZIP_SUFFIX } from '../views.ts';
-import { fdResponse, heldBytes } from './file-response.ts';
+import { attachmentDisposition, fdResponse, heldBytes } from './file-response.ts';
 
 /**
  * The file a ticket opens: what `files.read` could not put in a JSON frame.
@@ -27,7 +27,7 @@ export async function ticketedFile(core: Core, ticket: string, range: string | n
     // picks what the panel opens, so no file of its may run in a window.
     // Neither header touches an <img> or a <video> loading the same address.
     'x-content-type-options': 'nosniff',
-    'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(opened.name ?? 'download')}`,
+    'content-disposition': attachmentDisposition(opened.name),
   };
   return fdResponse(opened.handle, opened.size, range, headers, opened.permit);
 }
@@ -70,7 +70,7 @@ export async function viewPage(core: Core, ticket: string, gzip: boolean): Promi
 /** The gzipped copy of a view, opened without following a link; null when it is missing or not a file. */
 async function openViewCopy(path: string): Promise<{ handle: FileHandle; size: number } | null> {
   let handle: FileHandle;
-  try { handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)); } catch { return null; }
+  try { handle = await open(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | (constants.O_NOFOLLOW ?? 0)); } catch { return null; }
   try {
     const stats = await handle.stat();
     if (stats.isFile()) return { handle, size: stats.size };

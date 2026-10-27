@@ -2,6 +2,12 @@ import type { FileHandle } from 'node:fs/promises';
 import type { HeldBytes } from '../workdir.ts';
 import type { SharedFilePermit } from '../contacts/access-policy.ts';
 
+/** RFC 8187 attr-char excludes these four characters that encodeURIComponent leaves literal. */
+export function attachmentDisposition(name = 'download'): string {
+  const encoded = encodeURIComponent(name).replace(/['()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename*=UTF-8''${encoded}`;
+}
+
 /**
  * Bytes a ticket of `FileTickets.mintBytes` names: an attachment of a message,
  * its original or a picture copy. The bytes behind that ticket never change, so the
@@ -16,7 +22,7 @@ export function heldBytes(held: HeldBytes, range: string | null): Response {
     'content-type': held.mime,
     'cache-control': held.noStore ? 'no-store' : 'private, max-age=31536000, immutable',
     'x-content-type-options': 'nosniff',
-    'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(held.name ?? 'download')}`,
+    'content-disposition': attachmentDisposition(held.name),
   });
 }
 
@@ -84,14 +90,10 @@ export function fdResponse(handle: FileHandle, size: number, range: string | nul
         const chunk = Math.min(remaining, 64 * 1024);
         const buffer = Buffer.alloc(chunk);
         const { bytesRead } = await handle.read(buffer, 0, chunk, offset);
+        if (bytesRead <= 0) throw new Error(`file response: unexpected end of file with ${remaining} bytes remaining`);
         if (permit) {
           const text = buffer.subarray(0, bytesRead).toString('utf8');
           permit.inspect(tail + text); tail = text.slice(-512);
-        }
-        if (bytesRead <= 0) {
-          close();
-          controller.close();
-          return;
         }
         offset += bytesRead;
         remaining -= bytesRead;

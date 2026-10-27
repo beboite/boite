@@ -626,7 +626,7 @@ export class FileTickets {
     let handle: FileHandle;
     try {
       entry.permit?.check();
-      handle = await open(entry.path, constants.O_RDONLY | NOFOLLOW);
+      handle = await open(entry.path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | NOFOLLOW);
     } catch {
       this.held.delete(ticket);
       return null;
