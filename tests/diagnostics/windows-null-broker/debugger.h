@@ -39,6 +39,7 @@ static int nb_read(NB_PROCESS *p, uintptr_t address, void *out, SIZE_T size) {
   if (!address || size > UINTPTR_MAX - address) return 0;
   return ReadProcessMemory(p->handle, (void *)address, out, size, &read) && read == size;
 }
+static int nb_read_snapshot(void *ctx, uintptr_t address, void *out, size_t size) {return nb_read(ctx, address, out, size);}
 static int nb_write(NB_PROCESS *p, uintptr_t address, const void *in, SIZE_T size) {
   SIZE_T written = 0; return WriteProcessMemory(p->handle, (void *)address, in, size, &written) && written == size;
 }
@@ -191,14 +192,27 @@ static int nb_delegate(NB_DEBUG *d, NB_PROCESS *p, DWORD tid, CONTEXT *c, int ap
   NTSTATUS status; IO_STATUS_BLOCK io; ZeroMemory(&io, sizeof(io)); HANDLE host = NULL, target = NULL;
   NB_BASIC basic; NB_DEVICE device; ULONG mode = 0; int opened = 0, closed = 1, rollback = 1;
   BYTE old_handle[8], old_io[16]; int valid = nb_outputs(r.handle, r.iosb, nb_query_region, p);
-  if (!valid) status = NB_BAD_POINTER;
-  else if (!nb_read(p, r.handle, old_handle, sizeof(old_handle)) || !nb_read(p, r.iosb, old_io, sizeof(old_io))) return -1;
-  else if ((r.access & ~allowed) || (r.oa.Attributes & ~(0x40u | 2u)) || r.oa.SecurityDescriptor || r.oa.SecurityQualityOfService ||
+  if (!valid) {
+    /* The real syscall decides probe/access-check ordering in the LPAC context.
+     * No host open, remote write or manufactured NTSTATUS on this path. */
+    fwprintf(stderr, L"NB_PASSTHROUGH pid=%lu tid=%lu api=%ls reason=outputs opened=0\n", p->id, tid, api ? L"open" : L"create");
+    return 0;
+  }
+  if (!nb_read(p, r.handle, old_handle, sizeof(old_handle)) || !nb_read(p, r.iosb, old_io, sizeof(old_io))) return -1;
+  NB_QOS snapshot; SECURITY_QUALITY_OF_SERVICE qos; ZeroMemory(&qos, sizeof(qos));
+  int qos_valid = nb_snapshot_qos((uintptr_t)r.oa.SecurityQualityOfService, &snapshot, nb_read_snapshot, p);
+  if (qos_valid && r.oa.SecurityQualityOfService) {
+    qos.Length = sizeof(qos); qos.ImpersonationLevel = (SECURITY_IMPERSONATION_LEVEL)snapshot.level;
+    qos.ContextTrackingMode = snapshot.tracking; qos.EffectiveOnly = snapshot.effective;
+    fwprintf(stderr, L"NB_QOS pid=%lu length=%lu level=%lu tracking=%u effective=%u copied=1\n",
+      p->id, (DWORD)snapshot.length, (DWORD)snapshot.level, snapshot.tracking, snapshot.effective);
+  }
+  if ((r.access & ~allowed) || (r.oa.Attributes & ~(0x40u | 2u)) || r.oa.SecurityDescriptor || !qos_valid ||
       r.unsupported || (r.file_attributes & ~0x80u) || (r.share & ~7u) || r.disposition > 5 ||
       (r.options & ~(0x2u | 0x4u | 0x8u | 0x10u | 0x20u | 0x40u | 0x800u | 0x4000u | 0x100000u | 0x200000u))) status = NB_UNSUPPORTED;
   else {
     memcpy(&io, old_io, sizeof(io));
-    status = nb_host_open(&host, &io, r.access, r.share, r.disposition, r.options, r.oa.Attributes, r.file_attributes, api);
+    status = nb_host_open(&host, &io, r.access, r.share, r.disposition, r.options, r.oa.Attributes, r.file_attributes, api, r.oa.SecurityQualityOfService ? &qos : NULL);
     if (status == 0x103) {if (host && host != INVALID_HANDLE_VALUE) CloseHandle(host); return -1;}
     if (status >= 0) {
       opened = 1;

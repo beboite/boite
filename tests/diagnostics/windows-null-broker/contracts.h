@@ -63,4 +63,14 @@ static int nb_outputs(uintptr_t handle, uintptr_t iosb, nb_query_fn query, void 
   return nb_output_span(handle, 8, 8, query, ctx) && nb_output_span(iosb, 16, 8, query, ctx) &&
     (handle + 8 <= iosb || iosb + 16 <= handle);
 }
+
+/* A target address is read once, never handed to the host's object manager. */
+typedef struct {uint32_t length, level; uint8_t tracking, effective, padding[2];} NB_QOS;
+typedef int (*nb_read_fn)(void *, uintptr_t, void *, size_t);
+static int nb_snapshot_qos(uintptr_t address, NB_QOS *out, nb_read_fn read, void *ctx) {
+  memset(out, 0, sizeof(*out));
+  if (!address) return 1;
+  if (address > UINTPTR_MAX - sizeof(*out) || !read(ctx, address, out, sizeof(*out))) return 0;
+  return out->length == sizeof(*out) && out->level <= 3 && out->tracking <= 1 && out->effective <= 1;
+}
 #endif

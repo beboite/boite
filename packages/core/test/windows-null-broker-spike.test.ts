@@ -15,14 +15,15 @@ const trace = ['NB_EVENT number=1 pid=10 tid=11 code=3','NB_PROCESS_IMAGE pid=10
   'NB_HANDLE pid=10 tid=11 kind=thread action=close','NB_HANDLE pid=10 tid=0 kind=process action=close'];
 const negativeEnd = end.replace('delegations=0','delegations=1');
 const primitiveDelegate = 'NB_DELEGATE pid=10 sequence=1 api=create requested=0xc0100000 options=0x00000060 disposition=1 status=0xc0000022 opened=0 hostClosed=1 remoteClosed=1 valid=1';
-const negative = [bind, identity, primitiveDelegate, denial, ...trace, negativeEnd].join('\n');
+const input='NB_INPUT pid=10 api=create attributes=0x00000040 security=0 qos=0 extra=0 fileAttributes=0x00000000 share=3';
+const negative = [bind, identity, ...trace.slice(0,6), input, primitiveDelegate, denial, ...trace.slice(6), negativeEnd].join('\n');
 const pointerRows = ['readonly-handle', 'readonly-iosb', 'boundary'].flatMap(name => ['off', 'on'].map(transport =>
   `NB_POINTER pid=10 transport=${transport} name=${name} status=0xc0000005 unchanged=1 handles=0 opened=0`));
 
 describe('Null broker evidence admission', () => {
   test('a complete negative primitive is distinct from incomplete setup', () => {
     expect(classifyBroker(negative, 'primitive')).toEqual({kind: 'negative', experimentComplete: true, productionAccepted: false});
-    for (const line of [bind, identity, primitiveDelegate, denial, negativeEnd]) expect(classifyBroker(negative.replace(line, ''), 'primitive').experimentComplete).toBe(false);
+    for (const line of [bind, identity, input, primitiveDelegate, denial, negativeEnd]) expect(classifyBroker(negative.replace(line, ''), 'primitive').experimentComplete).toBe(false);
   });
   test('duplicate or inconsistent authority, startup and cleanup never complete', () => {
     for (const suffix of [bind, identity, denial, end, 'NB_UNKNOWN ok=1']) expect(classifyBroker(`${negative}\n${suffix}`, 'primitive').experimentComplete).toBe(false);
@@ -41,13 +42,31 @@ describe('Null broker evidence admission', () => {
     expect(classifyBroker(negative, 'primitive', true).kind).toBe('timeout');
   });
   test('pointer controls require both transports, unchanged sentinels, no leak and valid output', () => {
-    const failed = Array.from({length:3}, (_,i)=>`NB_DELEGATE pid=10 sequence=${i+1} api=create requested=0xc0100000 options=0x00000060 disposition=1 status=0xc0000005 opened=0 hostClosed=1 remoteClosed=1 valid=0`);
-    const text = [bind, identity, ...trace, ...pointerRows, ...failed, ...traffic(10,1,3), 'NB_POINTER pid=10 transport=on name=writable status=0x00000000 unchanged=0 handles=0 opened=1', end.replace('delegations=0','delegations=4')].join('\n');
+    const pass = 'NB_PASSTHROUGH pid=10 tid=11 api=create reason=outputs opened=0';
+    const paired = pointerRows.flatMap((row,i)=>i%2 ? [input,pass,row] : [row]);
+    // The direct syscall rejects this IOSB boundary after its LPAC access check.
+    const text = [bind, identity, ...trace.slice(0,6), ...paired, ...traffic(10,1), 'NB_POINTER pid=10 transport=on name=writable status=0x00000000 unchanged=0 handles=0 opened=1', ...trace.slice(6), end.replace('delegations=0','delegations=1')].join('\n')
+      .replaceAll('name=boundary status=0xc0000005','name=boundary status=0xc0000022');
     expect(classifyBroker(text, 'pointers').kind).toBe('positive');
-    for (const line of pointerRows) expect(classifyBroker(text.replace(line, ''), 'pointers').experimentComplete).toBe(false);
+    for (const row of pointerRows) {
+      const line = row.replace('name=boundary status=0xc0000005','name=boundary status=0xc0000022');
+      expect(classifyBroker(text.replace(line, ''), 'pointers').experimentComplete).toBe(false);
+    }
     for (const [a,b] of [['handles=0','handles=1'], ['unchanged=1','unchanged=0'], ['opened=0','opened=1']]) expect(classifyBroker(text.replace(a!,b!), 'pointers').experimentComplete).toBe(false);
     expect(classifyBroker(`${text}\n${pointerRows[0]}`, 'pointers').experimentComplete).toBe(false);
-    expect(classifyBroker(text.replace('transport=off name=boundary status=0xc0000005','transport=off name=boundary status=0xc0000022'),'pointers').experimentComplete).toBe(false);
+    expect(classifyBroker(text.replace('transport=on name=boundary status=0xc0000022','transport=on name=boundary status=0xc0000005'),'pointers').experimentComplete).toBe(false);
+    for (const replacement of ['',pass.replace('pid=10','pid=99'),pass.replace('opened=0','opened=1'),pass.replace('tid=11','tid=0')]) {
+      expect(classifyBroker(text.replace(pass,replacement),'pointers').experimentComplete).toBe(false);
+    }
+    expect(classifyBroker(`${text}\n${pass}`,'pointers').experimentComplete).toBe(false);
+    const writable='NB_POINTER pid=10 transport=on name=writable';
+    expect(classifyBroker(text.replace(pass,'').replace(writable,`${pass}\n${writable}`),'pointers').experimentComplete).toBe(false);
+    const closed=trace.slice(6).join('\n'), first=pointerRows[0]!;
+    expect(classifyBroker(text.replace(closed,'').replace(first,`${closed}\n${first}`),'pointers').experimentComplete).toBe(false);
+    const threadClosed='NB_HANDLE pid=10 tid=11 kind=thread action=close';
+    expect(classifyBroker(text.replace(threadClosed,'').replace(pass,`${threadClosed}\n${pass}`),'pointers').experimentComplete).toBe(false);
+    const creation=trace[0]!, attempts=paired.join('\n').replaceAll('name=boundary status=0xc0000005','name=boundary status=0xc0000022');
+    expect(classifyBroker(text.replace(attempts,'').replace(creation,`${attempts}\n${creation}`),'pointers').experimentComplete).toBe(false);
   });
   test('compiler disagreement and absent compilers do not complete the experiment', () => {
     const verdict = (kind: BrokerVerdict['kind']): BrokerVerdict => ({kind, experimentComplete: kind === 'positive' || kind === 'negative', productionAccepted: false});
@@ -62,6 +81,7 @@ test('shared native scheduler and output-span contracts: queued trap B cannot su
   const result = await runLocalContracts();
   expect(result.code, result.err).toBe(0);
   expect(result.out).toContain('NB_LOCAL queued-replay=1 balanced=1 progress=2 pointer-contracts=1');
+  expect(result.out).toContain('qos-snapshot=1');
 });
 
 test('source generation pins the production reference and rejects a second replacement', () => {
@@ -77,7 +97,7 @@ const expectedImages = {root: bunSha, native: nativeSha};
 function traffic(pid: number, count: number, start = 0): string[] {
   return Array.from({length: count}, (_, i) => {
     const sequence = start + i + 1;
-    return [`NB_MEASUREMENT pid=${pid} sequence=${sequence} same=0x00000000 different=0xc00001ac previous=${Number(i > 0)} ok=1`,
+    return [input.replace('pid=10',`pid=${pid}`), `NB_MEASUREMENT pid=${pid} sequence=${sequence} same=0x00000000 different=0xc00001ac previous=${Number(i > 0)} ok=1`,
       `NB_DELEGATE pid=${pid} sequence=${sequence} api=create requested=0xc0100000 options=0x00000060 disposition=1 status=0x00000000 information=1 opened=1 hostClosed=1 remoteClosed=1 valid=1 granted=0x0012019f mode=0x00000020 type=2 device=21`].join('\n');
   });
 }
@@ -129,6 +149,18 @@ test('native admission reconciles every delegation, measurement and suspension',
   const without=(prefix:string)=>uniform.split('\n').filter(line=>!line.startsWith(prefix)).join('\n');
   for (const prefix of ['NB_DELEGATE','NB_MEASUREMENT','NB_RESUME']) expect(classifyBroker(without(prefix),'native').experimentComplete).toBe(false);
   for (const [a,b] of [['previous=1 ok=1','previous=1 ok=0'],['hostClosed=1','hostClosed=0'],['owner=11 previous=1','owner=12 previous=1'],['sequence=2 ','sequence=1 ']]) expect(classifyBroker(uniform.replace(a!,b!),'native').experimentComplete).toBe(false);
+  const qos='NB_QOS pid=10 length=12 level=2 tracking=0 effective=1 copied=1';
+  const withInput=input.replace('qos=0','qos=1');
+  const withQos=capture.replace(input,`${withInput}\n${qos}`);
+  expect(classifyBroker(withQos,'native').kind).toBe('positive');
+  for(const [a,b] of [['length=12','length=11'],['level=2','level=4'],['tracking=0','tracking=2'],['effective=1','effective=2'],['copied=1','copied=0'],['NB_QOS pid=10','NB_QOS pid=99']]) {
+    expect(classifyBroker(withQos.replace(a!,b!),'native').experimentComplete).toBe(false);
+  }
+  expect(classifyBroker(withQos.replace(withInput,''),'native').experimentComplete).toBe(false);
+  expect(classifyBroker(withQos.replace(qos,''),'native').experimentComplete).toBe(false);
+  expect(classifyBroker(withQos.replace(qos,`${qos}\n${qos}`),'native').experimentComplete).toBe(false);
+  expect(classifyBroker(withQos.replace(`${withInput}\n${qos}`,''),'native').experimentComplete).toBe(false);
+  expect(classifyBroker(withQos.replace(withInput,withInput.replace('pid=10','pid=20')),'native').experimentComplete).toBe(false);
 });
 
 test('Bun evidence binds its exact runtime, ordinary children and complete native child proof',()=>{

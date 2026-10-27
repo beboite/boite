@@ -301,6 +301,11 @@ reference and an independently captured hash. They retain LPAC, startup, event
 and cleanup evidence; workload-child requirements never count them. A job-drain
 record must precede any accepted auxiliary exit with code 125. Completed calls
 and outstanding scenarios remain in the manifest if a later prerequisite fails.
+The adapter snapshots a validated security-quality-of-service descriptor into
+host-local storage for the fixed Null open. Invalid output spans pass through
+to the original syscall under the captured LPAC token, without a host open or
+remote write. Pointer admission still requires matching statuses for both
+transports, unchanged sentinels, zero handle growth and a successful valid open.
 
 A skip passes in a ruleset, so a draft must not satisfy it:
 

@@ -14,6 +14,13 @@ static int query(void *ctx, uintptr_t address, NB_REGION *r) {
   if (mode == 5) {r->base = UINTPTR_MAX - 2; r->size = 4096;}
   return mode != 6;
 }
+typedef struct {NB_QOS value; unsigned reads; int readable;} QOS_MEMORY;
+static int read_qos(void *ctx, uintptr_t address, void *out, size_t size) {
+  QOS_MEMORY *m = ctx; ++m->reads;
+  assert(address == 0x1000 && size == sizeof(m->value));
+  if (!m->readable) return 0;
+  memcpy(out, &m->value, size); return 1;
+}
 int main(void) {
   NB_STEP s = {0}; TRACE t = {0};
   assert(nb_join(&s, 1, hold, &t) && nb_join(&s, 2, hold, &t));
@@ -42,5 +49,20 @@ int main(void) {
     assert(!nb_outputs(0x1000, 0x2000, query, &mode));
     assert(!nb_output_span(0x1ff8, 16, 8, query, &mode));
   }
-  puts("NB_LOCAL queued-replay=1 balanced=1 progress=2 pointer-contracts=1"); return 0;
+  QOS_MEMORY memory = {{12, 2, 0, 1, {0xff, 0xff}}, 0, 1}; NB_QOS snapshot;
+  assert(nb_snapshot_qos(0, &snapshot, read_qos, &memory) && !memory.reads && !snapshot.length);
+  for (unsigned level = 0; level < 4; ++level) for (unsigned tracking = 0; tracking < 2; ++tracking) for (unsigned effective = 0; effective < 2; ++effective) {
+    memory.value = (NB_QOS){12, level, tracking, effective, {0xff, 0xff}};
+    unsigned reads = memory.reads;
+    assert(nb_snapshot_qos(0x1000, &snapshot, read_qos, &memory) && memory.reads == reads + 1);
+    memory.value.level = 99; /* The host uses this detached snapshot, never a target pointer. */
+    assert(snapshot.length == 12 && snapshot.level == level && snapshot.tracking == tracking && snapshot.effective == effective);
+  }
+  const NB_QOS bad[] = {{0, 0, 0, 0, {0}}, {11, 0, 0, 0, {0}}, {13, 0, 0, 0, {0}},
+    {12, 4, 0, 0, {0}}, {12, 2, 2, 0, {0}}, {12, 2, 0, 2, {0}}};
+  for (unsigned i = 0; i < sizeof(bad) / sizeof(*bad); ++i) {memory.value = bad[i]; assert(!nb_snapshot_qos(0x1000, &snapshot, read_qos, &memory));}
+  memory.readable = 0; assert(!nb_snapshot_qos(0x1000, &snapshot, read_qos, &memory));
+  unsigned reads = memory.reads;
+  assert(!nb_snapshot_qos(UINTPTR_MAX - 4, &snapshot, read_qos, &memory) && memory.reads == reads);
+  puts("NB_LOCAL queued-replay=1 balanced=1 progress=2 pointer-contracts=1 qos-snapshot=1"); return 0;
 }

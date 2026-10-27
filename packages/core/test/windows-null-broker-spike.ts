@@ -22,7 +22,7 @@ const decimal = (value?: string) => !!value && /^(?:0|[1-9]\d*)$/.test(value) &&
 const hex = (value?: string) => !!value && /^0x[0-9a-f]{8}$/.test(value);
 const negativeStatus = (value?: string) => hex(value) && Number.parseInt(value!, 16) >= 0x80000000;
 const known = new Set(['BIND','IMAGE','PROCESS_IMAGE','PRIMITIVE','END','FAILURE','POINTER','EVENT','HANDLE','SUSPEND','RESUME','DEFER',
-  'DRAIN','INPUT','DELEGATE','EXCEPTION','EXIT','OPEN','MODE','OBJECT','CHECK','DENY','OFF','READY','DETACHED','BUN','ROLLBACK','MEASUREMENT','TRANSFER']);
+  'DRAIN','INPUT','QOS','PASSTHROUGH','DELEGATE','EXCEPTION','EXIT','OPEN','MODE','OBJECT','CHECK','DENY','OFF','READY','DETACHED','BUN','ROLLBACK','MEASUREMENT','TRANSFER']);
 function parse(text: string): Row[] | null {
   const rows: Row[] = [];
   for (const line of text.split(/\r?\n/)) {
@@ -45,9 +45,22 @@ function completeTrace(rows: Row[], bindings: Row[]): boolean {
   const created = new Set<string>(), loaded = new Set<string>(), startup = new Set<string>();
   const held = new Map<string, {owner: string; previous: number; deferred: boolean}>();
   const owners = new Map<string, string>();
+  const ownership = new Map<string, string>();
   let eventNumber = 0;
   for (const row of rows) {
     const pid = row.pid!, tid = row.tid!, threads = processes.get(pid);
+    if (row.tag === 'HANDLE') {
+      const key = `${pid}:${row.kind}:${tid}`;
+      if (!handles.has(key)) return false;
+      if (row.action === 'own' && !ownership.has(key)) ownership.set(key, 'own');
+      else if (row.action === 'close' && ownership.get(key) === 'own') ownership.set(key, 'close');
+      else return false;
+      continue;
+    }
+    if (row.tag === 'PASSTHROUGH') {
+      if (!live.has(pid)||!threads?.has(tid)||ownership.get(`${pid}:process:0`)!=='own'||ownership.get(`${pid}:thread:${tid}`)!=='own') return false;
+      continue;
+    }
     if (['SUSPEND','RESUME','DEFER'].includes(row.tag!)) {
       if (!live.has(pid) || !threads?.has(tid) || !threads.has(row.owner!) || tid === row.owner) return false;
       const key = `${pid}:${tid}`, previous = held.get(key);
@@ -95,14 +108,6 @@ function completeTrace(rows: Row[], bindings: Row[]): boolean {
   }
   if (held.size || owners.size) return false;
   if (live.size || created.size !== bound.size || loaded.size !== bound.size || startup.size !== bound.size) return false;
-  const ownership = new Map<string, string>();
-  for (const row of records('HANDLE')) {
-    const key = `${row.pid}:${row.kind}:${row.tid}`;
-    if (!handles.has(key)) return false;
-    if (row.action === 'own' && !ownership.has(key)) ownership.set(key, 'own');
-    else if (row.action === 'close' && ownership.get(key) === 'own') ownership.set(key, 'close');
-    else return false;
-  }
   return ownership.size === handles.size && [...ownership.values()].every(action => action === 'close');
 }
 function fullNativeProof(rows: Row[], pid: string): boolean {
@@ -127,6 +132,25 @@ function completeTraffic(rows: Row[]): boolean {
   const delegates = rows.filter(r => r.tag === 'DELEGATE'), measurements = rows.filter(r => r.tag === 'MEASUREMENT');
   const bound = new Set(rows.filter(r => r.tag === 'BIND').map(r => r.pid));
   const end = rows.find(r => r.tag === 'END');
+  if (rows.filter(r=>r.tag==='PASSTHROUGH').some(r=>!bound.has(r.pid)||!decimal(r.tid)||r.tid==='0'||
+      !['open','create'].includes(r.api!)||r.reason!=='outputs'||r.opened!=='0')) return false;
+  let input: Row | undefined, copied = false;
+  for (const row of rows) {
+    if (row.tag==='INPUT') {
+      if(input||!bound.has(row.pid)||!['open','create'].includes(row.api!)||!hex(row.attributes)||!hex(row.fileAttributes)||
+          !['0','1'].includes(row.security!)||!['0','1'].includes(row.qos!)||!decimal(row.extra)||!decimal(row.share)) return false;
+      input=row;
+    } else if(row.tag==='QOS') {
+      if(!input||copied||row.pid!==input.pid||input.qos!=='1'||row.length!=='12'||!['0','1','2','3'].includes(row.level!)||
+          !['0','1'].includes(row.tracking!)||!['0','1'].includes(row.effective!)||row.copied!=='1') return false;
+      copied=true;
+    } else if(row.tag==='DELEGATE'||row.tag==='PASSTHROUGH') {
+      if(!input||input.pid!==row.pid||input.api!==row.api) return false;
+      if(row.tag==='PASSTHROUGH' ? copied : input.qos==='1'&&row.status!=='0xc00000bb'&&!copied) return false;
+      input=undefined;copied=false;
+    }
+  }
+  if(input) return false;
   if (!decimal(end?.delegations) || Number(end!.delegations) !== delegates.length ||
       measurements.length !== delegates.filter(r => r.opened === '1').length || !unique(measurements,r => r.sequence!)) return false;
   const measured = new Set<string>();
@@ -200,11 +224,14 @@ export function classifyBroker(text: string, scenario: string, timedOut = false,
     ['opened'].every(k => primitives[0]![k] === '0') && ['hostClosed','remoteClosed'].every(k => primitives[0]![k] === '1') ? verdict('negative') : verdict('incomplete');
   if (primitives.length) return verdict('incomplete');
   if (scenario === 'pointers') {
-    const pointers = records('POINTER');
-    if (records('DELEGATE').filter(r=>r.status==='0xc0000005'&&r.opened==='0').length < 3 || !records('DELEGATE').some(r=>r.status==='0x00000000'&&r.opened==='1') || pointers.length !== 7 || !unique(pointers, r => `${r.transport}:${r.name}`) || pointers.some(r => !bound(r) || r.handles !== '0')) return verdict('incomplete');
+    const pointers = records('POINTER'), passed = records('PASSTHROUGH'), delegates = records('DELEGATE');
+    if (passed.length!==3||delegates.length!==1||delegates[0]!.pid!==root.pid||delegates[0]!.status!=='0x00000000'||delegates[0]!.opened!=='1'||
+        pointers.length !== 7 || !unique(pointers, r => `${r.transport}:${r.name}`) || pointers.some(r => r.pid!==root.pid || r.handles !== '0')) return verdict('incomplete');
     for (const name of ['readonly-handle','readonly-iosb','boundary']) {
       const off = pointers.find(r => r.name === name && r.transport === 'off'), on = pointers.find(r => r.name === name && r.transport === 'on');
       if (!off || !on || !negativeStatus(off.status) || off.status !== on.status || [off,on].some(r => r.unchanged !== '1' || r.opened !== '0')) return verdict('incomplete');
+      const attempts=rows.slice(rows.indexOf(off)+1,rows.indexOf(on)).filter(r=>r.tag==='PASSTHROUGH');
+      if(attempts.length!==1||attempts[0]!.pid!==root.pid||attempts[0]!.api!=='create') return verdict('incomplete');
     }
     const valid = pointers.find(r => r.name === 'writable' && r.transport === 'on');
     return valid?.status === '0x00000000' && valid.opened === '1' && valid.unchanged === '0' ? verdict('positive') : verdict('incomplete');
