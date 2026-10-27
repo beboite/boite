@@ -3,7 +3,7 @@ import type { FakeArchiveState, MergedPrFixture } from './merged-pr-archive';
 /** The state one fake core keeps, and the plumbing every domain module shares. */
 import { observeProgress } from './progress';
 import type { FakeRoster } from './group';
-import { cancelSecretCards, type FakeSecretCard, type FakeSecretKey } from './secrets';
+import { cancelSecretCards, type FakeSecretCard, type FakeSecretTransit } from './secrets';
 import {
   type ClientPreferences,
   type ExperimentId,
@@ -293,9 +293,10 @@ export class FakeContext {
     string,
     { request: QuestionRequest; resolve: (answer: QuestionAnswer | null) => void }
   >();
-  /** Secret cards still open (`secrets.ts`), and the keys kept per project: names, dates and a length, never a value. */
+  /** Open cards and synthetic transit metadata: never a value or a project key. */
   readonly pendingSecrets = new Map<string, FakeSecretCard>();
-  secretKeys: FakeSecretKey[] = [];
+  readonly secretTransits = new Map<string, FakeSecretTransit>();
+  readonly settledSecrets = new Map<string, { threadId: Thread['id']; result: RpcResult<'secrets.ask'> }>();
   readonly inFlight = new Map<ThreadId, { cancelled: boolean; done: Promise<void>; steered?: { prompt: string; attachments: Attachment[] }[] }>();
   private readonly toolBoundaries = new Set<string>();
   /** Async answers waiting for the thread to be free, oldest first. */

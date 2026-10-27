@@ -1,14 +1,9 @@
-/**
- * Picks the system's secret store for this OS, loaded only when the first
- * secret is saved or used: DPAPI on Windows, the Keychain on macOS, the Secret
- * Service on Linux. When none answers, values live in memory and are lost when
- * the core stops; `persistent` tells the caller so.
- */
+/** Delete-only legacy vault selection, loaded solely for migration cleanup. */
 import { which } from 'bun';
 import { currentOs } from '../paths.ts';
 import type { SecretVault } from './types.ts';
 
-/** Values in this process only. Used when no system vault answers, and by tests. */
+/** In-memory fixture storage; production uses its empty delete-only view when no legacy vault is available. */
 export class MemoryVault implements SecretVault {
   readonly kind = 'memory' as const;
   readonly persistent: boolean = false;
@@ -33,7 +28,7 @@ export class MemoryVault implements SecretVault {
   }
 }
 
-/** The vault for this machine; `dir` holds DPAPI's sealed blobs on Windows. */
+/** Legacy cleanup backend; `dir` holds the old sealed blobs on Windows. */
 export async function openSecretVault(dir: string): Promise<SecretVault> {
   const os = currentOs();
   if (os === 'windows') {
@@ -42,9 +37,6 @@ export async function openSecretVault(dir: string): Promise<SecretVault> {
   }
   const posix = await import('./posix-vault.ts');
   if (os === 'macos' && which('security')) return new posix.KeychainVault();
-  if (os === 'linux' && which('secret-tool')) {
-    const vault = new posix.SecretServiceVault();
-    if (await posix.answers(vault)) return vault;
-  }
+  if (os === 'linux' && which('secret-tool')) return new posix.SecretServiceVault();
   return new MemoryVault();
 }

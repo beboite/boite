@@ -105,7 +105,7 @@ export interface CoreOptions {
   dataDirKind?: 'default' | 'custom';
   /** How often a resident core runs its retention passes; a test shortens the minute. */
   retentionPassMs?: number;
-  /** Where secrets are kept; tests pass a memory vault so no system store is touched. */
+  /** Legacy vault cleanup only; tests substitute it so no system store is touched. */
   secretVault?: (dir: string) => Promise<SecretVault>;
 }
 

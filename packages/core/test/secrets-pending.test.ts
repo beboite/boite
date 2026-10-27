@@ -21,7 +21,7 @@ test('pending secret metadata is thread-filtered, owner/paired only, and closes 
     const rows = await paired.call('secrets.pending', {});
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ id: requestId, threadId, name: 'API_KEY', status: 'pending', ref: null });
-    expect(Object.keys(rows[0]!).sort()).toEqual(['createdAt', 'expiresAt', 'id', 'name', 'placeholder', 'reason', 'ref', 'replace', 'status', 'threadId', 'turnId']);
+    expect(Object.keys(rows[0]!).sort()).toEqual(['createdAt', 'expiresAt', 'id', 'name', 'placeholder', 'reason', 'ref', 'status', 'threadId', 'turnId']);
     expect(await owner.call('secrets.pending', { threadId })).toEqual(rows);
     expect(await owner.call('secrets.pending', { threadId: sibling.id })).toEqual([]);
     expect(await thrown(agent.call('secrets.pending', { threadId }))).toThrow();
