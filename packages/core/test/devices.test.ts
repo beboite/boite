@@ -281,6 +281,7 @@ describe('the Device panel over RPC', () => {
     const at = async (gate: string) => {
       const deadline = Date.now() + 5000;
       while (!sdk.waiting(gate) && Date.now() < deadline) await Bun.sleep(20);
+      expect(sdk.waiting(gate)).toBe(true);
     };
     await agent.call('devices.open', { threadId, deviceId: 'A1B2-C3D4' });
     await at('boot');
