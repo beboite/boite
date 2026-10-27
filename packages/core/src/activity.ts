@@ -377,7 +377,7 @@ export class ActivityStore {
       }
       const checklist = list?.items.length ? { open: list.items.filter(item => item.status === 'open').map(item => item.text), bounced: this.bounced.delete(threadId) } : undefined;
       const turnActivity: ActivityTurn = { kind, iteration, ...(feedback ? { review: feedback } : {}), ...(checklist ? { checklist } : {}) };
-      const turn = this.core.threads.startTurn(threadId, prompt, pending[kind] ?? [], undefined, undefined, turnActivity, undefined, undefined, [], undefined, null, choice);
+      const turn = this.core.threads.startTurn(threadId, prompt, pending[kind] ?? [], undefined, undefined, turnActivity, undefined, undefined, [], undefined, null, undefined, choice);
       delete pending[kind];
       this.saveAttachments(threadId, pending);
       this.ownTurns.set(turn.id, { kind, generation: this.generations.get(`${threadId}:${kind}`) ?? 0, iteration });

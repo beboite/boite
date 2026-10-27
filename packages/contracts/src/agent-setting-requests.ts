@@ -14,7 +14,7 @@ import { SETTING_REASON_MAX, sameSetting } from './setting-requests.ts';
  */
 
 /** The settings a card may propose, each drawn where the agent's settings show it. */
-export const AGENT_SETTING_KEYS = ['name', 'domain', 'instructions', 'avatar', 'status', 'projects', 'model', 'effort', 'autoMemory', 'subagents', 'dailyBudget'] as const;
+export const AGENT_SETTING_KEYS = ['name', 'domain', 'instructions', 'avatar', 'status', 'projects', 'model', 'effort', 'autoMemory', 'eventWakes', 'subagents', 'dailyBudget'] as const;
 export type AgentSettingKey = (typeof AGENT_SETTING_KEYS)[number];
 
 export function isAgentSettingKey(key: unknown): key is AgentSettingKey {
@@ -115,6 +115,7 @@ export function agentSettingValue(profile: AgentProfile, config: AgentRuntimeCon
     case 'model': return profile.selection.model;
     case 'effort': return profile.selection.effort;
     case 'autoMemory': return config.autoMemory !== false;
+    case 'eventWakes': return config.eventWakes !== false;
     case 'subagents': return config.subagents.enabled;
     case 'dailyBudget': return config.dailyBudgetUsd ?? null;
   }
@@ -194,6 +195,7 @@ export function normalizeAgentSetting(key: AgentSettingKey, raw: unknown, ctx: A
     case 'model': return typeof raw === 'string' && raw.trim() ? ctx.model(raw.trim()) : { ok: false, message: 'model: expected a model id' };
     case 'effort': return raw === null || typeof raw === 'string' ? ctx.effort(raw === null ? null : raw.trim() || null) : { ok: false, message: 'effort: expected a reasoning level or null' };
     case 'autoMemory':
+    case 'eventWakes':
     case 'subagents': return typeof raw === 'boolean' ? { ok: true, value: raw } : { ok: false, message: `${key}: expected true or false` };
     case 'dailyBudget':
       return raw === null || (typeof raw === 'number' && Number.isFinite(raw) && raw >= AGENT_DAILY_BUDGET.min && raw <= AGENT_DAILY_BUDGET.max)

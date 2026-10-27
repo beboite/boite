@@ -23,6 +23,8 @@ export interface AgentRuntimeConfig {
    * turn never waits for it. On unless the owner turns it off.
    */
   autoMemory?: boolean;
+  /** Project and desk facts wake this bot automatically. Default true; false keeps them for its next routine. */
+  eventWakes?: boolean;
   /**
    * What the agent's own turns may spend in a day (API-equivalent dollars, the
    * core's `costUsdEquivalent`), counted from local midnight. Past it, wakes are
