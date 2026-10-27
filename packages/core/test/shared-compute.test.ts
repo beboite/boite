@@ -79,12 +79,23 @@ async function done(s: Awaited<ReturnType<typeof side>>, scope: { threadId: stri
 test.each(['done', 'failed'] as const)('late cancellation preserves %s local and remote history while revocation still fences it', async status => {
   const {a, b, scope, baseCommit, enable} = await pair(); await enable(a); await enable(b);
   if (status === 'failed') for (const side of [a, b]) side.h.core.sharedCompute.guardStart = () => {throw new Error('fixture admission refused');};
+  // The remote host's change notices reach the source only after the source read the same revision, on a later clock.
+  const request = b.h.core.coordination.request.bind(b.h.core.coordination), held: (() => void)[] = [], notices: Promise<unknown>[] = [];
+  b.h.core.coordination.request = (peer, operation, payload) => {
+    if (operation !== 'contact.project' || (payload as {method?: string}).method !== 'changed') return request(peer, operation, payload);
+    const notice = new Promise<void>(r => held.push(r)).then(() => request(peer, operation, payload));
+    notices.push(notice); return notice;
+  };
   const jobs = [];
   for (const host of [a, b]) {
     const job = await a.client.call('sharedCompute.start', {...scope, requestId: `history-${host.coreId}`, host: host.ref, profileId: 'conversation', task: 'Complete the fixture', baseCommit});
     await waitFor(() => host.h.core.sharedCompute.journal.get(job.id, 'host')?.job.status === status);
     jobs.push(await a.client.call('sharedCompute.get', {...scope, jobId: job.id}));
   }
+  expect(held.length).toBeGreaterThan(0);
+  const now = Date.now.bind(Date), clock = spyOn(Date, 'now').mockImplementation(() => now() + 1000);
+  try {for (const release of held.splice(0)) release(); await Promise.all(notices);}
+  finally {clock.mockRestore(); b.h.core.coordination.request = request;}
   for (const job of jobs) {
     expect(await a.client.call('sharedCompute.cancel', {...scope, jobId: job.id, requestId: `late-${job.id}`})).toEqual(job);
     const host = job.host.coreId === a.coreId ? a : b;

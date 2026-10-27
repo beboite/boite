@@ -244,7 +244,7 @@ export class BracketLinks {
   }
 }
 
-type LinkToken = { index: number; text: string; label?: string; target?: string; auto?: string; thread?: boolean };
+export type LinkToken = { index: number; text: string; label?: string; target?: string; auto?: string; thread?: boolean };
 
 /**
  * The link tokens of `text`, in order: the leftmost of the next bracket link
@@ -256,7 +256,7 @@ type LinkToken = { index: number; text: string; label?: string; target?: string;
  * there, as the next alternative of one regex would, and the scan then moves
  * on by one character.
  */
-function* linkTokens(text: string): Generator<LinkToken> {
+export function* linkTokens(text: string): Generator<LinkToken> {
   const tokens = new RegExp(OTHER_TOKENS, 'g');
   const absoluteAt = new RegExp(ABSOLUTE_PATH, 'y');
   // Every bracket link holds `](`: a text without one never builds the scanner.
@@ -294,9 +294,15 @@ function* linkTokens(text: string): Generator<LinkToken> {
 }
 
 /** Tokenize links before emphasis, keeping URL punctuation and escaped attributes intact. */
-export function richInline(text: string, format: (text: string) => string): string {
+export function richInline(text: string, format: (text: string) => string, explicit = true): string {
   let out = '', start = 0;
   for (const token of linkTokens(text)) {
+    // A Markdown parser already rejected this link; do not retry its decoded destination.
+    if (!explicit && token.label !== undefined) {
+      out += format(text.slice(start, token.index)) + escapeHtml(token.text);
+      start = token.index + token.text.length;
+      continue;
+    }
     if (token.thread) {
       out += format(text.slice(start, token.index)) + threadLinkHtml(token.text, token.text);
       start = token.index + token.text.length;

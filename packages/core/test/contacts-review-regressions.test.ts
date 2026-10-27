@@ -12,7 +12,8 @@ import {letterPrompt} from '../src/coordination-letter.ts';
 
 const scratch=tmpdir();
 const cores:TestCore[]=[],dirs:string[]=[],clients:CoreClient[]=[];
-afterEach(async()=>{for(const c of clients.splice(0))c.close();for(const c of cores.splice(0).reverse())await c.stop();for(const d of dirs.splice(0))rmSync(d,{recursive:true,force:true});});
+const observers=new Set<ReturnType<typeof setTimeout>>();
+afterEach(async()=>{for(const timer of observers)clearTimeout(timer);observers.clear();for(const c of clients.splice(0))c.close();for(const c of cores.splice(0).reverse())await c.stop();for(const d of dirs.splice(0))rmSync(d,{recursive:true,force:true});});
 async function side(name:string){
   const dataDir=mkdtempSync(join(scratch,'security-fixture-'));dirs.push(dataDir);
   const h=await startTestCore({dataDir});cores.push(h);
@@ -25,7 +26,12 @@ async function side(name:string){
   return{h,c,path,p,t,id,ref:{ownerCoreId:id,coreId:id,projectId:p.id}};
 }
 type Side=Awaited<ReturnType<typeof side>>;
-async function link(a:Side,b:Side){await b.c.call('contacts.join',{link:(await a.c.call('contacts.invite',{})).link});await waitFor(()=>a.h.core.contacts.linked(b.id));await waitFor(()=>a.h.core.contacts.find(b.id)?.capabilities?.humanLetters===1&&b.h.core.contacts.find(a.id)?.capabilities?.humanLetters===1);}
+async function link(a:Side,b:Side,phase:(name:string)=>void=()=>{}){
+  phase('contact invite/join');
+  await b.c.call('contacts.join',{link:(await a.c.call('contacts.invite',{})).link});
+  phase('contact linked');await waitFor(()=>a.h.core.contacts.linked(b.id));
+  phase('contact human-letter capabilities');await waitFor(()=>a.h.core.contacts.find(b.id)?.capabilities?.humanLetters===1&&b.h.core.contacts.find(a.id)?.capabilities?.humanLetters===1);
+}
 async function pair(){const a=await side('alpha'),b=await side('bravo');await link(a,b);for(const[x,y]of[[a,b],[b,a]] as const)await x.c.call('contacts.grant',{coreId:y.id,projectId:x.p.id,readThreads:true});return{a,b};}
 async function association(a:Side,b:Side){const offer=await a.c.call('sharedProjects.offer',{coreId:b.id,projectId:a.p.id,remote:b.ref,requestId:'offer'});const id=offer.shared.id;await b.c.call('sharedProjects.decide',{sharedProjectId:id,accept:true,requestId:'accept'});return id;}
 
@@ -174,47 +180,70 @@ test.each(['readThreads','readThreads-restored','grant','contact','member','memb
 },30000);
 
 test.each(['owner','paired','restart'] as const)('SEC-03 mailbox routing preserves attested %s contact-human provenance at the default tier',async principal=>{
-  const host=await side('gateway'),guest=await side('contact'),member=await side('member');
-  await host.h.core.group.create('Fixture');await member.h.core.group.join((await host.h.core.group.invite()).invite);await link(host,guest);
-  await guest.c.call('contacts.grant',{coreId:host.id,projectId:guest.p.id});
-  await waitFor(()=>host.h.core.contacts.find(guest.id)?.offers.length===1);
-  for(const s of [guest,member])await s.c.call('collaboration.configure',{threadId:s.t.id,config:{mode:'team',remote:true,paused:true,resources:''}});
+  const started=performance.now();let phase='create host',phaseAt=started,attempts=0;
+  let host:Side|undefined,guest:Side|undefined,member:Side|undefined,sentId:string|undefined,replyId:string|undefined;
+  const mark=(name:string)=>{phase=name;phaseAt=performance.now();};
+  // Counts and statuses belong to these fixtures; never dump letters, grants or tokens.
+  const state=(s:Side|undefined)=>{
+    if(!s)return null;
+    try {
+      const messages=s.h.core.coordination.get(s.t.id).messages;
+      return {messages:messages.length,sentPresent:messages.some(l=>l.id===sentId),replyPresent:messages.some(l=>l.id===replyId),
+        mailbox:replyId?s.h.core.coordination.mailboxes.received(replyId)?.status??null:null,
+        contactLinked:guest?s.h.core.contacts.linked(guest.id):false,offers:guest?s.h.core.contacts.find(guest.id)?.offers.length??0:0};
+    } catch {return {unavailable:true};}
+  };
+  const emit=(reason:'pending'|'failure')=>console.error(`SEC-03 ${reason}`,JSON.stringify({principal,phase,elapsedMs:performance.now()-started,phaseMs:performance.now()-phaseAt,attempts,host:state(host),guest:state(guest),member:state(member)}));
+  // Observe pending awaits before the 30s runner deadline; never settle them.
+  // A synchronously blocked event loop can also prevent this timer from running.
+  const observer=setTimeout(()=>{observers.delete(observer);emit('pending');},25_000);observers.add(observer);
+  try {
+  host=await side('gateway');mark('create guest');guest=await side('contact');mark('create member');member=await side('member');
+  mark('create group');await host.h.core.group.create('Fixture');
+  mark('group invite/join');await member.h.core.group.join((await host.h.core.group.invite()).invite);await link(host,guest,mark);
+  mark('grant contact');await guest.c.call('contacts.grant',{coreId:host.id,projectId:guest.p.id});
+  mark('contact offers');await waitFor(()=>host!.h.core.contacts.find(guest!.id)?.offers.length===1);
+  mark('pause receivers');for(const s of [guest,member])await s.c.call('collaboration.configure',{threadId:s.t.id,config:{mode:'team',remote:true,paused:true,resources:''}});
   // Temporarily allow this test's initiating send, then hold delivery on the two receivers.
-  await member.c.call('collaboration.configure',{threadId:member.t.id,config:{mode:'team',remote:true,paused:false,resources:''}});
-  await member.h.core.coordination.mailboxes.contacts(member.t.id);
-  const sent=await member.h.core.coordination.send({threadId:member.t.id,to:{coreId:guest.id,threadId:guest.t.id},text:'Fixture question',requestId:'member-send'});
-  await waitFor(()=>guest.h.core.coordination.get(guest.t.id).messages.some((l)=>l.id===sent.id),10000);
-  await member.c.call('collaboration.configure',{threadId:member.t.id,config:{mode:'team',remote:true,paused:true,resources:''}});
+  mark('configure member');await member.c.call('collaboration.configure',{threadId:member.t.id,config:{mode:'team',remote:true,paused:false,resources:''}});
+  mark('mailbox contacts');await member.h.core.coordination.mailboxes.contacts(member.t.id);
+  mark('send member letter');const sent=await member.h.core.coordination.send({threadId:member.t.id,to:{coreId:guest.id,threadId:guest.t.id},text:'Fixture question',requestId:'member-send'});
+  sentId=sent.id;mark('guest letter receipt');await waitFor(()=>guest!.h.core.coordination.get(guest!.t.id).messages.some((l)=>l.id===sent.id),10000);
+  mark('configure member');await member.c.call('collaboration.configure',{threadId:member.t.id,config:{mode:'team',remote:true,paused:true,resources:''}});
   const incoming=guest.h.core.coordination.get(guest.t.id).messages.find((l)=>l.id===sent.id)!;
-  await guest.c.call('collaboration.configure',{threadId:guest.t.id,config:{mode:'team',remote:true,paused:false,resources:''}});
+  mark('configure guest');await guest.c.call('collaboration.configure',{threadId:guest.t.id,config:{mode:'team',remote:true,paused:false,resources:''}});
   host.h.core.contacts.setSettings({minTier:1});member.h.core.contacts.setSettings({minTier:1});
-  const {grant}=await guest.c.call('pairing.grant',{});
-  const phone=await connect(guest.h.url,'',{grant,client:{name:'pwa',version:'test'}});clients.push(phone);
+  mark('pairing grant');const {grant}=await guest.c.call('pairing.grant',{});
+  mark('connect paired client');const phone=await connect(guest.h.url,'',{grant,client:{name:'pwa',version:'test'}});clients.push(phone);
   const writer=principal==='paired'?phone:guest.c;
-  let attempts=0;
   if(principal==='restart'){
     const request=host.h.core.coordination.request.bind(host.h.core.coordination);
     host.h.core.coordination.request=async(peer,op,payload)=>{
-      if(peer.coreId===member.id&&op==='contact.route'&&(payload as {action?:string}).action==='return'){
+      if(peer.coreId===member!.id&&op==='contact.route'&&(payload as {action?:string}).action==='return'){
         attempts++;throw new Error('Fixture source temporarily unreachable');
       }
       return request(peer,op,payload);
     };
   }
-  const reply=await writer.call('contacts.sendHuman',{threadId:guest.t.id,to:incoming.from,text:'Fixture human reply',replyTo:sent.id,requestId:'human-reply'});
+  mark('send human reply / intercept return');const reply=await writer.call('contacts.sendHuman',{threadId:guest.t.id,to:incoming.from,text:'Fixture human reply',replyTo:sent.id,requestId:'human-reply'});
+  replyId=reply.id;
   if(principal==='restart'){
-    await waitFor(()=>attempts>0&&host.h.core.coordination.mailboxes.received(reply.id)?.status==='received');
+    mark('intercepted return and durable mailbox receipt');await waitFor(()=>attempts>0&&host!.h.core.coordination.mailboxes.received(reply.id)?.status==='received');
     const previous=host.h;
-    await previous.stop();cores.splice(cores.indexOf(previous),1);
-    host.h=await startTestCore({dataDir:previous.dataDir,port:Number(new URL(previous.url).port)});cores.push(host.h);
-    host.h.core.contacts.selfUrl=async()=>host.h.url;
+    mark('stop host');await previous.stop();cores.splice(cores.indexOf(previous),1);
+    mark('restart host');host.h=await startTestCore({dataDir:previous.dataDir,port:Number(new URL(previous.url).port)});cores.push(host.h);
+    host.h.core.contacts.selfUrl=async()=>host!.h.url;
   }
-  await waitFor(()=>member.h.core.coordination.get(member.t.id).messages.some((l)=>l.id===reply.id),10000);
+  mark('member reply delivery');await waitFor(()=>member!.h.core.coordination.get(member!.t.id).messages.some((l)=>l.id===reply.id),10000);
   const got=member.h.core.coordination.get(member.t.id).messages.find((l)=>l.id===reply.id)!;
   console.log('SEC-03',JSON.stringify({sentOrigin:reply.origin,receivedOrigin:got.origin??null,promptSaysHuman:letterPrompt([got]).includes('HUMAN CONTACT'),promptSaysAgent:letterPrompt([got]).includes('agents of a CONTACT')}));
   expect(got.origin).toBe('contact-human');
   expect(got.from.agent).toBeUndefined();
   expect(letterPrompt([got])).toContain('HUMAN CONTACT');
   expect(letterPrompt([got])).not.toContain('agents of a CONTACT');
-  expect((await writer.call('contacts.sendHuman',{threadId:guest.t.id,to:incoming.from,text:'Fixture human reply',replyTo:sent.id,requestId:'human-reply'})).id).toBe(reply.id);
+  mark('idempotent human reply');expect((await writer.call('contacts.sendHuman',{threadId:guest.t.id,to:incoming.from,text:'Fixture human reply',replyTo:sent.id,requestId:'human-reply'})).id).toBe(reply.id);
+  } catch(error) {
+    emit('failure');
+    throw error;
+  } finally {clearTimeout(observer);observers.delete(observer);}
 },30000);
