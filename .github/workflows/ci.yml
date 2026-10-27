@@ -131,7 +131,10 @@ jobs:
         run: bun scripts/ci/changes.ts
       - run: bun install --frozen-lockfile
       - name: Audit frozen dependencies
-        run: bun audit
+        # GHSA-gcqx-w48m-w2h4 (low): deepmerge 4.3.1, the latest release, has no fix.
+        # Only @sveltejs/vite-plugin-svelte uses it, merging build configuration.
+        # Drop the ignore once a patched deepmerge or plugin ships.
+        run: bun audit --ignore=GHSA-gcqx-w48m-w2h4
       - run: bun scripts/check-docs.ts
       - run: bun test scripts/ci scripts/migrate ./bench ./apps/shell/scripts ./apps/android-server
       # Missing sentences are warnings here and in the nightly; release.yml refuses them.
