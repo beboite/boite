@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -49,6 +49,50 @@ async function cards(client: Awaited<ReturnType<typeof side>>['client'], scope: 
   return page.cards;
 }
 const command = (kind: 'add' | 'update', requestId: string, text: string): SharedBoardCommand => ({ kind, requestId, cardId: 'card_collision', text });
+
+test('a successful authority read reports local disk exhaustion instead of an offline snapshot', async () => {
+  const {a, b, scope} = await board();
+  const request = b.h.core.coordination.request.bind(b.h.core.coordination);
+  b.h.core.coordination.request = (peer, op, payload) => op === 'contact.project' ? Promise.reject(unavailable('fixture offline')) : request(peer, op, payload);
+  await a.client.call('sharedBoard.apply', {...scope, command: command('add', 'disk-card', 'durable remote card')});
+  const full = Object.assign(new Error('local board storage is full'), {code: 'SQLITE_FULL'});
+  let transported = false;
+  b.h.core.coordination.request = async (...args) => {
+    const result = await request(...args);
+    if (args[1] === 'contact.project' && (args[2] as {method?: string}).method === 'board.get') transported = true;
+    return result;
+  };
+  const append = spyOn(b.h.core.sharedBoard.journal, 'append').mockImplementation(() => {throw full;});
+  try {
+    expect(await thrown(b.h.core.sharedBoard.get(scope))).toThrow(full);
+    expect(transported).toBe(true);
+  } finally {append.mockRestore(); b.h.core.coordination.request = request;}
+}, 30000);
+
+test.each([null, 'updated text'])('a Todo hidden by a queued removal refuses update %s', async text => {
+  const {a, b, scope} = await board();
+  await a.client.call('sharedBoard.apply', {...scope, command: command('add', 'hidden-card', 'shared')});
+  await cards(b.client, scope);
+  const request = b.h.core.coordination.request.bind(b.h.core.coordination);
+  b.h.core.coordination.request = (peer, op, payload) => op === 'contact.project' ? Promise.reject(unavailable('fixture offline')) : request(peer, op, payload);
+  try {
+    expect((await b.client.call('sharedBoard.apply', {...scope, command: {kind: 'remove', cardId: 'card_collision', requestId: 'pending-remove'}})).outcome).toBe('queued');
+    expect(b.h.core.sharedBoard.journal.entry(scope.sharedProjectId, 'card_collision')?.kind).toBe('card');
+    expect(await thrown(b.client.call('todos.update', {...scope, todoId: 'card_collision', ...(text === null ? {goalThreadId: null} : {text})}))).toThrow('todoId: expected a live shared card');
+  } finally {b.h.core.coordination.request = request;}
+}, 30000);
+
+test('an acknowledged board edit reports local receipt storage exhaustion instead of a queued receipt', async () => {
+  const {a, b, scope} = await board();
+  await a.client.call('sharedBoard.apply', {...scope, command: command('add', 'receipt-card', 'shared')});
+  await cards(b.client, scope);
+  const full = Object.assign(new Error('local receipt storage is full'), {code: 'SQLITE_FULL'});
+  const settle = spyOn(b.h.core.sharedBoard.journal, 'settle').mockImplementation(() => {throw full;});
+  try {
+    expect(await thrown(b.h.core.sharedBoard.apply({...scope, command: command('update', 'disk-edit', 'accepted remotely')}))).toThrow(full);
+    expect((await cards(a.client, scope))[0]!.text).toBe('accepted remotely');
+  } finally {settle.mockRestore();}
+}, 30000);
 
 test('two simultaneous canonical claims reserve one worker and retries start exactly one goal', async () => {
   const { a, b, scope } = await board();

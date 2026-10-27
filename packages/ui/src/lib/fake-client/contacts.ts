@@ -336,9 +336,7 @@ export function contactMethods(ctx: FakeContext) {
         for (const request of state.requests) if (request.coreId === contact.coreId) request.contact = name;
       }
       if (params.trusted !== undefined) contact.trusted = params.trusted;
-      const peer = fakeCore(contact.coreId);
-      const counterpart = peer && contactState(peer).contacts.find(c => c.coreId === ctx.identity.coreId);
-      if (counterpart) counterpart.offers = contact.grants.flatMap(g => { const p=ctx.projects.find(p=>p.id===g.projectId&&!p.archived); return p?[{projectId:p.id,name:p.name}]:[]; });
+      offers(contact);
       changed();
       return structuredClone(contact);
     },

@@ -76,6 +76,96 @@ async function done(s: Awaited<ReturnType<typeof side>>, scope: { threadId: stri
   expect(current.error).toBeNull(); expect(current.status).toBe('done');
   return current;
 }
+test.each(['done', 'failed'] as const)('late cancellation preserves %s local and remote history while revocation still fences it', async status => {
+  const {a, b, scope, baseCommit, enable} = await pair(); await enable(a); await enable(b);
+  if (status === 'failed') for (const side of [a, b]) side.h.core.sharedCompute.guardStart = () => {throw new Error('fixture admission refused');};
+  const jobs = [];
+  for (const host of [a, b]) {
+    const job = await a.client.call('sharedCompute.start', {...scope, requestId: `history-${host.coreId}`, host: host.ref, profileId: 'conversation', task: 'Complete the fixture', baseCommit});
+    await waitFor(() => host.h.core.sharedCompute.journal.get(job.id, 'host')?.job.status === status);
+    jobs.push(await a.client.call('sharedCompute.get', {...scope, jobId: job.id}));
+  }
+  for (const job of jobs) {
+    expect(await a.client.call('sharedCompute.cancel', {...scope, jobId: job.id, requestId: `late-${job.id}`})).toEqual(job);
+    const host = job.host.coreId === a.coreId ? a : b;
+    const hosted = host.h.core.sharedCompute.journal.get(job.id, 'host')!.job;
+    expect(await host.client.call('sharedCompute.cancel', {...scope, jobId: job.id, requestId: `host-late-${job.id}`})).toEqual(hosted);
+  }
+  for (const host of [a, b]) await host.client.call('sharedProjects.configure', {sharedProjectId: scope.sharedProjectId, compute: {enabled: false, profiles: [], permissionMode: 'default', maxConcurrent: null}});
+  for (const job of jobs) await waitFor(() => a.h.core.sharedCompute.journal.get(job.id, job.host.coreId === a.coreId ? 'host' : 'source')?.job.status === 'revoked');
+}, 30000);
+
+test('completion racing a source cancellation keeps the verified result and clears its cancellation retry', async () => {
+  const {a, b, scope, baseCommit, enable} = await pair(); await enable(b);
+  const unblock = holdAccountTurns(b.h, b.accountId);
+  const request = a.h.core.coordination.request.bind(a.h.core.coordination);
+  try {
+    const job = await a.client.call('sharedCompute.start', {...scope, requestId: 'completion-race', host: b.ref, profileId: 'conversation', task: 'Finish during cancellation', baseCommit});
+    await waitFor(() => b.h.core.sharedCompute.journal.get(job.id, 'host')?.job.status === 'running');
+    a.h.core.coordination.request = async (peer, op, payload) => {
+      if (op === 'contact.project' && (payload as {method?: string}).method === 'compute.cancel') {
+        unblock();
+        await waitFor(() => b.h.core.sharedCompute.journal.get(job.id, 'host')?.job.status === 'done');
+      }
+      return request(peer, op, payload);
+    };
+    const cancelled = await a.client.call('sharedCompute.cancel', {...scope, jobId: job.id, requestId: 'completion-cancel'});
+    expect(cancelled.status).toBe('done'); expect(cancelled.result?.baseCommit).toBe(baseCommit);
+    expect(cancelled).toEqual({...b.h.core.sharedCompute.journal.get(job.id, 'host')!.job, updatedAt: cancelled.updatedAt});
+    expect(a.h.core.sharedCompute.journal.get(job.id, 'source')!.cancelRequest).toBeUndefined();
+    expect(b.h.core.journal.listChildThreads().filter(t => t.parentThreadId === b.threadId)).toHaveLength(1);
+  } finally {unblock(); a.h.core.coordination.request = request;}
+}, 30000);
+
+test('releasing a completed claim preserves history and fences a follow-up already in transport across host restart', async () => {
+  const {a, b, scope, baseCommit, enable} = await pair(); await enable(b);
+  for (const side of [a, b]) await side.client.call('sharedProjects.configure', {sharedProjectId: scope.sharedProjectId, board: true});
+  const added = await a.client.call('sharedBoard.apply', {...scope, command: {kind: 'add', requestId: 'completed-card', cardId: 'completed', text: 'Complete once'}});
+  const claimed = await a.client.call('sharedBoard.apply', {...scope, command: {kind: 'claim', requestId: 'completed-claim', cardId: 'completed', expectedRevision: added.revision, worker: {project: a.ref, threadId: a.threadId, address: {coreId: a.coreId, threadId: a.threadId}}}});
+  const claimId = claimed.card!.assignment!.claimId;
+  const job = await a.client.call('sharedCompute.start', {...scope, requestId: 'claim-history', host: b.ref, profileId: 'conversation', task: 'One result', baseCommit, claimId});
+  const completed = await done(a, scope, job), hosted = b.h.core.sharedCompute.journal.get(job.id, 'host')!.job;
+  const held = Promise.withResolvers<void>(), entered = Promise.withResolvers<void>();
+  const request = a.h.core.coordination.request.bind(a.h.core.coordination);
+  let captured!: Parameters<typeof request>;
+  a.h.core.coordination.request = async (...args) => {
+    if (args[1] === 'contact.project' && (args[2] as {method?: string}).method === 'compute.send') {captured = args; entered.resolve(); await held.promise;}
+    return request(...args);
+  };
+  try {
+    const sending = a.client.call('sharedCompute.send', {...scope, jobId: job.id, text: 'Must never resume', requestId: 'late-claim-send'}).catch(error => error);
+    await entered.promise;
+    expect((await a.client.call('sharedBoard.apply', {...scope, command: {kind: 'release', requestId: 'release-completed', cardId: 'completed', claimId}})).outcome).toBe('applied');
+    held.resolve();
+    const error = await sending;
+    expect(error).toBeInstanceOf(Error); expect(error.message).toContain('claim');
+    expect(b.h.core.sharedCompute.journal.get(job.id, 'host')!.job).toEqual(hosted);
+    expect(a.h.core.sharedCompute.journal.get(job.id, 'source')!.job.result).toEqual(completed.result);
+    expect(await thrown(a.client.call('sharedCompute.send', {...scope, jobId: job.id, text: 'Still closed', requestId: 'closed-source'}))).toThrow('claim');
+    await b.h.stop();
+    const restarted = await startTestCore({dataDir: b.h.dataDir, port: Number(new URL(b.h.url).port)}); cores.push(restarted);
+    await waitFor(() => a.h.core.contacts.linked(b.coreId), 10000);
+    expect(await thrown(request(...captured))).toThrow('claim');
+    expect(restarted.core.sharedCompute.journal.get(job.id, 'host')!.job).toEqual(hosted);
+  } finally {held.resolve(); a.h.core.coordination.request = request;}
+}, 30000);
+
+test('a send refuses remote permission disabled during its association lookup without persisting a letter', async () => {
+  const {a, b} = await pair();
+  const threads = a.h.core.sharedProjects.threads.bind(a.h.core.sharedProjects);
+  const lookup = spyOn(a.h.core.sharedProjects, 'threads').mockImplementationOnce(async (...args) => {
+    const result = await threads(...args);
+    a.h.core.coordination.configure(a.threadId, {...a.h.core.coordination.config(a.threadId), remote: false});
+    return result;
+  });
+  try {
+    expect(await thrown(a.h.core.coordination.send({threadId: a.threadId, to: {coreId: b.coreId, threadId: b.threadId}, text: 'Late remote permission', requestId: 'late-remote'}))).toThrow('coordination permissions changed');
+    expect(a.h.core.coordination.get(a.threadId).messages.some(m => m.text === 'Late remote permission')).toBe(false);
+    const local = await a.client.call('threads.create', {projectId: a.ref.projectId, providerId: 'echo', accountId: a.accountId, title: 'Local recipient'});
+    const letter = await a.h.core.coordination.send({threadId: a.threadId, to: {coreId: a.coreId, threadId: local.id}, text: 'Local permission is unchanged', requestId: 'local-only'});
+    expect(a.h.core.coordination.get(local.id).messages.some(message => message.id === letter.id)).toBe(true);
+  } finally {lookup.mockRestore();}
+}, 30000);
 test('start and duplicate requests acknowledge a durable queued job while host admission is held', async () => {
   const {a, b, scope, baseCommit, enable} = await pair(); await enable(a); await enable(b);
   for (const host of [a, b]) {
@@ -619,13 +709,14 @@ test('a workflow retry fences its previous shared job and accepts only the repla
   expect(failure?.message).toContain('fixture fails one admission');
   expect((await a.h.core.logs.query({source: 'shared-compute'}))).toHaveLength(0);
   const first = rejected.nodes[0]!.instances[0]!.compute!;
+  const previousJob = b.h.core.sharedCompute.journal.get(first.jobId, 'host')!.job;
   expect(failure?.threadId).toBe(first.worker!.threadId);
   await a.client.call('workflows.control', {threadId: a.threadId, runId: run.id, action: 'retry', stepId: 'remote'});
   await waitFor(() => ['done', 'failed'].includes(a.h.core.workflows.get(a.threadId, run.id).status));
   const last = a.h.core.workflows.get(a.threadId, run.id);
   expect(last.error).toBeNull(); expect(last.status).toBe('done');
   expect(last.nodes[0]!.instances[0]!.compute!.jobId).not.toBe(first.jobId);
-  expect(b.h.core.sharedCompute.journal.get(first.jobId, 'host')!.job.status).toBe('cancelled');
+  expect(b.h.core.sharedCompute.journal.get(first.jobId, 'host')!.job).toEqual(previousJob);
   expect(b.h.core.journal.listChildThreads()).toHaveLength(2);
 }, 30000);
 

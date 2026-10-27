@@ -164,6 +164,16 @@ test('compute uses the selected host profile, refuses unsafe execution, scopes j
   b.finishSharedCompute(raced.id,'Completed before cancellation arrived');
   a.setContactConnected(bid,true);
   expect(await a.call('sharedCompute.get',{...as,jobId:raced.id})).toMatchObject({status:'done',result:{text:'Completed before cancellation arrived'}});
+  for(const side of [a,b])await side.call('sharedProjects.configure',{sharedProjectId:as.sharedProjectId,board:true});
+  const card=await a.call('sharedBoard.apply',{...as,command:{kind:'add',requestId:'history-card',cardId:'history-card',text:'Keep completion'}});
+  const claimed=await a.call('sharedBoard.apply',{...as,command:{kind:'claim',requestId:'history-claim',cardId:'history-card',expectedRevision:card.revision,worker:{project:{ownerCoreId:aid,coreId:aid,projectId:ap.id},threadId:as.threadId,address:{coreId:aid,threadId:as.threadId}}}});
+  const claimId=claimed.card!.assignment!.claimId;
+  const historical=await a.call('sharedCompute.start',{...input,requestId:'history-job',claimId});
+  b.finishSharedCompute(historical.id,'Historical result');
+  const history=await a.call('sharedCompute.get',{...as,jobId:historical.id});
+  await a.call('sharedBoard.apply',{...as,command:{kind:'release',requestId:'close-history',cardId:'history-card',claimId}});
+  expect(await a.call('sharedCompute.get',{...as,jobId:historical.id})).toEqual(history);
+  expect(await a.call('sharedCompute.send',{...as,jobId:historical.id,text:'Must stay closed',requestId:'closed-history'}).catch(e=>e)).toMatchObject({code:RpcErrorCode.Refused});
   await b.call('sharedProjects.revoke',{sharedProjectId:bs.sharedProjectId,requestId:'revoke'});
   expect(await a.call('sharedCompute.get',{...as,jobId:job.id}).catch(e=>e)).toMatchObject({code:RpcErrorCode.Refused});
 });

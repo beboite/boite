@@ -212,7 +212,10 @@ export class ContactMailboxes {
       return this.core.coordination.receiveRouted(letter, route.name);
     }
     const from = checkRemoteContact(p?.from as AgentContact, peer);
-    if (p.action === 'contacts') return this.core.contacts.available().map(contact => ({ ...contact, admission: this.core.contacts.find(contact.coreId)!.addedAt }));
+    if (p.action === 'contacts') return this.core.contacts.available().flatMap(contact => {
+      const direct = this.core.contacts.find(contact.coreId);
+      return direct ? [{...contact, admission: direct.addedAt}] : [];
+    });
     const contactId = p.action === 'deliver' ? address(p.letter?.to as AgentContact, 'letter.to').coreId : text(p.coreId, 'route.coreId', 100);
     if (this.core.contacts.find(contactId)?.addedAt !== p.admission) throw refused('route: the gateway contact admission changed; discover its contacts again');
     if (p.action === 'lookup') {

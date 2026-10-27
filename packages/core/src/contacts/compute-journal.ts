@@ -13,6 +13,8 @@ export interface ComputeRecord {
   cancelRequest?: string;
   notified?: string;
   stopping?: 'cancelled' | 'revoked';
+  /** A released board claim keeps its history but can never accept another turn. */
+  claimClosed?: true;
   checkoutPath?: string;
   repositoryPath?: string;
   commonDirectory?: string;

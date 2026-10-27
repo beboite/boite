@@ -26,6 +26,21 @@ async function routed() {
   return { a, b, c, ai, bi, ci, ac, source, recipient };
 }
 
+test('gateway discovery retains direct admissions when its local summaries also contain a relay', async () => {
+  const {a, b, ai, ci, source} = await routed();
+  const relay = {coreId: 'e'.repeat(64), name: 'Another gateway relay', projects: [], link: 'connected' as const};
+  const local = [...b.core.contacts.available(), relay];
+  const available = spyOn(b.core.contacts, 'available').mockReturnValue(local);
+  try {
+    const peer = b.core.group.peers().find(peer => peer.coreId === ai)!;
+    const answer = await b.core.coordination.mailboxes.handle(peer, {action: 'contacts', from: a.core.coordination.describe(source)}) as {coreId: string; admission: number}[];
+    expect(answer.find(entry => entry.coreId === ci)?.admission).toBe(b.core.contacts.find(ci)!.addedAt);
+    expect(answer.some(entry => entry.coreId === relay.coreId)).toBe(false);
+    expect(b.core.contacts.available()).toContain(relay);
+    expect((await a.core.coordination.mailboxes.contacts(source)).some(entry => entry.coreId === ci)).toBe(true);
+  } finally {available.mockRestore();}
+}, 30000);
+
 test('a group contact route keeps letters and the wake on the initiating core without a gateway thread', async () => {
   const { a, b, c, ai, bi, ci, ac, source, recipient } = await routed();
   const contacts = await ac.call('collaboration.contacts', { threadId: source });

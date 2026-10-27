@@ -17,7 +17,7 @@ import { forgetOnMissing, resolveSpawnCommand, startResolved } from './spawn-com
 import { BUSY_CPU_PERCENT, IDLE_LOAD_INTERVAL_MS, LOAD_INTERVAL_MS, LoadPace, worthPushing } from './load-pace.ts';
 import { launchOf } from './git/command.ts';
 import { ExecutionProtections } from './execution-protection.ts';
-import { protectionRunner } from './protection-runner.ts';
+import { closeProcessResources, protectionRunner } from './protection-runner.ts';
 import { processEventDiagnostic } from './process-event-diagnostics.ts';
 
 import type { SpawnOptions } from './process-spawn-types.ts';
@@ -268,7 +268,7 @@ export class ProcRegistry {
     this.exitTimers.clear();
     for (const timer of this.forgetTimers.values()) clearTimeout(timer);
     this.forgetTimers.clear();
-    this.closing = this.protection.close().then(() => this.platform.release());
+    this.closing = closeProcessResources(this.protection, this.platform);
     return this.closing;
   }
 

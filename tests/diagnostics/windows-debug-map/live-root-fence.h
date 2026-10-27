@@ -30,7 +30,7 @@ static DWORD lf_file(const wchar_t *directory, const wchar_t *label, const wchar
   return error;
 }
 static BOOL lf_hex(wchar_t *value, const wchar_t *key) {
-  if (GetEnvironmentVariableW(key, value, 34) != 32) return FALSE;
+  if (GetEnvironmentVariableW(key, value, 33) != 32) return FALSE;
   for (int i = 0; i < 32; i++) if (!((value[i] >= L'a' && value[i] <= L'f') || (value[i] >= L'0' && value[i] <= L'9'))) return FALSE;
   return TRUE;
 }

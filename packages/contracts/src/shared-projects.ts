@@ -301,7 +301,7 @@ export interface SharedProjectPeerMethods {
   'compute.start': { params: SharedComputeStart & { source: SharedThreadRef; repository: string }; result: SharedComputeJob };
   'compute.get': { params: { jobId: string }; result: SharedComputeJob };
   'compute.send': { params: { jobId: string; text: string }; result: { ok: true } };
-  'compute.cancel': { params: { jobId: string; /** Allows a cancellation fence to arrive before a delayed start. */ input?: SharedComputeStart; repository?: string; source?: SharedThreadRef }; result: SharedComputeJob };
+  'compute.cancel': { params: { jobId: string; /** Permanently closes a released board claim, including a completed job's follow-ups. */ closeClaim?: true; /** Allows a cancellation fence to arrive before a delayed start. */ input?: SharedComputeStart; repository?: string; source?: SharedThreadRef }; result: SharedComputeJob };
   /** May only close the sender's access. It cannot widen or restore the receiver's grant. */
   revoke: { params: Record<string, never>; result: { ok: true } };
 }

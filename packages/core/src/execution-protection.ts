@@ -174,7 +174,12 @@ export class ExecutionProtections {
     if (lease) for (const id of lease.threads) if (this.bindings.get(id) === lease) this.bindings.delete(id);
   }
 
-  async close(): Promise<void> { await Promise.all([...this.bindings.keys()].map(id => this.release(id))); this.refused.clear(); }
+  async close(): Promise<void> {
+    const settled = await Promise.allSettled([...this.bindings.keys()].map(id => this.release(id)));
+    const errors = settled.flatMap(result => result.status === 'rejected' ? [result.reason] : []);
+    if (errors.length) throw new AggregateError(errors, 'Failed to close protected execution sessions');
+    this.refused.clear();
+  }
 
   private check(lease: Lease): void {
     if (lease.closed) throw new Error('execution.scope: captured authority was revoked');

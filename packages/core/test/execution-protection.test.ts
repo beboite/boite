@@ -63,6 +63,23 @@ test('revocation keeps both stop and session errors visible and retries the capt
   } finally {fail = false; await protection.close().catch(() => {});}
 });
 
+test('closing protection waits for the remaining leases after another lease fails', async () => {
+  const held = Promise.withResolvers<void>(), failed = Promise.withResolvers<void>(), error = new Error('first lease failed');
+  const protection = new ExecutionProtections({open: async () => ({launch() {throw new Error('unused');}, flush() {}, close() {}})}, async () => {throw new Error('unused');}, async id => {
+    if (id === 'first') {failed.resolve(); throw error;}
+    await held.promise;
+  }, () => 0);
+  let closed = false;
+  try {
+    await protection.install('first', input(), () => {}); await protection.install('second', input(), () => {});
+    const result = protection.close().catch(error => error).finally(() => {closed = true;});
+    await failed.promise; await Bun.sleep(20);
+    expect(closed).toBe(false);
+    held.resolve();
+    expect(await result).toBeInstanceOf(AggregateError);
+  } finally {held.resolve(); await protection.close().catch(() => {});}
+});
+
 test('shared workflow options normalize absent values without accepting host-owned values or malformed types', () => {
   const compute = {sharedProjectId: 'shared', host: {ownerCoreId: 'a'.repeat(64), coreId: 'b'.repeat(64), projectId: 'project'}, profileId: 'conversation', baseCommit: 'c'.repeat(40)};
   const plan = (extra: Record<string, unknown>) => ({name: 'Shared', steps: [{id: 'remote', task: 'Review', compute, ...extra}]});

@@ -4,6 +4,7 @@ import type { Core } from '../core.ts';
 import { invalidParams, messageOf } from '../errors.ts';
 import { sameProject } from '../contacts/project-policy.ts';
 import { fingerprint } from '../contacts/project-journal.ts';
+import { terminalCompute } from '../contacts/compute-journal.ts';
 
 interface Hooks {
   load: (id: string) => WorkflowRun | null;
@@ -49,7 +50,7 @@ export class SharedWorkflowCompute {
       // No ledger row means rejection preceded reservation/dispatch. Rows are never pruned.
       if (old && !recovery && (this.core.sharedCompute.journal.get(old.jobId, 'source') || this.core.sharedCompute.journal.get(old.jobId, 'host'))) {
         const stopped = await this.core.sharedCompute.cancel({threadId: run.rootThreadId, sharedProjectId: target.sharedProjectId, jobId: old.jobId, requestId: `retry-${requestId}`});
-        if (!['cancelled', 'revoked'].includes(stopped.status)) throw invalidParams('compute.retry: the previous captured job has not confirmed cancellation');
+        if (!terminalCompute(stopped)) throw invalidParams('compute.retry: the previous captured job has not confirmed cancellation');
       }
       if (!this.running(run.id, inst.key)) return;
       const before = this.hooks.load(run.id)!, admitted = before.nodes.flatMap(n => n.instances).find(i => i.key === inst.key)!;

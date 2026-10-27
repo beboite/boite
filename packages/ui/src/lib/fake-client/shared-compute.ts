@@ -6,7 +6,7 @@ import { delegationConfig, workflowChild, workflowAnswer, type ChildRoute } from
 import { secureId } from '../secure-id';
 import { assertSharedActive, cloneShared, endpoints, invalidShared, notifyShared, onceShared, projectAddress, remoteShared, requireShared, refusedShared, sameProject, sharedScope, sharedState, sharedText } from './shared-state';
 
-interface Record {job:SharedComputeJob;content:string;task:string;repository:string;parent:string;base:string;accountId:string;cancelRequest?:string}
+interface Record {job:SharedComputeJob;content:string;task:string;repository:string;parent:string;base:string;accountId:string;cancelRequest?:string;claimClosed?:true}
 interface HostState {nativeProtected:boolean;bindings:Map<string,string>;jobs:Map<string,Record>;requests:Map<string,Record>;sources:Map<string,Record>;repos:Map<string,{repository:string;head:string;commits:Set<string>}>}
 const states=new WeakMap<FakeContext,HostState>();
 function stateOf(ctx:FakeContext):HostState{let state=states.get(ctx);if(!state){state={nativeProtected:false,bindings:new Map(),jobs:new Map(),requests:new Map(),sources:new Map(),repos:new Map()};states.set(ctx,state);}return state;}
@@ -111,7 +111,10 @@ export function sharedComputeMethods(ctx:FakeContext){
     }
   });
   sharedState(ctx).stopClaim=(id,claimId,worker)=>{
-    for(const record of [...stateOf(ctx).jobs.values(),...stateOf(ctx).sources.values()])if(record.job.sharedProjectId===id&&record.job.claimId===claimId&&JSON.stringify(record.job.source)===JSON.stringify(worker)&&!terminal(record.job)){record.job={...record.job,status:'cancelled',result:null,revision:record.job.revision+1};}
+    for(const record of [...stateOf(ctx).jobs.values(),...stateOf(ctx).sources.values()])if(record.job.sharedProjectId===id&&record.job.claimId===claimId&&JSON.stringify(record.job.source)===JSON.stringify(worker)){
+      record.claimClosed=true;
+      if(!terminal(record.job))record.job={...record.job,status:'cancelled',result:null,revision:record.job.revision+1};
+    }
   };
   function job(p:{threadId:string;sharedProjectId:string;jobId:string}){
     const {shared}=sharedScope(ctx,p),found=records(ctx,shared,p.threadId).find(r=>r.record.job.id===p.jobId);
@@ -158,6 +161,7 @@ export function sharedComputeMethods(ctx:FakeContext){
       computeSource(ctx,p);const found=job(p),{host,shared}=found,text=sharedText(p.text,'text',4000),requestId=sharedText(p.requestId,'requestId');
       if(found.record.job.host.coreId!==ctx.identity.coreId&&!remoteShared(ctx,shared))throw refusedShared('compute.host: unavailable');
       const record=stateOf(host).jobs.get(found.record.job.id)!;
+      if(record.claimClosed||found.record.claimClosed)throw refusedShared('compute.claim: reservation is permanently closed');
       if(terminal(record.job)&&record.job.status!=='done'||found.record.cancelRequest)throw refusedShared('jobId: execution authority is closed');
       return onceShared(host,`compute-send:${record.job.id}:${requestId}`,{text},()=>{record.job={...record.job,status:'running',revision:record.job.revision+1,result:null};notifyShared(ctx,shared.id);return {ok:true as const};});
     },

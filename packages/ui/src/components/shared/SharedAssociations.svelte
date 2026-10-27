@@ -12,19 +12,20 @@
   let { store, contact, projectId }: { store: Store; contact: Contact; projectId: string } = $props();
   let thread = $derived(store.projectBoardThread(projectId) ?? store.threadsOf(projectId).find(t => !t.archived && !t.incognito));
   let projects = $derived(thread ? (store.shared.projects[thread.id] ?? []).filter(p => p.contact.coreId === contact.coreId) : []);
-  let busy = $state(false), error = $state('');
+  let busy = $state(false), loadError = $state(''), actionError = $state('');
+  let error = $derived(actionError || loadError);
   let selected = $state<SharedProjectScope | null>(null);
   let loadVersion = 0;
   async function load() {
     const owner = store, id = thread?.id, client = owner.client, request = ++loadVersion;
     if (!id || owner.connection !== 'ready' || !client) return;
     const current = () => request === loadVersion && store === owner && owner.client === client && thread?.id === id;
-    try {await owner.shared.load(id); if (current()) error = '';}
-    catch (e) {if (current()) error = errorText(e);}
+    try {await owner.shared.load(id); if (current()) loadError = '';}
+    catch (e) {if (current()) loadError = errorText(e);}
   }
   async function refresh() {
     if (!thread || busy) return;
-    busy = true; error = '';
+    busy = true; actionError = ''; loadError = '';
     try { await load(); }
     finally { busy = false; }
   }
@@ -42,18 +43,18 @@
     if (!store.owner || busy || !thread) return;
     const selected = offers.find(o => keyOf(remoteOf(o)) === key);
     if (!selected) return;
-    busy = true; error = '';
+    busy = true; actionError = ''; loadError = '';
     try {
       await store.shared.call('sharedProjects.offer', {coreId: contact.coreId, projectId, remote: remoteOf(selected), requestId: secureId()});
       await store.shared.load(thread.id);
-    } catch (e) { error = errorText(e); }
+    } catch (e) { actionError = errorText(e); }
     finally { busy = false; }
   }
   async function decide(sharedProjectId: string, accept: boolean) {
     if (!store.owner || busy || !thread) return;
-    busy = true; error = '';
+    busy = true; actionError = ''; loadError = '';
     try { await store.shared.call('sharedProjects.decide', {sharedProjectId, accept, requestId: secureId()}); await store.shared.load(thread.id); }
-    catch (e) { error = errorText(e); }
+    catch (e) { actionError = errorText(e); }
     finally { busy = false; }
   }
 </script>

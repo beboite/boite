@@ -3,7 +3,7 @@ import type { RpcParams, SharedBoardCard, SharedBoardCommand, SharedBoardPage, S
 import { RpcErrorCode } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import type { Connection } from '../router.ts';
-import { refused, invalidParams, RpcFailure } from '../errors.ts';
+import { refused, invalidParams, RpcFailure, diskFull } from '../errors.ts';
 import { PeerRefusal } from '../coordination-wire.ts';
 import { text } from '../coordination-letter.ts';
 import { goalOf, notifySharedTodos } from '../todos.ts';
@@ -206,7 +206,7 @@ export class SharedBoard {
     const card = this.optimistic(ctx.shared.id, this.journal.snapshot(ctx.shared.id).cards).find(c => c.id === command.cardId) ?? null;
     return {requestId: command.requestId, outcome: 'queued', revision: this.journal.revision(ctx.shared.id), card};
   }
-  private offline(error: unknown): boolean { return !(error instanceof PeerRefusal) && (!(error instanceof RpcFailure) || error.code === RpcErrorCode.Unavailable); }
+  private offline(error: unknown): boolean { return !diskFull(error) && !(error instanceof PeerRefusal) && (!(error instanceof RpcFailure) || error.code === RpcErrorCode.Unavailable); }
   private async pull(ctx: SharedPeerContext, minimum = 0): Promise<void> {
     const id = ctx.shared.id;
     this.pullTargets.set(id, Math.max(minimum, this.pullTargets.get(id) ?? 0));
@@ -456,17 +456,22 @@ export class SharedBoard {
     const ctx = this.core.sharedProjects.scope(scope, connection); this.check(ctx);
     const current = this.journal.entry(ctx.shared.id, p.todoId);
     if (current?.kind !== 'card') throw refused('todoId: expected a live shared card');
+    const todo = (): Todo => {
+      const value = this.todos(ctx.local.projectId).find(t => t.id === p.todoId && t.shared?.sharedProjectId === ctx.shared.id);
+      if (!value) throw refused('todoId: expected a live shared card');
+      return value;
+    };
     const base = {cardId: p.todoId, requestId: newId('board_')};
     if (p.goalThreadId !== undefined && (p.text !== undefined || p.status !== undefined && p.status !== 'open')) throw invalidParams('todos.update: link changes are separate from text or status edits');
     let command: SharedBoardCommand;
     if (p.goalThreadId) command = {...base, kind: 'claim', expectedRevision: current.card.revision, worker: {project: ctx.local, threadId: p.goalThreadId, address: projectAddress(ctx.local, p.goalThreadId)}};
     else if (p.goalThreadId === null) {
-      if (!current.card.assignment) return this.todos(ctx.local.projectId).find(t => t.id === p.todoId && t.shared?.sharedProjectId === ctx.shared.id)!;
+      if (!current.card.assignment) return todo();
       command = {...base, kind: 'release', claimId: current.card.assignment.claimId};
     } else command = {...base, kind: 'update', ...(p.text === undefined ? {} : {text: p.text}), ...(p.status === undefined ? {} : {status: p.status})};
     const result = await this.apply({...scope, command}, connection);
     if (result.outcome === 'conflict' || result.outcome === 'deleted' || result.outcome === 'revoked' || command.kind === 'claim' && result.outcome === 'queued') throw refused('todoId: shared card claim requires an accepted authority reservation');
-    return this.todos(ctx.local.projectId).find(t => t.id === p.todoId && t.shared?.sharedProjectId === ctx.shared.id)!;
+    return todo();
   }
   todos(projectId: string): Todo[] {
     return this.core.sharedProjects.journal.all(projectId).filter(shared => shared.state === 'active' && shared.access.every(a => a.board)).flatMap(shared =>

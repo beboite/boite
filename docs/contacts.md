@@ -627,9 +627,12 @@ escape into an unrestricted child or another project.
 
 The requester follows only its own jobs; the host owner inspects/cancels all
 jobs on this association. Remote steering is an external agent letter, never
-an answer to a host permission card. Cancellation/revocation closes admission,
-retries, result delivery and authority for exactly these captured job IDs,
-including after restart. Keep terminal ledger entries as deduplication fences.
+an answer to a host permission card. Cancellation closes active jobs; cancelling
+an already completed or failed job preserves its history. Releasing a board
+claim durably closes its jobs to follow-ups on the source and host, while keeping
+completed results readable across restart. Revocation closes admission, retries,
+result delivery and authority for exactly these captured job IDs, including
+terminal jobs and after restart. Keep terminal ledger entries as deduplication fences.
 Unrelated jobs and ordinary local turns continue. An offline remote host
 cannot acknowledge cancellation until it hears it; report that state honestly.
 The enforcing host denies locally at once, and checks again before execution,

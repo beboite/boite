@@ -318,3 +318,21 @@ test('manual and background association refreshes only publish their latest resu
   expect(document.querySelector('[role=alert]')?.textContent).toBe('Current manual failure');
   load.mockImplementation(original);
 });
+
+test('background association refresh preserves a newer decision error until the next explicit refresh', async () => {
+  const {store, a, ap, bid, as} = await setup();
+  await a.call('sharedProjects.revoke', {sharedProjectId: as.sharedProjectId, requestId: 'new-offer'});
+  show(SharedAssociations, {store, projectId: ap.id, contact: (await a.call('contacts.get', {})).contacts.find(c => c.coreId === bid)!});
+  await settle();
+  let resolve!: (value: Awaited<ReturnType<typeof store.shared.load>>) => void;
+  const held = new Promise<Awaited<ReturnType<typeof store.shared.load>>>(done => {resolve = done;});
+  vi.spyOn(store.shared, 'load').mockImplementationOnce(() => held);
+  await a.call('contacts.update', {coreId: bid, name: 'Background update'}); await settle();
+  vi.spyOn(store.shared, 'call').mockRejectedValueOnce(new Error('Offer was refused'));
+  await click('shared-associate'); document.querySelector<HTMLButtonElement>('[data-value]')!.click(); await settle();
+  expect(document.querySelector('[role=alert]')?.textContent).toBe('Offer was refused');
+  resolve([]); await settle();
+  expect(document.querySelector('[role=alert]')?.textContent).toBe('Offer was refused');
+  await click('shared-associations-refresh');
+  expect(document.querySelector('[role=alert]')).toBeNull();
+});

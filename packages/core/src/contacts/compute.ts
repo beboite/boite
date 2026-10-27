@@ -210,7 +210,7 @@ export class SharedCompute {
       if (latest.cancelRequest || terminalCompute(latest.job)) return latest.cancelRequest ? this.dispatch(latest) : latest.job;
     }
     const raw = current.cancelRequest
-      ? await this.core.sharedProjects.request(ctx, 'compute.cancel', { jobId: current.job.id, input: current.input, repository: current.repository, source: current.job.source }, current.cancelRequest)
+      ? await this.core.sharedProjects.request(ctx, 'compute.cancel', { jobId: current.job.id, ...(current.claimClosed ? {closeClaim: true as const} : {}), input: current.input, repository: current.repository, source: current.job.source }, current.cancelRequest)
       : current.job.worker ? await this.core.sharedProjects.request(ctx, 'compute.get', {jobId: current.job.id})
         : await this.core.sharedProjects.request(ctx, 'compute.start', { ...current.input, source: current.job.source, repository: current.repository }, current.input.requestId);
     if (current.cancelRequest && current.job.status === 'revoked' && ['cancelled', 'revoked'].includes(raw.status)) {delete current.cancelRequest; this.journal.put(current); return current.job;}
@@ -218,12 +218,12 @@ export class SharedCompute {
   }
   private acceptRemote(record: ComputeRecord, raw: SharedComputeJob): SharedComputeJob {
     const current = this.journal.get(record.job.id, 'source')!;
-    if (current.job.status === 'revoked' || current.cancelRequest && !['cancelled', 'revoked'].includes(raw.status)) return current.job;
+    if (current.job.status === 'revoked' || current.cancelRequest && !terminalCompute(raw)) return current.job;
     const next = checkedComputeJob(raw, current.job, current.repository);
     if (next.revision < current.job.revision) return current.job;
     if (next.result && next.result.baseCommit !== current.input.baseCommit) throw refused('compute.result.baseCommit: expected the requested base');
     current.job = next;
-    if (next.status === 'cancelled' || next.status === 'revoked') delete current.cancelRequest;
+    if (terminalCompute(next)) delete current.cancelRequest;
     this.save(current); return next;
   }
   private admit(ctx: SharedPeerContext, input: SharedComputeStart, source: SharedThreadRef, repository: string): Promise<SharedComputeJob> {
@@ -253,6 +253,7 @@ export class SharedCompute {
     return Promise.resolve(this.journal.get(id, 'host')!.job);
   }
   private assertLive(record: ComputeRecord): SharedPeerContext {
+    if (record.claimClosed) throw refused('compute.claim: reservation is permanently closed');
     if (this.closed || record.stopping || terminalCompute(record.job)) throw refused('compute.job: execution authority is closed');
     const shared = this.core.sharedProjects.require(record.job.sharedProjectId);
     const ctx = this.context(shared);
@@ -349,10 +350,12 @@ export class SharedCompute {
   /** Board release waits for actual cancellation proof, including a delayed remote start's durable fence. */
   async stopBoardClaim(sharedId: string, claimId: string, worker: SharedThreadRef): Promise<void> {
     for (const record of this.journal.all(sharedId).filter(r => r.job.claimId === claimId && fingerprint(r.job.source) === fingerprint(worker))) {
-      if (record.role === 'host') {await this.stop(record, 'cancelled'); continue;}
-      record.cancelRequest ??= `board-${claimId}`; record.job.status = 'uncertain'; record.job.result = null; this.save(record);
+      if (record.role === 'host') {await this.stop(record, 'cancelled', true); continue;}
+      record.claimClosed = true; record.cancelRequest ??= `board-${claimId}`;
+      if (!terminalCompute(record.job)) {record.job.status = 'uncertain'; record.job.result = null; this.save(record);}
+      else this.journal.put(record);
       const stopped = await this.dispatch(record);
-      if (!['cancelled', 'revoked'].includes(stopped.status)) throw refused('compute.claim: captured remote job has not confirmed stop');
+      if (!terminalCompute(stopped)) throw refused('compute.claim: captured remote job has not confirmed stop');
     }
   }
   private save(record: ComputeRecord): void {
@@ -392,21 +395,23 @@ export class SharedCompute {
   }
   private hostGet(ctx: SharedPeerContext, id: string): SharedComputeJob { return this.hostRecord(ctx, id).job; }
   private hostCancel(ctx: SharedPeerContext, p: SharedProjectPeerMethods['compute.cancel']['params']): Promise<SharedComputeJob> {
+    if (p.closeClaim !== undefined && p.closeClaim !== true) throw invalidParams('compute.closeClaim: expected true or absent');
     let record = this.journal.get(text(p.jobId, 'jobId', 100), 'host');
     if (record) {
       if (ctx.source.kind === 'human') {
         if (record.job.sharedProjectId !== ctx.shared.id || !sameProject(record.job.source.project, ctx.remote)) throw refused('compute.cancel: expected the sender endpoint job');
-        return this.stop(record, 'cancelled');
+        return this.stop(record, 'cancelled', p.closeClaim);
       }
-      return this.stop(this.hostRecord(ctx, p.jobId), 'cancelled');
+      return this.stop(this.hostRecord(ctx, p.jobId), 'cancelled', p.closeClaim);
     }
     if (!p.input) throw refused('compute.cancel: an unknown job requires its exact source request');
     const input = computeInput(p.input);
+    if (p.closeClaim && !input.claimId) throw refused('compute.claim: expected a captured board claim');
     const source = ctx.source.kind === 'agent' ? threadRef({project: ctx.remote, threadId: ctx.source.threadId, address: ctx.source.address}) : threadRef(p.source);
     if (!sameProject(source.project, ctx.remote)) throw refused('compute.cancel.source: expected the sender endpoint');
     if (this.jobId(ctx.shared.id, source, input.requestId) !== p.jobId || !sameProject(input.host, ctx.local) || p.repository !== computeRepository(this.core, ctx.local.projectId)) throw refused('compute.cancel: expected the exact project, host and request identity');
     const {index} = this.core.sharedProjects.endpoints(ctx.shared);
-    record = {role: 'host', input, repository: p.repository, fingerprint: fingerprint({input, repository: p.repository}),
+    record = {role: 'host', input, repository: p.repository, fingerprint: fingerprint({input, repository: p.repository}), ...(p.closeClaim ? {claimClosed: true as const} : {}),
       job: {...this.newJob(ctx, input, source, p.jobId, ctx.shared.access[index].revision), status: 'cancelled'}};
     this.save(record); return Promise.resolve(record.job);
   }
@@ -434,6 +439,7 @@ export class SharedCompute {
   async cancel(p: RpcParams<'sharedCompute.cancel'>, connection?: Connection): Promise<SharedComputeJob> {
     const ctx = this.core.sharedProjects.scope(p, connection), record = this.localRecord(ctx, p.jobId);
     const requestId = text(p.requestId, 'requestId', 100);
+    if (terminalCompute(record.job)) return record.job;
     if (record.role === 'host') return this.stop(record, 'cancelled');
     record.cancelRequest ??= requestId; record.job.status = 'uncertain'; record.job.error = 'Cancellation pending'; record.job.result = null; this.save(record);
     try { await this.dispatch(record); } catch { /* Durable cancellation retries at the next Contacts reconnect. */ }
@@ -442,6 +448,7 @@ export class SharedCompute {
   async send(p: RpcParams<'sharedCompute.send'>, connection?: Connection): Promise<{ ok: true }> {
     const ctx = this.sourceContext(p, connection), record = this.localRecord(ctx, p.jobId);
     const body = text(p.text, 'text', 4000), requestId = text(p.requestId, 'requestId', 100);
+    if (record.claimClosed) throw refused('compute.claim: reservation is permanently closed');
     if (record.role === 'host') return this.hostSend({ ...ctx, source: { ...ctx.source, kind: 'agent' } as SharedPeerContext['source'] }, p.jobId, body, requestId);
     if (terminalCompute(record.job) && record.job.status !== 'done') throw refused('compute.job: authority is closed');
     const result = await this.core.sharedProjects.request(ctx, 'compute.send', { jobId: record.job.id, text: body }, requestId);
@@ -487,11 +494,15 @@ export class SharedCompute {
       if (record && !record.stopping && !terminalCompute(record.job)) { record.job.status = 'failed'; record.job.result = null; record.job.error = 'Host could not verify completed execution and git provenance'; this.save(record); }
     }
   }
-  private async stop(record: ComputeRecord, status: 'cancelled' | 'revoked'): Promise<SharedComputeJob> {
+  private async stop(record: ComputeRecord, status: 'cancelled' | 'revoked', closeClaim = false): Promise<SharedComputeJob> {
     const key = `${record.role}:${record.job.id}`;
-    const pending = this.stops.get(key); if (pending) return pending;
     record = this.journal.get(record.job.id, record.role)!;
-    if (record.job.status === 'revoked') return record.job;
+    if (closeClaim) {
+      if (!record.job.claimId) throw refused('compute.claim: expected a captured board claim');
+      record.claimClosed = true; this.journal.put(record);
+    }
+    const pending = this.stops.get(key); if (pending) return pending;
+    if (record.job.status === 'revoked' || status === 'cancelled' && terminalCompute(record.job)) return record.job;
     record.stopping = status; record.job.status = 'uncertain'; record.job.result = null; record.job.error = 'Cancellation pending';
     // Fence first, then stop only this captured worker. Never pause its parent or sibling jobs.
     this.save(record);
@@ -516,7 +527,7 @@ export class SharedCompute {
     for (const record of this.journal.all(id)) {
       if (record.stopping || record.job.status === 'revoked' || record.job.status === 'cancelled') continue;
       try {
-        if (record.role === 'host') this.assertLive({ ...record, job: { ...record.job, status: 'waiting' } });
+        if (record.role === 'host') this.assertLive({ ...record, claimClosed: undefined, job: { ...record.job, status: 'waiting' } });
         else {
           const ctx = this.sourceContext({ sharedProjectId: id, threadId: record.job.source.threadId });
           const { index } = this.core.sharedProjects.endpoints(ctx.shared);
