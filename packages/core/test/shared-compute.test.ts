@@ -68,8 +68,11 @@ async function done(s: Awaited<ReturnType<typeof side>>, scope: { threadId: stri
   const until = Date.now() + 12000;
   while (!['done', 'failed', 'cancelled', 'revoked', 'uncertain'].includes(current.status) && Date.now() < until) {
     await new Promise(r => setTimeout(r, 30));
-    current = await s.client.call('sharedCompute.get', { ...scope, jobId: job.id });
+    // The host notifies this core's durable projection. Repeated peer reads can
+    // spend its entire minute's allowance while a slow checkout is still queued.
+    current = s.h.core.sharedCompute.journal.get(job.id, 'source')?.job ?? s.h.core.sharedCompute.journal.get(job.id, 'host')!.job;
   }
+  current = await s.client.call('sharedCompute.get', { ...scope, jobId: job.id });
   expect(current.error).toBeNull(); expect(current.status).toBe('done');
   return current;
 }
@@ -124,6 +127,8 @@ test('core shutdown drains a held child worktree inspection before closing its j
 
 test('host opt-in runs four local and five remote children on the owning accounts and returns git provenance', async () => {
   const { a, b, scope, baseCommit, enable } = await pair();
+  const guard = b.h.core.sharedCompute.guardStart;
+  b.h.core.sharedCompute.guardStart = async (...args) => {await guard(...args); await Bun.sleep(1500);};
   let phase = 'disabled';
   try {
     expect(await thrown(a.client.call('sharedCompute.start', { ...scope, requestId: 'disabled', host: b.ref, profileId: 'conversation', baseCommit, task: 'fixture' }))).toThrow('compute');
@@ -433,7 +438,26 @@ test('board release cancels its exact delegated job before releasing the reserva
   await waitFor(() => b.h.core.sharedCompute.journal.get(job.id, 'host')?.job.status === 'running');
   job = await a.client.call('sharedCompute.get', {...scope, jobId: job.id});
   expect(job.status).toBe('running');
-  const released = await a.client.call('sharedBoard.apply', {...scope, command: {kind: 'release', requestId: 'release', cardId: 'card', claimId}});
+  let released;
+  try {
+    released = await a.client.call('sharedBoard.apply', {...scope, command: {kind: 'release', requestId: 'release', cardId: 'card', claimId}});
+  } catch (error) {
+    for (const {h, coreId, threadId} of [a, b]) {
+      try {
+        console.error(JSON.stringify({stage: 'shared-compute.board-release-failed', coreId,
+          logs: await h.core.logs.query({limit: 100}),
+          workers: [threadId, job.worker!.threadId].map(id => ({threadId: id,
+            status: h.core.journal.getThread(id)?.status, activity: h.core.activity.get(id),
+            processes: h.core.procs.liveOf(id),
+          })),
+          jobs: h.core.sharedCompute.journal.all(scope.sharedProjectId).map(({role, job}) => ({
+            role, id: job.id, status: job.status, revision: job.revision, error: job.error, worker: job.worker?.threadId,
+          })),
+        }));
+      } catch (snapshotError) {console.error(`shared-compute.board-release-snapshot: ${String(snapshotError)}`);}
+    }
+    throw error;
+  }
   expect(released.outcome).toBe('applied'); expect(released.card!.assignment).toBeNull();
   expect(b.h.core.sharedCompute.journal.get(job.id, 'host')?.job.status).toBe('cancelled');
   expect(b.h.core.procs.liveCount(job.worker!.threadId)).toBe(0);

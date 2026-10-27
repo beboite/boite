@@ -359,7 +359,22 @@ export class SharedBoard {
         if (fingerprint(this.core.journal.getSetting(bindingKey) ?? null) !== fingerprint(binding)) throw refused('board.stop: the user replaced the worker activity during stop');
       }
       const current = this.core.activity.get(p.worker.threadId);
-      if (current.goal || current.loop || captured.some(id => this.core.procs.liveCount(id) > 0 || ['queued', 'running', 'waiting'].includes(this.core.journal.getThread(id)?.status ?? 'idle'))) throw refused('board.stop: worker execution is uncertain; assignment retained');
+      let unsettled: {threadId: string; processes: number; status?: string} | undefined;
+      if (current.goal || current.loop || captured.some(id => {
+        const processes = this.core.procs.liveCount(id);
+        const status = processes > 0 ? undefined : this.core.journal.getThread(id)?.status ?? 'idle';
+        if (processes > 0 || ['queued', 'running', 'waiting'].includes(status!)) {unsettled = {threadId: id, processes, status}; return true;}
+        return false;
+      })) {
+        try {
+          this.core.logs.warn('Shared board stop refused: worker execution is uncertain; assignment retained', {
+            source: 'shared-board', event: 'shared-board.stop-refused', threadId: p.worker.threadId,
+            data: {sharedProjectId: ctx.shared.id, cardId: p.cardId, claimId: p.claimId, goal: !!current.goal, loop: !!current.loop,
+              ...(unsettled && {blockedThreadId: unsettled.threadId, processes: unsettled.processes, ...(unsettled.status && {status: unsettled.status})})},
+          });
+        } catch { /* Diagnostics must not replace the original refusal. */ }
+        throw refused('board.stop: worker execution is uncertain; assignment retained');
+      }
       this.check(ctx);
       this.core.journal.setSetting(key, {hash, state: 'stopped'});
     })();
