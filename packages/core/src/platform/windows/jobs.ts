@@ -15,6 +15,8 @@ import type { JobsWorkerMessage, JobsWorkerStart } from './jobs-worker.ts';
 import { describeWorkerError, workerEntry } from './worker-entry.ts';
 import { resolveMemoryLimits } from '../../memory-limits.ts';
 import { StartupPriority } from './startup-priority.ts';
+import { processEventDiagnostic } from '../../process-event-diagnostics.ts';
+import { listJobPids } from './jobs-packets.ts';
 import {
   applyCpuCap, applyMemoryLimit, CLASS_CPU_RATE_CONTROL, CLASS_EXTENDED_LIMIT,
   EXTENDED_LIMIT_SIZE, OFF_JOB_MEMORY_LIMIT, OFF_LIMIT_FLAGS, OFF_PRIORITY_CLASS,
@@ -26,9 +28,11 @@ import {
   createdAtOfPid,
   creationIdentityOf,
   exitCodeOf,
+  exitStatusOf,
   imageNameOf,
   ioBytesOf,
   parentPidOf,
+  peakMemoryOf,
   startedAs,
   whenCommandLineReads,
   workingSetOf,
@@ -41,7 +45,6 @@ import type { NativeProcessInfo, NativeProcessExit, ProcessSample, ProcessEventS
 const BELOW_NORMAL_PRIORITY_CLASS = 0x4000;
 const NORMAL_PRIORITY_CLASS = 0x20;
 
-const CLASS_BASIC_PROCESS_ID_LIST = 3;
 const CLASS_ASSOCIATE_COMPLETION_PORT = 7;
 const CLASS_BASIC_AND_IO_ACCOUNTING = 8;
 
@@ -464,6 +467,9 @@ export function sampleThreadJob(threadId: string): ProcessSample | null {
   for (const pid of job.pids) {
     const entry = tracked.get(pid);
     if (entry === undefined || entry.threadId !== threadId) continue;
+    if (process.env.BOITE_DIAGNOSE_JOB_EVENTS === '1') processEventDiagnostic('jobs.sample-held', {threadId, pid,
+      startedAt: entry.identity?.startedAt ?? null, incarnation: entry.identity?.incarnation ?? null,
+      ...exitStatusOf(api, entry.handle), activeProcesses: view.getUint32(OFF_ACTIVE_PROCESSES, true)});
     const memory = workingSetOf(api, entry.handle);
     if (memory === null) continue;
     memoryBytes += memory.workingSet;
@@ -557,7 +563,7 @@ function ensureWorker(port: number): void {
     };
     // No timeout: the Worker sleeps in the kernel until a packet comes, and
     // teardown posts one of its own to wake it.
-    const start: JobsWorkerStart = { port, stop: shared, waitMs: INFINITE, inspectAccess: INSPECT_ACCESS, globalKey: GLOBAL_JOB_KEY };
+    const start: JobsWorkerStart = { port, stop: shared, waitMs: INFINITE, inspectAccess: INSPECT_ACCESS, globalKey: GLOBAL_JOB_KEY, workerId: crypto.randomUUID() };
     created.postMessage(start);
     // Typed structurally: the bench type-checks this file under the DOM lib, whose Worker has no unref.
     (created as { unref?: () => void }).unref?.();
@@ -573,6 +579,7 @@ function failWorker(reason: string): void {
   workerFailure = reason;
   worker = null;
   startPolling();
+  processEventDiagnostic('main.polling-started', {workerFailed: true, armed: pollTimer !== null});
 }
 
 function cancelIdle(): void {
@@ -639,6 +646,8 @@ function retireWorker(): void {
 function onWorkerMessage(message: JobsWorkerMessage): void {
   switch (message.kind) {
     case 'packet':
+      processEventDiagnostic('main.packet', {workerId: message.workerId ?? null, sequence: message.sequence ?? null, message: message.message,
+        key: message.key, pid: message.pid, captured: message.handle !== 0, threadId: threadsByKey.get(message.key) ?? null});
       onJobPacket(message.message, message.key, message.pid, message.handle);
       return;
     case 'failed':
@@ -706,19 +715,6 @@ function startPolling(): void {
   pollTimer = timer;
 }
 
-function listJobPids(api: Native, job: number): Set<number> | null {
-  const capacity = 256;
-  const buffer = new Uint8Array(8 + capacity * 8);
-  if (!api.queryJobInfo(job, CLASS_BASIC_PROCESS_ID_LIST, buffer)) return null;
-  const view = new DataView(buffer.buffer);
-  const count = Math.min(view.getUint32(4, true), capacity);
-  const pids = new Set<number>();
-  for (let index = 0; index < count; index += 1) pids.add(Number(view.getBigUint64(8 + index * 8, true)));
-  return pids;
-}
-
-// -- per process reads ------------------------------------------------------
-
 /**
  * `opened` is the handle the Worker took the moment the packet came, 0 when it
  * had none. Opening it here instead waits for this thread's event loop, and a
@@ -740,7 +736,9 @@ function onProcessStarted(threadId: string, pid: number, opened = 0): void {
     // child killed within a millisecond of its start: there is no name, no
     // parent and no true start time to record. Its exit is swallowed the same
     // way as a console host's; its CPU stays in the job totals.
-    if (api.lastError() === ERROR_INVALID_PARAMETER) {
+    const error = api.lastError();
+    processEventDiagnostic('jobs.start-unopened', {threadId, pid, error});
+    if (error === ERROR_INVALID_PARAMETER) {
       ignored.add(pid);
       return;
     }
@@ -753,15 +751,22 @@ function onProcessStarted(threadId: string, pid: number, opened = 0): void {
   const exe = imageNameOf(api, handle);
   const commandLine = commandLineOf(api, handle);
   // A console host stays out of the trace, and so does its exit.
-  const ignore = (): void => { tracked.delete(pid); ignored.add(pid); api.close(handle); };
+  const ignore = (): void => {
+    processEventDiagnostic('jobs.start-console', {threadId, pid});
+    tracked.delete(pid); ignored.add(pid); api.close(handle);
+  };
   if (consoleHost(exe, commandLine)) return ignore();
   const identity = creationIdentityOf(api, handle);
+  processEventDiagnostic('jobs.start-captured', {threadId, pid, startedAt: identity?.startedAt ?? null,
+    incarnation: identity?.incarnation ?? null, awaitingCommandLine: commandLine === null && api.hasNt});
   tracked.set(pid, { threadId, handle, peakMemoryBytes: 0, identity });
   const record = { parentPid: parentPidOf(api, handle), ...identity };
   const waiting = whenCommandLineReads(api, handle, commandLine, (line) => {
     awaitingCommandLine.delete(pid);
     const name = startedAs(api, handle, exe, line);
     if (name === null) return ignore();
+    processEventDiagnostic('jobs.start-emitted', {threadId, pid, startedAt: identity?.startedAt ?? null,
+      incarnation: identity?.incarnation ?? null});
     sink?.started(threadId, pid, { ...record, exe: name, commandLine: line });
   });
   if (waiting !== null) awaitingCommandLine.set(pid, waiting);
@@ -776,6 +781,7 @@ function onProcessExited(threadId: string, pid: number): void {
 
 function reportExit(threadId: string, pid: number): void {
   const entry = tracked.get(pid);
+  processEventDiagnostic('jobs.exit-received', {threadId, pid, owner: entry?.threadId ?? null, ignored: ignored.has(pid)});
   if (entry !== undefined && entry.threadId !== threadId) return;
   const api = ensureNative();
   if (entry !== undefined && api !== null) {
@@ -783,11 +789,15 @@ function reportExit(threadId: string, pid: number): void {
     // A late pid-only exit/empty-job packet cannot retire a replacement whose
     // captured handle proves it is still running. Failed reads retain the
     // notification path, with the already captured creation identity.
-    if (api.exitCode(entry.handle, code) && code[0] === STILL_ACTIVE) return;
+    const read = api.exitCode(entry.handle, code);
+    processEventDiagnostic('jobs.exit-read', {threadId, pid, read, code: read ? code[0]! : null,
+      error: read ? 0 : api.lastError(), startedAt: entry.identity?.startedAt ?? null, incarnation: entry.identity?.incarnation ?? null});
+    if (read && code[0] === STILL_ACTIVE) return;
   }
   threadJobs.get(threadId)?.pids.delete(pid);
   if (ignored.delete(pid)) return;
   if (entry === undefined || api === null) {
+    processEventDiagnostic('jobs.exit-pid-only', {threadId, pid});
     sink?.exited(threadId, pid, { exitCode: null, cpuMs: null, peakMemoryBytes: null, ioBytes: null });
     return;
   }
@@ -803,15 +813,10 @@ function reportExit(threadId: string, pid: number): void {
     ioBytes: ioBytesOf(api, entry.handle),
   };
   api.close(entry.handle);
+  processEventDiagnostic('jobs.exit-emitted', {threadId, pid, startedAt: exit.startedAt ?? null,
+    incarnation: exit.incarnation ?? null, code: exit.exitCode});
   sink?.exited(threadId, pid, exit);
 }
-
-function peakMemoryOf(api: Native, entry: TrackedProcess): number | null {
-  const memory = workingSetOf(api, entry.handle);
-  const peak = Math.max(memory?.peak ?? 0, entry.peakMemoryBytes);
-  return peak > 0 ? peak : null;
-}
-
 
 // -- teardown ---------------------------------------------------------------
 

@@ -298,6 +298,7 @@ jobs:
         if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
         env:
           BOITE_TEST_NATIVE_EXECUTION: '1'
+          BOITE_DIAGNOSE_JOB_EVENTS: '1'
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
         shell: pwsh

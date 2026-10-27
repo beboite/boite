@@ -1,4 +1,4 @@
-import {expect, test} from 'bun:test';
+import {expect, spyOn, test} from 'bun:test';
 import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
@@ -8,9 +8,11 @@ import type {ProcessReads} from '../src/platform/windows/process-reads.ts';
 
 interface PacketFixture {
   configure(api: Partial<ProcessReads> & {close(handle: number): void; lastError(): number;
-    openProcess(access: number, pid: number): number; terminateProcess(handle: number, code: number): boolean}, sink: ProcessEventSink): void;
+    openProcess(access: number, pid: number): number; terminateProcess(handle: number, code: number): boolean;
+    queryJobInfo?(job: number, klass: number, buffer: Uint8Array): boolean}, sink: ProcessEventSink): void;
   start(thread: string, pid: number, handle?: number): void;
   exit(thread: string, pid: number): void;
+  sample(thread: string, pid: number): void;
   terminateJobProcess(thread: string, pid: number): boolean;
   dispose(): void;
 }
@@ -27,10 +29,16 @@ async function fixture(): Promise<{registry: PacketFixture; close(): void}> {
   writeFileSync(file, source + `
 export function configure(api: Native, events: ProcessEventSink) { native = api; sink = events; }
 export const start = onProcessStarted, exit = reportExit;
+export function sample(thread: string, pid: number) {
+  threadJobs.set(thread, {handle: 1, pids: new Set([pid]), lastCpu100ns: 0n, lastSampleAt: 0} as ThreadJob);
+  sampleThreadJob(thread);
+}
 export function dispose() {
   for (const waiting of awaitingCommandLine.values()) waiting.cancel();
   awaitingCommandLine.clear(); tracked.clear(); ignored.clear(); native = null; sink = null;
 }
+
+
 `);
   try {
     const registry = await import(pathToFileURL(file).href) as PacketFixture;
@@ -88,3 +96,32 @@ for (const previous of ['console host without exit packet', 'process gone before
     } finally {close();}
   });
 }
+
+test('a held-handle diagnostic distinguishes a running process from an unreadable exit status', async () => {
+  const {registry, close} = await fixture();
+  const previous = process.env.BOITE_DIAGNOSE_JOB_EVENTS;
+  const output = spyOn(console, 'error').mockImplementation(() => {});
+  let readable = true;
+  registry.configure({hasNt: false, lastError: () => 5, close() {}, imageName: () => false,
+    openProcess: () => 0, terminateProcess: () => false,
+    processTimes: () => false, memoryInfo: () => false, queryJobInfo: () => true,
+    exitCode(_handle, value) {value[0] = 259; return readable;},
+  }, {started() {}, exited() {}, memoryLimit() {}, note() {}});
+  try {
+    registry.start('current', 1234, 202);
+    process.env.BOITE_DIAGNOSE_JOB_EVENTS = '1';
+    registry.sample('current', 1234);
+    readable = false;
+    registry.sample('current', 1234);
+    const samples = output.mock.calls.filter(call => call[0] === 'WINDOWS_JOB_EVENT')
+      .map(call => JSON.parse(String(call[1]))).filter(row => row.stage === 'jobs.sample-held');
+    expect(samples).toEqual([
+      expect.objectContaining({pid: 1234, read: true, code: 259, error: 0}),
+      expect.objectContaining({pid: 1234, read: false, code: null, error: 5}),
+    ]);
+  } finally {
+    if (previous === undefined) delete process.env.BOITE_DIAGNOSE_JOB_EVENTS;
+    else process.env.BOITE_DIAGNOSE_JOB_EVENTS = previous;
+    output.mockRestore(); close();
+  }
+});

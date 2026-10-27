@@ -93,6 +93,14 @@ that read fails on a host caught as it starts, by a command line that starts
 the system's own `conhost.exe`. Terminating a job requires explicit
 exit reconciliation because the port may report only the empty-job event.
 
+For a native ordering investigation, `BOITE_DIAGNOSE_JOB_EVENTS=1` writes
+`WINDOWS_JOB_EVENT` records to host stderr: worker packet/action/sequence,
+main-thread receipt, captured creation identity and registry admission or
+rejection. The native protected-tools CI step enables it for both helpers.
+It records no commands, environment or paths and changes no exit, wait or
+publication decision. A later PID lookup without a valid creation time cannot
+identify the incarnation retained by the registry.
+
 `process.started` and `process.exited` carry the available PID, parent PID,
 executable, command line, timestamps, exit code, CPU time, peak memory and I/O.
 The UI applies them only while the trace surface is on screen, which reads

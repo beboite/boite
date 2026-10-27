@@ -18,6 +18,7 @@ import { BUSY_CPU_PERCENT, IDLE_LOAD_INTERVAL_MS, LOAD_INTERVAL_MS, LoadPace, wo
 import { launchOf } from './git/command.ts';
 import { ExecutionProtections } from './execution-protection.ts';
 import { protectionRunner } from './protection-runner.ts';
+import { processEventDiagnostic } from './process-event-diagnostics.ts';
 
 import type { SpawnOptions } from './process-spawn-types.ts';
 export type { SpawnOptions } from './process-spawn-types.ts';
@@ -503,6 +504,8 @@ export class ProcRegistry {
       this.live.set(threadId, byPid);
     }
     const entry: Entry = { record, identity, ...control };
+    processEventDiagnostic('registry.start-accepted', {threadId, pid: record.pid, startedAt: identity.startedAt,
+      incarnation: identity.incarnation, root: entry.root});
     entry.parent = parentAtStart(byPid, entry);
     byPid.set(record.pid, entry);
     // Both spawn paths and the job's own grandchild events land here, so this is
@@ -729,6 +732,10 @@ export class ProcRegistry {
 
   private onExit(threadId: ThreadId, pid: number, code: number | null, fromJob?: NativeProcessExit, expected?: ProcessRecord): void {
     const entry = this.live.get(threadId)?.get(pid);
+    processEventDiagnostic('registry.exit-received', {threadId, pid, native: fromJob !== undefined, tracked: entry !== undefined,
+      recordMatches: expected === undefined || expected === entry?.record, startedAt: fromJob?.startedAt ?? null,
+      incarnation: fromJob?.incarnation ?? null, currentStartedAt: entry?.identity.startedAt ?? null,
+      currentIncarnation: entry?.identity.incarnation ?? null});
     if (entry === undefined) return;
     if (expected !== undefined && entry.record !== expected) return;
     if (fromJob !== undefined) {
@@ -754,6 +761,8 @@ export class ProcRegistry {
     this.exitTimers.delete(pid);
     this.unassigned.delete(pid);
     this.live.get(threadId)?.delete(pid);
+    processEventDiagnostic('registry.exit-accepted', {threadId, pid, native: fromJob !== undefined, code,
+      startedAt: entry.identity.startedAt, incarnation: entry.identity.incarnation});
     const known = this.known.get(threadId)?.get(pid);
     if (known !== undefined && known.identity === entry.identity) known.exitedAt = Date.now();
     if ((this.live.get(threadId)?.size ?? 0) === 0) {

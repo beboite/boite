@@ -24,10 +24,11 @@ export function publicationState(records: ProcessRecord[]) {
       try {
         const times = Buffer.alloc(32), exit = Buffer.alloc(4), image = Buffer.alloc(65536), size = Buffer.alloc(4);
         size.writeUInt32LE(image.length / 2);
-        const timed = kernel.symbols.GetProcessTimes(handle, ptr(times), ptr(times.subarray(8)), ptr(times.subarray(16)), ptr(times.subarray(24)));
+        const timed = kernel.symbols.GetProcessTimes(handle, ptr(times, 0), ptr(times, 8), ptr(times, 16), ptr(times, 24));
         result.timesError = timed ? 0 : kernel.symbols.GetLastError();
         result.creationFileTime = timed ? times.readBigUInt64LE().toString() : null;
-        result.creationUnixMs = timed ? Number((times.readBigUInt64LE() - 116444736000000000n) / 10000n) : null;
+        result.creationValid = !!timed && times.readBigUInt64LE() > 116444736000000000n;
+        result.creationUnixMs = result.creationValid ? Number((times.readBigUInt64LE() - 116444736000000000n) / 10000n) : null;
         const read = kernel.symbols.GetExitCodeProcess(handle, ptr(exit));
         result.exitError = read ? 0 : kernel.symbols.GetLastError(); result.exitCode = read ? exit.readUInt32LE() : null;
         result.wait = kernel.symbols.WaitForSingleObject(handle, 0);
