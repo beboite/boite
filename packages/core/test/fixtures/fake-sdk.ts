@@ -38,6 +38,8 @@ export interface FakeSdkState {
   clipboardUnconfirmed?: boolean;
   /** Delays the server's final log and exit, so the core must enforce its shutdown deadline. */
   scrcpyExitDelayMs?: number;
+  /** How long `simctl boot` takes to return. */
+  simBootMs?: number;
   /** `simctl io screenshot` writes a partial file, prints this and fails. */
   screenshotFails?: string;
   /** `simctl shutdown` prints this and fails, whatever the simulator's state. */
@@ -369,10 +371,16 @@ async function main(root: string, tool: string, args: string[]): Promise<number>
         out(JSON.stringify({ devices }));
         return 0;
       }
-      case 'boot':
+      case 'boot': {
         if (!sim) return 1;
         if (sim.state === 'Booted') { process.stderr.write('Unable to boot device in current state: Booted\n'); return 149; }
-        sim.state = 'Booted'; write(state); return 0;
+        // The simulator stays Shutdown until `simctl boot` returns.
+        if (state.simBootMs) await Bun.sleep(state.simBootMs);
+        const now = read();
+        now.sims!.find((entry) => entry.udid === sim.udid)!.state = 'Booted';
+        write(now);
+        return 0;
+      }
       case 'bootstatus': return sim?.state === 'Booted' ? 0 : 1;
       case 'shutdown':
         if (!sim) return 1;

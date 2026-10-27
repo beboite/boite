@@ -483,7 +483,8 @@ export class MobileDevices {
       ? await this.#run(this.#adb().adb, ['-s', target.serial!, 'emu', 'kill'], COMMAND_TIMEOUT_MS)
       : await this.#run(this.#xcrun(), ['simctl', 'shutdown', target.id], COMMAND_TIMEOUT_MS);
     // A simulator someone already shut down is the state asked for; simctl still answers with an error.
-    if (target.platform === 'ios' && run.code !== 0 && /Unable to shutdown device in current state: Shutdown/i.test(run.stderr)) return;
+    // Not while its boot is pending: `simctl boot` could still start it once the session is gone.
+    if (target.platform === 'ios' && run.code !== 0 && !this.#boots.has(target.id) && /Unable to shutdown device in current state: Shutdown/i.test(run.stderr)) return;
     if (run.code !== 0) throw refused(`powering ${target.name} off failed: ${this.#why(run)}`, { deviceId: target.id });
   }
 

@@ -275,10 +275,14 @@ describe('the Device panel over RPC', () => {
     expect((await agent.call('devices.sessions', { threadId })).sessions).toEqual([]);
   });
 
-  test('a failed iOS capture deletes its file and a failed shutdown keeps its error', async () => {
-    const sdk = fakeSdk({ sims: [{ udid: 'A1B2-C3D4', name: 'iPhone 16', runtime: 'com.apple.CoreSimulator.SimRuntime.iOS-18-2', state: 'Booted' }], screenshotFails: 'Error creating the image' }, { adb: false, emulator: false, xcrun: true });
+  test('a failed iOS capture deletes its file, and a shutdown during the boot or a failed one keeps its error', async () => {
+    const sdk = fakeSdk({ sims: [{ udid: 'A1B2-C3D4', name: 'iPhone 16', runtime: 'com.apple.CoreSimulator.SimRuntime.iOS-18-2', state: 'Shutdown' }], simBootMs: 1000, screenshotFails: 'Error creating the image' }, { adb: false, emulator: false, xcrun: true });
     sdkEnv = { os: 'darwin', env: { PATH: sdk.xcode }, home: empty() };
     await agent.call('devices.open', { threadId, deviceId: 'A1B2-C3D4' });
+    // Still Shutdown while `simctl boot` runs: that answer is no power-off, since the boot would start it after the close.
+    const deadline = Date.now() + 5000;
+    while (!sdk.calls().includes('xcrun simctl boot A1B2-C3D4') && Date.now() < deadline) await Bun.sleep(20);
+    expect(await thrown(agent.call('devices.close', { threadId, shutdown: true }))).toThrow('current state: Shutdown');
     expect((await ready('A1B2-C3D4')).state).toBe('ready');
     expect(await thrown(owner.call('devices.frame', { threadId, deviceId: 'A1B2-C3D4' }))).toThrow('Error creating the image');
     const [shot] = screenshots(sdk.calls());
