@@ -80,6 +80,28 @@ test('the default machine is followed outside settings, and a follower names it 
   expect(remote.store.settings?.asyncQuestions).toBe(false);
 });
 
+test('background compaction turns on for the machine picked above it, not the window\'s', async () => {
+  // Flipped from the desktop app, the switch only ever reached the PC's core, never the server running the thread.
+  await mountOnFake('/?fake=1&machines=1');
+  await waitFor(() => workspace.machines.length === 2);
+  const remote = workspace.machines.find(machine => machine.store !== store)!;
+  store.showSettings('experiments');
+  await waitFor(() => document.querySelector('[data-testid=settings-machine]') !== null && document.querySelector('[data-testid=background-compaction-on]') !== null);
+  // This device's switches come first; the bar names the machine of the cards below it.
+  const page = query('[data-testid=experiments-page]');
+  const bar = query('[data-testid=settings-machine-bar]');
+  expect(page.contains(bar)).toBe(true);
+  expect(bar.compareDocumentPosition(query('[data-testid=experiment-goal2]')) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  query<HTMLButtonElement>('[data-testid=settings-machine]').click();
+  flushSync();
+  query<HTMLElement>(`[data-testid=settings-machine-menu] [data-value="${remote.id}"]`).click();
+  await waitFor(() => query('[data-testid=settings-machine]').textContent?.includes(remote.label) === true);
+  query<HTMLInputElement>('[data-testid=background-compaction-on]').click();
+  await waitFor(() => remote.store.settings?.backgroundCompaction === true);
+  expect(store.settings?.backgroundCompaction ?? false).toBe(false);
+  expect(workspace.active).toBe(store);
+});
+
 test('machines coexist and disconnecting a remote leaves the primary connected', async () => {
   await mountOnFake('/?fake=1&machines=1');
   await waitFor(() => workspace.machines.length === 2);

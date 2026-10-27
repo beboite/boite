@@ -180,6 +180,24 @@ describe('automatic compaction', () => {
     client.close();
   });
 
+  test('a thread left above a limit set later compacts once when a client shows it, not at its next prompt', async () => {
+    // A thread idle at 212k before a 200k limit existed made its next prompt wait a minute for the agent's own compaction.
+    const client = await h.connect();
+    const { threadId } = await quiet(client);
+    await turn(client, threadId, 'x'.repeat(950));
+    await client.call('settings.set', { autoCompact: { tokens: 1000, moments: [] } });
+    await pause(120);
+    expect(await compactions(client, threadId)).toEqual([]);
+    const compacted = client.next('turn.finished', t => t.threadId === threadId && t.execution?.operation === 'compact');
+    await client.call('threads.focus', { threadId });
+    expect(await compacted).toMatchObject({ status: 'done', execution: { automatic: true } });
+    await client.call('threads.focus', { threadId: null });
+    await client.call('threads.focus', { threadId });
+    await pause(120);
+    expect((await compactions(client, threadId)).map(t => t.status)).toEqual(['done']);
+    client.close();
+  });
+
   test('the token limit does not wait for the cache-expiry moment', async () => {
     const client = await h.connect();
     const { threadId } = await quiet(client);

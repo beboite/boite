@@ -17,7 +17,7 @@
   import { backgroundLabel } from '../lib/background';
   import { secondClock } from '../lib/clock.svelte';
   import type { Snippet } from 'svelte';
-  let { turn, requestStartedAt = null, progress, waiting = false, activeTool = false, activeContent = false, background = [], stop, pointed = false, steps, memory, actions }: {
+  let { turn, requestStartedAt = null, clockOffset = 0, progress, waiting = false, activeTool = false, activeContent = false, background = [], stop, pointed = false, steps, memory, actions }: {
     turn: Turn;
     /**
      * When the user's request this turn belongs to started, earlier than the
@@ -25,6 +25,8 @@
      * The elapsed time counts from there.
      */
     requestStartedAt?: number | null;
+    /** How far the core's clock runs ahead of this device's: every time here is the core's. */
+    clockOffset?: number;
     progress?: ThreadProgress | null;
     waiting?: boolean;
     /** The message already shows the running tool's activity row. */
@@ -47,7 +49,7 @@
   const hidden = $derived(page.hidden);
   const running = $derived(turn.status === 'running');
   /** The second clock ticks while the turn runs and the page is on screen; a settled turn keeps the time it stopped at. */
-  const now = $derived(running ? secondClock.now : Date.now());
+  const now = $derived((running ? secondClock.now : Date.now()) + clockOffset);
   const compactOperation = $derived(turn.execution?.operation === 'compact');
   const observed = $derived(running && !waiting && progress?.turnId === turn.id ? progress : null);
   const compacting = $derived(running && !waiting && (compactOperation || observed?.phase === 'compacting'));

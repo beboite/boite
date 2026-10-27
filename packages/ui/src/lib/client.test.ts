@@ -161,6 +161,28 @@ describe('rpcUrl', () => {
 });
 
 describe('WsClient', () => {
+  test('the hello measures how far the core clock runs ahead, from the middle of its round trip', async () => {
+    vi.useFakeTimers({ now: 1_000_000 });
+    const { client, socket } = connected();
+    try {
+      socket.open();
+      await vi.advanceTimersByTimeAsync(0);
+      const sent = Date.now();
+      await vi.advanceTimersByTimeAsync(400);
+      // The core read its clock 11 s ahead, halfway through the 400 ms trip.
+      socket.receive({ id: socket.frame(0).id, result: { core: { ...CORE, now: sent + 200 + 11_000 }, principal: 'owner' } });
+      await client.connect();
+      expect(client.clockOffset).toBe(11_000);
+    } finally { client.close(); vi.useRealTimers(); }
+    const old = connected();
+    try {
+      old.socket.open();
+      old.socket.receive({ id: old.socket.frame(0).id, result: { core: CORE, principal: 'owner' } });
+      await old.client.connect();
+      expect(old.client.clockOffset).toBe(0);
+    } finally { old.client.close(); }
+  });
+
   test('a silent RPC expires without resending it, and a probe the core answers keeps the connection', async () => {
     vi.useFakeTimers();
     const { client, socket } = connected();

@@ -91,6 +91,14 @@ handshake does not finish within twelve seconds can be retried from Machines.
 Once the machine has said hello, loading its lists is waited for however long
 it takes on a slow link; the connection is never dropped for it.
 
+Each machine keeps its own clock. The hello's answer carries the core's
+(`CoreInfo.now`), and the client takes the difference from the middle of the
+round trip as that machine's `clockOffset`. A running turn's counters (working
+for, compaction elapsed) count the core's timestamps against the device's
+clock plus that offset, so a desktop 11 seconds behind its server no longer
+shows "Elapsed: 0s" for the first 11 seconds. An older core sends no clock and
+the offset stays zero.
+
 The client detects silent remote sockets (`packages/ui/src/lib/ws-client.ts`).
 On a remote host, 25 seconds without any frame sends a `hello`, which the core
 answers on an open connection with its info and nothing else. That `hello`

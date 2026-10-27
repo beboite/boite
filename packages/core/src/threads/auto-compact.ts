@@ -33,6 +33,8 @@ export const AUTO_COMPACT_LABEL = 'Automatic compaction';
  */
 export class AutoCompaction {
   private readonly timers = new Map<ThreadId, ReturnType<typeof setTimeout>>();
+  /** The context reading each shown thread was last compacted for, so one that failed is not retried at every look. */
+  private readonly shownAt = new Map<ThreadId, number>();
 
   constructor(private readonly core: Core, private readonly threads: ThreadStore) {}
 
@@ -74,6 +76,23 @@ export class AutoCompaction {
     this.fire(threadId);
   }
 
+  /**
+   * A client shows an idle thread already at its token limit: one that went
+   * quiet before the limit was lowered, or whose timer a restart dropped. A
+   * copy compacted in the background starts only below the limit, and its next
+   * prompt would wait for the agent to compact first, so it compacts now, while
+   * the user reads and types. Once per context reading.
+   */
+  shown(threadId: ThreadId): void {
+    const thread = this.core.journal.getThread(threadId);
+    const reading = thread?.context ?? null;
+    if (thread === null || reading === null || this.timers.has(threadId) || this.shownAt.get(threadId) === reading.at) return;
+    const limit = effectiveCompaction(this.core.settings.get(), thread).autoCompact?.tokens ?? null;
+    if (limit === null || reading.tokens < limit) return;
+    this.shownAt.set(threadId, reading.at);
+    this.fire(threadId);
+  }
+
   /** Done lets the final answer finish, but has no further context to prepare. */
   stopIfDone(threadId: ThreadId): void {
     const thread = this.core.journal.getThread(threadId);
@@ -86,6 +105,7 @@ export class AutoCompaction {
   close(): void {
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
+    this.shownAt.clear();
   }
 
   /**

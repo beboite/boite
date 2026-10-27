@@ -27,6 +27,12 @@ export interface Client {
   readonly state: ClientState;
   /** Who the core took this client for on the last hello; null before one. */
   readonly principal: Principal | null;
+  /**
+   * How far the core's clock runs ahead of this device's, in milliseconds,
+   * measured on the last hello; zero or absent when unknown. An elapsed time
+   * counted from a core timestamp adds it to `Date.now()`.
+   */
+  readonly clockOffset?: number;
   close(): void;
 }
 
