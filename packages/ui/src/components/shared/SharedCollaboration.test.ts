@@ -4,6 +4,7 @@ import { sharedFlow } from '../../test/shared-flow';
 import { Store } from '../../lib/store.svelte';
 import { FakeClient } from '../../lib/fake-client';
 import { setExperiment } from '../../lib/experiments';
+import { sharedProjectDialog } from '../../lib/deferred-parts';
 import SharedProjectThreads from './SharedProjectThreads.svelte';
 import SharedProjectDialog from './SharedProjectDialog.svelte';
 import SharedAssociations from './SharedAssociations.svelte';
@@ -16,7 +17,7 @@ beforeAll(() => {
   Object.defineProperty(HTMLDialogElement.prototype, 'close', {configurable: true, value: function(this: HTMLDialogElement) {this.open = false;}});
   HTMLElement.prototype.scrollTo = function(this: HTMLElement, options: ScrollToOptions | number) {this.scrollLeft = typeof options === 'number' ? options : options.left ?? 0;} as typeof HTMLElement.prototype.scrollTo;
 });
-afterEach(async () => {for (const run of cleanup.splice(0).reverse()) await run(); setExperiment('contacts', false); setExperiment('goal2', false); document.body.innerHTML = '';});
+afterEach(async () => {for (const run of cleanup.splice(0).reverse()) await run(); vi.restoreAllMocks(); sharedProjectDialog.current = undefined; sharedProjectDialog.failed = false; setExperiment('contacts', false); setExperiment('goal2', false); document.body.innerHTML = '';});
 async function settle() {for (let i = 0; i < 8; i++) {await new Promise(r => setTimeout(r, 0)); await tick();} flushSync();}
 async function setup() {
   setExperiment('contacts', true); setExperiment('goal2', true);
@@ -167,6 +168,43 @@ test('association needs the second owner consent and an open Contacts page can r
   await click('shared-association-accept');
   await vi.waitFor(() => expect(document.querySelector('[data-testid=shared-association][data-state=active]')).not.toBeNull());
   expect((await a.call('sharedProjects.get', {...as, sharedProjectId: pending.shared.id})).shared.state).toBe('active');
+  expect(el<HTMLButtonElement>('shared-associate').disabled).toBe(true);
+});
+
+test.each(['ownerCoreId', 'projectId'] as const)('an outgoing pending association does not offer consent for a colliding core with another %s', async field => {
+  const {store, a, ap, bid, as} = await setup();
+  const view = await a.call('sharedProjects.get', as);
+  const recipient = {...view.local, [field]: `different-${field}`};
+  const pending = {...view, shared: {...view.shared, state: 'pending' as const, projects: [view.local, recipient] as typeof view.shared.projects}};
+  vi.spyOn(store.shared, 'load').mockImplementation(async threadId => {
+    store.shared.projects[threadId] = [pending];
+    return [pending];
+  });
+  const contact = (await a.call('contacts.get', {})).contacts.find(c => c.coreId === bid)!;
+  show(SharedAssociations, {store, contact, projectId: ap.id}); await settle();
+  expect(document.querySelector('[data-testid=shared-association][data-state=pending]')).not.toBeNull();
+  expect(el('shared-association-accept')).toBeNull();
+});
+
+test('an association dialog chunk failure offers feedback and a retry that opens the same scope', async () => {
+  const {store, a, ap, bid, as} = await setup();
+  const load = vi.spyOn(sharedProjectDialog, 'load')
+    .mockImplementationOnce(async () => { sharedProjectDialog.failed = true; throw new Error('offline'); })
+    .mockImplementationOnce(async () => { sharedProjectDialog.failed = false; sharedProjectDialog.current = SharedProjectDialog; return SharedProjectDialog; });
+  const contact = (await a.call('contacts.get', {})).contacts.find(c => c.coreId === bid)!;
+  const calls = vi.spyOn(a, 'call');
+  show(SharedAssociations, {store, contact, projectId: ap.id}); await settle();
+  expect(load).not.toHaveBeenCalled();
+  await click('shared-association-open');
+  expect(el('deferred-failed')).not.toBeNull();
+  expect(el('shared-project-dialog')).toBeNull();
+  await click('deferred-retry');
+  await vi.waitFor(() => expect(el('shared-project-dialog')).not.toBeNull());
+  expect(el('deferred-failed')).toBeNull();
+  expect(load).toHaveBeenCalledTimes(2);
+  expect(calls).toHaveBeenCalledWith('sharedProjects.get', expect.objectContaining({sharedProjectId: as.sharedProjectId}));
+  el<HTMLButtonElement>('shared-project-dialog').querySelector<HTMLButtonElement>('[data-testid=shared-dialog-close]')!.click(); await settle();
+  expect(el('shared-project-dialog')).toBeNull();
 });
 
 test('association choices distinguish a gateway and its member with the same project id', async () => {

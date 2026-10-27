@@ -5,6 +5,9 @@
   import { errorText } from '../../lib/errors';
   import { secureId } from '../../lib/secure-id';
   import { strings } from '../../lib/strings';
+  import { sameSharedProject } from '../../lib/shared-ui';
+  import { sharedProjectDialog } from '../../lib/deferred-parts';
+  import Deferred from '../Deferred.svelte';
   import Menu from '../Menu.svelte';
   let { store, contact, projectId }: { store: Store; contact: Contact; projectId: string } = $props();
   let thread = $derived(store.projectBoardThread(projectId) ?? store.threadsOf(projectId).find(t => !t.archived && !t.incognito));
@@ -54,7 +57,7 @@
   {#each projects as project (project.shared.id)}
     <div class="row" data-testid="shared-association" data-state={project.shared.state}>
       <span>{contact.offers.find(o => keyOf(remoteOf(o)) === keyOf(project.remote))?.name ?? strings.shared.heading} · {strings.shared.state[project.shared.state]}</span>
-      {#if project.shared.state === 'pending' && project.shared.projects[1].coreId === project.local.coreId && store.owner}
+      {#if project.shared.state === 'pending' && sameSharedProject(project.shared.projects[1], project.local) && store.owner}
         <button type="button" class="small" disabled={busy} onclick={() => void decide(project.shared.id, true)} data-testid="shared-association-accept">{strings.shared.accept}</button>
         <button type="button" class="ghost small" disabled={busy} onclick={() => void decide(project.shared.id, false)}>{strings.shared.decline}</button>
       {:else if project.shared.state === 'active' && thread}
@@ -64,12 +67,17 @@
   {/each}
   {#if store.owner && contact.capabilities?.sharedProjects === 1}
     <Menu items={offers.map(o => ({id: keyOf(remoteOf(o)), label: o.name}))}
-      label={strings.shared.pickProject} disabled={busy || !thread || !contact.offers.length} onpick={id => void offer(id)} testid="shared-associate"><span>{strings.shared.associate}</span></Menu>
+      label={strings.shared.pickProject} disabled={busy || !thread || !offers.length} onpick={id => void offer(id)} testid="shared-associate"><span>{strings.shared.associate}</span></Menu>
     {#if !thread}<p class="hint">{strings.shared.needsThread}</p>{:else if !contact.offers.length}<p class="hint">{strings.shared.noOffers}</p>{/if}
   {/if}
   {#if error}<p class="error" role="alert">{error}</p>{/if}
 </div>
-{#if selected}{#await import('./SharedProjectDialog.svelte') then module}<module.default {store} scope={selected} onclose={() => { selected = null; }} />{/await}{/if}
+{#if selected}
+  {@const scope = selected}
+  <Deferred part={sharedProjectDialog} floating>
+    {#snippet children(Component)}<Component {store} {scope} onclose={() => { selected = null; }} />{/snippet}
+  </Deferred>
+{/if}
 
 <style>
   .associations { padding: 0 0 12px; }

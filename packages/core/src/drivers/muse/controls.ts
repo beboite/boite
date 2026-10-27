@@ -19,13 +19,13 @@ export class MuseControls {
     if (model !== null && model !== this.modelId) {
       const result = await rpc.command<{status?: string}>('session/setModel', { sessionId, model: { modelId: model, providerId: META_PROVIDER } });
       if (protectedNative && result.status !== 'accepted') throw new Error('execution.muse.model: native host did not admit the captured model');
-      this.modelId = model;
+      if (result.status === undefined || result.status === 'accepted') this.modelId = model;
     }
     const mode = MODE_POSTURE[ctx.thread.permissionMode].approvalMode;
     if (mode !== this.approvalMode) {
       const result = await rpc.command<{effectiveMode?: {mode?: string}}>('session/setApprovalMode', { sessionId, mode });
       if (protectedNative && result.effectiveMode?.mode !== mode) throw new Error('execution.muse.mode: native host did not confirm the captured approval mode');
-      this.approvalMode = mode;
+      this.approvalMode = result.effectiveMode?.mode ?? mode;
     }
   }
 

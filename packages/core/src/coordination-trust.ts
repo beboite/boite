@@ -9,7 +9,9 @@ import { migrateGroupPeer } from './coordination-group.ts';
 export function trustCoordination(core: Core, peer: CoordinationPeer): CoordinationPeer {
     if (!peer) throw invalidParams('peer: expected a public contact card');
     const publicKey = text(peer.publicKey, 'peer.publicKey', 1000);
-    const parsed = createPublicKey(publicKey);
+    let parsed: ReturnType<typeof createPublicKey>;
+    try { parsed = createPublicKey(publicKey); }
+    catch { throw invalidParams('peer.publicKey: expected Ed25519'); }
     if (parsed.asymmetricKeyType !== 'ed25519') throw invalidParams('peer.publicKey: expected Ed25519');
     const canonical = parsed.export({ type: 'spki', format: 'pem' }).toString();
     const coreId = createHash('sha256').update(canonical).digest('hex');

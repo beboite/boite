@@ -24,7 +24,7 @@ export function createSharedProjects(db: Database): void {
 /** Sorted object keys make request identity independent of JSON field ordering. */
 export function fingerprint(value: unknown): string {
   const canonical = (input: unknown): unknown => Array.isArray(input) ? input.map(canonical)
-    : input && typeof input === 'object' ? Object.fromEntries(Object.entries(input).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonical(item)])) : input;
+    : input && typeof input === 'object' ? Object.fromEntries(Object.entries(input).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, item]) => [key, canonical(item)])) : input;
   return createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
 }
 

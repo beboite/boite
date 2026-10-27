@@ -35,3 +35,6 @@ export const mobileNavigation = new LazyComponent(() => import('../components/Mo
 
 /** Shared rows load only for an expanded project with Contacts enabled. */
 export const sharedProjectThreads = new LazyComponent(() => import('../components/shared/SharedProjectThreads.svelte'));
+
+/** Association controls load their dialog only when the owner opens it. */
+export const sharedProjectDialog = new LazyComponent(() => import('../components/shared/SharedProjectDialog.svelte'));
