@@ -229,6 +229,7 @@ export class BrowserHostRelay {
     } else if (event.type === 'destroyed') {
       // Closed by the shell itself (a deleted profile, a reload): the core hears it as a closed page.
       this.#targets.delete(target.id); target.off?.();
+      this.#send(target.relay, { method: 'Target.detachedFromTarget', params: { sessionId: target.id, targetId: target.id } });
       this.#send(target.relay, { method: 'Target.targetDestroyed', params: { targetId: target.id } });
     } else if (event.type === 'new-window') {
       // A window the shell could not keep with its opener: a webview of the same profile, adopted by the core as a tab of the opener's conversation.

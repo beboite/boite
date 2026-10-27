@@ -4,6 +4,7 @@ export const strings = {
     /** Above the box while a sent message is being edited. */
     editing: 'Editing a sent message: sending replaces it and everything after it',
     editingQueued: 'Send or remove the queued messages before replacing a sent message.',
+    editUnavailable: "This thread's provider is unavailable. Reconnect it before editing a sent message.",
     filesUnavailable: 'The messages were rewound, but this edit has no complete file backup. The code could not be restored.',
     filesBusy: 'The messages were rewound. Another agent is still working in this folder, so the files were left as they are.',
     editingCancel: 'Stop editing (Esc)',

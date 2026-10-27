@@ -40,6 +40,7 @@
     if (entry.letter.origin === 'user') return strings.agentMessages.you;
     if (entry.letter.origin === 'result') return strings.agentMessages.result;
     if (entry.letter.origin === 'resident') return discussion.agent?.name ?? strings.agentMessages.relation.resident;
+    if (entry.letter.contact) return `${entry.letter.origin === 'contact-human' ? strings.shared.human : strings.shared.agent} · ${entry.letter.contact.name}`;
     return undefined;
   }
   let items = $derived.by(() => {
@@ -143,7 +144,7 @@
     <div class="who">
       <strong data-testid="agent-discussion-heading" tabindex="-1">{discussion.title}</strong>
       <span class="facts">
-        {#if discussion.contact}<RemoteChip name={discussion.contact} />{/if}
+        {#if discussion.contact}<RemoteChip name={discussion.contact} human={discussion.entries.every(entry => entry.letter.origin === 'contact-human')} />{/if}
         {#if tag}<span class="tag" class:resident={discussion.resident} data-relation={tag}>{strings.agentMessages.relation[tag]}</span>{/if}
         {#if where}<span class="where" data-testid="agent-discussion-where">{where}</span>{/if}
         {#if discussion.model}<span class="model">{discussion.model}</span>{/if}
@@ -158,6 +159,7 @@
     <p class="about"><span>{strings.agentMessages.about}</span> {discussion.about}</p>
   {/if}
   <div class="letters" bind:this={list} onscroll={scrolled} data-testid="agent-discussion-letters">
+    {#if discussion.contact}<p class="about" data-testid="shared-external-origin">{strings.shared.external}</p>{/if}
     {#each items as item (item.key)}
       {#if item.kind === 'time'}
         <time class="stretch" datetime={new Date(item.at).toISOString()} title={exactTime(item.at)}>{clockTime(item.at)}</time>

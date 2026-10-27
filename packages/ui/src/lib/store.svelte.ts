@@ -134,6 +134,7 @@ export class Store {
   }
   get clientGeneration(): number { return this.#ctx.clientGeneration; }
   get navigationGeneration(): number { return this.#ctx.threads.openGeneration; }
+  get shared() { return this.#ctx.shared; }
   get serverUpdater() { return this.#ctx.serverUpdater; }
 
   // -------------------------------------------------------------------------
@@ -179,6 +180,7 @@ export class Store {
 
   detach(): void {
     const ctx = this.#ctx;
+    ctx.shared.reset();
     ctx.requests.resetSecrets();
     ctx.clientGeneration++;
     ctx.settings.brainCommands = [];
@@ -512,6 +514,7 @@ export class Store {
   addProject(...args: Parameters<Projects['addProject']>) { return this.#ctx.projects.addProject(...args); }
   addProjects(...args: Parameters<Projects['addProjects']>) { return this.#ctx.projects.addProjects(...args); }
   removeProject(...args: Parameters<Projects['removeProject']>) { return this.#ctx.projects.removeProject(...args); }
+  renameProject(...args: Parameters<Projects['renameProject']>) { return this.#ctx.projects.renameProject(...args); }
   refreshProjects() { return this.#ctx.projects.refreshProjects(); }
   archiveProject(...args: Parameters<Projects['archiveProject']>) { return this.#ctx.projects.archiveProject(...args); }
   projectIconUrl(...args: Parameters<Projects['projectIconUrl']>) { return this.#ctx.projects.projectIconUrl(...args); }

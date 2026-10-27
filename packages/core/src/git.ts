@@ -10,6 +10,7 @@ export { gitDiff } from './git/diff.ts';
 export { parseBranchHeader, parseNumstat, parseStatus } from './git/porcelain.ts';
 
 export async function gitStatus(core: Core, threadId: ThreadId): Promise<GitStatus> {
+  core.sharedAccess.denyTool(threadId);
   const cwd = threadCwd(core, threadId);
   // Both reads start together: neither needs the other's answer, and in series
   // they cost the sum of two full walks of the working tree. The status is

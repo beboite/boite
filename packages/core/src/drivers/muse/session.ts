@@ -50,6 +50,8 @@ import { handshake, mintUuidV7, MspError, MuseRpc } from './rpc.ts';
 import { MuseTurn } from './turn.ts';
 import { noteReady } from '../driver-log.ts';
 import { SessionRetention } from '../session-retention.ts';
+import { protectedMuse } from './protected.ts';
+import { MuseControls } from './controls.ts';
 
 /** One question set still open, settled by an answer, a stop or the host itself. */
 interface OpenQuestion {
@@ -76,15 +78,15 @@ export function setMuseStartupDeadlineForTests(ms: number | null): void {
  * setup closes the host.
  */
 export class MuseSession {
+  private protection: ReturnType<typeof protectedMuse> = null;
+  private replaces: string | null = null;
   private child: SpawnedChild | null = null;
   private rpc: MuseRpc | null = null;
   private starting: Promise<void> | null = null;
 
   /** The Muse session id: what `ctx.sessionId` stores and `session/resume` takes. */
   private sessionId: string | null = null;
-  /** The session's model and approval mode as the host last reported them. */
-  private modelId: string | null = null;
-  private approvalMode: string | null = null;
+  private readonly controls = new MuseControls();
   private lastStderr = '';
   private exitCode: number | null = null;
   private exited: Promise<number | null> | null = null;
@@ -97,6 +99,7 @@ export class MuseSession {
   private killTree: (() => void) | null = null;
   private quotaSink: SessionContext['quota'] | null = null;
   private contextSink: SessionContext['context'] | null = null;
+  private logSink: SessionContext['log'] | null = null;
   /**
    * The running turn's items, by id, for the deltas that name only the item.
    * Item ids are per turn: the map is emptied when a turn ends, and an item of
@@ -261,7 +264,9 @@ export class MuseSession {
     this.quotaSink = turn.ctx.quota ?? null;
     const ctx = turn.ctx;
     try {
-      await this.align(rpc, sessionId, ctx);
+      ctx.protectedExecution?.check();
+      await this.controls.align(rpc, sessionId, ctx, this.protection !== null);
+      ctx.protectedExecution?.check();
       if (turn.isStopped) {
         // Stopped while the model or the mode was being set: no turn and no
         // compaction goes out, and the host stays warm.
@@ -275,6 +280,13 @@ export class MuseSession {
           turn.fail(`Muse had nothing to compact${result.reason === undefined ? '' : ` (${result.reason})`}`);
         }
       } else {
+        let prompt = ctx.prompt, attachments = ctx.attachments;
+        if (this.replaces !== null && this.replaces === ctx.sessionId) {
+          this.replaces = null;
+          const carried = ctx.continuation?.();
+          if (!carried) throw new Error('execution.muse.history: a protected cold start requires the captured conversation continuation');
+          prompt = carried.prompt; attachments = carried.attachments;
+        }
         const commandId = mintUuidV7();
         // A fresh turn's id is its commandId, known before the ack: an item that
         // arrives ahead of the answer still finds its turn.
@@ -283,8 +295,8 @@ export class MuseSession {
         const started = await rpc.request<{ turnId?: string }>('turn/start', {
           commandId,
           sessionId,
-          input: inputOf(ctx.prompt, ctx.attachments),
-          ...(ctx.prompt.length === 0 ? {} : { displayText: ctx.prompt }),
+          input: inputOf(prompt, attachments),
+          ...(prompt.length === 0 ? {} : { displayText: prompt }),
           ...(effort === null ? {} : { reasoningEffort: effort }),
         });
         if (typeof started.turnId === 'string' && started.turnId.length > 0) turn.turnId = started.turnId;
@@ -302,24 +314,6 @@ export class MuseSession {
     await turn.finished;
     this.current = null;
     this.endTurn(turn, turn.isStopped);
-  }
-
-  /**
-   * The thread as it stands for this turn: its model and its approval mode,
-   * sent only when the host reports something else. The effort rides on
-   * `turn/start` itself.
-   */
-  private async align(rpc: MuseRpc, sessionId: string, ctx: SessionContext): Promise<void> {
-    const model = modelOf(ctx);
-    if (model !== null && model !== this.modelId) {
-      await rpc.command('session/setModel', { sessionId, model: { modelId: model, providerId: META_PROVIDER } });
-      this.modelId = model;
-    }
-    const mode = MODE_POSTURE[ctx.thread.permissionMode].approvalMode;
-    if (mode !== this.approvalMode) {
-      await rpc.command('session/setApprovalMode', { sessionId, mode });
-      this.approvalMode = mode;
-    }
   }
 
   private endStopped(turn: MuseTurn): void {
@@ -348,14 +342,18 @@ export class MuseSession {
 
   private async open(ctx: SessionContext): Promise<void> {
     if (this.ended) throw new Error('the muse session was closed before it started');
+    ctx.protectedExecution?.check();
     this.quotaSink = ctx.quota ?? null;
     this.contextSink = ctx.context;
+    this.logSink = ctx.log;
     const executable = museExecutable(ctx.provider);
     const posture = MODE_POSTURE[ctx.thread.permissionMode];
-    const args = [...(profileFor(ctx.provider)?.launch?.args ?? []), ...museHostArgs(executable), ...posture.flags];
+    const declared = profileFor(ctx.provider)?.launch?.args ?? [];
+    this.protection = protectedMuse(ctx, () => this.current ? {ctx: this.current.ctx, stopped: this.current.stopped} : null, declared);
+    const args = this.protection?.args ?? [...declared, ...museHostArgs(executable), ...posture.flags];
     const child = ctx.spawnChild(executable, args, {
-      cwd: ctx.thread.cwd,
-      env: agentEnv(ctx.provider, ctx.accountEnv),
+      cwd: this.protection?.cwd ?? ctx.thread.cwd,
+      env: this.protection?.env ?? agentEnv(ctx.provider, ctx.accountEnv),
     });
     this.child = child;
     this.killTree = ctx.killTree ?? null;
@@ -373,9 +371,10 @@ export class MuseSession {
     this.rpc = rpc;
     this.watch(child, ctx, rpc);
 
-    await this.within('initialize', handshake(rpc));
+    const initialized = await this.within('initialize', handshake(rpc));
+    this.protection?.admit(initialized);
 
-    if (ctx.sessionId !== null) {
+    if (ctx.sessionId !== null && !this.protection) {
       const resumed = await this.within(
         'session/resume',
         rpc.command<{ session: MuseSessionRecord }>('session/resume', {
@@ -383,21 +382,23 @@ export class MuseSession {
           excludeItems: true,
         }),
       );
-      this.adopt(resumed.session);
+      this.sessionId = this.controls.adopt(resumed.session);
       return;
     }
 
     const model = modelOf(ctx);
+    if (this.protection) this.replaces = ctx.sessionId;
     const created = await this.within(
       'session/start',
       rpc.command<{ session: MuseSessionRecord }>('session/start', {
         sessionId: mintUuidV7(),
-        workspaceRoot: ctx.thread.cwd,
+        workspaceRoot: this.protection?.cwd ?? ctx.thread.cwd,
         approvalMode: posture.approvalMode,
         ...(model === null ? {} : { modelId: model, providerId: META_PROVIDER }),
       }),
     );
-    this.adopt(created.session);
+    this.protection?.ready(created.session, posture.approvalMode, model);
+    this.sessionId = this.controls.adopt(created.session);
   }
 
   /** One startup step, or the host closed and a sentence naming the step it hung on. */
@@ -420,12 +421,6 @@ export class MuseSession {
         },
       );
     });
-  }
-
-  private adopt(session: MuseSessionRecord): void {
-    this.sessionId = session.sessionId;
-    this.modelId = session.modelId ?? null;
-    this.approvalMode = session.approvalMode?.mode ?? null;
   }
 
   private watch(child: SpawnedChild, ctx: SessionContext, rpc: MuseRpc): void {
@@ -493,6 +488,9 @@ export class MuseSession {
     this.ended = true;
     this.closing = true;
     this.clearIdle();
+    try { this.protection?.close(this.processClosed); }
+    catch (error) { this.logSink?.('error', `muse: protected cleanup failed: ${logMessageOf(error)}`); }
+    this.protection = null;
     // The running turn ends now, while the journal is still open, not from the
     // child's close event, which can fire after core shutdown closed it.
     const turn = this.current;
@@ -553,10 +551,10 @@ export class MuseSession {
         return;
       }
       case 'session/modelChanged':
-        if (typeof params['modelId'] === 'string') this.modelId = params['modelId'];
+        if (typeof params['modelId'] === 'string') this.controls.modelId = params['modelId'];
         return;
       case 'session/approvalModeChanged':
-        if (typeof params['mode'] === 'string') this.approvalMode = params['mode'];
+        if (typeof params['mode'] === 'string') this.controls.approvalMode = params['mode'];
         return;
       case 'session/contextUsage': {
         const used = params['usedTokens'];

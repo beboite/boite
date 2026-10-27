@@ -84,6 +84,8 @@ export interface QuestionAsk {
 export type QuestionTicket = Promise<QuestionAnswer | null> & { readonly questionId: RequestId };
 
 export interface TurnContext {
+  /** Immutable additional restriction for externally supplied work, never a provider/account replacement. */
+  protectedExecution?: import('./protected.ts').ProtectedDriverExecution;
   thread: ThreadSummary;
   account: Account;
   provider: ProviderDescriptor;
@@ -226,7 +228,7 @@ export interface TurnContext {
 export type SessionContext = Pick<TurnContext,
   'thread' | 'account' | 'provider' | 'sessionId' | 'resumeAt' | 'sessionBefore' |
   'accountEnv' | 'systemGuide' | 'warmProcessMinutes' | 'toolSummaries' | 'shortAnswers' | 'autoCompactTokens' | 'log' | 'diagnostic' | 'authenticationFailed' | 'commands' | 'context' | 'hook' |
-  'background' | 'backgroundFinished' | 'wake' | 'spawnChild' | 'finishStartup' | 'killTree' | 'quota' | 'lazyMcp'>;
+  'background' | 'backgroundFinished' | 'wake' | 'spawnChild' | 'finishStartup' | 'killTree' | 'quota' | 'lazyMcp' | 'protectedExecution'>;
 
 export type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error';
 /** Scalars only: never a prompt, a tool input or output, a command line or a token. */

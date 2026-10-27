@@ -34,7 +34,7 @@ function query<T extends Element>(selector: string): T {
 const SECRET = 'sk-test-0123456789abcdef';
 
 /** A card asked on the seeded thread, drawn the way the timeline draws it. */
-async function asked(options: FakeClientOptions = {}, ask: { replace?: boolean; placeholder?: string; requestId?: string } = {}) {
+async function asked(options: FakeClientOptions = {}, ask: { placeholder?: string; requestId?: string } = {}) {
   const client = new FakeClient({ delayMs: 0, ...options });
   const store = new Store();
   store.attach(client);
@@ -61,7 +61,7 @@ function type(value: string): HTMLInputElement {
   return field;
 }
 
-test('a kept key is saved from Enter, the card folds to one line and nothing holds the value', async () => {
+test('a temporary key is sent from Enter, the card folds to one line and nothing holds the value', async () => {
   const { store, client, outcome, part } = await asked({}, { placeholder: 'sk-...' });
   const field = query<HTMLInputElement>('[data-testid=secret-field]');
   expect(query('[data-testid=secret-name]').textContent).toBe('OPENAI_API_KEY');
@@ -70,11 +70,10 @@ test('a kept key is saved from Enter, the card folds to one line and nothing hol
   expect(field.placeholder).toBe('sk-...');
   expect([field.autocomplete, field.getAttribute('data-lpignore'), field.getAttribute('data-form-type')]).toEqual(['off', 'true', 'other']);
   expect(field.hasAttribute('data-1p-ignore') && field.hasAttribute('data-bwignore')).toBe(true);
-  const keep = query<HTMLInputElement>('[data-testid=secret-keep]');
-  expect(keep.checked).toBe(false);
+  expect(document.querySelector('[data-testid=secret-keep]')).toBeNull();
+  expect(query('[data-testid=secret-transit]').textContent).toContain('10 minutes');
   expect(document.querySelector('[data-testid=secret-replaces]')).toBeNull();
 
-  keep.click();
   type(SECRET);
   field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
   flushSync();
@@ -82,16 +81,17 @@ test('a kept key is saved from Enter, the card folds to one line and nothing hol
   expect(field.value).toBe('');
   await settle();
 
-  expect(await outcome).toMatchObject({ outcome: 'saved', ref: 'secret:project/OPENAI_API_KEY' });
+  expect(await outcome).toMatchObject({ outcome: 'saved', ref: expect.stringMatching(/^secret:sec_/), storage: 'memory' });
   await settle();
   const card = query('[data-testid=secret-card]');
-  expect([card.getAttribute('data-state'), card.getAttribute('data-kept')]).toEqual(['saved', 'true']);
-  expect(query('[data-testid=secret-outcome]').textContent).toBe('OPENAI_API_KEY saved and kept for this project');
+  expect([card.getAttribute('data-state'), card.getAttribute('data-kept')]).toEqual(['saved', null]);
+  expect(query('[data-testid=secret-outcome]').textContent).toBe('OPENAI_API_KEY sent for one use');
   expect(document.querySelector('[data-testid=secret-field]')).toBeNull();
-  expect(part()).toMatchObject({ status: 'saved', kept: true });
+  expect(part()).toMatchObject({ status: 'saved' });
+  expect(part()).not.toHaveProperty('kept');
 
   const listed = await client.call('secrets.list', { projectId: 'p-boite' });
-  expect(listed.secrets.map((key) => key.name)).toEqual(['OPENAI_API_KEY']);
+  expect(listed).toEqual({ secrets: [], storage: 'memory', encrypted: true });
   for (const held of [listed, store.openThread, document.body.innerHTML]) expect(JSON.stringify(held)).not.toContain(SECRET);
 });
 
@@ -120,18 +120,21 @@ test('typing, pasting and Escape in the field reach no window or document listen
   }
 });
 
-test('a card replacing the kept key says so and starts ticked; unticked, it saves a one-off copy', async () => {
-  const { outcome } = await asked({}, { replace: true });
-  expect(query('[data-testid=secret-replaces]').textContent).toBe('Replaces the key kept for this project.');
-  const keep = query<HTMLInputElement>('[data-testid=secret-keep]');
-  expect(keep.checked).toBe(true);
-  keep.click();
+test('a fresh request for the same name always opens a new card', async () => {
+  const { client, outcome } = await asked();
   type(SECRET);
   query<HTMLButtonElement>('[data-testid=secret-save]').click();
-  expect((await outcome).ref).toMatch(/^secret:sec_/);
+  const saved = await outcome;
   await settle();
-  expect(query('[data-testid=secret-outcome]').textContent).toBe('OPENAI_API_KEY saved for this conversation');
-  expect(query('[data-testid=secret-card]').hasAttribute('data-kept')).toBe(false);
+  const second = client.call('secrets.ask', { threadId: 't-trace', name: 'OPENAI_API_KEY', reason: 'Another operation.' });
+  second.catch(() => undefined);
+  await settle();
+  expect(query('[data-testid=secret-card][data-state=pending]')).toBeTruthy();
+  expect(query<HTMLInputElement>('[data-testid=secret-field]').value).toBe('');
+  expect(query('[data-testid=secret-reason]').textContent).toBe('Another operation.');
+  type(SECRET);
+  query<HTMLButtonElement>('[data-testid=secret-save]').click();
+  expect((await second).ref).not.toBe(saved.ref);
 });
 
 test('over a link nobody encrypts the field and Save are off, Decline still answers, and a retry with the id gets the same card', async () => {
@@ -160,25 +163,20 @@ test('a pending secret stays in the question dock and leaves only a link in the 
   expect(query('[data-testid=secret-docked]').querySelector('input')).toBeNull();
 });
 
-test.each([false, true])('new requests keep the current secret, input and storage choice (replace=%s); the timeline link reopens its place in the pager', async (replace) => {
-  const { client, store, part } = await asked({}, { replace });
+test('new requests keep each secret input isolated; the timeline link reopens its place in the pager', async () => {
+  const { client, store, part } = await asked();
   type(SECRET);
-  const keep = query<HTMLInputElement>('[data-testid=secret-keep]');
-  expect(keep.checked).toBe(replace);
-  keep.click();
-  await settle();
-  expect(keep.checked).toBe(!replace);
+
   const second = client.call('secrets.ask', { threadId: 't-trace', name: 'DEPLOY_TOKEN', reason: 'Deploy the preview.' });
   second.catch(() => undefined);
   await settle();
   expect(query<HTMLInputElement>('[data-testid=activity-question]:not([hidden]) [data-testid=secret-field]').value).toBe(SECRET);
-  expect(keep.checked).toBe(!replace);
   expect(query('[data-testid=activity-question-index]').textContent).toBe('1 of 2');
   query<HTMLButtonElement>('[data-testid=activity-question-next]').click();
   await settle();
   expect(query('[data-testid=activity-question]:not([hidden]) [data-testid=secret-reason]').textContent).toBe('Deploy the preview.');
   expect(query<HTMLInputElement>('[data-testid=activity-question]:not([hidden]) [data-testid=secret-field]').value).toBe('');
-  expect(query<HTMLInputElement>('[data-testid=activity-question]:not([hidden]) [data-testid=secret-keep]').checked).toBe(false);
+  expect(document.querySelector('[data-testid=secret-keep]')).toBeNull();
   query<HTMLButtonElement>('[data-testid=activity-question-toggle]').click();
   await settle();
   query<HTMLButtonElement>('[data-testid=secret-docked]').click();
@@ -186,7 +184,6 @@ test.each([false, true])('new requests keep the current secret, input and storag
   expect(query('[data-testid=activity-question-toggle]').getAttribute('aria-expanded')).toBe('true');
   expect(query('[data-testid=activity-question]:not([hidden])').getAttribute('data-question')).toBe(part().requestId);
   expect(query<HTMLInputElement>('[data-testid=activity-question]:not([hidden]) [data-testid=secret-field]').value).toBe(SECRET);
-  expect(keep.checked).toBe(!replace);
   expect(JSON.stringify(store.composerStates)).not.toContain(SECRET);
 });
 
@@ -194,14 +191,14 @@ test('a refused answer shows the core\'s message and leaves the field empty', as
   const { client } = await asked();
   const real = client.call.bind(client);
   client.call = ((method: string, params: unknown) => method === 'secrets.answer'
-    ? Promise.reject(new Error('the windows vault did not store the value'))
+    ? Promise.reject(new Error('the transit buffer could not accept the value'))
     : real(method as never, params as never)) as typeof client.call;
   const field = type(SECRET);
   query<HTMLButtonElement>('[data-testid=secret-save]').click();
   flushSync();
   expect(field.value).toBe('');
   await settle();
-  expect(query('[data-testid=secret-error]').textContent).toContain('the windows vault did not store the value');
+  expect(query('[data-testid=secret-error]').textContent).toContain('the transit buffer could not accept the value');
   expect(query('[data-testid=secret-card]').getAttribute('data-state')).toBe('pending');
 });
 

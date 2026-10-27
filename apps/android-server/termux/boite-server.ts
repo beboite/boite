@@ -22,9 +22,9 @@ import { posix } from 'node:path';
 // Android paths, also when the tests run on Windows.
 const { dirname, join } = posix;
 
-export const REPOSITORY = 'beboite/boite';
+export const REPOSITORY = 'mtsu-dev/boite';
 /** Where a release's files may live; GitHub redirects the old owner's addresses (packages/core/src/server-update/release.ts). */
-const OWNERS = ['https://github.com/mtsu-dev/boite', `https://github.com/${REPOSITORY}`];
+const OWNERS = [`https://github.com/${REPOSITORY}`, 'https://github.com/beboite/boite'];
 /** `plugins.updater.pubkey` of apps/shell/src-tauri/tauri.conf.json; boite-server.test.ts keeps the two equal. */
 export const UPDATE_PUBLIC_KEY = 'dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIxQUMwNkU2MzREQjRFMTUKUldRVlR0czA1Z2Fzc1JuNTArSldvdXVsRi9NbGNrTWQ5QUFxcmdOZXllRnBKL1djRFVwMFg3MS8K';
 /** The updater manifest's key for this bundle (scripts/ci/updater-manifest.ts). */

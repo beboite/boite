@@ -41,7 +41,7 @@ test('ordinary server verification has no registry credentials or write permissi
   expect(source).not.toContain('docker/login-action');
 });
 
-const expected = { repository: 'beboite/boite', tag: 'v2.0.0', sha: 'a'.repeat(40) };
+const expected = { repository: 'mtsu-dev/boite', tag: 'v2.0.0', sha: 'a'.repeat(40) };
 const digests = {
   amd64: `${imageName(expected.repository)}@sha256:${'1'.repeat(64)}`,
   arm64: `${imageName(expected.repository)}@sha256:${'2'.repeat(64)}`,

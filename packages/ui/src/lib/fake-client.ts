@@ -1,3 +1,10 @@
+import { sharedProjectMethods } from './fake-client/shared-projects';
+import { sharedLookupMethods } from './fake-client/shared-lookup';
+import { sharedBoardMethods } from './fake-client/shared-board';
+import { sharedComputeMethods, setSharedRepository, setSharedNativeExecution, finishSharedCompute } from './fake-client/shared-compute';
+import { sharedAccessMethods } from './fake-client/shared-access';
+import { sharedLetterMethods } from './fake-client/shared-letters';
+import { sharedState, sharedContact, reconcileShared, refusedShared } from './fake-client/shared-state';
 import { startupMethods, resetStartup } from './fake-client/startup';
 import { seedWorking } from './fake-client/working-seed';
 import { sweepMergedPrFixtures, type MergedPrFixture } from './fake-client/merged-pr-archive';
@@ -45,7 +52,7 @@ import { providerCatalogMethods } from './fake-client/provider-catalog';
 import { providerInstallMethods } from './fake-client/provider-installs';
 import { RELEASES } from './fake-client/providers';
 import { clearRequestsOf, requestMethods } from './fake-client/requests';
-import { secretMethods } from './fake-client/secrets';
+import { closeSecrets, secretMethods } from './fake-client/secrets';
 import { resourceMethods } from './fake-client/resources';
 import { seed } from './fake-client/seed';
 import { settingsMethods } from './fake-client/settings';
@@ -120,7 +127,7 @@ export class FakeClient implements ObservableClient {
     this.#stopWorking = seedWorking(ctx, options.working ?? 0);
     if (options.watchDemo) {
       const at = Date.now();
-      const watch = (number: number) => ({ url: `https://github.com/beboite/boite/pull/${number}`, repository: 'beboite/boite', number, since: at - 600_000 });
+      const watch = (number: number) => ({ url: `https://github.com/mtsu-dev/boite/pull/${number}`, repository: 'mtsu-dev/boite', number, since: at - 600_000 });
       ctx.thread('t-trace').pullRequestWatches = [
         { ...watch(512), paused: null, seen: { checkedAt: at - 30_000, head: '3e535df', base: 'main', checks: { total: 26, running: 4, failed: 1 }, conflicting: false } },
         { ...watch(498), paused: { reason: 'rate-limit', until: at + 240_000, message: 'API rate limit exceeded' }, seen: { checkedAt: at - 300_000, head: '2f257f4', base: 'main', checks: { total: 26, running: 0, failed: 0 }, conflicting: true } },
@@ -253,6 +260,7 @@ export class FakeClient implements ObservableClient {
     const ctx = this.#ctx;
     this.#stopWorking();
     closeSideQuestions(ctx);
+    closeSecrets(ctx);
     this.#stopLoad();
     ctx.agents.close();
     unregisterCore(ctx);
@@ -320,6 +328,10 @@ export class FakeClient implements ObservableClient {
     }
     if (bus.principal === 'session' && method === 'git.diff' && ![undefined, '', 'HEAD'].includes((params as RpcParams<'git.diff'>).ref)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'git.diff: paired devices compare the working tree with HEAD only' });
     if (bus.principal === 'session' && (method === 'quotas.list' || method === 'subscriptionProxy.quotas') && (params as { refresh?: unknown }).refresh === true) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method}: paired devices read the last reading; refresh must be false or absent` });
+    if (bus.principal === 'agent' && /^(?:sharedProjects|sharedBoard|sharedCompute|sharedAccess)\.|^contacts\.sendHuman$/.test(method)) {
+      const owner = new Set(['sharedProjects.offer','sharedProjects.decide','sharedProjects.revoke','sharedProjects.configure','sharedCompute.host','sharedAccess.reviewConfig','sharedAccess.overrides','sharedAccess.override','sharedAccess.revokeOverride','contacts.sendHuman']);
+      if (owner.has(method) || !this.#ctx.agentThreadId || (params as {threadId?:string}).threadId !== this.#ctx.agentThreadId) throw refusedShared(`${method}: expected an allowed method and the authenticated agent thread`);
+    }
     const result = await bus.hold(this.#dispatch(method, params)) as RpcResult<M>;
     if (this.#ctx.rttMs > 0) {
       // An answer still on its way back when the socket changed never arrives.
@@ -353,6 +365,18 @@ export class FakeClient implements ObservableClient {
     const thread = this.#ctx.thread(threadId);
     thread.load = { processes, cpuPercent: 12, memoryBytes: 48 * 1024 * 1024 };
     this.#ctx.emit('thread.load', { threadId, load: structuredClone(thread.load) });
+  }
+
+  /** Explicit deterministic Git fixture, separate from any RPC input. */
+  setSharedNativeExecution(available: boolean): void { setSharedNativeExecution(this.#ctx, available); }
+  setSharedRepository(projectId: string, repository: string, head: string): void { setSharedRepository(this.#ctx, projectId, repository, head); }
+  finishSharedCompute(jobId: string, text: string): void { finishSharedCompute(this.#ctx, jobId, text); }
+  get sharedSubscriptions() { return [...sharedState(this.#ctx).subscriptions.values()].map(p => ({...p})); }
+  setContactConnected(coreId: string, connected: boolean): void {
+    const contact = sharedContact(this.#ctx, coreId);
+    if (!contact) throw refusedShared('coreId: expected a contact');
+    contact.link = connected ? 'connected' : 'offline';
+    reconcileShared(this.#ctx);
   }
 
   /** The desktop app on the fake machine reporting its experiments, as the core's book announces a change. */
@@ -456,6 +480,7 @@ export class FakeClient implements ObservableClient {
   #answer(ctx: FakeContext): FakeMethods {
     const threads = threadMethods(ctx);
     const projects = projectMethods(ctx);
+    const coordination = coordinationMethods(ctx);
     const methods: FakeMethods = {
       'core.restart': async () => ({ ok: true as const }),
       'core.shutdown': async () => { ctx.agents.close(); await Promise.all([...ctx.threads.keys()].map(id => ctx.stopTurn(id))); setTimeout(() => this.close(), 25); return { ok: true }; },
@@ -490,7 +515,13 @@ export class FakeClient implements ObservableClient {
       ...gatewayMoveMethods(ctx),
       ...speechMethods(ctx),
       ...delegationMethods(ctx),
-      ...coordinationMethods(ctx),
+      ...coordination,
+      ...sharedProjectMethods(ctx),
+      ...sharedLookupMethods(ctx),
+      ...sharedBoardMethods(ctx),
+      ...sharedComputeMethods(ctx),
+      ...sharedAccessMethods(ctx),
+      ...sharedLetterMethods(ctx, coordination),
       ...groupMethods(ctx),
       ...contactMethods(ctx),
       ...todoMethods(ctx),

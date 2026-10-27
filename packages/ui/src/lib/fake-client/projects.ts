@@ -1,5 +1,5 @@
 /** Projects, their files and the Claude Code sessions they can import. */
-import { RpcErrorCode, type ImportableSession, type Project, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { PROJECT_NAME_MAX, RpcErrorCode, type ImportableSession, type Project, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { missingFolder, pathKey } from './checks';
 import { FAKE_FILES, scoreFakeFile } from './files';
@@ -21,6 +21,23 @@ export function projectMethods(ctx: FakeContext) {
   return {
     'projects.list': async (params) => {
       return ctx.projects.map((project) => describedProject(ctx, project));
+    },
+    'projects.rename': async (params) => {
+      const project = ctx.projects.find(p => p.id === params.projectId);
+      if (!project) throw ctx.notFound('project', params.projectId);
+      const name = typeof params.name === 'string' ? params.name.trim() : '';
+      if (!name || name.length > PROJECT_NAME_MAX) {
+        const expected = `a string of 1 to ${PROJECT_NAME_MAX} characters after trimming`;
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: `projects.rename.name must be ${expected}`, data: { field: 'name', expected } });
+      }
+      if (project.kind === 'drafts') {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the drafts project has a localized system name', data: { field: 'projectId', projectId: project.id, expected: 'a project other than the drafts' } });
+      }
+      if (project.name !== name) {
+        project.name = name;
+        ctx.emit('project.updated', describedProject(ctx, project));
+      }
+      return describedProject(ctx, project);
     },
     'projects.setAutoArchiveMergedPr': async (params) => {
       const project = ctx.projects.find(project => project.id === params.projectId);

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import { TECH_ICON_IDS, type Project, type ProjectIcon, type ProjectId, type TechIconId } from '@boite/contracts';
+import { PROJECT_NAME_MAX, TECH_ICON_IDS, type Project, type ProjectIcon, type ProjectId, type TechIconId } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { newId } from './ids.ts';
 import { folderGone, messageOf, notFound, refused } from './errors.ts';
@@ -377,6 +377,23 @@ export class ProjectStore {
     return answered;
   }
 
+  rename(projectId: ProjectId, name: string): Project {
+    const project = this.require(projectId);
+    const trimmed = typeof name === 'string' ? name.trim() : '';
+    if (!trimmed || trimmed.length > PROJECT_NAME_MAX) {
+      const expected = `a string of 1 to ${PROJECT_NAME_MAX} characters after trimming`;
+      throw refused(`projects.rename.name must be ${expected}`, { field: 'name', expected });
+    }
+    if (this.isDrafts(project)) {
+      throw refused('the drafts project has a localized system name', { field: 'projectId', projectId, expected: 'a project other than the drafts' });
+    }
+    if (project.name === trimmed) return project;
+    this.core.journal.append({ type: 'project.renamed', threadId: null, version: 1, payload: { projectId, name: trimmed } }, () => {
+      this.core.journal.putProject({ ...project, name: trimmed });
+    });
+    return this.announce(projectId);
+  }
+
   /**
    * Puts a project away or brings it back. Only the flag moves: its threads,
    * their processes and its folder stay as they are, so a restore is exact.
@@ -567,6 +584,7 @@ export function registerProjectMethods(core: Core): void {
   });
   core.router.register('projects.list', () => core.projects.listFresh());
   core.router.register('projects.add', (params) => core.projects.add(params.path, params.name));
+  core.router.register('projects.rename', (params) => core.projects.rename(params.projectId, params.name));
   core.router.register('projects.drafts', () => core.projects.drafts());
   core.router.register('projects.icon', (params) => core.projects.iconImage(params.projectId));
   core.router.register('projects.refreshIcon', (params) => core.projects.refreshIcon(params.projectId));

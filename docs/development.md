@@ -113,6 +113,13 @@ resulting client credential are retained. See [machines](machines.md) and
 
 ## Projects and worktrees
 
+A project's action menu offers Rename on desktop and phone. It changes the
+display name through `projects.rename`, retains the folder and conversations,
+and broadcasts `project.updated` to other clients. Paired devices may rename
+too. Trimmed names must contain 1 to 1024 UTF-16 code units; the core rejects
+larger names before journaling or broadcasting. The system drafts project
+keeps its localized name.
+
 Owners open a folder through the project dialog by selecting its machine and
 browsing or typing an absolute path. `projects.browse` is owner-only; the native
 folder picker is available only on the shell's local core. Dropping a desktop
@@ -138,6 +145,11 @@ requires a Git repository other than Drafts.
 Settings > Appearance > Buttons can hide the Worktree switch on desktop and in
 the phone's options sheet. This device preference preserves the draft's choice
 and the project's default.
+
+Thread worktree registration, recovery, branch rename and rollback commands serialize
+by the canonical Git common directory. Linked checkouts share that queue; other
+repositories and running jobs remain independent. Queued preparation rechecks
+cancellation before spawning, and queue time counts against an explicit timeout.
 
 With `worktree: {}`, `threads.create` runs `git worktree add -b` before writing
 the thread, with `-c checkout.workers=0` (one checkout worker per core) unless
@@ -573,6 +585,16 @@ The native shell cases require their executable and adjacent files;
 `BOITE_E2E_SKIP_SHELL=1` explicitly selects a partial core/browser run.
 It does not establish native macOS or Linux WebView coverage.
 
+`bun test tests/e2e/shared-cores.test.ts` starts three real cores on loopback
+with independent temporary journals and Git repositories: two Contact owners
+and one group member. It exercises both association directions, signed/sealed
+relays, role and route refusals, board claims/tombstones, host compute,
+member restart, scoped cancellation, policy revocation and actual Git result
+fetch/object verification/cherry-pick. It runs echo only and performs no paid
+inference or real account action. `shared-collaboration.test.ts` separately
+checks desktop/phone presentation through two in-memory clients. Neither
+fixture proves selective external-provider isolation or native Windows behavior.
+
 Windows process usage reaches the registry through a completion-port event,
 or a one-second fallback after the child exits (`procs.ts`). Cleanup assertions
 must wait for both the expected PID set and install leases before checking them;
@@ -713,6 +735,11 @@ Bun's baseline runtime, with `core/main.js` and split chunks in the adjacent
 `bun run build:core:exe` first. Other platforms use the compiled core. Windows verifies the
 runtime archive's SHA-256 and executable signature and caches it under
 `node_modules/.cache` for the running Bun version.
+
+The JavaScript build minifies identifiers as well as whitespace and syntax;
+function names in its stacks can differ from the source. The compiled sidecar
+keeps identifiers readable. `browser-page-kit.test.ts` evaluates the minified
+page script in a fresh realm, without the bundle's globals.
 
 `stage:core` places `jobs-worker.js`, `guard-worker.js` and
 `artifact-retention-worker.js` beside the core, with both CLI shims. The jobs
@@ -1109,6 +1136,12 @@ the selection. Typing groups by word, pause and direction; deleting a selection,
 paste, cut, a picture added or removed and every text the app writes are steps
 of their own, so deleting everything and typing by mistake comes back in two
 undos, pictures included. A sent prompt clears that history.
+
+ArrowUp on an idle thread loads the recalled prompt's deferred attachments
+before entering edit mode, like the message's Edit button. A late load cannot
+replace a new draft, another recall or another visit. Submitting an edit
+validates its current attachments and page references before rewinding history;
+attachments deliberately removed from the recalled prompt stay removed.
 
 Original file links in the local desktop thread may open through the system
 application, with executable links retaining their explicit local behavior.

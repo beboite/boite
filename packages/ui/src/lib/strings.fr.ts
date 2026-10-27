@@ -97,6 +97,7 @@ import { fr as parts } from './strings/fr/parts';
 import { fr as common } from './strings/fr/common';
 import { fr as onboarding } from './strings/fr/onboarding';
 import { fr as contacts } from './strings/fr/contacts';
+import { fr as shared } from './strings/fr/shared';
 import { fr as windows } from './strings/fr/windows';
 
 export const fr: Translation = {
@@ -187,5 +188,6 @@ export const fr: Translation = {
   ...common,
   ...onboarding,
   ...contacts,
+  ...shared,
   ...windows,
 };

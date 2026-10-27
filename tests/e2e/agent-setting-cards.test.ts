@@ -20,6 +20,7 @@ beforeAll(async () => {
 }, 60000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
+
 async function capture(name: string) {
   await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
   await page.screenshot(join(ARTIFACTS, name));
@@ -159,3 +160,36 @@ test('a bot asks to change its name, picture and instructions; Apply renames it'
   await page.waitFor(`document.querySelector('[data-testid="agent-setting-card"][data-outcome="applied"][data-key="name"]')`);
   expect(await page.evaluate(`window.__boiteTest.workspace.active.client.call('agents.snapshot', {}).then(s => s.profiles.find(p => p.id === ${JSON.stringify(agent)}).name)`)).toBe('Gargouille (Sécurité)');
 }, 60000);
+
+test('a native event wake setting card works at desktop and phone widths', async () => {
+  await page.navigate(`http://127.0.0.1:${port}/?fake=1`);
+  await page.waitFor(`document.querySelector('[data-testid="view-agents"]')`);
+  await page.send('Emulation.setDeviceMetricsOverride', DESKTOP);
+  const agentId = await page.evaluate(`(async () => {
+    const store = window.__boiteTest.workspace.active;
+    const agent = await store.client.call('agents.profile.save', { value: { name: 'Scheduled scout', domain: '', instructions: '', avatar: '', status: 'active', projectIds: [], selection: { providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: null, permissionMode: 'default' } } });
+    const thread = await store.client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
+    await window.__boiteTest.workspace.select(store, thread.id);
+    await store.client.call('turns.start', { threadId: thread.id, prompt: 'Configure the bot.' });
+    await store.client.settled();
+    await store.client.call('agents.settings.request', { threadId: thread.id, agent: agent.id, key: 'eventWakes', value: false, reason: 'Review project news with the morning and evening routines.' });
+    return agent.id;
+  })()`) as string;
+  const card = '[data-testid="agent-setting-card"][data-key="eventWakes"][data-state="pending"]';
+  await page.waitFor(`document.querySelector('${card} [data-testid="agent-setting-apply"]')?.getBoundingClientRect().width > 0`);
+  expect(await page.text(card)).toContain('Wake automatically for project and desk events');
+  await capture('event-wakes-desktop.png');
+  await page.send('Emulation.setDeviceMetricsOverride', PHONE);
+  expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  await capture('event-wakes-phone.png');
+  await page.click(`${card} [data-testid="agent-setting-show"]`);
+  await page.waitFor(`document.querySelector('[data-testid="agent-event-wakes"]')`);
+  await page.evaluate(`document.querySelector('[data-testid="agent-event-wakes"]').scrollIntoView({ block: 'center' })`);
+  await capture('event-wakes-settings-phone.png');
+  await page.send('Emulation.setDeviceMetricsOverride', DESKTOP);
+  await page.evaluate(`document.querySelector('[data-testid="agent-event-wakes"]').scrollIntoView({ block: 'center' })`);
+  await capture('event-wakes-settings-desktop.png');
+  await page.click('[data-testid="agent-event-wakes"]');
+  await page.waitFor(`window.__boiteTest.workspace.active.client.call('agents.runtime.get', { agentId: ${JSON.stringify(agentId)} }).then(c => c.eventWakes === false)`);
+  expect(await page.evaluate(`window.__boiteTest.workspace.active.client.call('agents.snapshot', {}).then(s => s.profiles.find(p => p.id === ${JSON.stringify(agentId)}).status)`)).toBe('active');
+}, 60_000);

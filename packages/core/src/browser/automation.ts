@@ -6,6 +6,7 @@
  */
 import type { BrowserAction, BrowserActionResult, BrowserDialog, BrowserReply } from '@boite/contracts';
 import { kit } from './page-kit.ts';
+import { CdpSessionDetachedError } from './cdp.ts';
 
 /** A way into one document of a tab: the top one speaks on the tab's own session. */
 export interface FrameChannel {
@@ -250,11 +251,32 @@ export async function press(page: FrameChannel, combo: string): Promise<void> {
   await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: key.key, code: key.code, windowsVirtualKeyCode: key.keyCode, modifiers });
   for (const mod of held.reverse()) await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: mod.key, code: `${mod.key}Left`, windowsVirtualKeyCode: mod.keyCode, modifiers: 0 });
 }
-async function nativeClick(page: FrameChannel, point: { x: number; y: number }, count: 1 | 2): Promise<void> {
-  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point, button: 'none' });
+async function nativeClick(page: FrameChannel, scope: Scope, selector: string, point: { x: number; y: number }, count: 1 | 2): Promise<CdpSessionDetachedError | undefined> {
+  // A newly drawn cross-process frame can still route input to its iframe.
+  // Confirm the native move reached the target before pressing, never retry a click.
+  await run(scope.channel, `K.watchPointer(${js(selector)})`);
+  try {
+    for (const end = Date.now() + 2000;;) {
+      await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point, button: 'none' });
+      let local: Point = point;
+      for (const { parent, owner } of scope.path) {
+        if (!local) break;
+        local = await run<Point>(parent, `return K.into(${js(owner)}, ${local.x}, ${local.y})`);
+      }
+      if (local && await run<boolean>(scope.channel, `return K.pointerMoved(${local.x}, ${local.y})`)) break;
+      if (Date.now() >= end) throw new Error('the element did not receive native pointer movement; wait for the page to finish drawing, then try again');
+      await sleep(16);
+    }
+  } finally { await run(scope.channel, 'K.stopPointer()').catch(() => {}); }
   for (let click = 1; click <= count; click++) {
     await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', buttons: 1, clickCount: click });
-    await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: click });
+    try { await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: click }); }
+    catch (error) {
+      // A popup may close itself on release without acknowledging that input.
+      // Earlier input failures and detachment of another session remain errors.
+      if (error instanceof CdpSessionDetachedError && error.method === 'Input.dispatchMouseEvent' && error.sessionId === page.session) return error;
+      throw error;
+    }
   }
 }
 
@@ -278,11 +300,11 @@ async function pointOf(scope: Scope, selector: string, mode: string): Promise<Po
 }
 
 /** Clicks through native input where the element is reachable, through the DOM when something covers it. */
-async function click(page: AgentPage, scope: Scope, selector: string, count: 1 | 2): Promise<string | undefined> {
+async function click(page: AgentPage, scope: Scope, selector: string, count: 1 | 2): Promise<{ note?: string; closed?: CdpSessionDetachedError }> {
   const point = await pointOf(scope, selector, 'click');
-  if (point && !point.covered) { await nativeClick(page, point, count); return undefined; }
+  if (point && !point.covered) return { closed: await nativeClick(page, scope, selector, point, count) };
   await run(scope.channel, `return K.dom('click', ${js(selector)}, ${count})`);
-  return point?.covered ? `the element was covered by ${point.covered}; it was clicked through the DOM` : undefined;
+  return { note: point?.covered ? `the element was covered by ${point.covered}; it was clicked through the DOM` : undefined };
 }
 
 async function write(page: AgentPage, scope: Scope, kind: 'fill' | 'type', selector: string, text: string): Promise<string | undefined> {
@@ -301,7 +323,8 @@ async function write(page: AgentPage, scope: Scope, kind: 'fill' | 'type', selec
 
 async function check(page: AgentPage, scope: Scope, selector: string, wanted: boolean): Promise<string | undefined> {
   if (await run<boolean>(scope.channel, `return K.checked(${js(selector)})`) === wanted) return undefined;
-  const note = await click(page, scope, selector, 1);
+  const { note, closed } = await click(page, scope, selector, 1);
+  if (closed) throw closed;
   await sleep(30);
   if (await run<boolean>(scope.channel, `return K.checked(${js(selector)})`) === wanted) return note;
   await run(scope.channel, `return K.dom('click', ${js(selector)}, 1)`);
@@ -352,7 +375,11 @@ async function act(page: AgentPage, tabId: string, action: BrowserAction): Promi
       const before = await begin(page);
       const dialogs = page.dialogs.length, downloads = page.downloads;
       let note: string | undefined, value: unknown;
-      if (action.kind === 'click') note = await click(page, scope, action.selector, action.count ?? 1);
+      if (action.kind === 'click') {
+        const clicked = await click(page, scope, action.selector, action.count ?? 1);
+        if (clicked.closed) return reply({ ok: true });
+        note = clicked.note;
+      }
       else if (action.kind === 'check' || action.kind === 'uncheck') note = await check(page, scope, action.selector, action.kind === 'check');
       else if (action.kind === 'select') value = await run(scope.channel, `return K.select(${js(action.selector)}, ${js(action.values)})`);
       else if (action.kind === 'fill' || action.kind === 'type') note = await write(page, scope, action.kind, action.selector, action.text);

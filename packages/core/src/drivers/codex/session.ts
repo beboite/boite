@@ -1,5 +1,5 @@
 import { logMessageOf, withLogDiagnostic } from '../../log-errors.ts';
-import type { HookOutcome, ModelInfo, QuestionAnswer } from '@boite/contracts';
+import type { ModelInfo, QuestionAnswer } from '@boite/contracts';
 import pkg from '../../../package.json';
 import { messageOf, unavailable } from '../../errors.ts';
 import { tildePath } from '../../paths.ts';
@@ -31,6 +31,7 @@ import {
   COMMAND_TOOL_NAME,
   EXIT_GRACE_MS,
   FILE_CHANGE_TOOL_NAME,
+  HOOK_OUTCOMES,
   contextArgs,
   MODE_POLICY,
   LIVE_TURN_SETTINGS,
@@ -47,14 +48,8 @@ import { CodexRateLimits } from './rate-limits.ts';
 import { SpentWindows, turnError } from './availability.ts';
 import { SessionRetention } from '../session-retention.ts';
 import { noteReady } from '../driver-log.ts';
-
-/** `hook/completed` statuses as the ledger counts them; `running` is not an end. */
-const HOOK_OUTCOMES: Record<string, HookOutcome> = {
-  completed: 'ok',
-  failed: 'failed',
-  blocked: 'blocked',
-  stopped: 'stopped',
-};
+import {PROTECTED_CODEX_ARGS, protectedCodexConfig, protectedCodexThread} from './protected.ts';
+import {PROTECTED_TOOL, protectedTool, PROTECTED_COMMIT, protectedCommit} from '../protected.ts';
 
 /** How long a stopped turn waits for the agent to end it before its process is stopped. */
 const STOP_GRACE_MS = 3_000;
@@ -329,6 +324,9 @@ export class CodexSession {
   }
 
   private async open(ctx: SessionContext): Promise<void> {
+    // thread/resume cannot replace dynamicTools. Replaying through the core's
+    // existing session-loss retry installs them on thread/start before any prompt.
+    if (ctx.protectedExecution && ctx.sessionId !== null) throw new ThreadLostError('Protected Codex tools require thread/start; replay the captured conversation');
     const profile = profileFor(ctx.provider);
     const executable = profile === undefined ? null : resolveExecutable(profile);
     if (executable === null) {
@@ -338,11 +336,11 @@ export class CodexSession {
     const rpc = await this.initialize(ctx, executable, profile?.launch?.args ?? []);
     rpc.notify('initialized', {});
     void this.reportSkippedHooks(rpc, ctx);
-
     const policy = MODE_POLICY[ctx.thread.permissionMode];
     const model = modelOf(ctx);
     // A context mode without MCP turns the user's servers off by name.
-    const config = { ...await threadConfig(rpc, ctx.thread.cwd, (level, message) => ctx.log(level, message), ctx.thread.contextMode?.mcp === false) };
+    const config = {...await threadConfig(rpc, ctx.thread.cwd, (level, message) => ctx.log(level, message), !!ctx.protectedExecution || ctx.thread.contextMode?.mcp === false, !!ctx.protectedExecution), ...protectedCodexConfig(ctx)};
+    const sandbox = ctx.protectedExecution ? protectedCodexThread(ctx) : {sandbox: policy.sandbox};
     // Codex checks this at its own model/tool boundaries. Its live settings
     // RPC does not accept it; the session key reopens changed limits between turns.
     const tokens = ctx.autoCompactTokens?.() ?? null;
@@ -352,7 +350,7 @@ export class CodexSession {
         threadId: ctx.sessionId,
         cwd: ctx.thread.cwd,
         approvalPolicy: policy.approvalPolicy,
-        sandbox: policy.sandbox,
+        ...sandbox,
         ...(model === null ? {} : { model }),
         config,
         excludeTurns: true,
@@ -366,7 +364,7 @@ export class CodexSession {
       config,
       cwd: ctx.thread.cwd,
       approvalPolicy: policy.approvalPolicy,
-      sandbox: policy.sandbox,
+      ...sandbox,
       ...(model === null ? {} : { model }),
     });
     this.threadId = created.thread.id;
@@ -418,6 +416,7 @@ export class CodexSession {
     const context = contextArgs(ctx.thread.contextMode);
     if (ctx.thread.permissionMode === 'yolo' && !context.includes('features.hooks=false')) args = [...args, '--config', 'features.hooks=false'];
     args = [...args, ...context, ...NO_NATIVE_SUBAGENTS, ...LIVE_TURN_SETTINGS];
+    if (ctx.protectedExecution) {ctx.protectedExecution.check(); args = [...args, ...PROTECTED_CODEX_ARGS];}
     const child = ctx.spawnChild(executable, args, {
       startup: true,
       cwd: ctx.thread.cwd,
@@ -743,6 +742,17 @@ export class CodexSession {
 
   private async onRequest(ctx: SessionContext, method: string, raw: unknown): Promise<unknown> {
     const params = (raw ?? {}) as Record<string, unknown>;
+    if (ctx.protectedExecution) {
+      ctx.protectedExecution.check();
+      if (method === 'item/tool/call' && params['tool'] === PROTECTED_TOOL) {
+        return protectedTool(this.current?.ctx ?? null, params['arguments'], this.current?.stopped ?? Promise.resolve());
+      }
+      if (method === 'item/tool/call' && params['tool'] === PROTECTED_COMMIT) return protectedCommit(this.current?.ctx ?? null, params['arguments'], this.current?.stopped ?? Promise.resolve());
+      if (method === 'item/permissions/requestApproval') return {permissions: {}};
+      if (method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval') return {decision: 'decline'};
+      if (method === 'mcpServer/elicitation/request') return {action: 'decline'};
+      if (method === 'item/tool/call') throw new Error('execution.codex.tool: only the captured protected tool is installed');
+    }
     switch (method) {
       case 'item/commandExecution/requestApproval': {
         const decision = await this.askUser(

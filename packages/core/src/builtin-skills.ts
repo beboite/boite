@@ -57,7 +57,7 @@ boite issue draft --title "<symptom in a few words>" --description-file <file>
 \`\`\`
 
 Show the user the printed draft. It is anonymized but the issue is public on
-github.com/beboite/boite; let them change anything. An agent never publishes
+github.com/mtsu-dev/boite; let them change anything. An agent never publishes
 it: the issue goes out under the user's own GitHub account, by their hand.
 The draft prints a link that opens GitHub with the issue filled in; give it
 to the user (\`boite browse <link>\` opens it in the panel) so they submit it
@@ -66,7 +66,7 @@ which creates it with \`gh\` when it is signed in. Give the path of the full
 anonymized export too, which they can drag into the issue.
 
 With \`gh: ready\`, look for an existing report first:
-\`gh issue list --repo beboite/boite --search "<words>" --state all\`, and
+\`gh issue list --repo mtsu-dev/boite --search "<words>" --state all\`, and
 give the user the matching issue so they comment there instead of opening a
 duplicate.
 `,

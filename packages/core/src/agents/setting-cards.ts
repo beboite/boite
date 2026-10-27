@@ -173,6 +173,7 @@ export class AgentSettingCards {
       }
       case 'effort': return save({ ...agent, selection: { ...agent.selection, effort: value as string | null } });
       case 'autoMemory': return configure({ ...ctx.config, autoMemory: value as boolean });
+      case 'eventWakes': return configure({ ...ctx.config, eventWakes: value as boolean });
       case 'subagents': return configure({ ...ctx.config, subagents: { ...ctx.config.subagents, enabled: value as boolean } });
       case 'dailyBudget': return configure({ ...ctx.config, dailyBudgetUsd: value as number | null });
     }

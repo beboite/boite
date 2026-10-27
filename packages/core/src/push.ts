@@ -395,7 +395,7 @@ export class PushStore {
   send = async (subscription: PushSubscription, payload: string, keys: Keys, topic: string): Promise<void> => {
     const { default: webpush } = await import('web-push');
     await webpush.sendNotification(subscription, payload, {
-      vapidDetails: { ...keys, subject: this.core.settings.get().publicUrl ?? 'https://github.com/beboite/boite' },
+      vapidDetails: { ...keys, subject: this.core.settings.get().publicUrl ?? 'https://github.com/mtsu-dev/boite' },
       TTL: 300, timeout: 10_000, urgency: 'normal', topic
     });
   };

@@ -46,6 +46,10 @@ export interface CoreInfo {
     gatewayMove?: boolean;
     /** `todos.update` takes `goalThreadId`, a card carries its goal, and a paired device reads and moves cards: the project board. */
     projectBoard?: boolean;
+    /** Shared-project version 1 RPCs and scoped invalidations; absent until all enforcing handlers exist. */
+    sharedProjects?: 1;
+    /** contacts.sendHuman preserves a contact's human provenance without owner authority. */
+    contactHumanLetters?: 1;
     /** `group.settingsHome` and `Group.settingsHome`: one member's settings, chosen for the whole group, that the others follow. */
     settingsHome?: boolean;
   };

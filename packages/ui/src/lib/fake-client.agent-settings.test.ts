@@ -11,6 +11,23 @@ async function agent(client: FakeClient, name = 'Mira'): Promise<AgentProfile> {
 const prompts = async (client: FakeClient, threadId: string) => (await client.call('threads.get', { threadId })).messages
   .filter((message) => message.role === 'user').map((message) => (message.parts[0]?.type === 'text' ? message.parts[0].text : ''));
 
+test('fake eventWakes settings use the same boolean card and preserve the active bot', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  const mira = await agent(client);
+  const { id: threadId } = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
+  await client.call('turns.start', { threadId, prompt: 'Configure the bot.' });
+  await client.settled();
+  const read = await client.call('agents.settings.read', { threadId, agent: mira.id });
+  expect(read.settings.find(s => s.key === 'eventWakes')?.value).toBe(true);
+  for (const value of [false, true]) {
+    const card = await client.call('agents.settings.request', { threadId, agent: mira.id, key: 'eventWakes', value, reason: 'Batch project news' });
+    expect(card.setting.previous).toBe(!value);
+    const saved = await client.call('agents.settings.apply', { threadId, questionId: card.questionId });
+    expect(saved.status).toBe('active');
+    expect((await client.call('agents.runtime.get', { agentId: mira.id })).eventWakes).toBe(value);
+  }
+});
+
 test('fake agent setting cards: read, request, refusals, apply with an edit and the answer the thread reads', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
   const mira = await agent(client);
