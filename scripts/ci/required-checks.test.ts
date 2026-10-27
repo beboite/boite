@@ -173,6 +173,14 @@ test('protection changes run the native fixture inside the existing Windows core
   expect(helper.run).toContain('bun packages/core/bin/install-windows-sandbox.ts');
   expect(helper.run).toContain('BOITE_WINDOWS_SANDBOX_PATH=');
   expect(helper.run).toContain('$env:GITHUB_ENV');
+  // Preparation is a prerequisite for later matrices: every native command
+  // must stop before a later success can overwrite its exit status.
+  const helperLines = helper.run!.trim().split('\n');
+  const nativeCommands = helperLines.flatMap((line, index) => /^(?:bun |& )/.test(line) ? [index] : []);
+  expect(nativeCommands).toHaveLength(3);
+  for (const index of nativeCommands) {
+    expect(helperLines[index + 1]).toBe('if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }');
+  }
   expect(windows.steps.indexOf(helper)).toBeLessThan(windows.steps.indexOf(native));
   expect(native.env).toMatchObject({ BOITE_TEST_NATIVE_EXECUTION: '1', TEMP: '${{ runner.temp }}', TMP: '${{ runner.temp }}' });
   expect(native.run).toBe(`$failed = $false

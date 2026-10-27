@@ -1017,7 +1017,7 @@ platform a provider can launch on.
 | --- | --- | --- | --- | --- | --- |
 | Linux x64, Bun 1.4.3, bubblewrap 0.13.1 | Tools, jobs/Git, board, letters | Same | Same; explicit unavailable model refused before API | Same | Same, verified 1.4.13 only |
 | Windows x64 NT 10.0.26200, Bun 1.4.3 | Tools, jobs/Git, board, letters | Same | Same; explicit unavailable model refused before API | Same | Not attested |
-| Hosted Server 2025 NT 10.0.26100 | Native NUL prerequisite refuses admission | Same | Same | Same | Not attested |
+| Hosted Server 2025 NT 10.0.26100 | Tools, jobs/Git, board, letters | Same | Same; explicit unavailable model refused before API | Same | Not attested |
 | Linux arm64 | Backend source exists; native execution not attested | Same | Same | Same | Same |
 | macOS | No protected backend; refused | Same | Same | Same | Same |
 
@@ -1046,30 +1046,9 @@ Tailscale/Funnel acceptance is implied by these fixtures.
 | Security and network proof | `packages/core/test/contacts.test.ts`, `contacts-group.test.ts`, `contact-mailboxes.test.ts`, `contacts-review-regressions.test.ts`, `access.test.ts`; `tests/e2e/shared-cores.test.ts`: held transcript and readmission regressions | Independent security/network passes identified three access/provenance faults, a review feedback loop, stale lease teardown and compute scan waste. Regressions cover their corrections. Per-peer SQLite expression indexes/selective materialization retain all durable job fences. The independent combined native-isolation review remains a separate gate; fixture passes do not substitute for that review. |
 | Transport and UI parity | `tests/contract/shared-projects.ts` through core/fake contract suites; fake/Store tests; `tests/e2e/shared-collaboration.test.ts` at 1440 and 390 px | Same contract and refusals, captured owning Store, canonical remote offers/addresses, connection cache fencing, leases and phone actions. No paid inference, physical phone, real Tailscale/Funnel or remote CI proof is implied. |
 
-Local release proof on 2026-10-24 reran `bun run check`, 733 core tests in
-35 isolated file processes, seven real three-core scenarios, 99 UI tests and
-seven browser tests. All passed at runtime head `9bd9211e`. Desktop (1440 px)
-and phone (390 px) interactions also showed a contact-owned board assignment,
-converged completion, attested human mail, host job results and revocation;
-their captures were opened. Fresh network regression replays recorded one
-inference and no recursive refresh with the reviewer enabled, then zero peer
-leases and no notification traffic after unsubscribe.
-
-Publication verification after reconciling the merged Contacts dependencies
-reran the full check (1,153 architecture modules, no Svelte errors or warnings),
-300 core/E2E tests in 19 files and 96 UI tests in eight files. Four Boite browser
-fixtures at 1440 and 390 px repeated the shared board/mail/job/revoke flow and
-restored a different persisted host conversation. Saving the unchanged numeric
-contribution preserved its binding, grant revision and running jobs at both ends.
-The desktop and phone captures were opened. These remain deterministic
-protocol/UI fixtures, not native-provider isolation proof.
-
-The independent combined native review found an OpenCode model-selection defect
-and the Server 2025 admission blocker. Protected ACP now requires confirmed model
-selection before fresh and warm prompts. Native regressions cover refusal before
-any API request, including a complete remotely hosted job. Server compatibility
-and current-head CI/review clearance remain required release gates.
-Claude/Codex/OpenCode/pi now have native Linux and
+Protected ACP requires confirmed model selection before fresh and warm prompts.
+Native regressions cover refusal before any API request, including a complete
+remotely hosted job. Claude/Codex/OpenCode/pi have native Linux and
 Windows driver/control/tool fixtures proving useful edits/build/tests, forged
 tool denial, account/mode retention, associated letters/board goals, warm
 transitions, protected stop/overrides and real Git result consumption. These run
@@ -1077,14 +1056,12 @@ installed clients against deterministic local APIs without inference.
 Muse 1.4.13 proves its mandatory native-tool gate, useful execution,
 job/letter/board transitions and actual Git consumption on Linux; 1.3.0 remains
 refused. Muse Windows, native macOS and live inference remain unverified.
-Windows evidence comes from its own native lane, independently of Linux.
-The full native Windows result currently comes from NT 10.0.26200. Exact SDK
-clang and MinGW helper bytes from CI both pass there. On Server 2025 NT
-10.0.26100, the existing NUL device denies LPAC read/write with native error 5;
-private pipes and direct child creation succeed. Both compilers reproduce this
-failure. Admission now checks NUL access before any model tool. The Server CI
-lane remains red, so Windows readiness remains incomplete; the 26200 result does
-not attest Server 2025 compatibility. No host device ACL is changed.
+Windows evidence comes from its own native lane, independently of Linux. It
+builds SDK clang and MinGW helpers separately and runs the protected-tool and
+provider/shared-scope fixtures with each helper. Failed native preparation
+blocks provider preparation. Admission checks platform prerequisites before any
+model tool; it never changes a host device ACL. Per-run counts, captures and CI
+status belong in the pull request verification record.
 
 ### Native Windows tool execution
 

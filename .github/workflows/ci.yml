@@ -197,9 +197,12 @@ jobs:
         run: |
           Write-Host "Native Windows kernel: $([Environment]::OSVersion.Version)"
           bun packages/core/bin/install-windows-sandbox.ts "$env:RUNNER_TEMP\protected-tool.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           bun packages/core/bin/install-windows-sandbox.ts "$env:RUNNER_TEMP\protected-tool-mingw.exe" 'C:\mingw64\bin\gcc.exe'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-FileHash "$env:RUNNER_TEMP\protected-tool*.exe" -Algorithm SHA256 | Format-List
           & "$env:RUNNER_TEMP\protected-tool.exe" --diagnose-null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "BOITE_WINDOWS_SANDBOX_PATH=$env:RUNNER_TEMP\protected-tool.exe" >> $env:GITHUB_ENV
       - name: LPAC parent creation prerequisite (non-acceptance)
         if: runner.os == 'Windows' && needs.changes.outputs.nativeWindows == 'true'
