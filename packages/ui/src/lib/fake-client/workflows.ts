@@ -104,6 +104,8 @@ export class FakeWorkflows {
   #templates = new Map<string, WorkflowTemplate>();
   /** Retain replaced children for usage; workflows.output checks the current execution's thread id. */
   #steps = new Map<ThreadId, { runId: string; key: string }>();
+  /** Retain every remote attempt for retirement when its root is archived or deleted. */
+  #remoteSteps = new Map<ThreadId, { coreId: string; threadId: ThreadId }[]>();
   #timers = new Set<ReturnType<typeof setTimeout>>();
   #seq = 0;
   /** Set while a demo is seeded: its steps wait for `finish` instead of a timer. */
@@ -131,7 +133,7 @@ export class FakeWorkflows {
   owns(threadId: ThreadId): boolean { return this.#steps.has(threadId); }
   /** The subagents its runs started on other machines, which the core retires with the conversation. */
   childrenThere(rootId: ThreadId): { coreId: string; threadId: ThreadId }[] {
-    return [...this.#runs.values()].filter(run => run.rootThreadId === rootId).flatMap(run => run.nodes.flatMap(node => node.instances.flatMap(inst => (inst.machine?.coreId && inst.machine.childId ? [{ coreId: inst.machine.coreId, threadId: inst.machine.childId }] : []))));
+    return (this.#remoteSteps.get(rootId) ?? []).map(child => ({ ...child }));
   }
   /** Full retained collection, including paused runs beyond the display page. */
   active(rootId: ThreadId): boolean { return [...this.#runs.values()].some(run => run.rootThreadId === rootId && (run.status === 'running' || run.status === 'paused' || ((run.status === 'done' || run.status === 'failed') && !run.delivered))); }
@@ -283,6 +285,7 @@ export class FakeWorkflows {
   }
 
   forget(rootId: ThreadId): void {
+    this.#remoteSteps.delete(rootId);
     const ids = new Set([...this.#runs.values()].filter(run => run.rootThreadId === rootId).map(run => run.id));
     for (const id of ids) this.#runs.delete(id);
     for (const [key, request] of this.#requests) if (ids.has(request.runId)) this.#requests.delete(key);
@@ -499,6 +502,9 @@ export class FakeWorkflows {
     }
     try {
       const child = this.host.there(root, profile, step, this.#title(run, node, inst), inst.task ?? '');
+      const children = this.#remoteSteps.get(run.rootThreadId) ?? [];
+      children.push({ coreId: child.machine.coreId, threadId: child.childId });
+      this.#remoteSteps.set(run.rootThreadId, children);
       inst.machine = { ...inst.machine, name: child.machine.name, coreId: child.machine.coreId, childId: child.childId };
       Object.assign(inst, { providerId: child.providerId, model: child.model, effort: child.effort });
       if (child.worktree) inst.worktree = child.worktree;

@@ -115,19 +115,30 @@ test('a plan naming a machine not in the group is refused before it starts; one 
   expect(onPc()).toHaveLength(0);
 });
 
-test('stopping the run stops its step on the other machine', async () => {
+for (const restart of [false, true]) test(`stopping the run${restart ? ' after a caller restart' : ''} stops its step on the other machine`, async () => {
   const { held } = scripted(prompt => (prompt.includes('step slow') ? null : 'ok'));
-  const { desk, pc, owner, threadId, pcId, machine, onPc, run } = await setup();
+  const deskDir = restartable();
+  const { desk, pc, owner, threadId, pcId, machine, onPc, run } = await setup(true, { desk: deskDir });
   const started = await owner.call('workflows.start', { threadId, requestId: 'stop-1', plan: { name: 'Stop', steps: [{ id: 'slow', machine, project: 'notes', task: 'Read every page.' }] } });
   await waitFor(() => onPc().length === 1 && held.has(onPc()[0]!.id));
   const childId = onPc()[0]!.id;
   await waitFor(() => run(started.id).nodes[0]!.instances[0]!.machine?.childId === childId);
 
-  await owner.call('workflows.control', { threadId, runId: started.id, action: 'stop' });
-  expect(run(started.id)).toMatchObject({ status: 'stopped' });
-  expect(run(started.id).nodes[0]!.instances[0]!.status).toBe('stopped');
-  await desk.core.delegation.remote.flush(pcId);
-  await waitFor(() => !held.has(childId) && pc.core.threads.require(childId).status !== 'running');
+  let caller = desk, client = owner;
+  if (restart) {
+    const port = Number(new URL(desk.url).port);
+    await desk.stop();
+    caller = await startTestCore({ dataDir: deskDir, port });
+    cores.push(caller);
+    client = await caller.connect();
+    expect(caller.core.workflows.get(threadId, started.id)).toMatchObject({ status: 'paused', nodes: [{ instances: [{ status: 'waiting' }] }] });
+    expect(held.has(childId)).toBe(true);
+  }
+
+  await client.call('workflows.control', { threadId, runId: started.id, action: 'stop' });
+  expect(caller.core.workflows.get(threadId, started.id)).toMatchObject({ status: 'stopped', nodes: [{ instances: [{ status: 'stopped' }] }] });
+  await caller.core.delegation.remote.flush(pcId);
+  await waitFor(() => !held.has(childId) && pc.core.threads.require(childId).status !== 'running', 1_000);
   expect(pc.core.journal.listTurns(childId).at(-1)?.status).toBe('stopped');
 });
 

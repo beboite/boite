@@ -234,7 +234,7 @@ export class MachineWorkflowSteps {
 
   /** The subagents of a stopped run stop there, once that machine takes the stop; one whose start answer has not come yet, once its answer or a report names it. */
   stop(run: WorkflowRun): void {
-    for (const node of run.nodes) for (const inst of node.instances) if (inst.status === 'running' && inst.machine) this.halt(run.rootThreadId, inst.machine.requestId);
+    for (const node of run.nodes) for (const inst of node.instances) if ((inst.status === 'running' || inst.status === 'waiting') && inst.machine) this.halt(run.rootThreadId, inst.machine.requestId);
   }
 
   beginClose(): void { this.closed = true; this.off(); }

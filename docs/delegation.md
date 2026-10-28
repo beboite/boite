@@ -179,7 +179,7 @@ subscription usage is not an invoice, and missing cost reports stay unknown.
 Briefs are limited to 12,000 characters. Boite does not copy the parent's
 conversation into every child. Messages are capped at 4,000 characters and
 delivered in batches of up to four. Unread steering messages expire after 15 minutes.
-Team messages are limited to 100 per hour; terminal results have a separate
+Local team messages are limited to 100 per hour; terminal results have a separate
 delivery path and stay available. They wake an idle parent or join its next
 prompt when live steering is unavailable.
 The panel lists children by their summaries and streams none of them. Clicking
@@ -265,7 +265,8 @@ at once, and is refused while it is away; `delegate result` reads the full
 answer from it. `delegate stop <id>`, a team stop and archiving or deleting the
 parent stop it there, and archiving or deleting the parent archives it there.
 Its result, its questions and its own `delegate send` to the parent come back
-as letters from that machine, which wake the parent once each. A worktree child
+as letters from that machine, which wake the parent once each. Cross-machine
+letters have no hourly cap. A worktree child
 branches from that machine's checkout of the project, and its branch stays
 there. `delegate spawn` and `thread new` refuse the child; its instructions
 tell it not to start workflows either.

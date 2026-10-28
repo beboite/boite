@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from 'vitest';
 import { FakeClient } from '../fake-client';
+import { fakeCore } from './coordination';
 
 /* `agent.spawn --machine` in the in-memory client refuses as the core's `memberNamed` and remote spawn do. */
 
@@ -69,12 +70,19 @@ test('delegate spawn --machine starts the subagent on that machine, and its pare
   await expect(spawn({ requestId: 'sub-1', project: 'nothing' })).rejects.toMatchObject({ message: expect.stringContaining('pc has no project named nothing; name one of its projects with --project'), data: { field: 'project' } });
   await expect(spawn({ requestId: 'sub-1', model: 'nothing-like-it' })).rejects.toThrow('model: no installed model matches "nothing-like-it"; run boite delegate models --machine pc');
 
+  // A new child has its own state, even when the parent has private or pending work.
+  const parent = fakeCore('desk')!.thread('t-trace');
+  Object.assign(parent, { incognito: true, pendingAnswers: ['answer for the parent'], openQuestions: 1 });
   // Without --project it works there in the project named like the parent's.
   const child = await spawn({ requestId: 'sub-1' });
   expect(child.machine).toEqual({ coreId: 'pc', name: 'pc' });
   expect(child.thread.parentThreadId).toBe('t-trace');
   const there = await pc.call('threads.get', { threadId: child.thread.id });
-  expect(there).toMatchObject({ projectId: 'p-boite', parentThreadId: undefined });
+  expect(there.projectId).toBe('p-boite');
+  expect(there.parentThreadId).toBeUndefined();
+  expect(there.incognito).toBeUndefined();
+  expect(there.pendingAnswers ?? []).toEqual([]);
+  expect(there.openQuestions ?? 0).toBe(0);
   expect((await spawn({ requestId: 'sub-1' })).thread.id).toBe(child.thread.id);
   await expect(spawn({ requestId: 'sub-1', task: 'Read other notes' })).rejects.toThrow('requestId already used for different content');
 

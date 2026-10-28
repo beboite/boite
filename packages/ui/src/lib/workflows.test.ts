@@ -240,9 +240,17 @@ test('a step on another machine runs there as a subagent: the run names that mac
   expect([near.machine, near.threadId === null]).toEqual([undefined, false]);
   expect(near.task).toContain('src/parser/lexer.ts');
   expect((await desk.call('delegation.get', { threadId: 't-trace' })).messages).toHaveLength(mail);
-  // The conversation archived here, its step there is archived as well.
+
+  // A failed remote attempt is replaced on retry, but both children still belong to this root.
+  const failedRun = await desk.call('workflows.start', { threadId: 't-trace', requestId: 'retry-there', plan: { name: 'Retry there', steps: [{ id: 'far', machine: 'pc', task: 'fail this attempt' }] } });
+  const failed = await until(() => desk.call('workflows.get', { threadId: 't-trace', runId: failedRun.id }), value => value.status === 'failed');
+  const firstId = failed.nodes[0]!.instances[0]!.machine!.childId!;
+  const retried = await desk.call('workflows.control', { threadId: 't-trace', runId: failedRun.id, action: 'retry' });
+  const nextId = retried.nodes[0]!.instances[0]!.machine!.childId!;
+  expect(nextId).not.toBe(firstId);
+  // The conversation archived here, every attempt there is archived as well.
   await desk.call('threads.archive', { threadId: 't-trace' });
-  expect((await pc.call('threads.get', { threadId: childId })).archived).toBe(true);
+  for (const id of [childId, firstId, nextId]) expect((await pc.call('threads.get', { threadId: id })).archived).toBe(true);
 });
 
 test('a step on another machine fails at launch while it keeps group threads off, and stops there with its run', async ({ createClient }) => {

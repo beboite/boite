@@ -61,18 +61,14 @@ function placeThere(ctx: FakeContext, parent: Thread, config: DelegationConfig, 
   const worktree = params.worktree === true ? { branch: `boite/sub-${id}`, path: `${project.path}/.boite/worktrees/sub-${id}`, base: null, state: 'pending' as const } : null;
   // Top-level there: its parent is on another machine.
   const child: Thread = {
-    ...parent,
     id, projectId: project.id, cwd: worktree?.path ?? project.path, branch: worktree?.branch ?? null,
-    parentThreadId: undefined, parentIsBot: undefined, agentSessionId: undefined,
     title: params.title?.trim() || task.split('\n')[0]!.slice(0, 80), titleSource: 'user',
     providerId, accountId: account.id, model: pick ? pick.model : base.model, effort: pick ? pick.effort : base.effort ?? null, speed: pick ? pick.speed : null,
-    contextMode: undefined,
+    permissionMode: parent.permissionMode,
     status: 'idle', unread: false, archived: false, pinned: false,
     sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null, moveNote: null,
     createdAt: at, updatedAt: at, messagesBefore: null, messages: [], turns: [], commands: [], background: [], backgroundHistory: []
   };
-  delete child.pullRequest;
-  delete child.lastUserMessageAt;
   return { there, child, project, worktree, profileId: pick && params.model !== undefined ? `${pick.providerId}/${pick.model}` : base.id };
 }
 
