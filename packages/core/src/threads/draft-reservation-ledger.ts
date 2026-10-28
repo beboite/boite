@@ -37,6 +37,14 @@ export class DraftReservationLedger {
 
   /** Publication wins, including a crash after journal commit but before intent removal. */
   async cleanup(ownership: DraftOwnership): Promise<boolean> {
+    try {
+      // A stop request can leave the agent alive during its native termination grace.
+      // Keep both its folder and durable ownership until its actual exit is recorded.
+      await this.core.procs.waitForExit(ownership.threadId);
+    } catch (error) {
+      this.core.log('warn', `draft cleanup retained for ${ownership.path}: ${logMessageOf(error)}`);
+      return false;
+    }
     if (this.core.journal.getThread(ownership.threadId)) {
       this.forget(ownership.threadId);
       return true;

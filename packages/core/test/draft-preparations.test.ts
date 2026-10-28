@@ -183,3 +183,49 @@ test('requested worktree is prepared in its final directory, adopted or removed 
   expect(git(cwd, 'branch', '--list', discarded.branch!).trim()).toBe('');
   expect(await exists(created.cwd)).toBe(true);
 });
+
+for (const kind of ['worktree', 'draft', 'incognito'] as const) {
+  test(`release keeps an owned ${kind} folder and its cleanup intent until its agent exits`, async () => {
+    if (kind === 'worktree') {
+      const cwd = join(h.dataDir, 'repo'); await mkdir(cwd);
+      git(cwd, 'init', '-q'); git(cwd, 'commit', '-q', '--allow-empty', '-m', 'fixture');
+      const project = await client.call('projects.add', { path: cwd, name: 'repo' });
+      choice = { ...choice, projectId: project.id, worktree: {} };
+    } else if (kind === 'incognito') choice.incognito = true;
+    const ready = Promise.withResolvers<void>();
+    const exited = Promise.withResolvers<void>();
+    let thread: ThreadSummary | undefined;
+    let folderAtExit = false;
+    let ownershipAtExit = false;
+    const restoreSleeper = setDriver('echo', { ...echoDriver, setViewed: () => {}, releaseThread: () => {},
+      prepare: async context => {
+        thread = context.thread;
+        const child = context.spawnChild(process.execPath, ['-e',
+          'process.on("SIGTERM", () => {}); console.log("ready"); setTimeout(() => {}, 60_000)',
+        ], { cwd: context.thread.cwd });
+        child.stdout.once('data', () => ready.resolve());
+        child.once('exit', () => {
+          folderAtExit = existsSync(context.thread.cwd);
+          ownershipAtExit = (h.core.journal.getSetting('draftReservationOwnership') as { threadId: string }[] | undefined)
+            ?.some(item => item.threadId === context.thread.id) ?? false;
+          exited.resolve();
+        });
+      },
+    });
+    try {
+      const reservation = await prepare(`draft_owned_${kind}`);
+      await ready.promise;
+      const cwd = thread!.cwd;
+      const releasing = client.call('drafts.release', { preparationId: reservation.preparationId });
+      const first = await Promise.race([releasing.then(() => 'released'), exited.promise.then(() => 'exited')]);
+      expect(first).toBe('exited');
+      await releasing;
+      expect(folderAtExit).toBe(true);
+      expect(ownershipAtExit).toBe(true);
+      expect(h.core.procs.liveCount(reservation.threadId)).toBe(0);
+      expect(await exists(cwd)).toBe(false);
+      expect(h.core.journal.getSetting('draftReservationOwnership')).toBeUndefined();
+      if (kind === 'worktree') expect(git(h.core.projects.require(choice.projectId).path, 'branch', '--list', thread!.branch!).trim()).toBe('');
+    } finally { restoreSleeper(); }
+  });
+}
