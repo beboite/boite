@@ -29,6 +29,8 @@ interface Entry {
   startup?: boolean;
   /** Off Windows, the group stop that follows: resolved once the group is gone or SIGKILLed. */
   kill(): void | Promise<void>;
+  /** Not yet seen exiting by its spawner, which holds its handle until then; false for one the core did not spawn. */
+  running(): boolean;
   usage(): { cpuMs: number; peakMemoryBytes: number } | null;
   /** The parent running when this process started, held after it exits: the sweep reads lineage through it. */
   parent?: Entry | null;
@@ -257,6 +259,7 @@ export class ProcRegistry {
       root: opts.agentRoot !== false,
       startup: opts.startup === true,
       kill: () => killBunChild(proc),
+      running: running(proc),
       usage: () => {
         const usage = proc.resourceUsage();
         if (!usage) return null;
@@ -270,7 +273,7 @@ export class ProcRegistry {
       return code;
     });
 
-    return { record, proc, exited, stop: this.managedStop(proc.pid, () => proc.exitCode === null && proc.signalCode === null, () => killBunChild(proc), exited), ...(fds ? { fds } : {}) };
+    return { record, proc, exited, stop: this.managedStop(proc.pid, running(proc), () => killBunChild(proc), exited), ...(fds ? { fds } : {}) };
   }
 
   /**
@@ -296,6 +299,7 @@ export class ProcRegistry {
       root: opts.agentRoot !== false,
       startup: opts.startup === true,
       kill: () => killBunChild(proc),
+      running: running(proc),
       usage: () => {
         const usage = proc.resourceUsage();
         if (!usage) return null;
@@ -304,7 +308,7 @@ export class ProcRegistry {
     });
 
     const exited = proc.exited.then((code) => { this.onExit(threadId, record.pid, code, undefined, record); return code; });
-    return { record, proc, exited, stop: this.managedStop(proc.pid, () => proc.exitCode === null && proc.signalCode === null, () => killBunChild(proc), exited) };
+    return { record, proc, exited, stop: this.managedStop(proc.pid, running(proc), () => killBunChild(proc), exited) };
   }
 
   /**
@@ -336,6 +340,7 @@ export class ProcRegistry {
 
     const record = this.register(threadId, proc.pid, cmd, args, {
       root: false,
+      running: running(proc),
       kill: () => {
         if (process.platform === 'win32') return proc.kill();
         // Interactive jobs have separate groups: capture their descendants
@@ -390,7 +395,7 @@ export class ProcRegistry {
     });
 
     const kill = (): Promise<void> | undefined => {
-      if (OWN_GROUP) return stopGroup(child.pid ?? -1, () => child.exitCode === null && child.signalCode === null);
+      if (OWN_GROUP) return stopGroup(child.pid ?? -1, running(child));
       child.kill();
       return undefined;
     };
@@ -398,6 +403,7 @@ export class ProcRegistry {
       root: opts.agentRoot !== false,
       startup: opts.startup === true,
       kill,
+      running: running(child),
       usage: () => null,
     });
     const exited = new Promise<void>((resolve) => {
@@ -405,7 +411,7 @@ export class ProcRegistry {
       child.once('exit', () => resolve());
       child.once('error', () => resolve());
     });
-    this.childStops.set(child, this.managedStop(record.pid, () => child.exitCode === null && child.signalCode === null, kill, exited));
+    this.childStops.set(child, this.managedStop(record.pid, running(child), kill, exited));
 
     child.once('exit', (code) => {
       this.onExit(threadId, record.pid, code, undefined, record);
@@ -557,6 +563,7 @@ export class ProcRegistry {
         // Nothing to kill by hand: the job owns this process, killTree terminates it.
         root: false,
         kill: () => undefined,
+        running: () => false,
         usage: () => null,
       },
       identity,
@@ -626,8 +633,8 @@ export class ProcRegistry {
     for (const entry of entries) {
       if (terminated && !this.unassigned.has(entry.record.pid)) continue;
       if (entry.record.pid <= 0) continue;
-      // The child's own kill waits for the tree kill: once the root is gone, taskkill /T finds no tree.
-      const fallback = this.platform.terminateUnassigned(entry.record.pid);
+      // The own kill waits for the tree kill, which /T needs the root alive for; as in `managedStop`, only while held.
+      const fallback = entry.running() ? this.platform.terminateUnassigned(entry.record.pid) : undefined;
       this.trackStop(fallback instanceof Promise ? fallback.then(() => killEntry(entry), () => killEntry(entry)) : killEntry(entry));
     }
     return entries.length;
@@ -883,6 +890,9 @@ export class ProcRegistry {
     });
   }
 }
+
+/** Whether `proc` runs as its spawner sees it: until it reports the exit it holds the process's handle. */
+const running = (proc: { exitCode: number | null; signalCode: unknown }) => () => proc.exitCode === null && proc.signalCode === null;
 
 /** An entry's own kill, and the group stop that may follow it. */
 function killEntry(entry: Entry): Promise<void> | undefined {

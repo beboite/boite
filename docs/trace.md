@@ -71,7 +71,9 @@ a job that still reports members remains held. A pid that could not join its
 job, or any pid of a thread with no job, is stopped by `taskkill /T /F` started
 asynchronously, so the core keeps serving while it starts. The child's own kill
 runs once taskkill ends, since `/T` needs the root alive to find the tree, and
-`killAll` at shutdown waits for both.
+`killAll` at shutdown waits for both. Taskkill gets only a pid the core
+spawned and has not seen exit, held as described under managed stops below; a
+process the core did not spawn or saw exit gets only its own kill.
 
 Independent cores in one process share the native drain, with an opaque job
 scope per registry and thread. Starts, exits, guards and controls use that same

@@ -65,6 +65,13 @@ describe('procs', () => {
       const running = registry.spawn('stop-identity', process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { agentRoot: false });
       await running.stop();
       expect(handed).toEqual([running.proc.pid]);
+      // A thread stop's fallback, between the exit the spawner saw and the registry's own exit callback.
+      const exiting = registry.spawnChild('tree-identity', process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { agentRoot: false });
+      const live = registry.spawn('tree-identity', process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { agentRoot: false });
+      Object.assign(exiting, { exitCode: 0 });
+      registry.killTree('tree-identity');
+      expect(handed).toEqual([running.proc.pid, live.proc.pid]);
+      await live.exited;
     } finally { await registry.close(); }
   });
   test.skipIf(process.platform !== 'win32')('spawnChild keeps native exit usage after the node exit callback', async () => {
