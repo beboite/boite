@@ -586,8 +586,8 @@ test('a child turn admitted during final Git validation keeps its merged parent 
   } finally { held.mockRestore(); harness.core.threads.stopTurn(childId); }
 });
 
-test('repository identities strip trailing slashes before the git suffix', () => {
-  for (const remote of ['https://github.com/example/repo.git/', 'git@github.com:example/repo.git//']) {
+test('repository identities normalize slashes around the git suffix', () => {
+  for (const remote of ['https://github.com/example/repo.git/', 'git@github.com:example/repo.git//', 'https://github.com/example/repo/.git', 'https://github.com/example/repo/.git/', 'https://github.com/example/repo']) {
     const remotes = `origin ${remote} (fetch)`;
     expect(githubRepository(remotes)).toBe('github.com/example/repo');
     expect([...fetchedRepositories(remotes)]).toEqual(['github.com/example/repo']);
