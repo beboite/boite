@@ -529,11 +529,13 @@ export class PluginStore {
    * reason, keeping the version that worked.
    */
   private async activate(id: string, dir: string, previous: Installed | null, manifest: PluginManifest, temporary: string, ran: boolean, record: string): Promise<void> {
+    const binary = this.binaryPath(dir, manifest);
     let activation: Activation | null = null;
     let why: string | null = null;
     try {
-      activation = switchRelease(dir, { previous: previous?.binary ?? null, binary: this.binaryPath(dir, manifest), temporary, record });
-      if (ran && providesGateway(manifest) && !await this.gateways.launch(id, false)) {
+      activation = switchRelease(dir, { previous: previous?.binary ?? null, binary, temporary, record });
+      // The record names the previous release until the commit: the gateway is handed the new binary.
+      if (ran && providesGateway(manifest) && !await this.gateways.launch(id, false, { binary, executable: manifest.executable })) {
         why = this.gateways.state(id, dir).error ?? `${id} ${manifest.version} did not start`;
         throw new Error(why);
       }

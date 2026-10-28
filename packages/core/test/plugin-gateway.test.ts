@@ -37,11 +37,11 @@ afterEach(async () => {
 const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 
 /** Douane's reviewed entry, pointed at a download this test serves. */
-function douane(version: string, bytes: Uint8Array) {
+function douane(version: string, bytes: Uint8Array, executable = 'douane') {
   served.set(version, bytes);
   return parseManifest({
     schema: 1, id: 'douane', name: 'Douane', version,
-    description: 'Subscription gateway.', homepage: 'https://github.com/mtsu-dev/douane', executable: 'douane',
+    description: 'Subscription gateway.', homepage: 'https://github.com/mtsu-dev/douane', executable,
     artifacts: { [platformKey()]: { url: `${ARTIFACT}/${version}`, sha256: sha256(bytes) } },
     provides: { gateway: {} },
   }, 'recommended.json[1]');
@@ -224,6 +224,24 @@ test.skipIf(process.platform === 'win32')('an update waits for the requests in f
   expect(back.error).toMatch(/exited with code 1.*0\.4\.0 runs again/);
   expect(readFileSync(binary, 'utf8')).toContain('0.4.0');
   expect(live()).toBe(1);
+}, 60_000);
+
+test.skipIf(process.platform === 'win32')('an update that renames the gateway executable starts the new one before its record names it', async () => {
+  delete process.env[DOUANE_BINARY_ENV];
+  const { owner } = await core('0.3.0', program('0.3.0'));
+  harness!.core.plugins.gateways.readyMs = 3_000;
+  await owner.call('plugins.install', { id: 'douane' });
+  expect((await gatewayIs(owner, 'running')).gateway?.version).toBe('0.3.0');
+  const dir = join(harness!.dataDir, 'plugins', 'douane');
+
+  harness!.core.plugins.recommended = [douane('0.4.0', program('0.4.0'), 'douane-next')];
+  await owner.call('plugins.install', { id: 'douane' });
+  const updated = await until(() => state(owner), (plugin) => plugin.status !== 'installing' && plugin.gateway?.status === 'running', 'the update settled');
+  expect(updated).toMatchObject({ status: 'installed', version: '0.4.0', error: null });
+  expect(updated.gateway?.version).toBe('0.4.0');
+  expect(existsSync(join(dir, 'douane-next'))).toBe(true);
+  expect(existsSync(join(dir, 'douane'))).toBe(false);
+  await until(live, (count) => count === 1, 'one gateway process');
 }, 60_000);
 
 test('an update whose release exits at once says so, even when its relaunch would come before the answer', async () => {

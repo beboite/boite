@@ -86,8 +86,8 @@ export class InstallManager {
   /** The record `current` held when last read, with the file's identity then: every provider list reads it. */
   #records = new Map<ProviderId, { stamp: string; record: ReleaseRecord }>();
   #settledListeners: ((outcome: InstallOutcome) => void)[] = [];
-  /** Providers whose `current` was checked for a repointing a stopped core left half done. */
-  #settled = new Set<ProviderId>();
+  /** Per provider, whether `current` was settled after a repointing a stopped core left half done (false: it failed, said once). */
+  #settled = new Map<ProviderId, boolean>();
   /** Test seams: how long a silent download waits, and the pauses between attempts. */
   idleTimeoutMs = IDLE_TIMEOUT_MS;
   retryDelaysMs: readonly number[] = RETRY_DELAYS_MS;
@@ -102,11 +102,15 @@ export class InstallManager {
 
   currentDir(providerId: ProviderId): string {
     const link = agentsDirPath(this.dataDir, providerId);
-    // Once per core: a repointing cut off by a stop settles before anything reads `current`.
-    if (!this.#settled.has(providerId)) {
-      this.#settled.add(providerId);
-      try { recoverCurrent(link); }
-      catch (error) { this.#log('warn', `${link}: an update that did not finish could not be settled (${messageOf(error)})`); }
+    // A repointing cut off by a stop settles before anything reads `current`; until it does, each read tries again.
+    if (this.#settled.get(providerId) !== true) {
+      try {
+        recoverCurrent(link);
+        this.#settled.set(providerId, true);
+      } catch (error) {
+        if (!this.#settled.has(providerId)) this.#log('warn', `${link}: an update that did not finish could not be settled (${messageOf(error)})`);
+        this.#settled.set(providerId, false);
+      }
     }
     return link;
   }

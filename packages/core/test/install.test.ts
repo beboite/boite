@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { zipSync } from 'fflate';
@@ -440,6 +440,33 @@ describe('managed installs', () => {
       installedAt: expect.any(Number),
       available: '1.1.0',
     });
+  });
+
+  // Root ignores the read-only directory that makes the old release impossible to remove.
+  test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('an update whose previous release cannot be removed yet still runs the new one', async () => {
+    await loadDescriptor(goodInstall());
+    const client = await harness.connect();
+    const states: ProviderInstallState[] = [];
+    client.on('providers.installProgress', (event) => states.push(event));
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => states.some((state) => state.state === 'installed'));
+    // The layout of an account that may not make links: the release itself sits at `current`, with a part it cannot delete.
+    rmSync(agentDir('current'));
+    renameSync(agentDir('releases', '1.0.0'), agentDir('current'));
+    mkdirSync(agentDir('current', 'locked'));
+    writeFileSync(agentDir('current', 'locked', 'file'), 'kept');
+    chmodSync(agentDir('current', 'locked'), 0o500);
+    try {
+      await loadDescriptor(nextInstall());
+      states.length = 0;
+      await client.call('providers.install', { providerId: 'managed' });
+      await waitFor(() => states.some((state) => state.state === 'installed' || state.state === 'failed'));
+      expect(states.at(-1)?.state).toBe('installed');
+      expect(statSync(agentDir('current', 'bin', 'agent.exe')).size).toBe(EXE_V2.byteLength);
+      expect(existsSync(agentDir('releases', '1.1.0', 'bin', 'agent.exe'))).toBe(true);
+    } finally {
+      chmodSync(agentDir('current.previous', 'locked'), 0o700);
+    }
   });
 
   test('an old release a process still runs out of stays until that process ends', async () => {

@@ -196,9 +196,9 @@ export class PluginGateways {
     return this.entries.get(id)?.status === 'running';
   }
 
-  /** The program run: the development one for Douane when set, else the installed binary. */
-  private executable(id: string): { binary: string; executable: string } | null {
-    const installed = this.host.installed(id);
+  /** The program run: the development one for Douane when set, else `candidate` or the installed binary. */
+  private executable(id: string, candidate?: { binary: string; executable: string }): { binary: string; executable: string } | null {
+    const installed = candidate ?? this.host.installed(id);
     const development = id === DOUANE_PLUGIN ? process.env[DOUANE_BINARY_ENV] : undefined;
     if (installed !== null && development) return { binary: development, executable: installed.executable };
     return installed;
@@ -279,14 +279,15 @@ export class PluginGateways {
    * reason on its state and a relaunch scheduled like a crash). With
    * `relaunch` false a failure only leaves it `crashed`: a relaunch would
    * start it again while the caller reads why, and clear that reason.
+   * `candidate` is the program an update tries before its record names it.
    */
-  async launch(id: string, relaunch = true): Promise<boolean> {
+  async launch(id: string, relaunch = true, candidate?: { binary: string; executable: string }): Promise<boolean> {
     if (this.closing) return false;
     const entry = this.entry(id);
     if (entry.running !== null) return entry.status === 'running';
     this.clock.clearTimeout(entry.relaunch);
     entry.relaunch = null;
-    const program = this.executable(id);
+    const program = this.executable(id, candidate);
     if (program === null) {
       Object.assign(entry, { status: 'stopped', error: null });
       this.host.changed(id);

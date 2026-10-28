@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type { CoreClient } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { setDriver } from '../src/drivers/index.ts';
@@ -128,6 +128,38 @@ describe('accounts', () => {
     } finally {
       for (const owner of owners) await harness.core.procs.stopAndWait(owner);
       await Promise.all(reads);
+    }
+  });
+
+  test('an account whose quota read could not be stopped is not removed until it stops', async () => {
+    const client = await harness.connect();
+    const providerId = await addLoginProvider(harness, client);
+    const account = await client.call('accounts.add', { providerId, label: 'Quota account' });
+    const owner = `quota:${account.id}`;
+    const realStop = harness.core.procs.stopAndWait.bind(harness.core.procs);
+    // The backend refuses to stop this owner's processes, as a timeout or a refused job would.
+    const stop = spyOn(harness.core.procs, 'stopAndWait').mockImplementation(async (threadId) => {
+      if (threadId === owner) throw new Error(`processes of ${owner} did not exit within five seconds`);
+      return realStop(threadId);
+    });
+    const read = withQuotaProbe(harness.core, harness.core.accounts.require(account.id), 'echo', async ctx => {
+      const child = ctx.spawnChild(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: account.isolationDir! });
+      await new Promise<void>(resolve => child.once('close', () => resolve()));
+      return 'read';
+    }, false).catch(() => 'refused');
+    try {
+      await waitFor(() => harness.core.procs.liveCount(owner) === 1);
+      expect(await thrown(client.call('accounts.remove', { accountId: account.id }))).toThrow(`processes of ${owner} did not stop`);
+      expect(existsSync(account.isolationDir!)).toBe(true);
+      expect((await client.call('accounts.list', {})).some(listed => listed.id === account.id)).toBe(true);
+      // Once its processes stop, the account goes.
+      stop.mockRestore();
+      await client.call('accounts.remove', { accountId: account.id });
+      expect(existsSync(account.isolationDir!)).toBe(false);
+    } finally {
+      stop.mockRestore();
+      await realStop(owner);
+      await read;
     }
   });
 

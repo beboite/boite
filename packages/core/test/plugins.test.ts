@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import * as fs from 'node:fs';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
@@ -285,6 +286,28 @@ describe('one operation at a time on a plugin', () => {
     expect(readFileSync(join(dir, 'installed.json'), 'utf8')).toBe(before);
     // Nothing of the update stays beside them but the obstacle the test planted.
     expect(readdirSync(dir).sort()).toEqual(['installed.json', 'installed.json.part', `pool${EXE}`]);
+  });
+
+  test('an update whose previous binary is still locked after the commit is installed, and the leftover goes on a later read', async () => {
+    harness = await startPoolCore(); const client = await harness.connect();
+    const dir = installPool(harness.dataDir);
+    serveDownloads({ [POOL_URL]: new Uint8Array([1, 2, 3, 4]) });
+    const kept = join(dir, `pool${EXE}.previous`);
+    const realRm = fs.rmSync;
+    // Windows holds a file a process still has open: removing the previous binary fails once the record is in.
+    const rm = spyOn(fs, 'rmSync').mockImplementation((path, options) => {
+      if (path === kept && existsSync(join(dir, 'installed.json')) && !existsSync(join(dir, 'installed.json.part'))) throw new Error('EBUSY: resource busy or locked');
+      realRm(path, options);
+    });
+    try {
+      await client.call('plugins.install', { id: 'pool-switcher' });
+      await waitFor(() => harness!.core.plugins.state('pool-switcher').status !== 'installing');
+      expect(harness.core.plugins.state('pool-switcher')).toMatchObject({ status: 'installed', error: null });
+      expect([...readFileSync(join(dir, `pool${EXE}`))]).toEqual([1, 2, 3, 4]);
+      expect(existsSync(kept)).toBe(true);
+    } finally { rm.mockRestore(); }
+    expect(harness.core.plugins.state('pool-switcher').status).toBe('installed');
+    expect(readdirSync(dir).sort()).toEqual(['installed.json', `pool${EXE}`]);
   });
 
   test.each([

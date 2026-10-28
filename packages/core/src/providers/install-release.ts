@@ -69,7 +69,9 @@ function present(path: string): boolean {
  * made (an unprivileged account with no developer mode is the case). The
  * previous `current` steps aside as `current.previous` and goes only once the
  * new one is in place; when neither a link nor the rename can be made, it
- * comes back and the error stands, so the release that worked still runs. On
+ * comes back and the error stands, so the release that worked still runs.
+ * Once the new one is in place the switch has happened: a previous one that
+ * cannot be removed yet stays for `recoverCurrent`, and nothing is thrown. On
  * the rename path an update has nothing to keep: the old release was moved
  * into `current` rather than linked, so repointing takes it.
  */
@@ -101,18 +103,30 @@ export function pointCurrent(
     }
     throw error;
   }
-  if (moved) removeCurrent(kept);
+  if (!moved) return;
+  try {
+    removeCurrent(kept);
+  } catch (error) {
+    log('warn', `${providerId}: the previous release at ${kept} could not be removed yet (${messageOf(error)}); the next start removes it`);
+  }
 }
 
 /**
- * Settles a repointing a stopped core left half done: a `current.previous`
- * with no `current` goes back, one beside a `current` already in place goes.
+ * Settles a repointing a stopped core left half done. A `current.previous`
+ * beside a `current` that reaches a complete release goes; it comes back when
+ * `current` is missing, or reaches no completion record while it has one.
  */
 export function recoverCurrent(link: string): void {
   const kept = keptCurrent(link);
   if (!present(kept)) return;
-  if (present(link)) removeCurrent(kept);
-  else renameSync(kept, link);
+  // `existsSync` follows the link: a broken one, or a release without its record, is not in place.
+  const complete = (path: string): boolean => existsSync(join(path, RELEASE_RECORD));
+  if (present(link) && (complete(link) || !complete(kept))) {
+    removeCurrent(kept);
+    return;
+  }
+  removeCurrent(link);
+  renameSync(kept, link);
 }
 
 /**

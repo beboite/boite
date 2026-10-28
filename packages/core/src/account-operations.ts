@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { AccountId, ProviderId, ThreadId } from '@boite/contracts';
 import type { Core } from './core.ts';
 import type { ProbeContext } from './drivers/types.ts';
-import { messageOf } from './errors.ts';
+import { messageOf, refused } from './errors.ts';
 import { removeDir } from './fs-retry.ts';
 
 /** After an operation's processes stop, a descendant that outlived them may hold their pipes: cleanup waits this long, no longer. */
@@ -21,8 +21,9 @@ export interface AccountOperation {
   killTree(): void;
   /**
    * Stops what still runs under `owner`, waits for it, then for its pipes
-   * (bounded) and removes `scratch`. Idempotent; the account forgets the
-   * operation once it resolves.
+   * (bounded) and removes `scratch`. Idempotent and never rejects, so the
+   * read it served can answer; a stop that failed keeps the operation open
+   * for the account, whose removal then refuses.
    */
   close(): Promise<void>;
 }
@@ -30,6 +31,8 @@ export interface AccountOperation {
 interface Open {
   owner: ThreadId;
   closed: Promise<void>;
+  /** Why its processes could not be stopped, when they could not: the account is not drained. */
+  failure: unknown;
 }
 
 /**
@@ -55,19 +58,22 @@ export class AccountOperations {
     let scratch: string | null = null;
     const exits: Promise<void>[] = [];
     let resolveClosed!: () => void;
-    const entry: Open = { owner, closed: new Promise<void>((resolve) => { resolveClosed = resolve; }) };
+    const entry: Open = { owner, closed: new Promise<void>((resolve) => { resolveClosed = resolve; }), failure: null };
     const set = this.#open.get(accountId) ?? new Set<Open>();
     set.add(entry);
     this.#open.set(accountId, set);
     let closing: Promise<void> | null = null;
     const close = async (): Promise<void> => {
       try {
-        await core.procs.stopAndWait(owner).catch((error: unknown) => log(messageOf(error)));
-        await bounded(Promise.all(exits), () => log(`process pipes did not close within ${CLOSE_GRACE_MS} ms`));
+        await core.procs.stopAndWait(owner).catch((error: unknown) => {
+          entry.failure = error;
+          log(messageOf(error));
+        });
+        // Only once its processes stopped: a descendant that outlived them may hold the pipes, and is not waited for.
+        if (entry.failure === null) await bounded(Promise.all(exits), () => log(`process pipes did not close within ${CLOSE_GRACE_MS} ms`));
         if (scratch !== null) await removeDir(scratch, log);
       } finally {
-        set.delete(entry);
-        if (set.size === 0 && this.#open.get(accountId) === set) this.#open.delete(accountId);
+        if (entry.failure === null) this.#forget(accountId, entry);
         resolveClosed();
       }
     };
@@ -103,12 +109,32 @@ export class AccountOperations {
   /**
    * Stops every operation of the account and waits until each has closed. The
    * caller has already closed admission (`accounts.require` refuses), so the
-   * work that notices its process died cannot start another.
+   * work that notices its process died cannot start another. An operation
+   * whose processes could not be stopped is asked again; if they still do not
+   * stop, the account is not drained and this refuses, naming them.
    */
   async drain(accountId: AccountId): Promise<void> {
     const open = [...(this.#open.get(accountId) ?? [])];
     for (const entry of open) this.core.procs.killTree(entry.owner);
     await Promise.all(open.map((entry) => entry.closed));
+    for (const entry of open) {
+      if (entry.failure === null) continue;
+      try {
+        await this.core.procs.stopAndWait(entry.owner);
+        entry.failure = null;
+        this.#forget(accountId, entry);
+      } catch (error) {
+        entry.failure = error;
+        throw refused(`processes of ${entry.owner} did not stop (${messageOf(error)}); the account stays until they do`, { accountId, owner: entry.owner });
+      }
+    }
+  }
+
+  #forget(accountId: AccountId, entry: Open): void {
+    const set = this.#open.get(accountId);
+    if (set === undefined) return;
+    set.delete(entry);
+    if (set.size === 0) this.#open.delete(accountId);
   }
 }
 

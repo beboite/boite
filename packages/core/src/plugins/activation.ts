@@ -34,6 +34,36 @@ function writeDurable(path: string, text: string): void {
   }
 }
 
+/** Flushes a file, or with `r` a directory, so a rename cannot persist before what it names does. */
+function flush(path: string, mode: 'r' | 'r+' = 'r+'): void {
+  const fd = openSync(path, mode);
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Flushes the directory's entries: a rename is atomic, not durable, until
+ * then. Windows cannot open a directory for this, and NTFS journals the
+ * rename itself.
+ */
+function flushEntries(dir: string): void {
+  if (process.platform === 'win32') return;
+  flush(dir, 'r');
+}
+
+/** Removes what a finished activation no longer needs; false when the file is still locked. */
+function bestEffort(path: string): boolean {
+  try {
+    rmSync(path, { force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function rollback(dir: string, intent: Intent): void {
   const kept = intent.previous === null ? null : join(dir, intent.previous + KEPT);
   const moved = kept !== null && existsSync(kept);
@@ -44,9 +74,14 @@ function rollback(dir: string, intent: Intent): void {
   rmSync(join(dir, ACTIVATION_FILE), { force: true });
 }
 
+/**
+ * After the commit: the release is installed whatever this manages to remove,
+ * so it never throws. The intent stays while the previous binary does, for
+ * `recoverActivation` to try again on a later read.
+ */
 function finish(dir: string, intent: Intent): void {
-  if (intent.previous !== null) rmSync(join(dir, intent.previous + KEPT), { force: true });
-  rmSync(join(dir, ACTIVATION_FILE), { force: true });
+  if (intent.previous !== null && !bestEffort(join(dir, intent.previous + KEPT))) return;
+  bestEffort(join(dir, ACTIVATION_FILE));
 }
 
 /**
@@ -59,14 +94,17 @@ function finish(dir: string, intent: Intent): void {
  */
 export function switchRelease(dir: string, release: { previous: string | null; binary: string; temporary: string; record: string }): Activation {
   const intent: Intent = { previous: release.previous === null ? null : basename(release.previous), binary: basename(release.binary) };
+  flush(release.temporary);
   writeDurable(join(dir, STAGED_RECORD), release.record);
   writeDurable(join(dir, ACTIVATION_FILE), JSON.stringify(intent));
+  flushEntries(dir);
   try {
     if (intent.previous !== null) {
       rmSync(join(dir, intent.previous + KEPT), { force: true });
       renameSync(join(dir, intent.previous), join(dir, intent.previous + KEPT));
     }
     renameSync(release.temporary, join(dir, intent.binary));
+    flushEntries(dir);
   } catch (error) {
     rollback(dir, intent);
     throw error;
@@ -77,6 +115,8 @@ export function switchRelease(dir: string, release: { previous: string | null; b
       if (settled) return;
       renameSync(join(dir, STAGED_RECORD), join(dir, RECORD));
       settled = true;
+      // Committed: what follows cannot undo it, so it cannot fail it either.
+      try { flushEntries(dir); } catch { /* the rename stands; only its durability is unconfirmed */ }
       finish(dir, intent);
     },
     rollback: () => {
