@@ -366,8 +366,13 @@ export class AgentStore {
     // Quoting escapes control characters six to one: the wake it makes, not the raw text, keeps under the cap.
     const fits = (n: number) => eventPrompt([{ key, text: said(body.slice(0, n)) }]).length <= EVENT_PROMPT_MAX;
     if (!fits(0)) throw refused(`agents.event: the event does not fit in a wake of ${EVENT_PROMPT_MAX} characters even with an empty text`, { field: 'text' });
-    let low = 0, high = body.length;
-    while (low < high) { const mid = Math.ceil((low + high) / 2); if (fits(mid)) low = mid; else high = mid - 1; }
+    // A whole text carries no cut note, so it may fit where one character less does not: try it first.
+    let low = body.length;
+    if (!fits(low)) {
+      low = 0;
+      let high = body.length - 1;
+      while (low < high) { const mid = Math.ceil((low + high) / 2); if (fits(mid)) low = mid; else high = mid - 1; }
+    }
     const landed = this.core.agentRuntime.fact(agent.id, { key, urgent: true, replace: true, threadIds: [], text: said(body.slice(0, low)) });
     if (!landed) throw refused(`agents.event: ${agent.name} received too many events this hour; this one was dropped`, { field: 'agent' });
     return { agentId: agent.id, key };

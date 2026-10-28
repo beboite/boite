@@ -319,6 +319,16 @@ test('a paired device lands an outside event on a bot: it wakes it with default 
   expect(signed.text).toContain('(name cut by Boite at ');
   expect(signed.text).toContain(' of 3000 characters)');
   expect(signed.text).toEndWith('you: "x"');
+  // A plain text whose wake ends just under the cap lands whole, with no cut note.
+  const near = await connect(h.url, session.token);
+  try {
+    await near.call('agents.event', { agent: 'Ada', key: 'near', text: 'a' });
+    const room = EVENT_PROMPT_MAX - eventPrompt([h.core.agentRuntime.facts(agent.id).find(f => f.key === 'external:near')!]).length + 1;
+    await near.call('agents.event', { agent: 'Ada', key: 'near', text: 'a'.repeat(room - 2) });
+  } finally { near.close(); }
+  const whole = h.core.agentRuntime.facts(agent.id).find(f => f.key === 'external:near')!;
+  expect(eventPrompt([whole]).length).toBe(EVENT_PROMPT_MAX - 2);
+  expect(whole.text).not.toContain('cut by Boite');
 });
 
 test('scheduled-only bots retain facts across runtime restart and failed admission, then deliver once with a routine', async () => {
