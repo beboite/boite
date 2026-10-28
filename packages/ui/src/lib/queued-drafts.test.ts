@@ -128,7 +128,7 @@ test.for([false, true])('pictures taken back past the byte total that cannot be 
   const [row] = store.draftEntries;
   store.cancelQueuedDraft(row!.id);
   expect(store.composerStates.draft?.attachments).toHaveLength(2);
-  await vi.waitFor(() => expect(store.error).toBe('These pictures still weigh over 10 MB together at their smallest: remove some before sending.'), { timeout: 5000 });
+  await vi.waitFor(() => expect(store.error).toBe('These files still weigh over 10 MB together, even with the pictures at their smallest: remove some before sending.'), { timeout: 5000 });
 });
 
 test('cancelling a queued start brings its words back into the draft, which no longer starts by itself', async () => {

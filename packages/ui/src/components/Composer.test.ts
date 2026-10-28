@@ -2147,7 +2147,7 @@ test('a pasted copy that stays over the byte total at its smallest says to remov
     await waitFor(() => !store.busy);
     input().focus();
     expect(clipboardEvent('paste', copied).defaultPrevented).toBe(true);
-    const over = 'These pictures still weigh over 10 MB together at their smallest: remove some before sending.';
+    const over = 'These files still weigh over 10 MB together, even with the pictures at their smallest: remove some before sending.';
     await waitFor(() => store.error === over, 4000);
     expect(store.composerStates['t-trace']!.attachments).toHaveLength(30);
     // Enter then keeps the box and says it again, rather than sending what the core would refuse.

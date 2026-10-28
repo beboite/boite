@@ -105,7 +105,7 @@ export const strings = {
     attachFormat: '{name} is {type}, and an image must be one of {formats}.',
     attachTooLarge: '{name} is too big: a file may weigh {max} at most.',
     attachTooMany: 'A turn carries at most {max} files, so {name} was left out.',
-    attachTotalOver: 'These pictures still weigh over {max} together at their smallest: remove some before sending.',
+    attachTotalOver: 'These files still weigh over {max} together, even with the pictures at their smallest: remove some before sending.',
     attachTotalTooLarge: 'The files of one turn weigh {max} at most together, so {name} was left out.',
     attachNoImages: '{provider} takes no images: send the prompt without them.'
   }
