@@ -97,7 +97,15 @@ export function registerLocalCommands(core: Core, reload: () => Promise<Provider
     // Owner-only: the file holds the environment values in plain text.
     writeFileSync(partial, `${JSON.stringify(raw, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
     renameSync(partial, file);
-    const list = await reload();
+    let list: ProviderList;
+    try {
+      list = await reload();
+    } catch (error) {
+      // The provider loaded before the reload failed (a default account it could not store): the file leaves with it.
+      unlinkSync(file);
+      await reload().catch(() => undefined);
+      throw error;
+    }
     if (!list.loaded.some((entry) => entry.id === id)) {
       // Only a file that loads stays: a refusal here would otherwise sit on the page as a rejected descriptor.
       const why = list.rejected.find((entry) => entry.file === file);

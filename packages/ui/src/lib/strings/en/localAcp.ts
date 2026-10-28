@@ -21,6 +21,7 @@ export const strings = {
     removeRow: 'Remove',
     save: 'Add provider',
     added: '{provider} added',
+    unavailable: 'This machine is not connected as its owner. Reconnect it, then add the provider again.',
     source: 'Added here',
     remove: 'Remove provider',
     removeTitle: 'Remove {provider}?',

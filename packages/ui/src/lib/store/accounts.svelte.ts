@@ -12,6 +12,7 @@ import type {
   SubscriptionProxyQuotas
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
+import { strings } from '../strings';
 import type { LoginState } from '../store.svelte';
 import { updateStale } from '../update-freshness';
 import type { StoreContext } from './context';
@@ -419,7 +420,7 @@ export class Accounts {
    */
   async addLocalProvider(command: LocalAcpCommand): Promise<{ ok: true; providerId: ProviderId } | { ok: false; field: string | null; message: string }> {
     const client = this.ctx.client;
-    if (!client || !this.ctx.store.owner) return { ok: false, field: null, message: '' };
+    if (!client || !this.ctx.store.owner) return { ok: false, field: null, message: strings.localAcp.unavailable };
     const generation = this.ctx.clientGeneration;
     try {
       const { providerId, loaded, rejected } = await client.call('providers.addLocal', command);

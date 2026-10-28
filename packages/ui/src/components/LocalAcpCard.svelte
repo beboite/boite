@@ -32,9 +32,12 @@
   const fold = (): number =>
     window.matchMedia('(prefers-reduced-motion: reduce)').matches || document.documentElement.dataset.motion === 'reduced' ? 0 : 180;
 
-  /** What is sent: empty argument rows and nameless variables are left out, and `field` points back at the rows that stayed. */
+  /**
+   * What is sent: empty argument rows and blank variable rows are left out, and `field` points back at the rows that stayed.
+   * A value without a name is sent, so the core refuses it instead of the form dropping it.
+   */
   const sent = $derived(args.filter((arg) => arg.value.length > 0));
-  const named = $derived(env.filter((entry) => entry.key.trim().length > 0));
+  const named = $derived(env.filter((entry) => entry.key.trim().length > 0 || entry.value.length > 0));
 
   function invalidArg(arg: Arg): boolean {
     return field === `args[${sent.indexOf(arg)}]`;

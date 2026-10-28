@@ -21,6 +21,7 @@ export const fr: Translation = {
     removeRow: 'Retirer',
     save: 'Ajouter le fournisseur',
     added: '{provider} ajouté',
+    unavailable: "Cette machine n'est pas connectée en tant que propriétaire. Reconnectez-la, puis ajoutez de nouveau le fournisseur.",
     source: 'Ajouté ici',
     remove: 'Retirer le fournisseur',
     removeTitle: 'Retirer {provider} ?',

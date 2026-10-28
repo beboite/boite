@@ -102,6 +102,19 @@ test('a local ACP command is refused with its field before anything is written',
   writeFileSync(join(harness.dataDir, 'providers', 'mine.json'), '{ "not": "loaded" }', 'utf8');
   expect(await add({})).toMatchObject({ code: RpcErrorCode.InvalidParams, data: { field: 'name', providerId: 'mine' } });
   expect(readFileSync(join(harness.dataDir, 'providers', 'mine.json'), 'utf8')).toBe('{ "not": "loaded" }');
+
+  // A default account that cannot be stored fails the reload after the provider loaded: neither the file nor the provider stays.
+  const ensureDefaults = harness.core.accounts.ensureDefaults.bind(harness.core.accounts);
+  let failed = false;
+  harness.core.accounts.ensureDefaults = () => {
+    if (failed) return ensureDefaults();
+    failed = true;
+    throw new Error('the journal refused the write');
+  };
+  expect((await add({ name: 'Unstored' })).code).toBe(RpcErrorCode.Internal);
+  expect(failed).toBe(true);
+  expect(existsSync(join(harness.dataDir, 'providers', 'unstored.json'))).toBe(false);
+  expect((await client.call('providers.list', {})).loaded.some((entry) => entry.id === 'unstored')).toBe(false);
 });
 
 test('removing a provider is refused for a shipped one, an unknown one and one with a turn running', async () => {

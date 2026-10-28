@@ -90,7 +90,7 @@ export function checkLocalAcpCommand(input: unknown, os: Os): LocalAcpCheck {
   }
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(raw['env'])) {
-    if (!ENV_NAME.test(key)) return refuse(`env.${key}`, 'a name of letters, digits and _, not starting with a digit', `${key} is not an environment variable name`);
+    if (!ENV_NAME.test(key)) return refuse(`env.${key}`, 'a name of letters, digits and _, not starting with a digit', key === '' ? 'a variable has a value but no name' : `${key} is not an environment variable name`);
     // A plain object drops this key on assignment, and the descriptor loader builds one too: the variable would never reach the agent.
     if (key === '__proto__') return refuse(`env.${key}`, 'any other variable name', `${key} cannot be stored in a provider file`);
     if (typeof value !== 'string' || value.length === 0 || /\0/.test(value)) {

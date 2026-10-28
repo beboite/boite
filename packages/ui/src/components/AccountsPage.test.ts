@@ -223,11 +223,22 @@ test('a local ACP command is added from its form, a refused field is marked, and
   expect(field('local-acp-command').getAttribute('aria-invalid')).toBe('false');
   expect(field<HTMLInputElement>('local-acp-command').value).toBe('my-agent');
 
+  // A value typed without its name reaches the core, which marks that row, rather than vanishing from the request.
   type(field('local-acp-name'), 'My Agent');
+  field('local-acp-add-env').click();
+  flushSync();
+  const unnamed = () => document.querySelectorAll<HTMLInputElement>('[data-testid="local-acp-env-key"]')[1]!;
+  type(document.querySelectorAll<HTMLInputElement>('[data-testid="local-acp-env-value"]')[1]!, 'orphan');
+  field('local-acp-save').click();
+  await vi.waitFor(() => expect(unnamed().getAttribute('aria-invalid')).toBe('true'));
+  expect(field('local-acp-env-key').getAttribute('aria-invalid')).toBe('false');
+  expect(row('my-agent')).toBeNull();
+
+  type(unnamed(), 'EXTRA');
   field('local-acp-save').click();
   await vi.waitFor(() => expect(row('my-agent')).not.toBeNull());
   expect(call).toHaveBeenCalledWith('providers.addLocal', {
-    name: 'My Agent', command: 'my-agent', args: ['--profile', 'two words'], env: { AGENT_MODE: 'acp' }
+    name: 'My Agent', command: 'my-agent', args: ['--profile', 'two words'], env: { AGENT_MODE: 'acp', EXTRA: 'orphan' }
   });
   await vi.waitFor(() => expect(field('local-acp-added').textContent).toBe('My Agent added'));
   expect(document.querySelector('[data-testid="local-acp-name"]')).toBeNull();
