@@ -2137,6 +2137,8 @@ test('a pasted copy that stays over the byte total at its smallest says to remov
     width: 1170, height: 2532, hasAlpha: () => false, close() {},
     async encode(_width, _height, mimeType) { return new Blob([new Uint8Array(400 * 1024)], { type: mimeType }); }
   }));
+  // jsdom's 5 MB storage cannot back up a 12 MB draft and would say so at any save; a browser keeps it in its journal.
+  const save = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {});
   try {
     const from = { text: heavy.map((_, at) => `[Image ${at + 1}]`).join(' '), attachments: heavy, queued: [], sending: false, paused: false };
     const copied = clipboard();
@@ -2145,7 +2147,6 @@ test('a pasted copy that stays over the byte total at its smallest says to remov
     await waitFor(() => !store.busy);
     input().focus();
     expect(clipboardEvent('paste', copied).defaultPrevented).toBe(true);
-    // jsdom's storage cannot keep a 12 MB draft and says so first; the fit's answer follows.
     const over = 'These pictures still weigh over 10 MB together at their smallest: remove some before sending.';
     await waitFor(() => store.error === over, 4000);
     expect(store.composerStates['t-trace']!.attachments).toHaveLength(30);
@@ -2158,7 +2159,7 @@ test('a pasted copy that stays over the byte total at its smallest says to remov
     expect(store.composerStates['t-trace']!.attachments).toHaveLength(30);
     expect(store.composerStates['t-trace']!.queued).toHaveLength(0);
     expect((await store.client!.call('threads.get', { threadId: 't-trace' })).messages).toEqual(before.messages);
-  } finally { decode.mockRestore(); }
+  } finally { decode.mockRestore(); save.mockRestore(); }
 });
 
 test('a send held by a fit is dropped when the composer moves to another thread meanwhile', async ({ app: _app }) => {

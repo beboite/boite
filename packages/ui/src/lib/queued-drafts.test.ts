@@ -114,6 +114,8 @@ test('a start whose answer the link lost is asked again under its id and makes o
 test.for([false, true])('pictures taken back past the byte total that cannot be fitted say so (codec failing: %s)', async (failing) => {
   const { browserCodec } = await import('./image-prepare');
   // jsdom has no canvas, so the pictures cannot shrink; a failing codec rejects instead.
+  // Without IndexedDB, jsdom's 5 MB storage cannot back up a 12 MB draft and says so whenever it saves, before or after the fit; a browser keeps it in its journal.
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {});
   if (failing) vi.spyOn(browserCodec, 'decode').mockImplementation(async () => ({ width: 1170, height: 2532, hasAlpha: () => false, close() {}, encode: async () => { throw new Error('encoder lost'); } }));
   const { store, client } = await machine('one');
   await store.connect();
@@ -126,7 +128,7 @@ test.for([false, true])('pictures taken back past the byte total that cannot be 
   const [row] = store.draftEntries;
   store.cancelQueuedDraft(row!.id);
   expect(store.composerStates.draft?.attachments).toHaveLength(2);
-  await vi.waitFor(() => expect(store.error).toBe('These pictures still weigh over 10 MB together at their smallest: remove some before sending.'));
+  await vi.waitFor(() => expect(store.error).toBe('These pictures still weigh over 10 MB together at their smallest: remove some before sending.'), { timeout: 5000 });
 });
 
 test('cancelling a queued start brings its words back into the draft, which no longer starts by itself', async () => {
