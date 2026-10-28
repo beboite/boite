@@ -16,6 +16,12 @@ export type ChildEnd =
   | { kind: 'checkpoint'; live: BackgroundTask[] }
   | { kind: 'final' };
 
+/** A child's last turn of its task, past compactions and cache keepalives. */
+export function taskTurn(core: Core, threadId: string): Turn | null {
+  const row = core.journal.db.query("SELECT id FROM turns WHERE thread_id = ? AND COALESCE(json_extract(execution, '$.operation'), '') NOT IN ('compact', 'keepalive') ORDER BY rowid DESC LIMIT 1").get(threadId) as { id: string } | null;
+  return row ? core.journal.getTurn(row.id) : null;
+}
+
 export function childEnd(core: Core, turn: Turn): ChildEnd {
   if (turn.execution?.operation === 'compact' || turn.execution?.operation === 'keepalive') return { kind: 'maintenance' };
   const live = turn.status === 'done' ? core.threads.agentState.background.get(turn.threadId) ?? [] : [];
@@ -31,8 +37,7 @@ export function childEnd(core: Core, turn: Turn): ChildEnd {
 export function unwoken(core: Core, threadId: string): string | null {
   const thread = core.journal.getThread(threadId);
   if (thread?.status !== 'idle' || thread.archived || (core.threads.agentState.background.get(threadId) ?? []).length > 0) return null;
-  const row = core.journal.db.query("SELECT id FROM turns WHERE thread_id = ? AND COALESCE(json_extract(execution, '$.operation'), '') NOT IN ('compact', 'keepalive') ORDER BY rowid DESC LIMIT 1").get(threadId) as { id: string } | null;
-  const turn = row ? core.journal.getTurn(row.id) : null;
+  const turn = taskTurn(core, threadId);
   if (turn?.status !== 'done' || turn.finishedAt === null) return null;
   const end = turn.finishedAt;
   const ended = core.threads.agentState.backgroundHistory.endedAfter(threadId, end).filter(task => task.startedAt <= end);

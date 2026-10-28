@@ -15,11 +15,11 @@ import { newId } from './ids.ts';
 import { assertDriverRunnable } from './drivers/index.ts';
 import type { ChildRoute } from './delegation/routes.ts';
 import { WorkflowLog } from './workflow-log.ts';
-import { pauseHold } from './delegation/pauses.ts';
+import { mayResume, resumeTeam, running } from './workflows/resume.ts';
 import { listTemplates, removeTemplate, saveTemplate } from './workflows/templates.ts';
 import { planError, text } from './workflows/validation.ts';
 import { NOT_STARTED, clip, describe, failureNotice, runSummary, tooLong, unnoticed } from './workflows/notices.ts';
-import { askFinal, childEnd } from './delegation/completion.ts';
+import { askFinal, childEnd, unwoken } from './delegation/completion.ts';
 import { workflowUsage } from './workflows/usage.ts';
 import { SharedWorkflowCompute } from './workflows/shared-compute.ts';
 export { registerWorkflowMethods } from './workflows/register.ts';
@@ -575,11 +575,15 @@ export class Workflows {
     else next();
   }
 
-  /** A checkpointed step whose background work completed without waking it is asked for its final answer; it fails if none can start. */
+  /**
+   * A checkpointed step whose background work completed without waking it is
+   * asked for its final answer; it fails if none can start. A paused run starts
+   * nothing: its resume asks.
+   */
   unwoken(threadId: string, tasks: string): void {
     const entry = this.stepOf.get(threadId);
     const run = entry && !this.closed ? this.load(entry.runId) : null;
-    const inst = run && run.status !== 'stopped' ? this.instance(run, entry!.key) : undefined;
+    const inst = run?.status === 'running' ? this.instance(run, entry!.key) : undefined;
     if (inst?.status !== 'running' || inst.threadId !== threadId) return;
     const error = askFinal(this.core, threadId, tasks);
     if (error !== null) this.waitLost(threadId, `completed without waking it, and asking for its final result failed: ${error}`, tasks);
@@ -721,9 +725,9 @@ export class Workflows {
         break;
       case 'resume': {
         if (run.status !== 'paused') throw refused(`the run is ${run.status}, not paused`);
-        this.mayResume(run, principal);
-        this.resumeTeam(run.rootThreadId, principal);
-        this.save(this.running(run));
+        mayResume(this.core, run, principal);
+        resumeTeam(this.core, run.rootThreadId, principal);
+        this.save(running(run));
         break;
       }
       case 'stop':
@@ -734,7 +738,7 @@ export class Workflows {
         if (principal === 'session') throw refused('retrying a workflow step is an owner action');
         if (run.status === 'done') throw refused('the run finished; start it again instead');
         // A retry leaves the run running: on a paused run that is a resume.
-        if (run.status === 'paused') this.mayResume(run, principal);
+        if (run.status === 'paused') mayResume(this.core, run, principal);
         const nodes = params.stepId === undefined ? run.nodes.filter(n => broken(n.status) || n.instances.some(i => broken(i.status))) : run.nodes.filter(n => n.id === params.stepId);
         if (params.stepId !== undefined && !nodes.length) throw invalidParams(`stepId: no step ${params.stepId} in this run`);
         for (const node of run.nodes) {
@@ -755,36 +759,21 @@ export class Workflows {
         // Another failed step still holds the run: say which, instead of refusing the step that was named.
         const holding = run.nodes.filter(node => broken(node.status) || node.instances.some(i => broken(i.status))).map(node => node.id);
         if (holding.length) throw refused(`the run stays stopped while ${holding.join(', ')} ${holding.length === 1 ? 'has' : 'have'} failed; retry ${holding.length === 1 ? 'that step' : 'those steps'} too, or retry the whole run without naming a step`);
-        this.resumeTeam(run.rootThreadId, principal);
-        this.save({ ...this.running(run), finishedAt: null, delivered: false, updatedAt: now });
+        resumeTeam(this.core, run.rootThreadId, principal);
+        this.save({ ...running(run), finishedAt: null, delivered: false, updatedAt: now });
         break;
       }
       default:
         throw invalidParams('action: expected pause, resume, stop or retry');
     }
     this.advance(run.id);
+    // Work that completed while the run was paused asked nothing then: its steps are asked now.
+    const current = this.load(run.id)!;
+    if (current.status === 'running') for (const node of current.nodes) for (const inst of node.instances) {
+      const tasks = inst.status === 'running' && inst.threadId ? unwoken(this.core, inst.threadId) : null;
+      if (tasks !== null) this.unwoken(inst.threadId!, tasks);
+    }
     return this.view(this.load(run.id)!);
-  }
-
-  /** The run going again, with no pause left on it. */
-  private running(run: WorkflowRun): WorkflowRun {
-    const { pausedBy: _by, pausedAt: _at, ...rest } = run;
-    return { ...rest, status: 'running', error: null };
-  }
-
-  /** The owner resumes any run; a session none; an agent the pauses `pauseHold` lets it lift. */
-  private mayResume(run: WorkflowRun, principal: Principal): void {
-    if (principal === 'owner') return;
-    if (principal === 'session') throw refused('resuming a workflow is an owner action');
-    const hold = pauseHold(this.core, run.rootThreadId, { by: run.pausedBy, at: run.pausedAt }, 'run');
-    if (hold) throw refused(hold);
-  }
-
-  /** Resuming a run resumes the team its steps run in, when the caller may lift that pause too. */
-  private resumeTeam(rootId: string, principal: Principal): void {
-    const config = this.core.delegation.config(rootId);
-    if (!config.enabled || !config.paused) return;
-    this.core.delegation.unpause(rootId, principal);
   }
 
   /** `boite delegate resume`: the root's paused runs this caller may resume and owns; the others stay as they are. */
@@ -825,11 +814,9 @@ export class Workflows {
     this.compute.stop(run);
     for (const node of run.nodes) for (const inst of node.instances) {
       if (inst.status !== 'running' || !inst.threadId || this.core.scheduler.stop(inst.threadId)) continue;
-      // A step at rest on its own background work is at work too: stopping it ends that work and settles its worktree.
-      if (this.core.threads.agentState.background.get(inst.threadId)?.length) {
-        this.core.threads.releaseAgent(inst.threadId);
-        void this.core.delegation.worktrees.settle(inst.threadId);
-      }
+      // A step at rest on its checkpoint, its work live or completed unanswered: stopping it ends that work and settles its worktree.
+      this.core.threads.releaseAgent(inst.threadId);
+      void this.core.delegation.worktrees.settle(inst.threadId);
     }
     this.mutate(run.id, current => {
       for (const node of current.nodes) for (const inst of node.instances) if (inst.status === 'running') Object.assign(inst, { status: 'stopped', error: reason, finishedAt: now });

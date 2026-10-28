@@ -31,7 +31,7 @@ function scripted() {
   return { runs, prompts };
 }
 
-async function setup() {
+async function parent() {
   const driver = scripted();
   const h = await startTestCore(); cores.push(h);
   const owner = await h.connect();
@@ -41,16 +41,26 @@ async function setup() {
     { id: 'fast', name: 'Fast', providerId: 'echo', accountId: thread.accountId, model: thread.model!, effort: null },
   ] };
   await owner.call('delegation.configure', { threadId, config });
+  /** The child starts CI in the background and ends its turn on that checkpoint. */
+  const checkpoint = async (childId: string) => {
+    await waitFor(() => driver.runs.has(childId));
+    const first = driver.runs.get(childId)!;
+    first.ctx.background!([{ id: 'ci-1', kind: 'monitor', description: 'Pending CI', toolId: null, startedAt: Date.now() }]);
+    first.finish('Checkpoint: waiting for CI.');
+    await waitFor(() => h.core.threads.require(childId).status === 'idle');
+    return first;
+  };
+  return { ...driver, h, owner, threadId, checkpoint };
+}
+
+async function setup() {
+  const base = await parent();
+  const { h, owner, threadId } = base;
   const run = await owner.call('workflows.start', { threadId, requestId: 'ci', plan: PLAN });
   const step = () => h.core.workflows.get(threadId, run.id).nodes[0]!.instances[0]!;
-  await waitFor(() => !!step()?.threadId && driver.runs.has(step().threadId!));
+  await waitFor(() => !!step()?.threadId);
   const childId = step().threadId!;
-  const first = driver.runs.get(childId)!;
-  // The step starts CI in the background and ends its turn on that checkpoint.
-  first.ctx.background!([{ id: 'ci-1', kind: 'monitor', description: 'Pending CI', toolId: null, startedAt: Date.now() }]);
-  first.finish('Checkpoint: waiting for CI.');
-  await waitFor(() => h.core.threads.require(childId).status === 'idle');
-  return { ...driver, h, owner, threadId, run, step, childId, first };
+  return { ...base, run, step, childId, first: await base.checkpoint(childId) };
 }
 
 const PLAN: WorkflowPlan = { name: 'Watch CI', steps: [
@@ -119,6 +129,44 @@ test('a step that cannot be asked for its final answer fails with a reason a ret
   expect(step().result).toBeNull();
 });
 
+test('a paused run asks nothing of a step whose work completed, and its resume asks for the final answer', async () => {
+  const { h, owner, threadId, run, step, childId, first, runs, prompts } = await setup();
+  await owner.call('workflows.control', { threadId, runId: run.id, action: 'pause' });
+  const asked = spyOn(h.core.workflows, 'unwoken');
+  restores.push(() => asked.mockRestore());
+  first.ctx.backgroundFinished!('ci-1', 'completed');
+  const clock = afterGrace();
+  await waitFor(() => asked.mock.calls.length > 0, 5000);
+  expect(runs.get(childId)).toBe(first);
+  expect(step()).toMatchObject({ status: 'running', result: null });
+  await owner.call('workflows.control', { threadId, runId: run.id, action: 'resume' });
+  await waitFor(() => runs.get(childId) !== first, 5000);
+  clock.mockRestore();
+  expect(prompts.filter(entry => entry.threadId === childId).at(-1)!.prompt).toContain('Your background work (Pending CI) completed');
+  runs.get(childId)!.finish('CI passed.');
+  await waitFor(() => step().status === 'done');
+  expect(step().result).toBe('CI passed.');
+});
+
+test('an ordinary child that cannot be asked for its final answer tells its parent, and a resume continues it', async () => {
+  const { h, owner, threadId, checkpoint, runs } = await parent();
+  const spawned = await owner.call('delegation.spawn', { threadId, profileId: 'fast', task: 'Watch CI.', requestId: 'watch' });
+  const childId = spawned.thread.id;
+  const first = await checkpoint(childId);
+  const start = spyOn(h.core.threads, 'startTurn').mockImplementation(() => { throw new Error('account signed out'); });
+  restores.push(() => start.mockRestore());
+  first.ctx.backgroundFinished!('ci-1', 'completed');
+  const clock = afterGrace();
+  const note = () => h.core.delegation.get(threadId).messages.find(letter => letter.from.threadId === childId && letter.text.includes(': interrupted'));
+  await waitFor(() => !!note(), 5000);
+  start.mockRestore();
+  expect(note()!.text).toContain('completed without waking it, and asking for its final result failed: account signed out');
+  expect(h.core.delegation.resume(threadId, childId, 'owner').agents).toEqual([childId]);
+  await waitFor(() => runs.get(childId) !== first, 5000);
+  clock.mockRestore();
+  expect(runs.get(childId)!.ctx.prompt).toContain('Continue your task');
+});
+
 test('a step whose background work ends without waking it fails with why, and what depends on it never starts', async () => {
   const { h, threadId, run, step, childId } = await setup();
   // Its agent process goes away with the task: nothing is left to wake it.
@@ -130,10 +178,17 @@ test('a step whose background work ends without waking it fails with why, and wh
   expect(h.core.workflows.get(threadId, run.id).nodes[1]!.instances.some(inst => inst.threadId)).toBe(false);
 });
 
-test('stopping a run ends the background work of a step at rest on it', async () => {
-  const { h, owner, threadId, run, step, childId } = await setup();
+test.each(['live', 'completed'] as const)('stopping a run ends the work of a step at rest on its checkpoint (%s) and settles its worktree', async work => {
+  const { h, owner, threadId, run, step, childId, first } = await setup();
+  // Completed in the wake grace: nothing is left in the live map, the step still rests on its checkpoint.
+  if (work === 'completed') first.ctx.backgroundFinished!('ci-1', 'completed');
+  const release = spyOn(h.core.threads, 'releaseAgent');
+  const settle = spyOn(h.core.delegation.worktrees, 'settle');
+  restores.push(() => { release.mockRestore(); settle.mockRestore(); });
   await owner.call('workflows.control', { threadId, runId: run.id, action: 'stop' });
   await waitFor(() => step().status === 'stopped');
+  expect(release).toHaveBeenCalledWith(childId);
+  expect(settle).toHaveBeenCalledWith(childId);
   expect(h.core.threads.agentState.background.get(childId) ?? []).toEqual([]);
   expect(h.core.workflows.get(threadId, run.id).status).toBe('stopped');
 });
