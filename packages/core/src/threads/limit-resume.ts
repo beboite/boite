@@ -230,7 +230,7 @@ export class LimitResumes {
     const thread = this.core.journal.getThread(threadId);
     if (thread === null) return 'the thread is gone';
     if (thread.archived) return 'the thread was archived';
-    if (['queued', 'running', 'waiting'].includes(thread.status) || this.threads.runner.handles.has(threadId)) return 'the thread is busy';
+    if (this.threads.isBusy(threadId)) return 'the thread is busy';
     if (this.lastTurnId(threadId) !== plan.turnId) return 'the thread was answered since';
     if (this.core.journal.getTurn(plan.turnId)?.status !== 'error') return 'the turn is no longer the failed one';
     if (thread.providerId !== plan.providerId || thread.accountId !== plan.accountId || thread.model !== plan.model || (thread.sessionGeneration ?? 0) !== plan.sessionGeneration) {

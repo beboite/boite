@@ -345,7 +345,7 @@ export class AgentRuntime {
   }
 
   private atWork(thread: ThreadSummary): boolean {
-    return thread.status === 'queued' || thread.status === 'running' || thread.status === 'waiting' || this.core.threads.runner.handles.has(thread.id);
+    return this.core.threads.isBusy(thread.id);
   }
 
   private begin(thread: ThreadSummary, wake: AgentWake): Turn {

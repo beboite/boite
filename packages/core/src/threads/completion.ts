@@ -13,7 +13,7 @@ export type CompletionRequest = 'explicit' | 'automatic';
 /** What still holds a member of the family, in words a refusal can show. */
 function pending(core: Core, id: ThreadId, status: string, scheduled: Set<ThreadId>, request: CompletionRequest): string | null {
   const threads = core.threads;
-  if (['running', 'waiting', 'queued'].includes(status) || scheduled.has(id) || threads.runner.handles.has(id) || threads.runner.steering.has(id)) return 'a turn is still running';
+  if (threads.isBusy(id) || scheduled.has(id) || threads.runner.steering.has(id)) return 'a turn is still running';
   if (threads.agentState.background.get(id)?.length) return 'background work is still running';
   if (threads.moves.pendingOf(id)) return 'a move is still in progress';
   if (threads.deferred.deferredAnswers.get(id)?.length || threads.deferred.pendingWakes.has(id)) return 'a message is still waiting to be delivered';

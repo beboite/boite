@@ -366,7 +366,7 @@ export class PullRequestWatches {
     if (!due.length || this.core.stopping) return;
     const thread = this.core.journal.getThread(threadId);
     if (!thread || thread.archived) return;
-    if (['queued', 'running', 'waiting'].includes(thread.status) || this.core.threads.runner.handles.has(threadId)) return;
+    if (this.core.threads.isBusy(threadId)) return;
     const { text, label } = wakeMessage(due.map(record => ({ number: record.number, url: record.url, changes: record.pending })));
     try {
       this.core.threads.startTurn(threadId, text, [], undefined, 'pull-request', undefined, undefined, label);

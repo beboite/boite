@@ -1,7 +1,7 @@
 import { archiveState } from '../merged-pr-archive-state.ts';
 import { worktreeRemovalOf } from '../worktree-cleanup-state.ts';
 import { backgroundWait, pullRequestWatchWaits } from '@boite/contracts';
-import type { BackgroundTask, BackgroundWait, MessageId, MessagePart, MoveNotice, RpcParams, ThreadId, ThreadStatus, ThreadSummary } from '@boite/contracts';
+import type { BackgroundTask, BackgroundWait, MessageId, MessagePart, MoveNotice, RpcParams, ThreadId, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { notFound } from '../errors.ts';
 
@@ -26,12 +26,7 @@ export function readToolPart(core: Core, params: RpcParams<'messages.toolPart'>)
 }
 
 // The thread row as every part of the store writes it: one event, the row, and the clients told.
-
-export function setThreadStatus(core: Core, threadId: ThreadId, status: ThreadStatus): void {
-  const thread = core.journal.getThread(threadId);
-  if (thread === null || thread.status === status) return;
-  saveThread(core, { ...thread, status }, 'thread.status');
-}
+// Its status has one writer, `threads/lifecycle.ts`.
 
 export function saveThread(core: Core, thread: ThreadSummary, eventType: string): ThreadSummary {
   const next: ThreadSummary = { ...thread, updatedAt: Date.now() };

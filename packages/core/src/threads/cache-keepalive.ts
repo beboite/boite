@@ -1,3 +1,4 @@
+import { threadActive } from '@boite/contracts';
 import type { ThreadId, ThreadSummary, Turn, TurnId, Usage } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf } from '../errors.ts';
@@ -10,7 +11,6 @@ export const KEEPALIVE_PROMPT = 'Cache keepalive: reply ok, no tools.';
 /** What the opening message of a ping is labelled. */
 export const KEEPALIVE_LABEL = 'Prompt cache kept warm';
 
-const BUSY = ['queued', 'running', 'waiting'];
 
 /**
  * One wait of a thread on its agents: from the end of its last real turn,
@@ -155,7 +155,7 @@ export class CacheKeepalive {
   /** True while a delegated agent of the thread works or a workflow of it runs, otherwise why not. */
   private waiting(threadId: ThreadId): true | string {
     try {
-      if (this.core.delegation.get(threadId).agents.some((agent) => BUSY.includes(agent.thread.status))) return true;
+      if (this.core.delegation.get(threadId).agents.some((agent) => threadActive(agent.thread.status))) return true;
       if (this.core.workflows.list(threadId).some((run) => run.status === 'running')) return true;
     } catch (error) {
       return `its agents could not be read: ${messageOf(error)}`;

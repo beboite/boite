@@ -7,7 +7,8 @@ import type { ThreadStore } from '../threads.ts';
 import { totalTokens } from '../usage.ts';
 import { LivePermissions } from './live-permissions.ts';
 import { LiveSettings } from './live-settings.ts';
-import { saveThread, setThreadStatus, withLoad } from './records.ts';
+import { saveThread, withLoad } from './records.ts';
+import { markRunning } from './lifecycle.ts';
 import type { CarriedInput } from './turn-context.ts';
 
 /** The current attempt snapshots, shared with live controls and final settlement. */
@@ -280,7 +281,7 @@ export class TurnAttempts {
           result = { ...result, usage: null };
           break;
         }
-        setThreadStatus(this.core, threadId, 'running');
+        markRunning(this.core, threadId);
         afterCapacity = true;
         because = `retry ${capacityTries} of ${CAPACITY_RETRY.delaysMs.length} after the model was at capacity`;
         continue;
@@ -305,7 +306,7 @@ export class TurnAttempts {
       this.keepSession(state, result);
       this.threads.cards.clearPermissionsOf(threadId, 'mode change');
       this.threads.cards.clearQuestionsOf(threadId, false, 'mode change');
-      setThreadStatus(this.core, threadId, 'running');
+      markRunning(this.core, threadId);
       resumed = true;
       because = 'after a permission mode change';
     }

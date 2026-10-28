@@ -37,7 +37,8 @@ import { memberNamed } from './group-spawn.ts';
 import { newId } from '../ids.ts';
 import type { ThreadStore } from '../threads.ts';
 import { nativeCommandPrompt } from './operations.ts';
-import { setThreadStatus, withLoad } from './records.ts';
+import { withLoad } from './records.ts';
+import { markRunning } from './lifecycle.ts';
 
 /** Why open cards were cleared, as the log says it. */
 export type CardClearReason = 'turn end' | 'stop' | 'mode change' | 'archive' | 'rewind';
@@ -135,7 +136,7 @@ export class ThreadCards {
       () => undefined,
     );
     this.core.bus.emit('permission.resolved', { requestId: params.requestId, threadId, decision: params.decision });
-    setThreadStatus(this.core, threadId, this.waitingOn(threadId) ? 'waiting' : 'running');
+    markRunning(this.core, threadId);
     pending.resolve(params.decision);
   }
 
@@ -165,7 +166,7 @@ export class ThreadCards {
     );
     this.core.bus.emit('question.answered', { questionId: request.id, threadId: request.threadId, answer: null });
     this.foldAsyncCard(request.id, null);
-    if (request.async !== true) setThreadStatus(this.core, request.threadId, this.waitingOn(request.threadId) ? 'waiting' : 'running');
+    if (request.async !== true) markRunning(this.core, request.threadId);
     else this.asyncChanged(request.threadId);
     pending.resolve(null);
   }
@@ -222,7 +223,7 @@ export class ThreadCards {
       return;
     }
     this.recordAnswer(request, answer, by);
-    setThreadStatus(this.core, request.threadId, this.waitingOn(request.threadId) ? 'waiting' : 'running');
+    markRunning(this.core, request.threadId);
     pending.resolve(answer);
   }
 
@@ -428,7 +429,7 @@ export class ThreadCards {
       { type: 'permission.requested', threadId: thread.id, version: 1, payload: request },
       () => undefined,
     );
-    setThreadStatus(this.core, thread.id, 'waiting');
+    markRunning(this.core, thread.id);
     this.core.bus.emit('permission.requested', request);
     this.core.logs.debug(`Permission requested for ${toolName}`, { source: 'permissions', event: 'permission.requested', threadId: thread.id, turnId: turn.id, requestId: request.id, data: { tool: toolName, permissionMode: thread.permissionMode } });
     const withdraw = (): void => {
@@ -462,7 +463,7 @@ export class ThreadCards {
       () => undefined,
     );
     // Nobody waits on an asynchronous card: the thread keeps its status.
-    if (ask.async !== true) setThreadStatus(this.core, thread.id, 'waiting');
+    if (ask.async !== true) markRunning(this.core, thread.id);
     else this.asyncChanged(thread.id);
     this.core.bus.emit('question.asked', request);
     this.core.logs.debug(`Question asked with ${ask.options.length} options${ask.async === true ? ', without stopping the turn' : ''}`, { source: 'permissions', event: 'question.asked', threadId: thread.id, turnId: turn.id, requestId: request.id, data: { options: ask.options.length, async: ask.async === true, allowText: ask.allowText, multiple: ask.multiple } });
@@ -532,7 +533,7 @@ export class ThreadCards {
     this.asyncCards.delete(questionId);
     this.closeUnanswered(pending.request);
     this.core.bus.emit('question.answered', { questionId, threadId, answer: null });
-    if (pending.request.async !== true) setThreadStatus(this.core, threadId, this.waitingOn(threadId) ? 'waiting' : 'running');
+    if (pending.request.async !== true) markRunning(this.core, threadId);
     else this.asyncChanged(threadId);
     pending.resolve(null);
   }

@@ -240,7 +240,7 @@ export class GoalTracker {
     try {
       if (!parent || parent.archived) throw refused('the goal\'s conversation is gone or archived');
       let tracker = list.threadId ? this.core.journal.getThread(list.threadId) : null;
-      if (tracker && (['queued', 'running', 'waiting'].includes(tracker.status) || this.core.threads.runner.handles.has(tracker.id))) {
+      if (tracker && this.core.threads.isBusy(tracker.id)) {
         // The last pass is still settling: try again in a moment.
         if (++tracking.busy < BUSY_TRIES) {
           if (job.kind === 'write') tracking.writes--;

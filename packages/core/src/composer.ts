@@ -184,7 +184,7 @@ export class Composer {
         if (!choice) throw refused('No agent selection was saved for this queued prompt. Choose an agent and enqueue it again.');
         const account = this.core.accounts.require(choice.accountId);
         if (account.providerId !== choice.providerId || account.status === 'unauthenticated') throw refused('The queued account is unavailable; choose an account and enqueue this input again.');
-        const active = ['running', 'queued', 'waiting'].includes(thread.status) || this.core.threads.runner.handles.has(id);
+        const active = this.core.threads.isBusy(id);
         const running = active ? this.core.journal.runningTurn(id) : null;
         if (active && (!boundary || boundary === item.afterBoundary || item.request || isComposerActivity(item.text) || !sameChoice(choice, choiceOf({ ...thread, ...running?.execution })) || userSteeringUnavailable(this.core, this.core.threads, id, running) !== null)) return;
         const batch = composerBatch(value.input.queued, this.storage);

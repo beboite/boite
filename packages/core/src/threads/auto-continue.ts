@@ -369,7 +369,7 @@ export class AutoContinues {
     const thread = this.core.journal.getThread(threadId);
     if (thread === null) return 'the thread is gone';
     if (thread.archived) return 'the thread was archived';
-    if (['queued', 'running', 'waiting'].includes(thread.status) || this.threads.runner.handles.has(threadId)) return 'the thread is busy';
+    if (this.threads.isBusy(threadId)) return 'the thread is busy';
     if (this.lastTurn(threadId)?.id !== plan.turnId) return 'the thread was answered since';
     if (this.threads.cards.listPermissions(threadId).length > 0 || this.threads.cards.listQuestions(threadId).some(question => !question.async)) return 'a card waits for the user';
     const team = this.core.delegation.config(threadId);

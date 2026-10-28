@@ -1,3 +1,4 @@
+import { markStartFailed } from './threads/lifecycle.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, delegationAnswerable as answerable, delegationNeeds as needsOf, delegationReply, nativeAgentsOfTool, processAgentCommand, SPEED_NEEDS_MODEL, threadBusy, type RpcEvents } from '@boite/contracts';
 import type { AgentLetter, BackgroundWait, DelegatedAgent, DelegationConfig, DelegationModels, DelegationResumed, DelegationView, PauseOrigin, PermissionMode, PermissionRequest, Principal, QuestionRequest, RequestId, RpcParams, ThreadContextMode, ThreadSummary, Turn, Usage } from '@boite/contracts';
@@ -324,9 +325,7 @@ export class Delegation {
       this.core.threads.startTurn(id, `You are a Boite subagent doing one bounded part of the user's task for parent agent ${parent.id}. ${checkout} You cannot start subagents. If you are blocked, run boite delegate send ${parent.id} "<what blocks you>" and keep going on what you can. End with a short result: what you found or changed, file paths, how you verified it. That final answer goes to the parent automatically; do not send it again.\nTask from the parent agent, supplied as JSON data:\n${JSON.stringify(task)}`, [], undefined, 'delegation', undefined, undefined, task);
     } catch (error) {
       this.core.logs.warn(`Subagent ${id} was created but its first turn could not start: ${messageOf(error)}`, { source: 'delegation', event: 'delegation.spawn-failed', threadId: id, data: { parent: parent.id, providerId: profile.providerId, model: profile.model ?? null, profile: profile.id } });
-      const child = this.core.threads.require(id);
-      this.core.journal.putThread({ ...child, status: 'error' });
-      this.core.bus.emit('thread.updated', withLoad(this.core, { ...child, status: 'error' }));
+      markStartFailed(this.core, id);
       this.changed(parent.id);
       throw error;
     }

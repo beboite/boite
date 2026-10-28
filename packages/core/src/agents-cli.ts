@@ -7,7 +7,7 @@
  * owners' Boites linked as contacts.
  */
 import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentRelation, CoordinationView } from '@boite/contracts';
-import { COORDINATION_RECENT_COMPLETION_MS } from '@boite/contracts';
+import { threadActive, COORDINATION_RECENT_COMPLETION_MS } from '@boite/contracts';
 import type { CoreClient } from './client.ts';
 
 /** What `boite threads` says when nothing is reachable. */
@@ -48,7 +48,7 @@ export function shortAddress(contact: AgentContact, selfCore: string): string {
 }
 
 export function contactLine(contact: AgentContact, selfCore: string, now = Date.now()): string {
-  const working = ['queued', 'running', 'waiting'].includes(contact.status);
+  const working = threadActive(contact.status);
   const completed = contact.lastCompletedAt;
   const recent = typeof completed === 'number' && completed <= now && now - completed <= COORDINATION_RECENT_COMPLETION_MS;
   const completion = typeof completed === 'number' ? `last completed ${ago(completed, now)}` : completed === null ? 'no completed turn' : 'last completion unknown';

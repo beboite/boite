@@ -19,7 +19,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { chmod, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { PLUGIN_MANIFEST_FILE } from '@boite/contracts';
+import { threadActive, PLUGIN_MANIFEST_FILE } from '@boite/contracts';
 import type { PluginArtifact, PluginManifest, PluginPool, PluginPreview, PluginRejected, PluginSource, PluginState, RpcParams } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
@@ -756,7 +756,7 @@ export class PluginStore {
     try {
       const affected = this.core.journal.listThreads().filter((thread) => this.blocksAccount(thread.accountId));
       if (this.core.scheduler.activeAccountIds().some((accountId) => this.blocksAccount(accountId))) throw refused('Stop this provider\'s default-account turns before changing its saved login.');
-      if (affected.some((thread) => ['running', 'queued', 'waiting'].includes(thread.status))) throw refused('Stop this provider\'s default-account turns before changing its saved login.');
+      if (affected.some((thread) => threadActive(thread.status))) throw refused('Stop this provider\'s default-account turns before changing its saved login.');
       for (const thread of affected) this.core.threads.releaseAgent(thread.id);
       const args = params.action === 'add' ? POOL_COMMANDS.add(params.provider)
         : params.action === 'switch' ? POOL_COMMANDS.switch(params.provider, params.email!)

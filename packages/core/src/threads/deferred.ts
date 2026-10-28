@@ -113,7 +113,7 @@ export class DeferredInput {
     const held = this.deferredAnswers.get(threadId);
     const thread = this.core.journal.getThread(threadId);
     if (held === undefined || thread === null || thread.archived) return;
-    if (['queued', 'running', 'waiting'].includes(thread.status) || this.threads.runner.handles.has(threadId) || this.threads.runner.steering.has(threadId)) return;
+    if (this.threads.isBusy(threadId) || this.threads.runner.steering.has(threadId)) return;
     this.deferredAnswers.delete(threadId);
     try {
       this.threads.startTurn(threadId, held.join('\n\n'));
@@ -166,7 +166,7 @@ export class DeferredInput {
   wake(threadId: ThreadId, text: string): void {
     const thread = this.core.journal.getThread(threadId);
     if (thread === null || thread.archived) return;
-    if (['queued', 'running', 'waiting'].includes(thread.status) || this.threads.runner.handles.has(threadId)) {
+    if (this.threads.isBusy(threadId)) {
       // The turn that ended is still being saved: open this one right after it.
       this.pendingWakes.set(threadId, text);
       return;

@@ -1,3 +1,4 @@
+import { threadActive } from '@boite/contracts';
 import { createHash } from 'node:crypto';
 import {
   DEFAULT_WORKFLOW_LIMITS, WORKFLOW_LIMITS, checkPlan, checkSteps, conditionHolds, extractJson, itemLabel, renderTask,
@@ -32,7 +33,6 @@ const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(valu
 const ACTIVE_RUNS = 3;
 const LIST_LIMIT = 20;
 const SUMMARY_CHARS = 10000;
-const BUSY = ['queued', 'running', 'waiting'];
 const ended = (status: WorkflowStepStatus) => status === 'done' || status === 'failed' || status === 'skipped' || status === 'stopped';
 const broken = (status: WorkflowStepStatus) => status === 'failed' || status === 'stopped';
 const INTERRUPTED = 'Interrupted by a core restart';
@@ -343,7 +343,7 @@ export class Workflows {
       if (running >= run.limits.maxConcurrent) break;
       const localRunning = run.nodes.filter(n => !run!.plan.steps.find(s => s.id === n.id)!.compute).reduce((n, node) => n + node.instances.filter(i => i.status === 'running').length, 0);
       const localLimit = run.plan.limits?.maxConcurrent ?? DEFAULT_WORKFLOW_LIMITS.maxConcurrent;
-      const ready = (inst: WorkflowInstance) => inst.status === 'waiting' && (!inst.outputCorrection || !inst.threadId || !BUSY.includes(this.core.journal.getThread(inst.threadId)?.status ?? 'idle'));
+      const ready = (inst: WorkflowInstance) => inst.status === 'waiting' && (!inst.outputCorrection || !inst.threadId || !threadActive(this.core.journal.getThread(inst.threadId)?.status ?? 'idle'));
       const node = run.nodes.find(n => (localRunning < localLimit || run!.plan.steps.find(s => s.id === n.id)!.compute) && n.instances.some(ready));
       if (!node) break;
       this.launch(run, node, node.instances.find(ready)!, config);
@@ -670,7 +670,7 @@ export class Workflows {
       this.mutate(run.id, current => { current.delivered = true; });
       return;
     }
-    if (BUSY.includes(root.status)) { this.core.threads.cacheKeepalive.yieldTo(root.id); return; }
+    if (threadActive(root.status)) { this.core.threads.cacheKeepalive.yieldTo(root.id); return; }
     const display = `Workflow "${run.name}" ${run.status === 'done' ? 'finished' : 'failed'}`;
     try {
       this.handTo(root, this.summary(run), display);
@@ -689,7 +689,7 @@ export class Workflows {
   private noticeFailures(runId: string): void {
     const run = this.load(runId), failed = run ? unnoticed(run) : [];
     const root = run && failed.length > 0 ? this.core.journal.getThread(run.rootThreadId) : null;
-    if (!run || !root || root.archived || BUSY.includes(root.status)) return;
+    if (!run || !root || root.archived || threadActive(root.status)) return;
     const notice = failureNotice(run, failed);
     try {
       this.handTo(root, notice.prompt, notice.display);

@@ -1,7 +1,7 @@
 import { archiveState, archiveStateKey } from './merged-pr-archive-state.ts';
 import { assertIdleFamily } from './threads/completion.ts';
 import { repositoryOf, type MergedPrProof } from './pull-requests.ts';
-import { previewReferencesError, previewPrompt, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type ActivityTurn, type AgentProfile } from '@boite/contracts';
+import { previewReferencesError, previewPrompt, threadActive, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type ActivityTurn, type AgentProfile } from '@boite/contracts';
 import type {
   Account, AccountId, Attachment, ComposerChoice, PreviewReference,
   SentFrom,
@@ -20,7 +20,6 @@ import type {
   Thread,
   ThreadId,
   ThreadRewind,
-  ThreadStatus,
   ThreadSummary,
   Turn,
   TurnId,
@@ -28,7 +27,6 @@ import type {
 } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { notFound, refused } from './errors.ts';
-import type { AutonomousSource } from './agents/runtime.ts';
 import { newId } from './ids.ts';
 import { assertDriverRunnable, releaseThread } from './drivers/index.ts';
 import { AgentState } from './threads/agent-state.ts';
@@ -43,8 +41,9 @@ import { MOVE_NOTE_PREFIX, pendingMove, ThreadMove } from './threads/move.ts';
 import { ThreadSpawns } from './threads/spawn.ts';
 import { checkAttachmentArray, checkAttachments, checkTurnRequest, titleOf } from './threads/inputs.ts';
 import { RestartHandoff } from './threads/handoff.ts';
-import { SYSTEM_LABEL, nativeCommandPrompt, systemOperation } from './threads/operations.ts';
-import { saveThread, setThreadStatus, withLoad } from './threads/records.ts';
+import { SYSTEM_LABEL, autonomousSource, nativeCommandPrompt, systemOperation } from './threads/operations.ts';
+import { saveThread, withLoad } from './threads/records.ts';
+import { isBusy, markQueued } from './threads/lifecycle.ts';
 import { ThreadRecovery } from './threads/recovery.ts';
 import { LimitResumes } from './threads/limit-resume.ts';
 import { AutoContinues } from './threads/auto-continue.ts';
@@ -354,7 +353,7 @@ export class ThreadStore {
     }
     if (switched) {
       this.agentState.cancelBackground(thread.id);
-      if (!['queued', 'running', 'waiting'].includes(thread.status)) {
+      if (!threadActive(thread.status)) {
         this.releaseAgent(thread.id);
         this.agentState.noteBackground(thread.id, []);
       }
@@ -473,7 +472,7 @@ export class ThreadStore {
       if (this.core.journal.getThread(threadId)?.archived !== true) return;
       const idle = family.filter((id) => {
         const member = this.core.journal.getThread(id);
-        return member !== null && !['queued', 'running', 'waiting'].includes(member.status);
+        return member !== null && !threadActive(member.status);
       });
       await Promise.all(idle.map(id => this.core.procs.stopAndWait(id)));
     } catch (error) {
@@ -612,7 +611,7 @@ export class ThreadStore {
     if (accepted) return accepted;
     this.checkSelection(thread, expectedSelectionVersion);
     if (thread.archived) throw refused('cannot start a turn on an archived thread', { threadId });
-    if (['queued', 'running', 'waiting'].includes(thread.status) || this.runner.handles.has(threadId)) {
+    if (this.isBusy(threadId)) {
       const data: TurnInFlightData = { threadId, reason: 'turn-in-flight', thread: this.withLoad(thread) };
       throw refused('this thread already has an in-flight turn', data);
     }
@@ -722,7 +721,7 @@ export class ThreadStore {
         this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
         // A status that stays queued tells nobody: the row still loses its pending move note.
         if (moved && this.core.journal.getThread(threadId)?.status === 'queued') this.core.bus.emit('thread.updated', this.withLoad(this.require(threadId)));
-        this.setStatus(threadId, 'queued');
+        markQueued(this.core, threadId);
         return { reservation, dismissal, admitted };
       })();
       // Nothing in memory consumes the wake or resumes the agent until the prompt exists on disk.
@@ -741,6 +740,11 @@ export class ThreadStore {
     this.cacheKeepalive.cancel(threadId);
     this.core.scheduler.enqueue(turn, thread.accountId);
     return turn;
+  }
+
+  /** True while a turn of the thread is under way (`threads/lifecycle.ts`). */
+  isBusy(threadId: ThreadId): boolean {
+    return isBusy(this.core, threadId);
   }
 
   /**
@@ -871,30 +875,11 @@ export class ThreadStore {
 
   // -- internals ------------------------------------------------------------
 
-  private setStatus(threadId: ThreadId, status: ThreadStatus): void {
-    setThreadStatus(this.core, threadId, status);
-  }
-
   private save(thread: ThreadSummary, eventType: string): ThreadSummary {
     return saveThread(this.core, thread, eventType);
   }
 
   private withLoad(thread: ThreadSummary): ThreadSummary {
     return withLoad(this.core, thread);
-  }
-}
-
-/**
- * Where a turn comes from when the core starts it by itself, or null for the
- * user's message, a routine or an event (`AgentRuntime.attempt` admitted it,
- * or it is the owner's Run now), a compaction, a cache ping, and a restart
- * continuing a turn that was running (`threads/handoff.ts`).
- */
-function autonomousSource(operation: NonNullable<Turn['execution']>['operation'] | undefined, activity: ActivityTurn | undefined, requestId: string | undefined): AutonomousSource | null {
-  switch (operation) {
-    case undefined: return activity ? 'goal' : null;
-    case 'background': case 'coordination': case 'delegation': case 'pull-request': return operation;
-    case 'resume': return requestId?.startsWith('restart_') ? null : 'resume';
-    default: return null;
   }
 }

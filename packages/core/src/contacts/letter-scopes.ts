@@ -1,4 +1,5 @@
 /** External correspondence retains its execution authority with the history that consumed it. */
+import { threadActive } from '@boite/contracts';
 import {realpathSync} from 'node:fs';
 import type {AgentLetter} from '@boite/contracts';
 import type {Core} from '../core.ts';
@@ -56,14 +57,14 @@ export function protectLetters(core: Core, threadId: string, letters: AgentLette
   if (!core.sharedAccess.execution.support(protocol, thread.providerId, thread.permissionMode).supported || protocol === 'echo' && thread.permissionMode !== 'default') throw refused('shared file policy: contact letter execution requires a protected provider route');
   const captured = core.sharedAccess.bound(threadId);
   const associations = captured ? [captured, ...(captured.additional ?? [])].map(b => b.job.sharedProjectId) : [];
-  if (protocol !== 'echo' && ['queued', 'running', 'waiting'].includes(thread.status)
+  if (protocol !== 'echo' && threadActive(thread.status)
     && external.some(l => !l.sharedProjectId || !associations.includes(l.sharedProjectId))) {
     throw refused('shared file policy: new contact authority waits until the native turn is idle');
   }
   if (protocol !== 'echo' && !captured) {
     // An ordinary running session has unrestricted tools. Hold the letter until
     // that turn ends; it must never be steered into the old process.
-    if (['queued', 'running', 'waiting'].includes(thread.status)) throw refused('shared file policy: contact letter waits for protected native preparation after the local turn');
+    if (threadActive(thread.status)) throw refused('shared file policy: contact letter waits for protected native preparation after the local turn');
     core.threads.releaseAgent(threadId);
   }
   const scope = storedScope(core, threadId) ?? {bindings: [], legacy: false, peers: []};

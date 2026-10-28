@@ -1,3 +1,4 @@
+import { threadActive } from '@boite/contracts';
 import type { ActivityTurn, AgentTask, Attachment, ComposerChoice, GoalReview, MessagePart, RpcParams, ThreadActivity, ThreadSummary, Turn } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
@@ -341,7 +342,7 @@ export class ActivityStore {
     const thread = this.core.journal.getThread(threadId);
     const state = this.states.get(threadId);
     if (!thread || !state || thread.archived) return;
-    if (['running', 'queued', 'waiting'].includes(thread.status)) return;
+    if (threadActive(thread.status)) return;
     const kind = state.loop?.status === 'active' && (state.loop.nextRunAt ?? 0) <= Date.now() ? 'loop' : state.goal?.status === 'active' ? 'goal' : null;
     if (!kind) {
       if (state.loop?.status === 'active') this.schedule(threadId, Math.max(0, (state.loop.nextRunAt ?? Date.now()) - Date.now()));

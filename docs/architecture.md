@@ -315,6 +315,10 @@ held with its original turn, input receipt and execution selection. Desktop and
 phone offer Resume and Discard through `turns.recover`; neither creates a second
 input. Work that may already have reached a provider is never replayed by this
 recovery path. Explicit restart handoff keeps its own authorization rules.
+A turn the restart closes as failed leaves its thread `error`, the status a live
+failure leaves: `threads/lifecycle.ts` is the only writer of a thread's status,
+and `finishTurn` in `threads/turn-settlement.ts` closes every turn, settled,
+never started, crashed or handed over.
 Server-owned composer queues may resume never-started turns admitted by their
 durable delivery ledger. A native submission whose acceptance is uncertain
 stays held for review; it is never submitted again automatically.
