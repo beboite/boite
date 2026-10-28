@@ -7,7 +7,7 @@ import { FakeClient } from '../lib/fake-client';
 import { RpcFailure } from '../lib/client';
 import { defaultPrefs, PREFS_STORAGE_KEY, STASH_STORAGE_KEY } from '../lib/prefs';
 import { store } from '../lib/store.svelte';
-import { repliesOf, TYPING_PAUSE_MS } from '../lib/question-reply.svelte';
+import { repliesOf, sendAnswer, TYPING_PAUSE_MS } from '../lib/question-reply.svelte';
 import { closeTour } from '../lib/onboarding.svelte';
 import { freshWork, work, WORK_STORAGE_KEY } from '../lib/work-prefs.svelte';
 
@@ -1030,6 +1030,11 @@ function chips(): HTMLElement[] {
   return Array.from(document.querySelectorAll<HTMLElement>('[data-testid=composer-attachment]'));
 }
 
+/** Every file shows as a tile at once; true once none is still being read. */
+function loaded(): boolean {
+  return document.querySelector('[data-testid=composer-attachment][data-loading]') === null;
+}
+
 test('a pasted image becomes a chip, comes off again, and rides the prompt', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
@@ -1037,7 +1042,7 @@ test('a pasted image becomes a chip, comes off again, and rides the prompt', asy
   await waitFor(() => document.querySelector('[data-testid=composer-attach]') !== null);
 
   paste(pngFile());
-  await waitFor(() => chips().length === 1);
+  await waitFor(() => chips().length === 1 && loaded());
   expect(chips()[0]?.getAttribute('title')).toBe('[Image 1] · pixel.png');
   // No decoder here to make a thumbnail: the tile draws the picture by URL, never a data: string.
   const tile = query<HTMLImageElement>('[data-testid=composer-attachment] img').getAttribute('src');
@@ -1256,6 +1261,29 @@ test('a question asked while the user types takes the emptied composer only afte
   expect(query('[data-testid=composer-reply]').dataset.question).toBe(asked.id);
 });
 
+test('a question card\'s own submit never answers with a file still being read', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await send('check this [ask]');
+  await waitFor(() => document.querySelector('[data-testid=composer-reply]') !== null);
+  const asked = store.pendingQuestions.find((question) => question.threadId === 't-trace')!;
+  await type('here are the notes');
+  let release!: () => void;
+  const read = FileReader.prototype.readAsDataURL;
+  vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (this: FileReader, blob: Blob) { release = () => read.call(this, blob); });
+  paste(new File(['notes'], 'notes.txt', { type: 'text/plain' }));
+  await waitFor(() => chips().length === 1 && !loaded());
+  const call = vi.spyOn(store.client!, 'call');
+  // The card's submit (`sendAnswer`) does not go through the box's Send, which waits.
+  expect(await sendAnswer(store, asked)).toBe(false);
+  expect(call.mock.calls.some(([method]) => method === 'questions.answer')).toBe(false);
+  expect(store.error).toBe('A file is still loading. Answer once it is ready.');
+  release();
+  await waitFor(() => loaded());
+  expect(await sendAnswer(store, asked)).toBe(true);
+  const answered = call.mock.calls.find(([method]) => method === 'questions.answer')![1] as { attachments?: { data: string }[] };
+  expect(answered.attachments?.map(file => file.data)).toEqual([btoa('notes')]);
+});
+
 test('a question card does not take a sent message being edited as its answer', async ({ app: _app }) => {
   await store.open('t-trace');
   await send('check this [ask]');
@@ -1284,7 +1312,7 @@ test('the composer buttons keep the focus where it was, and a removed chip opens
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
   paste(pngFile());
-  await waitFor(() => chips().length === 1);
+  await waitFor(() => chips().length === 1 && loaded());
   const pressed = (selector: string) => {
     const event = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
     query(selector).dispatchEvent(event);
@@ -1349,7 +1377,7 @@ test('image references follow the caret, mixed attachments and removal without l
   store.addPreviewReference('t-trace', previewReference);
   await waitFor(() => input().value.endsWith('@Save'));
   paste(pngFile('second.png'));
-  await waitFor(() => input().value.endsWith('[Image 2] '));
+  await waitFor(() => input().value.endsWith('[Image 2] ') && loaded());
   const references = () => Array.from(document.querySelectorAll<HTMLElement>('[data-testid=composer-image-reference]'));
   expect(references().map(item => item.textContent)).toEqual(['[Image 1]', '[Image 2]']);
   references()[1]!.dispatchEvent(new Event('pointerenter'));
@@ -1381,7 +1409,7 @@ test('deleting one character of an image reference removes the reference and its
   paste(pngFile('first.png'));
   await waitFor(() => input().value === 'A [Image 1] ');
   paste(pngFile('second.png'));
-  await waitFor(() => input().value === 'A [Image 1] [Image 2] ');
+  await waitFor(() => input().value === 'A [Image 1] [Image 2] ' && loaded());
   // Backspace with the caret right after the first reference's bracket.
   input().setSelectionRange(11, 11);
   input().dispatchEvent(new Event('beforeinput', { bubbles: true }));
@@ -1394,7 +1422,7 @@ test('deleting one character of an image reference removes the reference and its
   expect(chips()[0]!.getAttribute('title')).toBe('[Image 1] · second.png');
 });
 
-test('sending waits for a file read so the attachment cannot land in the next prompt', async ({ app: _app }) => {
+test('Send pressed during a file read goes once the file is ready, unless the user types on', async ({ app: _app }) => {
   await store.open('t-trace');
   await type('Read these notes');
   const original = FileReader.prototype.readAsDataURL;
@@ -1403,16 +1431,66 @@ test('sending waits for a file read so the attachment cannot land in the next pr
     release = () => original.call(this, blob);
   });
   paste(new File(['notes'], 'notes.txt', { type: 'text/plain' }));
-  await waitFor(() => query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+  // The tile is there before a byte is read, and the box still takes keys.
+  await waitFor(() => chips().length === 1);
+  expect(loaded()).toBe(false);
   const before = store.openThread!.messages.length;
+  const send = () => query<HTMLButtonElement>('[data-testid=composer-send]');
   press('Enter');
+  await waitFor(() => send().dataset.waiting === 'true');
+  // Typing on means the prompt is not finished: the waiting send is dropped.
+  await type('Read these notes, all of them');
+  await waitFor(() => send().dataset.waiting === undefined);
+  press('Enter');
+  await waitFor(() => send().dataset.waiting === 'true');
   expect(store.openThread!.messages.length).toBe(before);
   release();
-  await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
-  press('Enter');
   await waitFor(() => store.openThread!.messages.length > before && !store.busy);
   const sent = store.openThread!.messages.filter(m => m.role === 'user').at(-1)!;
+  expect(sent.parts.some(part => part.type === 'text' && part.text === 'Read these notes, all of them')).toBe(true);
   expect(sent.parts).toContainEqual({ type: 'file', mimeType: 'text/plain', name: 'notes.txt', data: btoa('notes') });
+  expect(input().value).toBe('');
+});
+
+test('a send waiting on a file never sends a box a sync swapped in, even with the same words', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await type('Mine, with notes');
+  vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(() => {});
+  paste(new File(['notes'], 'notes.txt', { type: 'text/plain' }));
+  await waitFor(() => chips().length === 1);
+  const before = store.openThread!.messages.length;
+  press('Enter');
+  await waitFor(() => query<HTMLButtonElement>('[data-testid=composer-send]').dataset.waiting === 'true');
+  // A conflict sets this box aside and writes the other side's in its place, as `#write` does: same words, another file.
+  const state = Object.values(store.composerStates).find(one => one.text === 'Mine, with notes')!;
+  state.attachments = [{ kind: 'file', mimeType: 'text/plain', name: 'theirs.txt', data: btoa('theirs') }];
+  await waitFor(() => query<HTMLButtonElement>('[data-testid=composer-send]').dataset.waiting === undefined);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect(store.openThread!.messages.length).toBe(before);
+  expect(chips().map(chip => chip.getAttribute('title'))).toEqual(['theirs.txt']);
+});
+
+test('a send waiting on a draft\'s file never sends another draft opened in the same box', async ({ app: _app }) => {
+
+  await openDraft();
+  await type('Second draft words');
+  const parked = store.draft!.id!;
+  store.startDraft(undefined, { fresh: true });
+  await waitFor(() => store.draft?.id !== parked && input().value === '');
+  await type('First words');
+  vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(() => {});
+  paste(new File(['notes'], 'notes.txt', { type: 'text/plain' }));
+  await waitFor(() => chips().length === 1);
+  const send = () => query<HTMLButtonElement>('[data-testid=composer-send]');
+  press('Enter');
+  await waitFor(() => send().dataset.waiting === 'true');
+  // Same store, same 'draft' key, another box: what waited stays with the box it was pressed in.
+  store.startDraft(undefined, { draftId: parked });
+  await waitFor(() => input().value === 'Second draft words');
+  await new Promise(resolve => setTimeout(resolve, 300));
+  expect(store.draft?.id).toBe(parked);
+  expect(input().value).toBe('Second draft words');
+  expect(send().dataset.waiting).toBeUndefined();
 });
 
 test.for([true, false])('an image pasted during a pending send preserves only unsent content when accepted=%s', async (accepted, { app: _app }) => {
@@ -2049,7 +2127,7 @@ test('Ctrl+Z after deleting everything and a stray key brings back the text and 
   paste(pngFile('first.png'));
   await waitFor(() => input().value === 'Look at [Image 1] ');
   paste(pngFile('second.png'));
-  await waitFor(() => input().value === 'Look at [Image 1] [Image 2] ');
+  await waitFor(() => input().value === 'Look at [Image 1] [Image 2] ' && loaded());
   const full = input().value;
   input().focus();
   // Ctrl+A, Backspace: every reference goes, and every picture with it.
@@ -2089,6 +2167,58 @@ test('Ctrl+Z after deleting everything and a stray key brings back the text and 
   expect(chips()).toEqual([]);
 });
 
+test('a picture refused while it loads leaves no undo step naming it, and keeps the typing done meanwhile', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  await type('Look at ');
+  let fail: (() => void) | undefined;
+  vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (this: FileReader) {
+    fail = () => this.onerror?.(new ProgressEvent('error') as ProgressEvent<FileReader>);
+  });
+  paste(pngFile('broken.png'));
+  await waitFor(() => input().value === 'Look at [Image 1] ' && fail !== undefined);
+  input().focus();
+  // Typing while it loads records steps that hold its placeholder.
+  edit('insertText', 'Look at [Image 1] a', 19, 'a');
+  fail!();
+  await waitFor(() => chips().length === 0);
+  expect(store.error).toContain('broken.png');
+  expect(input().value).toBe('Look at  a');
+  const seen: string[] = [];
+  for (let step = 0; step < 4; step++) {
+    press('z', { ctrlKey: true });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    seen.push(input().value);
+  }
+  expect(seen.filter(value => value.includes('[Image'))).toEqual([]);
+  // The letter typed during the read is its own step, then the box before the paste.
+  expect(seen.slice(0, 2)).toEqual(['Look at  ', 'Look at ']);
+});
+
+test('a loading tile removed before its read ends stays gone once the read lands', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  await type('Look at ');
+  const original = FileReader.prototype.readAsDataURL;
+  let release: (() => void) | undefined;
+  vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (this: FileReader, blob: Blob) {
+    release = () => original.call(this, blob);
+  });
+  paste(pngFile('gone.png'));
+  await waitFor(() => input().value === 'Look at [Image 1] ' && release !== undefined);
+  query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').click();
+  await waitFor(() => chips().length === 0);
+  release!();
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(chips()).toEqual([]);
+  expect(input().value).toBe('Look at  ');
+  // Undo back past the removal brings the tile back as the read left it: loaded, its reference beside it.
+  press('z', { ctrlKey: true });
+  await waitFor(() => chips().length === 1);
+  expect(input().value).toBe('Look at [Image 1] ');
+  expect(loaded()).toBe(true);
+});
+
 test('copying an image reference carries its picture to another composer, and stays text in its own', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => !store.busy);
@@ -2096,7 +2226,7 @@ test('copying an image reference carries its picture to another composer, and st
   paste(pngFile('first.png'));
   await waitFor(() => input().value === 'A [Image 1] ');
   paste(pngFile('second.png'));
-  await waitFor(() => input().value === 'A [Image 1] [Image 2] ');
+  await waitFor(() => input().value === 'A [Image 1] [Image 2] ' && loaded());
   input().focus();
   input().setSelectionRange(12, 21);
   const copied = clipboard();

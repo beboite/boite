@@ -8,6 +8,10 @@ import { BROWSER_HEADERS } from './browser/network.ts';
 export const BROWSER_HELP = `boite browser <command> [args] [--tab <id>] [--json]
 The conversation's browser, with agent-browser's commands.
 Targets: @e3 (a ref from the last snapshot), a CSS selector matching one element, or text=Sign in.
+Text is the command's: after the target of fill, type and select, the answer of dialog, the
+script of run and anywhere in eval, every word is passed on as typed. Put --json before it.
+The tab is not text: --tab <id>, or without it a last word browser:<id>, names the tab
+(run reads --tab only before its script or right after it).
 
   open <url> [--profile <name>]   go to url in the current tab, or open one (--profile: a new tab
                                   in that profile; default, private or a name from profiles)

@@ -11,10 +11,13 @@
  *   this job builds when that run is missing). A measure growing more than 0.1 % needs a `## Bundle size`
  *   section in the pull request body;
  * - the ceiling is the last published build (a nightly or a release) plus 2 %,
- *   so only publishing raises it.
+ *   so only publishing raises it. A pull request fails it only for growth it
+ *   adds: when main already sits above it, the debt is reported and main's own
+ *   run (`ceiling`, bundle-size.yml) fails on it.
  *
  * Run: bun scripts/ci/budgets.ts measure <out.json> (after build:ui and build:core)
  *      bun scripts/ci/budgets.ts check <head.json> (in a pull request's CI)
+ *      bun scripts/ci/budgets.ts ceiling <main.json> (on a push to main)
  */
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -124,16 +127,26 @@ export interface Verdict {
 const bytes = (value: number) => value.toLocaleString('en-US');
 const signed = (value: number) => `${value > 0 ? '+' : ''}${bytes(value)}`;
 
+/**
+ * The verdict on `head`. With a base, the ceiling fails only growth past
+ * `max(base, ceiling)`: what main already carries above it is debt, reported
+ * here and failed by main's own check, which passes no base.
+ */
 export function judge(head: Sizes, base: Reference | undefined, limit: Reference | undefined, reason: string | undefined): Verdict {
-  const rows = ['| Measure | This PR | Base | Growth | Ceiling |', '| --- | ---: | ---: | ---: | ---: |'];
+  const rows = ['| Measure | Measured | Base | Growth | Ceiling |', '| --- | ---: | ---: | ---: | ---: |'];
   const errors: string[] = [];
+  const debts: string[] = [];
   const unexplained: string[] = [];
+  const shrink = 'Shrink the change; the ceiling rises only when a nightly or a release is published.';
   for (const key of MEASURES) {
     const growth = base ? head[key] - base.sizes[key] : undefined;
     const ratio = base && growth !== undefined ? growth / base.sizes[key] : undefined;
     rows.push(`| ${key} | ${bytes(head[key])} | ${base ? bytes(base.sizes[key]) : 'n/a'} | ${growth === undefined ? 'n/a' : `${signed(growth)} (${(ratio! * 100).toFixed(2)} %)`} | ${limit ? bytes(limit.sizes[key]) : 'n/a'} |`);
     if (limit && head[key] > limit.sizes[key]) {
-      errors.push(`${key}: ${bytes(head[key])} bytes, above its ${bytes(limit.sizes[key])}-byte ceiling (${limit.source} plus ${HEADROOM * 100} %). Shrink the change; the ceiling rises only when a nightly or a release is published.`);
+      const ceilingOf = `${bytes(limit.sizes[key])}-byte ceiling (${limit.source} plus ${HEADROOM * 100} %)`;
+      if (!base || base.sizes[key] <= limit.sizes[key]) errors.push(`${key}: ${bytes(head[key])} bytes, above its ${ceilingOf}. ${shrink}`);
+      else if (growth! > 0) errors.push(`${key}: ${bytes(head[key])} bytes, ${bytes(growth!)} more than ${base.source}, which is already above its ${ceilingOf}. ${shrink}`);
+      else debts.push(`${key}: ${bytes(head[key])} bytes, ${bytes(head[key] - limit.sizes[key])} above the ${bytes(limit.sizes[key])}-byte ceiling, carried from ${base.source}; main's own bundle size run fails on it.`);
     }
     if (ratio !== undefined && ratio > EXPLAIN_ABOVE) unexplained.push(`${key} ${signed(growth!)} bytes (${(ratio * 100).toFixed(2)} %)`);
   }
@@ -143,6 +156,7 @@ export function judge(head: Sizes, base: Reference | undefined, limit: Reference
   const notes = [
     base ? `Base: ${base.source}.` : 'Base: no measurement, growth not checked.',
     limit ? `Ceiling: ${limit.source} plus ${HEADROOM * 100} %.` : 'Ceiling: no published measurement, not checked.',
+    ...(debts.length ? ['', 'Above the ceiling before this pull request:', ...debts.map((debt) => `- ${debt}`)] : []),
     // Shown in the job summary, which renders HTML: the body's text stays text.
     ...(reason ? ['', `Reason given in the body: ${reason.split('\n')[0]!.replace(/[<>&]/g, (c) => `&#${c.charCodeAt(0)};`)}`] : []),
   ];
@@ -230,19 +244,22 @@ async function check(headFile: string) {
     ? { sizes: fromMain, source: `\`${short(baseSha)}\` (main bundle-sizes artifact)` }
     : { sizes: buildBase(baseSha), source: `\`${short(baseSha)}\` (built here: main kept no measurement)` };
 
-  let limit: Reference | undefined;
+  const number = process.env.PR_NUMBER;
+  const pull = number ? await api<{ body: string | null }>(`pulls/${number}`) : undefined;
+  publish(judge(head, base, await publishedLimit(), bodyReason(pull?.body)));
+}
+
+/** The ceiling: the newest of the last ten published builds main measured, plus the headroom. */
+async function publishedLimit(): Promise<Reference | undefined> {
   const releases = publishedCommits(await api<Parameters<typeof publishedCommits>[0]>('releases?per_page=20'));
   for (const release of releases.slice(0, 10)) {
     const sizes = await mainMeasurement(release.sha);
-    if (sizes) {
-      limit = { sizes: ceiling(sizes), source: `${release.tag} at \`${short(release.sha)}\`` };
-      break;
-    }
+    if (sizes) return { sizes: ceiling(sizes), source: `${release.tag} at \`${release.sha.slice(0, 8)}\`` };
   }
+  return undefined;
+}
 
-  const number = process.env.PR_NUMBER;
-  const pull = number ? await api<{ body: string | null }>(`pulls/${number}`) : undefined;
-  const verdict = judge(head, base, limit, bodyReason(pull?.body));
+function publish(verdict: Verdict): void {
   console.log(verdict.report);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Bundle size\n\n${verdict.report}\n`);
   if (verdict.errors.length) throw new Error(`Bundle size:\n${verdict.errors.join('\n')}`);
@@ -257,7 +274,10 @@ if (import.meta.main) {
     writeFileSync(path, `${JSON.stringify({ commit: process.env.GITHUB_SHA ?? '', sizes } satisfies Measurement, null, 2)}\n`);
   } else if (command === 'check' && path) {
     await check(path);
+  } else if (command === 'ceiling' && path) {
+    // Main against the published ceiling alone: the debt pull requests are not charged for.
+    publish(judge((JSON.parse(readFileSync(path, 'utf8')) as Measurement).sizes, undefined, await publishedLimit(), undefined));
   } else {
-    throw new Error('usage: bun scripts/ci/budgets.ts measure <out.json> | check <head.json>');
+    throw new Error('usage: bun scripts/ci/budgets.ts measure <out.json> | check <head.json> | ceiling <main.json>');
   }
 }

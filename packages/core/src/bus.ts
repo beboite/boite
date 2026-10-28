@@ -3,6 +3,8 @@ import type { RpcEventName, RpcEvents } from '@boite/contracts';
 export type EventPayload = RpcEvents[RpcEventName];
 export type BusListener = (name: RpcEventName, payload: EventPayload) => void;
 interface Notification { name: RpcEventName; payload: EventPayload }
+/** A staged event, or an effect `whenCommitted` holds until the outermost commit. */
+type Staged = Notification | { effect: () => void };
 
 const DELTA_WINDOW_MS = 16;
 
@@ -21,7 +23,7 @@ interface PendingDelta {
 export class Bus {
   private readonly listeners = new Set<BusListener>();
   private readonly committedListeners = new Set<BusListener>();
-  private staged: Notification[] | null = null;
+  private staged: Staged[] | null = null;
   private readonly pending = new Map<string, PendingDelta>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private reporting = false;
@@ -34,6 +36,11 @@ export class Bus {
   /** Core diagnostics are normalized before either internal or committed observers see them. */
   normalizeLog?: (payload: RpcEvents['core.log']) => RpcEvents['core.log'];
 
+  /**
+   * Every event as it is emitted, possibly inside a transaction that can still
+   * roll back. Only state that rolls back with it belongs here: an effect on a
+   * process, the network or memory subscribes with `onCommitted`.
+   */
   onAny(listener: BusListener): () => void {
     this.listeners.add(listener);
     return () => {
@@ -41,7 +48,7 @@ export class Bus {
     };
   }
 
-  /** External observers see a write only after its synchronous transaction commits. */
+  /** Observers with effects see a write only after its synchronous transaction commits. */
   onCommitted(listener: BusListener): () => void {
     this.committedListeners.add(listener);
     return () => { this.committedListeners.delete(listener); };
@@ -51,7 +58,7 @@ export class Bus {
   afterCommit<T>(write: () => T): T {
     this.flush();
     const parent = this.staged;
-    const notifications: Notification[] = [];
+    const notifications: Staged[] = [];
     this.staged = notifications;
     let result: T;
     try {
@@ -66,8 +73,25 @@ export class Bus {
       this.staged = parent;
     }
     if (parent !== null) parent.push(...notifications);
-    else for (const { name, payload } of notifications) this.notify(this.committedListeners, name, payload);
+    else for (const staged of notifications) this.release(staged);
     return result;
+  }
+
+  /**
+   * Runs `effect` once the write around it commits, in order with the events
+   * it emitted, or now outside any `afterCommit`. A rollback drops it: what
+   * the write would have stopped, closed or forgotten keeps running.
+   */
+  whenCommitted(effect: () => void): void {
+    this.flush();
+    if (this.staged !== null) this.staged.push({ effect });
+    else this.release({ effect });
+  }
+
+  private release(staged: Staged): void {
+    if (!('effect' in staged)) { this.notify(this.committedListeners, staged.name, staged.payload); return; }
+    try { staged.effect(); }
+    catch (error) { this.onError(`committed effect failed: ${error instanceof Error ? error.message : String(error)}`); }
   }
 
   emit<E extends RpcEventName>(name: E, payload: RpcEvents[E]): void {
@@ -143,8 +167,4 @@ export class Bus {
   }
 }
 
-export function eventThreadId(payload: EventPayload): string | null {
-  if (typeof payload !== 'object' || payload === null) return null;
-  const value = (payload as { threadId?: unknown }).threadId;
-  return typeof value === 'string' ? value : null;
-}
+export { eventThreadId } from '@boite/contracts';

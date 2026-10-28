@@ -6,6 +6,18 @@ RPC result for scripts. The command loads on demand and works with every driver,
 including providers without an MCP client. The CLI also exposes a bounded set of thread-scoped tools through
 `boite mcp` for providers with an MCP client.
 
+The global flags (`--json`, `--thread`, `--data-dir`, `--core`, `--channel`)
+are read anywhere until a command's own text begins. The table `OWNED` in
+`packages/core/src/cli-args.ts` names the commands that parse their own flags
+and where their text starts: after `boite browser fill <target>`,
+`browser run <script>` (`-` for stdin), `browser recipe run <name>`,
+`browser recipe save <name> <file|->`, `browser eval` or `secret ... --`,
+every word is the command's, so `boite browser fill '#q' --json` types
+`--json`. Before that text, `--` ends Boite's flags and hands every later word
+to the command: `boite task add -- --json` adds the task `--json`, and
+`boite browser run -- batch.js --core x` passes `--core x` to the script.
+`secret run|pipe` reads its own `--`, before the child command.
+
 Every new native agent session receives a compact CLI guide before its first
 request, even without a connected brain. Enabled coordination and delegation
 add their commands and current limits; workflow syntax is loaded on demand
@@ -341,7 +353,7 @@ three variables and one PATH entry, put there by
 | `PATH`             | the directory holding `boite` and `boite.cmd` (and `boite.exe` in an installed Windows app), first |
 
 The CLI says hello with that token and becomes the `agent` principal of that
-one thread. `AGENT_METHODS` in `packages/core/src/access.ts` lists its allowed
+one thread. `AGENT_METHODS` in `packages/contracts/src/access.ts` lists its allowed
 calls and reasons. Each call is bound to that authenticated thread; delegation
 and coordination additionally check relationships and authorized contacts.
 An owner-only method such as `files.write`, `trace.get` or `core.logs` is refused;

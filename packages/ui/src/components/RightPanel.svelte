@@ -483,7 +483,8 @@
     {:else if active?.kind === 'files'}
       <FilesSurface {store} surface={active} {panel} />
     {:else if active?.kind === 'file'}
-      {#key active.id}
+      <!-- One editor per document: the same path open in another thread is another file's tab. -->
+      {#key `${panel.threadId}\n${active.id}`}
         <FileSurface {store} surface={active} {panel} />
       {/key}
     {:else if active?.kind === 'device'}

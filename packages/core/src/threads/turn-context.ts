@@ -33,6 +33,7 @@ import type { ThreadStore } from '../threads.ts';
 import { compactionTail } from './background-compact.ts';
 import { nativeCommandPrompt, systemOperation } from './operations.ts';
 import { stoppedInput } from './stopped-input.ts';
+import { sessionUsage } from '../usage.ts';
 
 /**
  * The parts of a turn's prompt that building it consumes: the async answers
@@ -524,10 +525,10 @@ export class TurnContexts {
     };
   }
 
-  /** What the agent session this turn resumes already used (`Journal.sessionUsage`). */
+  /** What the agent session this turn resumes already used (`usage.ts` `sessionUsage`). */
   private sessionBefore(thread: ThreadSummary, turnId: TurnId): { costUsd: number; tokens: number } {
     if (thread.sessionId === null) return { costUsd: 0, tokens: 0 };
-    return this.core.journal.sessionUsage(thread.id, thread.sessionGeneration ?? 0, turnId);
+    return sessionUsage(this.core, thread.id, thread.sessionGeneration ?? 0, turnId);
   }
 
   /**

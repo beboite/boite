@@ -26,13 +26,6 @@ export function prefetchParts(): void {
   for (const part of Object.values(parts)) void part.load().catch(() => undefined);
 }
 
-/**
- * The phone's navigation, drawn only outside the shell, which never parses it:
- * App fetches it with the app there and the boot screen waits for it, so the
- * first frame has it. Not in `parts`: the idle prefetch has no use for it.
- */
-export const mobileNavigation = new LazyComponent(() => import('../components/MobileNavigation.svelte'));
-
 /** Shared rows load only for an expanded project with Contacts enabled. */
 export const sharedProjectThreads = new LazyComponent(() => import('../components/shared/SharedProjectThreads.svelte'));
 

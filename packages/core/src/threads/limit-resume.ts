@@ -25,7 +25,8 @@ const SAME_WINDOW_MS = 120_000;
  */
 export class LimitResumes {
   constructor(private readonly core: Core, private readonly resumes: ResumePlanner) {
-    core.bus.onAny((name, payload) => {
+    // A setting that rolls back keeps the plans.
+    core.bus.onCommitted((name, payload) => {
       if (name === 'settings.updated' && (payload as Settings).autoResumeLimitedThreads !== true) {
         resumes.cancelAll('automatic resume was turned off', plan => plan.reason === 'limit');
       }

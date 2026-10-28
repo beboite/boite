@@ -65,7 +65,8 @@ async function attach(page: BrowserPage): Promise<void> {
       } else document.querySelector('[data-testid=composer-input]').dispatchEvent(new ClipboardEvent('paste', {bubbles:true,cancelable:true,clipboardData:transfer}));
     })()`);
   }
-  await page.waitFor('document.querySelectorAll("[data-testid=composer-attachment]").length === 2');
+  // A tile shows before its file is read: the uploads start once both are ready.
+  await page.waitFor('document.querySelectorAll("[data-testid=composer-attachment]:not([data-loading])").length === 2');
   await page.waitFor(`(() => { const w = globalThis.__startupWire; return w.requests.filter(f => f.method === 'attachments.upload').slice(-2).filter(r => w.responses.some(f => f.id === r.id && f.result?.id)).length === 2; })()`);
 }
 

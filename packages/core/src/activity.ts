@@ -85,6 +85,10 @@ export class ActivityStore {
         const event = payload as { threadId: string; part: MessagePart };
         this.observeTool(event.threadId, event.part);
       }
+    });
+    // An archive or removal that rolls back pauses, stops and forgets nothing.
+    core.bus.onCommitted((name, payload) => {
+      if (this.closed) return;
       if (name === 'thread.updated') {
         const thread = payload as { id: string; archived: boolean };
         if (thread.archived) this.pauseAll(thread.id);

@@ -183,6 +183,59 @@ test('a computer types, pastes and scrolls on the device screen, with no text fi
   } finally { vi.unstubAllGlobals(); }
 });
 
+test('input still queued for one device never reaches the device a tab change shows next', async () => {
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.startsWith('not all'), addEventListener() {}, removeEventListener() {} }));
+  try {
+    const real = client.call.bind(client);
+    let release!: () => void;
+    const first = new Promise<void>(resolve => { release = resolve; });
+    const inputs: { deviceId: string; input: unknown }[] = [];
+    const sessions = ['device-a', 'device-b'].map(deviceId => ({ threadId: thread, deviceId, name: deviceId, platform: 'android' as const, state: 'ready' as const, input: true, openedAt: 1 }));
+    vi.spyOn(client, 'call').mockImplementation((async (method: string, params: { deviceId: string; input: unknown }) => {
+      if (method === 'devices.sessions') return { sessions };
+      if (method === 'devices.frame') return { id: `frame-${params.deviceId}`, deviceId: params.deviceId, width: 100, height: 200, base64: 'AA==', capturedAt: Date.now() };
+      if (method === 'devices.input') { inputs.push({ deviceId: params.deviceId, input: params.input }); if (inputs.length === 1) await first; return {}; }
+      return real(method as never, params as never);
+    }) as never);
+    app = mount(DeviceSurface, { target: document.body, props: { store, threadId: thread } }); await settle();
+    document.querySelector<HTMLButtonElement>('[data-testid=device-show]')!.click(); await settle();
+    await vi.waitFor(() => expect(document.querySelector('[data-testid=device-frame]')).not.toBeNull());
+    const screen = document.querySelector<HTMLImageElement>('[data-testid=device-frame]')!.parentElement!;
+    screen.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
+    for (const key of ['a', 'b']) document.body.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    await settle();
+    expect(inputs).toEqual([{ deviceId: 'device-a', input: { kind: 'text', text: 'a' } }]);
+    document.querySelectorAll<HTMLButtonElement>('[data-testid=device-tab]')[1]!.click(); await settle();
+    release(); await settle();
+    // `b` was typed for device-a while `a` was on its way: it is dropped, never typed on device-b.
+    expect(inputs.map(one => one.deviceId)).toEqual(['device-a']);
+    // Typing on the device shown now still works.
+    await vi.waitFor(() => expect(document.querySelector('[data-testid=device-frame]')).not.toBeNull());
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true, cancelable: true })); await settle();
+    expect(inputs.at(-1)).toEqual({ deviceId: 'device-b', input: { kind: 'text', text: 'c' } });
+  } finally { vi.unstubAllGlobals(); }
+});
+
+test('a device opened while the first list is out stays listed once that older list answers', async () => {
+  const real = client.call.bind(client), on = client.on.bind(client);
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let changed!: (event: { threadId: string; sessions: unknown[] }) => void;
+  const session = (deviceId: string, name: string) => ({ threadId: thread, deviceId, name, platform: 'android' as const, state: 'ready' as const, input: true, openedAt: 1 });
+  vi.spyOn(client, 'call').mockImplementation((async (method: string, params: unknown) => {
+    if (method === 'devices.sessions') { await held; return { sessions: [session('device-b', 'Device B')] }; }
+    return real(method as never, params as never);
+  }) as never);
+  vi.spyOn(client, 'on').mockImplementation(((event: string, handler: never) => {
+    if (event === 'devices.changed') changed = handler;
+    return on(event as never, handler);
+  }) as never);
+  app = mount(DeviceSurface, { target: document.body, props: { store, threadId: thread } }); await settle();
+  changed({ threadId: thread, sessions: [session('device-b', 'Device B'), session('device-a', 'Device A')] });
+  release(); await settle();
+  expect([...document.querySelectorAll('[data-testid=device-tab]')].map(tab => tab.textContent?.trim())).toEqual(['Device B', 'Device A']);
+});
+
 /** A WebCodecs decoder that keeps what it was given and outputs one 72 by 160 frame per chunk. */
 function stubDecoder(supported = true) {
   const seen = { configs: [] as VideoDecoderConfig[], chunks: [] as { type: string; timestamp: number; head: number[] }[] };

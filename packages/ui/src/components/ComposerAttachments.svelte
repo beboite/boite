@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { ChevronUp, FileText, X } from '@lucide/svelte';
+  import { ChevronUp, FileText, LoaderCircle, X } from '@lucide/svelte';
   import type { Attachment } from '@boite/contracts';
   import { bytes } from '../lib/format';
   import { decodedBytes } from '../lib/attachments';
-  import { unresolvedAssetId } from '../lib/draft-attachments';
+  import { isLoading, tileKey, unresolvedAssetId } from '../lib/draft-attachments';
   import { fill, strings } from '../lib/strings';
   import { imageLabel } from '../lib/composer-images';
   import { Closing } from '../lib/closing.svelte';
@@ -31,6 +31,8 @@
   let row = $state<DOMRectReadOnly>();
   let expanded = $state(false);
   const widths = $derived(attachments.map(attachment => attachment.kind === 'image' && !unresolvedAssetId(attachment) ? IMAGE_TILE : FILE_TILE));
+  /** Not openable yet: bytes still on the core, or a file still being read here. */
+  const unready = (attachment: Attachment) => !!unresolvedAssetId(attachment) || isLoading(attachment);
   const overflows = $derived(!!row?.width && widths.reduce((sum, width) => sum + width, 0) + GAP * (widths.length - 1) > row.width);
   /** How many tiles show before the "+N" one; every tile when the row has room, is open or is not laid out yet. */
   const shown = $derived.by(() => {
@@ -44,7 +46,7 @@
     return count;
   });
   const hidden = $derived(attachments.length - shown);
-  const visible = $derived(selected?.kind === 'image' && attachments.includes(selected) && !unresolvedAssetId(selected) ? selected : null);
+  const visible = $derived(selected?.kind === 'image' && attachments.includes(selected) && !unready(selected) ? selected : null);
 
   /**
    * Back to the box when the focus is in the composer, where a keyboard put it.
@@ -56,7 +58,7 @@
   }
 
   export function open(attachment: Attachment) {
-    if (attachment.kind !== 'image' || unresolvedAssetId(attachment)) return;
+    if (attachment.kind !== 'image' || unready(attachment)) return;
     selected = attachment;
     preview.show();
     refocus();
@@ -103,11 +105,17 @@
 {/if}
 
 <div bind:this={strip} class="attachments" class:expanded={expanded && overflows} bind:contentRect={row} data-testid="composer-attachments">
-  {#each attachments.slice(0, shown) as attachment, at (attachment)}
+  <!-- A tile keeps its place, and its animation, when the file it waited for takes its placeholder's place. -->
+  {#each attachments.slice(0, shown) as attachment, at (tileKey(attachment))}
     {@const label = attachment.name ?? strings.composer.attachAlt}
     {@const pending = unresolvedAssetId(attachment)}
-    <div class="attachment" style:width="{widths[at]}px" class:highlighted={highlighted === attachment} class:selected={visible === attachment && preview.shown} class:document={attachment.kind === 'file' || !!pending} data-testid="composer-attachment" title={pending ? strings.errors.draftAttachment : attachment.kind === 'image' ? `${imageLabel(images.indexOf(attachment) + 1)} · ${label}` : label}>
-      {#if attachment.kind === 'image' && !pending}
+    {@const loading = isLoading(attachment)}
+    <div class="attachment" style:width="{widths[at]}px" class:highlighted={highlighted === attachment} class:selected={visible === attachment && preview.shown} class:document={attachment.kind === 'file' || !!pending} class:loading
+      data-testid="composer-attachment" data-loading={loading || undefined} aria-busy={loading || undefined}
+      title={pending ? strings.errors.draftAttachment : attachment.kind === 'image' ? `${imageLabel(images.indexOf(attachment) + 1)} · ${loading ? strings.composer.attachLoading : label}` : label}>
+      {#if loading && attachment.kind === 'image'}
+        <span class="tile-loading" role="img" aria-label={`${imageLabel(images.indexOf(attachment) + 1)} · ${strings.composer.attachLoading}`}><LoaderCircle size={16} strokeWidth={2} class="spinner" /></span>
+      {:else if attachment.kind === 'image' && !pending}
         {@const thumb = pictures.thumb(attachment)}
         <button type="button" class="image-open" data-testid="composer-image-open"
           aria-label={fill(strings.composer.imagePreview, { image: imageLabel(images.indexOf(attachment) + 1) })}
@@ -115,8 +123,8 @@
           {#if thumb}<img src={thumb} alt={label} />{/if}
         </button>
       {:else}
-        <FileText size={20} strokeWidth={1.5} />
-        <span class="file-info"><span>{label}</span><small>{pending ? strings.composer.attachPending : bytes(decodedBytes(attachment.data))}</small></span>
+        {#if loading}<LoaderCircle size={20} strokeWidth={1.5} class="spinner" />{:else}<FileText size={20} strokeWidth={1.5} />{/if}
+        <span class="file-info"><span>{label}</span><small>{loading ? strings.composer.attachLoading : pending ? strings.composer.attachPending : bytes(decodedBytes(attachment.data))}</small></span>
       {/if}
       <button
         type="button"
@@ -186,6 +194,11 @@
   .preview-image { display: block; width: 100%; height: auto; padding: 0; border: none; border-radius: 0; background: transparent; box-shadow: none; cursor: zoom-out; }
   .preview-image:hover:not(:disabled) { background: transparent; }
   .preview-image img { display: block; width: 100%; height: min(40vh, 420px); object-fit: contain; }
+
+  /* A file still being read: the tile is there at once, a spinner where its picture or its size will be. */
+  .tile-loading { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; color: var(--color-muted-foreground); background: var(--color-surface-3); }
+  .attachment :global(.spinner) { flex: none; animation: spin 1s linear infinite var(--loops); }
+  @media (prefers-reduced-motion: reduce) { .attachment :global(.spinner) { animation: none; } }
 
   .attachment.document { display: flex; align-items: center; gap: 8px; padding: 0 24px 0 10px; color: var(--color-muted-foreground); }
   .file-info { min-width: 0; display: flex; flex-direction: column; gap: 1px; font-size: var(--text-xs); }

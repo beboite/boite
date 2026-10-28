@@ -79,14 +79,19 @@ function emitTodos(ctx: FakeContext, projectId: string): void {
   ctx.emit('todos.updated', { projectId, todos: projectTodos(ctx, projectId) });
 }
 
+/** The cards an agent reads: a shared one only while its source may reach that association, as the core's `visibleTodos`. */
+export function agentTodos(ctx: FakeContext, threadId: string, todos: Todo[]): Todo[] {
+  return todos.filter(todo=>{
+    if(!todo.shared)return true;
+    try{sharedScope(ctx,{threadId,sharedProjectId:todo.shared.sharedProjectId});return true;}catch{return false;}
+  });
+}
+
 export function todoMethods(ctx: FakeContext) {
   return {
     'todos.list': async (params) => {
       const todos=projectTodos(ctx, ctx.thread(params.threadId).projectId);
-      return ctx.bus.principal!=='agent'?todos:todos.filter(todo=>{
-        if(!todo.shared)return true;
-        try{sharedScope(ctx,{threadId:params.threadId,sharedProjectId:todo.shared.sharedProjectId});return true;}catch{return false;}
-      });
+      return ctx.bus.principal!=='agent'?todos:agentTodos(ctx, params.threadId, todos);
     },
     'todos.add': async (params) => {
       const thread = ctx.thread(params.threadId);

@@ -214,7 +214,8 @@ ${CONTROL_HELP}
   --core <url>                   another core, with its token in BOITE_TOKEN
                                  (an owner token, or a paired device's session)
   --thread <id> --data-dir <dir> --channel <stable|dev>
-                                 drive a thread from outside it, as the owner`;
+                                 drive a thread from outside it, as the owner
+  --                             ends Boite's flags: the words after it are the command's`;
 
 const STATUS_LETTER: Record<GitChange['status'], string> = {
   added: 'A',

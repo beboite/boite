@@ -1,7 +1,8 @@
-import { closeSync, fstatSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, statSync } from 'node:fs';
 import { uptime } from 'node:os';
 import { join } from 'node:path';
-import { processPlatform } from './platform/index.ts';
+import { lockFile as osLockFile, processPlatform } from './platform/index.ts';
+import type { FileLocker, HeldFileLock } from './platform/types.ts';
 
 /**
  * How much later than the lock's own time a holder may have started and still
@@ -50,66 +51,119 @@ export interface LockClock {
   startKey?: (pid: number) => string | null;
 }
 
+interface LockRecord { pid: number | null; lockedAt: number | null; lockedKey: string | null; osLock: boolean }
+
+function readRecord(file: string): LockRecord | null {
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<{ pid: number; startedAt: number; startKey: string; osLock: boolean }>;
+    return {
+      pid: typeof parsed.pid === 'number' ? parsed.pid : null,
+      lockedAt: typeof parsed.startedAt === 'number' ? parsed.startedAt : null,
+      lockedKey: typeof parsed.startKey === 'string' ? parsed.startKey : null,
+      osLock: parsed.osLock === true,
+    };
+  } catch {
+    // Missing, empty while its holder writes it, or cut by a power loss.
+    return null;
+  }
+}
+
+/** The locks this process holds, so `releaseOwnLock` finds one wherever its directory moved. */
+const held = new Set<{ lock: HeldFileLock; drop(path: string, keepRecord?: boolean): void }>();
+
 /**
- * Takes `file` for this process, or throws `busy(holder)` while a live
- * process that wrote it holds it. A lock whose holder is gone is taken over.
+ * Takes `file` for this process, or throws `busy(holder)` while another
+ * process holds it. The operating system holds the lock (`platform/`), drops
+ * it when its holder dies and never lets two holders in, so a lock is never
+ * stale and never read half-written by someone who then takes it. Normally,
+ * the record only names the holder for the message; `recordKind: 'pid'`
+ * publishes the PID-only record a restorer keeps when its native handle closes.
  *
- * Gone includes a pid worn by someone else. A core that died without releasing
- * the lock, in a reboot say, leaves its pid to whatever asks next: a browser
- * tab held the pid of a dead core and kept every later core from starting. A
- * holder that started after the lock was written is not the core that wrote it.
- * Nor is any process when the lock predates the last boot: that is the only
- * test macOS can make, since `startedAt` cannot read a start time there.
- * Where the OS names a run with a key (Linux), the key decides alone: the
- * Linux start time and boot time both follow every step of the wall clock,
- * so after an NTP step the live holder would look like a stranger.
+ * A record without `osLock` comes from an older core or a restorer that must
+ * close its handles for a directory swap. The old judgement keeps that core's
+ * directory from a second one. A record from a run that is gone is replaced.
+ * Gone includes a pid worn by someone else: a holder that started after the
+ * lock was written is not the core that wrote it, nor is any process when the
+ * lock predates the last boot (macOS cannot read a start time). Where the OS
+ * names a run with a key (Linux), the key decides alone: the Linux start and
+ * boot times follow every step of the wall clock.
+ *
+ * Such an older core replaces a record it judged stale by path. This core
+ * writes its record through the lock it holds and then checks the path still
+ * names that file, so an older core that replaced it first is found and kept.
+ * One that judged before the record was written and replaces the file after
+ * that check still gets in, as two older cores could race each other.
  */
-export function takeLock(file: string, busy: (holder: number) => string, clock: LockClock = {}): () => void {
+export function takeLock(file: string, busy: (holder: number | null) => string, clock: LockClock = {}, lockFile: FileLocker = osLockFile, recordKind?: 'pid'): () => void {
   const startedAt = clock.startedAt ?? processPlatform.startedAt;
   const bootedAt = clock.bootedAt ?? (() => Date.now() - uptime() * 1000);
   const startKey = clock.startKey ?? (pid => processPlatform.startKey?.(pid) ?? null);
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const handle = openSync(file, 'wx');
-      const key = startKey(process.pid);
-      writeFileSync(handle, `${JSON.stringify({ pid: process.pid, startedAt: Date.now(), ...(key === null ? {} : { startKey: key }) }, null, 2)}\n`, 'utf8');
-      const { ino } = fstatSync(handle, { bigint: true });
-      closeSync(handle);
-      // Only the file this call made: its directory may have moved away, and another lock taken its path.
-      return () => {
-        try {
-          if (statSync(file, { bigint: true }).ino === ino) rmSync(file, { force: true });
-        } catch {
-          // The directory may be gone already; nothing left to release.
-        }
-      };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      let holder: number | null = null;
-      let lockedAt: number | null = null;
-      let lockedKey: string | null = null;
-      try {
-        const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<{ pid: number; startedAt: number; startKey: string }>;
-        holder = typeof parsed.pid === 'number' ? parsed.pid : null;
-        lockedAt = typeof parsed.startedAt === 'number' ? parsed.startedAt : null;
-        lockedKey = typeof parsed.startKey === 'string' ? parsed.startKey : null;
-      } catch {
-        holder = null;
-      }
-      if (holder !== null && holder !== process.pid && alive(holder) && sameRun(holder, lockedAt, lockedKey, startedAt, bootedAt, startKey)) throw new Error(busy(holder));
-      rmSync(file, { force: true });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const lock = lockFile(file);
+    if (!lock) throw new Error(busy(readRecord(file)?.pid ?? null));
+    // The previous holder deleted the file as it let go: this lock is on a file no longer at the path.
+    if (!lock.stillAt(file)) {
+      lock.release();
+      continue;
     }
+    const record = readRecord(file);
+    const holder = record?.pid ?? null;
+    if (record && !record.osLock && holder !== null && holder !== process.pid && alive(holder)
+      && sameRun(holder, record.lockedAt, record.lockedKey, startedAt, bootedAt, startKey)) {
+      lock.release();
+      throw new Error(busy(holder));
+    }
+    const key = startKey(process.pid);
+    const ownRecord = { pid: process.pid, startedAt: Date.now(), ...(key === null ? {} : { startKey: key }) };
+    // Through the held handle, never by path: a core older than this lock may have replaced the file
+    // since it was judged, and a write by path would land in that core's file.
+    try {
+      lock.write(`${JSON.stringify({ ...ownRecord, ...(recordKind === 'pid' ? {} : { osLock: true }) }, null, 2)}\n`);
+    } catch (error) {
+      // A full disk, say: still held, the lock would keep this process out of its own directory.
+      lock.release();
+      throw error;
+    }
+    // Replaced meanwhile: the next attempt locks that core's file and reads its record.
+    if (!lock.stillAt(file)) {
+      lock.release();
+      continue;
+    }
+    const entry = {
+      lock,
+      // Deleted while still held, so the next holder cannot lock a file the path no longer names unnoticed.
+      drop(path: string, keepRecord = false) {
+        // A restorer acquired with a PID record from the start. Rewriting it here would briefly
+        // expose an empty file to older cores, which would replace it while its holder is alive.
+        held.delete(entry);
+        if (!keepRecord && lock.stillAt(path)) rmSync(path, { force: true });
+        lock.release();
+      },
+    };
+    held.add(entry);
+    // Only the file this call locked: its directory may have moved away, and another lock taken its path.
+    return () => {
+      try { entry.drop(file); } catch { /* The directory may be gone already; the lock is released all the same. */ lock.release(); }
+    };
   }
   throw new Error(`could not take the lock ${file}: it keeps coming back`);
 }
 
-/** Removes the core lock in `directory` if this process wrote it, wherever the directory has moved since. */
-export function releaseOwnLock(directory: string): void {
+/**
+ * Releases this process's core lock wherever its directory moved. Under the maintenance lock,
+ * `keepRecord` leaves the PID record published at acquisition, protecting a directory whose handles must close before a rename.
+ */
+export function releaseOwnLock(directory: string, keepRecord = false): void {
   const file = join(directory, 'core.lock');
-  try {
-    if ((JSON.parse(readFileSync(file, 'utf8')) as { pid?: unknown }).pid === process.pid) rmSync(file, { force: true });
-  } catch {
-    // No lock there, or not one this process can read: not this process's.
+  try { statSync(file); } catch { return; }
+  for (const entry of held) {
+    if (!entry.lock.stillAt(file)) continue;
+    try { entry.drop(file, keepRecord); }
+    catch (error) {
+      if (keepRecord) throw error;
+      entry.lock.release();
+    }
+    return;
   }
 }
 
@@ -128,8 +182,9 @@ export function lockDataDir(
   startedAt?: (pid: number) => number | null,
   bootedAt?: () => number,
   startKey?: (pid: number) => string | null,
+  recordKind?: 'pid',
 ): () => void {
   return takeLock(join(dataDir, 'core.lock'),
-    holder => `another core is already running on ${dataDir} (pid ${holder}). Close it, or start this one with --data-dir on a directory of its own.`,
-    { startedAt, bootedAt, startKey });
+    holder => `another core is already running on ${dataDir} (pid ${holder ?? 'not written yet'}). Close it, or start this one with --data-dir on a directory of its own.`,
+    { startedAt, bootedAt, startKey }, osLockFile, recordKind);
 }
