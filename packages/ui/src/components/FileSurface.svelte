@@ -28,7 +28,6 @@
   let loading = $state(false);
 
   // The editor
-  let draft = $state('');
   let saving = $state(false);
   let area = $state<HTMLTextAreaElement | undefined>(undefined);
   let offset = $state(0);
@@ -61,11 +60,13 @@
   let path = $derived(surface.path ?? null);
   const language = $derived(codeLanguage(path ?? '', content?.kind === 'text' ? content.language : null));
   /**
-   * What the disk last answered with, held by the panel: an editor mounted
-   * while another one's save was out learns what that save wrote. The dirty
-   * dot is the distance to it.
+   * What the disk last confirmed and the edit over it, both held by the panel
+   * for the file rather than by this editor: one mounted while another's save
+   * was out learns what that save wrote, and a tab switch keeps the edit. The
+   * dirty dot is the distance between them.
    */
-  let stored = $derived(panel.disk(surface.id) ?? '');
+  let stored = $derived(content?.kind === 'text' ? ((path === null ? undefined : panel.disk(path)) ?? content.text) : '');
+  let draft = $derived(content?.kind === 'text' ? (panel.draft(surface.id) ?? stored) : '');
   let dirty = $derived(content?.kind === 'text' && draft !== stored);
   let readOnly = $derived(content?.kind === 'text' && (content.truncated || !store.owner));
   let lineCount = $derived(content?.kind === 'text' ? draft.split('\n').length : 0);
@@ -81,7 +82,7 @@
 
   async function load(id: string, wanted: string): Promise<void> {
     loading = true;
-    const sends = panel.reading(surface.id);
+    const sent = panel.reading(wanted);
     const answer = await store.readFile(id, wanted);
     loading = false;
     // The tab may have been asked for another file while the call was out.
@@ -94,10 +95,9 @@
     problem = null;
     content = answer.value;
     if (answer.value.kind === 'text') {
-      panel.read(surface.id, wanted, answer.value.text, sends);
       // An edit made before this tab was last unmounted comes back over the
       // disk's text, and the dirty dot with it.
-      draft = panel.draft(surface.id) ?? panel.disk(surface.id) ?? answer.value.text;
+      panel.read(wanted, answer.value.text, sent);
       offset = 0;
     } else {
       natural = null;
@@ -126,21 +126,19 @@
     // than the disk, and marking it saved let a tab switch drop it.
     const text = draft;
     const owner = panel;
-    const surfaceId = surface.id;
     saving = true;
-    owner.sending(surfaceId);
+    const write = owner.sending(wanted);
     const answer = await store.writeFile(id, wanted, text);
     saving = false;
+    // The answer settles its own numbered write of the file it was sent for,
+    // not this editor's text: an edit made since, here or in an editor mounted
+    // after this one was closed, stays a draft.
+    owner.answered(wanted, write, answer.ok ? text : null);
     if (!answer.ok) {
-      owner.unsent(surfaceId, wanted);
       problem = fill(strings.files.writeFailed, { reason: answer.error });
       return;
     }
     problem = null;
-    // The answer settles the panel's disk and draft of the file it was sent for,
-    // not this editor's text: an edit made since, here or in an editor mounted
-    // after this one was closed, stays a draft.
-    owner.saved(surfaceId, wanted, text);
     content = { ...file, text, bytes: answer.value.bytes, modifiedAt: answer.value.modifiedAt };
   }
 
@@ -149,13 +147,8 @@
    * hidden panel or another thread unmounts the editor, and the text typed
    * since the last save used to go with it.
    */
-  function keep(): void {
-    panel.edited(surface.id, draft);
-  }
-
   function edit(text: string): void {
-    draft = text;
-    keep();
+    if (path !== null) panel.edited(path, text);
   }
 
   /** Tab writes two spaces rather than leaving the editor for the next control. */

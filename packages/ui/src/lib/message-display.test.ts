@@ -78,6 +78,15 @@ test('an indented fence keeps its indent through the stream, so its code outdent
     expect(code(blocks.map(block => renderMarkdown(block)).join(''))).toEqual([expected]);
   }
 });
+test('an indented heading stays a heading, in a completed block and in the final tail', () => {
+  const heading = /^<h[1-6][^>]*>Heading<\/h[1-6]>$/;
+  expect(paragraphBlocks('  # Heading', false).map(block => renderMarkdown(block))).toEqual([expect.stringMatching(heading)]);
+  const text = 'Intro\n\n   ## Heading\n\nAfter';
+  const scan = new ParagraphScan();
+  for (let end = 1; end <= text.length; end += 3) scan.blocks(text.slice(0, end), true);
+  expect(renderMarkdown(scan.blocks(text, true)[1]!)).toMatch(heading);
+  expect(renderMarkdown(scan.blocks(text, false)[1]!)).toMatch(heading);
+});
 test('internal goal markers stay out of prose, even during partial arrival', () => {
   expect(answerText('Done\n\n[BOITE_GOAL_COMPLETE]', false)).toBe('Done\n\n');
   expect(answerText('Done\n\n[BOITE_GOAL_COM', true)).not.toContain('[BOITE_');

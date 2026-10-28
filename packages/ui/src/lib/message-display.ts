@@ -1,5 +1,5 @@
 import type { Message, MessagePart, MoveNotice, ThreadLink, ThreadSummary } from '@boite/contracts';
-import { FenceScan } from './fences';
+import { FenceScan, openFence } from './fences';
 
 /** Older cores journalled the whole goal instruction as a user message. */
 export function visibleUserText(text: string): string {
@@ -104,12 +104,15 @@ export function paragraphBlocks(text: string, live: boolean): string[] {
 }
 
 /**
- * A block as the renderer must see it: blank lines and trailing space go, the
- * first line's indent stays. A fence indented by one to three spaces outdents
- * its code by that much, so trimming the opening line alone shifted the code.
+ * A block as the renderer must see it: blank lines and trailing space go. The
+ * first line's indent stays only on a fence opener, whose code the renderer
+ * outdents by that indent; anywhere else, a heading included, it goes as it
+ * always did.
  */
 function blockText(text: string): string {
-  return text.replace(/^(?:[ \t]*\r?\n)+/, '').trimEnd();
+  const block = text.replace(/^(?:[ \t]*\r?\n)+/, '').trimEnd();
+  const cut = block.indexOf('\n');
+  return openFence(cut < 0 ? block : block.slice(0, cut)) ? block : block.trimStart();
 }
 
 /**

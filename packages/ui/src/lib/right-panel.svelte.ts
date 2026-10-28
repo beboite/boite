@@ -81,16 +81,23 @@ export type CloseAction = 'close' | 'others' | 'right' | 'all';
 
 /** What one thread remembers about its panel. */
 /**
- * What one file tab's disk holds as far as this app knows, and the saves out
- * for it. `sends` counts every save sent, so a read that left before one is
- * known to be older than its answer.
+ * One file's save sequence in one thread. It outlives the tabs that show the
+ * file: closing a tab drops its draft, never a write still out, so the tab
+ * reopened on the file knows the disk is about to change.
  */
-interface FileDisk {
-  path: string;
-  text: string;
-  sending: number;
-  sends: number;
+interface FileSaves {
+  /** What the disk last confirmed: the newest read, or the newest numbered write it answered. */
+  disk: string | null;
+  /** The number of the write whose answer set `disk`; an older answer changes nothing. */
+  confirmed: number;
+  /** The newest write sent: a read that left before it may predate its text. */
+  sent: number;
+  /** The writes sent and not answered yet. */
+  pending: readonly number[];
 }
+
+/** Write numbers never repeat in a session, so an answer can never be taken for another write's. */
+let lastWrite = 0;
 
 export interface PanelState {
   isOpen: boolean;
@@ -229,11 +236,11 @@ export class RightPanelStore {
   readonly drafts = new SvelteMap<string, SvelteMap<string, string>>();
 
   /**
-   * The disk text of each file tab, per thread, shared by every editor mounted
-   * on the tab: one mounted while another's save is out learns the new disk
-   * when that save answers, though it read the old one.
+   * The save sequence of each file, per thread and path, shared by every
+   * editor mounted on it: one mounted while another's save is out learns the
+   * new disk when that save answers, though it read the old one.
    */
-  readonly disks = new SvelteMap<string, SvelteMap<string, FileDisk>>();
+  readonly saves = new SvelteMap<string, SvelteMap<string, FileSaves>>();
 
   /**
    * The threads a phone-width load shut, kept beside the stored layout rather
@@ -362,7 +369,7 @@ export class RightPanelStore {
       delete kept[key];
       this.#bound.delete(key);
       this.drafts.delete(key);
-      this.disks.delete(key);
+      this.saves.delete(key);
       this.phoneShut.delete(key);
       changed = true;
     }
@@ -535,69 +542,76 @@ export class BoundPanel {
     else this.#root.drafts.set(this.#key, new SvelteMap([[id, text]]));
   }
 
-  /** What the disk of a file tab holds, as its last read or save left it. */
-  disk(id: string): string | undefined {
-    return this.#root.disks.get(this.#key)?.get(id)?.text;
+  /** What the disk holds for a file, as its last read or answered write left it. */
+  disk(path: string): string | undefined {
+    return this.#saves(path)?.disk ?? undefined;
   }
 
-  #setDisk(id: string, disk: FileDisk): void {
-    const held = this.#root.disks.get(this.#key);
-    if (held) held.set(id, disk);
-    else this.#root.disks.set(this.#key, new SvelteMap([[id, disk]]));
+  #saves(path: string): FileSaves | undefined {
+    return this.#root.saves.get(this.#key)?.get(path);
   }
 
-  /** The count a read hands back to `read`, taken when it leaves. */
-  reading(id: string): number {
-    return this.#root.disks.get(this.#key)?.get(id)?.sends ?? 0;
+  #setSaves(path: string, saves: FileSaves): void {
+    const held = this.#root.saves.get(this.#key);
+    if (held) held.set(path, saves);
+    else this.#root.saves.set(this.#key, new SvelteMap([[path, saves]]));
   }
 
-  /**
-   * A read of `path` answered. A save sent since it left, or still out, may
-   * have changed the disk after the read saw it: its own answer says what the
-   * disk holds then.
-   */
-  read(id: string, path: string, text: string, sends: number): void {
-    const now = this.#root.disks.get(this.#key)?.get(id);
-    if (now && now.path === path && (now.sending > 0 || now.sends !== sends)) return;
-    this.#setDisk(id, { path, text, sending: 0, sends: now?.sends ?? sends });
+  /** What a read hands back to `read`, taken when it leaves. */
+  reading(path: string): number {
+    return this.#saves(path)?.sent ?? 0;
   }
 
   /**
-   * An editor's text. It stays a draft while it differs from the disk, and
-   * while a save is out whatever it is: the disk is about to change, so text
-   * equal to the old disk will be an edit once the save answers.
+   * A read answered. A write sent since it left, or still out, may change the
+   * disk after the read saw it: that write's own answer says what it holds.
    */
-  edited(id: string, text: string): void {
-    const now = this.#root.disks.get(this.#key)?.get(id);
-    this.keepDraft(id, now && now.sending === 0 && now.text === text ? null : text);
+  read(path: string, text: string, sent: number): void {
+    const now = this.#saves(path);
+    if (now && (now.pending.length > 0 || now.sent !== sent)) return;
+    this.#setSaves(path, { disk: text, confirmed: now?.confirmed ?? 0, sent: now?.sent ?? 0, pending: [] });
+    this.#settle(path);
   }
 
-  /** A save of the tab's file left. */
-  sending(id: string): void {
-    const now = this.#root.disks.get(this.#key)?.get(id);
-    if (now) this.#setDisk(id, { ...now, sending: now.sending + 1, sends: now.sends + 1 });
+  /** An editor's text, held as the file's draft until the disk confirms it. */
+  edited(path: string, text: string): void {
+    this.keepDraft(surfaceId('file', path), text);
+    this.#settle(path);
+  }
+
+  /** A write of the file left; its number is what its answer settles. */
+  sending(path: string): number {
+    const write = ++lastWrite;
+    const now = this.#saves(path) ?? { disk: null, confirmed: 0, sent: 0, pending: [] };
+    this.#setSaves(path, { ...now, sent: write, pending: [...now.pending, write] });
+    return write;
   }
 
   /**
-   * A save of `text` to `path` reached the disk. The draft goes only while it
-   * is still that text: an edit made since, in this editor or in one mounted
-   * after it, stays unsaved whichever editor sent the save.
+   * The answer to one numbered write: the text it wrote, or null when it
+   * failed. It settles that write only, and moves the disk only when no newer
+   * write was answered before it.
    */
-  saved(id: string, path: string, text: string): void {
-    const now = this.#root.disks.get(this.#key)?.get(id);
-    if (!now || now.path !== path) return;
-    this.#setDisk(id, { ...now, text, sending: now.sending - 1 });
-    const held = this.#root.drafts.get(this.#key);
-    if (held?.get(id) === text) held.delete(id);
+  answered(path: string, write: number, text: string | null): void {
+    const now = this.#saves(path);
+    if (!now?.pending.includes(write)) return;
+    const pending = now.pending.filter((one) => one !== write);
+    const newer = text !== null && write > now.confirmed;
+    this.#setSaves(path, newer ? { ...now, disk: text, confirmed: write, pending } : { ...now, pending });
+    this.#settle(path);
   }
 
-  /** A save failed: the disk kept its text, and a draft equal to it is no edit once nothing else is out. */
-  unsent(id: string, path: string): void {
-    const now = this.#root.disks.get(this.#key)?.get(id);
-    if (!now || now.path !== path) return;
-    this.#setDisk(id, { ...now, sending: now.sending - 1 });
-    const draft = this.draft(id);
-    if (draft !== undefined) this.edited(id, draft);
+  /**
+   * A draft goes only once no write of its file is out and the disk confirmed
+   * its very text: until then the disk can still change under it. A file no
+   * tab shows keeps its sequence only while a write is out.
+   */
+  #settle(path: string): void {
+    const now = this.#saves(path);
+    if (!now || now.pending.length > 0) return;
+    const id = surfaceId('file', path);
+    if (this.draft(id) === now.disk) this.keepDraft(id, null);
+    if (!this.state.surfaces.some((surface) => surface.id === id)) this.#root.saves.get(this.#key)?.delete(path);
   }
 
   /** The ids a close action takes away, so the question asked and the tabs closed agree. */
@@ -618,13 +632,15 @@ export class BoundPanel {
     return this.state.surfaces.filter((surface) => ids.includes(surface.id) && held.has(surface.id));
   }
 
-  /** A closed tab's draft goes with it: reopening the file reads the disk again. */
+  /** A closed tab's draft goes with it: reopening the file reads the disk again, once no write of it is out. */
   #drop(ids: readonly string[]): void {
     const held = this.#root.drafts.get(this.#key);
-    const disks = this.#root.disks.get(this.#key);
+    const saves = this.#root.saves.get(this.#key);
     for (const id of ids) {
       held?.delete(id);
-      disks?.delete(id);
+      const path = this.state.surfaces.find((surface) => surface.id === id)?.path;
+      // A write still out stays the file's: the tab reopened on it must know.
+      if (path !== undefined && !this.#saves(path)?.pending.length) saves?.delete(path);
     }
   }
 

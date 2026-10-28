@@ -182,26 +182,36 @@ test('a key typed while a save is out stays unsaved and survives a tab switch', 
   store.panel.closeAll();
 });
 
-/** Holds every `files.write` until the returned release runs. */
-/** Holds every file write until `release`, which resolves once the held writes have answered their editors. */
-function holdWrites(): () => Promise<void> {
+/**
+ * Holds each file write on its own gate. `release(index)` lets the write sent
+ * in that order through, `releaseAll()` every one, and both resolve once the
+ * editors have handled the answers.
+ */
+function gateWrites(): { release(index: number): Promise<void>; releaseAll(): Promise<void> } {
   const client = store.client!, real = client.call.bind(client);
-  let open!: () => void;
-  const held = new Promise<void>(resolve => { open = resolve; });
-  const answers: Promise<unknown>[] = [];
+  const gates: Array<{ open: () => void; answer: Promise<unknown> }> = [];
   vi.spyOn(client, 'call').mockImplementation(((method: string, params: unknown) => {
     if (method !== 'files.write') return real(method as never, params as never);
+    let open!: () => void;
+    const held = new Promise<void>(resolve => { open = resolve; });
     const answer = held.then(() => real(method as never, params as never));
-    answers.push(answer);
+    gates.push({ open, answer });
     return answer;
   }) as never);
-  return async () => {
-    open();
-    await Promise.allSettled(answers);
+  const through = async (some: typeof gates) => {
+    for (const gate of some) gate.open();
+    await Promise.allSettled(some.map(gate => gate.answer));
     // The editor's own continuation after its awaited write.
     for (let i = 0; i < 10; i++) await Promise.resolve();
     flushSync();
   };
+  return { release: index => through([gates[index]!]), releaseAll: () => through(gates) };
+}
+
+/** Holds every file write until `release`, which resolves once the held writes have answered their editors. */
+function holdWrites(): () => Promise<void> {
+  const gates = gateWrites();
+  return () => gates.releaseAll();
 }
 
 async function edit(text: string): Promise<void> {
@@ -249,13 +259,76 @@ async function remount(id: string, text: string): Promise<void> {
   await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value === text);
 }
 
-async function saveHeld(): Promise<() => Promise<void>> {
-  const release = holdWrites();
+async function clickSave(): Promise<void> {
   await waitFor(() => document.querySelector<HTMLButtonElement>('[data-testid=file-save]')?.disabled === false);
   query<HTMLButtonElement>('[data-testid=file-save]').click();
   flushSync();
+}
+
+async function saveHeld(): Promise<() => Promise<void>> {
+  const release = holdWrites();
+  await clickSave();
   return release;
 }
+
+async function openTree(): Promise<{ id: string; original: string }> {
+  await openWorkbench();
+  const file = store.panel.openFile('docs/guide/tree.md');
+  await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value.includes('# The tree') === true);
+  return { id: file.id, original: query<HTMLTextAreaElement>('[data-testid=file-text]').value };
+}
+
+async function diskOf(path: string): Promise<string | false> {
+  const read = await store.client!.call('files.read', { threadId: 't-trace', path });
+  return read.kind === 'text' && read.text;
+}
+
+test('the answer to one save leaves the newest draft while a later save of the file is still out', async () => {
+  const { id, original } = await openTree();
+  const writes = gateWrites();
+  const first = `${original}First save.\n`;
+  await edit(first);
+  await clickSave();
+  await remount(id, first);
+  const second = `${original}Second save.\n`;
+  await edit(second);
+  await clickSave();
+  // Back to the first save's text while both writes are out: the newest text the user wants.
+  await edit(first);
+  await writes.release(0);
+  await writes.release(1);
+  vi.restoreAllMocks();
+  expect(await diskOf('docs/guide/tree.md')).toBe(second);
+  expect(store.panel.draft(id)).toBe(first);
+  await remount(id, first);
+  store.panel.keepDraft(id, null);
+  store.panel.closeAll();
+});
+
+test('a save still out when its tab closes stays the file\'s: the tab reopened on it keeps the old disk text as an edit', async () => {
+  const { id, original } = await openTree();
+  const sent = `${original}Saved from a closed tab.\n`;
+  await edit(sent);
+  const release = await saveHeld();
+  const closer = `[data-testid=panel-tab][data-surface-id="${id}"] [data-testid=panel-tab-close]`;
+  query<HTMLButtonElement>(closer).click();
+  await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') !== null);
+  query<HTMLButtonElement>('[data-testid=confirm-ok]').click();
+  await waitFor(() => !store.panel.surfaces.some((surface) => surface.id === id));
+
+  store.panel.openFile('docs/guide/tree.md');
+  await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value === original);
+  await edit(`${original}Typed in the reopened tab.\n`);
+  await edit(original);
+  await release();
+  vi.restoreAllMocks();
+  expect(await diskOf('docs/guide/tree.md')).toBe(sent);
+  expect(store.panel.draft(id)).toBe(original);
+  expect(document.querySelector('[data-testid=file-dirty]')).not.toBeNull();
+  await remount(id, original);
+  store.panel.keepDraft(id, null);
+  store.panel.closeAll();
+});
 
 test('an editor mounted while a save is out keeps the old disk text as an edit, typed before or after the save answers', async () => {
   await openWorkbench();
