@@ -34,6 +34,11 @@ export class Bus {
   /** Core diagnostics are normalized before either internal or committed observers see them. */
   normalizeLog?: (payload: RpcEvents['core.log']) => RpcEvents['core.log'];
 
+  /**
+   * Every event as it is emitted, possibly inside a transaction that can still
+   * roll back. Only state that rolls back with it belongs here: an effect on a
+   * process, the network or memory subscribes with `onCommitted`.
+   */
   onAny(listener: BusListener): () => void {
     this.listeners.add(listener);
     return () => {
@@ -41,7 +46,7 @@ export class Bus {
     };
   }
 
-  /** External observers see a write only after its synchronous transaction commits. */
+  /** Observers with effects see a write only after its synchronous transaction commits. */
   onCommitted(listener: BusListener): () => void {
     this.committedListeners.add(listener);
     return () => { this.committedListeners.delete(listener); };

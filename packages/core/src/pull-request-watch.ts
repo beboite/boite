@@ -91,7 +91,7 @@ export class PullRequestWatches {
       // A restart reads each watch again soon, a few seconds apart.
       for (const record of records) this.#runtime.set(runtimeKey(threadId, record.url), { nextReadAt: Date.now() + 2_000 * ++stagger, failures: 0, paused: null, reading: false, detail: null, rules: null });
     }
-    this.#unsubscribe = core.bus.onAny((name, payload) => {
+    this.#unsubscribe = core.bus.onCommitted((name, payload) => {
       if (this.#closed) return;
       if (name === 'thread.removed') this.#endWith((payload as { threadId: ThreadId }).threadId);
       else if (name === 'thread.updated') {
