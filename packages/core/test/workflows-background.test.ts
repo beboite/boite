@@ -118,7 +118,7 @@ test('a step whose background work completes without a wake is asked for its fin
 });
 
 test('a step that cannot be asked for its final answer fails with a reason a retry clears', async () => {
-  const { h, step, first } = await setup();
+  const { h, owner, threadId, run, step, childId, first, runs } = await setup();
   const start = spyOn(h.core.threads, 'startTurn').mockImplementation(() => { throw new Error('account signed out'); });
   restores.push(() => start.mockRestore());
   first.ctx.backgroundFinished!('ci-1', 'completed');
@@ -127,6 +127,22 @@ test('a step that cannot be asked for its final answer fails with a reason a ret
   clock.mockRestore();
   expect(step().error).toContain('completed without waking it, and asking for its final result failed: account signed out');
   expect(step().result).toBeNull();
+  // Signed in again, the retry runs the step in the same conversation and its answer is the result.
+  start.mockRestore();
+  expect(await owner.call('workflows.control', { threadId, runId: run.id, action: 'retry', stepId: 'watch' })).toMatchObject({ status: 'running' });
+  await waitFor(() => runs.get(childId) !== first, 5000);
+  expect(step()).toMatchObject({ status: 'running', error: null, threadId: childId });
+  runs.get(childId)!.finish('CI passed after sign-in.');
+  await waitFor(() => step().status === 'done');
+  expect(step()).toMatchObject({ result: 'CI passed after sign-in.', error: null });
+});
+
+test('a step stopped while it waits on its background work reads stopped, not failed on the lost wait', async () => {
+  const { h, owner, threadId, step, childId } = await setup();
+  expect(await owner.call('delegation.stop', { threadId, agentId: childId })).toMatchObject({ stopped: 1 });
+  // Stopping it ended the work it waited on: a stop the user asked for, not a failure of the step.
+  await waitFor(() => step().status !== 'running', 5000);
+  expect(step()).toMatchObject({ status: 'stopped', error: 'Stopped', result: null });
 });
 
 test.each(['run', 'team'] as const)('a paused %s asks nothing of a step whose work completed, and its resume asks for the final answer', async paused => {
@@ -134,11 +150,14 @@ test.each(['run', 'team'] as const)('a paused %s asks nothing of a step whose wo
   // The team's pause reaches the run only on its next advance, after the work completed.
   if (paused === 'run') await owner.call('workflows.control', { threadId, runId: run.id, action: 'pause' });
   else await owner.call('delegation.configure', { threadId, config: { ...h.core.delegation.config(threadId), paused: true } });
+  first.ctx.backgroundFinished!('ci-1', 'completed');
   const asked = spyOn(h.core.workflows, 'unwoken');
   restores.push(() => asked.mockRestore());
-  first.ctx.backgroundFinished!('ci-1', 'completed');
+  const before = asked.mock.calls.length;
   const clock = afterGrace();
-  await waitFor(() => asked.mock.calls.length > 0, 5000);
+  // A check past the grace, then time for an ask it might have sent to start a turn.
+  await waitFor(() => asked.mock.calls.length > before, 5000);
+  await new Promise(resolve => setTimeout(resolve, 100));
   expect(runs.get(childId)).toBe(first);
   expect(step()).toMatchObject({ status: 'running', result: null });
   if (paused === 'run') await owner.call('workflows.control', { threadId, runId: run.id, action: 'resume' });

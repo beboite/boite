@@ -694,7 +694,7 @@ export class Delegation {
     }
     if (wait?.state !== 'interrupted') return;
     const how = `ended without waking it: ${INTERRUPTION_TEXT[wait.reason]}`;
-    if (step) this.core.workflows.waitLost(thread.id, how, wait.for);
+    if (step) this.core.workflows.waitLost(thread.id, how, wait.for, this.stopped.has(thread.id));
     else if (!this.stopped.has(thread.id)) tellInterrupted(this.core, thread, wait.for, how, wait.reason);
   }
   /**
