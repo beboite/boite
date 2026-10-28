@@ -2309,7 +2309,7 @@ test('on a phone, a file attached after the draft was cleared ends the Undo offe
   await waitFor(() => document.querySelector('[data-testid=undo-toast]') === null);
 });
 
-test('on a phone, removing the only file of a draft offers Undo that brings it back', async ({ app: _app }) => {
+test('on a phone, removing the only file or picture of a draft offers Undo that brings it back', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => !store.busy);
   vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
@@ -2322,6 +2322,15 @@ test('on a phone, removing the only file of a draft offers Undo that brings it b
   await waitFor(() => chips().length === 0 && document.querySelector('[data-testid=undo-toast]')?.textContent?.includes(strings.composer.draftCleared) === true);
   query<HTMLButtonElement>('[data-testid=undo-action]').click();
   await waitFor(() => chips().length === 1);
+  // A picture leaves only the space after its `[Image 1]` reference behind: the draft is just as empty.
+  query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').click();
+  await waitFor(() => chips().length === 0);
+  paste(pngFile('only.png'));
+  await waitFor(() => chips().length === 1 && input().value.includes('[Image 1]') && document.querySelector('[data-testid=undo-toast]') === null);
+  query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').click();
+  await waitFor(() => chips().length === 0 && document.querySelector('[data-testid=undo-toast]')?.textContent?.includes(strings.composer.draftCleared) === true);
+  query<HTMLButtonElement>('[data-testid=undo-action]').click();
+  await waitFor(() => chips().length === 1 && input().value.includes('[Image 1]'));
 });
 
 test('on a phone, a file that finishes reading in a conversation left behind keeps the Undo offer of the one on screen', async ({ app: _app }) => {

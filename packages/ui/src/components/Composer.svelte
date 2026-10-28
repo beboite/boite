@@ -471,7 +471,7 @@
     const refocus = focusWithin(box?.closest('[data-testid="composer"]'));
     removeImageReferences(store, key, at);
     state.attachments = state.attachments.filter((_, index) => index !== at);
-    if (!state.text && !state.attachments.length) offerDraftUndo(editing(), { text: '', attachments: 1 }, strings.composer.draftCleared);
+    if (!state.text.trim() && !state.attachments.length) offerDraftUndo(editing(), { text: '', attachments: 1 }, strings.composer.draftCleared);
     if (refocus) focusInitial(box, box?.closest<HTMLElement>('[data-testid=composer]'));
   }
 
