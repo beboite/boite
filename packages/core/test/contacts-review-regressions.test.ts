@@ -195,10 +195,17 @@ test('a native thread trusted while contact mail waits takes that letter, and a 
     const approved=b.h.core.coordination.get(b.t.id).messages.find(l=>l.id===waiting.id)!;
     expect(()=>protectLetters(b.h.core,b.t.id,[{...approved,text:'Different text'}])).toThrow('shared file policy');
     expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).not.toBeNull();
+    await b.c.call('threads.trustContactHistory',{threadId:b.t.id});
+    expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).toBeNull();
+    // A letter that arrives later holds the free thread again.
     const later=await a.c.call('collaboration.send',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'Another contact note',requestId:'native-later'});
     await waitFor(()=>b.h.core.coordination.config(b.t.id).paused);
     expect(status(later.id)).toBe('received');
     expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).not.toBeNull();
+    // Trust ends that refused wake's pause even when its letter expired meanwhile.
+    b.h.core.journal.db.query("UPDATE coordination_letters SET data=json_set(data,'$.expiresAt',?) WHERE id=?").run(Date.now()-1,later.id);
+    await b.c.call('threads.trustContactHistory',{threadId:b.t.id});
+    expect(b.h.core.coordination.config(b.t.id).paused).toBe(false);
   }finally{providers.require=require;access.execution.support=support;restore();}
 },30000);
 

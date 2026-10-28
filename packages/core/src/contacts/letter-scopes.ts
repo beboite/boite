@@ -100,7 +100,8 @@ export function trustLetters(core: Core, threadId: string): void {
       .map(row => JSON.parse(row.data) as AgentLetter).filter(letter => letter.contact && letter.expiresAt > Date.now());
     const trusted = waiting.map(approval).filter((digest, index) => scope.trusted?.includes(digest) || holders.includes(waiting[index]!.contact!.coreId));
     core.journal.setSetting(`shared-file-letters:${id}`, {...scope, legacy: false, holders: [], trustedAt: Date.now(), trusted});
-    if (trusted.length) resumed.push(id);
+    // The hold may have refused a wake whose letters expired since: its pause ends all the same.
+    resumed.push(id);
   }
   core.sharedAccess.execution.reconcile();
   announceHold(core, ids);
