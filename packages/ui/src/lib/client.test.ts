@@ -184,12 +184,12 @@ describe('WsClient', () => {
       expect(socket.closed).toBe(false);
       expect(client.clockOffset).toBe(300);
       expect(heard).toEqual([300]);
-      // A hello held behind an upload comes back 3 s later: a trip that long cannot place the core's clock.
+      // A hello held behind an upload comes back 3 s later, held the whole way out: an odd trip that long cannot place the core's clock.
       const late = client.resume();
       await vi.advanceTimersByTimeAsync(0);
       const probed = Date.now();
-      await vi.advanceTimersByTimeAsync(3_000);
-      socket.receive({ id: socket.frame(2).id, result: { core: { ...CORE, now: probed + 3_000 + 300 }, principal: 'owner' } });
+      await vi.advanceTimersByTimeAsync(3_001);
+      socket.receive({ id: socket.frame(2).id, result: { core: { ...CORE, now: probed + 3_001 + 300 }, principal: 'owner' } });
       await late;
       expect(client.clockOffset).toBe(300);
       expect(heard).toEqual([300]);

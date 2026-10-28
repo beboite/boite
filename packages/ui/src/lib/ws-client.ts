@@ -45,7 +45,7 @@ export class WsClient implements ObservableClient {
   #state: ClientState = 'idle';
   #core: CoreInfo | null = null;
   #clockOffset = 0;
-  /** How far `#clockOffset` can be off: half the round trip that measured it. */
+  /** How far `#clockOffset` can be off: half the round trip that measured it, rounded up to cover the offset's own rounding. */
   #clockError = 0;
   #nextId = 1;
   #pending = new Map<number, Pending>();
@@ -395,7 +395,7 @@ export class WsClient implements ObservableClient {
             this.#lastFrameAt = Date.now();
             // The core read its clock halfway through the round trip, as far as this side can tell.
             this.#clockOffset = typeof result.core.now === 'number' ? Math.round(result.core.now - (sentAt + this.#lastFrameAt) / 2) : 0;
-            this.#clockError = (this.#lastFrameAt - sentAt) / 2;
+            this.#clockError = Math.ceil((this.#lastFrameAt - sentAt) / 2);
             this.#setState('ready');
             this.#armLiveness(IDLE_PROBE_MS);
             this.#resubscribe(socket);
@@ -505,7 +505,7 @@ export class WsClient implements ObservableClient {
     if (typeof now !== 'number') return;
     const back = Date.now();
     const offset = Math.round(now - (sentAt + back) / 2);
-    const error = (back - sentAt) / 2;
+    const error = Math.ceil((back - sentAt) / 2);
     const shift = Math.abs(offset - this.#clockOffset);
     if (shift < 1000 || (error >= this.#clockError && shift <= error + this.#clockError)) return;
     this.#clockOffset = offset;
