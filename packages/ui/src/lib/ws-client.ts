@@ -492,14 +492,15 @@ export class WsClient implements ObservableClient {
   /**
    * A probe's hello measures the clocks again, for a device that corrected
    * its own on a live socket, back from sleep. Less than a second apart is
-   * round-trip noise, which would only make a counter skip. A trip of a second
-   * or more, a hello held behind an upload, could hide that much error itself.
+   * round-trip noise, which would only make a counter skip. The middle of the
+   * trip is off by at most half of it, so a slow hello, held behind an upload,
+   * moves the offset only by more than that half: a clock set right still shows.
    */
   #retime(now: number | undefined, sentAt: number): void {
+    if (typeof now !== 'number') return;
     const back = Date.now();
-    if (typeof now !== 'number' || back - sentAt >= 1000) return;
     const offset = Math.round(now - (sentAt + back) / 2);
-    if (Math.abs(offset - this.#clockOffset) < 1000) return;
+    if (Math.abs(offset - this.#clockOffset) < Math.max(1000, (back - sentAt) / 2)) return;
     this.#clockOffset = offset;
     for (const handler of this.#clockHandlers) handler(offset);
   }

@@ -99,8 +99,9 @@ clock plus that offset, so a desktop 11 seconds behind its server no longer
 shows "Elapsed: 0s" for the first 11 seconds. Each liveness probe's `hello`
 measures it again, so a device that sets its clock right on a live socket,
 back from sleep, follows within one probe; a change under a second is
-round-trip noise and is ignored, and so is a probe whose round trip took a
-second or more, a hello held behind an upload. An older core sends no clock
+round-trip noise and is ignored. The middle of a trip is off by at most half
+of it, so a slow probe, a hello held behind an upload, moves the offset only
+by more than that half. An older core sends no clock
 and the offset stays zero.
 
 The client detects silent remote sockets (`packages/ui/src/lib/ws-client.ts`).

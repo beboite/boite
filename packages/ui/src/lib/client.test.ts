@@ -193,6 +193,16 @@ describe('WsClient', () => {
       await late;
       expect(client.clockOffset).toBe(300);
       expect(heard).toEqual([300]);
+      // The same slow trip after the device's clock fell 8 s behind: a shift larger than half the trip still counts.
+      vi.setSystemTime(Date.now() - 8_000);
+      const behind = client.resume();
+      await vi.advanceTimersByTimeAsync(0);
+      const again = Date.now();
+      await vi.advanceTimersByTimeAsync(3_000);
+      socket.receive({ id: socket.frame(3).id, result: { core: { ...CORE, now: again + 2_900 + 8_300 }, principal: 'owner' } });
+      await behind;
+      expect(client.clockOffset).toBe(9_700);
+      expect(heard).toEqual([300, 9_700]);
     } finally { client.close(); vi.useRealTimers(); }
     const old = connected();
     try {
