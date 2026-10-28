@@ -1036,6 +1036,11 @@ function chips(): HTMLElement[] {
   return Array.from(document.querySelectorAll<HTMLElement>('[data-testid=composer-attachment]'));
 }
 
+/** Every file shows as a tile at once; true once none is still being read. */
+function loaded(): boolean {
+  return document.querySelector('[data-testid=composer-attachment][data-loading]') === null;
+}
+
 test('a pasted image becomes a chip, comes off again, and rides the prompt', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
@@ -1043,7 +1048,7 @@ test('a pasted image becomes a chip, comes off again, and rides the prompt', asy
   await waitFor(() => document.querySelector('[data-testid=composer-attach]') !== null);
 
   paste(pngFile());
-  await waitFor(() => chips().length === 1);
+  await waitFor(() => chips().length === 1 && loaded());
   expect(chips()[0]?.getAttribute('title')).toBe('[Image 1] · pixel.png');
   // No decoder here to make a thumbnail: the tile draws the picture by URL, never a data: string.
   const tile = query<HTMLImageElement>('[data-testid=composer-attachment] img').getAttribute('src');
@@ -1290,7 +1295,7 @@ test('the composer buttons keep the focus where it was, and a removed chip opens
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
   paste(pngFile());
-  await waitFor(() => chips().length === 1);
+  await waitFor(() => chips().length === 1 && loaded());
   const pressed = (selector: string) => {
     const event = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
     query(selector).dispatchEvent(event);
@@ -1355,7 +1360,7 @@ test('image references follow the caret, mixed attachments and removal without l
   store.addPreviewReference('t-trace', previewReference);
   await waitFor(() => input().value.endsWith('@Save'));
   paste(pngFile('second.png'));
-  await waitFor(() => input().value.endsWith('[Image 2] '));
+  await waitFor(() => input().value.endsWith('[Image 2] ') && loaded());
   const references = () => Array.from(document.querySelectorAll<HTMLElement>('[data-testid=composer-image-reference]'));
   expect(references().map(item => item.textContent)).toEqual(['[Image 1]', '[Image 2]']);
   references()[1]!.dispatchEvent(new Event('pointerenter'));
@@ -1387,7 +1392,7 @@ test('deleting one character of an image reference removes the reference and its
   paste(pngFile('first.png'));
   await waitFor(() => input().value === 'A [Image 1] ');
   paste(pngFile('second.png'));
-  await waitFor(() => input().value === 'A [Image 1] [Image 2] ');
+  await waitFor(() => input().value === 'A [Image 1] [Image 2] ' && loaded());
   // Backspace with the caret right after the first reference's bracket.
   input().setSelectionRange(11, 11);
   input().dispatchEvent(new Event('beforeinput', { bubbles: true }));
@@ -1400,7 +1405,7 @@ test('deleting one character of an image reference removes the reference and its
   expect(chips()[0]!.getAttribute('title')).toBe('[Image 1] · second.png');
 });
 
-test('sending waits for a file read so the attachment cannot land in the next prompt', async ({ app: _app }) => {
+test('Send pressed during a file read goes once the file is ready, unless the user types on', async ({ app: _app }) => {
   await store.open('t-trace');
   await type('Read these notes');
   const original = FileReader.prototype.readAsDataURL;
@@ -1409,16 +1414,25 @@ test('sending waits for a file read so the attachment cannot land in the next pr
     release = () => original.call(this, blob);
   });
   paste(new File(['notes'], 'notes.txt', { type: 'text/plain' }));
-  await waitFor(() => query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+  // The tile is there before a byte is read, and the box still takes keys.
+  await waitFor(() => chips().length === 1);
+  expect(loaded()).toBe(false);
   const before = store.openThread!.messages.length;
+  const send = () => query<HTMLButtonElement>('[data-testid=composer-send]');
   press('Enter');
+  await waitFor(() => send().dataset.waiting === 'true');
+  // Typing on means the prompt is not finished: the waiting send is dropped.
+  await type('Read these notes, all of them');
+  await waitFor(() => send().dataset.waiting === undefined);
+  press('Enter');
+  await waitFor(() => send().dataset.waiting === 'true');
   expect(store.openThread!.messages.length).toBe(before);
   release();
-  await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
-  press('Enter');
   await waitFor(() => store.openThread!.messages.length > before && !store.busy);
   const sent = store.openThread!.messages.filter(m => m.role === 'user').at(-1)!;
+  expect(sent.parts.some(part => part.type === 'text' && part.text === 'Read these notes, all of them')).toBe(true);
   expect(sent.parts).toContainEqual({ type: 'file', mimeType: 'text/plain', name: 'notes.txt', data: btoa('notes') });
+  expect(input().value).toBe('');
 });
 
 test.for([true, false])('an image pasted during a pending send preserves only unsent content when accepted=%s', async (accepted, { app: _app }) => {
@@ -2055,7 +2069,7 @@ test('Ctrl+Z after deleting everything and a stray key brings back the text and 
   paste(pngFile('first.png'));
   await waitFor(() => input().value === 'Look at [Image 1] ');
   paste(pngFile('second.png'));
-  await waitFor(() => input().value === 'Look at [Image 1] [Image 2] ');
+  await waitFor(() => input().value === 'Look at [Image 1] [Image 2] ' && loaded());
   const full = input().value;
   input().focus();
   // Ctrl+A, Backspace: every reference goes, and every picture with it.
@@ -2102,7 +2116,7 @@ test('copying an image reference carries its picture to another composer, and st
   paste(pngFile('first.png'));
   await waitFor(() => input().value === 'A [Image 1] ');
   paste(pngFile('second.png'));
-  await waitFor(() => input().value === 'A [Image 1] [Image 2] ');
+  await waitFor(() => input().value === 'A [Image 1] [Image 2] ' && loaded());
   input().focus();
   input().setSelectionRange(12, 21);
   const copied = clipboard();

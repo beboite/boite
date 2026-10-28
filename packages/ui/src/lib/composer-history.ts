@@ -124,6 +124,22 @@ export function resetHistory(state: ComposerState): void {
   histories.delete(state);
 }
 
+/**
+ * A file still being read became `ready`, or was refused: every step that
+ * held its placeholder holds the file instead, so an undo after it arrived
+ * never brings back a tile that waits forever, or drops the picture.
+ */
+export function replaceInHistory(state: ComposerState, placeholder: Attachment, ready: Attachment | null): void {
+  const history = histories.get(state);
+  if (!history) return;
+  for (const step of [...history.undo, ...history.redo]) {
+    const at = step.attachments.indexOf(placeholder);
+    if (at < 0) continue;
+    if (ready) step.attachments[at] = ready;
+    else step.attachments.splice(at, 1);
+  }
+}
+
 function travel(state: ComposerState, from: 'undo' | 'redo', selection?: { start: number; end: number }): ComposerSnapshot | null {
   const history = historyOf(state);
   const target = history[from].pop();

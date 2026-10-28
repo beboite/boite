@@ -1,6 +1,8 @@
 import { untrack } from 'svelte';
 import { SvelteMap } from 'svelte/reactivity';
 import { imageSize, type Attachment } from '@boite/contracts';
+import { attachmentSource } from './attachments';
+import { isLoading } from './draft-attachments';
 
 /**
  * The size a composer tile's thumbnail is made at, twice the 56 by 42 tile so
@@ -35,13 +37,15 @@ async function decode(blob: Blob, width: number, height: number): Promise<ImageB
  * A small WebP (a PNG where the browser cannot write WebP) of `data` that
  * covers `width` by `height`, its proportions kept; null when the browser
  * cannot decode or draw it, and the tile falls back to the picture itself.
+ * `source` is the file `data` was read from, when this device has it: its
+ * bytes need no decoding from base64 on the main thread.
  */
-export async function makeThumbnail(data: string, mimeType: string, width = THUMB_WIDTH, height = THUMB_HEIGHT): Promise<Blob | null> {
+export async function makeThumbnail(data: string, mimeType: string, width = THUMB_WIDTH, height = THUMB_HEIGHT, source?: Blob): Promise<Blob | null> {
   if (typeof createImageBitmap !== 'function') return null;
   const size = imageSize(data);
   let bitmap: ImageBitmap | null = null;
   try {
-    const blob = new Blob([bytesOf(data)], { type: mimeType });
+    const blob = source ?? new Blob([bytesOf(data)], { type: mimeType });
     const scale = size ? Math.min(1, Math.max(width / size.width, height / size.height)) : 1;
     const target = size ? { width: Math.max(1, Math.round(size.width * scale)), height: Math.max(1, Math.round(size.height * scale)) } : null;
     bitmap = target ? await decode(blob, target.width, target.height) : await createImageBitmap(blob);
@@ -103,10 +107,10 @@ export class AttachmentPreviews {
     }
     if (!canMakeUrls()) return;
     for (const attachment of attachments) {
-      if (attachment.kind !== 'image' || this.#previews.has(attachment)) continue;
+      if (attachment.kind !== 'image' || isLoading(attachment) || this.#previews.has(attachment)) continue;
       const preview: Preview = { thumb: null, full: null, failed: false };
       this.#previews.set(attachment, preview);
-      void makeThumbnail(attachment.data, attachment.mimeType).then((thumbnail) => {
+      void makeThumbnail(attachment.data, attachment.mimeType, THUMB_WIDTH, THUMB_HEIGHT, attachmentSource(attachment)).then((thumbnail) => {
         if (this.#closed || this.#previews.get(attachment) !== preview) return;
         this.#previews.set(attachment, thumbnail
           ? { ...preview, thumb: URL.createObjectURL(thumbnail) }
@@ -128,7 +132,7 @@ export class AttachmentPreviews {
     if (!preview || !canMakeUrls()) return dataUrl(attachment);
     if (preview.full) return preview.full;
     // Made outside the render's reactive reads: the map is written back once, on its own.
-    preview.full = URL.createObjectURL(new Blob([bytesOf(attachment.data)], { type: attachment.mimeType }));
+    preview.full = URL.createObjectURL(attachmentSource(attachment) ?? new Blob([bytesOf(attachment.data)], { type: attachment.mimeType }));
     return preview.full;
   }
 

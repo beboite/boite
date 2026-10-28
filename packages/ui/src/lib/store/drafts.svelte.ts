@@ -5,7 +5,7 @@ import type { Composer, OutboxRequest } from './composer.svelte';
 import type { StoreContext } from './context';
 import { strings } from '../strings';
 import { readDraftJournal, writeDraftJournal } from '../draft-journal';
-import { unresolvedAssetId, type DraftAttachment } from '../draft-attachments';
+import { readyAttachments, unresolvedAssetId, type DraftAttachment } from '../draft-attachments';
 import { secureId } from '../secure-id';
 
 export type Input = Composer['composerStates'][string];
@@ -619,7 +619,7 @@ function savedInput(input: Input, assetId: (bytes: string) => string) {
   const file = (item: Attachment) => ({ kind: item.kind, mimeType: item.mimeType, name: item.name,
     assetId: unresolvedAssetId(item) ?? assetId(item.data), ...(unresolvedAssetId(item) ? {} : { data: item.data }) });
   // `$state.snapshot` hands anything but an object to `structuredClone`, which an absent list costs on every key.
-  return { text: input.text, editing: input.editing ?? null, attachments: input.attachments.map(file),
+  return { text: input.text, editing: input.editing ?? null, attachments: readyAttachments(input.attachments).map(file),
     previewReferences: input.previewReferences && $state.snapshot(input.previewReferences),
     queued: input.queued.map(item => ({ ...(item.id ? { id: item.id } : {}), ...(item.choice ? { choice: $state.snapshot(item.choice) } : {}),
       ...(item.experiments ? { experiments: [...item.experiments] } : {}), ...(item.sentFrom !== undefined ? { sentFrom: item.sentFrom && { ...item.sentFrom } } : {}),

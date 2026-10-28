@@ -1114,6 +1114,16 @@ source over 50 MB is refused before decoding, since a phone's canvas would not
 hold it. So twenty iPhone screenshots, 2 to 4 MB each as PNG, fit one turn at
 around 400 KB each.
 
+None of this holds the box. A pasted, dropped or picked file shows at once as
+a loading tile, a picture with its `[Image N]` at the caret, and the box keeps
+taking keys while the file is read (`receiveFiles`, `lib/composer-attachments.ts`).
+The reduction runs in a worker (`lib/image-prepare.worker.ts`, `OffscreenCanvas`)
+and falls back to the page where a browser has neither. Files of one composer
+settle in the order they came, each into its placeholder's place, its undo
+steps included. A placeholder is never saved, synced or uploaded. Send pressed
+meanwhile waits on a spinner and goes once every file is ready; typing on
+cancels it. A refused file drops its tile and its reference and says why.
+
 The Claude driver fits every prompt image to the same edge again before it
 goes in (`drivers/claude/images.ts`, Bun's image codec, same format), because
 an image can reach a prompt without passing the composer: a client that sends

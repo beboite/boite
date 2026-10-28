@@ -39,7 +39,7 @@ export function imageTextParts(text: string, attachments: Attachment[]) {
   return parts;
 }
 
-/** Insert only after the file was accepted, into the draft that received it. */
+/** At the caret of the draft that took the picture, as it is taken: its tile loads while the typing goes on. */
 export function insertImageReference(store: Store, key: string) {
   const state = store.composerStates[key];
   if (!state) return;
@@ -68,7 +68,11 @@ export function removeImageReferences(store: Store, key: string, at: number) {
     const end = match.index + match[0].length;
     const replacement = index === number ? '' : imageLabel(index - 1);
     store.editComposerText(key, state.text.slice(0, match.index) + replacement + state.text.slice(end), false, { start: match.index, end });
+    // The caret keeps its place in the words around it, while the user may still be typing.
+    const shift = (at: number) => at >= end ? at + replacement.length - (end - match.index) : Math.min(at, match.index + replacement.length);
+    if (state.selection) state.selection = { start: shift(state.selection.start), end: shift(state.selection.end) };
   }
+  if (state.selection) state.mentionInsertion = (state.mentionInsertion ?? 0) + 1;
 }
 
 /** True when `edit` (a range of `text`) reaches into an image reference: removing it is a step of its own. */
