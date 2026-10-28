@@ -131,7 +131,10 @@
     }
     problem = null;
     stored = text;
-    keep(owner, surfaceId);
+    // The answer settles the panel's draft of the file it was sent for, not this
+    // editor's text: an edit made since, here or in an editor mounted after this
+    // one was closed, stays a draft.
+    owner.saved(surfaceId, text);
     content = { ...file, text, bytes: answer.value.bytes, modifiedAt: answer.value.modifiedAt };
   }
 
@@ -140,8 +143,8 @@
    * hidden panel or another thread unmounts the editor, and the text typed
    * since the last save used to go with it.
    */
-  function keep(owner: BoundPanel = panel, surfaceId: string = surface.id): void {
-    owner.keepDraft(surfaceId, draft === stored ? null : draft);
+  function keep(): void {
+    panel.keepDraft(surface.id, draft === stored ? null : draft);
   }
 
   function edit(text: string): void {

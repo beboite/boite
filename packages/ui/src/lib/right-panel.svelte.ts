@@ -515,6 +515,16 @@ export class BoundPanel {
     else this.#root.drafts.set(this.#key, new SvelteMap([[id, text]]));
   }
 
+  /**
+   * A save of `text` reached the disk. The draft goes only while it is still
+   * that text: an edit made since, in this editor or in one mounted after it,
+   * stays unsaved whichever editor sent the save.
+   */
+  saved(id: string, text: string): void {
+    const held = this.#root.drafts.get(this.#key);
+    if (held?.get(id) === text) held.delete(id);
+  }
+
   /** The ids a close action takes away, so the question asked and the tabs closed agree. */
   closing(action: CloseAction, id: string | null): string[] {
     const ids = this.state.surfaces.map((surface) => surface.id);

@@ -182,6 +182,93 @@ test('a key typed while a save is out stays unsaved and survives a tab switch', 
   store.panel.closeAll();
 });
 
+/** Holds every `files.write` until the returned release runs. */
+function holdWrites(): () => void {
+  const client = store.client!, real = client.call.bind(client);
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  vi.spyOn(client, 'call').mockImplementation((async (method: string, params: unknown) => {
+    if (method === 'files.write') await held;
+    return real(method as never, params as never);
+  }) as never);
+  return release;
+}
+
+async function edit(text: string): Promise<void> {
+  const area = query<HTMLTextAreaElement>('[data-testid=file-text]');
+  area.value = text;
+  area.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+}
+
+test('a save that answers after its editor closed keeps the edit a newer editor made since', async () => {
+  await openWorkbench();
+  const file = store.panel.openFile('docs/guide/tree.md');
+  await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value.includes('# The tree') === true);
+  const release = holdWrites();
+  const sent = `${query<HTMLTextAreaElement>('[data-testid=file-text]').value}Saved.\n`;
+  await edit(sent);
+  await waitFor(() => document.querySelector<HTMLButtonElement>('[data-testid=file-save]')?.disabled === false);
+  query<HTMLButtonElement>('[data-testid=file-save]').click();
+  flushSync();
+
+  // The tab switch unmounts the editor with its save still out; the one mounted next types on.
+  store.panel.openTasks();
+  await waitFor(() => document.querySelector('[data-testid=file-text]') === null);
+  store.panel.activate(file.id);
+  await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value === sent);
+  const newer = `${sent}Typed in the next editor.\n`;
+  await edit(newer);
+  release();
+  await waitFor(async () => {
+    const disk = await store.client!.call('files.read', { threadId: 't-trace', path: 'docs/guide/tree.md' });
+    return disk.kind === 'text' && disk.text === sent;
+  });
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(store.panel.draft(file.id)).toBe(newer);
+  store.panel.openTasks();
+  await waitFor(() => document.querySelector('[data-testid=file-text]') === null);
+  store.panel.activate(file.id);
+  await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value === newer);
+  store.panel.keepDraft(file.id, null);
+  store.panel.closeAll();
+});
+
+test('the same path in two threads is two editors: a save in one never turns the text of the other into its draft', async () => {
+  await openWorkbench();
+  // Another thread on the same folder already shows the file on its active tab.
+  await store.open('t-bench');
+  store.panel.openFile('docs/guide/editor.md');
+  await waitFor(() => (document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value.length ?? 0) > 0);
+  await store.open('t-trace');
+  const file = store.panel.openFile('docs/guide/editor.md');
+  await waitFor(() => (document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value.length ?? 0) > 0);
+  const disk = query<HTMLTextAreaElement>('[data-testid=file-text]').value;
+  const release = holdWrites();
+  const sent = `${disk}From the trace thread.\n`;
+  await edit(sent);
+  await waitFor(() => document.querySelector<HTMLButtonElement>('[data-testid=file-save]')?.disabled === false);
+  query<HTMLButtonElement>('[data-testid=file-save]').click();
+  flushSync();
+
+  // That thread comes back and is typed into before the save answers.
+  await store.open('t-bench');
+  await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value === disk);
+  const other = `${disk}From the bench thread.\n`;
+  await edit(other);
+  release();
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(store.panel.draft(file.id)).toBe(other);
+  store.panel.keepDraft(file.id, null);
+  store.panel.closeAll();
+
+  await store.open('t-trace');
+  // The trace thread's save landed: nothing of the bench thread became its draft.
+  expect(store.panel.draft(file.id)).toBeUndefined();
+  await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value === sent);
+  store.panel.closeAll();
+});
+
 test('the image viewer measures the picture and the zoom buttons move the percentage', async () => {
   await openWorkbench();
   store.panel.openFile('assets/preview.png');
