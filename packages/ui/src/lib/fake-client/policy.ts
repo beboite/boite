@@ -131,17 +131,27 @@ export function checkPolicySettings(ctx: FakeContext, patch: Partial<Settings>):
 /** Applies the policy to what the fake core holds: locked settings, a capped analytics mode and the blocked providers. */
 export function applyPolicy(ctx: FakeContext): void {
   const values = ctx.policy.present ? ctx.policy.values : {};
-  ctx.settings = { ...ctx.settings, ...lockedSettingsOf(values, ctx.settings) };
-  if (values.analytics === 'off') ctx.telemetry = { ...ctx.telemetry, mode: 'off' };
-  if (values.analytics === 'basic' && ctx.telemetry.mode === 'enhanced') ctx.telemetry = { ...ctx.telemetry, mode: 'basic' };
+  const mode = values.analytics === 'off' ? 'off' : values.analytics === 'basic' && ctx.telemetryMode === 'enhanced' ? 'basic' : ctx.telemetryMode;
+  ctx.telemetry = { ...ctx.telemetry, mode };
   markBlockedProviders(ctx, ctx.providers);
 }
+
+/** Only a blocked provider needs its original switch kept while the policy marks its summary off. */
+const providerChoices = new WeakMap<ProviderSummary, boolean | undefined>();
 
 /** Marks each provider the policy keeps off, as the core's loader does: off, with the key and the file. */
 export function markBlockedProviders(ctx: FakeContext, providers: ProviderSummary[]): ProviderSummary[] {
   for (const provider of providers) {
+    if (providerChoices.has(provider)) {
+      provider.enabled = providerChoices.get(provider);
+      providerChoices.delete(provider);
+    }
     const key = providerBlocked(ctx.policy, provider.id);
-    if (key) { provider.enabled = false; provider.policy = { policy: key, file: ctx.policy.file }; }
+    if (key) {
+      providerChoices.set(provider, provider.enabled);
+      provider.enabled = false;
+      provider.policy = { policy: key, file: ctx.policy.file };
+    }
     else if (provider.policy) { delete provider.policy; }
   }
   return providers;

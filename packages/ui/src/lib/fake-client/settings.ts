@@ -6,7 +6,7 @@ import type { FakeContext, FakeMethods } from './context';
 import { gatewayQuotas } from './accounts';
 import { fakeCore } from './coordination';
 import { settleMachineSetting, settleSettings } from './requests';
-import { checkPolicySettings } from './policy';
+import { applyPolicy, checkPolicySettings } from './policy';
 
 export function settingsMethods(ctx: FakeContext) {
   const methods = {
@@ -49,8 +49,9 @@ export function settingsMethods(ctx: FakeContext) {
     'telemetry.configure': async ({ mode, countChoice }) => {
       if (!['off', 'basic', 'enhanced'].includes(mode)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'mode: expected off, basic or enhanced' });
       if (countChoice !== undefined && typeof countChoice !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'countChoice: expected a boolean' });
-      if (ctx.telemetry.mode === 'enhanced' && mode !== 'enhanced') ctx.telemetry.pendingDeletion = true;
-      ctx.telemetry.mode = mode;
+      if (ctx.telemetryMode === 'enhanced' && mode !== 'enhanced') ctx.telemetry.pendingDeletion = true;
+      ctx.telemetryMode = mode;
+      applyPolicy(ctx);
       return { ...ctx.telemetry };
     },
     'telemetry.retryForget': async () => {

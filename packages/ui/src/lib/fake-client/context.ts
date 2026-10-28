@@ -85,7 +85,7 @@ import { FakeWorkflows } from './workflows';
 import { initialDesktopUpdate, initialServerUpdate } from './server-update';
 import { observeLog } from './logs';
 import { followGoal } from './todos';
-import { applyPolicy, policyFixture } from './policy';
+import { applyPolicy, lockedSettingsOf, policyFixture } from './policy';
 import type { FakeWorktree } from './worktrees';
 
 /**
@@ -210,6 +210,8 @@ export class FakeContext {
   /** Each agent's own hooks and the runs that did not pass (`hooks.ts`). */
   hooks: HooksStatus = seedHooks();
   telemetry: TelemetryState = { mode: 'basic', configured: true, pendingDeletion: false };
+  /** The user's analytics choice, before the policy's ceiling is applied. */
+  telemetryMode: TelemetryState['mode'] = 'basic';
   /** The admin policy, as `policy.get` answers it: none, as on most machines, unless `?policy=` names a fixture (`policy.ts`). */
   policy: PolicyState;
   projects: Project[] = [];
@@ -265,7 +267,29 @@ export class FakeContext {
   /** The working tree `files.list`, `files.read` and `files.write` share. */
   readonly files = new Map<string, string>(Object.entries(FAKE_TREE));
   readonly artifactUrls = new Set<string>();
-  settings: Settings;
+  private storedSettings!: Settings;
+
+  /** As in the core, policy values are read over the saved choices, never saved over them. */
+  get settings(): Settings {
+    const saved = this.storedSettings;
+    return this.policy?.present ? { ...saved, ...lockedSettingsOf(this.policy.values, saved) } : saved;
+  }
+
+  set settings(next: Settings) {
+    const saved = this.storedSettings;
+    if (!saved || !this.policy?.present) { this.storedSettings = next; return; }
+    const held = lockedSettingsOf(this.policy.values, saved);
+    const kept = { ...next };
+    for (const key of ['listenOnLan', 'autoInstallUpdates', 'autoUpdateHarnesses', 'groupThreads', 'groupBots'] as const) {
+      if (key in held) Object.assign(kept, { [key]: saved[key] });
+    }
+    // Configuring a gateway while its switch is held off still saves the new address.
+    const proxy = kept.subscriptionProxy;
+    if (proxy && !proxy.enabled && saved.subscriptionProxy?.enabled && lockedSettingsOf(this.policy.values, { ...saved, subscriptionProxy: { ...proxy, enabled: true } }).subscriptionProxy) {
+      kept.subscriptionProxy = { ...proxy, enabled: true };
+    }
+    this.storedSettings = kept;
+  }
   /** What the app last said of itself (`client.preferences`); the fake core has one app. */
   clientPreferences: ClientPreferences | null = null;
   /** Each app's last report by its id, as the core's book keeps them. */
