@@ -59,7 +59,7 @@ export class Coordination {
   private readonly desk: PeerDesk;
   private readonly attempts = new Map<string, number>();
   /** Agents blocked in `collaboration.wait`, by thread. */
-  private readonly waiters = new Map<string, Set<{ from: AgentAddress | null; done: (letters: AgentLetter[]) => void }>>();
+  private readonly waiters = new Map<string, Set<{ from: AgentAddress | null; done: (letters: AgentLetter[]) => void; fail: (error: unknown) => void }>>();
   private ticking = false;
   private readonly timer: ReturnType<typeof setInterval>;
   private readonly off: () => void;
@@ -321,11 +321,12 @@ export class Coordination {
     const sender = from === undefined ? null : address(from, 'from');
     const ready = this.claim(threadId, sender);
     if (ready.length > 0 || timeoutMs === 0) return Promise.resolve({ letters: ready });
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
       const set = this.waiters.get(threadId) ?? new Set();
       this.waiters.set(threadId, set);
       let off: (() => void) | undefined;
-      const waiter = { from: sender, done: (letters: AgentLetter[]) => { clearTimeout(timer); off?.(); set.delete(waiter); if (set.size === 0) this.waiters.delete(threadId); resolve({ letters }); } };
+      const leave = () => { clearTimeout(timer); off?.(); set.delete(waiter); if (set.size === 0) this.waiters.delete(threadId); };
+      const waiter = { from: sender, done: (letters: AgentLetter[]) => { leave(); resolve({ letters }); }, fail: (error: unknown) => { leave(); reject(error); } };
       const timer = setTimeout(() => waiter.done([]), timeoutMs);
       set.add(waiter);
       // A departed CLI cannot read tool output; its waiter must leave the next letter for provider delivery.
@@ -341,13 +342,16 @@ export class Coordination {
     }, () => this.ready(threadId, Infinity, from, true));
     return withRelations(this.core, this.self('').coreId, threadId, letters.map(letter => ({ ...letter, status: 'delivered' as const })));
   }
-  /** A waiting agent takes the letter that just arrived, with what else it may read now. */
+  /**
+   * A waiting agent takes the letter that just arrived, with what else it may read now. Mail held from
+   * one waiter may still reach the next; a fault fails the waiter that read, never the letter's sender.
+   */
   private handToWaiter(letter: AgentLetter): void {
     for (const waiter of this.waiters.get(letter.to.threadId) ?? []) {
       if (waiter.from !== null && !same(waiter.from, letter.from)) continue;
-      const letters = this.claim(letter.to.threadId, waiter.from);
-      if (letters.length > 0) waiter.done(letters);
-      return;
+      let letters: AgentLetter[];
+      try { letters = this.claim(letter.to.threadId, waiter.from); } catch (error) { return waiter.fail(error); }
+      if (letters.length > 0) return waiter.done(letters);
     }
   }
   async send(params: RpcParams<'collaboration.send'>, human = false, connection?: Connection): Promise<AgentLetter> {
@@ -583,9 +587,9 @@ export class Coordination {
    * held contact letters never fill the batch; without `local` the whole batch
    * is refused. `update` refuses to deliver any letter `consume` was not given here.
    */
-  private admit<T>(threadId: string, letters: AgentLetter[], consume: (batch: AgentLetter[]) => T, local?: () => AgentLetter[]): T {
+  private admit<T>(threadId: string, letters: AgentLetter[], consume: (batch: AgentLetter[]) => T, local?: () => AgentLetter[], starting = false): T {
     let batch = letters;
-    try { protectLetters(this.core, threadId, batch); } catch (error) {
+    try { protectLetters(this.core, threadId, batch, starting); } catch (error) {
       // Only a policy refusal holds mail back; anything else is a fault to report.
       if (!local || !(error instanceof RpcFailure) || !batch.some(letter => letter.contact)) throw error;
       batch = local();
@@ -621,10 +625,11 @@ export class Coordination {
     if (sender.mode === 'off') return false;
     return this.inProject(letter) || (recipient.remote && sender.remote);
   }
-  queuedCancelled(threadId: string): void {
+  /** A wake that never reached its provider puts its letters back, those it had already claimed for `turnId` too. */
+  queuedCancelled(threadId: string, turnId?: string): void {
     for (const row of this.rows("thread_id = ? AND direction = 'in' AND status = 'uncertain'", threadId)) {
       const letter = JSON.parse(row.data) as AgentLetter;
-      if (letter.error === 'Queued for provider delivery') this.update(letter, 'received');
+      if (letter.error === 'Queued for provider delivery' || turnId && letter.error === `Awaiting provider turn ${turnId}`) this.update(letter, 'received');
     }
   }
   /** Recheck a queued batch immediately before it crosses the provider boundary. */
@@ -637,7 +642,7 @@ export class Coordination {
       this.restoreProject(threadId);
       for (const letter of letters) this.update(letter, 'uncertain', `Awaiting provider turn ${turnId}`);
       return true;
-    });
+    }, undefined, true);
   }
   private async steer(threadId: string, prompt: string): Promise<{ submitted: boolean } | null> {
     if (this.closed) return null;

@@ -657,6 +657,20 @@ test('a waiting agent takes its answer directly, and the recipient is not woken 
   expect((await h.core.coordination.wait(a, undefined, 0)).letters).toEqual([]);
 });
 
+test('a waiter whose mail is held leaves the arrival to the next waiter of the thread', async () => {
+  const { h, a, b } = await setup();
+  const held = h.core.coordination.wait(a, dest(h, b), 5000);
+  const open = h.core.coordination.wait(a, undefined, 5000);
+  // The first waiter's read comes back empty, as when its contact mail waits for an idle turn.
+  const desk = h.core.coordination as unknown as { claim(threadId: string, from: AgentAddress | null): unknown[] };
+  const claim = spyOn(desk, 'claim').mockImplementationOnce(() => []);
+  try {
+    const answer = await send(h, b, dest(h, a), 'Done, you can restart.');
+    expect((await open).letters.map(l => [l.id, l.status])).toEqual([[answer.id, 'delivered']]);
+  } finally { claim.mockRestore(); }
+  expect((await held).letters).toEqual([]);
+}, 10000);
+
 test('a disconnected inbox waiter leaves the next answer for a provider wake', async () => {
   const { h, a, b } = await setup();
   const client = await connect(h.url, h.core.agents.tokenFor(a));

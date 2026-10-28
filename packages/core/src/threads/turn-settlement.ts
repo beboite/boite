@@ -28,7 +28,7 @@ export function markQueuedStopped(core: Core, turnId: TurnId): void {
     core.bus.emit('turn.finished', next);
     setThreadStatus(core, turn.threadId, 'idle');
   })());
-  if (turn.execution?.operation === 'coordination') core.coordination.queuedCancelled(turn.threadId);
+  if (turn.execution?.operation === 'coordination') core.coordination.queuedCancelled(turn.threadId, turn.id);
 }
 
 /**

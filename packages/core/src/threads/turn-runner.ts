@@ -2,7 +2,7 @@ import type { PermissionMode, ProviderId, ThreadId, ThreadRetry, ThreadSummary, 
 import type { Core } from '../core.ts';
 import { getDriver, releaseThread } from '../drivers/index.ts';
 import type { TurnResult } from '../drivers/types.ts';
-import { messageOf, refused } from '../errors.ts';
+import { messageOf, refused, RpcFailure } from '../errors.ts';
 import { logMessageOf } from '../log-errors.ts';
 import { reportSettlementError, settleTurn } from './turn-settlement.ts';
 import type { ThreadStore } from '../threads.ts';
@@ -73,9 +73,13 @@ export class TurnRunner {
     if (next.effort !== before.effort || next.speed !== before.speed) this.attempts.changeSettings(next.id, next);
   }
 
-  /** A wake whose letters cannot cross, refused or faulted, still stops and puts them back in the inbox. */
+  /**
+   * A wake whose letters cannot cross stops and puts them back in the inbox: a refusal is that
+   * ordinary stop, a fault also reaches the scheduler's error log.
+   */
   private prepareWake(turnId: TurnId, threadId: ThreadId): boolean {
     try { return this.core.coordination.prepareWake(threadId, turnId); } catch (error) {
+      if (error instanceof RpcFailure) return false;
       this.threads.markQueuedStopped(turnId);
       throw error;
     }

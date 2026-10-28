@@ -1,7 +1,7 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AgentAddress, CoordinationConfig } from '@boite/contracts';
+import type { AgentAddress, AgentLetter, CoordinationConfig } from '@boite/contracts';
 import { Core } from '../src/core.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { refused } from '../src/errors.ts';
@@ -232,14 +232,49 @@ test('a queued wake whose protection refuses at the provider boundary stops and 
   // The letter's status the moment the stopped wake gives it back, before any later delivery takes it again.
   const statuses: (string | undefined)[] = [];
   const restore = h.core.coordination.queuedCancelled.bind(h.core.coordination);
-  const cancelled = spyOn(h.core.coordination, 'queuedCancelled').mockImplementation(threadId => {
-    restore(threadId);
+  const cancelled = spyOn(h.core.coordination, 'queuedCancelled').mockImplementation((threadId, turn) => {
+    restore(threadId, turn);
     statuses.push(h.core.coordination.get(to).messages.find(message => message.id === letter.id)?.status);
   });
-  restores.push(() => { prepare.mockRestore(); cancelled.mockRestore(); });
+  // The refusal is an ordinary stop: the scheduler's run of the turn ends without an error.
+  let ran: Promise<void> | undefined;
+  const run = h.core.threads.runTurn.bind(h.core.threads);
+  const runs = spyOn(h.core.threads, 'runTurn').mockImplementation((id, threadId) => {
+    const result = run(id, threadId);
+    if (id === turnId) ran = result;
+    return result;
+  });
+  restores.push(() => { prepare.mockRestore(); cancelled.mockRestore(); runs.mockRestore(); });
   stopBlocker();
   releaseAdmission();
   await waitFor(() => h.core.journal.getTurn(turnId)?.status === 'stopped', 8000);
+  expect(statuses).toEqual(['received']);
+  expect(await ran!.then(() => 'resolved', () => 'rejected')).toBe('resolved');
+}, 12000);
+
+test('a wake that faults after claiming part of its batch puts the claimed letters back too', async () => {
+  const { h, to, letter, stopBlocker, releaseAdmission } = await setupQueued();
+  const turnId = h.core.journal.listTurns(to)[0]!.id;
+  const desk = h.core.coordination as unknown as { update(letter: AgentLetter, status: string, error?: string): void };
+  const original = desk.update.bind(desk);
+  let faulted = false;
+  // The batch's first letter is claimed for the turn, then the journal fails before the rest.
+  const update = spyOn(desk, 'update').mockImplementation((entry, status, error) => {
+    original(entry, status, error);
+    if (!faulted && error?.startsWith('Awaiting provider turn')) { faulted = true; throw new Error('journal write failed'); }
+  });
+  // As above: the status at the moment the stopped wake gives the batch back, before a later wake claims it again.
+  const statuses: (string | undefined)[] = [];
+  const restore = h.core.coordination.queuedCancelled.bind(h.core.coordination);
+  const cancelled = spyOn(h.core.coordination, 'queuedCancelled').mockImplementation((threadId, turn) => {
+    restore(threadId, turn);
+    statuses.push(h.core.coordination.get(to).messages.find(message => message.id === letter.id)?.status);
+  });
+  restores.push(() => { update.mockRestore(); cancelled.mockRestore(); });
+  stopBlocker();
+  releaseAdmission();
+  await waitFor(() => h.core.journal.getTurn(turnId)?.status === 'stopped', 8000);
+  expect(faulted).toBe(true);
   expect(statuses).toEqual(['received']);
 }, 12000);
 

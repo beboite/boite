@@ -167,6 +167,20 @@ test('SEC-01 a fault while protecting contact mail is reported, never taken for 
   } finally {deliver.mockRestore();}
 },30000);
 
+test('SEC-01 a fault while handing contact mail to a waiting agent fails that wait, never the arrival',async()=>{
+  const {a,b}=await pair();
+  const deliver=spyOn(b.h.core.coordination as unknown as {deliver(threadId:string):Promise<void>},'deliver').mockResolvedValue(undefined);
+  const support=spyOn(b.h.core.sharedAccess.execution,'support').mockImplementation(()=>{throw new Error('checkout unreadable');});
+  try {
+    const waiting=b.h.core.coordination.wait(b.t.id,undefined,5000).then(()=>null,(error:unknown)=>error);
+    const letter=await a.c.call('contacts.sendHuman',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'External correspondence',requestId:'handoff-fault'});
+    expect(String(await waiting)).toContain('checkout unreadable');
+    expect(b.h.core.coordination.get(b.t.id).messages.find(l=>l.id===letter.id)?.status).toBe('received');
+    // The arrival still asks for a provider delivery, which picks the letter up once protection works.
+    await waitFor(()=>deliver.mock.calls.some(([threadId])=>threadId===b.t.id));
+  } finally {support.mockRestore();deliver.mockRestore();}
+},30000);
+
 test.each([false,true])('SEC-01 historical letters survive restart without losing protection (old history: %s)',async old=>{
   const {a,b}=await pair();const id=await association(a,b);
   const letter=await a.c.call('collaboration.send',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'Ordinary project correspondence',requestId:'history'});
@@ -208,6 +222,50 @@ test('SEC-01 consumed associations intersect their live authority instead of rep
   await b.c.call('sharedProjects.configure',{sharedProjectId:first,board:true});
   expect(()=>b.h.core.sharedAccess.assertTurn(b.t.id)).toThrow('shared file policy');
   expect(await thrown(b.c.call('files.read',{threadId:b.t.id,path:'ordinary.txt'}))).toThrow('shared file policy');
+},30000);
+
+test('SEC-01 contact mail a bound native thread admitted idle is not refused again by its own queued wake',async()=>{
+  const {a,b}=await pair();
+  const core=b.h.core,id=b.t.id;
+  const deliver=spyOn(core.coordination as unknown as {deliver(threadId:string):Promise<void>},'deliver').mockResolvedValue(undefined);
+  // A protected native route with a captured binding stands in for a prepared one: no CLI, helper, login or inference.
+  core.providers.require('echo').protocol='claude-sdk';
+  const mocks=[
+    spyOn(core.sharedAccess.execution,'support').mockReturnValue({supported:true,boundary:'isolated-process'}),
+    spyOn(core.sharedAccess,'bound').mockReturnValue({job:{sharedProjectId:'shp_fixture'}} as never),
+    spyOn(core.sharedAccess,'assertTurn').mockReturnValue(undefined),
+    spyOn(core.sharedAccess.execution,'reconcile').mockReturnValue(undefined),
+  ];
+  try {
+    // A contact answer carries no association of its own.
+    const letter=await a.c.call('contacts.sendHuman',{threadId:a.t.id,to:{coreId:b.id,threadId:id},text:'External answer',requestId:'bound-native'});
+    await waitFor(()=>core.coordination.get(id).messages.some(l=>l.id===letter.id));
+    const desk=core.coordination as unknown as {admit(threadId:string,letters:AgentLetter[],consume:(batch:AgentLetter[])=>void):void;update(letter:AgentLetter,status:string,error:string):void};
+    const entry=core.coordination.get(id).messages.find(l=>l.id===letter.id)!;
+    expect(entry.sharedProjectId).toBeUndefined();
+    // Idle, the thread admits it and queues its wake.
+    desk.admit(id,[entry],()=>desk.update(entry,'uncertain','Queued for provider delivery'));
+    const thread=core.threads.require(id),require=core.threads.require.bind(core.threads);
+    mocks.push(spyOn(core.threads,'require').mockImplementation(threadId=>threadId===id?{...thread,status:'queued'}:require(threadId)));
+    // The thread is queued for that wake alone: the same letter crosses, it is not refused into a retry loop.
+    expect(core.coordination.prepareWake(id,'trn_fixture')).toBe(true);
+    expect(core.coordination.get(id).messages.find(l=>l.id===letter.id)).toMatchObject({status:'uncertain',error:'Awaiting provider turn trn_fixture'});
+  } finally {core.providers.require('echo').protocol='echo';for(const mock of mocks)mock.mockRestore();deliver.mockRestore();}
+},30000);
+
+test('SEC-01 a directory drops what an association revoked while its lookup was pending returned',async()=>{
+  const {a,b}=await pair();const id=await association(a,b);
+  expect((await a.h.core.coordination.directory(a.t.id)).agents.some(contact=>contact.coreId===b.id)).toBe(true);
+  const service=a.h.core.sharedProjects,real=service.threads.bind(service);
+  const asked=Promise.withResolvers<void>(),held=Promise.withResolvers<void>();
+  const threads=spyOn(service,'threads').mockImplementation(async scope=>{const result=await real(scope);asked.resolve();await held.promise;return result;});
+  try {
+    const pending=a.h.core.coordination.directory(a.t.id);
+    await asked.promise;
+    await a.c.call('sharedProjects.revoke',{sharedProjectId:id,requestId:'revoke'});
+    held.resolve();
+    expect((await pending).agents.filter(contact=>contact.coreId===b.id)).toEqual([]);
+  } finally {held.resolve();threads.mockRestore();}
 },30000);
 
 test.each(['claude-sdk','codex-appserver','acp','muse','pi'] as const)('SEC-01 unsupported %s warm sessions receive no unprotected external prompt',async protocol=>{

@@ -68,7 +68,7 @@ export class ThreadRecovery {
       const resumes = previous === 'running' && this.core.threads.autoContinue.resumesCrashed(turn);
       this.core.journal.db.transaction(() => {
         this.failStuckTurn(turn, previous === 'running' ? resumes ? CRASH_RESUMING : CRASH_WHILE_RUNNING : CRASH_WHILE_QUEUED);
-        if (previous === 'queued' && turn.execution?.operation === 'coordination') this.core.coordination.queuedCancelled(turn.threadId);
+        if (previous === 'queued' && turn.execution?.operation === 'coordination') this.core.coordination.queuedCancelled(turn.threadId, turn.id);
       })();
       counts.failed += 1;
       this.core.log(
