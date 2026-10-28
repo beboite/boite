@@ -29,7 +29,7 @@ const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwA
 let harness: TestCore | null = null;
 let logFile = '';
 /** The variables these tests set, as the process had them: a later test file gets them back. */
-const TOUCHED = ['HERMES_FAKE_LOG', 'HERMES_FAKE_FORGET', 'HERMES_FAKE_LOAD_BARE', 'HERMES_FAKE_LOAD_OPTION', 'HERMES_FAKE_NEW_FAIL', 'OPENAI_API_KEY', 'LOCALAPPDATA'];
+const TOUCHED = ['HERMES_FAKE_LOG', 'HERMES_FAKE_FORGET', 'HERMES_FAKE_LOAD_BARE', 'HERMES_FAKE_LOAD_OPTION', 'HERMES_FAKE_NEW_FAIL', 'HERMES_FAKE_MODEL_FAIL', 'OPENAI_API_KEY', 'LOCALAPPDATA'];
 const outer = new Map(TOUCHED.map((name) => [name, process.env[name]]));
 
 afterEach(async () => {
@@ -232,6 +232,23 @@ describe('hermes', () => {
     await runTurn(client, threadId, 'back');
     expect(loggedLines('set_model ')).toEqual([LLAMA, QWEN, LLAMA, QWEN]);
     expect(loggedLines('initialize').length).toBe(2);
+  });
+
+  test('a refused return to the agent own model fails without prompting the previous model', async () => {
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const { threadId } = await hermesThread(client, LLAMA);
+    await runTurn(client, threadId, 'first');
+    await waitFor(() => harness?.core.procs.liveCount(threadId) === 0);
+
+    process.env['HERMES_FAKE_MODEL_FAIL'] = QWEN;
+    await client.call('threads.update', { threadId, model: 'default' });
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'back' });
+    const turn = await finished;
+    expect(turn.status).toBe('error');
+    expect(turn.error).toContain(`refused the model ${QWEN}`);
+    expect(loggedLines('model-refused ')).toEqual([QWEN]);
+    expect(loggedLines('prompt ')).toHaveLength(1);
   });
 
   test('a session already on the thread model, or a thread on the agent own model, sends no set_model', async () => {

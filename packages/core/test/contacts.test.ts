@@ -132,6 +132,28 @@ test('a granted project is all a contact sees: letters cross both ways, an ungra
   expect(await thrown(guest.core.coordination.read(guestThread, { coreId: hostId, threadId: hostClosed }))).toThrow('not a thread of a project opened to you');
 }, 30000);
 
+test('a grant made while the contact sync is in flight reaches the contact without waiting for the periodic flush', async () => {
+  const { host, guest, guestClient, hostId, guestId } = await linked();
+  await waitFor(() => host.core.contacts.find(guestId)?.capabilities?.humanLetters === 1);
+  const first = await project(guest, guestClient, 'first');
+  const second = await project(guest, guestClient, 'second');
+  // Hold the sync that carries the first grant, so the second lands while it is in flight.
+  const gate = Promise.withResolvers<void>();
+  let holding = false;
+  const request = guest.core.coordination.request.bind(guest.core.coordination);
+  guest.core.coordination.request = async (peer, operation, payload) => {
+    if (operation === 'contact.sync' && !holding && (payload as { offers: unknown[] }).offers.length === 1) { holding = true; await gate.promise; }
+    return request(peer, operation, payload);
+  };
+  restore = () => { guest.core.coordination.request = request; };
+  await guestClient.call('contacts.grant', { coreId: hostId, projectId: first.id });
+  await waitFor(() => holding);
+  await guestClient.call('contacts.grant', { coreId: hostId, projectId: second.id });
+  gate.resolve();
+  // The periodic flush runs every 30 seconds; the second grant must not wait for it.
+  await waitFor(() => host.core.contacts.find(guestId)?.offers.length === 2);
+}, 30000);
+
 test('model tiers: a sender below its own owner\'s tier cannot write, and a letter whose attested model is below the recipient\'s tier is refused', async () => {
   const { host, guest, hostClient, guestClient, hostId, guestId } = await linked();
   const open = await project(host, hostClient, 'alpha');

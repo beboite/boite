@@ -717,9 +717,9 @@ descriptor uses additional fields available to other providers:
 `quirks: ["antigravity"]` folds a tool call's command, working directory and
 output under one spelling and draws an `interaction_` permission request as the
 agent's own question; its modes are `default`, `auto_edit` and `yolo`, with no
-plan mode. A `start_subagent` call (titled `Running start_subagent` or `Run
-start_subagent?`, without `_meta.is_mcp_tool_call`) carries the batch it
-launched as `nativeAgents`, listed in Subagents: the call returns once the batch
+plan mode. An `invoke_subagent` call (titled `Running invoke_subagent` or `Run
+invoke_subagent?`; agents before 1.4.1 name it `start_subagent`; without
+`_meta.is_mcp_tool_call`) carries the batch it launched as `nativeAgents`, listed in Subagents: the call returns once the batch
 is launched, its output is the launch's description, and the agent reports no
 child ids, names, models or results, so the batch stays running while the turn
 runs and reads unknown after it; only a failed launch is final, with its error.
@@ -949,9 +949,10 @@ a Job Object and in the trace like any other, then asks the protocol's own quest
   puts the effort back on `default` with any model change, so the effort goes
   again after one; a thread with no effort sends `default` when the agent lists
   it, and a thread back on the agent's own model asks for the model the
-  session opened on. A value the agent refuses is not asked again in that
-  process: an injected gateway model it never takes costs one round of retries,
-  not one per turn.
+  session opened on. A refused effort is not asked again in that process.
+  A model the agent lists without the selected value, or refuses after any
+  injected-model retries, stops the turn before its prompt. A later turn can
+  retry that model.
 - Codex: `initialize`, the `initialized` notification, then `model/list` until no
   cursor comes back. Each model carries its own efforts and its own default, so
   two models on one account can offer two different scales. `serviceTiers` supplies
@@ -1305,7 +1306,10 @@ differ from what the session was given, the session gets
 
 The CLI's end releases the registration, not the turn's: a warm or viewed
 session keeps its CLI across turns, and the servers it started with it. The
-core then closes each server's stdin and kills it after 3 seconds. A server
+core then closes each server's stdin and, after 3 seconds, stops it with what
+it started. The core reads a server's stdout as lines of at most 16 MiB
+through the drivers' shared `LineSplitter`; a longer line fails every call the
+server owed and stops it the same way. A server
 whose command, arguments or environment hold a `${...}` reference stays with
 the CLI, which expands it. Set `BOITE_LAZY_MCP=0` in the core's environment
 to give the CLI the servers as configured.
@@ -1541,8 +1545,9 @@ runs hosted models and local ones through any OpenAI-compatible server
   reads `models.availableModels` from `session/new`, ids `provider:model`
   (`custom:qwen2.5-0.5b`). Hermes 0.21.5 answers no config options, so the
   model goes out as `session/set_model` with no effort; Hermes answers -32603
-  while a turn runs and -32602 for a model it does not have, each one warning in
-  the log. Switching can take seconds, since Hermes rebuilds its agent.
+  while a turn runs and -32602 for a model it does not have. A refused switch,
+  including a return to the configured default, stops the turn before its
+  prompt. Switching can take seconds, since Hermes rebuilds its agent.
 - Modes: `default` asks before edits and dangerous commands, `accept_edits`
   allows edits inside the workspace and `dont_ask` allows edits outside
   sensitive paths. `acceptEdits` and `dontAsk` map to those two, the others to

@@ -83,6 +83,30 @@ test('disconnect, configuration changes and session expiry release the decoder r
   await next.call('speech.streamFinish', { revision, requestId: 'again', sequence: 0 });
 });
 
+test('a request for one model never runs on the engine a request for another model loaded meanwhile', async () => {
+  const { native, nativeRuntime } = harness.core.speech.local;
+  native.commandOverride!.push('--echo-model');
+  await native.ensure(nativeRuntime, 'old');
+  const ask = async (model: string) => {
+    const engine = await native.ensure(nativeRuntime, model);
+    return native.request('transcribe', {}, AbortSignal.timeout(5000), engine);
+  };
+  const [a, b] = await Promise.allSettled([ask('model-A'), ask('model-B')]);
+  // B's start stopped A's engine while it loaded: A is refused, never answered by B.
+  expect(a.status === 'rejected' ? String(a.reason) : a.value.text).toContain('cancelled');
+  expect(b).toMatchObject({ status: 'fulfilled', value: { text: 'model-B' } });
+}, 15_000);
+
+test('a stream whose engine another model replaced is refused, never finished by the replacement', async () => {
+  const { native, nativeRuntime } = harness.core.speech.local;
+  native.commandOverride!.push('--echo-model');
+  const client = await harness.connect();
+  const revision = harness.core.speech.status().revision;
+  await client.call('speech.streamStart', { revision, requestId: 'replaced' });
+  await native.ensure(nativeRuntime, 'model-B');
+  expect(await thrown(client.call('speech.streamFinish', { revision, requestId: 'replaced', sequence: 0, audio: wav() }))).toThrow('the voice model changed');
+}, 15_000);
+
 test('cancelling model load rejects the start and never delivers a late stream', async () => {
   harness.core.speech.local.native.commandOverride!.push('--slow-load');
   const client = await harness.connect();

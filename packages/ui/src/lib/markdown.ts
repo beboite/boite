@@ -1,4 +1,5 @@
 import { inline, mathHtml } from './markdown-inline';
+import { closesFence, fenceLanguage, openFence } from './fences';
 /**
  * The markdown an agent answer needs: paragraphs, headings, nested and task
  * lists, block quotes, tables, rules, fenced and inline code, bold, italic,
@@ -21,7 +22,6 @@ function escape(text: string): string {
     .replaceAll('"', '&quot;');
 }
 
-const FENCE = /^```([\w+-]*)\s*$/;
 const HEADING = /^(#{1,6})\s+(.+)$/;
 const RULE = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/;
 const ITEM = /^(\s*)(?:[-*+]|\d+[.)])\s+(.*)$/;
@@ -140,7 +140,8 @@ export function renderMarkdown(source: string, rich = false): string {
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? '';
-    const fence = readFence(lines, index);
+    // An indented line under an open item belongs to the item, a fence included, as it always has.
+    const fence = list.takes(line) ? null : readFence(lines, index);
     if (fence) {
       flushAll();
       html.push(fence.html);
@@ -214,20 +215,23 @@ export function renderMarkdown(source: string, rich = false): string {
 
 interface Block { html: string; end: number }
 
+/** A fenced block under the grammar of `lib/fences.ts`, its code shifted left by the opening line's indent. */
 function readFence(lines: string[], start: number): Block | null {
-  const fence = FENCE.exec(lines[start] ?? '');
+  const fence = openFence(lines[start] ?? '');
   if (!fence) return null;
+  const outdent = new RegExp(`^ {0,${fence.indent}}`);
   const code: string[] = [];
   let end = start + 1;
-  while (end < lines.length && !FENCE.test(lines[end] ?? '')) code.push(lines[end++] ?? '');
+  while (end < lines.length && !closesFence(lines[end] ?? '', fence)) code.push((lines[end++] ?? '').replace(outdent, ''));
   const source = code.join('\n');
   // Only a closed block is drawn: one still being written stays code.
   const closed = end < lines.length;
-  const kind = fence[1]?.toLowerCase();
+  const name = fenceLanguage(fence);
+  const kind = name.toLowerCase();
   if (closed && kind === 'math' && source.trim()) {
     return { html: mathHtml('div', source.trim(), lines.slice(start, end + 1).join('\n'), true), end };
   }
-  const language = fence[1] ? ` data-language="${escape(fence[1])}"` : '';
+  const language = name ? ` data-language="${escape(name)}"` : '';
   const pre = `<pre${language}><code>${escape(source)}</code></pre>`;
   if (closed && kind === 'mermaid' && source.trim()) return { html: `<div class="md-mermaid" data-source="${escape(source)}">${pre}</div>`, end };
   return { html: pre, end };
@@ -315,10 +319,14 @@ class MarkdownList {
     return previous;
   }
 
+  /** Whether `continue` would add this line to the open item. */
+  takes(line: string): boolean {
+    return this.stack.length > 0 && /^\s{2,}\S/.test(line);
+  }
+
   continue(line: string): boolean {
-    const open = this.stack[this.stack.length - 1];
-    if (!open || !/^\s{2,}\S/.test(line)) return false;
-    open.text += ` ${line.trim()}`;
+    if (!this.takes(line)) return false;
+    this.stack[this.stack.length - 1]!.text += ` ${line.trim()}`;
     return true;
   }
 

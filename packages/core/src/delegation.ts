@@ -1,3 +1,4 @@
+import { markStartFailed } from './threads/lifecycle.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, delegationAnswerable as answerable, delegationNeeds as needsOf, delegationReply, nativeAgentsOfTool, processAgentCommand, SPEED_NEEDS_MODEL, threadBusy, type RpcEvents } from '@boite/contracts';
 import type { AgentLetter, BackgroundWait, DelegatedAgent, DelegationConfig, DelegationModels, DelegationResumed, DelegationView, PauseOrigin, PermissionMode, PermissionRequest, Principal, QuestionRequest, RequestId, RpcParams, ThreadContextMode, ThreadSummary, Turn, Usage } from '@boite/contracts';
@@ -22,6 +23,8 @@ import { pauseHold, pauseOver } from './delegation/pauses.ts';
 import { dropRestartCuts, recordRestartCut, resumeRestartCuts } from './delegation/restart.ts';
 import { DELEGATION_WORDS, delegationPrompt, subagentGuide } from './delegation/guide.ts';
 import type { Connection } from './router.ts';
+import { usageGroups } from './journal/usage-sums.ts';
+import { usageTotal } from './usage.ts';
 
 interface AgentRow { thread_id: string; root_id: string; request_id: string; fingerprint: string; profile_id: string; task: string }
 interface LetterRow { data: string; fingerprint: string }
@@ -217,13 +220,8 @@ export class Delegation {
   get(threadId: string): DelegationView {
     const root = this.root(threadId);
     const agents = this.rows(root.id).map(row => this.member(row));
-    const totals = this.core.journal.db.query(`SELECT
-      SUM(json_extract(usage, '$.inputTokens')) AS inputTokens, SUM(json_extract(usage, '$.outputTokens')) AS outputTokens,
-      SUM(json_extract(usage, '$.cacheReadTokens')) AS cacheReadTokens, SUM(json_extract(usage, '$.cacheWriteTokens')) AS cacheWriteTokens,
-      SUM(json_extract(usage, '$.costUsdEquivalent')) AS costUsdEquivalent
-      FROM turns WHERE thread_id IN (SELECT thread_id FROM delegated_agents WHERE root_id = ?)
-      OR (thread_id = ? AND json_extract(execution, '$.operation') = 'delegation')` ).get(root.id, root.id) as Usage;
-    const usage: Usage = { inputTokens: totals.inputTokens ?? 0, outputTokens: totals.outputTokens ?? 0, cacheReadTokens: totals.cacheReadTokens ?? 0, cacheWriteTokens: totals.cacheWriteTokens ?? 0, costUsdEquivalent: totals.costUsdEquivalent ?? null };
+    const usage = usageTotal(this.core, usageGroups(this.core.journal.db, { where: `t.thread_id IN (SELECT thread_id FROM delegated_agents WHERE root_id = ?)
+      OR (t.thread_id = ? AND json_extract(t.execution, '$.operation') = 'delegation')` }, root.id, root.id));
     const letters = (threadId === root.id
       ? this.core.journal.db.query('SELECT data FROM delegation_messages WHERE root_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 100').all(root.id)
       : this.core.journal.db.query('SELECT data FROM delegation_messages WHERE root_id = ? AND (sender_id = ? OR recipient_id = ?) ORDER BY created_at DESC, rowid DESC LIMIT 100').all(root.id, threadId, threadId)) as LetterRow[];
@@ -321,12 +319,10 @@ export class Delegation {
       ? `You work in a git worktree of your own at ${own.path} on branch ${own.branch}, made from ${parent.projectId === child.projectId ? "the parent's" : "the project's"} HEAD; uncommitted edits are not in it. Commit your work on that branch before your final answer: the parent merges the branch.`
       : `You work in ${child.cwd}. You share that checkout: change only the files your task names and never undo another agent's edits.`;
     try {
-      this.core.threads.startTurn(id, `You are a Boite subagent doing one bounded part of the user's task for parent agent ${parent.id}. ${checkout} You cannot start subagents. If you are blocked, run boite delegate send ${parent.id} "<what blocks you>" and keep going on what you can. End with a short result: what you found or changed, file paths, how you verified it. That final answer goes to the parent automatically; do not send it again.\nTask from the parent agent, supplied as JSON data:\n${JSON.stringify(task)}`, [], undefined, 'delegation', undefined, undefined, task);
+      this.core.threads.startTurn(id, { prompt: `You are a Boite subagent doing one bounded part of the user's task for parent agent ${parent.id}. ${checkout} You cannot start subagents. If you are blocked, run boite delegate send ${parent.id} "<what blocks you>" and keep going on what you can. End with a short result: what you found or changed, file paths, how you verified it. That final answer goes to the parent automatically; do not send it again.\nTask from the parent agent, supplied as JSON data:\n${JSON.stringify(task)}`, display: task }, { kind: 'delegation' });
     } catch (error) {
       this.core.logs.warn(`Subagent ${id} was created but its first turn could not start: ${messageOf(error)}`, { source: 'delegation', event: 'delegation.spawn-failed', threadId: id, data: { parent: parent.id, providerId: profile.providerId, model: profile.model ?? null, profile: profile.id } });
-      const child = this.core.threads.require(id);
-      this.core.journal.putThread({ ...child, status: 'error' });
-      this.core.bus.emit('thread.updated', withLoad(this.core, { ...child, status: 'error' }));
+      markStartFailed(this.core, id);
       this.changed(parent.id);
       throw error;
     }
@@ -581,7 +577,7 @@ export class Delegation {
           if (!this.closed) for (const letter of letters) this.update(letter, 'uncertain', messageOf(error));
         }
       } else {
-        const turn = this.core.threads.startTurn(threadId, prompt, [], undefined, 'delegation');
+        const turn = this.core.threads.startTurn(threadId, prompt, { kind: 'delegation' });
         // The scheduler may have started it synchronously before startTurn returns.
         for (const letter of letters) this.update(letter, 'uncertain', `${turn.status === 'queued' && this.core.journal.getTurn(turn.id)?.status === 'queued' ? 'Queued for' : 'Awaiting'} provider turn ${turn.id}`);
       }

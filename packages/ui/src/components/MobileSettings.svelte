@@ -28,6 +28,7 @@
   import InfoTip from './InfoTip.svelte';
   import { tick, type Snippet } from 'svelte';
   import { revealSettingsCard } from '../lib/settings-flash';
+  import { phonePage } from '../lib/settings-tabs';
 
   /**
    * `target` is the machine the settings bar picked, `store` this window's:
@@ -38,21 +39,14 @@
   /** The analytics switches, on a screen of their own beside the notifications. */
   let privacy = $state(false);
   /**
-   * The phone has no General page, so the archive, which lives there on the
-   * desktop, gets a page of its own; a jump to the desktop's card (the palette,
-   * the project menu) lands on it too.
+   * The phone has no General or Advanced page: the cards a phone needs from
+   * them, the archive or the keys, get a page of their own, which a jump to the
+   * desktop's card (the palette, the project menu) lands on too
+   * (`lib/settings-tabs.ts`). Phone and privacy are this phone's own screens,
+   * opened from Home.
    */
-  let archivePage = $derived(store.settingsTab === 'general' && store.settingsSection?.id === 'archived');
-  let worktreesPage = $derived(store.owner && store.settingsTab === 'general' && store.settingsSection?.id === 'worktrees');
-  /** Both window cards on one page: the allowed apps and the ones never captured. */
-  let windowsPage = $derived(store.owner && store.settingsTab === 'general' && (store.settingsSection?.id === 'windows' || store.settingsSection?.id === 'window-exclusions'));
-  /** The keys kept per project: a paired phone sees them too. */
-  let secretsPage = $derived(store.settingsTab === 'general' && store.settingsSection?.id === 'secrets');
-  let browserProfilesPage = $derived(store.owner && store.settingsTab === 'general' && store.settingsSection?.id === 'browser-profiles');
-  /** The one card of the desktop's Advanced page that is about conversations, not about the machine. */
-  let compactPage = $derived(store.owner && store.settingsTab === 'advanced' && store.settingsSection?.id === 'auto-compact');
-  let page = $derived((store.owner && (store.settingsTab === 'brain' || store.settingsTab === 'resources' || store.settingsTab === 'diagnostics')) || store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice' || store.settingsTab === 'usage' || store.settingsTab === 'limits' || store.settingsTab === 'task-manager' || store.settingsTab === 'experiments'
-    ? store.settingsTab : phone ? 'phone' : privacy ? 'privacy' : archivePage ? 'archived' : worktreesPage ? 'worktrees' : windowsPage ? 'windows' : secretsPage ? 'secrets' : browserProfilesPage ? 'browser-profiles' : compactPage ? 'auto-compact' : 'home');
+  let routed = $derived(phonePage(store.settingsTab, store.settingsSection?.id, store.owner));
+  let page = $derived(routed !== 'home' && routed === store.settingsTab ? routed : phone ? 'phone' : privacy ? 'privacy' : routed);
   let machine = $derived(workspace.machines.find(machine => machine.store === store));
   const titleOf = (page: string): string => page === 'brain' ? strings.brain.heading : page === 'phone' ? strings.mobile.settingsPhone
     : page === 'privacy' ? strings.mobile.settingsPrivacy

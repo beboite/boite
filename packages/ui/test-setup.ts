@@ -65,7 +65,8 @@ await loadLocale('en');
 // the store modules these parts import, which a top-level import here would
 // have cached unmocked.
 beforeAll(async () => {
-  const { prefetchParts, parts, mobileNavigation } = await import('./src/lib/deferred-parts');
+  const { prefetchParts, parts } = await import('./src/lib/deferred-parts');
+  const { mobileNavigation } = await import('./src/lib/mobile-navigation');
   prefetchParts();
   await Promise.all(Object.values(parts).map((part) => part.load()));
   // So is the phone's navigation, which App fetches with the app outside the shell.

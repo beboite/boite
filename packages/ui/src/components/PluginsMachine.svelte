@@ -12,6 +12,7 @@
   import { relativeTime } from '../lib/format';
   import { confirm } from '../lib/confirm.svelte';
   import QuotaList from './QuotaList.svelte';
+  import { SnapshotFeed } from '../lib/snapshot-feed';
 
   /**
    * One machine's plugins. The page mounts a fresh one per machine, so an
@@ -262,23 +263,29 @@
   $effect(() => {
     const client = store.client;
     if (!client) return;
-    let disposed = false;
-    const off = client.on('plugins.updated', (value) => {
+    // An update that lands while the list is out is applied after it, never under it.
+    const feed = new SnapshotFeed<PluginState>((value) => {
       const before = plugins.find((plugin) => plugin.id === value.id);
       put(value);
       if (value.status === 'installed' && value.pools.length > 0 && before?.status !== 'installed') void loadPools(value.id);
     });
-    void client.call('plugins.list', {}).then(async (rows) => {
-      if (disposed) return;
+    const off = client.on('plugins.updated', (value) => feed.push(value));
+    let disposed = false, listed = false;
+    void feed.read(() => client.call('plugins.list', {}), (rows) => {
       plugins = rows;
+      listed = true;
+    }).then(async () => {
+      // The list as it stands once the updates held meanwhile are applied.
+      if (disposed || !listed) return;
+      const rows = plugins;
       for (const plugin of rows) {
         if (plugin.origin === 'recommended' && plugin.version === null && plugin.updates != null) void checkUpdates(plugin);
       }
       await Promise.all(rows.filter((plugin) => plugin.status === 'installed' && plugin.pools.length > 0).map((plugin) => loadPools(plugin.id)));
-    }).catch((cause) => {
+    }, (cause) => {
       if (!disposed) error = messageOf(cause);
     });
-    return () => { disposed = true; off(); };
+    return () => { disposed = true; feed.dispose(); off(); };
   });
 </script>
 

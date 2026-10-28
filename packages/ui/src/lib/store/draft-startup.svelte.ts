@@ -6,6 +6,7 @@ import { DRAFT_STASH_KEY } from '../prefs';
 import { secureId } from '../secure-id';
 import type { StoreContext } from './context';
 import { AttachmentUploads } from './attachment-uploads';
+import { readyAttachments } from '../draft-attachments';
 
 type Prepared = { client: Client; generation: number; draft: Draft; key: string; id: string;
   source: Choice; choice: Choice | null; input: RpcParams<'drafts.prepare'> | null; ready: boolean; claimed: boolean };
@@ -29,7 +30,7 @@ export class DraftStartup {
         const draft = s.draft;
         const input = s.composerStates[s.openThread?.id ?? DRAFT_STASH_KEY];
         const active = s.visible && !this.#hidden && s.page === 'chat' && s.connection === 'ready';
-        const files = active ? input?.attachments ?? [] : [];
+        const files = active ? readyAttachments(input?.attachments ?? []) : [];
         const choice = active && draft && !s.openThread && (input?.text.trim() || files.length) ? s.defaultChoice() : null;
         const key = draft && choice ? this.#key(draft, choice) : null;
         const client = this.ctx.client;

@@ -702,7 +702,18 @@ history. That parent's old letter scopes do not replace the new job boundary.
 
 Legacy correspondence and pre-policy consumed history have no captured file
 authority: they use the no-tools route and deny file/tool/upload/publication
-RPCs. Such history cannot resume an unrestricted native session. Unsupported
+RPCs. Such history cannot resume an unrestricted native session. `threads.get`
+reports that hold as `contactHold` with the contacts' names (null when free),
+`thread.updated` carries it whenever it changes, and the chat shows it above
+the composer. Only the owner can lift it, with
+`threads.trustContactHistory`: the thread and the conversations it continues
+lose the hold, captured shared-project bindings stay, and a later letter
+outside a shared project holds the thread again. A native wake that the hold
+refused leaves its letters waiting and pauses coordination; trusting ends that
+pause and delivers the letters still waiting from the contacts the hold named,
+not one that arrives later. The approval is a digest of each letter's sender
+and content, so a letter that reuses an approved id holds the thread again. Agents and paired devices
+cannot call it. Unsupported
 native providers hold contact mail in the inbox before exposing its text,
 including on an active warm session; local work already running without that
 mail continues. Claude and Codex retire idle ordinary control before consuming associated mail

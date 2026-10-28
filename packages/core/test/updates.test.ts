@@ -601,7 +601,7 @@ describe('harness updates', () => {
     await updated;
     expect(released).toContain(thread.id);
     // The work ended by itself: nothing was cut, nothing is resumed.
-    expect(core.threads.autoContinue.retryOf(thread.id)).toBeNull();
+    expect(core.threads.resumes.retryOf(thread.id)).toBeNull();
     await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
   }, 30000);
 
@@ -645,7 +645,7 @@ describe('harness updates', () => {
     await waitFor(() => core.journal.listTurns(child).length === 2 && core.journal.listTurns(child).at(-1)?.status === 'done', 20000);
     expect(core.journal.db.query('SELECT 1 FROM delegation_messages WHERE recipient_id = ? AND request_id = ?').get(child, `resume:${checkpoint}`)).not.toBeNull();
     // The conversation of its own resumes like background work that ended without waking it.
-    expect(core.threads.autoContinue.retryOf(server.id)).toMatchObject({ kind: 'auto-continue', turnId: turn.id });
+    expect(core.threads.resumes.retryOf(server.id)).toMatchObject({ kind: 'auto-continue', turnId: turn.id });
     await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
   }, 30000);
 
@@ -710,7 +710,7 @@ describe('harness updates', () => {
     await new Promise((done) => setTimeout(done, 800));
     // The continuation queued for the child was stopped with it and never ran.
     expect(core.journal.listTurns(child).slice(childTurns).map((entry) => [entry.status, entry.startedAt])).toEqual([['stopped', null]]);
-    expect(core.threads.autoContinue.retryOf(server.id)).toBeNull();
+    expect(core.threads.resumes.retryOf(server.id)).toBeNull();
     await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
   }, 30000);
 
@@ -737,7 +737,7 @@ describe('harness updates', () => {
     harness = null;
     const next = new Core({ dataDir: h.dataDir, token: h.token });
     try {
-      expect(next.threads.autoContinue.retryOf(thread.id)).toMatchObject({ kind: 'auto-continue', turnId: turn.id });
+      expect(next.threads.resumes.retryOf(thread.id)).toMatchObject({ kind: 'auto-continue', turnId: turn.id });
     } finally {
       await next.close();
     }
@@ -760,7 +760,7 @@ describe('harness updates', () => {
     const updated = client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.2.0', 20000);
     expect((await client.call('providers.update', { providerId: 'update-fake' })).state).toBe('updating');
     await updated;
-    expect(core.threads.autoContinue.retryOf(thread.id)).toMatchObject({ kind: 'auto-continue', turnId: turn.id });
+    expect(core.threads.resumes.retryOf(thread.id)).toMatchObject({ kind: 'auto-continue', turnId: turn.id });
     await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
   }, 30000);
 

@@ -21,6 +21,7 @@
  * `HERMES_FAKE_LOAD_BARE=1` makes its `session/load` answer the modes alone,
  * `HERMES_FAKE_LOAD_OPTION=1` adds a config option that is not the model.
  * `HERMES_FAKE_NEW_FAIL=1` refuses every `session/new`.
+ * `HERMES_FAKE_MODEL_FAIL` refuses `session/set_model` for that model id.
  */
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -142,6 +143,10 @@ const app = agent({ name: 'hermes-fake' })
       if (state === undefined) throw RequestError.invalidParams({ details: 'unknown session' });
       if (!AVAILABLE.some((model) => model.modelId === params.modelId)) {
         throw RequestError.invalidParams({ details: `model ${params.modelId} is not configured` });
+      }
+      if (process.env['HERMES_FAKE_MODEL_FAIL'] === params.modelId) {
+        log(`model-refused ${params.modelId}`);
+        throw RequestError.invalidParams({ details: `model ${params.modelId} is unavailable` });
       }
       log(`set_model ${params.modelId}`);
       save(params.sessionId, { ...state, model: params.modelId });

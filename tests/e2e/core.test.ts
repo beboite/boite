@@ -260,8 +260,11 @@ test(
   'usage totals what the turn reported',
   async () => {
     const usage = await client.call('usage.get', {});
-    expect(usage.byThread[thread.id]).toEqual(firstTurnUsage as Usage);
-    expect(usage.total).toEqual(firstTurnUsage as Usage);
+    // The normalisation marker belongs to the stored turn, never a sum of turns.
+    const { buckets, ...total } = firstTurnUsage as Usage;
+    expect(buckets).toBe(1);
+    expect(usage.byThread[thread.id]).toEqual(total);
+    expect(usage.total).toEqual(total);
   },
   TIMEOUT,
 );
