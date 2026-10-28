@@ -1,4 +1,4 @@
-import {afterEach, expect, test} from 'bun:test';
+import {afterEach, expect, spyOn, test} from 'bun:test';
 import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
@@ -8,6 +8,7 @@ import {thrown} from './settle.ts';
 import {protectLetters} from '../src/contacts/letter-scopes.ts';
 import {setDriver,getDriver} from '../src/drivers/index.ts';
 import {memberThreadId} from '../src/contacts/member-address.ts';
+import type {AgentLetter} from '@boite/contracts';
 import {letterPrompt} from '../src/coordination-letter.ts';
 
 const scratch=tmpdir();
@@ -87,6 +88,38 @@ test.each(['steer','hook'] as const)('SEC-01 active %s delivery installs protect
     const child=b.h.core.threads.create({projectId:b.p.id,providerId:'echo',accountId:b.t.accountId},{id:'thr_letter_descendant',branch:null,parentThreadId:b.t.id});
     expect(()=>b.h.core.sharedAccess.denyTool(child.id)).toThrow('shared file policy');
   } finally {restore();}
+},30000);
+
+test.each([
+  ['immediate','unprotected'],['pending','unprotected'],['immediate','associated'],['pending','associated'],['immediate','legacy'],['pending','legacy'],
+] as const)('SEC-01 collaboration.wait takes a %s external letter on a %s route only through its protection',async(when,route)=>{
+  const {a,b}=await pair();const id=route==='associated'?await association(a,b):null;
+  const done=Promise.withResolvers<import('../src/drivers/types.ts').TurnResult>();
+  const restore=setDriver('echo',{...getDriver('echo'),startTurn:()=>({done:done.promise,stop:()=>done.resolve({status:'stopped',sessionId:null,usage:null})})});
+  // Hook, steer and wake stay out of the way: the agent's own wait is the only sink.
+  const deliver=spyOn(b.h.core.coordination as unknown as {deliver(threadId:string):Promise<void>},'deliver').mockResolvedValue(undefined);
+  try {
+    b.h.core.threads.startTurn(b.t.id,'Owner work');
+    await waitFor(()=>b.h.core.threads.require(b.t.id).status==='running');
+    // A deterministic running native turn, no CLI or account login.
+    if(route==='unprotected') b.h.core.providers.require('echo').protocol='pi';
+    const send=()=>a.c.call('contacts.sendHuman',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'External correspondence',requestId:`wait-${when}-${route}`});
+    const arrived=(letterId:string)=>b.h.core.coordination.get(b.t.id).messages.some(l=>l.id===letterId);
+    let letter:{id:string},result:{letters:AgentLetter[]};
+    if(when==='immediate'){letter=await send();await waitFor(()=>arrived(letter.id));result=await b.h.core.coordination.wait(b.t.id,undefined,0);}
+    else {const waiting=b.h.core.coordination.wait(b.t.id,undefined,1500);letter=await send();await waitFor(()=>arrived(letter.id));result=await waiting;}
+    const status=b.h.core.coordination.get(b.t.id).messages.find(l=>l.id===letter.id)?.status;
+    if(route==='unprotected'){
+      expect(result.letters).toEqual([]);
+      expect(status).toBe('received');
+      expect(b.h.core.sharedAccess.bound(b.t.id)).toBeNull();
+    } else {
+      expect(result.letters.map(l=>l.id)).toEqual([letter.id]);
+      expect(status).toBe('delivered');
+      expect(()=>b.h.core.sharedAccess.denyTool(b.t.id)).toThrow('shared file policy');
+      if(id) expect(b.h.core.sharedAccess.bound(b.t.id)?.job.sharedProjectId).toBe(id);
+    }
+  } finally {deliver.mockRestore();b.h.core.providers.require('echo').protocol='echo';done.resolve({status:'stopped',sessionId:null,usage:null});restore();}
 },30000);
 
 test.each([false,true])('SEC-01 historical letters survive restart without losing protection (old history: %s)',async old=>{

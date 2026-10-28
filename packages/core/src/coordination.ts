@@ -28,6 +28,8 @@ const HOUR = 3_600_000;
 export const LETTER_RETENTION_MS = 30 * 24 * HOUR;
 /** Marks a pause the core applied by itself, as opposed to the owner's in Communication settings. */
 const AUTO_PAUSE_PREFIX = 'coordination-autopause:';
+/** Letters one hook, steer or wake hands over. */
+const BATCH = 4;
 /** The sweep's idle probes, each one read on the status index: letters it still has work for. */
 export const SWEEP_PROBES = [
   "SELECT 1 FROM coordination_letters WHERE status IN ('queued', 'received') LIMIT 1",
@@ -50,6 +52,8 @@ export class Coordination {
   private readonly localWaits = new Set<() => void>();
   private readonly pending = new Set<Promise<unknown>>();
   private readonly delivering = new Set<string>();
+  /** The letters `admit` let through, while their sink records them. */
+  private admitting: Set<string> | null = null;
   /** Answers other cores' signed requests. */
   private readonly desk: PeerDesk;
   private readonly attempts = new Map<string, number>();
@@ -416,23 +420,27 @@ export class Coordination {
   }
   /** Received letters for this thread, from one sender or any, marked delivered. */
   private claim(threadId: string, from: AgentAddress | null): AgentLetter[] {
-    const letters = this.rows("thread_id = ? AND direction = 'in' AND status = 'received' ORDER BY created_at", threadId)
-      .map(r => JSON.parse(r.data) as AgentLetter)
-      .filter(letter => letter.expiresAt > Date.now() && this.mayReceive(letter) && (from === null || same(letter.from, from)));
-    if (letters.length > 0) this.restoreProject(threadId);
-    for (const letter of letters) this.update(letter, 'delivered');
+    let letters = this.ready(threadId, Infinity, from);
+    const take = () => this.admit(threadId, letters, () => {
+      if (letters.length > 0) this.restoreProject(threadId);
+      for (const letter of letters) this.update(letter, 'delivered');
+    });
+    try { take(); } catch (error) {
+      // Contact mail this turn cannot protect stays in the inbox for a later delivery; the rest is read now.
+      if (!letters.some(letter => letter.contact)) throw error;
+      letters = letters.filter(letter => !letter.contact);
+      take();
+    }
     return withRelations(this.core, this.self('').coreId, threadId, letters.map(letter => ({ ...letter, status: 'delivered' as const })));
   }
-  /** A waiting agent takes the letter that just arrived; true when one did. */
-  private handToWaiter(letter: AgentLetter): boolean {
+  /** A waiting agent takes the letter that just arrived, with what else it may read now. */
+  private handToWaiter(letter: AgentLetter): void {
     for (const waiter of this.waiters.get(letter.to.threadId) ?? []) {
       if (waiter.from !== null && !same(waiter.from, letter.from)) continue;
       const letters = this.claim(letter.to.threadId, waiter.from);
-      if (letters.length === 0) return false;
-      waiter.done(letters);
-      return true;
+      if (letters.length > 0) waiter.done(letters);
+      return;
     }
-    return false;
   }
   async send(params: RpcParams<'collaboration.send'>, human = false, connection?: Connection): Promise<AgentLetter> {
     const to = address(params.to, 'to');
@@ -543,8 +551,10 @@ export class Coordination {
     this.core.threads.runner.noteMail(threadId, letter.createdAt);
     this.resumeForAgent(threadId);
     this.update(letter, 'received');
-    if (!this.handToWaiter(letter)) this.kick(threadId);
-    return this.find(letter.id, 'in') ?? letter;
+    this.handToWaiter(letter);
+    const current = this.find(letter.id, 'in');
+    if (current?.status === 'received') this.kick(threadId);
+    return current ?? letter;
   }
   private rows(where: string, ...params: (string | number)[]): Row[] { return this.core.journal.db.query(`SELECT data, fingerprint FROM coordination_letters WHERE ${where}`).all(...params) as Row[]; }
   private find(id: string, direction: string): AgentLetter | null {
@@ -555,6 +565,8 @@ export class Coordination {
     this.core.journal.db.query('INSERT INTO coordination_letters (id, thread_id, direction, status, created_at, request_id, fingerprint, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(letter.id, threadId, direction, letter.status, letter.createdAt, requestId, fingerprint, JSON.stringify(letter));
   }
   private update(letter: AgentLetter, status: AgentLetter['status'], error: string | null = null): void {
+    const before = letter.to.coreId === this.coreId && (letter.status === 'received' || letter.status === 'uncertain' && letter.error === 'Queued for provider delivery');
+    if (before && (status === 'delivered' || status === 'uncertain') && !this.admitting?.has(letter.id)) throw new Error(`coordination: letter ${letter.id} reaches its agent only through admit`);
     const next = { ...letter, status, error };
     this.core.journal.append({ type: 'coordination.status', threadId: letter.to.coreId === this.self('').coreId ? letter.to.threadId : letter.from.threadId, version: 1, payload: { id: letter.id, status, error } }, () => {
       // Each endpoint retains its own send or receipt time when acknowledgement metadata arrives.
@@ -626,17 +638,41 @@ export class Coordination {
   take(threadId: string, turnId: string): string | null {
     // Off and paused hold ordinary letters through mayReceive; a persistent agent's still pass.
     if (this.delivering.has(threadId)) return null;
-    const letters = this.inbox(threadId);
+    const letters = this.ready(threadId, BATCH);
     if (!letters.length) return null;
-    protectLetters(this.core, threadId, letters);
-    this.restoreProject(threadId);
-    const prompt = letterPrompt(letters, senderContext(this.core, this.self('').coreId, threadId));
-    this.core.threads.noteCoordination(threadId, turnId, prompt);
-    for (const letter of letters) this.update(letter, 'delivered');
-    return prompt;
+    return this.admit(threadId, letters, () => {
+      this.restoreProject(threadId);
+      const prompt = letterPrompt(letters, senderContext(this.core, this.self('').coreId, threadId));
+      this.core.threads.noteCoordination(threadId, turnId, prompt);
+      for (const letter of letters) this.update(letter, 'delivered');
+      return prompt;
+    });
   }
-  private inbox(threadId: string): AgentLetter[] {
-    return this.rows("thread_id = ? AND direction = 'in' AND status = 'received' ORDER BY created_at LIMIT 4", threadId).map(r => JSON.parse(r.data) as AgentLetter).filter(letter => letter.expiresAt > Date.now() && this.mayReceive(letter));
+  /**
+   * The oldest received letters this thread may take now. Held ones (paused,
+   * off, no longer permitted) stay in the inbox and never hide those behind them.
+   */
+  private ready(threadId: string, limit: number, from: AgentAddress | null = null): AgentLetter[] {
+    const letters: AgentLetter[] = [];
+    const rows = this.core.journal.db.query("SELECT data FROM coordination_letters WHERE thread_id = ? AND direction = 'in' AND status = 'received' ORDER BY created_at").iterate(threadId) as IterableIterator<Row>;
+    for (const row of rows) {
+      const letter = JSON.parse(row.data) as AgentLetter;
+      if (letter.expiresAt > Date.now() && (from === null || same(letter.from, from)) && this.mayReceive(letter)) letters.push(letter);
+      if (letters.length >= limit) { rows.return?.(); break; }
+    }
+    return letters;
+  }
+  /**
+   * The one way a letter reaches its agent: a wait's tool output, a hook, a
+   * steer or a wake. Contact mail gets its file protection first, and a refusal
+   * leaves the batch where it was; `update` refuses to deliver any letter
+   * `consume` was not given here.
+   */
+  private admit<T>(threadId: string, letters: AgentLetter[], consume: () => T): T {
+    protectLetters(this.core, threadId, letters);
+    const outer = this.admitting;
+    this.admitting = new Set(letters.map(letter => letter.id));
+    try { return consume(); } finally { this.admitting = outer; }
   }
   private inProject(letter: AgentLetter): boolean {
     if (letter.from.coreId !== this.self('').coreId || letter.to.coreId !== this.coreId) return false;
@@ -676,10 +712,11 @@ export class Coordination {
     const letters = this.rows("thread_id = ? AND direction = 'in' AND status = 'uncertain'", threadId)
       .map(row => JSON.parse(row.data) as AgentLetter).filter(letter => letter.error === 'Queued for provider delivery');
     if (!letters.length || this.closed || letters.some(letter => letter.expiresAt <= Date.now() || !this.mayReceive(letter))) return false;
-    protectLetters(this.core, threadId, letters);
-    this.restoreProject(threadId);
-    for (const letter of letters) this.update(letter, 'uncertain', `Awaiting provider turn ${turnId}`);
-    return true;
+    return this.admit(threadId, letters, () => {
+      this.restoreProject(threadId);
+      for (const letter of letters) this.update(letter, 'uncertain', `Awaiting provider turn ${turnId}`);
+      return true;
+    });
   }
   private async steer(threadId: string, prompt: string): Promise<{ submitted: boolean } | null> {
     if (this.closed) return null;
@@ -703,16 +740,19 @@ export class Coordination {
     const thread = this.core.journal.getThread(threadId);
     // A thread whose last turn failed wakes like an idle one: each letter starts at most one turn, so a failing provider cannot loop.
     if (!thread || thread.archived || thread.status === 'waiting' || thread.status === 'queued') return;
-    const letters = this.inbox(threadId);
+    const letters = this.ready(threadId, BATCH);
     if (!letters.length) return;
     this.delivering.add(threadId);
     try {
-      protectLetters(this.core, threadId, letters);
       const prompt = letterPrompt(letters, senderContext(this.core, this.self('').coreId, threadId));
       if (thread.status === 'running') {
-        if (!this.core.threads.canSteer(threadId)) return;
-        this.restoreProject(threadId);
-        for (const letter of letters) this.update(letter, 'uncertain', 'Awaiting provider acknowledgement');
+        const steering = this.admit(threadId, letters, () => {
+          if (!this.core.threads.canSteer(threadId)) return false;
+          this.restoreProject(threadId);
+          for (const letter of letters) this.update(letter, 'uncertain', 'Awaiting provider acknowledgement');
+          return true;
+        });
+        if (!steering) return;
         try {
           const result = await this.steer(threadId, prompt);
           if (result === null || this.closed || this.core.journal.isClosed()) return;
@@ -729,11 +769,11 @@ export class Coordination {
         }
       } else {
         // One transaction records the wake, message states and scheduled turn.
-        this.core.journal.db.transaction(() => {
+        this.admit(threadId, letters, () => this.core.journal.db.transaction(() => {
           for (const letter of letters) this.update(letter, 'uncertain', 'Queued for provider delivery');
           this.core.journal.db.query('INSERT INTO coordination_wakes VALUES (?, ?)').run(threadId, Date.now());
           this.core.threads.startTurn(threadId, prompt, [], undefined, 'coordination');
-        })();
+        })());
       }
     } catch (error) {
       // A persistent agent that is paused or out of budget: its letters wait in the inbox for it.

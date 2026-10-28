@@ -148,7 +148,10 @@ test('a real secret-file denial revokes letters, board execution and compute wit
   await waitFor(() => letters().find(l => l.id === letter.id)?.status === 'received');
   const queued = await a.h.core.coordination.send({threadId: a.threadId, to: {coreId: b.coreId, threadId: b.threadId}, text: 'Queued provider wake', requestId: 'review-wake'});
   await waitFor(() => letters().find(l => l.id === queued.id)?.status === 'received');
-  (b.h.core.coordination as unknown as {update(letter: AgentLetter, status: string, error: string): void}).update(letters().find(l => l.id === queued.id)!, 'uncertain', 'Queued for provider delivery');
+  // Only `admit`, which protects the letter first, may hand it to a provider wake.
+  const desk = b.h.core.coordination as unknown as {admit(threadId: string, letters: AgentLetter[], consume: () => void): void; update(letter: AgentLetter, status: string, error: string): void};
+  const wake = letters().find(l => l.id === queued.id)!;
+  desk.admit(b.threadId, [wake], () => desk.update(wake, 'uncertain', 'Queued for provider delivery'));
   const answer = Promise.withResolvers<string>(); let calls = 0;
   restore.push(setDriver('echo', {...getDriver('echo'), sideQuestion: () => {calls++; return answer.promise;}}));
   await configure(); writeFileSync(join(worker.cwd, '.env'), 'TOKEN=actual-denial-canary');
