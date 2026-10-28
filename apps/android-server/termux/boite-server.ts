@@ -477,14 +477,11 @@ export const FILES = {
 };
 
 const targetOf = (link: string) => { try { return readlinkSync(link); } catch { return null; } };
-
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 /**
- * Moving a prepared release into place, as one transaction. What runs now is read when it is planned, before
- * the core stops; `apply` points `current`, Bun and this controller at the new release, and `rollback` puts
- * every one back exactly, a same-version reinstall's replaced directory included, whether a step of `apply`
- * failed or the new core never answered. `commit` drops what `rollback` would need.
+ * Moving a prepared release into place, as one transaction planned before the core stops: `apply` points `current`,
+ * Bun and this controller at it, `rollback` puts each back exactly (a reinstall's replaced copy too), `commit` keeps it.
  */
 export function planActivation({ staging, release, runtime, controller }: Prepared, layout: Layout = PATHS, files = FILES) {
   const dir = join(layout.releases, release.version);
@@ -514,29 +511,6 @@ export function planActivation({ staging, release, runtime, controller }: Prepar
     return readRelease(dir);
   };
   return { apply, rollback, commit: () => { undo.length = 0; rmSync(aside, { recursive: true, force: true }); } };
-}
-
-/** Applies an activation to a stopped core and starts it if it ran; a failure goes back and says why, and why going back failed too. */
-export async function switchGeneration(activation: ReturnType<typeof planActivation>, version: string, before: { version: string } | null,
-  wasRunning: boolean, say: (line: string) => void, server = { start: startServer, stop: stopServer }): Promise<Release> {
-  let installed: Release | null = null;
-  try {
-    installed = activation.apply();
-    if (wasRunning) await server.start();
-    return installed;
-  } catch (error) {
-    const failed = `Boite ${version} ${installed ? 'did not start' : 'could not be installed'}`;
-    const previous = before?.version ?? 'no installation';
-    say(`${failed}, going back to ${previous}`);
-    try {
-      if (installed) await server.stop();
-      activation.rollback();
-      if (wasRunning) await server.start();
-    } catch (recovery) {
-      throw new Error(`${failed}, and going back to ${previous} failed: ${messageOf(recovery)}. ${messageOf(error)}`);
-    }
-    throw new Error(`${failed}; ${before ? `${before.version} ${wasRunning ? 'runs' : 'is in place'} again` : 'nothing else was installed'}. ${messageOf(error)}`);
-  }
 }
 
 /** Keeps the current release and the one before it, for `rollback`. */
@@ -811,10 +785,7 @@ async function health(url: string): Promise<unknown> {
   }
 }
 
-/**
- * Null when a `/health` answer comes from the core this server launched, with its PID and the version of the
- * release it runs; otherwise why not. Another Boite on the port answers too, and must not pass for it.
- */
+/** Null when a `/health` answer comes from the launched core (its PID, its release's version), else why not: another Boite may hold the port. */
 export function judgeCoreHealth(expected: { pid: number; version: string }, answer: unknown): string | null {
   const body = answer !== null && typeof answer === 'object' ? answer as { ok?: unknown; pid?: unknown; version?: unknown } : null;
   if (body?.ok !== true) return 'no core answers';
@@ -1071,7 +1042,23 @@ async function update(args: Args, say: (line: string) => void): Promise<Record<s
   writeCliShim();
   const wasRunning = alive(readState().supervisor) || alive(readState().core);
   if (wasRunning) await stopServer();
-  const installed = await switchGeneration(activation, prepared.release.version, before, wasRunning, say);
+  let installed: Release | null = null;
+  try {
+    installed = activation.apply();
+    if (wasRunning) await startServer();
+  } catch (error) {
+    const failed = `Boite ${prepared.release.version} ${installed ? 'did not start' : 'could not be installed'}`;
+    const previous = before?.version ?? 'no installation';
+    say(`${failed}, going back to ${previous}`);
+    try {
+      if (installed) await stopServer();
+      activation.rollback();
+      if (wasRunning) await startServer();
+    } catch (recovery) {
+      throw new Error(`${failed}, and going back to ${previous} failed: ${messageOf(recovery)}. ${messageOf(error)}`);
+    }
+    throw new Error(`${failed}; ${before ? `${previous} ${wasRunning ? 'runs' : 'is in place'} again` : 'nothing else was installed'}. ${messageOf(error)}`);
+  }
   activation.commit();
   const previous = before && before.version !== installed.version ? before : null;
   pruneReleases([installed.dir, ...(previous ? [previous.dir] : [])]);

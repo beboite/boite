@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { coreReadiness, FILES, judgeCoreHealth, planActivation, startTimeOf, switchGeneration, type Layout } from './boite-server.ts';
+import { coreReadiness, FILES, judgeCoreHealth, planActivation, startTimeOf, type Layout } from './boite-server.ts';
 
 const CONTROLLER = join(import.meta.dir, 'boite-server.ts');
 const BUN = { version: '1.4.3', sha256: 'a'.repeat(64) };
@@ -34,7 +34,7 @@ test('a core that exits while its answer is on the way is not ready', async () =
 });
 
 /** A release directory as a bundle unpacks: the core is a stand-in that answers `/health` as its release. */
-function release(dir: string, version: string, controller = readFileSync(CONTROLLER)) {
+function release(dir: string, version: string, controller: string | Uint8Array = readFileSync(CONTROLLER)) {
   mkdirSync(join(dir, 'core'), { recursive: true });
   mkdirSync(join(dir, 'ui'), { recursive: true });
   writeFileSync(join(dir, 'server-release.json'), JSON.stringify({ version, bun: BUN }));
@@ -130,22 +130,6 @@ test.skipIf(process.platform === 'win32')('a committed activation keeps only the
   expect(Bun.spawnSync(['ls', layout.releases]).stdout.toString().trim()).toBe('1.0.0');
 });
 
-test.skipIf(process.platform === 'win32')('a failed way back keeps why the update failed and why going back did too', async () => {
-  const layout = installed(temporary(), '1.0.0');
-  const before = { version: '1.0.0' };
-  const server = (start: () => Promise<void>) => ({ start, stop: async () => undefined });
-  // The new core never answers, then the previous one does not either.
-  let starts = 0;
-  const neither = server(async () => { starts += 1; throw new Error(`no answer ${starts}`); });
-  const restart = await switchGeneration(planActivation(prepared(layout, '2.0.0', 'new'), layout), '2.0.0', before, true, () => undefined, neither).catch(String);
-  expect(restart).toBe('Error: Boite 2.0.0 did not start, and going back to 1.0.0 failed: no answer 2. no answer 1');
-  // A step of the rollback fails: the installation is only partly back.
-  const failing = failingAt(6);
-  const partial = await switchGeneration(planActivation(prepared(layout, '2.0.0', 'again'), layout, failing.files), '2.0.0', before, true, () => undefined, server(async () => { throw new Error('no answer'); })).catch(String);
-  expect(partial).toStartWith('Error: Boite 2.0.0 did not start, and going back to 1.0.0 failed: the previous installation is only partly back: ');
-  expect(partial).toEndWith('. no answer');
-});
-
 /** Runs the controller as Termux would, in its own home, against stand-in cores on a free local port. */
 async function server(root: string) {
   const prefix = join(root, 'prefix');
@@ -163,9 +147,9 @@ async function server(root: string) {
     const [out] = await Promise.all([new Response(child.stdout).text(), child.exited]);
     return JSON.parse(out.trim().split('\n').pop()!) as Record<string, unknown>;
   };
-  const bundle = (version: string) => {
+  const bundle = (version: string, controller?: string) => {
     const dir = join(root, `bundle-${version}`);
-    release(dir, version);
+    release(dir, version, controller);
     const zip = join(root, `bundle-${version}.zip`);
     expect(Bun.spawnSync(['zip', '-qr', zip, '.'], { cwd: dir }).exitCode).toBe(0);
     return zip;
@@ -193,6 +177,23 @@ test.skipIf(process.platform !== 'linux')('an update that fails after the core s
   expect(readlinkSync(join(root, 'bin', 'bun'))).toBe(runtime);
   expect(readFileSync(join(root, 'boite-server.ts'), 'utf8')).toBe(controller);
   expect(await run('status', '--quick')).toMatchObject({ running: true, healthy: true, version: '1.0.0' });
+}, 60_000);
+
+test.skipIf(process.platform !== 'linux')('an update whose way back fails too says why it failed and why going back did', async () => {
+  const root = temporary();
+  const { run, bundle } = await server(root);
+  expect(await run('update', '--bundle', bundle('1.0.0'))).toMatchObject({ ok: true, version: '1.0.0' });
+  expect(await run('start')).toMatchObject({ healthy: true, version: '1.0.0' });
+  // The new release's supervisor exits at once and occupies the path the previous controller is put back through.
+  const sabotage = `if (process.argv[2] === 'supervise') { require('node:fs').mkdirSync(require('node:path').join(process.env.BOITE_SERVER_HOME, 'boite-server.ts.tmp', 'occupied'), { recursive: true }); process.exit(1); }\n`;
+  cleanups.push(() => rmSync(join(root, 'boite-server.ts.tmp'), { recursive: true, force: true }));
+
+  const failed = await run('update', '--bundle', bundle('2.0.0', sabotage + readFileSync(CONTROLLER, 'utf8')));
+  expect(failed).toMatchObject({ ok: false });
+  const error = String(failed.error);
+  expect(error).toStartWith('Boite 2.0.0 did not start, and going back to 1.0.0 failed: the previous installation is only partly back: EISDIR');
+  expect(error).toContain('the core did not answer within 90 s (no core started)');
+  expect(readlinkSync(join(root, 'current'))).toBe(join(root, 'releases', '1.0.0'));
 }, 60_000);
 
 test.skipIf(process.platform !== 'linux')('another Boite answering on the core\'s port does not make it healthy', async () => {
