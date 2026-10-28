@@ -6,7 +6,7 @@ import {refused} from '../errors.ts';
 import type {AccessBinding} from './access-scopes.ts';
 import {incomingContact} from './human-letters.ts';
 
-interface LetterScope {bindings: AccessBinding[]; legacy: boolean; peers: string[]}
+interface LetterScope {bindings: AccessBinding[]; legacy: boolean; peers: string[]; trustedAt?: number}
 const checkedHistory = new WeakMap<Core, Set<string>>();
 
 function storedScope(core: Core, threadId: string): LetterScope | null {
@@ -26,24 +26,58 @@ function storedScope(core: Core, threadId: string): LetterScope | null {
   return scope;
 }
 
-export function letterScope(core: Core, threadId: string): LetterScope {
-  const bindings: AccessBinding[] = [], peers = new Set<string>(), seen = new Set<string>();
-  let thread = core.journal.getThread(threadId), legacy = false;
-  while (thread && !seen.has(thread.id)) {
-    seen.add(thread.id);
-    const scope = storedScope(core, thread.id);
-    if (scope) {
-      legacy ||= scope.legacy;
-      for (const peer of scope.peers) peers.add(peer);
-      for (const binding of scope.bindings) if (!bindings.some(b => b.job.sharedProjectId === binding.job.sharedProjectId && b.job.grantRevision === binding.job.grantRevision && b.checkoutPath === binding.checkoutPath)) bindings.push({...binding, threadId});
-    }
+/** The thread and the conversations whose history it continues, nearest first. */
+function history(core: Core, threadId: string): string[] {
+  const ids: string[] = [];
+  let thread = core.journal.getThread(threadId);
+  while (thread && !ids.includes(thread.id)) {
+    ids.push(thread.id);
     // A remote job starts a fresh session with the remote task and its own
     // captured host grant/checkout. Its host parent supplies the account/profile,
     // never conversation history. Descendants still inherit this job's letters.
     if (core.sharedCompute.journal.worker(thread.id)) break;
     thread = thread.parentThreadId ? core.journal.getThread(thread.parentThreadId) : null;
   }
+  return ids;
+}
+
+export function letterScope(core: Core, threadId: string): LetterScope {
+  const bindings: AccessBinding[] = [], peers = new Set<string>();
+  let legacy = false;
+  for (const id of history(core, threadId)) {
+    const scope = storedScope(core, id);
+    if (!scope) continue;
+    legacy ||= scope.legacy;
+    for (const peer of scope.peers) peers.add(peer);
+    for (const binding of scope.bindings) if (!bindings.some(b => b.job.sharedProjectId === binding.job.sharedProjectId && b.job.grantRevision === binding.job.grantRevision && b.checkoutPath === binding.checkoutPath)) bindings.push({...binding, threadId});
+  }
   return {bindings, legacy, peers: [...peers]};
+}
+
+/**
+ * The contacts whose unassociated mail holds this thread, by name, or null.
+ * Such mail has no captured file authority, so every turn and tool is refused
+ * until the owner trusts that history.
+ */
+export function contactHold(core: Core, threadId: string): {contacts: string[]} | null {
+  const scope = letterScope(core, threadId);
+  if (!scope.legacy) return null;
+  const known = core.contacts.peers();
+  return {contacts: scope.peers.map(coreId => known.find(peer => peer.coreId === coreId)?.name ?? coreId.slice(0, 8))};
+}
+
+/**
+ * The owner accepts the unassociated contact mail this thread's history
+ * consumed. Associated mail keeps its captured bindings; a later unassociated
+ * letter holds the thread again.
+ */
+export function trustLetters(core: Core, threadId: string): void {
+  core.threads.require(threadId);
+  for (const id of history(core, threadId)) {
+    const scope = storedScope(core, id);
+    if (scope?.legacy) core.journal.setSetting(`shared-file-letters:${id}`, {...scope, legacy: false, trustedAt: Date.now()});
+  }
+  core.sharedAccess.execution.reconcile();
 }
 
 /** Called before wake, steer and hook delivery. Unsupported native sessions never see the letter. */

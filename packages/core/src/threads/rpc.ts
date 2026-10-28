@@ -13,6 +13,7 @@ import { steerUser } from './user-steering.ts';
 import { readToolOutput, readToolPart } from './records.ts';
 import { readMessageAttachment } from './attachment-read.ts';
 import { CreationRequests } from './creation-requests.ts';
+import { trustLetters } from '../contacts/letter-scopes.ts';
 
 /**
  * A turn in a folder that is gone is refused by that folder. An archived
@@ -195,6 +196,10 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
   core.router.register('threads.pin',(params) => core.threads.pin(params.threadId, params.pinned !== false));
   core.router.register('threads.markRead', (params) => {
     core.threads.markRead(params.threadId);
+    return { ok: true } as const;
+  });
+  core.router.register('threads.trustContactHistory', (params) => {
+    trustLetters(core, params.threadId);
     return { ok: true } as const;
   });
   core.router.register('threads.subscribe', (params, ctx) => {

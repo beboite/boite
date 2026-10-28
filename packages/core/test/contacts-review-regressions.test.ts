@@ -114,6 +114,29 @@ test('SEC-01 legacy contact correspondence cannot use the ordinary local process
   expect(()=>b.h.core.sharedAccess.denyTool(b.t.id)).toThrow('shared file policy');
 },30000);
 
+test('contact mail outside a shared project holds a full-permission thread until its owner trusts the history',async()=>{
+  const {a,b}=await pair();
+  const letter=await a.c.call('collaboration.send',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'Ordinary contact note',requestId:'unassociated'});
+  await waitFor(()=>b.h.core.journal.lastTurn(b.t.id)?.finishedAt!=null);
+  // The owner's own agent works with every tool, as a bot does; a native provider has no tool-free route.
+  await b.c.call('threads.update',{threadId:b.t.id,permissionMode:'bypassPermissions'});
+  const name=b.h.core.contacts.peers().find(peer=>peer.coreId===a.id)!.name;
+  expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).toEqual({contacts:[name]});
+  expect(await thrown(b.c.call('turns.start',{threadId:b.t.id,prompt:'Owner work'}))).toThrow('shared file policy');
+  // Only the owner releases it, never the held agent.
+  const agent=await connect(b.h.url,b.h.core.agents.tokenFor(b.t.id));clients.push(agent);
+  expect(await thrown(agent.call('threads.trustContactHistory',{threadId:b.t.id}))).toThrow();
+  expect(await b.c.call('threads.trustContactHistory',{threadId:b.t.id})).toEqual({ok:true});
+  expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).toBeUndefined();
+  await b.c.call('turns.start',{threadId:b.t.id,prompt:'Owner work'});
+  await waitFor(()=>b.h.core.journal.lastTurn(b.t.id)?.finishedAt!=null);
+  // A later letter outside a shared project holds it again.
+  await b.c.call('threads.update',{threadId:b.t.id,permissionMode:'default'});
+  const again=await a.c.call('collaboration.send',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'Another contact note',requestId:'unassociated-again'});
+  await waitFor(()=>b.h.core.coordination.get(b.t.id).messages.find(l=>l.id===again.id)?.status==='delivered');
+  expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).toEqual({contacts:[name]});
+},30000);
+
 test('SEC-01 consumed associations intersect their live authority instead of replacing earlier history',async()=>{
   const {a,b}=await pair(),c=await side('charlie');await link(c,b);
   for(const [x,y] of [[c,b],[b,c]] as const)await x.c.call('contacts.grant',{coreId:y.id,projectId:x.p.id,readThreads:true});

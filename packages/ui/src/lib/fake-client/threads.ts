@@ -576,6 +576,10 @@ export function threadMethods(ctx: FakeContext) {
       ctx.touch(thread);
       return { ok: true };
     },
+    'threads.trustContactHistory': async (params) => {
+      delete ctx.thread(params.threadId).contactHold;
+      return { ok: true };
+    },
     'threads.subscribe': async (params) => {
       // The core runs `threads.require` first, so an unknown id is a NotFound.
       ctx.thread(params.threadId);
@@ -647,6 +651,7 @@ export function threadMethods(ctx: FakeContext) {
           data: { field: 'accountId', accountId: account.id, providerId: account.providerId, expected: provider.id } });
         checkRunnable(provider, account);
       }
+      if (thread.contactHold) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'shared file policy: this tool has no enforceable shared execution boundary' });
       const error = attachmentError(params.attachments ?? [], provider);
       if (error) throw new RpcFailure({ code: RpcErrorCode.Refused, ...error });
       const rootId = thread.parentThreadId;

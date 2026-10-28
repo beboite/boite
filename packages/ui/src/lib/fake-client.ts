@@ -230,6 +230,13 @@ export class FakeClient implements ObservableClient {
     this.#ctx.touch(thread);
   }
 
+  /** What the core says of a thread whose history read contact mail outside a shared project. */
+  holdForContactMail(threadId: ThreadId, contacts: string[]): void {
+    const thread = this.#ctx.threads.get(threadId);
+    if (!thread) throw new Error(`no fake thread ${threadId}`);
+    thread.contactHold = { contacts };
+  }
+
   setMergedPrFixture(threadId: ThreadId, fixture: MergedPrFixture): void {
     this.#ctx.mergedPrFixtures.set(threadId, fixture);
   }
