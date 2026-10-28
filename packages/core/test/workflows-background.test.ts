@@ -137,12 +137,21 @@ test('a step that cannot be asked for its final answer fails with a reason a ret
   expect(step()).toMatchObject({ result: 'CI passed after sign-in.', error: null });
 });
 
-test('a step stopped while it waits on its background work reads stopped, not failed on the lost wait', async () => {
-  const { h, owner, threadId, step, childId } = await setup();
+test.each(['live', 'completed'] as const)('a step stopped on its checkpoint with its work %s reads stopped and settles once', async work => {
+  const { h, owner, threadId, step, childId, first } = await setup();
+  const settle = spyOn(h.core.delegation.worktrees, 'settle');
+  restores.push(() => settle.mockRestore());
+  // Completed in the wake grace: no wait is left to interrupt, and no turn will end to settle the step.
+  if (work === 'completed') first.ctx.backgroundFinished!('ci-1', 'completed');
   expect(await owner.call('delegation.stop', { threadId, agentId: childId })).toMatchObject({ stopped: 1 });
-  // Stopping it ended the work it waited on: a stop the user asked for, not a failure of the step.
+  // A stop the user asked for, not a failure of the step.
   await waitFor(() => step().status !== 'running', 5000);
   expect(step()).toMatchObject({ status: 'stopped', error: 'Stopped', result: null });
+  const clock = afterGrace();
+  await new Promise(resolve => setTimeout(resolve, 1300));
+  clock.mockRestore();
+  expect(step().status).toBe('stopped');
+  expect(settle.mock.calls.filter(([id]) => id === childId)).toHaveLength(1);
 });
 
 test.each(['run', 'team'] as const)('a paused %s asks nothing of a step whose work completed, and its resume asks for the final answer', async paused => {

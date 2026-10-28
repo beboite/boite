@@ -592,23 +592,30 @@ export class Workflows {
     if (error !== null) this.waitLost(threadId, `completed without waking it, and asking for its final result failed: ${error}`, tasks);
   }
 
-  /**
-   * A checkpointed step lost the background work that was to wake it: it fails with why, which a retry clears, instead of waiting forever.
-   * `stopped`: its agent was stopped, which ended that work; the step reads stopped, as one stopped mid-turn does.
-   */
-  waitLost(threadId: string, how: string, tasks: string, stopped = false): void {
+  /** A checkpointed step lost the background work that was to wake it: it fails with why, which a retry clears, instead of waiting forever. */
+  waitLost(threadId: string, how: string, tasks: string): void {
+    this.rested(threadId, { status: 'failed', error: `It was waiting on its background work (${tasks}), which ${how}. Its last answer was a checkpoint, not its result.` });
+  }
+
+  /** Its agent was stopped while the step rested on its checkpoint: it reads stopped, as one stopped mid-turn does. */
+  stepStopped(threadId: string): void {
+    if (['queued', 'running', 'waiting'].includes(this.core.journal.getThread(threadId)?.status ?? '')) return;
+    this.rested(threadId, { status: 'stopped', error: 'Stopped' });
+  }
+
+  /** Ends a step still running between turns, once: its worktree settles and the run moves on. */
+  private rested(threadId: string, end: { status: 'failed' | 'stopped'; error: string }): void {
     const entry = this.stepOf.get(threadId);
     if (!entry || this.closed || this.core.threads.handoff.active) return;
-    let failed = false;
+    let ended = false;
     this.mutate(entry.runId, run => {
       const inst = this.instance(run, entry.key);
       // A Stop records the run stopped before it ends that work.
       if (run.status === 'stopped' || !inst || inst.status !== 'running' || inst.threadId !== threadId) return false;
-      Object.assign(inst, stopped ? { status: 'stopped', error: 'Stopped', finishedAt: Date.now() }
-        : { status: 'failed', error: `It was waiting on its background work (${tasks}), which ${how}. Its last answer was a checkpoint, not its result.`, finishedAt: Date.now() });
-      failed = true;
+      Object.assign(inst, { ...end, finishedAt: Date.now() });
+      ended = true;
     });
-    if (failed) this.ended(entry, threadId);
+    if (ended) this.ended(entry, threadId);
   }
 
   /**

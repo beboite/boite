@@ -657,6 +657,25 @@ test('a waiting agent takes its answer directly, and the recipient is not woken 
   expect((await h.core.coordination.wait(a, undefined, 0)).letters).toEqual([]);
 });
 
+test('a read that faults midway leaves every letter of its batch in the inbox', async () => {
+  const { h, a, b } = await setup();
+  const desk = h.core.coordination as unknown as { deliver(threadId: string): Promise<void>; update(letter: unknown, status: string, error?: string | null): void };
+  const deliver = spyOn(desk, 'deliver').mockResolvedValue(undefined);
+  try {
+    await send(h, b, dest(h, a), 'First letter');
+    await send(h, b, dest(h, a), 'Second letter');
+    const original = desk.update.bind(desk);
+    let marked = 0;
+    const update = spyOn(desk, 'update').mockImplementation((letter, status, error) => {
+      if (status === 'delivered' && ++marked === 2) throw new Error('journal write failed');
+      original(letter, status, error);
+    });
+    try { expect(() => h.core.coordination.wait(a, undefined, 0)).toThrow('journal write failed'); } finally { update.mockRestore(); }
+    // The first letter was never returned, so it is still there to read.
+    expect((await h.core.coordination.wait(a, undefined, 0)).letters.map(l => l.text)).toEqual(['First letter', 'Second letter']);
+  } finally { deliver.mockRestore(); }
+});
+
 test('a waiter whose mail is held leaves the arrival to the next waiter of the thread', async () => {
   const { h, a, b } = await setup();
   const held = h.core.coordination.wait(a, dest(h, b), 5000);

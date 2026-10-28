@@ -33,20 +33,21 @@ export class CoordinationLookups {
     const unavailable: string[] = [];
     if (config.remote) {
       const found = await Promise.all(this.side.trusted().map(async peer => {
-        try {
-          const remote = partialList(await projectCoordination(this.core, threadId, peer, 'directory', { partial: PARTIAL }));
-          if (!this.side.trusted().some(p => p.coreId === peer.coreId)) throw new Error('peer revoked');
-          return { peer, contacts: remote.entries.map(a => checkRemoteContact(a as AgentContact, peer)), missing: remote.unavailable };
-        } catch { return { peer, contacts: null, missing: 0 }; }
+        try { return { peer, answer: await projectCoordination(this.core, threadId, peer, 'directory', { partial: PARTIAL }) }; } catch { return { peer, answer: null }; }
       }));
       const routed = await this.side.mailboxes.directory(threadId);
-      // Trust is read after the last await: a peer revoked while the routed lookup was pending is named, not listed.
+      // Trust and associations are read after the last await: a peer revoked while another lookup was pending is named, not listed.
       const trusted = new Set(this.side.trusted().map(peer => peer.coreId));
-      for (const result of found) {
-        if (result.contacts === null || !trusted.has(result.peer.coreId)) unavailable.push(result.peer.name);
+      for (const { peer, answer } of found) {
+        let remote: { contacts: AgentContact[]; missing: number } | null = null;
+        if (answer && trusted.has(peer.coreId)) try {
+          const list = partialList(answer());
+          remote = { contacts: list.entries.map(a => checkRemoteContact(a as AgentContact, peer)), missing: list.unavailable };
+        } catch { remote = null; }
+        if (!remote) unavailable.push(peer.name);
         else {
-          agents.push(...result.contacts);
-          if (result.missing > 0) unavailable.push(partialName(result.peer.name, result.missing));
+          agents.push(...remote.contacts);
+          if (remote.missing > 0) unavailable.push(partialName(peer.name, remote.missing));
         }
       }
       agents.push(...routed.entries);
@@ -59,26 +60,28 @@ export class CoordinationLookups {
     // A group member that is down fails both its own directory and the contact routes asked of it: it is named once.
     return { agents: agents.filter(contact => contact.coreId !== localCoreId || reachable.has(contact.threadId)), unavailable: [...new Set(unavailable)] };
   }
-  /** Every contact this thread may reach on each trusted machine, in parallel; a machine that fails is named, not fatal. */
-  private async remoteAll<T>(threadId: string, operation: 'search' | 'read', payload: unknown, check: (answer: unknown, peer: CoordinationPeer) => T, peers = this.side.trusted()): Promise<{ results: T[]; unavailable: string[] }> {
+  /**
+   * Every contact this thread may reach on each trusted machine, in parallel; a machine that fails is named, not fatal.
+   * The caller collects the answers after its own last await: trust and associations are read then.
+   */
+  private async remoteAll<T>(threadId: string, operation: 'search' | 'read', payload: unknown, check: (answer: unknown, peer: CoordinationPeer) => T, peers = this.side.trusted()): Promise<() => { results: T[]; unavailable: string[] }> {
     const config = this.side.config(threadId);
-    if (!config.remote || config.mode === 'off') return { results: [], unavailable: [] };
+    if (!config.remote || config.mode === 'off') return () => ({ results: [], unavailable: [] });
     const found = await Promise.all(peers.map(async peer => {
-      try {
-        const answer = await projectCoordination(this.core, threadId, peer, operation, payload);
-        if (!this.side.trusted().some(p => p.coreId === peer.coreId)) throw new Error('peer revoked');
-        return { peer, result: check(answer, peer), failed: null };
-      } catch (error) { return { peer, result: null, failed: error instanceof PeerRefusal ? `${peer.name} (${error.message})` : peer.name }; }
+      try { return { peer, answer: await projectCoordination(this.core, threadId, peer, operation, payload), failed: null }; }
+      catch (error) { return { peer, answer: null, failed: error instanceof PeerRefusal ? `${peer.name} (${error.message})` : peer.name }; }
     }));
-    this.side.checkLookupAccess(threadId, true);
-    // A peer that answered early may have been revoked while another one was pending.
-    for (const entry of found) {
-      if (!this.side.trusted().some(peer => peer.coreId === entry.peer.coreId)) {
-        entry.result = null;
-        entry.failed = entry.peer.name;
+    return () => {
+      this.side.checkLookupAccess(threadId, true);
+      const trusted = new Set(this.side.trusted().map(peer => peer.coreId));
+      const results: T[] = [], unavailable: string[] = [];
+      for (const { peer, answer, failed } of found) {
+        // A peer that answered early may have been revoked while another lookup was pending.
+        if (!answer || !trusted.has(peer.coreId)) { unavailable.push(failed ?? peer.name); continue; }
+        try { results.push(check(answer(), peer)); } catch (error) { unavailable.push(error instanceof PeerRefusal ? `${peer.name} (${error.message})` : peer.name); }
       }
-    }
-    return { results: found.flatMap(entry => entry.result === null ? [] : [entry.result]), unavailable: found.flatMap(entry => entry.failed === null ? [] : [entry.failed]) };
+      return { results, unavailable };
+    };
   }
   /** Contacts here and on trusted machines whose fields or chat contain every word of the query. */
   async search(threadId: string, query: string): Promise<{ matches: AgentMatch[]; unavailable: string[] }> {
@@ -87,12 +90,13 @@ export class CoordinationLookups {
     if (this.core.threads.require(threadId).archived || config.mode === 'off') return { matches: [], unavailable: [] };
     const own = this.side.localReach(threadId).filter(a => a.threadId !== threadId);
     const matches = searchContacts(this.core.journal.db, own, words);
-    const remote = await this.remoteAll(threadId, 'search', { words, partial: PARTIAL }, (answer, peer) => {
+    const collect = await this.remoteAll(threadId, 'search', { words, partial: PARTIAL }, (answer, peer) => {
       const list = partialList(answer);
       return { peer, missing: list.unavailable, matches: list.entries.map(match => ({ ...checkRemoteContact(match as AgentContact, peer), ...checkMatchExtras(match as { matched?: unknown; excerpts?: unknown }) })) };
     });
     const routed = config.remote ? await this.side.mailboxes.search(threadId, words) : { entries: [], unavailable: [] };
     this.side.checkLookupAccess(threadId, config.remote);
+    const remote = collect();
     const reachable = new Set(this.side.localReach(threadId).map(contact => contact.threadId));
     const trusted = new Set(this.side.trusted().map(peer => peer.coreId));
     const remoteMatches = remote.results.flatMap(result => result.matches);
@@ -118,13 +122,13 @@ export class CoordinationLookups {
     const peer = this.side.trusted().find(p => p.coreId === to.coreId);
     if (!config.remote) throw refused('cross-machine coordination is disabled for this thread');
     if (!peer) return this.side.mailboxes.read(threadId, to.coreId, { threadId: to.threadId, limit, ...(before === undefined ? {} : { before }) });
-    const { results, unavailable } = await this.remoteAll(threadId, 'read', { threadId: to.threadId, limit, ...(before === undefined ? {} : { before }) }, (answer, from) => {
+    const collect = await this.remoteAll(threadId, 'read', { threadId: to.threadId, limit, ...(before === undefined ? {} : { before }) }, (answer, from) => {
       const raw = answer as { contact?: AgentContact } | null;
       const contact = checkRemoteContact(raw?.contact as AgentContact, from);
       if (contact.threadId !== to.threadId) throw new Error('transcript of another thread');
       return { contact, ...checkTranscript(answer) };
     }, [peer]);
-    this.side.checkLookupAccess(threadId, true);
+    const { results, unavailable } = collect();
     if (!this.side.trusted().some(current => current.coreId === peer.coreId)) throw refused('target.coreId: machine permission revoked');
     if (!results[0]) throw refused(`${unavailable[0] ?? peer.name} did not answer the read`);
     return results[0];

@@ -253,6 +253,20 @@ test('SEC-01 contact mail a bound native thread admitted idle is not refused aga
   } finally {core.providers.require('echo').protocol='echo';for(const mock of mocks)mock.mockRestore();deliver.mockRestore();}
 },30000);
 
+test('SEC-01 a transient fault on one waiting agent leaves the letter to the next waiter',async()=>{
+  const {a,b}=await pair();
+  const deliver=spyOn(b.h.core.coordination as unknown as {deliver(threadId:string):Promise<void>},'deliver').mockResolvedValue(undefined);
+  const support=spyOn(b.h.core.sharedAccess.execution,'support').mockImplementationOnce(()=>{throw new Error('checkout unreadable');});
+  try {
+    const faulted=b.h.core.coordination.wait(b.t.id,undefined,5000).then(()=>null,(error:unknown)=>error);
+    const next=b.h.core.coordination.wait(b.t.id,undefined,5000);
+    const letter=await a.c.call('contacts.sendHuman',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'External correspondence',requestId:'transient-fault'});
+    expect(String(await faulted)).toContain('checkout unreadable');
+    expect((await next).letters.map(l=>l.id)).toEqual([letter.id]);
+    expect(b.h.core.coordination.get(b.t.id).messages.find(l=>l.id===letter.id)?.status).toBe('delivered');
+  } finally {support.mockRestore();deliver.mockRestore();}
+},30000);
+
 test('SEC-01 a directory drops what an association revoked while its lookup was pending returned',async()=>{
   const {a,b}=await pair();const id=await association(a,b);
   expect((await a.h.core.coordination.directory(a.t.id)).agents.some(contact=>contact.coreId===b.id)).toBe(true);
@@ -266,6 +280,24 @@ test('SEC-01 a directory drops what an association revoked while its lookup was 
     held.resolve();
     expect((await pending).agents.filter(contact=>contact.coreId===b.id)).toEqual([]);
   } finally {held.resolve();threads.mockRestore();}
+},30000);
+
+test.each(['directory','search'] as const)('SEC-01 a %s drops what an association revoked while a later source was pending returned',async lookup=>{
+  const {a,b}=await pair();const id=await association(a,b);
+  const listed=async(pending:Promise<{agents?:{coreId:string}[];matches?:{coreId:string}[]}>)=>{const r=await pending;return (r.agents??r.matches??[]).some(contact=>contact.coreId===b.id);};
+  const run=()=>lookup==='directory'?a.h.core.coordination.directory(a.t.id):a.h.core.coordination.search(a.t.id,b.t.title);
+  expect(await listed(run())).toBe(true);
+  // The contact's own answer is in; the routed boxes, asked after it, are still pending when the owner revokes.
+  const boxes=a.h.core.coordination.mailboxes as unknown as Record<'directory'|'search',(...args:unknown[])=>Promise<unknown>>;
+  const real=boxes[lookup].bind(boxes),asked=Promise.withResolvers<void>(),held=Promise.withResolvers<void>();
+  const routed=spyOn(boxes,lookup).mockImplementation(async(...args:unknown[])=>{const result=await real(...args);asked.resolve();await held.promise;return result;});
+  try {
+    const pending=run();
+    await asked.promise;
+    await a.c.call('sharedProjects.revoke',{sharedProjectId:id,requestId:`revoke-${lookup}`});
+    held.resolve();
+    expect(await listed(pending)).toBe(false);
+  } finally {held.resolve();routed.mockRestore();}
 },30000);
 
 test.each(['claude-sdk','codex-appserver','acp','muse','pi'] as const)('SEC-01 unsupported %s warm sessions receive no unprotected external prompt',async protocol=>{

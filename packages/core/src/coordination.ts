@@ -335,12 +335,11 @@ export class Coordination {
   }
   /** Received letters for this thread, from one sender or any, marked delivered. */
   private claim(threadId: string, from: AgentAddress | null): AgentLetter[] {
-    const letters = this.admit(threadId, this.ready(threadId, Infinity, from), batch => {
+    return this.admit(threadId, this.ready(threadId, Infinity, from), batch => {
       if (batch.length > 0) this.restoreProject(threadId);
       for (const letter of batch) this.update(letter, 'delivered');
-      return batch;
+      return withRelations(this.core, this.self('').coreId, threadId, batch.map(letter => ({ ...letter, status: 'delivered' as const })));
     }, () => this.ready(threadId, Infinity, from, true));
-    return withRelations(this.core, this.self('').coreId, threadId, letters.map(letter => ({ ...letter, status: 'delivered' as const })));
   }
   /**
    * A waiting agent takes the letter that just arrived, with what else it may read now. Mail held from
@@ -350,7 +349,7 @@ export class Coordination {
     for (const waiter of this.waiters.get(letter.to.threadId) ?? []) {
       if (waiter.from !== null && !same(waiter.from, letter.from)) continue;
       let letters: AgentLetter[];
-      try { letters = this.claim(letter.to.threadId, waiter.from); } catch (error) { return waiter.fail(error); }
+      try { letters = this.claim(letter.to.threadId, waiter.from); } catch (error) { waiter.fail(error); continue; }
       if (letters.length > 0) return waiter.done(letters);
     }
   }
@@ -596,7 +595,8 @@ export class Coordination {
     }
     const outer = this.admitting;
     this.admitting = new Set(batch.map(letter => letter.id));
-    try { return consume(batch); } finally { this.admitting = outer; }
+    // The sink records its whole batch or nothing: a fault on one letter leaves none marked as read.
+    try { return this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => consume(batch))()); } finally { this.admitting = outer; }
   }
   private inProject(letter: AgentLetter): boolean {
     if (letter.from.coreId !== this.self('').coreId || letter.to.coreId !== this.coreId) return false;

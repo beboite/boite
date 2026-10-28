@@ -694,7 +694,8 @@ export class Delegation {
     }
     if (wait?.state !== 'interrupted') return;
     const how = `ended without waking it: ${INTERRUPTION_TEXT[wait.reason]}`;
-    if (step) this.core.workflows.waitLost(thread.id, how, wait.for, this.stopped.has(thread.id));
+    if (step && this.stopped.has(thread.id)) this.core.workflows.stepStopped(thread.id);
+    else if (step) this.core.workflows.waitLost(thread.id, how, wait.for);
     else if (!this.stopped.has(thread.id)) tellInterrupted(this.core, thread, wait.for, how, wait.reason);
   }
   /**
@@ -732,6 +733,8 @@ export class Delegation {
       if (this.core.scheduler.stop(id) || waiting) stopped++;
       closeQuestions(this.core, id, 'the core, since the subagent was stopped');
       this.core.threads.releaseAgent(id);
+      // A step at rest on its checkpoint has no turn whose end would settle it, even when its work already completed.
+      this.core.workflows.stepStopped(id);
       for (const letter of this.letters(id, 'received')) this.update(letter, 'rejected', 'Agent stopped');
       for (const letter of this.letters(id, 'uncertain')) {
         if (letter.error?.startsWith('Queued for provider turn ')) this.update(letter, 'rejected', 'Agent stopped before provider delivery');
