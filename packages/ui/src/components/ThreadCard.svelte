@@ -14,6 +14,7 @@
   import PullRequestBadge from './PullRequestBadge.svelte';
   import { projectName } from '../lib/format';
   import { canMarkDone, markDone } from '../lib/recent.svelte';
+  import { ThreadRename } from '../lib/thread-rename.svelte';
   let {
     machine,
     project,
@@ -39,8 +40,8 @@
   } = $props();
   let owner = $derived(machine.store);
   let open = $derived(workspace.active === owner && owner.openThread?.id === thread.id);
-  let renaming = $state(false);
-  let title = $state('');
+  /** The rename in progress, bound to the machine and thread it began on. */
+  let renaming = $state<ThreadRename | null>(null);
   const pr = trackThreadPullRequest(() => ({ owner, thread, hidden }));
   const pullRequest = $derived(pr.value);
   /** Only a project or pull request needs a second line; the machine and the provider stay beside the title. */
@@ -50,19 +51,21 @@
   let doneAllowed = $derived(canMarkDone(owner, thread));
 
   function rename() {
-    title = thread.title;
-    renaming = true;
+    renaming = new ThreadRename(owner, thread.id, thread.title);
   }
   async function save() {
-    if (!renaming) return;
-    renaming = false;
-    await owner.rename(thread.id, title);
+    const current = renaming;
+    renaming = null;
+    await current?.commit();
   }
   let row = $state<HTMLButtonElement | undefined>(undefined);
   /** Enter and Escape hand the keyboard back to the row, never to the page, where Escape stops the turn. */
   async function leaveRename(commit: boolean) {
     if (commit) void save();
-    else renaming = false;
+    else {
+      renaming?.cancel();
+      renaming = null;
+    }
     await tick();
     row?.focus({ preventScroll: true });
   }
@@ -84,7 +87,8 @@
   <input
     class="rename"
     data-testid="thread-rename"
-    bind:value={title}
+    value={renaming.text}
+    oninput={(event) => { if (renaming) renaming.text = event.currentTarget.value; }}
     use:focusOnMount
     onblur={() => void save()}
     onkeydown={(event) => {
