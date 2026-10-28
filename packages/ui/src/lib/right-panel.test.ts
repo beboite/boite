@@ -566,6 +566,15 @@ describe('the right panel', () => {
     expect(bound.outgoing('notes.md')).toBeNull();
   });
 
+  test('closing the changes tab on a file\'s row leaves that open file\'s disk text', async () => {
+    const { bound } = panel();
+    bound.openFile('notes.md');
+    await bound.read('notes.md', async () => 'on disk', (text) => text);
+    const changes = bound.openChanges('notes.md');
+    bound.close(changes.id);
+    expect(bound.disk('notes.md')).toBe('on disk');
+  });
+
   test('a file tab keeps its unsaved text until it is closed, and each close names what it takes', () => {
     const { root, bound } = panel();
     const readme = bound.openFile('README.md');

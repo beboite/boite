@@ -105,14 +105,16 @@ export function paragraphBlocks(text: string, live: boolean): string[] {
 
 /**
  * A block as the renderer must see it: blank lines and trailing space go. The
- * first line's indent stays only on a fence opener, whose code the renderer
- * outdents by that indent; anywhere else, a heading included, it goes as it
- * always did.
+ * first line's indent stays on a fence opener, whose code the renderer
+ * outdents by that indent, and on a marker indented past one, which trimming
+ * would turn into a fence the scanner never saw. Anywhere else, a heading
+ * included, it goes as it always did.
  */
 function blockText(text: string): string {
   const block = text.replace(/^(?:[ \t]*\r?\n)+/, '').trimEnd();
   const cut = block.indexOf('\n');
-  return openFence(cut < 0 ? block : block.slice(0, cut)) ? block : block.trimStart();
+  const first = cut < 0 ? block : block.slice(0, cut);
+  return openFence(first.trimStart()) ? block : block.trimStart();
 }
 
 /**

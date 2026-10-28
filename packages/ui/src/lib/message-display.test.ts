@@ -87,6 +87,13 @@ test('an indented heading stays a heading, in a completed block and in the final
   expect(renderMarkdown(scan.blocks(text, true)[1]!)).toMatch(heading);
   expect(renderMarkdown(scan.blocks(text, false)[1]!)).toMatch(heading);
 });
+test('a marker indented past a fence stays text in the stream, as the scanner and the full render read it', () => {
+  const text = '    ```\nx = 1\n\ny = 2';
+  expect(renderMarkdown(text)).not.toContain('<pre');
+  for (const live of [false, true]) {
+    expect(paragraphBlocks(text, live).map(block => renderMarkdown(block)).join('')).not.toContain('<pre');
+  }
+});
 test('internal goal markers stay out of prose, even during partial arrival', () => {
   expect(answerText('Done\n\n[BOITE_GOAL_COMPLETE]', false)).toBe('Done\n\n');
   expect(answerText('Done\n\n[BOITE_GOAL_COM', true)).not.toContain('[BOITE_');

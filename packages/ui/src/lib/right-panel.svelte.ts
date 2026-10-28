@@ -701,7 +701,9 @@ export class BoundPanel {
     const saves = this.#root.saves.get(this.#key);
     for (const id of ids) {
       held?.delete(id);
-      const path = this.state.surfaces.find((surface) => surface.id === id)?.path;
+      // Only a file tab's path names a file: the changes tab's is its selected row.
+      const surface = this.state.surfaces.find((one) => one.id === id);
+      const path = surface?.kind === 'file' ? surface.path : undefined;
       // A read or write still out stays the file's: the tab reopened on it must know.
       if (path !== undefined && this.#sequence(path)?.idle) saves?.delete(path);
     }
