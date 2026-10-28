@@ -1,6 +1,7 @@
 import type { Attachment, PreviewReference } from '@boite/contracts';
 import type { Store } from './store.svelte';
 import type { ComposerState } from './composer-queue';
+import { tileKey } from './draft-attachments';
 import { editPreviewMentions } from './preview-mentions';
 import { fill, strings } from './strings';
 
@@ -77,12 +78,19 @@ export function removeImageReferences(store: Store, key: string, at: number) {
 }
 
 /**
- * What a Send waiting on a file read was pressed on. A sync that swaps the
- * box changes it; a file that lands, even a picture that went as a file and
- * took its reference with it, does not.
+ * What a Send waiting on a file read was pressed on: its words without their
+ * `[Image N]`, and each file as the tile it showed. A file that lands keeps
+ * its tile, even a picture that went as a file and took its reference with
+ * it; a sync that swaps the box brings other words or other files.
  */
-export function sendShape(text: string, attachments: Attachment[]): string {
-  return `${attachments.length}:${text.replace(/\[Image [1-9]\d*\]/g, '')}`;
+export interface SendShape { words: string; tiles: Attachment[] }
+
+export function sendShape(text: string, attachments: Attachment[]): SendShape {
+  return { words: text.replace(/\[Image [1-9]\d*\]/g, ''), tiles: attachments.map(tileKey) };
+}
+
+export function sameSend(pressed: SendShape, now: SendShape): boolean {
+  return pressed.words === now.words && pressed.tiles.length === now.tiles.length && pressed.tiles.every((tile, at) => tile === now.tiles[at]);
 }
 
 /** A box nobody types in: a step of the undo history, or a draft set aside. */

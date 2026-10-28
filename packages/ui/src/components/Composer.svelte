@@ -10,7 +10,7 @@
   import { rewindComposerEdit } from '../lib/composer-edit';
   import { editWhole } from '../lib/reading-window';
   import { fitHeight, selfSizing } from '../lib/composer-size';
-  import { editComposerInput, insertImageReference, removeImageReferences, sendShape, touchesImageReference, trackImageSend } from '../lib/composer-images';
+  import { editComposerInput, insertImageReference, removeImageReferences, sameSend, sendShape, touchesImageReference, trackImageSend, type SendShape } from '../lib/composer-images';
   import { checkpoint, editKind, recordEdit, resetHistory, settled } from '../lib/composer-history';
   import { boxSelection, copySelection, pasteImages, travel, type EditingHost } from '../lib/composer-editing';
   import { ComposerMentions } from '../lib/composer-mentions.svelte';
@@ -61,7 +61,7 @@
   /** Files still being read into this prompt: their tiles show, Send waits for them. */
   let loadingFiles = $derived(attachments.some(isLoading));
   /** Send pressed while files were still being read: it goes once they are ready, unless the user types on. */
-  let sendWhenLoaded = $state<{ store: Store; key: string; state: ComposerState; shape: string; nextDraft: boolean } | null>(null);
+  let sendWhenLoaded = $state.raw<{ store: Store; key: string; state: ComposerState; shape: SendShape; nextDraft: boolean } | null>(null);
   let dictating = $state(false);
   let speechPreview = $state(''), speechStatus = $state(''), speechError = $state(false);
   let box = $state<HTMLTextAreaElement | undefined>(undefined);
@@ -153,7 +153,7 @@
   let canSend = $derived(sendable && !loadingFiles);
   $effect(() => {
     const waiting = sendWhenLoaded;
-    if (waiting && !loadingFiles) untrack(() => { sendWhenLoaded = null; if (waiting.store === store && waiting.key === key && waiting.state === store.composerStates[key] && waiting.shape === sendShape(text, attachments)) void submit(waiting.nextDraft); });
+    if (waiting && !loadingFiles) untrack(() => { sendWhenLoaded = null; if (waiting.store === store && waiting.key === key && waiting.state === store.composerStates[key] && sameSend(waiting.shape, sendShape(text, attachments))) void submit(waiting.nextDraft); });
   });
   // Another conversation or machine on screen: the waiting send stays with the box it was pressed in, unsent.
   $effect(() => { void key; void store; untrack(() => { sendWhenLoaded = null; }); });

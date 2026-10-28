@@ -1458,7 +1458,7 @@ test('Send pressed during a file read goes once the file is ready, unless the us
   expect(input().value).toBe('');
 });
 
-test('a send waiting on a file never sends the words a sync swapped into its box', async ({ app: _app }) => {
+test('a send waiting on a file never sends a box a sync swapped in, even with the same words', async ({ app: _app }) => {
   await store.open('t-trace');
   await type('Mine, with notes');
   vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(() => {});
@@ -1467,14 +1467,13 @@ test('a send waiting on a file never sends the words a sync swapped into its box
   const before = store.openThread!.messages.length;
   press('Enter');
   await waitFor(() => query<HTMLButtonElement>('[data-testid=composer-send]').dataset.waiting === 'true');
-  // A conflict sets these words and their file aside and writes the other side's box, as `#write` does.
+  // A conflict sets this box aside and writes the other side's in its place, as `#write` does: same words, another file.
   const state = Object.values(store.composerStates).find(one => one.text === 'Mine, with notes')!;
-  state.text = 'Theirs';
-  state.attachments = [];
+  state.attachments = [{ kind: 'file', mimeType: 'text/plain', name: 'theirs.txt', data: btoa('theirs') }];
   await waitFor(() => query<HTMLButtonElement>('[data-testid=composer-send]').dataset.waiting === undefined);
   await new Promise(resolve => setTimeout(resolve, 20));
   expect(store.openThread!.messages.length).toBe(before);
-  expect(input().value).toBe('Theirs');
+  expect(chips().map(chip => chip.getAttribute('title'))).toEqual(['theirs.txt']);
 });
 
 test('a send waiting on a draft\'s file never sends another draft opened in the same box', async ({ app: _app }) => {
