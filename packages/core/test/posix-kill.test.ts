@@ -4,9 +4,25 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Bus } from '../src/bus.ts';
 import { Journal } from '../src/journal.ts';
-import { GROUP_POLL_MS, KILL_GRACE_MS, stopGroup } from '../src/platform/posix-kill.ts';
+import { GROUP_POLL_MS, KILL_GRACE_MS, killBunChild, stopGroup } from '../src/platform/posix-kill.ts';
 import type { Signaller } from '../src/platform/posix-kill.ts';
 import { ProcRegistry } from '../src/procs.ts';
+
+test('Windows stops skip reaped children and propagate real kill failures', () => {
+  const descriptor = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  Object.defineProperty(process, 'platform', { ...descriptor, value: 'win32' });
+  let kills = 0;
+  const error = new Error('access denied');
+  const kill = () => { kills++; throw error; };
+  try {
+    for (const state of [{ exitCode: 0, signalCode: null }, { exitCode: null, signalCode: 'SIGTERM' }]) {
+      expect(() => killBunChild({ ...state, kill } as unknown as Bun.Subprocess)).not.toThrow();
+    }
+    expect(kills).toBe(0);
+    expect(() => killBunChild({ exitCode: null, signalCode: null, kill } as unknown as Bun.Subprocess)).toThrow(error);
+    expect(kills).toBe(1);
+  } finally { Object.defineProperty(process, 'platform', descriptor); }
+});
 
 /**
  * A process table with groups: `kill` throws ESRCH the way the kernel does when
