@@ -1,11 +1,12 @@
+import { ACTIVE_THREAD_STATUSES } from '@boite/contracts';
 import type { Message, MessageId, MessagePart, RpcParams, ThreadId, Turn } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { assertDriverRunnable } from '../drivers/index.ts';
 import { notFound, refused } from '../errors.ts';
 import { newId } from '../ids.ts';
-import { saveThread } from './records.ts';
+import { markQueued, settleStatus } from './lifecycle.ts';
 import { checkStoredEffort, checkStoredSpeed } from './selection.ts';
-import { closeTools } from './turn-settlement.ts';
+import { announceFinished, finishTurn } from './turn-settlement.ts';
 
 /** What a turn a dead core left behind says, once the next core has closed it. */
 export const CRASH_WHILE_RUNNING = 'The core stopped while this turn was running; send the prompt again.';
@@ -50,7 +51,7 @@ export class ThreadRecovery {
         const held: Turn = { ...turn, queueHold: turn.queueHold ?? { reason: 'core-restarted', since: Date.now() } };
         this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
           if (!turn.queueHold) this.core.journal.append({ type: 'turn.held', threadId: turn.threadId, version: 1, payload: held }, () => this.core.journal.putTurn(held));
-          if (thread.status !== 'queued') saveThread(this.core, { ...thread, status: 'queued' }, 'thread.status');
+          markQueued(this.core, turn.threadId);
         })());
         this.core.scheduler.enqueue(held, held.execution!.accountId);
         counts.held += 1;
@@ -83,10 +84,8 @@ export class ThreadRecovery {
         source: 'startup', event: 'startup.turns-recovered', data: { total: stuck.length, ...counts },
       });
     }
-    for (const thread of this.core.journal.listThreadsWithStatus(['queued', 'running', 'waiting'])) {
-      if (!waiting.has(thread.id)) {
-        saveThread(this.core, { ...thread, status: 'idle' }, 'thread.finished');
-      }
+    for (const thread of this.core.journal.listThreadsWithStatus(ACTIVE_THREAD_STATUSES)) {
+      if (!waiting.has(thread.id)) settleStatus(this.core, thread.id);
     }
     return stuck.length;
   }
@@ -136,19 +135,12 @@ export class ThreadRecovery {
       this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
     }
     const stopped: Turn = { ...turn, status: 'stopped', finishedAt: Date.now() };
-    this.core.journal.append({ type: 'turn.stopped', threadId, version: 1, payload: stopped }, () => {
-      this.core.journal.putTurn(stopped);
-    });
-    this.core.bus.emit('turn.finished', stopped);
-    const thread = this.core.journal.getThread(threadId);
-    if (thread !== null) saveThread(this.core, { ...thread, status: 'idle' }, 'thread.finished');
+    announceFinished(this.core, stopped, finishTurn(this.core, stopped, 'handed-over'));
   }
 
   private failStuckTurn(turn: Turn, reason: string): void {
     const threadId = turn.threadId;
-    const thread = this.core.journal.getThread(threadId);
-    closeTools(this.core, threadId, turn.id);
-    if (thread !== null) {
+    if (this.core.journal.getThread(threadId) !== null) {
       // The turn's own messages, and only the ones still open: a caret left
       // blinking on a message nobody will ever write to again is the visible half
       // of this bug.
@@ -169,14 +161,9 @@ export class ThreadRecovery {
       this.closeAsError(threadId, carrier.id);
     }
 
+    // The thread rests where a live failure leaves it: `error` (`threads/lifecycle.ts`).
     const finished: Turn = { ...turn, status: 'error', finishedAt: Date.now(), error: reason };
-    this.core.journal.append({ type: 'turn.finished', threadId, version: 1, payload: finished }, () => {
-      this.core.journal.putTurn(finished);
-    });
-    this.core.bus.emit('turn.finished', finished);
-
-    if (thread === null) return;
-    saveThread(this.core, { ...thread, status: 'idle' }, 'thread.finished');
+    announceFinished(this.core, finished, finishTurn(this.core, finished, 'crashed'));
   }
 
   /** A queued turn never opened a message; the error needs one to live in. */

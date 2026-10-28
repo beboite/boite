@@ -48,7 +48,7 @@ export function unwoken(core: Core, threadId: string): string | null {
 /** Asks that child for the final result its checkpoint promised; the error when no turn could start. */
 export function askFinal(core: Core, threadId: string, tasks: string): string | null {
   try {
-    core.threads.startTurn(threadId, `Your background work (${tasks}) completed, but no turn of yours followed it, so your last answer is still a checkpoint. Check how that work ended and give your final result now.`, [], undefined, 'delegation', undefined, undefined, 'Background work completed: final result asked');
+    core.threads.startTurn(threadId, { prompt: `Your background work (${tasks}) completed, but no turn of yours followed it, so your last answer is still a checkpoint. Check how that work ended and give your final result now.`, display: 'Background work completed: final result asked' }, { kind: 'delegation' });
     return null;
   } catch (error) { return messageOf(error); }
 }

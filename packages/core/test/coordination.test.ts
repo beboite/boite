@@ -200,8 +200,8 @@ test('a resume lifts the pause the core applied, but not one the owner set', asy
   const { h, a, b } = await setup(); enable(h, a, b);
   h.core.coordination.pause(a);
   h.core.coordination.configure(b, { ...brief, paused: true });
-  h.core.threads.startTurn(a, 'carry on', [], undefined, 'resume');
-  h.core.threads.startTurn(b, 'carry on', [], undefined, 'resume');
+  h.core.threads.startTurn(a, 'carry on', { kind: 'resume', reason: 'carry-on' });
+  h.core.threads.startTurn(b, 'carry on', { kind: 'resume', reason: 'carry-on' });
   expect(h.core.coordination.get(a).config.paused).toBe(false);
   expect(h.core.coordination.get(b).config.paused).toBe(true);
 });

@@ -1,5 +1,5 @@
 import { stat } from 'node:fs/promises';
-import { ATTENTION_IDLE_MS, ATTENTION_LEASE_MS, protectedThreadIdsError, type ThreadId } from '@boite/contracts';
+import { threadActive, ATTENTION_IDLE_MS, ATTENTION_LEASE_MS, protectedThreadIdsError, type ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { assertDriverRunnable, getDriver, setThreadViewed } from '../drivers/index.ts';
 import { invalidParams } from '../errors.ts';
@@ -146,7 +146,7 @@ export class ThreadFocus {
       return;
     }
     setThreadViewed(threadId, true);
-    if (['running', 'queued', 'waiting'].includes(thread.status)) return;
+    if (threadActive(thread.status)) return;
     const key = JSON.stringify([thread.providerId, thread.accountId, thread.selectionVersion, thread.sessionGeneration, thread.cwd, thread.sessionResumeAt]);
     const previous = this.prepared.get(threadId);
     if (previous?.pending || previous?.key === key) return;
@@ -174,11 +174,11 @@ export class ThreadFocus {
     if (this.closed || this.core.stopping || !this.viewed(threadId)) return;
     const latest = this.core.threads.require(threadId);
     if (latest.selectionVersion !== thread.selectionVersion || latest.sessionGeneration !== thread.sessionGeneration || latest.archived) return;
-    if (['running', 'queued', 'waiting'].includes(latest.status)) return;
+    if (threadActive(latest.status)) return;
     const protection = this.core.sharedAccess.execution.prepare(threadId);
     if (protection) await protection;
     const ready = this.core.threads.require(threadId);
-    if (ready.selectionVersion !== latest.selectionVersion || ready.sessionGeneration !== latest.sessionGeneration || ready.archived || ['running', 'queued', 'waiting'].includes(ready.status)) return;
+    if (ready.selectionVersion !== latest.selectionVersion || ready.sessionGeneration !== latest.sessionGeneration || ready.archived || threadActive(ready.status)) return;
     await driver.prepare(this.core.threads.contexts.makeSessionContext(ready, provider, account));
   }
 

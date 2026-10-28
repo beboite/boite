@@ -1,4 +1,5 @@
 /** External correspondence retains its execution authority with the history that consumed it. */
+import { threadActive } from '@boite/contracts';
 import {createHash} from 'node:crypto';
 import {realpathSync} from 'node:fs';
 import type {AgentLetter} from '@boite/contracts';
@@ -144,7 +145,7 @@ export function protectLetters(core: Core, threadId: string, letters: AgentLette
   if (!core.sharedAccess.execution.support(protocol, thread.providerId, thread.permissionMode).supported || protocol === 'echo' && thread.permissionMode !== 'default') throw refused('shared file policy: contact letter execution requires a protected provider route');
   const captured = core.sharedAccess.bound(threadId);
   const associations = captured ? [captured, ...(captured.additional ?? [])].map(b => b.job.sharedProjectId) : [];
-  const busy = ['queued', 'running', 'waiting'].includes(thread.status) && !(starting && thread.status === 'queued');
+  const busy = threadActive(thread.status) && !(starting && thread.status === 'queued');
   if (protocol !== 'echo' && busy
     && external.some(l => !l.sharedProjectId || !associations.includes(l.sharedProjectId))) {
     throw refused('shared file policy: new contact authority waits until the native turn is idle');

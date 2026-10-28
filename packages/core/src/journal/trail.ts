@@ -66,8 +66,8 @@ export function rewindTrailCursor(db: Database): void {
 /**
  * Looks at the `limit` oldest events and deletes those written before
  * `before`; 0 means nothing old is left at the front. Only the front is read,
- * never the whole table: ids grow with time. Nothing replays events but
- * `openAsyncQuestions`, since the projections are written in the same transaction. The newest agents
+ * never the whole table: ids grow with time. Nothing replays events, since
+ * the projections (`journal/questions.ts` for open cards) are written in the same transaction. The newest agents
  * event stays, because its id is the agents revision and must never go back.
  */
 export function pruneOldEvents(db: Database, before: number, limit: number): number {

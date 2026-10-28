@@ -442,7 +442,7 @@ on a usage limit plans one resume a minute after the window resets
 (`threads/limit-resume.ts`). The reset is the one the agent reported, else the
 latest window at 100 % in a fresh `quotas` read of the turn's account; with
 neither, nothing is planned. The plan sits in the journal setting
-`limit-resumes`, so a restart arms it again, and the row shows it as `retry`
+`resumes` (`threads/resume.ts`), so a restart arms it again, and the row shows it as `retry`
 (`kind: 'usage-limit'`, `at`, `resetsAt`) with Do not resume.
 
 Nothing is planned for a failure whose window already reset (no retry loop),
@@ -450,8 +450,10 @@ for a window the thread already resumed after, for a sub-thread or persistent
 agent, or for a compaction or wake turn. When the plan fires, it is dropped
 instead if the setting went off, the thread was archived, answered, stopped or
 is busy, its provider, account, model or session generation changed, a card
-waits for the user, or its subagent team is paused. A plan a core caught while
-dispatching is dropped at the next start, since its turn may have gone out.
+waits for the user, or the user paused its team. A cache ping in the way
+stops and lets it go; it neither cancels the plan nor counts as the turn that
+answered. A plan a core caught while dispatching is dropped at the next start,
+since its turn may have gone out.
 The resume is a `resume` turn with the request id `limit-resume_<turnId>`,
 labelled "Resumed after the usage limit reset", whose prompt asks the agent to
 continue without repeating work.

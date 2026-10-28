@@ -29,6 +29,9 @@ export const SETTING_MARKERS: [string, { reason: string } & ({ key: string; valu
 /** `[agent-settings]`: the fake agent asks to entrust a project to the first agent, the way `boite settings bot request` would. */
 export const AGENT_SETTING_MARKER = '[agent-settings]';
 export const AGENT_SETTING_REASON = 'This project has threads that need following. Entrusting it to {name} lets it watch them and tell you what matters.';
+/** `[agent-model]`: the fake agent asks to move the first agent to another provider's model. */
+export const AGENT_MODEL_MARKER = '[agent-model]';
+export const AGENT_MODEL_REASON = 'Most of my wakes end quiet: a smaller model on another provider covers them.';
 
 export const DIFF_PATH = 'src/app.ts';
 
