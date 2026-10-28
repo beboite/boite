@@ -126,6 +126,9 @@ export function parseWorktreeList(out: string): Listed[] {
   return entries;
 }
 
+/** A thread found in a checkout, and whether it is a draft not sent yet, which only its processes make hold. */
+interface Occupant { thread: ThreadSummary; draft: boolean }
+
 export class WorktreeSweep {
   constructor(private readonly core: Core) {}
 
@@ -205,9 +208,10 @@ export class WorktreeSweep {
     return { branch: target.branch, branchDeleted };
   }
 
-  private refuseOccupied(project: Project, path: string, holder: ThreadSummary | null): void {
-    if (holder === null) return;
-    const why = this.core.drafts.threads().some((draft) => draft.id === holder.id) ? 'is a draft whose agent runs there: send or discard it first'
+  private refuseOccupied(project: Project, path: string, occupant: Occupant | null): void {
+    if (occupant === null) return;
+    const holder = occupant.thread;
+    const why = occupant.draft ? 'is a draft whose agent still runs there: send it, or discard it and let it stop'
       : holder.archived ? 'is still running there: wait for it to finish' : 'works there: archive it first';
     throw refused(`thread "${holder.title}" (${holder.id}) ${why} (${path})`, {
       projectId: project.id, path, threadId: holder.id, threadTitle: holder.title,
@@ -221,28 +225,31 @@ export class WorktreeSweep {
    * (`occupiesCheckout`), null when none does, or `moved` when a thread arrived
    * or changed folder after the folders were resolved.
    */
-  private async occupancy(project: Project, path: string): Promise<() => ThreadSummary | null | 'moved'> {
+  private async occupancy(project: Project, path: string): Promise<() => Occupant | null | 'moved'> {
     const key = await realKey(path);
     const near = this.near(project, [path]);
     // A draft's thread is in no list until it is sent, yet its agent may already run there.
-    const drafts = new Set<string>();
-    const threads = (): ThreadSummary[] => [...this.core.threads.list({ includeArchived: true }), ...this.core.drafts.threads().map((draft) => (drafts.add(draft.id), draft))]
-      .filter((thread) => thread.projectId === project.id || near(thread.cwd));
+    // Read again at each call: a draft sent meanwhile is a published thread, its row decides.
+    const threads = (): Occupant[] => [
+      ...this.core.threads.list({ includeArchived: true }).map((thread) => ({ thread, draft: false })),
+      ...this.core.drafts.threads().map((thread) => ({ thread, draft: true })),
+    ].filter(({ thread }) => thread.projectId === project.id || near(thread.cwd));
     const keys = new Map<string, string>();
-    await Promise.all([...new Set(threads().map((thread) => thread.cwd))].map(async (cwd) => { keys.set(cwd, await realKey(cwd)); }));
+    await Promise.all([...new Set(threads().map(({ thread }) => thread.cwd))].map(async (cwd) => { keys.set(cwd, await realKey(cwd)); }));
     return () => {
-      let holder: ThreadSummary | null = null;
-      for (const thread of threads()) {
+      let holder: Occupant | null = null;
+      for (const occupant of threads()) {
+        const { thread, draft } = occupant;
         const at = keys.get(thread.cwd);
         if (at === undefined) return 'moved';
-        const holds = drafts.has(thread.id) ? this.core.procs.liveCount(thread.id) > 0 : occupiesCheckout(this.core, thread);
-        if (holder === null && inside(key, at) && holds) holder = thread;
+        const holds = draft ? this.core.procs.liveCount(thread.id) > 0 : occupiesCheckout(this.core, thread);
+        if (holder === null && inside(key, at) && holds) holder = occupant;
       }
       return holder;
     };
   }
 
-  private async occupant(project: Project, path: string): Promise<ThreadSummary | null> {
+  private async occupant(project: Project, path: string): Promise<Occupant | null> {
     for (;;) {
       const holder = (await this.occupancy(project, path))();
       if (holder !== 'moved') return holder;

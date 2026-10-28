@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type { WorktreeEntry } from '@boite/contracts';
 import { setDriver } from '../src/drivers/index.ts';
@@ -354,6 +354,8 @@ describe('worktrees.remove', () => {
     const alias = join(project.path, 'alias');
     symlinkSync(thread.cwd, alias, process.platform === 'win32' ? 'junction' : 'dir');
     mkdirSync(join(thread.cwd, 'sub'));
+    const inner = join(project.path, 'inner');
+    symlinkSync(join(thread.cwd, 'sub'), inner, process.platform === 'win32' ? 'junction' : 'dir');
     await whileGitRemoves(project.id, thread.cwd, async () => {
       // Undoing the deletion would bring it back live, and its next turn would start in the folder git deletes.
       expect(await thrown(client.call('threads.restore', { threadId: thread.id }))).toThrow('is being removed');
@@ -361,6 +363,11 @@ describe('worktrees.remove', () => {
       for (const cwd of [alias, join(alias, 'sub')]) {
         expect(await thrown(client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Through a link', cwd }))).toThrow('is being removed');
       }
+      // `inner/..` names the project by its letters, yet the system would follow the link first and land in the checkout.
+      const climb = `${inner}${sep}..`;
+      const started = harness.core.procs.spawn('thr_climb' as never, process.execPath, ['-e', 'console.log(process.cwd())'], { cwd: climb });
+      const [ran] = await Promise.all([new Response(started.proc.stdout).text(), started.exited]);
+      expect(realpathSync(ran.trim())).toBe(realpathSync(project.path));
     });
     expect(harness.core.threads.list({ includeArchived: true }).filter((one) => one.cwd.startsWith(alias))).toEqual([]);
   });
@@ -374,10 +381,17 @@ describe('worktrees.remove', () => {
       return thread.cwd;
     };
     // The native drivers start their process as the draft is prepared; this one starts a sleeper the same way.
+    // It ignores the polite stop, as an agent busy writing may: off Windows only the SIGKILL two seconds later ends it.
+    const sleeper = 'process.on("SIGTERM", () => {}); console.log("ready"); setTimeout(() => {}, 60_000)';
     const started: string[] = [], refusals: string[] = [];
+    let gate: Promise<void> | null = null;
     const restore = setDriver('echo', { ...echoDriver, setViewed: () => {}, releaseThread: () => {},
       prepare: async (context) => {
-        try { context.spawnChild(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { cwd: context.thread.cwd }); started.push(context.thread.id); }
+        await gate;
+        try {
+          const child = context.spawnChild(process.execPath, ['-e', sleeper], { cwd: context.thread.cwd });
+          child.stdout.once('data', () => started.push(context.thread.id));
+        }
         catch (error) { refusals.push(error instanceof Error ? error.message : String(error)); }
       },
     });
@@ -393,12 +407,42 @@ describe('worktrees.remove', () => {
       const held = await worktree('Held by a draft');
       const draft = await client.call('drafts.prepare', { projectId: project.id, providerId: 'echo', accountId, cwd: held, preparationId: 'draft_before_removal' });
       await waitFor(() => started.includes(draft.threadId));
-      expect(await thrown(client.call('worktrees.remove', { projectId: project.id, path: held }))).toThrow('is a draft whose agent runs there');
+      expect(await thrown(client.call('worktrees.remove', { projectId: project.id, path: held }))).toThrow('is a draft whose agent still runs there');
       expect(existsSync(held)).toBe(true);
+      // Discarded, its agent is still stopping: the checkout stays held until it has exited.
       await client.call('drafts.release', { preparationId: draft.preparationId });
+      if (process.platform !== 'win32') {
+        expect(harness.core.procs.liveCount(draft.threadId as never)).toBe(1);
+        expect(await thrown(client.call('worktrees.remove', { projectId: project.id, path: held }))).toThrow('is a draft whose agent still runs there');
+        expect(existsSync(held)).toBe(true);
+      }
       await waitFor(() => harness.core.procs.liveCount(draft.threadId as never) === 0);
       expect(await client.call('worktrees.remove', { projectId: project.id, path: held })).toEqual({ ok: true, branchDeleted: true });
+      // A preparation still running when its draft is discarded starts nothing afterwards.
+      const late = await worktree('Late preparation');
+      let open = () => {};
+      gate = new Promise((resolve) => { open = resolve; });
+      const discarded = await client.call('drafts.prepare', { projectId: project.id, providerId: 'echo', accountId, cwd: late, preparationId: 'draft_discarded_early' });
+      await client.call('drafts.release', { preparationId: discarded.preparationId });
+      open();
+      await waitFor(() => refusals.length === 2);
+      expect(refusals[1]).toContain('draft preparation was released');
+      expect(harness.core.procs.liveCount(discarded.threadId as never)).toBe(0);
     } finally { restore(); }
+  });
+
+  test('a draft sent while the removal resolves folders holds the checkout by its live row', async () => {
+    const project = await repoProject();
+    const accountId = await echoAccount();
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Sent', worktree: {} });
+    // Each check lists who stands there, resolves their folders, then decides. Here the thread is still a draft
+    // when each check starts and sent by the time it decides: no process, a live row.
+    let calls = 0;
+    const spy = spyOn(harness.core.drafts, 'threads').mockImplementation(() => (calls++ % 2 === 0 ? [harness.core.threads.require(thread.id)] : []));
+    try {
+      expect(await thrown(client.call('worktrees.remove', { projectId: project.id, path: thread.cwd }))).toThrow('works there: archive it first');
+    } finally { spy.mockRestore(); }
+    expect(existsSync(thread.cwd)).toBe(true);
   });
 
   test('a proved branch is deleted only if no checkout took it back while the deletion waited', async () => {

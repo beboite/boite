@@ -1,5 +1,5 @@
 import { stat } from 'node:fs/promises';
-import type { Project, RpcParams, ThreadSummary } from '@boite/contracts';
+import type { Project, RpcParams, ThreadId, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { assertDriverRunnable, getDriver, releaseThread, setThreadViewed } from '../drivers/index.ts';
 import type { SessionContext } from '../drivers/types.ts';
@@ -35,6 +35,8 @@ export class DraftPreparations {
   private readonly released = new Map<string, Map<string, number>>();
   private readonly receipts = new Map<string, { id: string; key: string; threadId: string; expiresAt: number }>();
   private readonly backlog = new Set<Reservation>();
+  /** Discarded drafts whose processes were told to stop and may not have exited yet. */
+  private readonly stopping = new Map<string, ThreadSummary>();
   private readonly ledger: DraftReservationLedger;
   private readiness: Promise<void> | null = null;
   private readonly pending = new Map<string, Set<{ cancelled: boolean }>>();
@@ -48,9 +50,14 @@ export class DraftPreparations {
     return [...new Set([...this.ledger.list().map(ownership => ownership.path), ...live])];
   }
 
-  /** The threads of drafts not adopted yet, which no list holds: a worktree removal counts their processes. */
+  /**
+   * The threads of drafts not adopted yet, which no list holds: a worktree
+   * removal counts their processes. A discarded one stays until they exited.
+   */
   threads(): ThreadSummary[] {
-    return [...this.entries.values(), ...this.backlog].flatMap(entry => entry.thread && !entry.adopted ? [entry.thread] : []);
+    this.forgetStopped();
+    const pending = [...this.entries.values(), ...this.backlog].flatMap(entry => entry.thread && !entry.adopted ? [entry.thread] : []);
+    return [...new Map([...pending, ...this.stopping.values()].map(thread => [thread.id, thread])).values()];
   }
 
   /** Startup and speculative admission share one reconciliation barrier. */
@@ -246,6 +253,12 @@ export class DraftPreparations {
       }
       buffered.length = 0;
     };
+    // A setup still running once the draft is discarded starts nothing more, so its stop really ends (`threads`).
+    const spawnChild = context.spawnChild;
+    context.spawnChild = (...args) => {
+      if (entry.cancelled) throw refused('draft preparation was released', { reason: 'draft-preparation-expired' });
+      return spawnChild(...args);
+    };
     setThreadViewed(thread.id, true);
     void driver.prepare(context).catch(error => {
       if (!entry.cancelled) this.core.log('warn', `preparing a draft failed: ${logMessageOf(error)}`, { source: provider.id, event: 'provider.prepareFailed', threadId: thread.id });
@@ -257,6 +270,12 @@ export class DraftPreparations {
     releaseThread(thread.id);
     this.core.procs.killTree(thread.id);
     this.core.agents.forget(thread.id);
+    this.forgetStopped();
+    this.stopping.set(thread.id, thread);
+  }
+
+  private forgetStopped(): void {
+    for (const id of this.stopping.keys()) if (this.core.procs.liveCount(id as ThreadId) === 0) this.stopping.delete(id);
   }
 
   private async cleanup(entry: Reservation): Promise<void> {

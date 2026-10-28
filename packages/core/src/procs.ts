@@ -1,4 +1,5 @@
 import { spawn as spawnNodeChild, type ChildProcessByStdio } from 'node:child_process';
+import { resolve } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import type { AgentResourceSnapshot, ProcessRecord, Settings, ThreadId, ThreadLoad, TraceCapability, Turn } from '@boite/contracts';
 import type { Bus } from './bus.ts';
@@ -145,9 +146,13 @@ export class ProcRegistry {
   private accepting = true;
 
   stopAccepting(): void { this.accepting = false; }
-  private assertAccepting(cwd: string | undefined): void {
+  /** The options a launch runs with, its folder written as it was checked: `..` read by name, never after a link. */
+  private admitted<T extends { cwd?: string }>(opts: T): T {
     if (!this.accepting || this.closing !== null) throw new Error('the core is stopping; no new process may start');
-    if (cwd !== undefined) this.admitCwd(cwd);
+    if (opts.cwd === undefined) return opts;
+    const cwd = resolve(opts.cwd);
+    this.admitCwd(cwd);
+    return { ...opts, cwd };
   }
 
   constructor(
@@ -275,7 +280,7 @@ export class ProcRegistry {
   }
 
   spawn(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedProcess {
-    this.assertAccepting(opts.cwd);
+    opts = this.admitted(opts);
     const protectedLaunch = this.protection.launch(threadId, cmd, args, opts);
     const [command, env] = launchOf(protectedLaunch?.command ?? cmd, protectedLaunch?.env ?? { ...process.env, ...(opts.env ?? {}) });
     const extra = Math.max(0, Math.floor(opts.extraPipes ?? 0));
@@ -312,7 +317,7 @@ export class ProcRegistry {
    * that cannot reach a browser asks for a code to be pasted back.
    */
   spawnPiped(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedPipedProcess {
-    this.assertAccepting(opts.cwd);
+    opts = this.admitted(opts);
     const protectedLaunch = this.protection.launch(threadId, cmd, args, opts);
     const [command, env] = launchOf(protectedLaunch?.command ?? cmd, protectedLaunch?.env ?? opts.env ?? process.env);
     const proc = startResolved(command, env, (executable) => Bun.spawn({
@@ -345,7 +350,7 @@ export class ProcRegistry {
    * drop its prompt and line editing. The environment is passed as given.
    */
   spawnTerminal(threadId: ThreadId, cmd: string, args: string[], opts: TerminalSpawnOptions): SpawnedTerminal {
-    this.assertAccepting(opts.cwd);
+    opts = this.admitted(opts);
     this.protection.assertTerminal(threadId);
     const proc = Bun.spawn({
       cmd: [cmd, ...args],
@@ -405,7 +410,7 @@ export class ProcRegistry {
    * The environment is passed as given: the caller has already merged it.
    */
   spawnChild(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedChild {
-    this.assertAccepting(opts.cwd);
+    opts = this.admitted(opts);
     const protectedLaunch = this.protection.launch(threadId, cmd, args, opts);
     const [command, env] = launchOf(protectedLaunch?.command ?? cmd, protectedLaunch?.env ?? opts.env);
     const executable = resolveSpawnCommand(command, env ?? process.env);
