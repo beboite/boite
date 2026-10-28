@@ -406,7 +406,9 @@ export class Worktrees {
 
   private async branchExists(threadId: ThreadId, cwd: string, branch: string, timeoutMs?: number): Promise<boolean> {
     const result = await this.git(threadId, cwd, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], timeoutMs);
-    return result.code === 0;
+    // 1 is git's "no such ref"; anything else is a git that could not look, and a name it never checked is not free.
+    if (result.code === 0 || result.code === 1) return result.code === 0;
+    throw refused(`cannot tell whether branch ${branch} exists in ${cwd}: ${result.stderr.trim().split('\n')[0] || `exit ${result.code}`}`, { cwd, branch });
   }
 
   /** Local exclusions keep nested checkouts out of status without editing .gitignore. */
