@@ -7,6 +7,7 @@ import { sharedLetterMethods } from './fake-client/shared-letters';
 import { sharedState, sharedContact, reconcileShared, refusedShared } from './fake-client/shared-state';
 import { startupMethods, resetStartup } from './fake-client/startup';
 import { composerMethods } from './fake-client/composer';
+import { holdContactMail } from './fake-client/contact-hold';
 import { seedWorking } from './fake-client/working-seed';
 import { sweepMergedPrFixtures, type MergedPrFixture } from './fake-client/merged-pr-archive';
 import {
@@ -234,8 +235,7 @@ export class FakeClient implements ObservableClient {
   holdForContactMail(threadId: ThreadId, contacts: string[]): void {
     const thread = this.#ctx.threads.get(threadId);
     if (!thread) throw new Error(`no fake thread ${threadId}`);
-    thread.contactHold = { contacts };
-    this.#ctx.touch(thread);
+    holdContactMail(this.#ctx, threadId, contacts);
   }
 
   setMergedPrFixture(threadId: ThreadId, fixture: MergedPrFixture): void {

@@ -1,5 +1,6 @@
 import { noteUserMessage } from './checklist';
 import { createFakeThread, publishFakeThread } from './create-thread';
+import { trustContactMail } from './contact-hold';
 import { dismissMergedPr } from './merged-pr-archive';
 import { assertIdleFamily } from './completion';
 import { isThreadTerminal, protectedThreadIdsError, threadActive } from '@boite/contracts';
@@ -577,12 +578,8 @@ export function threadMethods(ctx: FakeContext) {
       return { ok: true };
     },
     'threads.trustContactHistory': async (params) => {
-      // As the core: the thread and every conversation it continues.
-      for (let thread: Thread | undefined = ctx.thread(params.threadId); thread; thread = thread.parentThreadId ? ctx.threads.get(thread.parentThreadId) : undefined) {
-        if (!thread.contactHold) continue;
-        thread.contactHold = null;
-        ctx.touch(thread);
-      }
+      ctx.thread(params.threadId);
+      trustContactMail(ctx, params.threadId);
       return { ok: true };
     },
     'threads.subscribe': async (params) => {
