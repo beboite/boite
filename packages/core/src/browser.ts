@@ -545,8 +545,10 @@ export class AgentBrowser {
       case 'network': {
         const started = !tab.network;
         if (started) {
-          await this.#send(tab, 'Network.enable', NETWORK_BUFFERS);
+          // Capture first: a call the page sends while buffers are enabled is listed too.
           tab.network = networkCapture();
+          try { await this.#send(tab, 'Network.enable', NETWORK_BUFFERS); }
+          catch (error) { tab.network = null; throw error; }
         }
         return done({ capturing: true, started, calls: networkCalls(tab.network!, action.filter) });
       }

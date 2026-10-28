@@ -290,7 +290,7 @@ test('a recipe is kept only after its run passes, records a failed run with the 
     expect(broken.out).toContain('recipe stock needs a repair');
     expect(broken.out).toContain('boite browser recipe save stock <file|-> <item> runs it and keeps it under the same name');
     expect(broken.error).toContain('recipe stock stopped at stock.js line 3');
-    expect((await cli(['list'])).out).toContain('shop.test; broken since 0s ago: stock.js line 3: no stock line: Sold out; repair it before relying on it');
+    expect((await cli(['list'])).out).toMatch(/shop\.test; broken since \d+s ago: stock\.js line 3: no stock line: Sold out; repair it before relying on it/);
 
     // The agent that hit it repairs it without repeating what it does.
     const repaired = script.replace("said !== 'in stock'", "!['in stock', 'Sold out'].includes(said)");
@@ -303,6 +303,11 @@ test('a recipe is kept only after its run passes, records a failed run with the 
     expect((await cli(['delete', 'stock'])).out).toContain('✓ Deleted recipe stock');
     expect((await cli(['run', 'stock'])).error).toContain('no recipe stock on this machine');
     expect((await cli(['frobnicate'])).error).toContain('browser recipe frobnicate is not a command');
+    // Save takes its flags up to the script's first word: the words after it are the script's own.
+    const echoed = await cli(['save', 'echo', '-', '--about', 'Echoes its words', 'ok', '--tab', 'nope'], 'return args.join(" ")');
+    expect(echoed.code).toBe(0);
+    expect(echoed.out).toStartWith('ok --tab nope\n');
+    expect((await cli(['delete', 'echo'])).code).toBe(0);
     // The core takes a recipe's name as a file name and its sites as host names, whoever calls it.
     const save: BrowserAction = { kind: 'recipe-save', name: 'stock', about: 'x', source: 'return 1', sites: ['shop.test'] };
     expect(browserActionError({ kind: 'recipe-get', name: '../settings' })).toContain('a recipe name is');

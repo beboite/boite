@@ -11,6 +11,9 @@ const browserFixture = createBrowserFixture();
 const { real, url } = browserFixture;
 
 test('masking keeps pagination tokens and hides credentials in JSON that does not parse whole', () => {
+  // An acronym and a list are credentials too; a list of pagination tokens is not.
+  expect(JSON.parse(maskBody(JSON.stringify({ APIToken: 'a1', XSRFToken: 'x1', apiKeys: ['k1', 'k22'], tokens: ['t1'], nextPageTokens: ['p'], session: { user: 'ann', token: 's1' } }))))
+    .toEqual({ APIToken: '<hidden, 2 characters>', XSRFToken: '<hidden, 2 characters>', apiKeys: ['<hidden, 2 characters>', '<hidden, 3 characters>'], tokens: ['<hidden, 2 characters>'], nextPageTokens: ['p'], session: { user: 'ann', token: '<hidden, 2 characters>' } });
   const masked = JSON.parse(maskBody(JSON.stringify({ pageToken: 'p1', next_page_token: 'p2', nextToken: 'p3', pageAccessToken: 'EAAB1', page_access_token: 'EAAB2', cursorSecret: 'c1', client_secret_key: 'sk', signingKey: 'k2' })));
   expect(masked).toEqual({ pageToken: 'p1', next_page_token: 'p2', nextToken: 'p3', pageAccessToken: '<hidden, 5 characters>', page_access_token: '<hidden, 5 characters>', cursorSecret: '<hidden, 2 characters>', client_secret_key: '<hidden, 2 characters>', signingKey: '<hidden, 2 characters>' });
   // A guard prefix, a stream of values and a cut-off text fail JSON.parse; their pairs are masked one by one.
@@ -62,8 +65,10 @@ real('network finds the API call behind a page with its credentials hidden, and 
   expect(printed.out).not.toMatch(/s3cret|hunter2|abc123|tok-999/);
 
   // Bodies past what detail shows are masked before they are cut: cut first, their JSON no longer parses.
-  await command({ kind: 'evaluate', expression: "fetch('/api/big', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: 'hunter2', rows: 'x'.repeat(60000) }) }).then(r => r.text()).then(t => t.length)" });
+  await command({ kind: 'evaluate', expression: "fetch('/api/big#/rows', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: 'hunter2', rows: 'x'.repeat(60000) }) }).then(r => r.text()).then(t => t.length)" });
   const bigCall = ((await command({ kind: 'network', filter: 'big' })).value as { calls: BrowserNetworkCall[] }).calls[0]!;
+  // Chromium reports a call without its fragment, which never reaches the server.
+  expect(bigCall.url).toBe(url('/api/big'));
   const bigDetail = (await command({ kind: 'network-detail', callId: bigCall.id })).value as BrowserNetworkDetail;
   expect(bigDetail.requestBody).toStartWith('{"password":"<hidden, 7 characters>","rows":"xxx');
   expect(bigDetail.responseBody).toStartWith('{"sessionToken":"<hidden, 7 characters>","rows":"yyy');
@@ -98,4 +103,6 @@ real('network finds the API call behind a page with its credentials hidden, and 
   expect(ran.out).toEndWith(`${JSON.stringify(['caps red', 'caps blue'], null, 2)}\n`);
   expect(((await command({ kind: 'recipes' })).value as { recipes: BrowserRecipe[] }).recipes).toEqual([expect.objectContaining({ name: 'list-items', sites: ['127.0.0.1'], runs: 2, lastRun: expect.objectContaining({ ok: true }) })]);
   expect((await cli(['open', url('/shop')])).out).toContain('recipes kept for this site: list-items (Lists the items of a query); browser recipe run <name> runs one');
+  // A link on another host that redirects here names the recipes of the site it reached.
+  expect((await cli(['open', url('/go').replace('127.0.0.1', 'localhost')])).out).toContain('recipes kept for this site: list-items');
 }, 60_000);

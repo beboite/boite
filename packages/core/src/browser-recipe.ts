@@ -11,7 +11,6 @@ import { browserActionError, browserRecipeNameError, type BrowserAction, type Br
 import type { CoreClient } from './client.ts';
 import type { CliIo } from './cli.ts';
 import { ago } from './agents-cli.ts';
-import { option } from './browser-cli.ts';
 import { BrowserScriptFailure, readScript, runBrowserScript, takeScriptTab } from './browser-run.ts';
 
 type Stored = BrowserRecipe & { source: string };
@@ -71,15 +70,13 @@ export async function browserRecipe(args: string[], io: CliIo, client: CoreClien
  * worked, under the sites that run visited.
  */
 async function save(words: string[], io: CliIo, client: CoreClient, threadId: string): Promise<{ lines: string[]; value: unknown }> {
-  const rest = [...words];
-  let about = option(rest, '--about', 'recipe save');
-  let usage = option(rest, '--usage', 'recipe save');
-  const tab = option(rest, '--tab', 'recipe save');
-  const name = rest.shift();
+  const { flags, name, file, rest } = saveWords(words);
+  let about = flags['--about'];
+  let usage = flags['--usage'];
+  const tab = flags['--tab'];
   if (name === undefined) throw new Error('browser recipe save needs a name, then the script file or - for stdin');
   const problem = browserRecipeNameError(name);
   if (problem) throw new Error(problem);
-  const file = rest.shift();
   if (file === undefined || file === '') throw new Error(`browser recipe save ${name} needs the script file, or - to read it from stdin`);
   if (about === undefined || usage === undefined) {
     // Saving a repaired script again keeps what the recipe said about itself.
@@ -102,6 +99,30 @@ async function save(words: string[], io: CliIo, client: CoreClient, threadId: st
   const sites = [...new Set([...ran.sites, ...await endSite(client, threadId, tab)])];
   const saved = await client.call('browser.command', { threadId, action: { ...draft, sites: sites.slice(0, RECIPE_SITES_MAX) } }).then(reply => reply.value as BrowserRecipe);
   return { lines: [...ran.lines, `✓ Kept recipe ${name}`, ...recipeLines(saved).slice(1)], value: { recipe: saved, run: ran.value } };
+}
+
+const SAVE_FLAGS = ['--about', '--usage', '--tab'] as const;
+
+/**
+ * The name, the file and the flags up to the script's first word: the words
+ * from there on are the script's own, a `--tab` among them included.
+ */
+function saveWords(words: string[]): { flags: Partial<Record<typeof SAVE_FLAGS[number], string>>; name?: string; file?: string; rest: string[] } {
+  const flags: Partial<Record<typeof SAVE_FLAGS[number], string>> = {};
+  const named: string[] = [];
+  let at = 0;
+  for (; at < words.length; at++) {
+    const word = words[at]!;
+    const flag = SAVE_FLAGS.find(one => one === word);
+    if (flag) {
+      if (flags[flag] !== undefined) throw new Error(`browser recipe save accepts one ${flag}`);
+      const value = words[++at];
+      if (value === undefined) throw new Error(`browser recipe save ${flag} needs a value`);
+      flags[flag] = value;
+    } else if (named.length < 2) named.push(word);
+    else break;
+  }
+  return { flags, name: named[0], file: named[1], rest: words.slice(at) };
 }
 
 /** The site the script ended on: the one it worked in. */

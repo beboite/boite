@@ -379,7 +379,8 @@ and the `page.fetch` line that sends it again from the page. A binary
 response is described, never sent. Credentials are hidden before anything
 leaves the core: a header, a query parameter or a JSON or form field named
 like a cookie, an authorization, a password, a secret, a key, a session, a
-signature or a token reads `<hidden, N characters>`. A body is masked whole,
+signature or a token reads `<hidden, N characters>`, after an acronym or in
+the plural too (`APIToken`, `apiKeys`), a list of them item by item. A body is masked whole,
 then cut. One that does not parse as JSON (a guard prefix, a stream of values,
 a page's inline script) has each `"name": value` pair masked on its own. Only
 pagination tokens stay readable (`page_token`, `next_page_token`,
@@ -406,7 +407,8 @@ next agent with the same task on the same site runs it in one call instead of
 driving the pages again (`packages/core/src/browser-recipe.ts`).
 `boite browser recipe save <name> <file|-> --about "<what it does>"
 [--usage "<its args>"] [args...]` runs the script with those words first and
-keeps it only if the run passes, under the sites it asked for, reached after
+keeps it only if the run passes; its flags come before the script's first
+word, and every word from there on is the script's own. It is kept under the sites it asked for, reached after
 redirects or fetched, and the site its tab ended on. Saving a name again replaces the script and keeps its
 `--about` and `--usage` unless new ones are given. `recipe list` shows each
 recipe's command, sites, runs and last result; `recipe show <name>` adds its

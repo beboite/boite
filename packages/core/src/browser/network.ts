@@ -33,14 +33,15 @@ export const networkCapture = (): NetworkCapture => ({ seq: 0, calls: [], byRequ
 
 /**
  * A name that carries a credential: a cookie, an authorization, a password, a
- * secret, a key, a session or a token, but not a pagination token, which an
- * agent needs to page through results. Compared in snake case.
+ * secret, a key, a session or a token, one or several, but not a pagination
+ * token, which an agent needs to page through results. Compared in snake case.
  */
-const SECRET_NAME = /(^|_)(cookie|set_cookie|authorization|auth|pass|passwd|password|pwd|secret|api_?key|access_?key|private_?key|secret_?key|signing_?key|client_?key|encryption_?key|session|session_?id|sess_?id|otp|totp|pin|cvc|cvv|csrf|xsrf|credentials?|signature|token)$/;
+const SECRET_NAME = /(^|_)(cookie|set_cookie|authorization|auth|pass|passwd|password|pwd|secret|api_?key|access_?key|private_?key|secret_?key|signing_?key|client_?key|encryption_?key|session|session_?id|sess_?id|otp|totp|pin|cvc|cvv|csrf|xsrf|credentials?|signature|token)s?$/;
 /** Only these exact names: `page_access_token` is a credential that merely mentions a page. */
-const PAGING_TOKEN = /^((next|prev|previous)_)?(page|continuation|pagination|cursor)_token$|^(next|prev|previous)_token$/;
+const PAGING_TOKEN = /^((next|prev|previous)_)?(page|continuation|pagination|cursor)_tokens?$|^(next|prev|previous)_tokens?$/;
 function secretName(name: string): boolean {
-  const snake = name.replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/[-\s.]+/g, '_').toLowerCase();
+  // `APIToken` is `api_token`, `apiKeys` is `api_keys`.
+  const snake = name.replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2').replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/[-\s.]+/g, '_').toLowerCase();
   return SECRET_NAME.test(snake) && !PAGING_TOKEN.test(snake);
 }
 const hidden = (value: string) => `<hidden, ${value.length} characters>`;
@@ -59,7 +60,14 @@ function maskHeaders(headers: unknown): Record<string, string> {
 function maskJson(value: unknown, depth = 0): unknown {
   if (depth > 20 || !value || typeof value !== 'object') return value;
   if (Array.isArray(value)) return value.map(item => maskJson(item, depth + 1));
-  return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, secretName(key) && (typeof inner === 'string' || typeof inner === 'number') ? hidden(String(inner)) : maskJson(inner, depth + 1)]));
+  return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, secretName(key) ? maskSecret(inner, depth + 1) : maskJson(inner, depth + 1)]));
+}
+
+/** A credential field's value: a list of them is hidden item by item, an object keeps its own field names. */
+function maskSecret(value: unknown, depth: number): unknown {
+  if (typeof value === 'string' || typeof value === 'number') return hidden(String(value));
+  if (Array.isArray(value) && depth <= 20) return value.map(item => maskSecret(item, depth + 1));
+  return maskJson(value, depth);
 }
 
 /** A `"name": value` pair, its string value possibly cut short at the end of the text. */

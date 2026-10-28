@@ -23,8 +23,10 @@ export class BrowserRecipes {
   }
 
   #read(name: string): Stored | null {
+    // A bad name is refused with the pattern, not reported missing.
+    const path = this.#file(name);
     try {
-      const stored = JSON.parse(readFileSync(this.#file(name), 'utf8')) as Stored;
+      const stored = JSON.parse(readFileSync(path, 'utf8')) as Stored;
       return stored && stored.name === name && typeof stored.source === 'string' ? stored : null;
     } catch { return null; }
   }

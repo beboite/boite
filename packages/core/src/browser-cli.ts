@@ -85,8 +85,9 @@ scrollIntoView, fill, type, select(target, ...values), press, scroll(direction, 
 wait(target | ms | { text, url, fn, load, timeout }), get(what, target, attr), is(what, target),
 eval(js, or a function and its JSON arguments), back, forward, reload, screenshot(path),
 dialog(decision, text), tabs(), tab(id), and command(...words) for any other, returning what
---json prints. fetch(url, { method, headers, body }) sends a request from the page, with its
-cookies, and returns { status, ok, url, headers, json or text }; a status of 400 or more fails
+--json prints. fetch(url, { method, headers, body, credentials }) sends a request from the page,
+with its cookies, and returns { status, ok, url, headers, json or text, truncated }; truncated is
+true when the reply was cut at 2,000,000 characters, and a status of 400 or more fails
 the step. A failed step stops the script: the output names it, then shows the page's
 interactive snapshot. What the script returns is printed.
 
@@ -517,7 +518,8 @@ export function browserLines(action: BrowserAction, result: BrowserReply): strin
 export async function browserCommand(args: string[], io: CliIo, client: CoreClient, threadId: string): Promise<{ lines: string[]; value: unknown }> {
   const { action, tabId, output } = browserAction(args);
   const result = await browserStep(action, tabId, output, io, client, threadId);
-  if (action.kind === 'open' || action.kind === 'navigate') result.lines.push(...await recipesFor(action.url, client, threadId));
+  // The site reached after redirects: a short link or a login names that site's recipes.
+  if (action.kind === 'open' || action.kind === 'navigate') result.lines.push(...await recipesFor((result.value as BrowserReply | undefined)?.url || action.url, client, threadId));
   return result;
 }
 

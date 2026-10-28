@@ -117,6 +117,7 @@ export function createBrowserFixture() {
       if (path === '/app') return new Response(APP, { headers: { 'content-type': 'text/html' } });
       if (path === '/api/items') return (request.method === 'POST' ? request.json() as Promise<{ query?: string }> : Promise.resolve({ query: undefined }))
         .then(body => Response.json({ items: ['red', 'blue'], query: body.query ?? null, next: 'cursor-2', sessionToken: 'tok-999' }));
+      if (path === '/go') return Response.redirect(`http://127.0.0.1:${site.port}/shop`, 302);
       if (path === '/api/fail') return Response.json({ error: 'the shelf is empty' }, { status: 500 });
       // A reply longer than network detail shows, sent as text after a space.
       if (path === '/api/huge') return new Response('z'.repeat(3_000_000), { headers: { 'content-type': 'text/plain' } });
