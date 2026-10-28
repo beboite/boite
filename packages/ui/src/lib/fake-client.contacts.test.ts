@@ -98,7 +98,6 @@ test('a direct contact preserves mutual-trust sends, search and transcript grant
   const sent = await source.call('collaboration.send', { threadId: 't-trace', to: address, text: 'Use the trusted link', requestId: 'mutual-trust' });
   expect(sent.status).toBe('delivered');
   expect(sent.contact).toBeUndefined();
-  // As the core: contact mail outside a shared project holds the receiving thread.
   expect((await source.call('collaboration.contacts', { threadId: 't-trace' })).map(contact => contact.coreId)).toContain(to.coreId);
   for (const client of [source, target]) await client.call('contacts.settings', { settings: { minTier: 2 } });
   expect((await source.call('collaboration.ask', { threadId: 't-trace', contact: to.coreId, text: 'Open another project' })).coreId).toBe(to.coreId);
