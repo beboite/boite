@@ -69,7 +69,7 @@ function readRecord(file: string): LockRecord | null {
 }
 
 /** The locks this process holds, so `releaseOwnLock` finds one wherever its directory moved. */
-const held = new Set<{ lock: HeldFileLock; drop(path: string): void }>();
+const held = new Set<{ lock: HeldFileLock; drop(path: string, keepRecord?: boolean): void }>();
 
 /**
  * Takes `file` for this process, or throws `busy(holder)` while another
@@ -113,10 +113,11 @@ export function takeLock(file: string, busy: (holder: number | null) => string, 
       throw new Error(busy(holder));
     }
     const key = startKey(process.pid);
+    const ownRecord = { pid: process.pid, startedAt: Date.now(), ...(key === null ? {} : { startKey: key }) };
     // Through the held handle, never by path: a core older than this lock may have replaced the file
     // since it was judged, and a write by path would land in that core's file.
     try {
-      lock.write(`${JSON.stringify({ pid: process.pid, startedAt: Date.now(), ...(key === null ? {} : { startKey: key }), osLock: true }, null, 2)}\n`);
+      lock.write(`${JSON.stringify({ ...ownRecord, osLock: true }, null, 2)}\n`);
     } catch (error) {
       // A full disk, say: still held, the lock would keep this process out of its own directory.
       lock.release();
@@ -130,9 +131,12 @@ export function takeLock(file: string, busy: (holder: number | null) => string, 
     const entry = {
       lock,
       // Deleted while still held, so the next holder cannot lock a file the path no longer names unnoticed.
-      drop(path: string) {
+      drop(path: string, keepRecord = false) {
+        // During a rollback's directory swap, Windows needs the handle closed. Both old and current
+        // cores honor this live PID record without osLock until the restorer takes the native lock again.
+        if (keepRecord) lock.write(`${JSON.stringify(ownRecord, null, 2)}\n`);
         held.delete(entry);
-        if (lock.stillAt(path)) rmSync(path, { force: true });
+        if (!keepRecord && lock.stillAt(path)) rmSync(path, { force: true });
         lock.release();
       },
     };
@@ -145,13 +149,20 @@ export function takeLock(file: string, busy: (holder: number | null) => string, 
   throw new Error(`could not take the lock ${file}: it keeps coming back`);
 }
 
-/** Releases the core lock in `directory` if this process holds it, wherever the directory has moved since. */
-export function releaseOwnLock(directory: string): void {
+/**
+ * Releases this process's core lock wherever its directory moved. Under the maintenance lock,
+ * `keepRecord` leaves a live PID record protecting a directory whose open handles must close before a rename.
+ */
+export function releaseOwnLock(directory: string, keepRecord = false): void {
   const file = join(directory, 'core.lock');
   try { statSync(file); } catch { return; }
   for (const entry of held) {
     if (!entry.lock.stillAt(file)) continue;
-    try { entry.drop(file); } catch { entry.lock.release(); }
+    try { entry.drop(file, keepRecord); }
+    catch (error) {
+      if (keepRecord) throw error;
+      entry.lock.release();
+    }
     return;
   }
 }

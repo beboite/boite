@@ -45,11 +45,15 @@ export function posixLockFile(os: 'linux' | 'macos'): (file: string) => HeldFile
       if (code === libc.busy) return null;
       throw new Error(`could not lock ${file}: flock failed with errno ${code}`);
     }
-    const id = fstatSync(handle, { bigint: true }).ino;
+    const { dev, ino } = fstatSync(handle, { bigint: true });
     let open = true;
     return {
       stillAt(path) {
-        try { return open && statSync(path, { bigint: true }).ino === id; } catch { return false; }
+        if (!open) return false;
+        try {
+          const at = statSync(path, { bigint: true });
+          return at.dev === dev && at.ino === ino;
+        } catch { return false; }
       },
       write(text) {
         // Opened for append: once truncated, the write lands at the start.

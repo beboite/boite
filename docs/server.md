@@ -254,11 +254,15 @@ the service starts the previous version at boot. A start that finds the record
 takes `<data>.maintenance.lock`, a kernel `flock` the job and its recovery hold
 while they restore, so neither moves the data under the other. The restore
 starts no process while it holds it, so the kernel drops it with a killed
-holder. Whoever restores also holds the data directory's `core.lock` from its
-first look until that data moves aside, and refuses while a live core holds it.
-It puts its own `core.lock` in the restored copy before that copy takes the
-data directory's name, so a core starting meanwhile finds the data taken or
-the record still there, never a directory about to move away. It finishes that
+holder. Whoever restores takes the data directory's `core.lock` and refuses
+while a live core holds it. It also locks the restored copy before the swap.
+Windows cannot rename these directories with the lock handles open, so the
+restorer writes live PID records without `osLock` in both, closes their handles,
+then takes the native lock again under the final data name. The maintenance
+lock stays held throughout. Both older cores and current cores honor these
+live PID records, including a start that checked for a rollback before its
+record was published. If the restorer dies mid-swap, its PID records no longer
+block the next restore. It finishes that
 operation's restore before anything opens the data: it uses the
 `<data>.restore-<id>` the record names, never the newest one on disk, keeps
 the rejected data as `<data>.failed-<id>` (or `<data>.unused-data` when that

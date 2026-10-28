@@ -142,7 +142,6 @@ function swapRestored(dataDir: string, id: string, moves: RestoreMoves): void {
     for (const name of UNSAVED_DATA) if (existsSync(join(dataDir, name)) && !existsSync(join(restored, name))) moves.rename(join(dataDir, name), join(restored, name));
     // The name is taken, by rejected data moved aside earlier or by an older folder: this one goes aside under its own.
     if (existsSync(failed)) {
-      releaseOwnLock(dataDir);
       setAside(dataDir, dataDir, moves);
     }
     else moves.rename(dataDir, failed);
@@ -157,9 +156,10 @@ function swapRestored(dataDir: string, id: string, moves: RestoreMoves): void {
  * what the disk shows and throws, record kept, when it cannot finish; the
  * data in place is then the rejected version's and nothing may open it.
  *
- * It holds the data directory's core lock from its first look to its last
- * move, and puts its lock in the restored copy before that copy takes the
- * name, so no core starting meanwhile locks a directory that then moves away.
+ * It takes both directories' core locks, then leaves live PID records while
+ * their handles close for the swap, which Windows requires for a directory
+ * rename. Both old and current cores honor those records. The maintenance
+ * lock excludes other restorers, and the final data lock is taken again.
  * The lock left on the data directory is this process's; the caller keeps it
  * or calls `releaseOwnLock`.
  */
@@ -181,8 +181,10 @@ function restoreRecorded(dataDir: string, record: RestoreRecord, moves: RestoreM
       // the swap and lost the mark would leave a finished restore with no snapshot to redo it from.
       (moves.sync ?? ((directory: string) => syncDirectory(directory, true)))(restored);
       lockData(restored);
+      releaseOwnLock(dataDir, true);
+      releaseOwnLock(restored, true);
       swapRestored(dataDir, record.id, moves);
-      releaseOwnLock(failed);
+      lockData(dataDir);
     }
   } catch (error) {
     for (const directory of [dataDir, restored, failed]) releaseOwnLock(directory);
