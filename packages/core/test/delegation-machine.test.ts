@@ -302,3 +302,94 @@ test('a member whose Boite does not know these operations is reported too old, a
   expect(childrenOnPc()).toHaveLength(0);
   expect(desk.core.delegation.remote.holds(threadId, 'old-1')).toBe(false);
 });
+
+test('a parent archived before its child there was named retires that child once a report names it', async () => {
+  const { held } = answering();
+  const { desk, pc, owner, threadId, pcId, deskId, machine, cli, childrenOnPc } = await setup();
+  const request = desk.core.coordination.request.bind(desk.core.coordination);
+  desk.core.coordination.request = (async (peer, operation, payload) => {
+    const answer = await request(peer, operation, payload);
+    if (operation === 'delegation.start') throw new Error('lost start reply');
+    return answer;
+  }) as typeof desk.core.coordination.request;
+  let away = true;
+  const report = pc.core.coordination.request.bind(pc.core.coordination);
+  pc.core.coordination.request = ((peer, operation, payload) => (operation === 'delegation.report' && away
+    ? Promise.reject(new Error('offline')) : report(peer, operation, payload))) as typeof pc.core.coordination.request;
+  expect((await cli(['delegate', 'spawn', 'Read HOLD-ON', '--machine', machine, '--project', 'notes', '--request-id', 'archive-lost'])).err).toContain('lost start reply');
+  const child = childrenOnPc()[0]!;
+  await waitFor(() => held.has(child.id));
+  await owner.call('threads.archive', { threadId });
+  away = false;
+  await pc.core.delegation.remote.flush(deskId);
+  await desk.core.delegation.remote.flush(pcId);
+  // Before, the archive skipped the child it could not name yet, and it kept working there.
+  expect(pc.core.threads.require(child.id).archived).toBe(true);
+  expect(held.has(child.id)).toBe(false);
+});
+
+test('a stop sent again because its answer was lost does not stop the instruction that follows it', async () => {
+  const { held, prompts } = answering();
+  const { desk, pc, threadId, pcId, cli, spawn } = await setup();
+  const child = await spawn('Read HOLD-ON', '--project', 'notes', '--request-id', 'stop-child');
+  await waitFor(() => held.has(child.thread.id));
+  const report = pc.core.coordination.request.bind(pc.core.coordination);
+  pc.core.coordination.request = ((peer, operation, payload) => (operation === 'delegation.report' ? Promise.reject(new Error('no reports')) : report(peer, operation, payload))) as typeof pc.core.coordination.request;
+  const request = desk.core.coordination.request.bind(desk.core.coordination);
+  let lost: unknown;
+  desk.core.coordination.request = (async (peer, operation, payload) => {
+    const answer = await request(peer, operation, payload);
+    if (operation === 'delegation.stop' && lost === undefined) { lost = payload; throw new Error('lost stop reply'); }
+    return answer;
+  }) as typeof desk.core.coordination.request;
+  desk.core.delegation.remote.stop(threadId, child.thread.id);
+  await desk.core.delegation.remote.flush(pcId);
+  await waitFor(() => !held.has(child.thread.id) && pc.core.journal.listTurns(child.thread.id)[0]?.status === 'stopped');
+  expect(desk.core.delegation.remote.waiting(pcId).stops).toBe(1);
+  expect((await cli(['delegate', 'send', child.thread.id, 'Read a new page HOLD-ON', '--request-id', 'later-instruction'])).err).toBe('');
+  await waitFor(() => held.has(child.thread.id));
+  expect(prompts.get(child.thread.id)).toHaveLength(2);
+  // The same stop arrives again, from the outbox or the transport's own retry.
+  await request(desk.core.group.peers().find(peer => peer.coreId === pcId)!, 'delegation.stop', lost);
+  await desk.core.delegation.remote.flush(pcId);
+  expect(desk.core.delegation.remote.waiting(pcId).stops).toBe(0);
+  // Before, the same stop was applied again and cut the new instruction too.
+  expect(held.has(child.thread.id)).toBe(true);
+  expect(pc.core.journal.listTurns(child.thread.id)[1]?.status).toBe('running');
+});
+
+test('a turn the parent there started with delegate send is cut by a restart handoff and continued after it', async () => {
+  const { held, prompts } = answering();
+  const { desk, pc, threadId, cli, spawn } = await setup();
+  const child = await spawn('Read the first page', '--project', 'notes', '--request-id', 'restart-child');
+  await waitFor(() => desk.core.delegation.remote.child(threadId, child.thread.id)?.state?.result === 'Done in notes');
+  expect((await cli(['delegate', 'send', child.thread.id, 'Read the next page HOLD-ON', '--request-id', 'restart-instruction'])).err).toBe('');
+  await waitFor(() => held.has(child.thread.id));
+  const cut = pc.core.journal.listTurns(child.thread.id)[1]!;
+  expect(cut.execution?.operation).toBe('delegation');
+  await pc.core.threads.handoff.begin(0);
+  // Before, nothing kept it: the handoff skips sub-work, and delegation only kept local children.
+  expect(pc.core.journal.getSetting('delegation-restart-cut')).toEqual([{ childId: child.thread.id, turnId: cut.id }]);
+  expect(pc.core.delegation.resumeAfterRestart()).toBe(1);
+  await waitFor(() => pc.core.journal.listTurns(child.thread.id)[2]?.status === 'done');
+  const resumed = pc.core.journal.listTurns(child.thread.id)[2]!;
+  expect(resumed.execution?.operation).toBe('resume');
+  expect(prompts.get(child.thread.id)!.at(-1)).toStartWith('Boite restarted');
+  // Its parent hears of the turn that went on.
+  await waitFor(() => desk.core.delegation.remote.child(threadId, child.thread.id)?.state?.lastTurn?.id === resumed.id);
+});
+
+test('a member that turns groupThreads off while a start is on its way creates no child', async () => {
+  answering();
+  const { desk, pc, threadId, deskId, childrenOnPc } = await setup();
+  const parent = desk.core.threads.require(threadId);
+  const caller = pc.core.group.peers().find(peer => peer.coreId === deskId)!;
+  const starting = pc.core.delegation.remote.peer(caller, 'delegation.start', {
+    parent: { threadId, title: parent.title, projectId: parent.projectId, project: 'test' }, requestId: 'revoke-1', fingerprint: 'revoke-1', task: 'Read the notes', title: 'Read the notes', worktree: false, project: 'notes',
+    route: { providerId: parent.providerId, model: parent.model, effort: parent.effort, speed: null }, permissionMode: parent.permissionMode,
+  });
+  await pc.core.settings.set({ groupThreads: false });
+  // Before, the setting was read once on arrival and a child started anyway.
+  expect(await thrown(starting)).toThrow('groupThreads is off on this machine');
+  expect(childrenOnPc()).toHaveLength(0);
+});

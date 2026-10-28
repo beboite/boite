@@ -90,8 +90,8 @@ interface Report {
   letter?: { origin: 'result' | 'question' | 'agent'; requestId: string; text: string; checkpoint?: true };
 }
 
-/** One entry of the caller's outbox to the member. */
-interface Stop { key: string; parentId: string; childId: string; retire?: true }
+/** One entry of the caller's outbox to the member. Each stop asked has its own `id`: the member applies it once, however often it is sent. */
+interface Stop { key: string; id: string; parentId: string; childId: string; retire?: true }
 
 /** The caller's record of a child on another machine. `childId` is null until that machine answered or reported. */
 export interface RemoteChild {
@@ -112,8 +112,8 @@ export interface RemoteChild {
   workflow?: true;
 }
 
-/** The member's link from a child here to its parent on another machine. */
-export interface ParentLink { coreId: string; machine: string; parentId: string; title: string; projectId: string; project: string; requestId: string; fingerprint: string; at: number }
+/** The member's link from a child here to its parent on another machine. `stop`: the id of the last stop applied to it. */
+export interface ParentLink { coreId: string; machine: string; parentId: string; title: string; projectId: string; project: string; requestId: string; fingerprint: string; at: number; stop?: string }
 
 /** What the delegation module lends this one: its private state and its mail. */
 export interface RemoteHost {
@@ -377,10 +377,10 @@ export class RemoteDelegation {
     const index = records.findIndex(record => record.requestId === ask.requestId);
     // Deleted while the request was out: the child there is retired with it.
     if (index < 0) {
-      this.stops.push(peer.coreId, { key: `child:${started.childId}`, parentId: parent.id, childId: started.childId, retire: true });
+      this.stopThere(peer.coreId, parent.id, started.childId, true);
       throw refused(`this thread was deleted while ${peer.name} started its subagent; that subagent is stopped`);
     }
-    const record = { ...records[index]!, childId: started.childId };
+    const record = this.named(parent.id, records[index]!, started.childId);
     records[index] = started.at >= record.at ? { ...record, state: started.state, at: started.at } : record;
     this.save(parent.id, records);
     // It started there, so the setting was on: a card still asking for it is settled.
@@ -421,6 +421,8 @@ export class RemoteDelegation {
     if (workflow) this.unpaused(root.id);
     else this.host.available(root);
     const peer = this.peerOf(record);
+    // A stop asked before this instruction goes first, so it never lands on the turn the instruction starts.
+    await this.stops.flush(record.coreId);
     let answer: unknown;
     try { answer = await this.core.coordination.request(peer, 'delegation.letter', { parentId: root.id, childId, requestId, text: body, origin }); }
     catch (error) {
@@ -461,7 +463,7 @@ export class RemoteDelegation {
   stop(rootId: string, childId: string): boolean {
     const record = this.child(rootId, childId);
     if (!record) return false;
-    this.stops.push(record.coreId, { key: `child:${childId}`, parentId: rootId, childId });
+    this.stopThere(record.coreId, rootId, childId, false);
     const agent = this.member(rootId, record);
     return (agent.lastTurn !== null && ['queued', 'running'].includes(agent.lastTurn.status)) || ['queued', 'running', 'waiting'].includes(agent.thread.status) || agent.thread.backgroundWait?.state === 'waiting';
   }
@@ -471,17 +473,31 @@ export class RemoteDelegation {
     return this.childIds(rootId).filter(childId => this.stop(rootId, childId)).length;
   }
 
-  /** The parent was archived: its children elsewhere are stopped and archived there, once. */
+  /**
+   * The parent was archived: its children elsewhere are stopped and archived
+   * there, once. One whose start answer was lost is retired as soon as a
+   * report or a late answer names it (`named`).
+   */
   retire(rootId: string): void {
     if (!this.roots.has(rootId)) return;
     const records = this.records(rootId);
-    if (records.every(record => record.retired || record.childId === null)) return;
+    if (records.every(record => record.retired)) return;
     for (const record of records) {
-      if (record.retired || record.childId === null) continue;
-      this.stops.push(record.coreId, { key: `child:${record.childId}`, parentId: rootId, childId: record.childId, retire: true });
+      if (record.retired) continue;
+      if (record.childId !== null) this.stopThere(record.coreId, rootId, record.childId, true);
       record.retired = true;
     }
     this.save(rootId, records);
+  }
+
+  /** A record now names its child; one retired before that is retired there now. */
+  private named(rootId: string, record: RemoteChild, childId: string): RemoteChild {
+    if (record.childId === null && record.retired) this.stopThere(record.coreId, rootId, childId, true);
+    return { ...record, childId };
+  }
+
+  private stopThere(coreId: string, parentId: string, childId: string, retire: boolean): void {
+    this.stops.push(coreId, { key: `child:${childId}`, id: randomUUID(), parentId, childId, ...(retire ? { retire: true as const } : {}) });
   }
 
   /** The parent was deleted: its children elsewhere are retired, and nothing of them stays here. */
@@ -528,7 +544,7 @@ export class RemoteDelegation {
       this.save(parentId, records.filter((_record, at) => at !== index));
       return parentId;
     }
-    let record: RemoteChild = { ...records[index]!, childId };
+    let record = this.named(parentId, records[index]!, childId);
     const fresh = report.state !== undefined && readableState(report.state) && report.at >= record.at;
     if (fresh) record = { ...record, state: report.state!, at: report.at };
     records[index] = record;
@@ -687,6 +703,9 @@ export class RemoteDelegation {
     const here = this.core.coordination.identity().name;
     const target = start.project !== undefined ? this.core.projects.find(start.project, 'delegation.start', 'project') : this.projectNamed(start.parent.project, here);
     const route = await this.routeHere(start.route, here);
+    // The owner may have turned this off, or that machine left the group, while the models were read.
+    if (this.core.settings.get().groupThreads !== true) throw refused(GROUP_THREADS_OFF);
+    if (!this.core.group.peers().some(member => member.coreId === peer.coreId)) throw refused(`delegation.start: ${peer.name} is no longer in this group`);
     const provider = this.core.providers.require(route.providerId), account = this.core.accounts.require(route.accountId);
     assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), account, () => this.core.providers.launcherScriptOnly(provider.id));
     const id = newId('thr_');
@@ -822,8 +841,15 @@ export class RemoteDelegation {
     let stopped = 0;
     for (const entry of stops as Stop[]) {
       try {
-        const { childId } = this.linked(peer, entry?.parentId, entry?.childId, 'delegation.stop');
+        const { link, childId } = this.linked(peer, entry?.parentId, entry?.childId, 'delegation.stop');
+        const id = entry.id === undefined ? null : text(entry.id, 'delegation.stop.id', 128);
+        // Sent again after its answer was lost, it would stop the instruction that followed it.
+        if (id !== null && link.stop === id) continue;
         if (this.host.halt(childId)) stopped++;
+        if (id !== null) {
+          this.parents.set(childId, { ...link, stop: id });
+          this.core.journal.setSetting(`${PARENT}${childId}`, { ...link, stop: id });
+        }
         if (entry.retire === true && !this.core.threads.require(childId).archived) this.core.threads.archive(childId, true);
       } catch (error) { this.core.log('info', `delegation stop from ${peer.name}: ${messageOf(error)}`); }
     }

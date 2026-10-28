@@ -278,11 +278,11 @@ or be away:
 
 | Operation | From | Key | What the receiver does |
 | --- | --- | --- | --- |
-| `delegation.start` | parent's machine | parent and `--request-id` | starts the child, or answers the one it started for that key; other content under the same key is refused |
+| `delegation.start` | parent's machine | parent and `--request-id` | starts the child, or answers the one it started for that key; other content under the same key is refused. `groupThreads` and the caller's membership are checked again right before the child is created |
 | `delegation.report` | child's machine | child, and a letter's request id | keeps the newest state; files a result, question or message once |
 | `delegation.letter` | parent's machine | parent and request id | files the steer once, answering an open question when it is one |
 | `delegation.read` | parent's machine | none, read only | returns a page of the named turn's answer |
-| `delegation.stop` | parent's machine | child | stops it, and archives it when the parent was archived or deleted |
+| `delegation.stop` | parent's machine | the stop's own `id` | stops it once, and archives it when the parent was archived or deleted; the same `id` again changes nothing |
 
 Reports and stops wait in an outbox in the sender's journal until the other
 machine took them, tried again after 5 s, 15 s, 1 min and then every 5 min,
@@ -290,6 +290,13 @@ and at once when that machine is heard from again. A report replaces the state
 waiting for the same child. A refusal drops the entry; a machine that left the
 group drops its outbox. A start whose answer was lost keeps its record on the
 parent's machine: the next report or the same `--request-id` finds the child.
+Archiving the parent before then keeps the retirement asked, and the report
+or answer that names the child sends it. Each stop carries an id of its own,
+which the child's machine keeps once applied: a stop sent again because its
+answer was lost does not cut the instruction that followed it, and
+`delegate send` delivers a stop still waiting before its letter. A restart
+handoff on the child's machine keeps a turn the parent's letter opened and
+continues it like the turns of a child here.
 A machine whose Boite lacks these operations is reported too old before
 anything starts there.
 

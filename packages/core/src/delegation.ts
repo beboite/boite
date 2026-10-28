@@ -567,7 +567,8 @@ export class Delegation {
     // and its worktree is still in use. A child the user or its parent stopped is in `stopped` first.
     if (turn.status === 'stopped' && this.core.threads.handoff.active && !this.stopped.has(thread.id) && (link || this.delegated(thread.id))) {
       if (link) this.remote.state(thread.id);
-      else recordRestartCut(this.core, turn);
+      // The handoff resumes a remote child's own turns, not those its parent's letters opened.
+      if (!this.core.threads.handoff.carries(turn.id)) recordRestartCut(this.core, turn);
       return;
     }
     // Ended to wait on its own background work: it is not done, and its worktree is still in use.

@@ -86,6 +86,11 @@ export class RestartHandoff {
     this.tools.delete(threadId);
   }
 
+  /** Whether this handoff resumes that turn on the next core itself. */
+  carries(turnId: TurnId): boolean {
+    return this.entries?.has(turnId) ?? false;
+  }
+
   /** A queued turn this handoff carries to the next core stays queued through shutdown. */
   keepsQueued(turnId: TurnId): boolean {
     return this.entries?.get(turnId)?.was === 'queued' || this.inheritedTurns().get(turnId) === 'queued';

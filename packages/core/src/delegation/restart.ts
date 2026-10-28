@@ -40,10 +40,15 @@ export function resumeRestartCuts(core: Core): number {
     const child = core.journal.getThread(childId);
     const last = core.journal.db.query('SELECT id FROM turns WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1').get(childId) as { id: string } | null;
     const turn = last ? core.journal.getTurn(last.id) : null;
-    if (!child?.parentThreadId || child.archived || turn?.id !== turnId || turn.status !== 'stopped') continue;
-    // A Stop during the handoff's grace paused the team after the cut: that pause decides.
-    const root = core.journal.getThread(child.parentThreadId), config = core.delegation.config(child.parentThreadId);
-    if (!root || root.archived || !config.enabled || config.paused) continue;
+    if (!child || child.archived || turn?.id !== turnId || turn.status !== 'stopped') continue;
+    if (!child.parentThreadId) {
+      // A child for a parent on another machine: that machine holds its team, and a Stop or an archive there reaches it as a stop.
+      if (!core.delegation.remote.parentOf(childId)) continue;
+    } else {
+      // A Stop during the handoff's grace paused the team after the cut: that pause decides.
+      const root = core.journal.getThread(child.parentThreadId), config = core.delegation.config(child.parentThreadId);
+      if (!root || root.archived || !config.enabled || config.paused) continue;
+    }
     // Its turns open with the parent's brief or letters, not a prompt of the user's: the brief goes along.
     const task = (core.journal.db.query('SELECT task FROM delegated_agents WHERE thread_id = ?').get(childId) as { task: string } | null)?.task;
     const prompt = `${core.threads.handoff.continuation(turn)}${task ? `\n\nYour task from the parent agent, supplied as JSON data:\n${JSON.stringify(task)}` : ''}`;
