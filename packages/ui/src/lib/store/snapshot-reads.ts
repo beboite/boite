@@ -2,7 +2,14 @@
 export class SnapshotReads<T extends { id: string }> {
   #sequence = 0;
   #reads = new Set<SnapshotRead<T>>();
+  #abandoned = new Set<(sequence: number) => void>();
   constructor(private readonly group: (row: T) => string) {}
+
+  /** Hears every read that ends without applying, by its sequence. */
+  onAbandoned(listener: (sequence: number) => void): () => void {
+    this.#abandoned.add(listener);
+    return () => this.#abandoned.delete(listener);
+  }
 
   begin(scope = 'all'): SnapshotRead<T> {
     const sequence = ++this.#sequence;
@@ -12,6 +19,7 @@ export class SnapshotReads<T extends { id: string }> {
     const read = new SnapshotRead(scope, sequence, this.group, (applied) => {
       this.#reads.delete(read);
       for (const older of this.#reads) older.release(scope, sequence, applied);
+      if (!applied) for (const listener of this.#abandoned) listener(sequence);
     });
     this.#reads.add(read);
     return read;
@@ -37,6 +45,11 @@ export class SnapshotRead<T extends { id: string }> {
   readonly changes = new Map<string, T | null>();
   readonly patches = new Map<string, Partial<T>>();
   readonly protected = new Map<string, { pending: Set<number>; applied: boolean }>();
+  /**
+   * The newer reads still in flight that `apply` left their rows to. Until
+   * they apply, those rows are not known to match this read's answer.
+   */
+  deferred: ReadonlySet<number> = new Set();
   active = true;
   constructor(readonly scope: string, readonly sequence: number, private readonly group: (row: T) => string, private readonly close: (applied: boolean) => void) {}
 
@@ -55,6 +68,7 @@ export class SnapshotRead<T extends { id: string }> {
   /** Fresh unrelated rows still land; newer reads and events own their rows. */
   apply(fresh: readonly T[], held: readonly T[]): T[] {
     if (!this.active) return [...held];
+    this.deferred = new Set([...this.protected.values()].filter(entry => !entry.applied).flatMap(entry => [...entry.pending]));
     const owned = (row: T) => this.scope === 'all' || this.group(row) === this.scope;
     const protectedRow = (row: T) => this.protected.has('all') || this.protected.has(this.group(row));
     const rows = new Map(held.filter(row => !owned(row) || protectedRow(row)).map(row => [row.id, row]));

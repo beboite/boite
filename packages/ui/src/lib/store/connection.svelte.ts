@@ -83,9 +83,11 @@ export class Connection {
   /**
    * Where the last thread list applied here left this client: the next load
    * on the same client, a reconnect, reads only what changed since. A new
-   * client or `detach` (a new generation) reads whole again.
+   * client or `detach` (a new generation) reads whole again, and so does the
+   * next load once a newer read the list left rows to (`deferred`) gives up:
+   * those rows were never brought up to the cursor.
    */
-  #threadList: { client: Client; generation: number; cursor: ListCursor } | null = null;
+  #threadList: { client: Client; generation: number; cursor: ListCursor; deferred: ReadonlySet<number> } | null = null;
   #localRecovery: ReturnType<typeof setTimeout> | null = null;
   /** Moves on every stop, so an ask still out from an earlier loss never reschedules. */
   #recoveryGeneration = 0;
@@ -94,7 +96,9 @@ export class Connection {
   /** Its hellos carry this device's key: one that opens says a group of that machine knows the device. */
   #signed = false;
 
-  constructor(private readonly ctx: StoreContext) {}
+  constructor(private readonly ctx: StoreContext) {
+    ctx.threadReads.onAbandoned(sequence => { if (this.#threadList?.deferred.has(sequence)) this.#threadList = null; });
+  }
 
   /**
    * What this client may ask of the core. A paired device reaches the list in
@@ -640,7 +644,7 @@ export class Connection {
         const fresh = answer.kind === 'full' ? answer.threads : applyThreadChanges(s.threads, answer.threads, answer.removed);
         const applied = threadRead.active;
         s.threads = reconcileRows(s.threads, threadRead.apply(fresh, s.threads));
-        this.#threadList = applied && answer.cursor ? { client, generation, cursor: answer.cursor } : null;
+        this.#threadList = applied && answer.cursor ? { client, generation, cursor: answer.cursor, deferred: threadRead.deferred } : null;
         const read = reopened && s.openThread?.unread === false ? s.threads.find(t => t.id === s.openThread?.id) : undefined;
         if (read) read.unread = false;
         const listed = new Set(s.threads.map(t => s.threadKey(t.id)));

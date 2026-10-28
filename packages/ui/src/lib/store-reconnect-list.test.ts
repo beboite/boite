@@ -25,7 +25,7 @@ async function connected(options: FakeClientOptions = {}) {
     if (method !== 'threads.list' && method !== 'threads.listChanges') return answer;
     return answer.then((result) => { lists.push({ method, bytes: bytes(result) }); return result; });
   }) as typeof client.call);
-  return { client, store, lists };
+  return { client, store, lists, real };
 }
 
 async function reconnect(client: FakeClient, store: Store, away: () => Promise<unknown> = async () => undefined) {
@@ -94,4 +94,27 @@ test('a load the gap ended is cleared on a row the answer left out', async () =>
   await vi.waitFor(() => expect(store.threads.find(row => row.id === 't-trace')?.load?.processes).toBe(2));
   await reconnect(client, store, async () => client.endLoad('t-trace'));
   expect(store.threads.find(row => row.id === 't-trace')?.load ?? null).toBeNull();
+});
+
+test('a deletion the list left to a newer read that gave up is read again on the next reconnect', async () => {
+  const { client, store, real } = await connected();
+  let release: (() => void) | null = null;
+  vi.mocked(client.call).mockImplementation(((method: string, params: never, callOptions?: never) => {
+    const answer = real(method as never, params, callOptions);
+    if (method !== 'threads.listChanges' || release) return answer;
+    return answer.then(value => new Promise(resolve => { release = () => resolve(value); }));
+  }) as typeof client.call);
+  client.drop();
+  await client.elsewhere('threads.remove', { threadId: 't-trace' });
+  await client.restore();
+  await vi.waitFor(() => expect(release).not.toBeNull());
+  // A press on the row reads it after the list was asked: the list leaves that row to it.
+  const giveUp = store.preload('t-trace');
+  release!();
+  await store.reload();
+  giveUp();
+  expect(store.threads.some(row => row.id === 't-trace')).toBe(true);
+
+  await reconnect(client, store);
+  expect(store.threads.some(row => row.id === 't-trace')).toBe(false);
 });
