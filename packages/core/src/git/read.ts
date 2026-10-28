@@ -309,16 +309,21 @@ function joinChunks(chunks: Uint8Array[], length: number): Uint8Array {
 }
 
 /**
- * The same with three gits, for one that does not know `cat-file --batch -z`.
+ * The same in steps, for a git that does not know `cat-file --batch -z`.
  * The name is resolved to the blob's own id before either read: a branch that
  * moves between them would otherwise size one object and read another.
  */
 async function readRefSideInSteps(core: Core, threadId: ThreadId, cwd: string, ref: string, name: string): Promise<DiffSide> {
   const blob = await probe(core, threadId, cwd, name);
   if (blob === null) return absentAt(core, threadId, cwd, ref, name, null);
-  const sized = await git(core, threadId, cwd, ['cat-file', '-s', blob]);
-  // The name resolved, so a size git cannot give is an object the store lost.
-  if (sized.code !== 0) return absentAt(core, threadId, cwd, ref, name, blob);
+  const typed = await git(core, threadId, cwd, ['cat-file', '-t', blob]);
+  // The name resolved, so a type git cannot give is an object the store lost.
+  if (typed.code !== 0) return absentAt(core, threadId, cwd, ref, name, blob);
+  // A tree or a commit at that name is no file to compare, as in one batch.
+  if (typed.stdout.trim() !== 'blob') return ABSENT;
+  const sizeArgs = ['cat-file', '-s', blob];
+  const sized = await git(core, threadId, cwd, sizeArgs);
+  if (sized.code !== 0) gitFailed(threadId, sizeArgs, sized);
   const blobBytes = Number(sized.stdout.trim());
   if (Number.isFinite(blobBytes) && blobBytes > SIDE_CEILING_BYTES) return { data: null, tooBig: true };
   const blobArgs = ['cat-file', 'blob', blob];

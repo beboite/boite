@@ -195,8 +195,12 @@ export class DiagnosticLogs {
       return;
     }
     this.pending.push(record);
-    // After a failed write, the retry already waits on its timer: a new record does not bring it forward.
-    if (this.failures > 0) return;
+    // After a failed write, a retry waits on its timer: a new record does not bring it forward,
+    // but re-arms one when the last retry found nothing to write.
+    if (this.failures > 0) {
+      if (this.timer === null && !this.flushing) this.schedule(this.retryDelay());
+      return;
+    }
     if (this.pending.length >= 64 && this.timer !== null) { clearTimeout(this.timer); this.timer = null; }
     if (this.timer === null && !this.flushing) this.schedule(this.pending.length >= 64 ? 0 : FLUSH_MS);
   }
@@ -384,8 +388,10 @@ export class DiagnosticLogs {
     this.failures += 1;
     this.failure(error);
     if (this.timer !== null) clearTimeout(this.timer);
-    this.schedule(Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** (this.failures - 1)));
+    this.schedule(this.retryDelay());
   }
+
+  private retryDelay(): number { return Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** (this.failures - 1)); }
 
   /** The first write after an outage: the next failure is reported again, and the log says how long it lasted. */
   private recovered(): void {

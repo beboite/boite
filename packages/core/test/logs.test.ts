@@ -167,6 +167,18 @@ describe('bounded persistent diagnostics', () => {
     }
   });
 
+  test('a log folder blocked at startup is written once it is free, with no flush asked', async () => {
+    const directory = temporary();
+    writeFileSync(join(directory, 'logs'), 'a file blocks the directory');
+    const logs = new DiagnosticLogs(directory, [], () => undefined);
+    try {
+      await logs.query({});
+      rmSync(join(directory, 'logs'));
+      logs.record('info', 'after the folder came back');
+      await waitFor(() => existsSync(join(directory, 'logs', 'core.0.ndjson')));
+    } finally { await logs.close(); rmSync(directory, { recursive: true, force: true }); }
+  });
+
   test('persistence resumes once the obstruction is gone, with every record written once and the outage logged', async () => {
     const directory = temporary();
     const reports: string[] = [];

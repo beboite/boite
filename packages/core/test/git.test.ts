@@ -276,6 +276,14 @@ describe('git.diff', () => {
       expect((await rejection(client.call('git.diff', { threadId, path: 'a.txt', ref: 'missing-ref', oldPath: null }))).reason)
         .toMatchObject({ rpc: { message: expect.stringContaining('missing-ref'), data: expect.objectContaining({ field: 'ref' }) } });
       expect(await client.call('git.diff', { threadId, path: 'new.txt', oldPath: null })).toMatchObject({ status: 'added', oldText: null });
+      // A folder at the ref, a file in the tree: that file is new, as the batch says.
+      mkdirSync(join(path, 'dir'));
+      writeFileSync(join(path, 'dir', 'file'), 'inside\n');
+      git(path, 'add', 'dir');
+      git(path, 'commit', '-q', '-m', 'dir');
+      rmSync(join(path, 'dir'), { recursive: true });
+      writeFileSync(join(path, 'dir'), 'replacement\n');
+      expect(await client.call('git.diff', { threadId, path: 'dir', oldPath: null })).toMatchObject({ status: 'added', oldText: null, newText: 'replacement\n' });
     } finally {
       spy.mockRestore();
     }
