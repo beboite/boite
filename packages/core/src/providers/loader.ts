@@ -24,6 +24,7 @@ import antigravityShipped from './shipped/antigravity.json';
 import claudeShipped from './shipped/claude.json';
 import codexShipped from './shipped/codex.json';
 import grokShipped from './shipped/grok.json';
+import hermesShipped from './shipped/hermes.json';
 import museShipped from './shipped/muse.json';
 import opencodeShipped from './shipped/opencode.json';
 import opencodeV2Shipped from './shipped/opencode-v2.json';
@@ -46,6 +47,7 @@ const SHIPPED_SOURCES: { file: string; raw: unknown; when?: () => boolean }[] = 
   { file: 'shipped/claude.json', raw: claudeShipped },
   { file: 'shipped/codex.json', raw: codexShipped },
   { file: 'shipped/grok.json', raw: grokShipped },
+  { file: 'shipped/hermes.json', raw: hermesShipped },
   { file: 'shipped/muse.json', raw: museShipped },
   { file: 'shipped/opencode.json', raw: opencodeShipped },
   { file: 'shipped/opencode-v2.json', raw: opencodeV2Shipped },

@@ -108,6 +108,8 @@ export class SessionControls {
    * model" is when a thread goes back to it on a session that was moved off it.
    */
   private ownModel: string | null = null;
+  /** The same for an agent that lists its models in the session answer: its first `currentModelId`. */
+  private ownListedModel: string | null = null;
   /**
    * The options came from this session's own answers, not from another
    * session's seed: only then does a current value say what this one is on.
@@ -142,6 +144,11 @@ export class SessionControls {
 
   hasOptions(): boolean {
     return this.configOptions.length > 0;
+  }
+
+  /** The session answers listed models, which is where an agent with no model option takes them. */
+  hasModels(): boolean {
+    return this.agentModels !== null;
   }
 
   /**
@@ -182,29 +189,39 @@ export class SessionControls {
     }
     const listed = agentModelsOf(answer);
     if (listed !== null) this.agentModels = listed;
+    if (this.ownListedModel === null && listed !== null) this.ownListedModel = listed.currentModelId;
   }
 
   /**
-   * The thread's model and reasoning effort as one `session/set_model`, for the
-   * agents that take them there rather than through `session/set_config_option`
-   * (Grok, today). It runs at the start of every turn and sends nothing when
-   * the pair has not moved since the last one, so a warm session follows a
+   * The thread's model as one `session/set_model`, for the agents that take it
+   * there rather than through `session/set_config_option`: Grok, with its
+   * reasoning effort in `_meta`, and any agent whose session answer lists
+   * `models` but no `model` config option (Hermes Agent), which takes the model
+   * alone. It runs at the start of every turn and sends nothing when the
+   * model has not moved since the last one, so a warm session follows a
    * change instead of being dropped for it. A thread on the agent's own model
-   * with no effort set says nothing, and neither does one the session answer
-   * already reports as current. A refusal is one warning: the turn runs on
-   * whatever the agent is already on.
+   * with no effort set says nothing, unless an earlier turn moved the session
+   * off it, and neither does one the session answer already reports as
+   * current. A refusal is one warning: the turn runs on whatever the agent is
+   * already on.
    */
   async applyModel(ctx: SessionContext): Promise<void> {
-    if (!isGrok(ctx.provider)) return;
+    const grok = isGrok(ctx.provider);
+    // An agent with a `model` option takes it in `applyConfig`, and one that
+    // lists no models has nothing to match the thread's model against.
+    if (!grok && (this.agentModels === null || categoryOption(this.configOptions, 'model') !== null)) return;
     const { agent, sessionId } = this.target();
     if (agent === null || sessionId === null) return;
 
     const wanted = ctx.thread.model === AGENT_OWN_MODEL ? null : ctx.thread.model;
-    const effort = ctx.thread.effort !== null && ctx.thread.effort.length > 0 ? ctx.thread.effort : null;
-    if (wanted === null && effort === null) return;
+    // Only Grok's `set_model` carries an effort; the others have no field for it.
+    const effort = grok && ctx.thread.effort !== null && ctx.thread.effort.length > 0 ? ctx.thread.effort : null;
+    // Back to the agent's own model on a session moved off it: it has to be asked for.
+    const restore = !grok && wanted === null && this.appliedModel !== undefined ? this.ownListedModel : null;
+    if (wanted === null && effort === null && restore === null) return;
 
     const listed = this.agentModels;
-    const modelId = wanted ?? listed?.currentModelId ?? null;
+    const modelId = wanted ?? restore ?? listed?.currentModelId ?? null;
     if (modelId === null) return;
     if (this.appliedModel === modelId && this.appliedEffort === effort) return;
 

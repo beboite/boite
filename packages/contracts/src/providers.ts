@@ -296,7 +296,7 @@ export interface ProviderHookSource {
  * Quirks a driver applies to one agent's dialect of a protocol. A value the
  * core does not know is refused at load time rather than ignored.
  */
-export type ProviderQuirk = 'antigravity' | 'grok';
+export type ProviderQuirk = 'antigravity' | 'grok' | 'hermes';
 
 /** One step of a model's reasoning effort scale, as the descriptor spells it. */
 export interface EffortLevel {

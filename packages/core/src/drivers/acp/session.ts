@@ -23,7 +23,7 @@ import { OpenCommands } from './commands.ts';
 import { SessionControls } from './controls.ts';
 import { failureText, loadRefusal, LoadRefused, rpcReason, rpcRefusal } from './load.ts';
 import { AGENT_OWN_MODEL } from './models.ts';
-import { canDeleteSessions, CLIENT_NAME, discardSession, EXIT_GRACE_MS, isGrok, STDERR_MAX, type AcpDeps, type Timer } from './protocol.ts';
+import { canDeleteSessions, CLIENT_NAME, discardSession, EXIT_GRACE_MS, isGrok, isHermes, STDERR_MAX, type AcpDeps, type Timer } from './protocol.ts';
 import { jsonLinesOnly } from './stdout.ts';
 import { commandsOf, imageBlocksOf, usdCostOf, type AcpTurn } from './turn.ts';
 import { answerPermission, drawUpdate, sessionNotificationOf } from './updates.ts';
@@ -593,6 +593,18 @@ export class AcpSession {
           false,
         );
       }
+      if (isHermes(ctx.provider) && (loaded === null || loaded.modes === undefined || loaded.modes === null)) {
+        // Hermes answers an id it does not have with an empty result instead
+        // of an error, and a prompt on it then stops as a refusal. Each session
+        // it does have comes back with its modes, so their absence is the "no".
+        this.memory.refusedLoads.delete(refusedKey);
+        ctx.log('warn', `acp: ${ctx.provider.id} answered session/load ${ctx.sessionId} with no session`);
+        ctx.diagnostic?.('warn', 'session/load answered with no session, read as gone', { event: 'driver.session.load-refused', data: { code: null, kind: 'gone' } });
+        throw new LoadRefused(
+          `${ctx.provider.name} no longer has this conversation (it answered the load with no session). Send the message again: Boite starts a new session that carries the conversation so far.`,
+          true,
+        );
+      }
       this.memory.refusedLoads.delete(refusedKey);
       this.sessionId = ctx.sessionId;
       this.loaded = true;
@@ -601,8 +613,10 @@ export class AcpSession {
       // empty session is opened for nothing. With no probe cache either, a
       // throwaway session reads them once for the account, and the next cold
       // turn of any thread starts from what it found.
+      // A load that listed models answers the model question: only an effort
+      // still has to be looked for.
       if (!isGrok(ctx.provider) && !this.controls.hasOptions()
-        && (ctx.thread.model !== AGENT_OWN_MODEL || ctx.thread.effort !== null)) {
+        && (ctx.thread.effort !== null || (ctx.thread.model !== AGENT_OWN_MODEL && !this.controls.hasModels()))) {
         const discovered = await connection.agent.request('session/new', { cwd: ctx.thread.cwd, mcpServers: [] });
         this.seedConfig(discovered.configOptions ?? []);
         this.onOptions(discovered.configOptions ?? []);

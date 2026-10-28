@@ -20,7 +20,7 @@ import { currentOs, homePath } from './paths.ts';
  * What an isolation variable means when it is not set, as segments under the
  * home directory. A descriptor that isolates an account through one of them
  * (OpenCode uses the XDG pair, Codex `CODEX_HOME`, pi `PI_CODING_AGENT_DIR`,
- * Antigravity `GEMINI_HOME`)
+ * Antigravity `GEMINI_HOME`, Hermes `HERMES_HOME`)
  * puts its session file under that same variable, so the provider's own location
  * is the variable's own default, never `~/.<id>`.
  */
@@ -34,6 +34,12 @@ export const ISOLATION_DEFAULTS: Record<string, string[]> = {
   GROK_HOME: ['.grok'],
   PI_CODING_AGENT_DIR: ['.pi', 'agent'],
   GEMINI_HOME: ['.gemini'],
+  HERMES_HOME: ['.hermes'],
+};
+
+/** The defaults that differ on Windows, where Hermes keeps its home under `%LOCALAPPDATA%`. */
+const WINDOWS_DEFAULTS: Record<string, string[]> = {
+  HERMES_HOME: ['AppData', 'Local', 'hermes'],
 };
 
 /** The file at the root of an account's directory that says what Boite linked and copied there. */
@@ -58,7 +64,7 @@ interface Marker {
 export function variableHome(variable: string, profile?: Pick<OsProfile, 'env'>): string | null {
   const value = profile?.env?.[variable] ?? process.env[variable];
   if (value !== undefined && value.length > 0) return value;
-  const fallback = ISOLATION_DEFAULTS[variable];
+  const fallback = (process.platform === 'win32' ? WINDOWS_DEFAULTS[variable] : undefined) ?? ISOLATION_DEFAULTS[variable];
   return fallback === undefined ? null : join(homePath(), ...fallback);
 }
 
