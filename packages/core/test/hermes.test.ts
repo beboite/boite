@@ -28,14 +28,17 @@ const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwA
 
 let harness: TestCore | null = null;
 let logFile = '';
+/** The variables these tests set, as the process had them: a later test file gets them back. */
+const TOUCHED = ['HERMES_FAKE_LOG', 'HERMES_FAKE_FORGET', 'HERMES_FAKE_LOAD_BARE', 'OPENAI_API_KEY', 'LOCALAPPDATA'];
+const outer = new Map(TOUCHED.map((name) => [name, process.env[name]]));
 
 afterEach(async () => {
   const open = harness;
   harness = null;
-  delete process.env['HERMES_FAKE_LOG'];
-  delete process.env['HERMES_FAKE_FORGET'];
-  delete process.env['HERMES_FAKE_LOAD_BARE'];
-  delete process.env['OPENAI_API_KEY'];
+  for (const [name, value] of outer) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
   if (open !== null) await open.stop();
 });
 
@@ -179,7 +182,7 @@ describe('hermes', () => {
     expect(descriptor.profiles.linux?.executable[0]).toEqual({ kind: 'path', value: 'hermes' });
     // With no `HERMES_HOME` set, the default account's login is in Hermes' own
     // home: `~/.hermes`, or `%LOCALAPPDATA%\hermes` on Windows wherever that points.
-    const saved = { home: process.env['HERMES_HOME'], local: process.env['LOCALAPPDATA'] };
+    const saved = process.env['HERMES_HOME'];
     const platform = Object.getOwnPropertyDescriptor(process, 'platform');
     delete process.env['HERMES_HOME'];
     try {
@@ -192,9 +195,7 @@ describe('hermes', () => {
       expect(variableHome('HERMES_HOME')).toBe(join(homedir(), 'AppData', 'Local', 'hermes'));
     } finally {
       if (platform !== undefined) Object.defineProperty(process, 'platform', platform);
-      if (saved.home !== undefined) process.env['HERMES_HOME'] = saved.home;
-      if (saved.local !== undefined) process.env['LOCALAPPDATA'] = saved.local;
-      else delete process.env['LOCALAPPDATA'];
+      if (saved !== undefined) process.env['HERMES_HOME'] = saved;
     }
   });
 
