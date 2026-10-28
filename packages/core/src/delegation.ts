@@ -14,6 +14,7 @@ import { withLoad } from './threads/records.ts';
 import { nativeAgents } from './native-agents.ts';
 import { delegatedResultPage, DelegationWaits } from './delegation/results.ts';
 import { INTERRUPTION_TEXT } from './delegation/interruption.ts';
+import { childEnd } from './delegation/completion.ts';
 import { permissionWake, questionWake, worktreeLine } from './delegation/messages.ts';
 import { ChildWorktrees } from './delegation/worktrees.ts';
 import { childProject } from './delegation/projects.ts';
@@ -592,7 +593,8 @@ export class Delegation {
     } finally { this.delivering.delete(threadId); }
   }
   private finished(turn: Turn): void {
-    if (turn.execution?.operation === 'compact' || turn.execution?.operation === 'keepalive') return;
+    const end = childEnd(this.core, turn);
+    if (end.kind === 'maintenance') return;
     const thread = this.core.journal.getThread(turn.threadId);
     if (!thread) return;
     // A parent's own turn ending badly (a provider error, an agent update, a restart) is no
@@ -605,8 +607,7 @@ export class Delegation {
       recordRestartCut(this.core, turn);
       return;
     }
-    // Ended to wait on its own background work: it is not done, and its worktree is still in use.
-    const live = turn.status === 'done' ? this.core.threads.agentState.background.get(thread.id) ?? [] : [];
+    const live = end.kind === 'checkpoint' ? end.live : [];
     const settling = live.length > 0 ? null : this.worktrees.settle(thread.id);
     // A workflow step's answer goes to its run, and a goal reviewer's to its goal, never to the parent as mail.
     if (this.stepOwned(thread.id)) return;
@@ -642,9 +643,7 @@ export class Delegation {
     else deliver();
   }
   /** Is this thread a delegated agent the parent spawned, rather than a workflow step or a reviewer? */
-  delegated(threadId: string): boolean {
-    return this.core.journal.db.query('SELECT 1 FROM delegated_agents WHERE thread_id = ?').get(threadId) !== null;
-  }
+  delegated(threadId: string): boolean { return this.core.journal.db.query('SELECT 1 FROM delegated_agents WHERE thread_id = ?').get(threadId) !== null; }
   /** A delegated agent asked something: its parent learns at once. */
   private asked(request: QuestionRequest): void {
     const child = this.core.journal.getThread(request.threadId);
@@ -682,21 +681,22 @@ export class Delegation {
     }
   }
   /**
-   * A delegated agent's background work changed. Once it ended, the agent gets
-   * a moment to wake; the tick looks again when that moment is over.
+   * A delegated agent's or a workflow step's background work changed. Once it
+   * ended, the agent gets a moment to wake; the tick looks again when that moment is over.
    */
   private backgroundChanged(threadId: string): void {
     const thread = this.core.journal.getThread(threadId);
-    if (!thread?.parentThreadId || this.stepOwned(threadId)) return;
+    if (!thread?.parentThreadId || (!this.core.workflows.owns(threadId) && this.stepOwned(threadId))) return;
     this.changed(thread.parentThreadId);
     this.settleWait(thread);
   }
-  /** Re-reads a child's wait: keeps watching it while a wake is expected, tells its parent once it is interrupted. */
+  /** Re-reads a child's wait: keeps watching it while a wake is expected, tells its parent or its run once it is interrupted. */
   private settleWait(thread: ThreadSummary): void {
     const wait = withLoad(this.core, thread).backgroundWait ?? null;
     if (wait?.state === 'waiting' && wait.until !== null) this.wakeDeadlines.set(thread.id, wait.until);
     else this.wakeDeadlines.delete(thread.id);
-    if (wait?.state === 'interrupted') this.interrupted(thread, wait);
+    if (wait?.state !== 'interrupted') return;
+    if (this.core.workflows.owns(thread.id)) this.core.workflows.waitLost(thread.id, wait); else this.interrupted(thread, wait);
   }
   /** The parent learns once per turn that the wait it was told about ended without a result. */
   private interrupted(thread: ThreadSummary, wait: Extract<BackgroundWait, { state: 'interrupted' }>): void {
