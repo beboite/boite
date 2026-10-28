@@ -507,6 +507,7 @@ describe('plugin git ignores the caller gitconfig', () => {
         record,
         proc: { stdout: empty(), stderr: empty(), pid: 0 } as SpawnedProcess['proc'],
         exited: Promise.resolve(args.includes('init') ? 0 : 1),
+        stop: () => Promise.resolve(),
       };
     };
     const emptyConfig = process.platform === 'win32' ? 'NUL' : '/dev/null';

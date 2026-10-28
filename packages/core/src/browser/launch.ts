@@ -33,8 +33,8 @@ export async function startChromium(spawn: SpawnBrowser, path: string, dir: stri
   // Chromium writes to both pipes; nobody reads them, so they are drained.
   void spawned.proc.stdout.pipeTo(new WritableStream()).catch(() => {});
   void spawned.proc.stderr.pipeTo(new WritableStream()).catch(() => {});
-  // Chromium's helpers exit with their parent; a clean close comes first.
-  const kill = () => { try { spawned.proc.kill(); } catch { /* gone */ } };
+  // A clean close comes first; this stops the browser and every helper it started, not the scope's other browsers.
+  const kill = () => { void spawned.stop(); };
   try {
     let cdp: Cdp;
     if (piped) {
