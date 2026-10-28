@@ -303,7 +303,9 @@ for that child; the child's machine applies it before the letter and files the
 letter once the turn it stopped is over, so the stop ends the turn it meant
 and the instruction opens the next one. The letter takes a number in the same
 order: a stop asked after it, taken before it arrives or while it waits,
-refuses it, so a final stop is not undone by an older instruction. A restart
+refuses it, so a final stop is not undone by an older instruction. A Stop by
+the child's owner also cancels instructions waiting for the previous turn
+to end; a new explicit instruction can resume the child. A restart
 handoff on the child's machine keeps a turn the parent's letter opened and
 continues it like the turns of a child here. Until that machine's next core
 continues a cut turn, its reports mark the child `restarting`, which the parent

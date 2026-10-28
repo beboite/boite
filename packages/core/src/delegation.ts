@@ -755,6 +755,7 @@ export class Delegation {
   }
   /** Stops one child: final until an explicit new instruction, so no restart continues it, and a parent elsewhere hears so. True when it was at work. */
   private halt(id: string): boolean {
+    this.remote.halted(id);
     endRestart(this.core, id);
     // A child at rest on its own background work is at work too: stopping it ends that work.
     const waiting = withLoad(this.core, this.core.threads.require(id)).backgroundWait?.state === 'waiting';

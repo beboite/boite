@@ -456,6 +456,30 @@ test('an instruction waiting for a stopped turn starts nothing once the owner tu
   expect(prompts.get(child.thread.id)).toHaveLength(1);
 });
 
+test('the child owner stopping it cancels an earlier waiting instruction, while a new explicit instruction can resume it', async () => {
+  const slow = Promise.withResolvers<void>(), asked = Promise.withResolvers<void>();
+  const { held, prompts } = answering(() => { asked.resolve(); return slow.promise; });
+  const { desk, pc, pcOwner, threadId, pcId, cli, spawn } = await setup();
+  const child = await spawn('Read HOLD-ON', '--project', 'notes', '--request-id', 'owner-stop-child');
+  await waitFor(() => held.has(child.thread.id));
+  const request = desk.core.coordination.request.bind(desk.core.coordination);
+  desk.core.coordination.request = ((peer, operation, payload) => (operation === 'delegation.stop' ? Promise.reject(new Error('stop not delivered')) : request(peer, operation, payload))) as typeof desk.core.coordination.request;
+  desk.core.delegation.remote.stop(threadId, child.thread.id);
+  await desk.core.delegation.remote.flush(pcId);
+  const waiting = thrown(desk.core.delegation.remote.send({ threadId, toThreadId: child.thread.id, requestId: 'before-owner-stop', text: 'Earlier instruction HOLD-ON' }, 'agent'));
+  await asked.promise;
+  expect(await pcOwner.call('turns.stop', { threadId: child.thread.id })).toEqual({ stopped: true });
+  slow.resolve();
+  expect(await waiting).toThrow('a stop asked after this instruction');
+  expect(held.has(child.thread.id)).toBe(false);
+  expect(prompts.get(child.thread.id)).toHaveLength(1);
+  expect(pc.core.journal.listTurns(child.thread.id).map(turn => turn.status)).toEqual(['stopped']);
+
+  expect((await cli(['delegate', 'send', child.thread.id, 'Resume HOLD-ON', '--request-id', 'after-owner-stop'])).err).toBe('');
+  await waitFor(() => held.has(child.thread.id));
+  expect(prompts.get(child.thread.id)).toHaveLength(2);
+});
+
 test('a turn the parent there started with delegate send is cut by a restart handoff and continued after it', async () => {
   const { held, prompts } = answering();
   const { desk, pc, threadId, cli, spawn } = await setup();

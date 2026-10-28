@@ -84,6 +84,8 @@ export class RemoteDelegation {
   private readonly starting = new Map<string, { fingerprint: string; result: Promise<Started> }>();
   /** Children here whose turn a stop of their parent elsewhere ended, until that turn is over. */
   private readonly ending = new Map<string, Promise<void>>();
+  /** Stops on this machine invalidate instructions already waiting for a preceding turn to end. */
+  private readonly stopGenerations = new Map<string, number>();
   private readonly reports: Outbox<Report>;
   private readonly stops: Outbox<Stop>;
   private probe: ProviderProbe | null = null;
@@ -581,6 +583,11 @@ export class RemoteDelegation {
   /** The parent on another machine of a child here. */
   parentOf(childId: string): ParentLink | undefined { return this.parents.get(childId); }
 
+  /** A final stop here, from either owner: pending older instructions must not resume the child. */
+  halted(childId: string): void {
+    if (this.parents.has(childId)) this.stopGenerations.set(childId, (this.stopGenerations.get(childId) ?? 0) + 1);
+  }
+
   /** A child here changed: its parent hears where it stands. */
   state(childId: string): void {
     const link = this.parents.get(childId);
@@ -606,6 +613,7 @@ export class RemoteDelegation {
     const link = this.parents.get(childId);
     if (!link) return;
     this.parents.delete(childId);
+    this.stopGenerations.delete(childId);
     if (!this.core.journal.isClosed()) {
       this.core.journal.deleteSetting(`${PARENT}${childId}`);
       this.reports.push(link.coreId, { key: `state:${childId}`, parentId: link.parentId, childId, requestId: link.requestId, at: Date.now(), removed: true });
@@ -795,6 +803,7 @@ export class RemoteDelegation {
     // A stop of the parent's that left before this letter and has not arrived yet ends the turn it meant first.
     if (raw.stop !== undefined) this.applyStop(childId, link, seqOf(raw.stop, 'delegation.letter.stop'), false);
     const known = raw.seq !== undefined ? seqOf(raw.seq, 'delegation.letter.seq') : applied(this.parents.get(childId));
+    const generation = this.stopGenerations.get(childId) ?? 0;
     // Filed once the turn a stop ended is over: that turn's end would take this instruction for the stop.
     await this.ending.get(childId);
     // Admitted on what holds now: the owner may have turned this off, that machine left, or a stop asked after this letter landed.
@@ -809,7 +818,7 @@ export class RemoteDelegation {
       const filed = JSON.parse(existing.data) as AgentLetter;
       return { id: filed.id, status: filed.status, ...(filed.answered === undefined ? {} : { answered: filed.answered }) };
     }
-    if (applied(current) > known) throw refused('delegation.letter: a stop asked after this instruction ended it; send it again to resume the subagent', { field: 'requestId' });
+    if (applied(current) > known || (this.stopGenerations.get(childId) ?? 0) !== generation) throw refused('delegation.letter: a stop asked after this instruction ended it; send it again to resume the subagent', { field: 'requestId' });
     const child = this.core.threads.require(childId);
     if (child.archived) throw refused('delegation messages require unarchived threads');
     // A parent writing to a child that waits on a question answers that question.
