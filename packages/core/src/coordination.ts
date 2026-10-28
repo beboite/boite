@@ -591,12 +591,12 @@ export class Coordination {
    * held contact letters never fill the batch; without `local` the whole batch
    * is refused. `update` refuses to deliver any letter `consume` was not given here.
    */
-  private admit<T>(threadId: string, letters: AgentLetter[], consume: (batch: AgentLetter[]) => T, local?: () => AgentLetter[], starting = false): T {
+  private admit<T>(threadId: string, letters: AgentLetter[], consume: (batch: AgentLetter[]) => T, local?: (refusal: RpcFailure) => AgentLetter[], starting = false): T {
     let batch = letters;
     try { protectLetters(this.core, threadId, batch, starting); } catch (error) {
       // Only a policy refusal holds mail back; anything else is a fault to report.
       if (!local || !(error instanceof RpcFailure) || !batch.some(letter => letter.contact)) throw error;
-      batch = local();
+      batch = local(error);
     }
     const outer = this.admitting;
     this.admitting = new Set(batch.map(letter => letter.id));
@@ -700,12 +700,15 @@ export class Coordination {
           }
         }
       } else {
+        let held: RpcFailure | null = null;
         // One transaction records the wake, message states and scheduled turn.
-        this.admit(threadId, ready, batch => batch.length > 0 && this.core.journal.db.transaction(() => {
+        const woke = this.admit(threadId, ready, batch => batch.length > 0 && this.core.journal.db.transaction(() => {
           for (const letter of batch) this.update(letter, 'uncertain', 'Queued for provider delivery');
           this.core.journal.db.query('INSERT INTO coordination_wakes VALUES (?, ?)').run(threadId, Date.now());
           this.core.threads.startTurn(threadId, prompt(batch), [], undefined, 'coordination');
-        })(), local);
+        })(), refusal => { held = refusal; return local(); });
+        // No turn of an idle thread ends to retry its refused contact mail: the refusal pauses coordination until the owner's trust or message.
+        if (!woke && held) throw held;
       }
     } catch (error) {
       // A persistent agent that is paused or out of budget: its letters wait in the inbox for it.
