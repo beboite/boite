@@ -3,6 +3,7 @@ import type { AgentProfile, Message, MessagePart, ThreadSummary, Turn } from '@b
 import type { Core } from '../core.ts';
 import { messageOf, refused, RpcFailure } from '../errors.ts';
 import { newId } from '../ids.ts';
+import { agentSpend } from './spend.ts';
 
 /** What a wake is: a turn the core starts on an agent's thread, with the label its opening line shows. */
 export interface AgentWake {
@@ -199,7 +200,7 @@ export class AgentRuntime {
     return null;
   }
 
-  /** What the agent's thread spent today against its budget, or null when it has room. */
+  /** What the agent's thread and the threads below it spent today against its budget, or null when it has room. */
   private spent(agent: AgentProfile, threadId: string): { spent: number; budget: number } | null {
     const budget = this.store.resident.config(agent.id).dailyBudgetUsd ?? null;
     if (budget === null) return null;
@@ -394,11 +395,9 @@ export class AgentRuntime {
     } });
   }
 
-  /** What the agent's thread spent today, in API-equivalent dollars, through the partial index `turns_by_thread_queue`. */
+  /** What the agent's thread and its subagents spent today, in API-equivalent dollars (`agentSpend`). */
   spentToday(threadId: string, now = Date.now()): number {
-    const row = this.core.journal.db.query("SELECT COALESCE(SUM(json_extract(usage, '$.costUsdEquivalent')), 0) AS cost FROM turns INDEXED BY turns_by_thread_queue WHERE thread_id = ? AND queued_at >= ? AND started_at IS NOT NULL AND usage IS NOT NULL")
-      .get(threadId, midnight(now)) as { cost: number };
-    return row.cost;
+    return agentSpend(this.core, threadId, midnight(now)).costUsd;
   }
 
   /** Past its daily budget a wake is skipped; the first skip of the day says so in its thread. */

@@ -126,7 +126,7 @@ function sumsToUsage(sums: UsageSums): Usage {
   };
 }
 
-interface Priced {
+export interface Priced {
   usage: Usage;
   priced: number;
   price: UsagePrice | null;
@@ -147,14 +147,20 @@ function priced(usage: Usage, sums: UsageSums, model: string | null): Priced {
   return { usage: { ...usage, costUsdEquivalent: quote.cost }, priced: sums.reported, price: quote.price };
 }
 
-export function usageHistory(core: Core, edges: number[], providerId?: ProviderId): UsageHistory {
-  const read = (row: UsageSums & { provider_id: ProviderId; model: string | null }): Priced => priced(groupUsage(core, row), row, row.model);
+/**
+ * The turns of one provider and model priced the way `usage.history` prices
+ * them (`priced`); a bot's daily budget reads the same rule (`agents/spend.ts`).
+ */
+export function priceGroup(core: Core, row: UsageSums & { provider_id: ProviderId; model: string | null }): Priced {
+  return priced(groupUsage(core, row), row, row.model);
+}
 
+export function usageHistory(core: Core, edges: number[], providerId?: ProviderId): UsageHistory {
   // The turns an older core recorded come as their own group, which the row counts as estimated.
   const rows = new Map<string, UsageHistoryRow>();
   for (const row of core.journal.usageByBucket(edges)) {
     if (providerId !== undefined && row.provider_id !== providerId) continue;
-    const cost = read(row);
+    const cost = priceGroup(core, row);
     const estimated = row.legacy ? row.reported : 0;
     const key = JSON.stringify([row.bucket, row.provider_id, row.model]);
     const entry = rows.get(key);
@@ -184,7 +190,7 @@ export function usageHistory(core: Core, edges: number[], providerId?: ProviderI
   const byThread = new Map<ThreadId, UsageHistoryThread>();
   for (const row of core.journal.usageByThread(edges[0]!, edges[edges.length - 1]!)) {
     if (providerId !== undefined && row.provider_id !== providerId) continue;
-    const { usage } = read(row);
+    const { usage } = priceGroup(core, row);
     const entry = byThread.get(row.thread_id);
     if (entry !== undefined) {
       entry.turns += row.turns;
