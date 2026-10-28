@@ -15,8 +15,8 @@
  * account is rechecked.
  *
  * A prompt that names a scenario plays it: `scenario:subagents` launches a
- * batch with `start_subagent`, fails a second launch and runs an MCP tool of
- * the same title; `scenario:command` answers while a shell command it started
+ * batch with `start_subagent`, fails a second launch, runs an MCP tool of
+ * the same title and launches a third batch with 1.4.1's `invoke_subagent`; `scenario:command` answers while a shell command it started
  * still runs, and `scenario:short-command` finishes that command a moment
  * after its answer.
  */
@@ -140,6 +140,10 @@ const app = agent({ name: 'agy-fake' })
       await update({ sessionUpdate: 'tool_call_update', toolCallId: `${params.sessionId}:2`, status: 'completed', rawOutput: 'Launch readers' });
       await update({ sessionUpdate: 'tool_call', toolCallId: `${params.sessionId}:3`, title: 'Running start_subagent', kind: 'other', status: 'failed', rawInput: {}, rawOutput: 'Subagent exceeded its limit.' });
       await update({ sessionUpdate: 'tool_call', toolCallId: `${params.sessionId}:4`, title: 'Running start_subagent', kind: 'other', status: 'completed', rawInput: {}, rawOutput: 'mcp', _meta: { is_mcp_tool_call: true } });
+      // 1.4.1 renamed the tool `invoke_subagent`; it asks under `Run invoke_subagent?` and runs under the same title.
+      await update({ sessionUpdate: 'tool_call', toolCallId: `${params.sessionId}:5`, title: 'Run invoke_subagent?', kind: 'other', status: 'pending', rawInput: {} });
+      await update({ sessionUpdate: 'tool_call_update', toolCallId: `${params.sessionId}:5`, title: 'Running invoke_subagent', kind: 'other', status: 'in_progress', rawInput: {} });
+      await update({ sessionUpdate: 'tool_call_update', toolCallId: `${params.sessionId}:5`, status: 'completed', rawOutput: 'Launch reviewers' });
     }
     if (text.includes('scenario:command') || text.includes('scenario:short-command')) {
       const id = `${params.sessionId}:cmd`;

@@ -30,16 +30,16 @@
   import SettingsMachineBar from './SettingsMachineBar.svelte';
   import { untrack } from 'svelte';
   import { revealSettingsCard } from '../lib/settings-flash';
+  import { desktopPage, desktopSettings, machinePage, ownerOnly } from '../lib/settings-tabs';
 
   let { store, onopenthread }: { store: Store; onopenthread?: () => void } = $props();
 
   /**
-   * The pages that change one machine take it from the bar above them; the
-   * others are this window's (appearance), the whole group's (machines) or
+   * The pages that change one machine (`machinePage`) take it from the bar
+   * above them; the others are this window's (appearance), the whole group's (machines) or
    * pick their own (usage, which also reads every machine). Experiments mixes
    * this device's switches with a machine's, so its bar sits above the latter.
    */
-  const MACHINE_TABS: SettingsTab[] = ['general', 'keyboard', 'voice', 'accounts', 'plugins', 'brain', 'limits', 'resources', 'advanced', 'diagnostics', 'experiments'];
   /** Machines this window controls, and the window's own whatever its role there. */
   let choices = $derived(workspace.machines.filter((machine) => machine.store === store || (machine.store.connection === 'ready' && machine.store.owner)));
   let picked = $state<string | null>(null);
@@ -50,9 +50,9 @@
   let chosen = $derived(choices.find((machine) => machine.id === picked)
     ?? (store.settingsTab === 'plugins' ? choices.find(isThisPC) : undefined)
     ?? choices.find((machine) => machine.store === store));
-  let target = $derived(MACHINE_TABS.includes(store.settingsTab) ? chosen?.store ?? store : store);
+  let target = $derived(machinePage(store.settingsTab) ? chosen?.store ?? store : store);
   /** The bar when there is a machine to pick or a default machine to speak of. */
-  let bar = $derived(MACHINE_TABS.includes(store.settingsTab) && chosen !== undefined && (choices.length > 1 || chosen.store.group?.settingsHome !== undefined));
+  let bar = $derived(machinePage(store.settingsTab) && chosen !== undefined && (choices.length > 1 || chosen.store.group?.settingsHome !== undefined));
   /** The policy banner stands above the page, so the panel scrolls both on one column, as under the bar. */
   let banner = $derived(target.policy?.present === true && target.policy.problems.length > 0);
   /**
@@ -66,9 +66,6 @@
   });
   const narrow = new MediaQuery('(max-width: 720px)');
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
-
-  /** Providers, Plugins, Resources, Brain and Diagnostics call nothing a paired device may call. */
-  const OWNER_TABS: SettingsTab[] = ['accounts', 'plugins', 'resources', 'brain', 'diagnostics'];
 
   type Tab = SettingsTile;
 
@@ -158,9 +155,9 @@
     Object.fromEntries(LONG_PAGES.map((id) => [id, children[id] ?? []]))
   );
 
-  let tabs = $derived(all.filter((tab) => store.owner || !OWNER_TABS.includes(tab.id)));
-  /** A tab this client has no nav entry for lands on Home rather than nowhere. */
-  let tab = $derived(tabs.some((entry) => entry.id === store.settingsTab) ? store.settingsTab : 'home');
+  let tabs = $derived(all.filter((tab) => store.owner || !ownerOnly(tab.id)));
+  /** A page only the owner may open lands on Home on a paired device, as it does on a phone. */
+  let tab = $derived(desktopPage(store.settingsTab, store.owner));
 
   /**
    * Single settings the search also finds, each with the card it sits on:
@@ -301,7 +298,7 @@
   {#if chosen}<SettingsMachineBar machine={chosen} machines={choices} onpick={(id) => { picked = id; }} />{/if}
 {/snippet}
 
-{#if narrow.current && !inShell}
+{#if !desktopSettings(narrow.current)}
   <MobileSettings {store} {target} bar={bar ? machineBar : undefined} {onopenthread} />
 {:else}
 <div class="settings" data-testid="settings">

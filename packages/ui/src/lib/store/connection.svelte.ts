@@ -634,7 +634,7 @@ export class Connection {
         if (read) read.unread = false;
         const listed = new Set(s.threads.map(t => s.threadKey(t.id)));
         const stale = unlistedPanels(s.machineId, listed, s.openThread ? s.threadKey(s.openThread.id) : null);
-        rightPanel.prune(key => stale(key) && !rightPanel.drafts.get(key)?.size);
+        rightPanel.prune(key => stale(key) && !rightPanel.documents.drafted(key));
         work.settle(s.threads.length > 0 || onboardingSeen());
       }, () => threadRead.cancel()),
       slice(client.call('providers.list', {}), value => {

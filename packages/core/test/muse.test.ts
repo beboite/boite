@@ -533,6 +533,7 @@ describe('muse driver', () => {
       outputTokens: 4,
       cacheReadTokens: 2,
       cacheWriteTokens: 1,
+      buckets: 1,
       costUsdEquivalent: null,
     });
     const thread = await client.call('threads.get', { threadId });

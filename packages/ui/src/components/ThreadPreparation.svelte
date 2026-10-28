@@ -15,7 +15,7 @@
   const composerIds = $derived(JSON.stringify(Object.entries(store.composerStates)
     .filter(([id, input]) => id !== DRAFT_STASH_KEY && !!(input.text || input.attachments.length || input.previewReferences?.length || input.queued.length || input.sending || input.editing))
     .map(([id]) => id)));
-  const panelIds = $derived(JSON.stringify(store.threads.filter((row) => rightPanel.drafts.get(store.threadKey(row.id))?.size).map((row) => row.id)));
+  const panelIds = $derived(JSON.stringify(store.threads.filter((row) => rightPanel.documents.drafted(store.threadKey(row.id))).map((row) => row.id)));
   $effect(() => {
     const client = store.connection === 'ready' ? store.client : null;
     const thread = store.openThread;

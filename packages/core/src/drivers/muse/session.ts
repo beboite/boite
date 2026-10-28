@@ -50,6 +50,7 @@ import { handshake, mintUuidV7, MspError, MuseRpc } from './rpc.ts';
 import { MuseTurn } from './turn.ts';
 import { noteReady } from '../driver-log.ts';
 import { SessionRetention } from '../session-retention.ts';
+import { endOnClose, releaseChild } from '../session-close.ts';
 import { protectedMuse } from './protected.ts';
 import { MuseControls } from './controls.ts';
 
@@ -495,10 +496,7 @@ export class MuseSession {
     // child's close event, which can fire after core shutdown closed it.
     const turn = this.current;
     this.current = null;
-    if (turn !== null) {
-      if (turn.isStopped) turn.finish('cancelled', null);
-      else turn.fail('the muse session was closed');
-    }
+    endOnClose(turn, 'the muse session was closed');
     for (const question of this.questions.values()) question.settle();
     this.questions.clear();
     this.approvals.clear();
@@ -507,20 +505,8 @@ export class MuseSession {
     this.rpc = null;
     const child = this.child;
     this.child = null;
-    if (child !== null) {
-      try {
-        child.stdin.end();
-      } catch {
-        // the pipe is already gone
-      }
-      try {
-        // The whole tree on Windows, so a shell a tool left running goes too.
-        if (this.killTree !== null) this.killTree();
-        else child.kill();
-      } catch {
-        // already exited
-      }
-    }
+    // The whole tree on Windows, so a shell a tool left running goes too.
+    releaseChild(child, this.killTree);
     this.onEnded(this);
   }
 
