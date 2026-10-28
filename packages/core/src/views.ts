@@ -41,13 +41,21 @@ const EMBEDDED: Record<string, string> = {
   '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json',
 };
 
+/**
+ * The rest of a tag up to its `>`: a quoted value after `=` is one piece, so
+ * a `>` inside it does not end the tag, and a quote anywhere else is a letter.
+ * Each character has one reading, and a `<` outside quotes gives up on the
+ * tag, so a page full of tags left open is still read in one pass.
+ */
+const TAG_REST = String.raw`(?:[^<>"'=]|=(?!\s*["'])|=\s*"[^"]*"|=\s*'[^']*'|(?<!=\s*)["'])*>`;
 /** Tags whose address is fetched when the page loads. An `<a>` is not one: its link opens in the user's browser on a click. */
-const LOADING_TAG = /<(img|image|source|video|audio|track|script|link|use|input|iframe|embed|object)\b[^>]*>/gi;
-const ADDRESS = /\s(src|href|xlink:href|poster|data)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi;
+const LOADING_TAG = new RegExp(`<(img|image|source|video|audio|track|script|link|use|input|iframe|embed|object)\\b${TAG_REST}`, 'gi');
+const ADDRESS = new Set(['src', 'href', 'xlink:href', 'poster', 'data']);
 const CSS_URL = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^'")\s]+))\s*\)/gi;
-const TAG = /<[a-z][^>]*>/gi;
-const ATTRIBUTE_VALUE = /\s[^\s=>]+\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/dg;
-const STYLE_BODY = /<style\b[^>]*>([\s\S]*?)(?=<\/style\s*>|$)/dgi;
+const TAG = new RegExp(`<[a-z]${TAG_REST}`, 'gi');
+/** Each attribute of a tag in turn, so a name written inside another's quoted value is never read. */
+const ATTRIBUTE = /\s([^\s=>]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/dg;
+const STYLE_BODY = new RegExp(`<style\\b${TAG_REST}([\\s\\S]*?)(?=<\\/style\\s*>|$)`, 'dgi');
 
 interface Edit { start: number; end: number; text: string }
 
@@ -117,7 +125,7 @@ export function buildView(source: string, directory: string, cwd: string, guard?
   };
 
   // Comments and element bodies blanked to the same length: a tag written in a string is not the page's.
-  const blank = (tags: string) => source.replace(new RegExp(`<!--[\\s\\S]*?(?:-->|$)|(<(${tags})\\b[^>]*>)([\\s\\S]*?)(?=<\\/\\2\\s*>|$)`, 'gi'),
+  const blank = (tags: string) => source.replace(new RegExp(`<!--[\\s\\S]*?(?:-->|$)|(<(${tags})\\b${TAG_REST})([\\s\\S]*?)(?=<\\/\\2\\s*>|$)`, 'gi'),
     (match: string, open?: string, _tag?: string, body?: string) => open === undefined ? ' '.repeat(match.length) : open + ' '.repeat(body?.length ?? 0));
   const markup = blank('script|style');
   /** The page without its scripts: where a `url(` or an `@import` is a rule and not a string. */
@@ -125,7 +133,8 @@ export function buildView(source: string, directory: string, cwd: string, guard?
   for (const tag of markup.matchAll(LOADING_TAG)) {
     const name = tag[1]!.toLowerCase();
     const at = tag.index;
-    for (const attribute of tag[0].matchAll(ADDRESS)) {
+    for (const attribute of tag[0].matchAll(ATTRIBUTE)) {
+      if (!ADDRESS.has(attribute[1]!.toLowerCase())) continue;
       const address = (attribute[2] ?? attribute[3] ?? attribute[4] ?? '').trim();
       if (kept(address)) continue;
       const offset = at + attribute.index;
@@ -157,8 +166,8 @@ export function buildView(source: string, directory: string, cwd: string, guard?
   const css: [number, number][] = [];
   for (const body of styled.matchAll(STYLE_BODY)) css.push(body.indices![1]!);
   for (const tag of markup.matchAll(TAG)) {
-    for (const value of tag[0].matchAll(ATTRIBUTE_VALUE)) {
-      const [start, end] = (value.indices![1] ?? value.indices![2] ?? value.indices![3])!;
+    for (const value of tag[0].matchAll(ATTRIBUTE)) {
+      const [start, end] = (value.indices![2] ?? value.indices![3] ?? value.indices![4])!;
       css.push([tag.index + start, tag.index + end]);
     }
   }

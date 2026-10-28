@@ -154,12 +154,17 @@ test('local files are embedded, and a remote address or a missing file is a prob
     '<script>const css = "url(dot.png)";</script>',
     '<p>Write url(dot.png) or url(gone.png) in a rule.</p>',
     '<svg><rect style=\'fill: url(dot.png)\'/></svg>',
+    // A quoted `>` does not end its tag, and an address quoted in another attribute is that attribute's text.
+    '<div title="a > b" style="background: url(dot.png)"></div>',
+    '<img alt="x > y src=gone.png" src="dot.png">',
   ].join('\n'), '<link rel="stylesheet" href="look.css"><link rel="stylesheet" href="theme/skin.css">'), join(harness.dataDir, 'views'), harness.dataDir);
   expect(built.problems).toEqual([]);
   const data = `data:image/png;base64,${PNG.toString('base64')}`;
   expect(built.html).toContain(`<img src="${data}" alt="">`);
   expect(built.html).toContain(`<div style="background: url(${data})"></div>`);
   expect(built.html).toContain(`<rect style='fill: url(${data})'/>`);
+  expect(built.html).toContain(`<div title="a > b" style="background: url(${data})"></div>`);
+  expect(built.html).toContain(`<img alt="x > y src=gone.png" src="${data}">`);
   const script = /<script>(const css[^<]*)<\/script>/.exec(built.html)![1]!;
   expect(script).toBe('const css = "url(dot.png)";');
   expect(() => new Function(script)).not.toThrow();
