@@ -86,18 +86,20 @@ export type CloseAction = 'close' | 'others' | 'right' | 'all';
  * reopened on the file knows the disk is about to change.
  */
 interface FileSaves {
-  /** What the disk last confirmed: the newest read, or the newest numbered write it answered. */
+  /** What the disk last confirmed, by the newest read or write that answered. */
   disk: string | null;
-  /** The number of the write whose answer set `disk`; an older answer changes nothing. */
-  confirmed: number;
-  /** The newest write sent: a read that left before it may predate its text. */
-  sent: number;
+  /** The number of the read or write whose answer set `disk`: an older answer changes nothing. */
+  at: number;
   /** The writes sent and not answered yet. */
   pending: readonly number[];
 }
 
-/** Write numbers never repeat in a session, so an answer can never be taken for another write's. */
-let lastWrite = 0;
+/**
+ * Reads and writes draw their numbers from one count that never repeats in a
+ * session, in the order they leave: an answer can never be taken for another
+ * operation's, and the disk only ever moves to a newer one.
+ */
+let lastOperation = 0;
 
 export interface PanelState {
   isOpen: boolean;
@@ -557,19 +559,19 @@ export class BoundPanel {
     else this.#root.saves.set(this.#key, new SvelteMap([[path, saves]]));
   }
 
-  /** What a read hands back to `read`, taken when it leaves. */
-  reading(path: string): number {
-    return this.#saves(path)?.sent ?? 0;
+  /** A read left; its number is what it hands back to `read`. */
+  reading(): number {
+    return ++lastOperation;
   }
 
   /**
-   * A read answered. A write sent since it left, or still out, may change the
-   * disk after the read saw it: that write's own answer says what it holds.
+   * A read answered. A write still out may change the disk after the read saw
+   * it, and a newer read or write that already answered saw a later disk.
    */
-  read(path: string, text: string, sent: number): void {
+  read(path: string, text: string, read: number): void {
     const now = this.#saves(path);
-    if (now && (now.pending.length > 0 || now.sent !== sent)) return;
-    this.#setSaves(path, { disk: text, confirmed: now?.confirmed ?? 0, sent: now?.sent ?? 0, pending: [] });
+    if (now && (now.pending.length > 0 || read < now.at)) return;
+    this.#setSaves(path, { disk: text, at: read, pending: [] });
     this.#settle(path);
   }
 
@@ -581,23 +583,23 @@ export class BoundPanel {
 
   /** A write of the file left; its number is what its answer settles. */
   sending(path: string): number {
-    const write = ++lastWrite;
-    const now = this.#saves(path) ?? { disk: null, confirmed: 0, sent: 0, pending: [] };
-    this.#setSaves(path, { ...now, sent: write, pending: [...now.pending, write] });
+    const write = ++lastOperation;
+    const now = this.#saves(path) ?? { disk: null, at: 0, pending: [] };
+    this.#setSaves(path, { ...now, pending: [...now.pending, write] });
     return write;
   }
 
   /**
    * The answer to one numbered write: the text it wrote, or null when it
    * failed. It settles that write only, and moves the disk only when no newer
-   * write was answered before it.
+   * read or write answered before it.
    */
   answered(path: string, write: number, text: string | null): void {
     const now = this.#saves(path);
     if (!now?.pending.includes(write)) return;
     const pending = now.pending.filter((one) => one !== write);
-    const newer = text !== null && write > now.confirmed;
-    this.#setSaves(path, newer ? { ...now, disk: text, confirmed: write, pending } : { ...now, pending });
+    const newer = text !== null && write > now.at;
+    this.#setSaves(path, newer ? { disk: text, at: write, pending } : { ...now, pending });
     this.#settle(path);
   }
 

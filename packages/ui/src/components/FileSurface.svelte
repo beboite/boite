@@ -82,7 +82,7 @@
 
   async function load(id: string, wanted: string): Promise<void> {
     loading = true;
-    const sent = panel.reading(wanted);
+    const read = panel.reading();
     const answer = await store.readFile(id, wanted);
     loading = false;
     // The tab may have been asked for another file while the call was out.
@@ -97,7 +97,7 @@
     if (answer.value.kind === 'text') {
       // An edit made before this tab was last unmounted comes back over the
       // disk's text, and the dirty dot with it.
-      panel.read(wanted, answer.value.text, sent);
+      panel.read(wanted, answer.value.text, read);
       offset = 0;
     } else {
       natural = null;

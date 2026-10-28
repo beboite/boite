@@ -533,6 +533,17 @@ describe('the right panel', () => {
     } finally { browserProfiles.source = null; }
   });
 
+  test('a read that answers after a newer one of the same file leaves the newer text', () => {
+    const { bound } = panel();
+    bound.openFile('notes.md');
+    // An editor unmounts with its read out, the next one reads again, and the first answer is the last to land.
+    const older = bound.reading();
+    const newer = bound.reading();
+    bound.read('notes.md', 'changed by the agent', newer);
+    bound.read('notes.md', 'before the agent', older);
+    expect(bound.disk('notes.md')).toBe('changed by the agent');
+  });
+
   test('a file tab keeps its unsaved text until it is closed, and each close names what it takes', () => {
     const { root, bound } = panel();
     const readme = bound.openFile('README.md');
