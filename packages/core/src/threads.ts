@@ -407,7 +407,7 @@ export class ThreadStore {
   }
 
   archive(threadId: ThreadId, archived: boolean, onlyIfIdle = false): ThreadSummary {
-    if (!archived) this.core.worktrees.reservations.assertFree(this.require(threadId).cwd, 'a restored conversation', { threadId }); else this.require(threadId);
+    this.require(threadId);
     if (archived && onlyIfIdle) assertIdleFamily(this.core, threadId, 'explicit');
     if (archived) {
       // Temporary inference belongs to the visible family, including retained descendants.

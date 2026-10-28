@@ -1,4 +1,5 @@
 import type { ThreadId, ThreadSummary } from '@boite/contracts';
+import { recordHoldsCheckout } from '../checkouts.ts';
 import type { Core } from '../core.ts';
 
 /**
@@ -11,6 +12,6 @@ import type { Core } from '../core.ts';
  * idle one. A deleted thread only needs the latter.
  */
 export function occupiesCheckout(core: Core, thread: Pick<ThreadSummary, 'id' | 'archived' | 'status'> & { deleted?: boolean }): boolean {
-  if (thread.deleted !== true && (!thread.archived || (thread.status !== 'idle' && thread.status !== 'error'))) return true;
+  if (thread.deleted !== true && recordHoldsCheckout(thread)) return true;
   return core.procs.liveCount(thread.id as ThreadId) > 0 || core.terminals.threadProcesses(thread.id as ThreadId) > 0;
 }

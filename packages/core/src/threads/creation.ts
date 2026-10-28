@@ -110,7 +110,6 @@ export class ThreadCreation {
   }
 
   publish(thread: ThreadSummary): ThreadSummary {
-    this.core.worktrees.reservations.assertFree(thread.cwd, 'a new conversation', { threadId: thread.id });
     this.core.journal.append({ type: 'thread.created', threadId: thread.id, version: 1, payload: thread }, () => this.core.journal.putThread(thread));
     // Capture inherited shared authority before an idle child can outlive its parent's board goal.
     if (thread.parentThreadId) this.core.sharedAccess.bound(thread.id);

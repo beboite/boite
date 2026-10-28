@@ -305,33 +305,59 @@ describe('worktrees.remove', () => {
     expect(await client.call('worktrees.remove', { projectId: project.id, path: thread.cwd })).toEqual({ ok: true, branchDeleted: true });
   });
 
-  test('a checkout git is removing cannot be restored or given a new thread until git ends', async () => {
-    const project = await repoProject();
-    const accountId = await echoAccount();
-    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Being removed', worktree: {} });
-    await client.call('threads.archive', { threadId: thread.id, archived: true });
+  /** Starts `worktrees.remove` and holds its git once started, before it deletes anything; `during` runs meanwhile. */
+  async function whileGitRemoves(projectId: string, path: string, during: () => Promise<void>): Promise<void> {
     const signal = join(harness.dataDir, 'remove-may-run');
     const procs = harness.core.procs, spawn = procs.spawn.bind(procs);
     let waiting = false;
-    // The removal's git starts, then waits for the test before it deletes anything.
     const spy = spyOn(procs, 'spawn').mockImplementation((scope, command, args, options) => {
       if (command !== 'git' || !args.includes('remove')) return spawn(scope, command, args, options);
       waiting = true;
       return spawn(scope, 'sh', ['-c', 'while [ ! -e "$0" ]; do sleep 0.02; done; exec git "$@"', signal, ...args], options);
     });
     try {
-      const removing = client.call('worktrees.remove', { projectId: project.id, path: thread.cwd });
+      const removing = client.call('worktrees.remove', { projectId, path });
       await waitFor(() => waiting);
+      await during();
+      writeFileSync(signal, '');
+      expect(await removing).toEqual({ ok: true, branchDeleted: true });
+    } finally { writeFileSync(signal, ''); spy.mockRestore(); }
+    expect(existsSync(path)).toBe(false);
+  }
+
+  test('a checkout git is removing cannot be restored or given a new thread until git ends', async () => {
+    const project = await repoProject();
+    const accountId = await echoAccount();
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Being removed', worktree: {} });
+    await client.call('threads.archive', { threadId: thread.id, archived: true });
+    await whileGitRemoves(project.id, thread.cwd, async () => {
       const restored = await rejection(client.call('threads.archive', { threadId: thread.id, archived: false }));
       expect(restored.reason).toMatchObject({ rpc: { message: expect.stringContaining('is being removed'), data: expect.objectContaining({ field: 'cwd' }) } });
       expect(harness.core.threads.require(thread.id).archived).toBe(true);
       expect(await thrown(client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Arrives', cwd: thread.cwd }))).toThrow('is being removed');
-      writeFileSync(signal, '');
-      expect(await removing).toEqual({ ok: true, branchDeleted: true });
-    } finally { writeFileSync(signal, ''); spy.mockRestore(); }
-    expect(existsSync(thread.cwd)).toBe(false);
+    });
     // Once git is done the reservation goes: restoring works, and the folder refuses the turn.
     expect((await client.call('threads.archive', { threadId: thread.id, archived: false })).archived).toBe(false);
+  });
+
+  test('neither a deleted conversation brought back nor a link to the checkout gets past its removal', async () => {
+    const project = await repoProject();
+    const accountId = await echoAccount();
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Deleted', worktree: {} });
+    await client.call('threads.remove', { threadId: thread.id });
+    // A link made before the removal: the same folder under another name, and a folder inside it.
+    const alias = join(project.path, 'alias');
+    symlinkSync(thread.cwd, alias, 'dir');
+    mkdirSync(join(thread.cwd, 'sub'));
+    await whileGitRemoves(project.id, thread.cwd, async () => {
+      // Undoing the deletion would bring it back live, and its next turn would start in the folder git deletes.
+      expect(await thrown(client.call('threads.restore', { threadId: thread.id }))).toThrow('is being removed');
+      expect(harness.core.journal.listDeletedThreads().map((one) => one.id)).toContain(thread.id);
+      for (const cwd of [alias, join(alias, 'sub')]) {
+        expect(await thrown(client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Through a link', cwd }))).toThrow('is being removed');
+      }
+    });
+    expect(harness.core.threads.list({ includeArchived: true }).filter((one) => one.cwd.startsWith(alias))).toEqual([]);
   });
 
   test('a proved branch is deleted only if no checkout took it back while the deletion waited', async () => {

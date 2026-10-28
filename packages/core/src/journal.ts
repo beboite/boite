@@ -22,7 +22,7 @@ import { PROCESS_COLUMNS, PROCESS_FROM, ProcessRows } from './journal/processes.
 import { runWrite } from './journal/statements.ts';
 import { WAL_LIMIT_BYTES, WalCheckpoints, type WalCheckpointOptions } from './journal/wal-checkpoints.ts';
 import { toAccount, toMessage, toProcess, toProject, toThread, toTurn, parseJson } from './journal/rows.ts';
-import { threadsWhere, VISIBLE_THREADS, writeThread } from './journal/thread-rows.ts';
+import { restoreDeletedRows, threadsWhere, VISIBLE_THREADS, writeThread } from './journal/thread-rows.ts';
 import { oneTurn, sumSessionUsage, writeTurn } from './journal/turn-rows.ts';
 import type { AccountRow, MessageRow, ProcessRow, ProjectIconRow, ProjectRow, ThreadRow, TurnRow } from './journal/rows.ts';
 import type { DetectedIcon as StoredProjectIcon } from './project-icons.ts';
@@ -260,7 +260,14 @@ export class Journal {
 
   // -- threads --------------------------------------------------------------
 
-  putThread(thread: ThreadSummary): void { writeThread(this.db, thread); }
+  /**
+   * Every thread row written, created, moved, restored or set running passes
+   * here first. The core refuses a row that would work in a checkout a
+   * removal holds (`checkouts.ts`); a throw rolls back the write around it.
+   */
+  admitThread: (thread: ThreadSummary) => void = () => {};
+
+  putThread(thread: ThreadSummary): void { this.admitThread(thread); writeThread(this.db, thread); }
 
   getThread(threadId: string): ThreadSummary | null {
     const row = this.db.query(`${VISIBLE_THREADS} AND id = ?`).get(threadId) as ThreadRow | null;
@@ -316,16 +323,7 @@ export class Journal {
     return rows.map(row => ({ ...toThread(row), deletedAt: row.deleted_at }));
   }
 
-  /** Restore the family atomically, retaining IDs, message cursors and prior archive flags. */
-  restoreDeletedThreads(rootId: string): string[] {
-    return this.db.transaction(() => {
-      const rows = this.db.query('SELECT thread_id, archived FROM thread_deletions WHERE root_id = ?').all(rootId) as { thread_id: string; archived: number }[];
-      // A thread that was live before its deletion loses the archive time the deletion gave it.
-      for (const row of rows) this.db.query('UPDATE threads SET archived = ?1, archived_at = CASE WHEN ?1 = 0 THEN NULL ELSE archived_at END WHERE id = ?2').run(row.archived, row.thread_id);
-      this.db.query('DELETE FROM thread_deletions WHERE root_id = ?').run(rootId);
-      return rows.map(row => row.thread_id);
-    })();
-  }
+  restoreDeletedThreads(rootId: string): string[] { return restoreDeletedRows(this.db, rootId, this.admitThread); }
 
   /**
    * Incognito conversations and the sub-threads they started. Their native
