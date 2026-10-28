@@ -1,3 +1,4 @@
+import { threadActive } from '@boite/contracts';
 import { realpathSync } from 'node:fs';
 import type { SharedProjectActor, SharedThreadRef } from '@boite/contracts';
 import type { Core } from '../core.ts';
@@ -24,7 +25,7 @@ export function bindBoard(core: Core, ctx: SharedPeerContext, worker: SharedThre
   const thread = core.threads.require(worker.threadId), {index} = core.sharedProjects.endpoints(ctx.shared);
   const protocol = core.providers.require(thread.providerId).protocol;
   if (!core.sharedAccess.execution.support(protocol, thread.providerId, thread.permissionMode).supported || protocol === 'echo' && thread.permissionMode !== 'default') throw refused('shared file policy: board execution requires a protected provider route');
-  if (['queued', 'running', 'waiting'].includes(thread.status) || core.procs.liveCount(thread.id) > 0) throw refused('shared file policy: board execution requires an idle host conversation');
+  if (threadActive(thread.status) || core.procs.liveCount(thread.id) > 0) throw refused('shared file policy: board execution requires an idle host conversation');
   const entry = core.sharedBoard.journal.entry(ctx.shared.id, cardId);
   if (entry?.kind !== 'card' || entry.card.assignment?.claimId !== claimId) throw refused('shared file policy: expected the current board claim');
   const scope: BoardScope = {sharedProjectId: ctx.shared.id, cardId, claimId, revision: ctx.shared.access[index].revision, root: realpathSync(thread.cwd), actor: entry.card.assignment.actor};

@@ -377,6 +377,8 @@ test('a core killed during the grace still hands its turn over, closed without a
     expect(left.status).toBe('stopped');
     expect(left.error).toBeNull();
     expect(messagesOf(core, left).every(message => message.state !== 'streaming' && !message.parts.some(part => part.type === 'error'))).toBe(true);
+    // Nothing answers the cut call any more: it closes like one a live stop cut.
+    expect(messagesOf(core, left).flatMap(message => message.parts).flatMap(part => part.type === 'tool' ? [part.status] : [])).toEqual(['error']);
     await waitFor(() => core.journal.listTurns(threadId).length === 2);
     expect(core.journal.listTurns(threadId)[1]!.execution?.operation).toBe('resume');
   } finally { await (next ?? h).stop(); if (next) await h.stop().catch(() => undefined); }

@@ -9,6 +9,7 @@ import { composerValue } from './composer-validation.ts';
 import { steerUser, userSteeringUnavailable } from './threads/user-steering.ts';
 import { DraftReservationLedger, type DraftOwnership } from './threads/draft-reservation-ledger.ts';
 import { needsModelDiscovery } from './threads/selection.ts';
+import { admissionRefusal } from './threads/admission.ts';
 import { composerActivity, isComposerActivity, startsAutoGoal } from './composer-activity.ts';
 import { composerBatch } from './composer-batch.ts';
 
@@ -182,9 +183,9 @@ export class Composer {
         const boundary = this.boundaries.get(id);
         const choice = item.choice;
         if (!choice) throw refused('No agent selection was saved for this queued prompt. Choose an agent and enqueue it again.');
-        const account = this.core.accounts.require(choice.accountId);
-        if (account.providerId !== choice.providerId || account.status === 'unauthenticated') throw refused('The queued account is unavailable; choose an account and enqueue this input again.');
-        const active = ['running', 'queued', 'waiting'].includes(thread.status) || this.core.threads.runner.handles.has(id);
+        const refusal = admissionRefusal(this.core, thread, choice);
+        if (refusal !== null) throw refused(refusal);
+        const active = this.core.threads.isBusy(id);
         const running = active ? this.core.journal.runningTurn(id) : null;
         if (active && (!boundary || boundary === item.afterBoundary || item.request || isComposerActivity(item.text) || !sameChoice(choice, choiceOf({ ...thread, ...running?.execution })) || userSteeringUnavailable(this.core, this.core.threads, id, running) !== null)) return;
         const batch = composerBatch(value.input.queued, this.storage);
@@ -200,10 +201,7 @@ export class Composer {
           this.complete(section, id, batch.entries.map(entry => entry.id)); continue;
         }
         this.boundaries.delete(id);
-        const provider = this.core.providers.require(choice.providerId);
-        if (needsModelDiscovery(provider, choice.accountId, choice.model, choice.effort, choice.speed ?? null)) {
-          await this.core.router.dispatch('providers.probe', { providerId: choice.providerId, accountId: choice.accountId, ...(provider.protocol === 'acp' && choice.model !== null && choice.effort !== null ? { model: choice.model } : {}) }, { connection: this.connection });
-        }
+        await this.discover(choice);
         // A discovery RPC can yield while the user archives the target or stops the core.
         const current = this.core.journal.getThread(id);
         if (this.closed || this.core.stopping || !current || current.archived || (current.projectId && this.core.projects.require(current.projectId).archived)) return;
@@ -216,9 +214,9 @@ export class Composer {
           if (activity) {
             if (item.previewReferences?.length) throw refused('Activity commands do not accept page references.');
             this.core.activity.set({ threadId: id, ...activity, attachments }, undefined, choice);
-          } else this.core.threads.startTurn(id, batch.text, attachments, current.selectionVersion ?? 0, undefined, undefined, batch.requestId, undefined, batch.previewReferences, undefined, batch.entries[0]!.sentFrom ?? null, undefined, choice,
+          } else this.core.threads.startTurn(id, { prompt: batch.text, attachments, previews: batch.previewReferences }, { kind: 'user', requestId: batch.requestId, sentFrom: batch.entries[0]!.sentFrom ?? null }, { expectedSelectionVersion: current.selectionVersion ?? 0, choice,
             // Decided from the experiments the prompt was queued with, so a restart keeps what it meant.
-            startsAutoGoal(batch.text, item.experiments, this.core.settings.get().autoGoalMinChars) ? batch.text : undefined);
+            autoGoal: startsAutoGoal(batch.text, item.experiments, this.core.settings.get().autoGoalMinChars) ? batch.text : undefined });
           this.complete(section, id, batch.entries.map(entry => entry.id));
         });
       } catch (error) {
@@ -229,6 +227,13 @@ export class Composer {
         this.hold(section, id, item.id, messageOf(error)); return;
       } finally { this.captured.delete(key); }
     }
+  }
+
+  /** Reads the agent's models once when the queued selection names one Boite has not seen yet. */
+  private async discover(choice: ComposerChoice): Promise<void> {
+    const provider = this.core.providers.require(choice.providerId);
+    if (!needsModelDiscovery(provider, choice.accountId, choice.model, choice.effort, choice.speed ?? null)) return;
+    await this.core.router.dispatch('providers.probe', { providerId: choice.providerId, accountId: choice.accountId, ...(provider.protocol === 'acp' && choice.model !== null && choice.effort !== null ? { model: choice.model } : {}) }, { connection: this.connection });
   }
 
   private requestId(item: ComposerQueuedPrompt): string { return `composer_${digest(item.id)}`; }
@@ -271,10 +276,7 @@ export class Composer {
     await this.core.projects.requireFolder(projectId);
     // Reuse discovery and draft workspace machinery, but keep publication and
     // the queue transfer in one commit so restart cannot create another thread.
-    const provider = this.core.providers.require(choice.providerId);
-    if (needsModelDiscovery(provider, choice.accountId, choice.model, choice.effort, choice.speed ?? null)) {
-      await this.core.router.dispatch('providers.probe', { providerId: choice.providerId, accountId: choice.accountId, ...(provider.protocol === 'acp' && choice.model !== null && choice.effort !== null ? { model: choice.model } : {}) }, { connection: this.connection });
-    }
+    await this.discover(choice);
     const ledger = new DraftReservationLedger(this.core);
     const mutations: DraftOwnership[] = [];
     const beforeMutation = (ownership: DraftOwnership) => { mutations.push(ownership); return ledger.record(ownership); };

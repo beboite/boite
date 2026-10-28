@@ -14,6 +14,7 @@ import { startsAutoGoal } from '../composer-activity.ts';
 import { readToolOutput, readToolPart } from './records.ts';
 import { readMessageAttachment } from './attachment-read.ts';
 import { CreationRequests } from './creation-requests.ts';
+import { trustLetters } from '../contacts/letter-scopes.ts';
 
 /**
  * A turn in a folder that is gone is refused by that folder. An archived
@@ -198,6 +199,10 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     core.threads.markRead(params.threadId);
     return { ok: true } as const;
   });
+  core.router.register('threads.trustContactHistory', (params) => {
+    trustLetters(core, params.threadId);
+    return { ok: true } as const;
+  });
   core.router.register('threads.subscribe', (params, ctx) => {
     core.threads.require(params.threadId);
     ctx.connection.subscriptions.add(params.threadId);
@@ -219,7 +224,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     const thread = core.threads.require(params.threadId);
     const preferences = core.clients.use(ctx.connection);
     const autoGoal = startsAutoGoal(params.prompt, preferences?.experiments, core.settings.get().autoGoalMinChars) ? params.prompt : undefined;
-    const start = () => core.threads.startTurn(params.threadId, params.prompt, attachments, params.expectedSelectionVersion, undefined, undefined, params.clientRequestId, undefined, params.previewReferences ?? [], undefined, promptOrigin(ctx.connection, preferences), undefined, undefined, autoGoal);
+    const start = () => core.threads.startTurn(params.threadId, { prompt: params.prompt, attachments, previews: params.previewReferences ?? [] }, { kind: 'user', requestId: params.clientRequestId, sentFrom: promptOrigin(ctx.connection, preferences) }, { expectedSelectionVersion: params.expectedSelectionVersion, autoGoal });
     return core.delegation.retirements.revivable(thread) ? core.delegation.retirements.revive(thread, start) : start();
   });
   core.router.register('turns.stop', (params, ctx) => {

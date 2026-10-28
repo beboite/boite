@@ -153,6 +153,15 @@ export interface ForkOrigin {
 }
 
 export interface ThreadSummary {
+  /**
+   * The thread, or a conversation it continues, read contact mail sent
+   * outside a shared project. That mail has no captured file authority, so
+   * the core refuses every turn and tool until the owner trusts the history
+   * (`threads.trustContactHistory`). Names the contacts it came from. Every
+   * `threads.get` carries it, null when nothing holds the thread; a
+   * `thread.updated` carries it only when the hold changed. Absent on older cores.
+   */
+  contactHold?: { contacts: string[] } | null;
   /** Date marked done, or automatically archived after a PR merge. Cleared on restore or manual archive. */
   doneAt?: Timestamp | null;
   /**
@@ -760,6 +769,13 @@ export interface ThreadsRpcMethods {
   /** Pin or unpin (`pinned: false`) a thread. An archived thread keeps its pin for when it comes back. */
   'threads.pin': { params: { threadId: ThreadId; pinned?: boolean }; result: ThreadSummary };
   'threads.markRead': { params: { threadId: ThreadId }; result: { ok: true } };
+  /**
+   * Owner only. Accept the contact mail outside a shared project that the
+   * thread's history consumed (`Thread.contactHold`), so its turns and tools
+   * run again. Mail of a shared project keeps its captured boundary, and a
+   * later letter outside one holds the thread again.
+   */
+  'threads.trustContactHistory': { params: { threadId: ThreadId }; result: { ok: true } };
   /** Only subscribed threads stream message events to this connection. */
   'threads.subscribe': { params: { threadId: ThreadId }; result: { ok: true } };
   'threads.unsubscribe': { params: { threadId: ThreadId }; result: { ok: true } };

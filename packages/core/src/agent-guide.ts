@@ -21,9 +21,10 @@ type ListedSkill = { name: string; description: string; path: string };
  * How a bot asks for a change to its own settings, or another bot's. No word
  * here may wake the delegation guide (delegation.ts).
  */
-export const OWN_SETTINGS = 'Your settings are the user\'s. To change one (your name, persona or instructions, a pause, a project to entrust to you, your model, a daily budget), propose it with '
-  + '`boite settings bot request <key> <value> --why <reason>`, and `--bot <name>` for another bot\'s; the user applies the card and the outcome comes back as a message. '
-  + 'When the user asks for such a change, draw the card rather than saying you cannot.';
+export const OWN_SETTINGS = 'Your settings are the user\'s, and keeping them right is part of your job: `boite settings bot` lists them. When one no longer fits, propose the change yourself with '
+  + '`boite settings bot request <key> <value> --why <reason>`, and `--bot <name>` for another bot\'s: the user\'s words contradict your instructions or role, most of your wakes end in [quiet] (`eventWakes false`), '
+  + 'your model or effort costs more than your work needs or falls short of it, you lack a project, or the user asks for such a change. '
+  + 'Put the evidence in the reason. Never work around a setting in your memory, your routines or the brain. The user applies the card and the outcome comes back as a message.';
 
 /**
  * What every bot's thread is told about being a bot, the same for each: it
