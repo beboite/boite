@@ -653,7 +653,7 @@ left for the next of those moments.
 
 ## What ships
 
-Nine descriptors ship, and only the first eight are ever visible to a user: `echo`
+Ten descriptors ship, and only the first nine are ever visible to a user: `echo`
 is the deterministic fake the tests and the bench run on, loaded only under
 `BOITE_ECHO=1`.
 
@@ -664,6 +664,7 @@ is the deterministic fake the tests and the bench run on, loaded only under
 | OpenCode 2 | `acp` | `opencode2 acp`, experimental and off until turned on |
 | Antigravity | `acp` | Managed `agy_acp_server` for the host OS |
 | Grok | `acp` | `grok [permission flags] agent [approval flag] stdio` |
+| Hermes Agent | `acp` | `hermes acp` ([below](#hermes)) |
 | Codex | `codex-appserver` | `codex app-server` |
 | Muse Code | `muse` | `muse serve --trust-workspace [MUSE_HOST_SETTINGS] [mode flags]` |
 | pi | `pi` | Package bin through Node or `pi --mode rpc` |
@@ -712,7 +713,7 @@ descriptor uses additional fields available to other providers:
   same port and same path, so the fetch lands on the agent's listener and
   nowhere else on the machine. [accounts.md](accounts.md) has the flow.
 
-`quirks` turns on a dialect the ACP driver knows, and there are two.
+`quirks` turns on a dialect the ACP driver knows, and there are three.
 `quirks: ["antigravity"]` folds a tool call's command, working directory and
 output under one spelling and draws an `interaction_` permission request as the
 agent's own question; its modes are `default`, `auto_edit` and `yolo`, with no
@@ -751,7 +752,14 @@ command line, because Grok advertises no `availableModes` for a
 process, so it joins the session key the way Codex's approval pair does and a
 change drops the process. Nothing ever sends `authenticate` to Grok: an account
 with no `auth.json` is refused before a turn starts, and `authenticate` on an
-empty home opens a browser.
+empty home opens a browser. `quirks: ["hermes"]` reads a `session/load` answer
+without `modes` as a session that is gone ([Hermes](#hermes)).
+
+An agent whose session answer lists `models` but offers no `model` config
+option takes the thread's model as `session/set_model { sessionId, modelId }`,
+with no effort, at the start of each turn the model moved; a thread put back on
+the descriptor's `default` asks for the model the first session reported as
+current. Hermes Agent is that agent today.
 
 An ACP thread resumes its session with `session/load` when the agent
 advertises `loadSession`. When the agent refuses that load while its process is
@@ -1486,3 +1494,74 @@ pi's RPC mode: JSON lines over the stdio of `pi --mode rpc`.
 - After each turn `get_session_stats` feeds the context meter with a five-second
   control-read expiry. A timed-out response is removed and cannot update a later
   turn's context.
+
+### Hermes
+
+Hermes Agent (Nous Research, MIT) speaks ACP through `hermes acp` on stdio. It
+runs hosted models and local ones through any OpenAI-compatible server
+(llama.cpp, Ollama, vLLM, LM Studio). Read against Hermes 0.21.5
+(`v2026.9.24`) on Linux.
+
+- Install, per user, no root:
+  `curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup`
+  puts a checkout under `~/.hermes/hermes-agent` and links
+  `~/.local/bin/hermes`; on Windows `install.ps1` uses
+  `%LOCALAPPDATA%\hermes\hermes-agent`. The descriptor looks on PATH, then in
+  `~/.local/bin`, then in the checkout's `venv`, and on Windows in the
+  checkout's `venv\Scripts\hermes.exe` first. A pinned install in a virtual
+  environment of your own is
+  `python3 -m venv ~/.local/lib/hermes-agent && git clone --depth 1 --branch v2026.9.24 https://github.com/NousResearch/hermes-agent ~/.local/lib/hermes-agent/src && ~/.local/lib/hermes-agent/bin/pip install -e "$HOME/.local/lib/hermes-agent/src[acp]" && ln -s ~/.local/lib/hermes-agent/bin/hermes ~/.local/bin/hermes`.
+  `hermes acp --check` answers `Hermes ACP check OK`.
+- Each account has its own `HERMES_HOME` (`~/.hermes`, or
+  `%LOCALAPPDATA%\hermes` on Windows, for the default account). It holds the
+  model and provider (`config.yaml`), keys (`.env`), sessions (`state.db`) and
+  memories. An account reads `ok` once `config.yaml` exists, which `hermes`
+  does not write on its own. Login runs `hermes model` in a terminal, Hermes'
+  own picker for a provider and model. `skills` and `SOUL.md` are shared from
+  the user's own home. The profile unsets `OPENAI_API_KEY`, `OPENAI_BASE_URL`,
+  `OPENROUTER_API_KEY` and `OPENROUTER_BASE_URL`, which Hermes reads ahead of an
+  account's own `.env`, plus `HERMES_SESSION_ID` and `HERMES_TUI_GATEWAY_URL`,
+  which would tie the process to another Hermes.
+- A local model: start the server with a window of at least 64K tokens, since
+  Hermes refuses a model under that, for example
+  `llama-server -m qwen2.5-0.5b-instruct-q4_k_m.gguf --alias qwen2.5-0.5b -c 65536 -fa on -ctk q8_0 -ctv q8_0 --host 127.0.0.1 --port 8089`.
+  Then pick "Custom endpoint" in `hermes model`, or write the account's
+  `config.yaml`:
+
+  ```yaml
+  model:
+    provider: custom
+    default: qwen2.5-0.5b
+    base_url: http://127.0.0.1:8089/v1
+    context_length: 65536
+  ```
+
+  No key is needed for a local server.
+- Models: the descriptor carries `default`, Hermes' configured model. The probe
+  reads `models.availableModels` from `session/new`, ids `provider:model`
+  (`custom:qwen2.5-0.5b`). Hermes 0.21.5 answers no config options, so the
+  model goes out as `session/set_model` with no effort; Hermes answers -32603
+  while a turn runs and -32602 for a model it does not have, each one warning in
+  the log. Switching can take seconds, since Hermes rebuilds its agent.
+- Modes: `default` asks before edits and dangerous commands, `accept_edits`
+  allows edits inside the workspace and `dont_ask` allows edits outside
+  sensitive paths. `acceptEdits` and `dontAsk` map to those two, the others to
+  `default`, where every request reaches Boite as a permission card answered
+  with Hermes' `allow_once` or `deny`. There is no plan mode. An unanswered
+  request is denied by Hermes after its own `approvals.timeout`, 300 seconds by
+  default.
+- Resume: `session/load` replays the history before it answers, which the
+  driver drops. For a session it no longer has, Hermes answers an empty result
+  instead of an error, and a prompt on that id stops with `refusal`; the `hermes`
+  quirk reads a load answer without `modes` as gone, and the turn runs again on
+  a new session carrying the conversation.
+- Images go as ACP image blocks; `initialize` advertises them.
+- Hermes' own `/` commands reach Boite as `available_commands_update`. A prompt
+  sent while Hermes runs a turn is queued by Hermes for the next one; Boite
+  does not send one.
+- Not covered: Hermes' `main` branch starts a gateway daemon per
+  `HERMES_HOME` behind `hermes acp`, which outlives the ACP process; this
+  descriptor was read against the release before it.
+- Live test: `BOITE_E2E_HERMES=1 HERMES_E2E_BASE_URL=http://127.0.0.1:8089/v1 HERMES_E2E_MODEL=qwen2.5-0.5b bun test test/hermes.live.test.ts`
+  in `packages/core`. It refuses a non-loopback URL, so no turn leaves the
+  machine.
