@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import * as fs from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { checkSettingsPatch, type PluginState, type SubscriptionProxy } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
@@ -213,7 +214,7 @@ test.skipIf(process.platform === 'win32')('an update waits for the requests in f
   writeFileSync(inFlight, '0');
   const updated = await until(() => state(owner), (plugin) => plugin.status === 'installed' && plugin.gateway?.status === 'running' && plugin.gateway.version === '0.4.0', 'the new release running');
   expect(updated.version).toBe('0.4.0');
-  expect(existsSync(`${binary}.previous`)).toBe(false);
+  expect(readdirSync(dirname(binary)).filter((name) => name.includes('.previous'))).toEqual([]);
 
   // A release that exits at once: the one that worked comes back, and the update says why.
   harness!.core.plugins.recommended = [douane('0.5.0', new TextEncoder().encode('#!/bin/sh\nexit 1\n'))];
@@ -268,15 +269,22 @@ test('an update whose record cannot be written after its gateway answered puts t
   await gatewayIs(owner, 'running');
   const dir = join(harness!.dataDir, 'plugins', 'douane');
   const binary = join(dir, process.platform === 'win32' ? 'douane.exe' : 'douane');
-  // A directory where the record is staged: its write fails, as a full disk would make it.
-  mkdirSync(join(dir, 'installed.json.part'));
+  const realRename = fs.renameSync;
+  // The commit fails, as a full disk would make it.
+  const full = spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+    if (String(from).endsWith('installed.json.part')) throw new Error('ENOSPC: no space left on device');
+    realRename(from, to);
+  });
   harness!.core.plugins.recommended = [douane('0.5.0', new Uint8Array([5]))];
-  await owner.call('plugins.install', { id: 'douane' });
-  const back = await until(() => state(owner), (plugin) => plugin.status === 'error' && plugin.gateway?.status === 'running', 'the previous release back');
+  let back: PluginState;
+  try {
+    await owner.call('plugins.install', { id: 'douane' });
+    back = await until(() => state(owner), (plugin) => plugin.status === 'error' && plugin.gateway?.status === 'running', 'the previous release back');
+  } finally { full.mockRestore(); }
   expect(back.version).toBe('0.3.0');
   expect(back.error).toMatch(/0\.3\.0 runs again\.$/);
   expect([...readFileSync(binary)]).toEqual([1, 2, 3]);
-  expect(existsSync(`${binary}.previous`)).toBe(false);
+  expect(readdirSync(dirname(binary)).filter((name) => name.includes('.previous'))).toEqual([]);
   await until(live, (count) => count === 1, 'one gateway process');
 }, 30_000);
 

@@ -1,4 +1,5 @@
-import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, rmSync, writeSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { closeSync, existsSync, fsyncSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
 /** What an activation in progress wrote first: which binary goes and which comes. */
@@ -6,14 +7,19 @@ export const ACTIVATION_FILE = 'activation.json';
 /** The record of the release being activated; renaming it to `installed.json` is the commit. */
 const STAGED_RECORD = 'installed.json.part';
 const RECORD = 'installed.json';
-/** Beside a binary an activation replaces, until the record commits. */
-const KEPT = '.previous';
+/**
+ * Beside a binary an activation replaces, tagged with that activation: a
+ * backup a lock kept after its commit is never taken for the next one's.
+ */
+const KEPT = /\.previous-[0-9a-f]{12}$/;
 
 interface Intent {
   /** The binary the plugin ran before, by file name in its directory; null for a first install. */
   previous: string | null;
   /** The binary the new release runs. */
   binary: string;
+  /** Where this activation moves `previous` until its record commits; null for a first install. */
+  kept: string | null;
 }
 
 export interface Activation {
@@ -64,24 +70,39 @@ function bestEffort(path: string): boolean {
   }
 }
 
+/**
+ * Backups of activations that committed: nothing restores them any more.
+ * Removing them is retried on every read while a running process locks them.
+ */
+function sweep(dir: string, keep: string | null): void {
+  for (const name of readdirSync(dir)) if (KEPT.test(name) && name !== keep) bestEffort(join(dir, name));
+}
+
+/**
+ * Restores what this activation moved, and only that. The previous binary
+ * comes back before the new one goes, so a lock leaves one of them in place,
+ * and the intent stays for a later read to finish the job.
+ */
 function rollback(dir: string, intent: Intent): void {
-  const kept = intent.previous === null ? null : join(dir, intent.previous + KEPT);
-  const moved = kept !== null && existsSync(kept);
-  // The new binary goes, unless it has the previous one's name and that one never moved aside.
-  if (intent.previous !== intent.binary || moved) rmSync(join(dir, intent.binary), { force: true });
-  if (moved) renameSync(kept, join(dir, intent.previous!));
+  const kept = intent.kept === null ? null : join(dir, intent.kept);
+  if (kept !== null && existsSync(kept)) {
+    renameSync(kept, join(dir, intent.previous!));
+    if (intent.binary !== intent.previous) rmSync(join(dir, intent.binary), { force: true });
+  } else if (intent.binary !== intent.previous) {
+    // The previous binary never moved, or there was none: only a new name to drop.
+    rmSync(join(dir, intent.binary), { force: true });
+  }
   rmSync(join(dir, STAGED_RECORD), { recursive: true, force: true });
   rmSync(join(dir, ACTIVATION_FILE), { force: true });
 }
 
 /**
  * After the commit: the release is installed whatever this manages to remove,
- * so it never throws. The intent stays while the previous binary does, for
- * `recoverActivation` to try again on a later read.
+ * so it never throws. A backup still locked is swept on a later read.
  */
-function finish(dir: string, intent: Intent): void {
-  if (intent.previous !== null && !bestEffort(join(dir, intent.previous + KEPT))) return;
+function finish(dir: string): void {
   bestEffort(join(dir, ACTIVATION_FILE));
+  sweep(dir, null);
 }
 
 /**
@@ -93,16 +114,17 @@ function finish(dir: string, intent: Intent): void {
  * together. Synchronous, so nothing else of this core runs in between.
  */
 export function switchRelease(dir: string, release: { previous: string | null; binary: string; temporary: string; record: string }): Activation {
-  const intent: Intent = { previous: release.previous === null ? null : basename(release.previous), binary: basename(release.binary) };
+  // An activation left unsettled goes back to its record first; one that still cannot is never started over.
+  if (existsSync(join(dir, ACTIVATION_FILE))) recoverActivation(dir);
+  if (existsSync(join(dir, ACTIVATION_FILE))) throw new Error(`${dir} holds an update that did not finish and could not be rolled back yet`);
+  const previous = release.previous === null ? null : basename(release.previous);
+  const intent: Intent = { previous, binary: basename(release.binary), kept: previous === null ? null : `${previous}.previous-${randomBytes(6).toString('hex')}` };
   flush(release.temporary);
   writeDurable(join(dir, STAGED_RECORD), release.record);
   writeDurable(join(dir, ACTIVATION_FILE), JSON.stringify(intent));
   flushEntries(dir);
   try {
-    if (intent.previous !== null) {
-      rmSync(join(dir, intent.previous + KEPT), { force: true });
-      renameSync(join(dir, intent.previous), join(dir, intent.previous + KEPT));
-    }
+    if (intent.previous !== null) renameSync(join(dir, intent.previous), join(dir, intent.kept!));
     renameSync(release.temporary, join(dir, intent.binary));
     flushEntries(dir);
   } catch (error) {
@@ -117,7 +139,7 @@ export function switchRelease(dir: string, release: { previous: string | null; b
       settled = true;
       // Committed: what follows cannot undo it, so it cannot fail it either.
       try { flushEntries(dir); } catch { /* the rename stands; only its durability is unconfirmed */ }
-      finish(dir, intent);
+      finish(dir);
     },
     rollback: () => {
       if (settled) return;
@@ -131,29 +153,43 @@ function plainName(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && basename(value) === value && value !== '.' && value !== '..';
 }
 
+function parseIntent(text: string): Intent | null {
+  try {
+    const raw = JSON.parse(text) as Partial<Intent>;
+    if (!plainName(raw.binary)) return null;
+    if (raw.previous === null && raw.kept === null) return { previous: null, binary: raw.binary, kept: null };
+    if (plainName(raw.previous) && plainName(raw.kept) && raw.kept.startsWith(`${raw.previous}.`) && KEPT.test(raw.kept)) return { previous: raw.previous, binary: raw.binary, kept: raw.kept };
+  } catch { /* cut off while it was written */ }
+  return null;
+}
+
 /**
  * Settles an activation a stopped core left behind: one whose record never
  * committed goes back to the previous release, one that committed drops what
- * it kept. An intent that does not parse was cut off before anything moved.
- * Returns what it did, or null when there was nothing to settle.
+ * it kept. An intent that does not parse was cut off before anything moved,
+ * and a staged record with no intent was cut off before its intent was
+ * written. Backups of committed activations go too. Returns what it did, or
+ * null when there was no activation to settle.
  */
 export function recoverActivation(dir: string): 'restored' | 'finished' | null {
   const file = join(dir, ACTIVATION_FILE);
-  if (!existsSync(file)) return null;
-  let intent: Intent | null = null;
-  try {
-    const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<Intent>;
-    if ((raw.previous === null || plainName(raw.previous)) && plainName(raw.binary)) intent = { previous: raw.previous, binary: raw.binary };
-  } catch { /* cut off while it was written */ }
+  if (!existsSync(file)) {
+    rmSync(join(dir, STAGED_RECORD), { recursive: true, force: true });
+    if (existsSync(dir)) sweep(dir, null);
+    return null;
+  }
+  const intent = parseIntent(readFileSync(file, 'utf8'));
   if (intent === null) {
     rmSync(join(dir, STAGED_RECORD), { recursive: true, force: true });
     rmSync(file, { force: true });
+    sweep(dir, null);
     return 'restored';
   }
   if (existsSync(join(dir, STAGED_RECORD))) {
+    sweep(dir, intent.kept);
     rollback(dir, intent);
     return 'restored';
   }
-  finish(dir, intent);
+  finish(dir);
   return 'finished';
 }

@@ -277,26 +277,33 @@ describe('one operation at a time on a plugin', () => {
     const dir = installPool(harness.dataDir);
     const before = readFileSync(join(dir, 'installed.json'), 'utf8');
     serveDownloads({ [POOL_URL]: new Uint8Array([1, 2, 3, 4]) });
-    // A directory where the record is staged: its write fails, as a full disk would make it.
-    mkdirSync(join(dir, 'installed.json.part'));
-    await client.call('plugins.install', { id: 'pool-switcher' });
-    await waitFor(() => harness!.core.plugins.state('pool-switcher').status !== 'installing');
+    const realOpen = fs.openSync;
+    // Staging the record fails, as a full disk would make it.
+    const full = spyOn(fs, 'openSync').mockImplementation((...args: Parameters<typeof fs.openSync>) => {
+      const path = args[0];
+      if (String(path).endsWith('installed.json.part')) throw new Error('ENOSPC: no space left on device');
+      return realOpen(...args);
+    });
+    try {
+      await client.call('plugins.install', { id: 'pool-switcher' });
+      await waitFor(() => harness!.core.plugins.state('pool-switcher').status !== 'installing');
+    } finally { full.mockRestore(); }
     expect(harness.core.plugins.state('pool-switcher')).toMatchObject({ status: 'error', version: '2.0.1' });
     expect(readFileSync(join(dir, `pool${EXE}`), 'utf8')).toBe('fixture');
     expect(readFileSync(join(dir, 'installed.json'), 'utf8')).toBe(before);
-    // Nothing of the update stays beside them but the obstacle the test planted.
-    expect(readdirSync(dir).sort()).toEqual(['installed.json', 'installed.json.part', `pool${EXE}`]);
+    // Nothing of the update stays beside them.
+    expect(readdirSync(dir).sort()).toEqual(['installed.json', `pool${EXE}`]);
   });
 
   test('an update whose previous binary is still locked after the commit is installed, and the leftover goes on a later read', async () => {
     harness = await startPoolCore(); const client = await harness.connect();
     const dir = installPool(harness.dataDir);
     serveDownloads({ [POOL_URL]: new Uint8Array([1, 2, 3, 4]) });
-    const kept = join(dir, `pool${EXE}.previous`);
+    const kept = () => readdirSync(dir).filter((name) => name.startsWith(`pool${EXE}.previous-`));
     const realRm = fs.rmSync;
     // Windows holds a file a process still has open: removing the previous binary fails once the record is in.
     const rm = spyOn(fs, 'rmSync').mockImplementation((path, options) => {
-      if (path === kept && existsSync(join(dir, 'installed.json')) && !existsSync(join(dir, 'installed.json.part'))) throw new Error('EBUSY: resource busy or locked');
+      if (String(path).includes('.previous-') && existsSync(path)) throw new Error('EBUSY: resource busy or locked');
       realRm(path, options);
     });
     try {
@@ -304,7 +311,7 @@ describe('one operation at a time on a plugin', () => {
       await waitFor(() => harness!.core.plugins.state('pool-switcher').status !== 'installing');
       expect(harness.core.plugins.state('pool-switcher')).toMatchObject({ status: 'installed', error: null });
       expect([...readFileSync(join(dir, `pool${EXE}`))]).toEqual([1, 2, 3, 4]);
-      expect(existsSync(kept)).toBe(true);
+      expect(kept()).toHaveLength(1);
     } finally { rm.mockRestore(); }
     expect(harness.core.plugins.state('pool-switcher').status).toBe('installed');
     expect(readdirSync(dir).sort()).toEqual(['installed.json', `pool${EXE}`]);
@@ -319,10 +326,11 @@ describe('one operation at a time on a plugin', () => {
     const record = readFileSync(join(dir, 'installed.json'), 'utf8');
     const next = JSON.stringify({ ...JSON.parse(record), installedAt: 2 });
     // What the activation leaves between moving the binaries and dropping the kept one.
-    renameSync(join(dir, `pool${EXE}`), join(dir, `pool${EXE}.previous`));
+    const kept = `pool${EXE}.previous-0123456789ab`;
+    renameSync(join(dir, `pool${EXE}`), join(dir, kept));
     writeFileSync(join(dir, `pool${EXE}`), 'new-binary');
     writeFileSync(join(dir, committed ? 'installed.json' : 'installed.json.part'), next);
-    writeFileSync(join(dir, ACTIVATION_FILE), JSON.stringify({ previous: `pool${EXE}`, binary: `pool${EXE}` }));
+    writeFileSync(join(dir, ACTIVATION_FILE), JSON.stringify({ previous: `pool${EXE}`, binary: `pool${EXE}`, kept }));
     expect(harness.core.plugins.state('pool-switcher').status).toBe('installed');
     expect(readFileSync(join(dir, `pool${EXE}`), 'utf8')).toBe(committed ? 'new-binary' : 'fixture');
     expect(readFileSync(join(dir, 'installed.json'), 'utf8')).toBe(committed ? next : record);
