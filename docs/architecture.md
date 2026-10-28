@@ -328,8 +328,8 @@ durable delivery ledger. A native submission whose acceptance is uncertain
 stays held for review; it is never submitted again automatically.
 
 A turn a provider refused for availability retries at capacity within the same
-turn, or, with `autoResumeLimitedThreads`, resumes after a usage limit's reset
-after a usage limit's reset; `ThreadSummary.retry` shows either
+turn, or, with `autoResumeLimitedThreads`, resumes after a usage limit's reset;
+`ThreadSummary.retry` shows either
 ([usage](usage.md#when-a-provider-refuses-a-turn)). Any other turn that stops
 before its answer (an error, a crash, a compaction, background work that ended
 without waking the agent) resumes by itself, twice in a row at most
