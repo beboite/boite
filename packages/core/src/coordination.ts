@@ -6,7 +6,7 @@ import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentTranscri
 import { checkMatchExtras, checkRemoteContact, checkTranscript, searchContacts, searchWords, transcript } from './coordination-lookup.ts';
 import { PeerDesk } from './coordination-peer.ts';
 import { CoordinationBridge } from './coordination-bridge.ts';
-import { dropGroupRead, groupPeers, policedRoutes, policyAllowsLetter } from './coordination-group.ts';
+import { dropGroupRead, policedRoutes, policyAllowsLetter } from './coordination-group.ts';
 import { address, coordinationGuide, coordinationUrl, LETTER_TTL_MS, letterPrompt, RESIDENT_LETTER_TTL_MS, same, text } from './coordination-letter.ts';
 import { projectName, senderContext, withProjects, withRelations } from './coordination-relation.ts';
 import { firstAnswer, PeerGone, PeerRefusal, post, settle, type Answer, type Envelope, type Operation } from './coordination-wire.ts';
@@ -21,7 +21,7 @@ import { invalidParams, messageOf, refused, RpcFailure, unavailable } from './er
 import { isAgentHeld } from './agents/runtime.ts';
 import { ContactMailboxes } from './contacts/mailboxes.ts';
 import { forwardCoordination } from './coordination-rpc.ts';
-import { trustCoordination } from './coordination-trust.ts';
+import { trustCoordination, trustedCoordinationPeers } from './coordination-trust.ts';
 
 const HOUR = 3_600_000;
 /** How long a delivered, expired, rejected or uncertain letter stays in the journal. */
@@ -124,16 +124,7 @@ export class Coordination {
   signature(input: Buffer): Buffer { this.identityKey(); return sign(null, input, this.key!); }
   /** The links the owner made by hand, each with its own permissions. A group's members are trusted too, and listed by the group. */
   peers(): CoordinationPeer[] { return (this.core.journal.getSetting('coordination:peers') as CoordinationPeer[] | undefined) ?? []; }
-  /**
-   * Every machine a letter may cross to: the hand-made links first, so the
-   * permissions the owner set on one win, then the members of this core's
-   * group, then contacts, whose reach is decided per project (`contacts/store.ts`).
-   */
-  trusted(): CoordinationPeer[] {
-    const manual = this.peers();
-    const own = [...manual, ...groupPeers(this.core).filter(peer => !manual.some(known => known.coreId === peer.coreId))];
-    return [...own, ...(this.core.contacts?.peers() ?? []).filter(peer => !own.some(known => known.coreId === peer.coreId))];
-  }
+  trusted(): CoordinationPeer[] { return trustedCoordinationPeers(this.core); }
   async check(coreId: string): Promise<{ ok: true }> {
     const peer = this.trusted().find(p => p.coreId === coreId);
     if (!peer) throw refused('machine is not trusted for coordination');
