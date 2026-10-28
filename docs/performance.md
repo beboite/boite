@@ -237,6 +237,9 @@ sidebar badges, and a thread without a merged PR waits 5 minutes, then up to
 an hour, before its next proof. Four unmerged worktree threads cost 2 processes
 on the first pass and none on the next ones, against 12 and then 8 a minute
 before ([bench/results/2026-10-15-perf-git.md](../bench/results/2026-10-15-perf-git.md)).
+Those counts hold for a repository with fewer than 100 PRs, whose page is
+complete. On a full page, a thread whose branch the page does not show also
+walks its checkout's status and reads its branch alone before a proof.
 
 Short git reads (30 seconds or less) share eight slots per core; a read waits
 for a free one before its git starts, and the wait does not count against its
