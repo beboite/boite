@@ -2128,6 +2128,30 @@ test('a pasted copy over the byte total holds Send until its pictures are fitted
   } finally { decode.mockRestore(); }
 });
 
+test('a pasted copy that stays over the byte total at its smallest says to remove pictures, and keeps them', async ({ app: _app }) => {
+  const { copyImages } = await import('../lib/composer-clipboard');
+  const { browserCodec } = await import('../lib/image-prepare');
+  const heavy = Array.from({ length: 30 }, (_, at) => ({ kind: 'image' as const, mimeType: 'image/jpeg' as const, data: Buffer.alloc(400 * 1024, at).toString('base64'), name: `shot-${at}.jpg` }));
+  // Every encoding still weighs 400 KB: no size brings the box under 10 MB.
+  const decode = vi.spyOn(browserCodec, 'decode').mockImplementation(async () => ({
+    width: 1170, height: 2532, hasAlpha: () => false, close() {},
+    async encode(_width, _height, mimeType) { return new Blob([new Uint8Array(400 * 1024)], { type: mimeType }); }
+  }));
+  try {
+    const from = { text: heavy.map((_, at) => `[Image ${at + 1}]`).join(' '), attachments: heavy, queued: [], sending: false, paused: false };
+    const copied = clipboard();
+    expect(copyImages(copied, from, 0, from.text.length)).toBe(true);
+    await store.open('t-trace');
+    await waitFor(() => !store.busy);
+    input().focus();
+    expect(clipboardEvent('paste', copied).defaultPrevented).toBe(true);
+    // jsdom's storage cannot keep a 12 MB draft and says so first; the fit's answer follows.
+    const over = 'These pictures still weigh over 10 MB together at their smallest: remove some before sending.';
+    await waitFor(() => store.error === over, 4000);
+    expect(store.composerStates['t-trace']!.attachments).toHaveLength(30);
+  } finally { decode.mockRestore(); }
+});
+
 test('a send held by a fit is dropped when the composer moves to another thread meanwhile', async ({ app: _app }) => {
   const { copyImages } = await import('../lib/composer-clipboard');
   const { browserCodec } = await import('../lib/image-prepare');

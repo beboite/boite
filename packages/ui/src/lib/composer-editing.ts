@@ -108,9 +108,8 @@ export function pasteImages(host: EditingHost, event: ClipboardEvent): boolean {
   writeEdit(host, state.text.slice(0, start) + fitted.text + state.text.slice(end), { start, end }, start + fitted.text.length);
   // Past the byte total, the pictures give way (`lib/turn-fit.ts`); the floor says when they cannot.
   if (attachedBytes(state.attachments) > ATTACHMENTS_TOTAL_MAX_BYTES) {
-    const last = fitted.attachments.at(-1);
     void fitHeld(state).then((fits) => {
-      if (!fits) store.error = fill(strings.composer.attachTotalTooLarge, { name: last?.name ?? strings.composer.attachUnnamed, max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) });
+      if (!fits) store.error = fill(strings.composer.attachTotalOver, { max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) });
     });
   }
   return true;

@@ -351,10 +351,9 @@ export class Drafts {
     this.persist();
     if (attachedBytes(input.attachments) <= ATTACHMENTS_TOTAL_MAX_BYTES) return;
     // Past the floor, or failed, the box says so like a paste does (`lib/composer-editing.ts`); either way it is saved.
-    const last = input.attachments.at(-1);
     void fitHeld(input).catch(() => false).then((fits) => {
       this.persist();
-      if (!fits) s.error = fill(strings.composer.attachTotalTooLarge, { name: last?.name ?? strings.composer.attachUnnamed, max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) });
+      if (!fits) s.error = fill(strings.composer.attachTotalOver, { max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) });
     });
   }
 
