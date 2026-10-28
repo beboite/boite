@@ -41,7 +41,7 @@ export function stoppedInput(
   messages.reverse();
   const images = messages.flatMap(message => message.parts.filter(part => part.type === 'image'));
   // The newest images, within the count and the byte total the current attachments leave; older ones go as files.
-  const slots = ATTACHMENTS_PER_TURN - input.attachments.filter(part => part.kind === 'image').length;
+  const slots = ATTACHMENTS_PER_TURN - input.attachments.length;
   let room = ATTACHMENTS_TOTAL_MAX_BYTES - input.attachments.reduce((sum, part) => sum + decodedBytes(part.data), 0);
   const kept = new Set<(typeof images)[number]>();
   for (const image of images.toReversed()) {

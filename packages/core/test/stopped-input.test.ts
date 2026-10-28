@@ -163,6 +163,22 @@ test('interrupted images carried into the next turn stay within its byte total, 
   expect(seen[2]!.prompt.split('\n').some(line => line.startsWith('{') && line.includes('a.png'))).toBe(true);
 });
 
+test('current files count against the interrupted images a turn carries', async () => {
+  const { seen, start, stop, complete } = await setup('native-session');
+  await start('Establish the native session');
+  await complete();
+  const images = Array.from({ length: ATTACHMENTS_PER_TURN }, (_, index) => ({
+    kind: 'image' as const, mimeType: 'image/png' as const, data: Buffer.from(`image-${index}`).toString('base64'), name: `image-${index}.png`,
+  }));
+  await start('Keep these references', images);
+  await stop();
+  const files = Array.from({ length: 10 }, (_, index) => ({ kind: 'file' as const, mimeType: 'text/plain', data: Buffer.from(`notes ${index}`).toString('base64'), name: `notes-${index}.txt` }));
+  await start('Read these notes against them', files);
+  // Ten files and forty images make the turn's fifty; the driver reads the files by path, the ten oldest images too.
+  expect(seen[2]?.attachments).toEqual(images.slice(10));
+  expect(seen[2]!.prompt.split('\n').some(line => line.startsWith('{') && line.includes('image-9.png'))).toBe(true);
+});
+
 test('interrupted images keep native attachment limits and leave overflow readable as files', async () => {
   const { seen, start, stop, complete } = await setup('native-session');
   await start('Establish the native session');
