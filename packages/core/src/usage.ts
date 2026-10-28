@@ -2,7 +2,7 @@ import type { ProviderId, ThreadId, Usage, UsageHistory, UsageHistoryThread, Usa
 import type { Core } from './core.ts';
 import { invalidParams } from './errors.ts';
 import type { UsageSums } from './journal/usage-sums.ts';
-import { costAt, priceOf } from './pricing/index.ts';
+import { priceUsage } from './pricing/index.ts';
 
 /** A year of days plus the closing edge. */
 export const MAX_USAGE_EDGES = 367;
@@ -25,7 +25,16 @@ function add(into: Usage, from: Usage): void {
   into.outputTokens += from.outputTokens;
   into.cacheReadTokens += from.cacheReadTokens;
   into.cacheWriteTokens += from.cacheWriteTokens;
+  const hour = (into.cacheWriteHourTokens ?? 0) + (from.cacheWriteHourTokens ?? 0);
+  if (hour > 0) into.cacheWriteHourTokens = hour;
   if (from.costUsdEquivalent !== null) into.costUsdEquivalent = (into.costUsdEquivalent ?? 0) + from.costUsdEquivalent;
+}
+
+/** Two reports of one turn as one; a cost neither carried stays unknown. */
+export function sumUsage(left: Usage, right: Usage): Usage {
+  const sum: Usage = { ...left, costUsdEquivalent: left.costUsdEquivalent };
+  add(sum, right);
+  return sum;
 }
 
 /** Every token the provider processed for these turns, cache included. */
@@ -58,17 +67,13 @@ function checkEdges(edges: unknown): number[] {
   return edges as number[];
 }
 
-/**
- * Codex reports the cached input inside `inputTokens`; Claude, ACP and pi
- * count it apart. The history takes the cache reads out of Codex's input so
- * the four token fields add up the same way for every provider.
- */
-function sumsToUsage(sums: UsageSums, cachedInInput: boolean): Usage {
+function sumsToUsage(sums: UsageSums): Usage {
   return {
-    inputTokens: cachedInInput ? Math.max(0, sums.input_tokens - sums.cache_read_tokens) : sums.input_tokens,
+    inputTokens: sums.input_tokens,
     outputTokens: sums.output_tokens,
     cacheReadTokens: sums.cache_read_tokens,
     cacheWriteTokens: sums.cache_write_tokens,
+    ...(sums.cache_write_hour_tokens > 0 ? { cacheWriteHourTokens: sums.cache_write_hour_tokens } : {}),
     costUsdEquivalent: sums.cost,
   };
 }
@@ -85,19 +90,19 @@ interface Priced {
  * reported. Rates come first because a reported cost is only as good as the
  * agent's own sum: Claude's is a running total the driver has to take apart,
  * Codex and Grok report none, and a rate prices every provider the same way.
+ * Only what each turn stored decides it, never the provider's descriptor, so
+ * editing or removing a provider leaves its history as it was.
  */
-function priced(sums: UsageSums, model: string | null, protocol: string | null): Priced {
-  const usage = sumsToUsage(sums, protocol === 'codex-appserver');
-  const price = priceOf(model, protocol === 'claude-sdk');
-  if (price === null || sums.reported === 0) return { usage, priced: sums.priced, price };
-  return { usage: { ...usage, costUsdEquivalent: costAt(price.rates, usage) }, priced: sums.reported, price };
+function priced(sums: UsageSums, model: string | null): Priced {
+  const usage = sumsToUsage(sums);
+  const quote = priceUsage(model, usage);
+  if (quote === null || sums.reported === 0) return { usage, priced: sums.priced, price: quote?.price ?? null };
+  return { usage: { ...usage, costUsdEquivalent: quote.cost }, priced: sums.reported, price: quote.price };
 }
 
 export function usageHistory(core: Core, edges: number[], providerId?: ProviderId): UsageHistory {
-  // A provider removed since keeps its protocol through its shipped id.
-  const protocolOf = (id: ProviderId): string | null => core.providers.get(id)?.protocol ?? (id === 'claude' ? 'claude-sdk' : id === 'codex' ? 'codex-appserver' : null);
   const rows = core.journal.usageByBucket(edges).filter((row) => providerId === undefined || row.provider_id === providerId).map((row) => {
-    const cost = priced(row, row.model, protocolOf(row.provider_id));
+    const cost = priced(row, row.model);
     return {
       bucket: row.bucket,
       providerId: row.provider_id,
@@ -113,7 +118,7 @@ export function usageHistory(core: Core, edges: number[], providerId?: ProviderI
   const byThread = new Map<ThreadId, UsageHistoryThread>();
   for (const row of core.journal.usageByThread(edges[0]!, edges[edges.length - 1]!)) {
     if (providerId !== undefined && row.provider_id !== providerId) continue;
-    const { usage } = priced(row, row.model, protocolOf(row.provider_id));
+    const { usage } = priced(row, row.model);
     const entry = byThread.get(row.thread_id);
     if (entry !== undefined) {
       entry.turns += row.turns;

@@ -5,13 +5,14 @@ import { nativeAgentPartSql } from './native-agent-parts.ts';
 import { addPartBlobCodecs, createPartBlobs } from './part-blobs.ts';
 import { createCommandLines } from './processes.ts';
 import { parseJson } from './rows.ts';
+import { freezeUsageBuckets, shippedUsageProtocol, type UsageProtocolOf } from './usage-buckets.ts';
 import { createSharedProjects } from '../contacts/project-journal.ts';
 import { createSharedBoard } from '../contacts/board-journal.ts';
 import { createSharedCompute } from '../contacts/compute-journal.ts';
 import { createSharedAccess } from '../contacts/access-journal.ts';
 import { createSharedReview } from '../contacts/review-journal.ts';
 
-export const SCHEMA_VERSION = 44;
+export const SCHEMA_VERSION = 45;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -159,7 +160,7 @@ ALTER TABLE sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'device';
 `;
 
 /** Brings the journal to the current schema; returns the version found on disk and the one now stamped. */
-export function migrate(db: Database, file: string): { from: number; to: number } {
+export function migrate(db: Database, file: string, usageProtocol: UsageProtocolOf = shippedUsageProtocol): { from: number; to: number } {
   const row = db.query('PRAGMA user_version').get() as { user_version: number } | null;
   let version = row?.user_version ?? 0;
   // An older core must not write a schema it does not know: it would stamp its
@@ -467,6 +468,10 @@ export function migrate(db: Database, file: string): { from: number; to: number 
         status TEXT NOT NULL, thread_id TEXT, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL
       ) WITHOUT ROWID;`);
     version = 44;
+  }
+  if (version < 45) {
+    freezeUsageBuckets(db, usageProtocol);
+    version = 45;
   }
   createSharedProjects(db);
   createSharedBoard(db);

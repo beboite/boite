@@ -1,10 +1,22 @@
 import type { ProjectId, ProviderId, ThreadId, Timestamp } from './ids';
 
+/**
+ * Tokens as four disjoint buckets, whatever the provider counts: `inputTokens`
+ * holds neither the cache reads nor the cache writes, so the four add up to
+ * what the model processed. The driver normalises them and the turn keeps
+ * them as stored; nothing downstream depends on the provider that ran it.
+ */
 export interface Usage {
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
+  /**
+   * Of `cacheWriteTokens`, those written to a one-hour cache, which Anthropic
+   * bills at twice the input rate. Absent when none were, and on turns an
+   * older core recorded with no cache writes.
+   */
+  cacheWriteHourTokens?: number;
   /** API-equivalent cost. On a subscription this is not money spent; the UI says so. */
   costUsdEquivalent: number | null;
 }
@@ -43,9 +55,8 @@ export interface UsageHistoryRow {
    */
   priced: number;
   /**
-   * Sums over the reported turns. `inputTokens` never includes the cache reads,
-   * whatever the provider counts, so the four token fields add up to the tokens
-   * processed. `costUsdEquivalent` is the tokens at `price`'s rates, or the sum
+   * Sums over the reported turns, in the buckets each turn stored.
+   * `costUsdEquivalent` is the tokens at `price`'s rates, or the sum
    * of the costs the agent reported when no rate matched the model; null when
    * neither gave one.
    */

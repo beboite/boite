@@ -9,6 +9,8 @@ export interface UsageSums {
   output_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  /** Of the cache writes, those to a one-hour cache. */
+  cache_write_hour_tokens: number;
   /** Null when no turn of the group carried a price. */
   cost: number | null;
 }
@@ -37,13 +39,14 @@ const USAGE_SUMS = `COUNT(*) AS turns, COUNT(x.usage) AS reported,
   COALESCE(SUM(json_extract(x.usage, '$.outputTokens')), 0) AS output_tokens,
   COALESCE(SUM(json_extract(x.usage, '$.cacheReadTokens')), 0) AS cache_read_tokens,
   COALESCE(SUM(json_extract(x.usage, '$.cacheWriteTokens')), 0) AS cache_write_tokens,
+  COALESCE(SUM(json_extract(x.usage, '$.cacheWriteHourTokens')), 0) AS cache_write_hour_tokens,
   SUM(json_extract(x.usage, '$.costUsdEquivalent')) AS cost`;
 
 /**
  * Finished turns summed per bucket, provider and model: bucket `i` holds the
  * turns with `edges[i] <= finished_at < edges[i + 1]`. A turn saved before
  * execution snapshots counts under its thread's provider and model. Token
- * counts are summed as each provider reported them.
+ * buckets are summed as each turn stored them (`Usage`).
  */
 export function usageByBucket(db: Database, edges: readonly number[]): UsageSumRow[] {
   return db

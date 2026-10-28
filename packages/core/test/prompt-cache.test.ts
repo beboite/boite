@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { PromptCache, Usage } from '@boite/contracts';
-import { cacheLifeOf } from '../src/drivers/claude/mapping.ts';
+import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
+import { cacheLifeOf, mapUsage as claudeUsage } from '../src/drivers/claude/mapping.ts';
 import { acpCacheLife } from '../src/drivers/acp/turn.ts';
 import { piCacheLife } from '../src/drivers/pi/mapping.ts';
 import { openAiCacheLife, promptCacheOf } from '../src/prompt-cache.ts';
@@ -78,6 +79,22 @@ describe('cacheLifeOf', () => {
     expect(cacheLifeOf({ cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 0 } })).toBeNull();
     expect(cacheLifeOf({ cache_creation_input_tokens: 500 })).toBeNull();
     expect(cacheLifeOf(undefined)).toBeNull();
+  });
+});
+
+describe('the hour writes a Claude turn records', () => {
+  const result = (usage: object) => ({ type: 'result', subtype: 'success', usage }) as unknown as SDKResultMessage;
+  test('the split names them, bounded by the writes', () => {
+    expect(claudeUsage(result({ cache_creation_input_tokens: 900, cache_creation: { ephemeral_5m_input_tokens: 600, ephemeral_1h_input_tokens: 300 } }), 0))
+      .toMatchObject({ cacheWriteTokens: 900, cacheWriteHourTokens: 300 });
+    expect(claudeUsage(result({ cache_creation_input_tokens: 900, cache_creation: { ephemeral_5m_input_tokens: 900, ephemeral_1h_input_tokens: 0 } }), 0))
+      .not.toHaveProperty('cacheWriteHourTokens');
+    expect(claudeUsage(result({ cache_creation_input_tokens: 100, cache_creation: { ephemeral_1h_input_tokens: 400 } }), 0).cacheWriteHourTokens).toBe(100);
+  });
+
+  test('without a split every write is an hour write, and no write records none', () => {
+    expect(claudeUsage(result({ cache_creation_input_tokens: 500 }), 0).cacheWriteHourTokens).toBe(500);
+    expect(claudeUsage(result({ input_tokens: 5 }), 0)).not.toHaveProperty('cacheWriteHourTokens');
   });
 });
 

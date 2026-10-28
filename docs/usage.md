@@ -324,11 +324,25 @@ on open when the journal lacks it. `EXPLAIN QUERY PLAN` shows
 
 ### What each field means across providers
 
-Codex's app-server reports cached input inside `inputTokens`; Claude, the ACP
-agents and pi report it apart. `usage.history` subtracts `cacheReadTokens` from
-Codex's input, so for every provider `inputTokens` is uncached input and the
-four token fields add up to the total the page shows. `usage.get` still
-returns the raw reports.
+A turn stores its tokens as four disjoint buckets (`Usage` in
+`packages/contracts/src/usage.ts`): `inputTokens` holds neither cache count,
+so input, output, cache reads and cache writes add up to what the model
+processed. The driver normalises them before the turn is saved. Codex's
+app-server counts both cache counts inside its input, and
+`drivers/codex/mapping.ts` takes them out once; Claude, the ACP agents and pi
+already report them apart, and Muse's counts are stored as it sends them. `cacheWriteHourTokens` says how many of the
+writes went to a one-hour cache: the Claude driver reads it from the result's
+`cache_creation` split and counts every write as an hour write when the split
+is missing, since Claude Code writes for an hour.
+
+Every reader, `usage.get`, `usage.history`, delegation and workflow totals,
+sums the stored buckets as they are. None asks the provider's descriptor, so
+editing or removing a provider leaves its history unchanged. Schema 45
+(`journal/usage-buckets.ts`) rewrote the turns an older core stored once: Codex
+input loses its cache counts and Claude Code writes become hour writes, each
+provider id resolved by the registry at the upgrade with the shipped `codex`
+and `claude` ids as the fallback. A custom provider removed before the upgrade
+keeps the counts it had.
 
 ### The API estimate
 
@@ -350,8 +364,10 @@ matches a model and computes the cost.
   priced as its model; a smaller one (`gpt-5.1-codex-mini`) is not.
 - Claude Code writes its prompt cache for an hour, and its transcripts show
   nearly every write at that lifetime. Anthropic bills it at twice the input
-  rate, where the list gives the five-minute rate, so the Claude provider's
-  rows use twice the input rate. OpenCode and pi keep the listed rate.
+  rate, where the list gives the five-minute rate, so a turn's
+  `cacheWriteHourTokens` cost twice the input rate and its other writes the
+  listed rate. A row's `price` shows the write rate most of its writes paid.
+  OpenCode and pi record no hour writes and keep the listed rate.
 - A rate the list leaves out is the input rate, which is what a provider
   without a cache discount bills.
 - Rates are the base tier. A request past a long-context threshold (Claude
@@ -500,10 +516,14 @@ added on top, and the uninstalled mode (`?fake=1&uninstalled=1`) starts empty.
   the banner's countdown and cancel, and the switch.
 
 - `packages/core/test/usage-history.test.ts`: edge boundaries, the provider and
-  model split, turns without usage, the Codex cache subtraction, pricing at
-  public rates over an inflated reported cost, the hour cache write, the
+  model split, turns without usage, stored buckets read as they are, pricing at
+  public rates over an inflated reported cost, the hour cache write of a
+  removed provider and of a mixed turn, the
   reported fallback, legacy turns, the top threads union, provider filtering,
   refused parameters and one real echo turn.
+- `packages/core/test/journal-usage-buckets.test.ts`: the schema 45 rewrite of
+  older turns, once per journal and once per provider id, with and without a
+  registry.
 - `packages/core/test/pricing.test.ts`: model id matching, the cache write
   rates, missing rates and the price list's coverage.
 - `packages/core/test/claude.session.test.ts`: the warm running total, a
