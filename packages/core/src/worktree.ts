@@ -330,7 +330,7 @@ export class Worktrees {
    * clean up must not replace it. What it could not remove goes to the log with
    * the path, so the user can finish the job himself.
    */
-  async remove(threadId: ThreadId, project: Project, placed: PlacedWorktree, timeoutMs?: number): Promise<boolean> {
+  async remove(threadId: ThreadId, project: Project, placed: PlacedWorktree, timeoutMs?: number, retiringThreadId?: ThreadId): Promise<boolean> {
     const deadline = timeoutMs === undefined ? undefined : performance.now() + timeoutMs;
     const remaining = () => {
       if (deadline === undefined) return undefined;
@@ -356,7 +356,7 @@ export class Worktrees {
     if (checkoutOwned) {
       const removed = await withRegistration(project.path, () => withVacantCheckout(this.core, project, placed.path,
         () => this.git(threadId, project.path,
-          ['worktree', 'remove', '--force', ...(timeoutMs === undefined ? [] : ['--force']), placed.path], remaining())),
+          ['worktree', 'remove', '--force', ...(timeoutMs === undefined ? [] : ['--force']), placed.path], remaining()), [], retiringThreadId),
       { timeoutMs: remaining() });
       if (removed.code !== 0) {
         this.core.log('warn', `could not remove the worktree ${placed.path}: ${removed.stderr.trim() || `exit ${removed.code}`}`);

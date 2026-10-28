@@ -1,6 +1,6 @@
 import { realpath } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
-import type { Project, ThreadSummary } from '@boite/contracts';
+import type { Project, ThreadId, ThreadSummary } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { inside, keyOf } from './checkouts.ts';
 import { refused } from './errors.ts';
@@ -24,7 +24,7 @@ export async function realKey(path: string): Promise<string> {
 interface Occupant { thread: ThreadSummary; draft: boolean }
 
 /** Resolve folders asynchronously, then re-read every occupant in the final synchronous check. */
-async function occupancy(core: Core, path: string): Promise<() => Occupant | null | 'moved'> {
+async function occupancy(core: Core, path: string, retiringThreadId?: ThreadId): Promise<() => Occupant | null | 'moved'> {
   const key = await realKey(path);
   const threads = (): Occupant[] => [
     ...core.threads.list({ includeArchived: true }).map(thread => ({ thread, draft: false })),
@@ -38,7 +38,10 @@ async function occupancy(core: Core, path: string): Promise<() => Occupant | nul
       const { thread, draft } = occupant;
       const at = keys.get(thread.cwd);
       if (at === undefined) return 'moved';
-      if (holder === null && inside(key, at) && occupiesCheckout(core, draft ? { ...thread, deleted: true } : thread)) holder = occupant;
+      // Only the cleanup's own idle row may relinquish its checkout without archive.
+      // Processes, terminals or a resumed turn still hold it, just like any other occupant.
+      const retiring = thread.id === retiringThreadId && (thread.status === 'idle' || thread.status === 'error');
+      if (holder === null && inside(key, at) && occupiesCheckout(core, draft || retiring ? { ...thread, deleted: true } : thread)) holder = occupant;
     }
     return holder;
   };
@@ -65,10 +68,10 @@ export async function assertCheckoutVacant(core: Core, project: Project, path: s
 }
 
 /** No await separates the final occupancy check and reservation, held through the actual deletion. */
-export async function withVacantCheckout<T>(core: Core, project: Project, path: string, remove: () => Promise<T>, aliases: readonly string[] = []): Promise<T> {
+export async function withVacantCheckout<T>(core: Core, project: Project, path: string, remove: () => Promise<T>, aliases: readonly string[] = [], retiringThreadId?: ThreadId): Promise<T> {
   const keys = await Promise.all([path, ...aliases].map(realKey));
   for (;;) {
-    const holder = (await occupancy(core, path))();
+    const holder = (await occupancy(core, path, retiringThreadId))();
     if (holder === 'moved') continue;
     refuseOccupied(project, path, holder);
     core.worktrees.reservations.assertFree(path, 'another checkout removal');
