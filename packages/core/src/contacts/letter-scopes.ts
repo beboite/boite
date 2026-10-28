@@ -10,9 +10,10 @@ import {incomingContact} from './human-letters.ts';
 /**
  * `peers` are every contact whose mail the history read; `holders` only those
  * whose mail came outside a shared project and holds it. Scopes saved before
- * `holders` existed hold through all their peers.
+ * `holders` existed hold through all their peers. `trusted` are the letters
+ * still waiting when the owner trusted the history; they no longer hold it.
  */
-interface LetterScope {bindings: AccessBinding[]; legacy: boolean; peers: string[]; holders?: string[]; trustedAt?: number}
+interface LetterScope {bindings: AccessBinding[]; legacy: boolean; peers: string[]; holders?: string[]; trustedAt?: number; trusted?: string[]}
 const checkedHistory = new WeakMap<Core, Set<string>>();
 
 function storedScope(core: Core, threadId: string): LetterScope | null {
@@ -81,12 +82,21 @@ export function contactHold(core: Core, threadId: string): {contacts: string[]} 
 export function trustLetters(core: Core, threadId: string): void {
   core.threads.require(threadId);
   const ids = history(core, threadId);
+  const resumed: string[] = [];
   for (const id of ids) {
     const scope = storedScope(core, id);
-    if (scope?.legacy) core.journal.setSetting(`shared-file-letters:${id}`, {...scope, legacy: false, holders: [], trustedAt: Date.now()});
+    if (!scope?.legacy) continue;
+    // A refused wake left the holders' letters waiting: the owner trusted them
+    // too, not a letter that arrives later.
+    const holders = scope.holders ?? scope.peers;
+    const trusted = (core.journal.db.query("SELECT id, json_extract(data,'$.contact.coreId') AS peer FROM coordination_letters WHERE thread_id=? AND direction='in' AND status='received' AND json_type(data,'$.sharedProjectId') IS NULL").all(id) as {id: string; peer: string | null}[])
+      .filter(row => scope.trusted?.includes(row.id) || row.peer !== null && holders.includes(row.peer)).map(row => row.id);
+    core.journal.setSetting(`shared-file-letters:${id}`, {...scope, legacy: false, holders: [], trustedAt: Date.now(), trusted});
+    if (trusted.length) resumed.push(id);
   }
   core.sharedAccess.execution.reconcile();
   announceHold(core, ids);
+  for (const id of resumed) core.coordination.resumeTrusted(id);
 }
 
 /**
@@ -110,7 +120,11 @@ function announceHold(core: Core, changed: string[]): void {
 /** Called before wake, steer and hook delivery. Unsupported native sessions never see the letter. */
 export function protectLetters(core: Core, threadId: string, letters: AgentLetter[]): void {
   // Core-formatted request answers still contain the contact's untrusted reason.
-  const external = letters.filter(l => l.contact);
+  const contactMail = letters.filter(l => l.contact);
+  if (!contactMail.length) return;
+  // A letter the owner trusted while it waited carries no new authority.
+  const trusted = storedScope(core, threadId)?.trusted ?? [];
+  const external = contactMail.filter(l => l.sharedProjectId || !trusted.includes(l.id));
   if (!external.length) return;
   const thread = core.threads.require(threadId);
   const protocol = core.providers.require(thread.providerId).protocol;

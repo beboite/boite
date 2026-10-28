@@ -171,6 +171,33 @@ test('the hold names only the contacts mailing outside a shared project, and tru
   expect(()=>b.h.core.sharedAccess.assertTurn(b.t.id)).toThrow('shared file policy');
 },30000);
 
+test('a native thread trusted while contact mail waits takes that letter, and a later letter holds it again',async()=>{
+  const {a,b}=await pair();
+  // As a protected native route would, with the echo driver standing in for its CLI.
+  const access=b.h.core.sharedAccess,providers=b.h.core.providers,require=providers.require.bind(providers),support=access.execution.support.bind(access.execution);
+  providers.require=((id:string)=>id===b.t.providerId?{...require(id),protocol:'claude-sdk'}:require(id)) as typeof providers.require;
+  access.execution.support=(()=>({supported:true,boundary:'isolated-process'})) as typeof access.execution.support;
+  const restore=setDriver('claude-sdk',getDriver('echo'));
+  try{
+    const status=(id:string)=>b.h.core.coordination.get(b.t.id).messages.find(l=>l.id===id)?.status;
+    const waiting=await a.c.call('collaboration.send',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'Ordinary contact note',requestId:'native-waiting'});
+    // The held native turn is refused, so the letter waits and coordination pauses.
+    await waitFor(()=>b.h.core.coordination.config(b.t.id).paused);
+    expect(status(waiting.id)).toBe('received');
+    expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).not.toBeNull();
+    await b.c.call('threads.trustContactHistory',{threadId:b.t.id});
+    // The owner trusted the mail the notice named: it reaches the thread without holding it again.
+    await waitFor(()=>status(waiting.id)==='delivered');
+    await waitFor(()=>b.h.core.journal.lastTurn(b.t.id)?.finishedAt!=null);
+    expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).toBeNull();
+    expect(b.h.core.coordination.config(b.t.id).paused).toBe(false);
+    const later=await a.c.call('collaboration.send',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'Another contact note',requestId:'native-later'});
+    await waitFor(()=>b.h.core.coordination.config(b.t.id).paused);
+    expect(status(later.id)).toBe('received');
+    expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).not.toBeNull();
+  }finally{providers.require=require;access.execution.support=support;restore();}
+},30000);
+
 test('SEC-01 consumed associations intersect their live authority instead of replacing earlier history',async()=>{
   const {a,b}=await pair(),c=await side('charlie');await link(c,b);
   for(const [x,y] of [[c,b],[b,c]] as const)await x.c.call('contacts.grant',{coreId:y.id,projectId:x.p.id,readThreads:true});
