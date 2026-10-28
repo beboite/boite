@@ -187,7 +187,7 @@ test('a key typed while a save is out stays unsaved and survives a tab switch', 
  * in that order through, `releaseAll()` every one, and both resolve once the
  * editors have handled the answers.
  */
-function gateWrites(): { release(index: number): Promise<void>; releaseAll(): Promise<void> } {
+function gateWrites(): { release(index: number): Promise<void>; releaseAll(): Promise<void>; releaseReversed(): Promise<void> } {
   const client = store.client!, real = client.call.bind(client);
   const gates: Array<{ open: () => void; answer: Promise<unknown> }> = [];
   vi.spyOn(client, 'call').mockImplementation(((method: string, params: unknown) => {
@@ -205,7 +205,17 @@ function gateWrites(): { release(index: number): Promise<void>; releaseAll(): Pr
     for (let i = 0; i < 10; i++) await Promise.resolve();
     flushSync();
   };
-  return { release: index => through([gates[index]!]), releaseAll: () => through(gates) };
+  // The newest held write reaches the disk first, each one finished before the
+  // next starts, until no write is left: the order a core may run them in.
+  const releaseReversed = async () => {
+    let opened = 0;
+    while (opened < gates.length) {
+      const fresh = gates.slice(opened).reverse();
+      opened = gates.length;
+      for (const gate of fresh) await through([gate]);
+    }
+  };
+  return { release: index => through([gates[index]!]), releaseAll: () => through(gates), releaseReversed };
 }
 
 /** Holds every file write until `release`, which resolves once the held writes have answered their editors. */
@@ -302,6 +312,55 @@ test('the answer to one save leaves the newest draft while a later save of the f
   expect(store.panel.draft(id)).toBe(first);
   await remount(id, first);
   store.panel.keepDraft(id, null);
+  store.panel.closeAll();
+});
+
+test('a file has one write out at a time: the newer save leaves once the older answered, whatever order a core would run them in', async () => {
+  const { id, original } = await openTree();
+  const writes = gateWrites();
+  const older = `${original}Older save.\n`;
+  await edit(older);
+  await clickSave();
+  await remount(id, older);
+  const newer = `${original}Newer save.\n`;
+  await edit(newer);
+  await clickSave();
+  await writes.releaseReversed();
+  vi.restoreAllMocks();
+  expect(await diskOf('docs/guide/tree.md')).toBe(newer);
+  expect(store.panel.disk('docs/guide/tree.md')).toBe(newer);
+  expect(store.panel.draft(id)).toBeUndefined();
+  await remount(id, newer);
+  store.panel.closeAll();
+});
+
+test('a read that left while a save was out never takes the disk back once that save answered', async () => {
+  const { id, original } = await openTree();
+  const sent = `${original}Saved under a read.\n`;
+  await edit(sent);
+  const release = await saveHeld();
+  // The next editor's read sees the disk before the write, and its answer is held past the write's.
+  const real = store.readFile.bind(store);
+  let answer!: () => void;
+  const held = new Promise<void>(resolve => { answer = resolve; });
+  vi.spyOn(store, 'readFile').mockImplementation(async (...args) => {
+    const snapshot = await real(...args);
+    await held;
+    return snapshot;
+  });
+  store.panel.openTasks();
+  await waitFor(() => document.querySelector('[data-testid=file-text]') === null);
+  store.panel.activate(id);
+  flushSync();
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  await release();
+  answer();
+  await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]') !== null);
+  vi.restoreAllMocks();
+  expect(await diskOf('docs/guide/tree.md')).toBe(sent);
+  expect(query<HTMLTextAreaElement>('[data-testid=file-text]').value).toBe(sent);
+  expect(store.panel.draft(id)).toBeUndefined();
+  expect(document.querySelector('[data-testid=file-dirty]')).toBeNull();
   store.panel.closeAll();
 });
 

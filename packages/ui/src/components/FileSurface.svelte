@@ -28,7 +28,6 @@
   let loading = $state(false);
 
   // The editor
-  let saving = $state(false);
   let area = $state<HTMLTextAreaElement | undefined>(undefined);
   let offset = $state(0);
   let horizontal = $state(0);
@@ -68,6 +67,8 @@
   let stored = $derived(content?.kind === 'text' ? ((path === null ? undefined : panel.disk(path)) ?? content.text) : '');
   let draft = $derived(content?.kind === 'text' ? (panel.draft(surface.id) ?? stored) : '');
   let dirty = $derived(content?.kind === 'text' && draft !== stored);
+  /** This very text is leaving: another edit can be saved behind it. */
+  let saving = $derived(dirty && path !== null && panel.outgoing(path) === draft);
   let readOnly = $derived(content?.kind === 'text' && (content.truncated || !store.owner));
   let lineCount = $derived(content?.kind === 'text' ? draft.split('\n').length : 0);
   /** A line the file does not have draws no band: an agent can name one past the end. */
@@ -82,8 +83,11 @@
 
   async function load(id: string, wanted: string): Promise<void> {
     loading = true;
-    const read = panel.reading();
-    const answer = await store.readFile(id, wanted);
+    const answer = await panel.read(
+      wanted,
+      () => store.readFile(id, wanted),
+      (read) => (read.ok && read.value.kind === 'text' ? read.value.text : null)
+    );
     loading = false;
     // The tab may have been asked for another file while the call was out.
     if (threadId !== id || path !== wanted) return;
@@ -97,7 +101,6 @@
     if (answer.value.kind === 'text') {
       // An edit made before this tab was last unmounted comes back over the
       // disk's text, and the dirty dot with it.
-      panel.read(wanted, answer.value.text, read);
       offset = 0;
     } else {
       natural = null;
@@ -122,18 +125,10 @@
     const wanted = path;
     const file = content;
     if (id === null || wanted === null || file?.kind !== 'text' || readOnly || !dirty || saving) return;
-    // What was sent, and where: a key typed while the write is out is newer
-    // than the disk, and marking it saved let a tab switch drop it.
-    const text = draft;
-    const owner = panel;
-    saving = true;
-    const write = owner.sending(wanted);
-    const answer = await store.writeFile(id, wanted, text);
-    saving = false;
-    // The answer settles its own numbered write of the file it was sent for,
-    // not this editor's text: an edit made since, here or in an editor mounted
-    // after this one was closed, stays a draft.
-    owner.answered(wanted, write, answer.ok ? text : null);
+    // The panel sends it once the file's write out answered, and settles the
+    // draft from the disk, not from this editor: a key typed meanwhile, here or
+    // in an editor mounted after this one was closed, stays a draft.
+    const { text, answer } = await panel.save(wanted, draft, (sent) => store.writeFile(id, wanted, sent));
     if (!answer.ok) {
       problem = fill(strings.files.writeFailed, { reason: answer.error });
       return;
