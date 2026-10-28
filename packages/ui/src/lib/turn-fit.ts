@@ -146,24 +146,24 @@ export function fitting(target: object): Promise<boolean> | undefined {
  * run one after the other, so none swaps in copies another already replaced.
  * True only when what the box holds at the end is within the budget.
  */
-export function fitHeld(target: { attachments: Attachment[] }, codec?: ImageCodec): Promise<boolean> {
+export function fitHeld(target: { attachments: Attachment[] }, codec?: ImageCodec, max = ATTACHMENTS_TOTAL_MAX_BYTES): Promise<boolean> {
   const previous = running.get(target);
-  const run = (previous ?? Promise.resolve(true)).then(() => fitNow(target, codec), () => fitNow(target, codec));
+  const run = (previous ?? Promise.resolve(true)).then(() => fitNow(target, codec, max), () => fitNow(target, codec, max));
   running.set(target, run);
   const done = (): void => { if (running.get(target) === run) running.delete(target); };
   run.then(done, done);
   return run;
 }
 
-async function fitNow(target: { attachments: Attachment[] }, codec?: ImageCodec): Promise<boolean> {
+async function fitNow(target: { attachments: Attachment[] }, codec: ImageCodec | undefined, max: number): Promise<boolean> {
   for (;;) {
     const before = target.attachments;
-    const fitted = await fitTurn(before, codec);
+    const fitted = await fitTurn(before, codec, max);
     if (fitted.attachments !== before) {
       const swaps = new Map(before.flatMap((attachment, at) => fitted.attachments[at] === attachment ? [] : [[attachment, fitted.attachments[at]!] as const]));
       target.attachments = target.attachments.map(attachment => swaps.get(attachment) ?? attachment);
     }
-    if (attachedBytes(target.attachments) <= ATTACHMENTS_TOTAL_MAX_BYTES) return true;
+    if (attachedBytes(target.attachments) <= max) return true;
     // Over budget: fit again only when pictures joined while this one ran.
     const seen = new Set([...before, ...fitted.attachments]);
     if (!fitted.fits || target.attachments.every(attachment => seen.has(attachment))) return false;

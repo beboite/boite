@@ -8,6 +8,8 @@ import { startBunCodec, type BunCodec } from '../test/bun-codec';
 import { screenshot } from '../test/screenshots';
 
 const KB = 1024;
+/** A tenth of the real budget, with pictures a tenth as heavy: the same shares at a tenth of the bytes to copy. */
+const MAX = ATTACHMENTS_TOTAL_MAX_BYTES / 10;
 
 /** A JPEG attachment of `size` decoded bytes. */
 function jpeg(name: string, size: number): Attachment {
@@ -51,44 +53,44 @@ describe('fitTurn', () => {
   });
 
   test('over budget, the light images, the GIF and the files stay; the heavy ones come under their share', async () => {
-    const gif: Attachment = { kind: 'image', mimeType: 'image/gif', name: 'loop.gif', data: Buffer.alloc(800 * KB).toString('base64') };
-    const pdf: Attachment = { kind: 'file', mimeType: 'application/pdf', name: 'spec.pdf', data: Buffer.alloc(200 * KB).toString('base64') };
-    const small = jpeg('small.jpg', 50 * KB);
-    const heavy = Array.from({ length: 40 }, (_, at) => jpeg(`shot-${at}.jpg`, 520 * KB));
+    const gif: Attachment = { kind: 'image', mimeType: 'image/gif', name: 'loop.gif', data: Buffer.alloc(80 * KB).toString('base64') };
+    const pdf: Attachment = { kind: 'file', mimeType: 'application/pdf', name: 'spec.pdf', data: Buffer.alloc(20 * KB).toString('base64') };
+    const small = jpeg('small.jpg', 5 * KB);
+    const heavy = Array.from({ length: 40 }, (_, at) => jpeg(`shot-${at}.jpg`, 52 * KB));
     const turn = [gif, pdf, small, ...heavy];
-    const fitted = await fitTurn(turn, weighingCodec(520 * KB));
+    const fitted = await fitTurn(turn, weighingCodec(52 * KB), MAX);
     expect(fitted.fits).toBe(true);
     expect(fitted.attachments.slice(0, 3)).toEqual([gif, pdf, small]);
     const total = fitted.attachments.reduce((sum, one) => sum + decodedBytes(one.data), 0);
-    expect(total).toBeLessThanOrEqual(ATTACHMENTS_TOTAL_MAX_BYTES);
+    expect(total).toBeLessThanOrEqual(MAX);
     expect(fitted.attachments.slice(3).every(one => one.kind === 'image' && one.mimeType === 'image/jpeg' && one.name?.endsWith('.jpg'))).toBe(true);
   });
 
   test('never under the floor: past it the turn says it does not fit', async () => {
     const encoded: { width: number; height: number }[] = [];
-    const turn = Array.from({ length: 50 }, (_, at) => jpeg(`shot-${at}.jpg`, 5 * 1024 * KB));
-    const fitted = await fitTurn(turn, weighingCodec(5 * 1024 * KB, encoded));
+    const turn = Array.from({ length: 50 }, (_, at) => jpeg(`shot-${at}.jpg`, 512 * KB));
+    const fitted = await fitTurn(turn, weighingCodec(512 * KB, encoded), MAX);
     expect(fitted.fits).toBe(false);
     expect(Math.min(...encoded.map(one => Math.max(one.width, one.height)))).toBe(FIT_FLOOR_EDGE);
   });
 
   test('two fits of one box at once end within the budget, and say so only when the box fits', async () => {
-    const box = { attachments: Array.from({ length: 15 }, (_, at) => jpeg(`first-${at}.jpg`, 900 * KB)) };
-    const first = fitHeld(box, weighingCodec(900 * KB));
+    const box = { attachments: Array.from({ length: 15 }, (_, at) => jpeg(`first-${at}.jpg`, 90 * KB)) };
+    const first = fitHeld(box, weighingCodec(90 * KB), MAX);
     // More pictures join while the first fit runs, and start their own.
-    box.attachments = [...box.attachments, ...Array.from({ length: 15 }, (_, at) => jpeg(`second-${at}.jpg`, 900 * KB))];
-    const second = fitHeld(box, weighingCodec(900 * KB));
+    box.attachments = [...box.attachments, ...Array.from({ length: 15 }, (_, at) => jpeg(`second-${at}.jpg`, 90 * KB))];
+    const second = fitHeld(box, weighingCodec(90 * KB), MAX);
     const answers = await Promise.all([first, second]);
     const total = box.attachments.reduce((sum, one) => sum + decodedBytes(one.data), 0);
     expect(box.attachments).toHaveLength(30);
-    expect(total).toBeLessThanOrEqual(ATTACHMENTS_TOTAL_MAX_BYTES);
+    expect(total).toBeLessThanOrEqual(MAX);
     expect(answers).toEqual([true, true]);
   });
 
   test('a picture removed while the box was fitted stays removed', async () => {
-    const box = { attachments: Array.from({ length: 30 }, (_, at) => jpeg(`shot-${at}.jpg`, 520 * KB)) };
+    const box = { attachments: Array.from({ length: 30 }, (_, at) => jpeg(`shot-${at}.jpg`, 52 * KB)) };
     const removed = box.attachments[0]!;
-    const fitting = fitHeld(box, weighingCodec(520 * KB));
+    const fitting = fitHeld(box, weighingCodec(52 * KB), MAX);
     box.attachments = box.attachments.slice(1);
     expect(await fitting).toBe(true);
     expect(box.attachments).toHaveLength(29);
