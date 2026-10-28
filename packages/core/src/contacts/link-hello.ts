@@ -2,9 +2,12 @@
 import { randomUUID, verify } from 'node:crypto';
 import type { Core } from '../core.ts';
 import { refused, RpcFailure } from '../errors.ts';
-import type { ContactStore, ContactSocketData } from './store.ts';
+import type { ContactStore } from './store.ts';
 import { TextSocket } from '../ws-client.ts';
 import { checkTailnetName } from './invite.ts';
+
+/** What the server keeps on a contact's link socket. */
+export interface ContactSocketData { contact: { coreId: string; routeId: string } }
 
 export const CONTACT_LINK_ROUTE = '/coordination/contact/link';
 export const HELLO_INPUT = 'boite-contact-hello\n';

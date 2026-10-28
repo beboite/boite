@@ -39,7 +39,7 @@ import { ContactReach } from './reach.ts';
 import { checkTier } from './tier.ts';
 import { fingerprintWords } from './words.ts';
 import type { TextSocket } from '../ws-client.ts';
-import { contactHello, CONTACT_LINK_ROUTE, dialContact, HELLO_INPUT } from './link-hello.ts';
+import { contactHello, CONTACT_LINK_ROUTE, dialContact, HELLO_INPUT, type ContactSocketData } from './link-hello.ts';
 import { checkedContactOffers, contactOffers } from './offers.ts';
 
 export { CONTACT_JOIN_ROUTE } from './join.ts';
@@ -71,8 +71,6 @@ interface StoredContact extends Omit<Contact, 'link'> {
  */
 type StoredRequest = ContactRequest & { pendingSend?: true; remoteId?: string };
 type Frame = { t: 'req'; id: string; body: string; signature: string } | { t: 'res'; id: string; status: number; body: string; signature: string };
-/** What the server keeps on a contact's link socket. */
-export interface ContactSocketData { contact: { coreId: string; routeId: string } }
 /** What a contact reads when the concierge refuses: never the model's own words. */
 const CONCIERGE_REFUSAL = 'Nothing on this Boite fits this request.';
 
@@ -98,7 +96,8 @@ export class ContactStore implements LinkedContacts {
   /** Join and hello nonces already used, until they would be stale anyway. */
   private readonly nonces = new Map<string, number>();
   private readonly backoff = new SyncBackoff(TICK_MS, 60_000);
-  private readonly flushing = new Set<string>();
+  /** Contacts with a flush in flight; true once a change during it asked for another, run when it ends. */
+  private readonly flushing = new Map<string, boolean>();
   private readonly deciding = new Set<string>();
   private readonly pending = new Set<Promise<unknown>>();
   /** Cores this one is joining right now: each holds a contact slot until its join ends. */
@@ -657,9 +656,10 @@ export class ContactStore implements LinkedContacts {
   // -- Telling the contact: grants, asks and answers, retried until heard.
 
   private flush(coreId: string): void {
-    if (this.closed || !this.started || this.flushing.has(coreId) || !this.linked(coreId)) return;
-    this.flushing.add(coreId);
-    this.background(this.tell(coreId).finally(() => this.flushing.delete(coreId)));
+    if (this.closed || !this.started || !this.linked(coreId)) return;
+    if (this.flushing.has(coreId)) { this.flushing.set(coreId, true); return; }
+    this.flushing.set(coreId, false);
+    this.background(this.tell(coreId).finally(() => { const again = this.flushing.get(coreId); this.flushing.delete(coreId); if (again) this.flush(coreId); }));
   }
 
   private async tell(coreId: string): Promise<void> {
