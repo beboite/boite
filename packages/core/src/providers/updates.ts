@@ -1,3 +1,4 @@
+import { threadActive } from '@boite/contracts';
 import { realpathSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { resolve, sep } from 'node:path';
@@ -821,7 +822,7 @@ export class HarnessUpdates {
   /** True while any turn of any agent is queued, running or waiting. */
   private anyBusy(): boolean {
     return this.core.journal.unfinishedTurns().length > 0 ||
-      this.core.journal.listThreads().some((thread) => ['queued', 'running', 'waiting'].includes(thread.status));
+      this.core.journal.listThreads().some((thread) => threadActive(thread.status));
   }
 
   private newer(entry: Pick<Entry, 'route' | 'current' | 'latest'>): boolean {

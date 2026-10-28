@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
-import { setThreadStatus } from '../src/threads/records.ts';
+import { saveThread } from '../src/threads/records.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
@@ -120,9 +120,9 @@ test('an answer held after Stop precedes the next manual prompt without replacin
 test('blocking requests, stale targets and unsupported drivers hold input without stopping or journaling it', async () => {
   const { owner, threadId, turn, inputs } = await running();
   const params = { threadId, turnId: turn.id, prompt: 'Continue', clientRequestId: 'follow_up_02', expectedSelectionVersion: 0 };
-  setThreadStatus(h.core, threadId, 'waiting');
+  saveThread(h.core, { ...h.core.threads.require(threadId), status: 'waiting' }, 'thread.status');
   expect(await owner.call('turns.steer', params)).toEqual({ accepted: false });
-  setThreadStatus(h.core, threadId, 'running');
+  saveThread(h.core, { ...h.core.threads.require(threadId), status: 'running' }, 'thread.status');
   expect(await owner.call('turns.steer', { ...params, turnId: 'older-turn' })).toEqual({ accepted: false });
   const stale = await owner.call('turns.steer', { ...params, expectedSelectionVersion: 9 }).catch(error => error);
   expect(stale.message).toContain('selection');

@@ -1,8 +1,8 @@
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomUUID, sign } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { defaultCoordinationConfig } from '@boite/contracts';
-import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentTranscript, ContactRequest, CoordinationBridgeResponse, CoordinationConfig, CoordinationPeer, CoordinationView, RpcParams } from '@boite/contracts';
+import { threadActive, defaultCoordinationConfig } from '@boite/contracts';
+import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentTranscript, ContactRequest, CoordinationBridgeResponse, CoordinationConfig, CoordinationPeer, CoordinationView, RpcParams, ThreadStatus } from '@boite/contracts';
 import { checkMatchExtras, checkRemoteContact, checkTranscript, searchContacts, searchWords, transcript } from './coordination-lookup.ts';
 import { PeerDesk } from './coordination-peer.ts';
 import { CoordinationBridge } from './coordination-bridge.ts';
@@ -78,11 +78,11 @@ export class Coordination {
     const interrupted = core.journal.db.query(`SELECT id, status, rowid FROM threads WHERE id NOT IN (SELECT thread_id FROM thread_deletions)
       AND (? IS NULL OR rowid <= ?) AND (status IN ('queued', 'running', 'waiting') OR rowid = ?
         OR id IN (SELECT thread_id FROM coordination_letters WHERE status IN ('queued', 'received', 'uncertain')))
-      ORDER BY rowid`).all(invalidConfig?.rowid ?? null, invalidConfig?.rowid ?? null, invalidConfig?.rowid ?? null) as { id: string; status: string; rowid: number }[];
+      ORDER BY rowid`).all(invalidConfig?.rowid ?? null, invalidConfig?.rowid ?? null, invalidConfig?.rowid ?? null) as { id: string; status: ThreadStatus; rowid: number }[];
     for (const thread of interrupted) {
       if (thread.rowid === invalidConfig?.rowid) core.journal.getSetting(invalidConfig.key);
       const pending = core.journal.db.query("SELECT 1 FROM coordination_letters WHERE thread_id = ? AND (status IN ('queued', 'received') OR (status = 'uncertain' AND json_extract(data, '$.error') = 'Queued for provider delivery')) LIMIT 1").get(thread.id);
-      if (pending || ['queued', 'running', 'waiting'].includes(thread.status)) this.pause(thread.id, 'restart');
+      if (pending || threadActive(thread.status)) this.pause(thread.id, 'restart');
     }
     // A thread that finishes a turn can take its waiting letters now, not at the next sweep.
     this.off = core.bus.onAny((name, payload) => {
@@ -737,7 +737,7 @@ export class Coordination {
         this.core.journal.db.transaction(() => {
           for (const letter of letters) this.update(letter, 'uncertain', 'Queued for provider delivery');
           this.core.journal.db.query('INSERT INTO coordination_wakes VALUES (?, ?)').run(threadId, Date.now());
-          this.core.threads.startTurn(threadId, prompt, [], undefined, 'coordination');
+          this.core.threads.startTurn(threadId, prompt, { kind: 'coordination' });
         })();
       }
     } catch (error) {

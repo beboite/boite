@@ -39,7 +39,6 @@ export function agentMoveNote(from: MoveEnd, to: MoveEnd, branch: string | null)
   return `You moved this thread from project ${from.name} (${from.cwd}) to project ${to.name} (${to.cwd}). Your working directory is now ${whereOf(to, branch)}.`;
 }
 
-const IN_FLIGHT = ['queued', 'running', 'waiting'];
 
 function checkStop(threadId: ThreadId, stopBackground: unknown): void {
   if (stopBackground !== undefined && typeof stopBackground !== 'boolean') {
@@ -113,7 +112,7 @@ export class ThreadMove {
   }
 
   private inFlight(thread: ThreadSummary): boolean {
-    return IN_FLIGHT.includes(thread.status) || this.threads.runner.handles.has(thread.id);
+    return this.threads.isBusy(thread.id);
   }
 
   /** Every client hears the row with its pending move, which lives in memory and changes nothing stored. */
@@ -240,7 +239,7 @@ export class ThreadMove {
     const busyNow = (one: ThreadSummary): boolean => {
       if (one.id === threadId && phase === 'request') return false;
       if (one.id === threadId && phase === 'apply') return this.threads.runner.handles.has(one.id) || one.status === 'running' || one.status === 'waiting';
-      return IN_FLIGHT.includes(one.status) || this.threads.runner.handles.has(one.id);
+      return this.threads.isBusy(one.id);
     };
     const busy = [thread, ...this.children(thread)].find(busyNow);
     if (busy !== undefined) {
