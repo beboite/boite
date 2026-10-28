@@ -72,7 +72,8 @@ echo execution must not be reported as external-provider sandbox coverage.
 
 A pull request whose selection includes desktop also runs [Bundle growth](#bundle-growth).
 
-The changes job always installs frozen dependencies, runs `bun audit`, local
+The changes job always installs frozen dependencies, runs `bun audit` (with
+the ignored advisories named and justified in `ci.yml`), local
 link checks, `bun test scripts/ci ./bench ./apps/shell/scripts`, architecture
 checks and their tests, translation validation and the no-em-dash UI copy
 rule (`bun run check:copy`). Changes to workflows,

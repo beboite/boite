@@ -190,8 +190,21 @@ The compaction is the turn `threads.compact` schedules, with
 `Automatic compaction`), its divider says `auto`, and it sends no notification.
 A threshold below what the agent keeps after compacting makes every turn end
 compact again. The timers live in memory: a core restart drops them, and the
-next finished turn arms a new one. The in-memory client implements `turn-end`
-and the independent token limit; it has no background work or prompt cache.
+next finished turn arms a new one.
+
+A thread can sit idle above its token limit: it went quiet before the owner
+lowered the limit, or a restart dropped its timer. When a client shows it
+(`threads.focus`), the core compacts it at once under the same checks, while
+the user reads and types, instead of letting the next prompt wait for the
+agent's own blocking compaction. A background copy cannot help there, since
+one starts only below the limit. As after a turn, a last turn that stopped or
+failed is left to the user (a cache keepalive ping does not count as the last
+turn), and a compaction never chains into another: when
+the last turn is one, even still over the limit, a look starts nothing. An ACP agent names its `compact` command only once its session is
+prepared, so that announcement, on a shown thread, is checked the same way. A prompt that crosses the
+limit by itself is compacted by the agent before it is sent, as above. The in-memory client implements `turn-end`
+and the independent token limit after a turn, not when a thread is shown; it
+has no background work or prompt cache.
 
 When a merged PR moves a conversation to Done, its last prompt can finish,
 but a compaction turn is stopped. If the provider announces native compaction
@@ -200,7 +213,8 @@ after Done, that turn is stopped too. The history already written is kept.
 ### Background compaction
 
 `Settings.backgroundCompaction` is an experiment, off by default, that the
-owner turns on under Settings, Experiments (an agent asks with
+owner turns on under Settings, Experiments, for the machine picked above the
+card, the one that runs the thread (an agent asks with
 `boite settings request backgroundCompaction true --why "..."`). It works
 with the token limit above and does nothing without one. Like `deviceStream`,
 it stays on its machine: the group's settings do not carry it.

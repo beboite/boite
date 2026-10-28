@@ -24,6 +24,7 @@ import { workflowCommand } from './workflow-cli.ts';
 import { DELEGATE_ACTIONS, delegateCommand } from './delegate-cli.ts';
 import { browserCommand, BROWSER_HELP } from './browser-cli.ts';
 import { browserRun } from './browser-run.ts';
+import { browserRecipe } from './browser-recipe.ts';
 import { deviceCommand } from './device-cli.ts';
 import { WINDOW_REQUEST_TIMEOUT_MS, windowCommand } from './window-cli.ts';
 import { secretCommand } from './secret-cli.ts';
@@ -423,7 +424,9 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     },
     browser: async () => {
       if (rest[0] === 'help') { print([BROWSER_HELP], { help: BROWSER_HELP }); return; }
-      const result = rest[0] === 'run' ? await browserRun(rest.slice(1), io, client, threadId) : await browserCommand(rest, io, client, threadId);
+      const result = rest[0] === 'run' ? await browserRun(rest.slice(1), io, client, threadId)
+        : rest[0] === 'recipe' ? await browserRecipe(rest.slice(1), io, client, threadId)
+        : await browserCommand(rest, io, client, threadId);
       print(result.lines, result.value);
     },
     device: async () => {

@@ -33,8 +33,16 @@ export const AUTO_COMPACT_LABEL = 'Automatic compaction';
  */
 export class AutoCompaction {
   private readonly timers = new Map<ThreadId, ReturnType<typeof setTimeout>>();
+  private readonly unlisten: () => void;
 
-  constructor(private readonly core: Core, private readonly threads: ThreadStore) {}
+  constructor(private readonly core: Core, private readonly threads: ThreadStore) {
+    // An ACP agent names its commands only once its session is prepared, after the client showed the thread.
+    this.unlisten = core.bus.onCommitted((name, payload) => {
+      if (name !== 'thread.commands') return;
+      const { threadId } = payload as { threadId: ThreadId };
+      if (this.threads.focus.viewed(threadId)) queueMicrotask(() => this.shown(threadId));
+    });
+  }
 
   /** Called once a finished turn and its thread are saved. */
   turnFinished(thread: ThreadSummary, turn: Turn): void {
@@ -74,6 +82,29 @@ export class AutoCompaction {
     this.fire(threadId);
   }
 
+  /**
+   * A client shows an idle thread already at its token limit: one that went
+   * quiet before the limit was lowered, or whose timer a restart dropped. A
+   * copy compacted in the background starts only below the limit, and its next
+   * prompt would wait for the agent to compact first, so it compacts now, while
+   * the user reads and types. As after a turn, a stop or a failure is the
+   * user's to look at, and a compaction never chains into another, even one
+   * that kept more than the limit: the last turn decides.
+   */
+  shown(threadId: ThreadId): void {
+    if (this.core.stopping || this.core.journal.isClosed()) return;
+    const thread = this.core.journal.getThread(threadId);
+    const reading = thread?.context ?? null;
+    if (thread === null || reading === null) return;
+    const limit = effectiveCompaction(this.core.settings.get(), thread).autoCompact?.tokens ?? null;
+    if (limit === null || reading.tokens < limit) return;
+    // A keepalive's ping says nothing of the conversation, as after a turn.
+    const last = this.core.journal.lastTurn(threadId, true);
+    if (last !== null && (last.status !== 'done' || last.execution?.operation === 'compact')) return;
+    // A timer armed below an older limit, for the cache's moment, would wait minutes: the moment is worked out again.
+    this.recheck(threadId);
+  }
+
   /** Done lets the final answer finish, but has no further context to prepare. */
   stopIfDone(threadId: ThreadId): void {
     const thread = this.core.journal.getThread(threadId);
@@ -86,6 +117,7 @@ export class AutoCompaction {
   close(): void {
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
+    this.unlisten();
   }
 
   /**
