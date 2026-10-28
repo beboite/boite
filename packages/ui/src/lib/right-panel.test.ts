@@ -11,7 +11,6 @@ import {
   PANEL_WIDTH_KEY,
   RightPanelStore,
   ZOOM_DEFAULT,
-  type FileWrite,
   ZOOM_STEPS,
   clampPanel,
   stepZoom
@@ -532,38 +531,6 @@ describe('the right panel', () => {
       expect(new RightPanelStore().for('t-2').surfaces).toHaveLength(0);
       destroy.mockRestore();
     } finally { browserProfiles.source = null; }
-  });
-
-  test('a file has one write out at a time, and a read that overlapped a write leaves the disk it confirmed', async () => {
-    const { bound } = panel();
-    bound.openFile('notes.md');
-    const writes: Array<{ text: string; answer: () => void }> = [];
-    const send = (text: string) => new Promise<FileWrite>((resolve) => {
-      writes.push({ text, answer: () => resolve({ ok: true, value: { bytes: text.length, modifiedAt: 1 } }) });
-    });
-    const turns = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
-    let answerRead!: (text: string) => void;
-    const reading = bound.read('notes.md', () => new Promise<string>((resolve) => { answerRead = resolve; }), (text) => text);
-    const first = bound.save('notes.md', 'one', send);
-    await turns();
-    const second = bound.save('notes.md', 'two', send);
-    const third = bound.save('notes.md', 'three', send);
-    await turns();
-    // The saves made while one is out wait as one write, of the last text.
-    expect(writes.map((write) => write.text)).toEqual(['one']);
-    expect(bound.outgoing('notes.md')).toBe('three');
-    writes[0]!.answer();
-    expect((await first).text).toBe('one');
-    await turns();
-    expect(writes.map((write) => write.text)).toEqual(['one', 'three']);
-    answerRead('before the saves');
-    await reading;
-    expect(bound.disk('notes.md')).toBe('one');
-    writes[1]!.answer();
-    expect((await second).text).toBe('three');
-    expect((await third).text).toBe('three');
-    expect(bound.disk('notes.md')).toBe('three');
-    expect(bound.outgoing('notes.md')).toBeNull();
   });
 
   test('closing the changes tab on a file\'s row leaves that open file\'s disk text', async () => {

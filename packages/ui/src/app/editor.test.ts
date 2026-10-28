@@ -334,6 +334,39 @@ test('a file has one write out at a time: the newer save leaves once the older a
   store.panel.closeAll();
 });
 
+test('an editor\'s read that answers after its replacement read a newer disk never takes the disk back', async () => {
+  const { id, original } = await openTree();
+  const path = 'docs/guide/tree.md';
+  const external = `${original}Changed by the agent while the first read was out.\n`;
+  // The first editor's read sees the disk before the agent's change, and its answer is held.
+  const real = store.readFile.bind(store);
+  let answer!: () => void;
+  const held = new Promise<void>(resolve => { answer = resolve; });
+  let calls = 0, captured = false;
+  vi.spyOn(store, 'readFile').mockImplementation(async (...args) => {
+    const snapshot = await real(...args);
+    if (++calls === 1) { captured = true; await held; }
+    return snapshot;
+  });
+  store.panel.openTasks();
+  await waitFor(() => document.querySelector('[data-testid=file-text]') === null);
+  store.panel.activate(id);
+  await waitFor(() => captured);
+  store.panel.openTasks();
+  await waitFor(() => document.querySelector('[data-testid=file-text]') === null);
+  await store.client!.call('files.write', { threadId: 't-trace', path, text: external });
+  await remount(id, external);
+  answer();
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  flushSync();
+  vi.restoreAllMocks();
+  expect(await diskOf(path)).toBe(external);
+  expect(query<HTMLTextAreaElement>('[data-testid=file-text]').value).toBe(external);
+  expect(document.querySelector('[data-testid=file-dirty]')).toBeNull();
+  await store.client!.call('files.write', { threadId: 't-trace', path, text: original });
+  store.panel.closeAll();
+});
+
 test('a read that left while a save was out never takes the disk back once that save answered', async () => {
   const { id, original } = await openTree();
   const sent = `${original}Saved under a read.\n`;

@@ -8,13 +8,14 @@ import { secureId } from './secure-id';
  */
 
 import type { PanelSurface } from '@boite/contracts';
-import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+import { SvelteSet } from 'svelte/reactivity';
 import { DEFAULT_BROWSER_PROFILE } from '@boite/contracts';
 import { browserBridge, type BrowserEvent } from './browser-bridge';
 import { browserProfiles } from './browser-profiles.svelte';
 import { work } from './work-prefs.svelte';
 import { ZOOM_STEPS } from './zoom';
 import { CONTACTS_RAIL_WIDTH, contactsRail } from './contacts-rail.svelte';
+import { FileDocuments, type FileDocument, type FileSaved, type FileWrite } from './file-documents.svelte';
 
 /**
  * `browser` is a page in this desktop's own webview, the user's browser.
@@ -80,88 +81,6 @@ export interface Surface {
 export type CloseAction = 'close' | 'others' | 'right' | 'all';
 
 /** What one thread remembers about its panel. */
-/** What a write of a file answers: the core's `FileAnswer` for `files.write`. */
-export type FileWrite = { ok: true; value: { bytes: number; modifiedAt: number } } | { ok: false; error: string };
-
-/** What a save resolves to: the text the write that carried it sent, and its answer. */
-export interface FileSaved {
-  text: string;
-  answer: FileWrite;
-}
-
-interface Outgoing {
-  text: string;
-  send: (text: string) => Promise<FileWrite>;
-  done: Promise<FileSaved>;
-}
-
-/**
- * Every write of a file starts and ends a change. A read applies only when
- * none did while it was out, since its snapshot may predate one. Module-wide,
- * so a sequence dropped and made again never reuses a value a read still holds.
- */
-let lastChange = 0;
-
-/**
- * One file's document I/O in one thread, shared by every editor mounted on it
- * and outliving their tabs while anything of it is out. A core may finish two
- * writes in either order, so at most one is out: a save asked meanwhile waits
- * as the next write, and a later one only replaces the text it will carry.
- */
-class FileSequence {
-  /** What the disk last confirmed, by a read or a write that answered. */
-  disk = $state<string | null>(null);
-  current = $state.raw<Outgoing | null>(null);
-  next = $state.raw<Outgoing | null>(null);
-  /** The value of `lastChange` the last write start or answer took. */
-  changed = 0;
-  /** Reads out: the sequence stays while one may still answer. */
-  reads = 0;
-
-  constructor(private readonly settled: () => void) {}
-
-  get writing(): boolean {
-    return this.current !== null || this.next !== null;
-  }
-
-  get idle(): boolean {
-    return !this.writing && this.reads === 0;
-  }
-
-  /** The text that leaves last, the one the disk holds once every write answered. */
-  get outgoing(): string | null {
-    return (this.next ?? this.current)?.text ?? null;
-  }
-
-  write(text: string, send: (text: string) => Promise<FileWrite>): Promise<FileSaved> {
-    if (this.next) {
-      this.next = { ...this.next, text, send };
-      return this.next.done;
-    }
-    if (this.current?.text === text) return this.current.done;
-    const run = async (): Promise<FileSaved> => {
-      // The waiting write, with the last text saved before it left.
-      const job = this.next!;
-      this.next = null;
-      this.current = job;
-      this.changed = ++lastChange;
-      try {
-        const answer = await job.send(job.text);
-        if (answer.ok) this.disk = job.text;
-        return { text: job.text, answer };
-      } finally {
-        this.current = null;
-        this.changed = ++lastChange;
-        this.settled();
-      }
-    };
-    // It leaves once the write out answered, or on the next tick when none is.
-    const after = this.current?.done ?? Promise.resolve();
-    this.next = { text, send, done: after.then(run, run) };
-    return this.next.done;
-  }
-}
-
 export interface PanelState {
   isOpen: boolean;
   activeSurfaceId: string | null;
@@ -292,18 +211,14 @@ export class RightPanelStore {
   floating = $state(false);
 
   /**
-   * The unsaved text of each file tab, per thread. Switching tabs, hiding the
-   * panel or opening another thread unmounts the editor, and the edit used to
-   * go with it. Held in memory only: the layout is stored, a draft is not.
+   * The files the editors show, per thread and path, with the edit over each.
+   * Switching tabs, hiding the panel or opening another thread unmounts the
+   * editor, and the edit used to go with it. Held in memory only: the layout
+   * is stored, a draft is not.
    */
-  readonly drafts = new SvelteMap<string, SvelteMap<string, string>>();
-
-  /**
-   * The document I/O of each file, per thread and path, shared by every
-   * editor mounted on it: one mounted while another's save is out learns the
-   * new disk when that save answers, though it read the old one.
-   */
-  readonly saves = new SvelteMap<string, SvelteMap<string, FileSequence>>();
+  readonly documents = new FileDocuments((key, path) =>
+    this.threads[key]?.surfaces.some((surface) => surface.kind === 'file' && surface.path === path) ?? false
+  );
 
   /**
    * The threads a phone-width load shut, kept beside the stored layout rather
@@ -431,8 +346,7 @@ export class RightPanelStore {
       }
       delete kept[key];
       this.#bound.delete(key);
-      this.drafts.delete(key);
-      this.saves.delete(key);
+      this.documents.forget(key);
       this.phoneShut.delete(key);
       changed = true;
     }
@@ -589,92 +503,46 @@ export class BoundPanel {
     else this.open('trace');
   }
 
+  /** The document of a file tab, by its surface id. */
+  #file(id: string): FileDocument | undefined {
+    return id.startsWith('file:') ? this.#root.documents.get(this.#key, id.slice('file:'.length)) : undefined;
+  }
+
   /** The unsaved text of a file tab, when it has any. */
   draft(id: string): string | undefined {
-    return this.#root.drafts.get(this.#key)?.get(id);
+    return this.#file(id)?.draft ?? undefined;
   }
 
   /** Held while it differs from the disk; null forgets it, after a save or a discard. */
   keepDraft(id: string, text: string | null): void {
-    const held = this.#root.drafts.get(this.#key);
-    if (text === null) {
-      held?.delete(id);
-      return;
-    }
-    if (held) held.set(id, text);
-    else this.#root.drafts.set(this.#key, new SvelteMap([[id, text]]));
+    if (!id.startsWith('file:')) return;
+    if (text === null) this.#file(id)?.edit(null);
+    else this.#root.documents.hold(this.#key, id.slice('file:'.length)).edit(text);
   }
 
   /** What the disk holds for a file, as its last read or answered write left it. */
   disk(path: string): string | undefined {
-    return this.#sequence(path)?.disk ?? undefined;
+    return this.#root.documents.get(this.#key, path)?.disk ?? undefined;
   }
 
   /** The text the file's writes leave with last, while one is out or waiting. */
   outgoing(path: string): string | null {
-    return this.#sequence(path)?.outgoing ?? null;
+    return this.#root.documents.get(this.#key, path)?.outgoing ?? null;
   }
 
-  #sequence(path: string): FileSequence | undefined {
-    return this.#root.saves.get(this.#key)?.get(path);
-  }
-
-  #held(path: string): FileSequence {
-    const known = this.#sequence(path);
-    if (known) return known;
-    const made = new FileSequence(() => this.#settle(path));
-    const held = this.#root.saves.get(this.#key);
-    if (held) held.set(path, made);
-    else this.#root.saves.set(this.#key, new SvelteMap([[path, made]]));
-    return made;
-  }
-
-  /**
-   * A read of the file, through `fetch`. Its text becomes the disk only when
-   * no write started or answered while it was out: one that did may have
-   * changed the disk after the read saw it.
-   */
-  async read<T>(path: string, fetch: () => Promise<T>, textOf: (answer: T) => string | null): Promise<T> {
-    const sequence = this.#held(path);
-    const since = lastChange;
-    sequence.reads++;
-    try {
-      const answer = await fetch();
-      const text = textOf(answer);
-      if (text !== null && !sequence.writing && sequence.changed <= since) sequence.disk = text;
-      return answer;
-    } finally {
-      sequence.reads--;
-      this.#settle(path);
-    }
+  /** A read of the file through `fetch`, whose answer the document orders against its other reads and writes. */
+  read<T>(path: string, fetch: () => Promise<T>, textOf: (answer: T) => string | null): Promise<T> {
+    return this.#root.documents.hold(this.#key, path).read(fetch, textOf);
   }
 
   /** An editor's text, held as the file's draft until the disk confirms it. */
   edited(path: string, text: string): void {
-    this.keepDraft(surfaceId('file', path), text);
-    this.#settle(path);
+    this.#root.documents.hold(this.#key, path).edit(text);
   }
 
-  /**
-   * A save of the file through `send`, which leaves once the write out
-   * answered. It resolves with the write that carried this text, or a later
-   * text saved before that write left.
-   */
+  /** A save of the file through `send`, which leaves once the file's write out answered. */
   save(path: string, text: string, send: (text: string) => Promise<FileWrite>): Promise<FileSaved> {
-    return this.#held(path).write(text, send);
-  }
-
-  /**
-   * A draft goes only once no write of its file is out or waiting and the disk
-   * confirmed its very text: until then the disk can still change under it. A
-   * file no tab shows keeps its sequence only while a read or write is out.
-   */
-  #settle(path: string): void {
-    const sequence = this.#sequence(path);
-    if (!sequence || sequence.writing) return;
-    const id = surfaceId('file', path);
-    if (this.draft(id) === sequence.disk) this.keepDraft(id, null);
-    if (sequence.idle && !this.state.surfaces.some((surface) => surface.id === id)) this.#root.saves.get(this.#key)?.delete(path);
+    return this.#root.documents.hold(this.#key, path).save(text, send);
   }
 
   /** The ids a close action takes away, so the question asked and the tabs closed agree. */
@@ -690,22 +558,15 @@ export class BoundPanel {
 
   /** The tabs among these holding an edit that was never saved. */
   unsaved(ids: readonly string[]): Surface[] {
-    const held = this.#root.drafts.get(this.#key);
-    if (!held) return [];
-    return this.state.surfaces.filter((surface) => ids.includes(surface.id) && held.has(surface.id));
+    return this.state.surfaces.filter((surface) => ids.includes(surface.id) && this.#file(surface.id)?.draft != null);
   }
 
-  /** A closed tab's draft goes with it: reopening the file reads the disk again, once nothing of it is out. */
+  /** A closed tab's edit goes with it: reopening the file reads the disk again, once nothing of it is out. */
   #drop(ids: readonly string[]): void {
-    const held = this.#root.drafts.get(this.#key);
-    const saves = this.#root.saves.get(this.#key);
     for (const id of ids) {
-      held?.delete(id);
       // Only a file tab's path names a file: the changes tab's is its selected row.
       const surface = this.state.surfaces.find((one) => one.id === id);
-      const path = surface?.kind === 'file' ? surface.path : undefined;
-      // A read or write still out stays the file's: the tab reopened on it must know.
-      if (path !== undefined && this.#sequence(path)?.idle) saves?.delete(path);
+      if (surface?.kind === 'file' && surface.path !== undefined) this.#root.documents.close(this.#key, surface.path);
     }
   }
 

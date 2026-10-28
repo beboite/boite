@@ -239,7 +239,18 @@ save chord through `files.write`.
 
 An edit not saved yet stays with its tab
 while another tab, another thread or a hidden panel unmounts the editor, in
-memory only, and closing that tab asks first. An image opens fitted to the panel; the wheel zooms
+memory only, and closing that tab asks first.
+
+`lib/file-documents.svelte.ts` holds one document per thread and path, shared
+by every editor mounted on the file. A core may finish two writes in either
+order, so at most one write of a file is out: a save asked meanwhile waits and
+leaves with the last text saved. A read's answer replaces the confirmed disk
+text only when no newer read or write already set it and no write was out
+during the read. An edit stays until no write is out and the disk confirmed
+its text. A tab closed while a read or write is out drops its edit, and the
+document stays until that answer lands, so the reopened tab knows the new disk.
+
+An image opens fitted to the panel; the wheel zooms
 around the pointer, a drag pans, the bar has fit, 100% and the zoom steps, and
 the checkerboard behind it tells transparency from white. A video or a sound
 uses the native player over the ticketed file route below. Anything else is a
