@@ -11,7 +11,7 @@
   import { shownWindows } from '../lib/quota-display';
 
   let { rows, loading = false, completed = [], connect, order = [], onreorder }: {
-    rows: AccountQuota[]; loading?: boolean; completed?: string[]; connect: () => void;
+    rows: AccountQuota[]; loading?: boolean; completed?: string[]; connect?: () => void;
     order?: string[]; onreorder?: (order: string[]) => Promise<boolean>;
   } = $props();
 
@@ -144,7 +144,7 @@
   {#if rows.length === 0}
     <div class="empty" data-testid="quota-empty">
       <p>{strings.quotas.empty}</p>
-      <button class="small" onclick={connect}><span class="ui-label">{strings.settings.connectProvider}</span></button>
+      {#if connect}<button class="small" onclick={connect}><span class="ui-label">{strings.settings.connectProvider}</span></button>{/if}
     </div>
   {/if}
   <!-- The headline is the primary window, never the lowest one; credits still take over once any window runs dry. -->

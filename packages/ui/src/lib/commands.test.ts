@@ -19,6 +19,12 @@ afterEach(() => {
   delete document.documentElement.dataset['theme'];
 });
 
+test('a phone, which leaves Providers to the desktop, is offered no command to open it', ({ store }) => {
+  expect(store.owner).toBe(true);
+  expect(appCommands(store, false).map((item) => item.id)).toContain('providers');
+  expect(appCommands(store, true).map((item) => item.id)).not.toContain('providers');
+});
+
 function ids(store: Store): string[] {
   return appCommands(store, false).map((item) => item.id);
 }
