@@ -53,6 +53,43 @@ const CONTEXT_FLAGS = { '--context': 'preset', '--keep': 'keep', '--drop': 'drop
 const BOOLEAN_OPTIONS = ['json', 'multiple', 'worktree', 'wait', 'archived', 'skip'] as const;
 const NUMBER_OPTIONS = ['timeout', 'last', 'before'] as const;
 
+/** What every command reads wherever it stands, until a command's own text begins. */
+const GLOBAL_FLAGS = ['--json', '--thread', '--data-dir', '--core', '--channel'];
+
+/**
+ * Commands that parse their own flags: every other word reaches them as typed.
+ * `help` keeps `--help` the CLI's. `text` says the command's own text has
+ * begun, after which a global flag is part of that text too.
+ */
+const OWNED: { owns: (positional: string[]) => boolean; help: boolean; text?: (positional: string[]) => boolean }[] = [
+  // agent-browser's own flags (-i, --text, --timeout...); see `browserText` for its text.
+  { owns: ([command, action]) => command === 'browser' && action !== undefined, help: false, text: positional => browserText(positional.slice(1)) },
+  // Their own filters (logs-cli.ts); a value comes next and is passed the same way.
+  { owns: ([command]) => command === 'logs' || command === 'issue', help: true },
+  // window-cli.ts: its --title names a window, not a thread.
+  { owns: ([command, action]) => command === 'window' && action !== undefined, help: true },
+  // view-cli.ts: the script and scheme flags of `view check`.
+  { owns: ([command, action]) => command === 'view' && action === 'check', help: true },
+  // secret-cli.ts; after `--` every word is the child command's.
+  { owns: ([command]) => command === 'secret', help: false, text: positional => positional.includes('--') },
+];
+
+/**
+ * The browser commands that end in text, and how many words come before it:
+ * `fill <target> <text>`, `eval <js>`, `run <script> <args>`. Once those words
+ * are there, every word is the command's, so `fill '#q' --json` types it and a
+ * script receives `--core`. `--tab <id>` is the browser's wherever it stands.
+ */
+const BROWSER_TEXT: Record<string, number> = { fill: 1, type: 1, select: 1, dialog: 1, eval: 0, evaluate: 0, run: 1 };
+
+function browserText(words: string[]): boolean {
+  const [action = '', ...rest] = words;
+  const plain = rest.filter((word, index) => !word.startsWith('-') && rest[index - 1] !== '--tab');
+  if (action === 'profiles') return plain[0] === 'add';
+  const before = BROWSER_TEXT[action];
+  return before !== undefined && plain.length >= before;
+}
+
 export function parse(argv: string[]): Parsed {
   const parsed: Parsed = { positional: [], json: false, multiple: false, worktree: false, wait: false, archived: false, skip: false, thread: undefined, dataDir: undefined, channel: 'stable' };
   const number = (flag: string, raw: string): number => {
@@ -68,20 +105,8 @@ export function parse(argv: string[]): Parsed {
       index += 1;
       return value;
     };
-    // `boite browser` takes agent-browser's own flags (-i, --text, --timeout...); only these stay global.
-    if (parsed.positional[0] === 'browser' && parsed.positional.length > 1 && !['--json', '--thread', '--data-dir', '--core', '--channel'].includes(arg)) { parsed.positional.push(arg); continue; }
-    // `boite logs` and `boite issue` parse their own filters (logs-cli.ts).
-    if ((parsed.positional[0] === 'logs' || parsed.positional[0] === 'issue') && !['--json', '--thread', '--data-dir', '--core', '--channel', '--help', '-h'].includes(arg)) {
-      // A value comes next and is passed the same way; a global flag after it stays global.
-      parsed.positional.push(arg);
-      continue;
-    }
-    // `boite window` parses its own flags (window-cli.ts): its --title names a window, not a thread.
-    // `boite view check` parses its script and scheme flags in view-cli.ts.
-    // `boite secret` parses its own flags (secret-cli.ts); after `--` every word is the child command's, `--json` included.
-    if ((parsed.positional[0] === 'window' && parsed.positional.length > 1 && !['--json', '--thread', '--data-dir', '--core', '--channel', '--help', '-h'].includes(arg))
-      || (parsed.positional[0] === 'view' && parsed.positional[1] === 'check' && !['--json', '--thread', '--data-dir', '--core', '--channel', '--help', '-h'].includes(arg))
-      || (parsed.positional[0] === 'secret' && (arg === '--' || parsed.positional.includes('--') || !['--json', '--thread', '--data-dir', '--core', '--channel'].includes(arg)))) {
+    const owner = OWNED.find(family => family.owns(parsed.positional));
+    if (owner && (owner.text?.(parsed.positional) || (!GLOBAL_FLAGS.includes(arg) && !(owner.help && (arg === '--help' || arg === '-h'))))) {
       parsed.positional.push(arg);
       continue;
     }

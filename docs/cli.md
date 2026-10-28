@@ -6,6 +6,13 @@ RPC result for scripts. The command loads on demand and works with every driver,
 including providers without an MCP client. The CLI also exposes a bounded set of thread-scoped tools through
 `boite mcp` for providers with an MCP client.
 
+The global flags (`--json`, `--thread`, `--data-dir`, `--core`, `--channel`)
+are read anywhere until a command's own text begins. The table `OWNED` in
+`packages/core/src/cli-args.ts` names the commands that parse their own flags
+and where their text starts: after `boite browser fill <target>`,
+`browser run <script>`, `browser eval` or `secret ... --`, every word is the
+command's, so `boite browser fill '#q' --json` types `--json`.
+
 Every new native agent session receives a compact CLI guide before its first
 request, even without a connected brain. Enabled coordination and delegation
 add their commands and current limits; workflow syntax is loaded on demand

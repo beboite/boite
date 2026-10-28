@@ -137,6 +137,18 @@ test('the browser CLI reads agent-browser command lines into actions', () => {
   expect(() => read(['frobnicate'])).toThrow('unknown browser command');
   // Boite's own connection flags stay global after the browser command.
   expect(parse(['browser', 'snapshot', '-i', '--core', 'https://host.test', '--channel', 'dev'])).toMatchObject({ positional: ['browser', 'snapshot', '-i'], core: 'https://host.test', channel: 'dev' });
+  // Until a command's text begins: from there every word is that text, a global flag's spelling included.
+  const fill = parse(['--json', 'browser', 'fill', '#query', '--json']);
+  expect(fill).toMatchObject({ positional: ['browser', 'fill', '#query', '--json'], json: true });
+  expect(read(fill.positional.slice(1)).action).toEqual({ kind: 'fill', selector: '#query', text: '--json' });
+  expect(parse(['browser', 'fill', '--json', '#query', 'a'])).toMatchObject({ positional: ['browser', 'fill', '#query', 'a'], json: true });
+  expect(parse(['browser', 'eval', 'f("--thread")', '--thread', 'x']).positional).toEqual(['browser', 'eval', 'f("--thread")', '--thread', 'x']);
+  const run = parse(['browser', 'run', '--tab', 'browser:a', 'batch.js', '--tab', 'browser:b', '--core', 'arg', '--json']);
+  expect(run).toMatchObject({ positional: ['browser', 'run', '--tab', 'browser:a', 'batch.js', '--tab', 'browser:b', '--core', 'arg', '--json'], json: false });
+  expect(run.core).toBeUndefined();
+  expect(parse(['browser', 'run', '--json', 'batch.js'])).toMatchObject({ positional: ['browser', 'run', 'batch.js'], json: true });
+  expect(parse(['browser', 'profiles', 'add', '--channel', 'dev']).positional).toEqual(['browser', 'profiles', 'add', '--channel', 'dev']);
+  expect(parse(['browser', 'profiles', '--json'])).toMatchObject({ positional: ['browser', 'profiles'], json: true });
 });
 
 test('browser output is agent-browser text: a check, the page reached and the dialogs answered', () => {
