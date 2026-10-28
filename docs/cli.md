@@ -655,7 +655,7 @@ in the Tasks surface and on the project board ([board.md](board.md)). An agent's
 or claimed cards, with the count in the refusal; the user's adds have no limit.
 
 `goal track` starts a reviewed goal on the agent's own thread whose objective is
-the user's last prompt (a steer included), verbatim, and a linked card on the project board. It is
+the user's last prompt (a steer included), verbatim, and, on a project thread that is not incognito, a linked card on the project board. It is
 refused unless the desktop app has the Automatic goals experiment on, while a
 goal or a loop is under way, and when that prompt already started a goal
 ([automatic goals](goals.md#automatic-goals)).

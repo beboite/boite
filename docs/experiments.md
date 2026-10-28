@@ -22,7 +22,7 @@ A finished experiment leaves this page and its switch moves to the Settings
 page it belongs to, on by default unless it changes what a familiar click does, as [chat files and previews](chat-files.md),
 [open chat links](chat-files.md#open-chat-links-in-their-apps),
 [preview comments](panel.md#preview-comments), the
-[pointer interactions](interactions.md) and [reviewed goals](goals.md) did. The agent's browser needs no switch: it runs on the machine of the
+[pointer interactions](interactions.md) did; [reviewed goals](goals.md) left with no switch. The agent's browser needs no switch: it runs on the machine of the
 conversation ([the agent's browser](browser.md)).
 
 ## Other client switches
