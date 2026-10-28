@@ -1,5 +1,5 @@
-import { afterEach, expect, test } from 'bun:test';
-import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
+import { afterEach, expect, spyOn, test } from 'bun:test';
+import { BACKGROUND_WAKE_GRACE_MS, DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
 import type { DelegationConfig, WorkflowPlan } from '@boite/contracts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
@@ -80,6 +80,43 @@ test('a step that ends its turn on background work stays running, and its final 
   const prompt = prompts.find(entry => entry.threadId === report()!.threadId)!.prompt;
   expect(prompt).toContain('CI is green on the final head.');
   expect(prompt).not.toContain('Checkpoint: waiting for CI.');
+});
+
+/** Past the wake grace of background work that ended now. */
+function afterGrace() {
+  const later = Date.now() + BACKGROUND_WAKE_GRACE_MS + 1000;
+  const clock = spyOn(Date, 'now').mockImplementation(() => later);
+  restores.push(() => clock.mockRestore());
+  return clock;
+}
+
+test('a step whose background work completes without a wake is asked for its final answer, never settled on the checkpoint', async () => {
+  const { h, threadId, run, step, childId, first, runs, prompts } = await setup();
+  // An ACP command reports its end through backgroundFinished and opens no turn.
+  first.ctx.backgroundFinished!('ci-1', 'completed');
+  const clock = afterGrace();
+  await waitFor(() => runs.get(childId) !== first, 5000);
+  clock.mockRestore();
+  expect(prompts.filter(entry => entry.threadId === childId).at(-1)!.prompt).toContain('Your background work (Pending CI) completed, but no turn of yours followed it');
+  expect(step()).toMatchObject({ status: 'running', result: null });
+  runs.get(childId)!.finish('CI passed: 12 checks green.');
+  await waitFor(() => step().status === 'done');
+  expect(step().result).toBe('CI passed: 12 checks green.');
+  const report = () => h.core.workflows.get(threadId, run.id).nodes[1]!.instances[0];
+  await waitFor(() => !!report()?.threadId && runs.has(report()!.threadId!));
+  expect(prompts.find(entry => entry.threadId === report()!.threadId)!.prompt).not.toContain('Checkpoint: waiting for CI.');
+});
+
+test('a step that cannot be asked for its final answer fails with a reason a retry clears', async () => {
+  const { h, step, first } = await setup();
+  const start = spyOn(h.core.threads, 'startTurn').mockImplementation(() => { throw new Error('account signed out'); });
+  restores.push(() => start.mockRestore());
+  first.ctx.backgroundFinished!('ci-1', 'completed');
+  const clock = afterGrace();
+  await waitFor(() => step().status === 'failed', 5000);
+  clock.mockRestore();
+  expect(step().error).toContain('completed without waking it, and asking for its final result failed: account signed out');
+  expect(step().result).toBeNull();
 });
 
 test('a step whose background work ends without waking it fails with why, and what depends on it never starts', async () => {

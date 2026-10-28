@@ -4,7 +4,7 @@ import {
   resolvePath, shapeMismatch, workflowLevels,
 } from '@boite/contracts';
 import type {
-  BackgroundWait, DelegationConfig, PauseOrigin, Principal, RpcParams, ThreadSummary, Turn, WorkflowInstance, WorkflowNode, WorkflowPlan, WorkflowRun,
+  DelegationConfig, PauseOrigin, Principal, RpcParams, ThreadSummary, Turn, WorkflowInstance, WorkflowNode, WorkflowPlan, WorkflowRun,
   WorkflowShape, WorkflowStepPlan, WorkflowStepStatus, WorkflowTemplate,
 } from '@boite/contracts';
 import type { Core } from './core.ts';
@@ -18,9 +18,8 @@ import { WorkflowLog } from './workflow-log.ts';
 import { pauseHold } from './delegation/pauses.ts';
 import { listTemplates, removeTemplate, saveTemplate } from './workflows/templates.ts';
 import { planError, text } from './workflows/validation.ts';
-import { NOT_STARTED, clip, failureNotice, runSummary, unnoticed } from './workflows/notices.ts';
-import { childEnd } from './delegation/completion.ts';
-import { INTERRUPTION_TEXT } from './delegation/interruption.ts';
+import { NOT_STARTED, clip, describe, failureNotice, runSummary, tooLong, unnoticed } from './workflows/notices.ts';
+import { askFinal, childEnd } from './delegation/completion.ts';
 import { workflowUsage } from './workflows/usage.ts';
 import { SharedWorkflowCompute } from './workflows/shared-compute.ts';
 export { registerWorkflowMethods } from './workflows/register.ts';
@@ -36,12 +35,6 @@ const BUSY = ['queued', 'running', 'waiting'];
 const ended = (status: WorkflowStepStatus) => status === 'done' || status === 'failed' || status === 'skipped' || status === 'stopped';
 const broken = (status: WorkflowStepStatus) => status === 'failed' || status === 'stopped';
 const INTERRUPTED = 'Interrupted by a core restart';
-
-function describe(value: unknown): string {
-  if (value === null || value === undefined) return 'empty';
-  if (typeof value === 'string') return `the text ${JSON.stringify(clip(value, 40))}`;
-  return typeof value === 'object' ? 'an object' : `the ${typeof value} ${String(value)}`;
-}
 
 /**
  * The core runs the graph: every step is an ordinary child thread on the
@@ -545,7 +538,7 @@ export class Workflows {
         inst.result = answer ? clip(answer, WORKFLOW_LIMITS.resultChars) : null;
         if (step.output !== undefined && inst.output === null) {
           const parsed = extractJson(answer);
-          const mismatch = parsed ? shapeMismatch(parsed.value, step.output) ?? this.tooLong(parsed.value) : 'the answer has no ```json block';
+          const mismatch = parsed ? shapeMismatch(parsed.value, step.output) ?? tooLong(parsed.value) : 'the answer has no ```json block';
           if (!mismatch) inst.output = parsed!.value;
           else if (inst.attempts < WORKFLOW_LIMITS.attempts) {
             inst.attempts += 1;
@@ -582,8 +575,18 @@ export class Workflows {
     else next();
   }
 
-  /** A checkpointed step lost the background work that was to wake it: it fails with why instead of waiting forever. */
-  waitLost(threadId: string, wait: Extract<BackgroundWait, { state: 'interrupted' }>): void {
+  /** A checkpointed step whose background work completed without waking it is asked for its final answer; it fails if none can start. */
+  unwoken(threadId: string, tasks: string): void {
+    const entry = this.stepOf.get(threadId);
+    const run = entry && !this.closed ? this.load(entry.runId) : null;
+    const inst = run && run.status !== 'stopped' ? this.instance(run, entry!.key) : undefined;
+    if (inst?.status !== 'running' || inst.threadId !== threadId) return;
+    const error = askFinal(this.core, threadId, tasks);
+    if (error !== null) this.waitLost(threadId, `completed without waking it, and asking for its final result failed: ${error}`, tasks);
+  }
+
+  /** A checkpointed step lost the background work that was to wake it: it fails with why, which a retry clears, instead of waiting forever. */
+  waitLost(threadId: string, how: string, tasks: string): void {
     const entry = this.stepOf.get(threadId);
     if (!entry || this.closed || this.core.threads.handoff.active) return;
     let failed = false;
@@ -591,7 +594,7 @@ export class Workflows {
       const inst = this.instance(run, entry.key);
       // A Stop records the run stopped before it ends that work.
       if (run.status === 'stopped' || !inst || inst.status !== 'running' || inst.threadId !== threadId) return false;
-      Object.assign(inst, { status: 'failed', error: `It was waiting on its background work (${wait.for}), which ended without waking it: ${INTERRUPTION_TEXT[wait.reason]}. Its last answer was a checkpoint, not its result.`, finishedAt: Date.now() });
+      Object.assign(inst, { status: 'failed', error: `It was waiting on its background work (${tasks}), which ${how}. Its last answer was a checkpoint, not its result.`, finishedAt: Date.now() });
       failed = true;
     });
     if (failed) this.ended(entry, threadId);
@@ -636,11 +639,6 @@ export class Workflows {
     timer.unref?.();
   }
 
-  private tooLong(value: unknown): string | null {
-    const size = JSON.stringify(value).length;
-    return size > WORKFLOW_LIMITS.outputChars ? `the output is ${size} characters as JSON; the limit is ${WORKFLOW_LIMITS.outputChars}` : null;
-  }
-
   output(threadId: string, value: unknown): { runId: string; step: string } {
     const entry = this.stepOf.get(threadId);
     if (!entry) throw refused('boite workflow output works only inside a workflow step');
@@ -648,7 +646,7 @@ export class Workflows {
     const inst = this.instance(run, entry.key);
     if (!inst || inst.status !== 'running' || inst.threadId !== threadId) throw refused(`step ${entry.key} is not running`);
     const shape: WorkflowShape | undefined = run.plan.steps.find(s => s.id === entry.key.split('#')[0])?.output;
-    const mismatch = (shape === undefined ? null : shapeMismatch(value, shape)) ?? this.tooLong(value);
+    const mismatch = (shape === undefined ? null : shapeMismatch(value, shape)) ?? tooLong(value);
     if (mismatch) throw invalidParams(`${mismatch}${shape === undefined ? '' : `; expected shape ${JSON.stringify(shape)}`}`);
     inst.output = value;
     this.save(run);

@@ -14,7 +14,7 @@ import { withLoad } from './threads/records.ts';
 import { nativeAgents } from './native-agents.ts';
 import { delegatedResultPage, DelegationWaits } from './delegation/results.ts';
 import { INTERRUPTION_TEXT } from './delegation/interruption.ts';
-import { childEnd } from './delegation/completion.ts';
+import { askFinal, childEnd, closeQuestions, unwoken } from './delegation/completion.ts';
 import { permissionWake, questionWake, worktreeLine } from './delegation/messages.ts';
 import { ChildWorktrees } from './delegation/worktrees.ts';
 import { childProject } from './delegation/projects.ts';
@@ -622,7 +622,7 @@ export class Delegation {
     // Stopping a child is final until an explicit new instruction, and ends its pull request watches; no failure retry loop.
     if (turn.status !== 'done') { this.stopped.add(thread.id); this.core.pullRequestWatches.endThread(thread.id); }
     // A child that is over leaves no question behind for its parent to find.
-    if (live.length === 0) this.closeQuestions(thread.id, `the core, since the subagent's turn ended ${turn.status}`);
+    if (live.length === 0) closeQuestions(this.core, thread.id, `the core, since the subagent's turn ended ${turn.status}`);
     const config = this.config(root.id);
     if (!config.enabled || config.paused || root.archived) return;
     const result = this.result(turn);
@@ -672,14 +672,6 @@ export class Delegation {
     const letter = JSON.parse(row.data) as AgentLetter;
     if (letter.status === 'received') this.update(letter, 'expired', 'The question closed before it was delivered');
   }
-  /** The open asynchronous questions of a delegated agent that is over or stopped. */
-  private closeQuestions(threadId: string, by: string): void {
-    for (const question of this.core.threads.listQuestions(threadId)) {
-      // A blocking one goes with its turn; only an asynchronous card outlives it.
-      if (!answerable(question) || question.async !== true) continue;
-      try { this.core.threads.skipQuestion({ threadId, questionId: question.id }, by); } catch { /* Already closed by a nested settle. */ }
-    }
-  }
   /**
    * A delegated agent's or a workflow step's background work changed. Once it
    * ended, the agent gets a moment to wake; the tick looks again when that moment is over.
@@ -695,8 +687,13 @@ export class Delegation {
     const wait = withLoad(this.core, thread).backgroundWait ?? null;
     if (wait?.state === 'waiting' && wait.until !== null) this.wakeDeadlines.set(thread.id, wait.until);
     else this.wakeDeadlines.delete(thread.id);
+    const step = this.core.workflows.owns(thread.id);
+    // Its work completed with no turn after it: the checkpoint is still all it said, so it is asked for its result.
+    const quiet = wait === null && !this.stopped.has(thread.id) ? unwoken(this.core, thread.id) : null;
+    if (quiet !== null && step) this.core.workflows.unwoken(thread.id, quiet);
+    else if (quiet !== null) { const error = askFinal(this.core, thread.id, quiet); if (error) this.core.log('warn', `delegation final result ${thread.id}: ${error}`); }
     if (wait?.state !== 'interrupted') return;
-    if (this.core.workflows.owns(thread.id)) this.core.workflows.waitLost(thread.id, wait); else this.interrupted(thread, wait);
+    if (step) this.core.workflows.waitLost(thread.id, `ended without waking it: ${INTERRUPTION_TEXT[wait.reason]}`, wait.for); else this.interrupted(thread, wait);
   }
   /** The parent learns once per turn that the wait it was told about ended without a result. */
   private interrupted(thread: ThreadSummary, wait: Extract<BackgroundWait, { state: 'interrupted' }>): void {
@@ -747,7 +744,7 @@ export class Delegation {
       this.core.activity.pauseAll(id);
       this.core.coordination.pause(id);
       if (this.core.scheduler.stop(id) || waiting) stopped++;
-      this.closeQuestions(id, 'the core, since the subagent was stopped');
+      closeQuestions(this.core, id, 'the core, since the subagent was stopped');
       this.core.threads.releaseAgent(id);
       for (const letter of this.letters(id, 'received')) this.update(letter, 'rejected', 'Agent stopped');
       for (const letter of this.letters(id, 'uncertain')) {
