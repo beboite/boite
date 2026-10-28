@@ -46,6 +46,27 @@ describe('procs', () => {
       else expect(error).toBe(protectionError);
     } finally {close.mockRestore();}
   });
+  test('a managed stop hands its root to the tree backend only while that root has not exited', async () => {
+    // On Windows the backend is taskkill /T /PID: a root that exited may have given its pid to a stranger.
+    const handed: number[] = [];
+    const platform: ProcessPlatform = { ...createPosixPlatform('linux', null), terminateUnassigned: (pid) => { handed.push(pid); } };
+    const registry = new ProcRegistry(harness.core.journal, new Bus(), platform);
+    try {
+      const ended = registry.spawn('stop-identity', process.execPath, ['-e', '0'], { agentRoot: false });
+      await ended.exited;
+      await ended.stop();
+      const piped = registry.spawnPiped('stop-identity', process.execPath, ['-e', '0'], { agentRoot: false });
+      await piped.exited;
+      await piped.stop();
+      const child = registry.spawnChild('stop-identity', process.execPath, ['-e', '0'], { agentRoot: false });
+      await new Promise((resolve) => child.once('exit', resolve));
+      await registry.stopChild(child);
+      expect(handed).toEqual([]);
+      const running = registry.spawn('stop-identity', process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { agentRoot: false });
+      await running.stop();
+      expect(handed).toEqual([running.proc.pid]);
+    } finally { await registry.close(); }
+  });
   test.skipIf(process.platform !== 'win32')('spawnChild keeps native exit usage after the node exit callback', async () => {
     const threadId = 'native-child-usage';
     const child = harness.core.procs.spawnChild(threadId, process.execPath, ['-e', 'setTimeout(() => {}, 250)'], {

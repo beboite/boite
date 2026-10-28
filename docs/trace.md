@@ -567,8 +567,11 @@ It never reaches the scope's other processes. A short system command
 (`tailscale`, the firewall, device SDK tools) runs through `runCommand`
 (`packages/core/src/run-command.ts`): at its deadline it is stopped that way
 and its pipes are given half a second to close, so a helper holding them
-cannot hold the caller. On Windows the stop goes through `taskkill /T`, which
-cannot reach a tree whose root already exited. Normal
+cannot hold the caller. On Windows the stop goes through `taskkill /T` only
+while the root has not exited: until Bun reports the exit it holds the
+process's handle, so the pid is still the root's; after it, the pid may be
+another process's, and only the root's own kill runs. A helper of a root that
+already exited is not reached there. Normal
 shutdown waits for escalation; a hard shell kill does not guarantee core exit
 on Linux/macOS. `TraceCapability` exposes OS, mode (`events`, `poll`, `none`) and
 failure notes; clients must read it before promising native capabilities.

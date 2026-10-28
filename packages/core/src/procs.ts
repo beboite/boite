@@ -270,7 +270,7 @@ export class ProcRegistry {
       return code;
     });
 
-    return { record, proc, exited, stop: this.managedStop(proc.pid, () => killBunChild(proc), exited), ...(fds ? { fds } : {}) };
+    return { record, proc, exited, stop: this.managedStop(proc.pid, () => proc.exitCode === null && proc.signalCode === null, () => killBunChild(proc), exited), ...(fds ? { fds } : {}) };
   }
 
   /**
@@ -304,7 +304,7 @@ export class ProcRegistry {
     });
 
     const exited = proc.exited.then((code) => { this.onExit(threadId, record.pid, code, undefined, record); return code; });
-    return { record, proc, exited, stop: this.managedStop(proc.pid, () => killBunChild(proc), exited) };
+    return { record, proc, exited, stop: this.managedStop(proc.pid, () => proc.exitCode === null && proc.signalCode === null, () => killBunChild(proc), exited) };
   }
 
   /**
@@ -405,7 +405,7 @@ export class ProcRegistry {
       child.once('exit', () => resolve());
       child.once('error', () => resolve());
     });
-    this.childStops.set(child, this.managedStop(record.pid, kill, exited));
+    this.childStops.set(child, this.managedStop(record.pid, () => child.exitCode === null && child.signalCode === null, kill, exited));
 
     child.once('exit', (code) => {
       this.onExit(threadId, record.pid, code, undefined, record);
@@ -424,10 +424,13 @@ export class ProcRegistry {
    * `ManagedStop` for a Bun child: its group off Windows, which outlives a
    * leader that exited; on Windows taskkill's tree first, while the root still
    * names it, then the root, since `proc.kill` reaches no grandchild there.
+   * Only while `running`, the spawner's own view: until it reports the exit it
+   * holds the process's handle, so Windows cannot give the pid to another
+   * process, and after it the pid may already be a stranger's.
    */
-  private managedStop(pid: number, kill: () => Promise<void> | undefined, exited: Promise<unknown>): ManagedStop {
+  private managedStop(pid: number, running: () => boolean, kill: () => Promise<void> | undefined, exited: Promise<unknown>): ManagedStop {
     return () => {
-      const tree = pid > 0 ? this.platform.terminateUnassigned(pid) : undefined;
+      const tree = pid > 0 && running() ? this.platform.terminateUnassigned(pid) : undefined;
       const stop = tree instanceof Promise ? tree.then(kill, kill) : kill();
       this.trackStop(stop);
       return Promise.all([stop, exited.catch(() => null)]).then(() => undefined);
