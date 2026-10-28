@@ -51,6 +51,8 @@ const TAG_REST = String.raw`(?:[^<>"'=]|=(?!\s*["'])|=\s*"[^"]*"|=\s*'[^']*'|(?<
 /** Tags whose address is fetched when the page loads. An `<a>` is not one: its link opens in the user's browser on a click. */
 const LOADING_TAG = new RegExp(`<(img|image|source|video|audio|track|script|link|use|input|iframe|embed|object)\\b${TAG_REST}`, 'gi');
 const ADDRESS = new Set(['src', 'href', 'xlink:href', 'poster', 'data']);
+/** The attributes whose value is CSS: `style` and SVG's presentation attributes that take a `url(`. */
+const CSS_ATTRIBUTE = new Set(['style', 'fill', 'stroke', 'mask', 'clip-path', 'filter', 'marker-start', 'marker-mid', 'marker-end', 'cursor']);
 const CSS_URL = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^'")\s]+))\s*\)/gi;
 const TAG = new RegExp(`<[a-z]${TAG_REST}`, 'gi');
 /** Each attribute of a tag in turn, so a name written inside another's quoted value is never read. */
@@ -160,14 +162,15 @@ export function buildView(source: string, directory: string, cwd: string, guard?
   }
   /**
    * Where a `url(` is CSS: the bodies of `<style>` elements and the values of
-   * the page's attributes (`style`, SVG's `fill` or `mask`). Script text and
-   * prose keep theirs as written. The data URL goes unquoted, which no
-   * attribute's quotes can end early.
+   * CSS attributes (`style`, SVG's `fill` or `mask`). Script text, prose, a
+   * `title` or an `onclick` keep theirs as written. The data URL goes
+   * unquoted, which no attribute's quotes can end early.
    */
   const css: [number, number][] = [];
   for (const body of styled.matchAll(STYLE_BODY)) css.push(body.indices![1]!);
   for (const tag of markup.matchAll(TAG)) {
     for (const value of tag[0].matchAll(ATTRIBUTE)) {
+      if (!CSS_ATTRIBUTE.has(value[1]!.toLowerCase())) continue;
       const [start, end] = (value.indices![2] ?? value.indices![3] ?? value.indices![4])!;
       css.push([tag.index + start, tag.index + end]);
     }
