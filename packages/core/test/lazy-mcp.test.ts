@@ -163,6 +163,39 @@ test('a session released while a request body comes starts no server', async () 
   expect(lazy.running()).toBe(0);
 });
 
+test('a server\'s stdout is read as whole lines, and a line past the bound fails the waiting calls once and stops the server', async () => {
+  const client = await harness.connect();
+  const { threadId } = await echoThread(harness, client);
+  const token = harness.core.agents.tokenFor(threadId as never);
+  const startsFile = join(harness.dataDir, 'starts.txt');
+  const lazy = harness.core.lazyMcp;
+  lazy.lineMax = 64 * 1024;
+  const server: StdioServer = { command: process.execPath, args: [FIXTURE], env: { LAZY_MCP_STARTS: startsFile, LAZY_MCP_FLOOD: String(1024 * 1024) } };
+  const { entries } = lazy.register(threadId as never, harness.dataDir, { ...process.env }, new Map([['fixture', server]]));
+  const url = entries.fixture!.url;
+  const opened = await post(url, token, { jsonrpc: '2.0', id: 0, method: 'initialize', params: INIT });
+  const session = opened.session;
+  await post(url, token, { jsonrpc: '2.0', method: 'notifications/initialized' }, session);
+
+  // A log line, then an answer in five-byte writes that cut its characters in half.
+  const chunked = await post(url, token, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'chunked', arguments: {} } }, session);
+  expect(chunked.messages).toHaveLength(1);
+  expect(chunked.messages[0]!.result.content[0].text).toBe('h\u00e9 \u{1f600} '.repeat(50));
+
+  // `roots` waits on the client; a line with no end comes while it does.
+  const asking = post(url, token, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'roots', arguments: {} } }, session);
+  await Bun.sleep(200);
+  const flooded = await post(url, token, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'flood', arguments: {} } }, session);
+  expect(flooded.messages).toHaveLength(1);
+  expect(flooded.messages[0]!.error.message).toContain('past 65536 characters');
+  const waited = (await asking).messages.filter(message => message.id === 2);
+  expect(waited).toHaveLength(1);
+  expect(waited[0]!.error.message).toContain('past 65536 characters');
+  const pid = Number(readFileSync(startsFile, 'utf8').trim());
+  await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, 5000);
+  expect(lazy.running()).toBe(0);
+}, 15000);
+
 test('only the stdio servers of the user config are taken, without the ones the project turned off or the CLI expands', () => {
   const dir = join(harness.dataDir, 'claude-config');
   mkdirSync(dir, { recursive: true });
