@@ -144,6 +144,25 @@ test('contact mail outside a shared project holds a full-permission thread until
   await waitFor(()=>JSON.stringify([heard.at(-1),heardChild.at(-1)])===JSON.stringify([{contacts:[name]},{contacts:[name]}]));
 },30000);
 
+test('the hold names only the contacts mailing outside a shared project, and trusting them keeps the shared-project boundary',async()=>{
+  const {a,b}=await pair(),c=await side('charlie');await link(c,b);
+  for(const [x,y] of [[c,b],[b,c]] as const)await x.c.call('contacts.grant',{coreId:y.id,projectId:x.p.id,readThreads:true});
+  const shared=await association(a,b);
+  for(const source of [a,c]){
+    const sent=await source.c.call('collaboration.send',{threadId:source.t.id,to:{coreId:b.id,threadId:b.t.id},text:'Ordinary contact note',requestId:'mixed'});
+    await waitFor(()=>b.h.core.coordination.get(b.t.id).messages.find(l=>l.id===sent.id)?.status==='delivered');
+    await waitFor(()=>b.h.core.threads.require(b.t.id).status==='idle');
+  }
+  const charlie=b.h.core.contacts.peers().find(peer=>peer.coreId===c.id)!.name;
+  expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).toEqual({contacts:[charlie]});
+  await b.c.call('threads.trustContactHistory',{threadId:b.t.id});
+  expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).toBeNull();
+  // The association's mail keeps its captured authority, and its live limits still apply.
+  expect(b.h.core.sharedAccess.bound(b.t.id)?.job.sharedProjectId).toBe(shared);
+  await b.c.call('sharedProjects.configure',{sharedProjectId:shared,board:true});
+  expect(()=>b.h.core.sharedAccess.assertTurn(b.t.id)).toThrow('shared file policy');
+},30000);
+
 test('SEC-01 consumed associations intersect their live authority instead of replacing earlier history',async()=>{
   const {a,b}=await pair(),c=await side('charlie');await link(c,b);
   for(const [x,y] of [[c,b],[b,c]] as const)await x.c.call('contacts.grant',{coreId:y.id,projectId:x.p.id,readThreads:true});

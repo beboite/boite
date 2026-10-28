@@ -577,9 +577,12 @@ export function threadMethods(ctx: FakeContext) {
       return { ok: true };
     },
     'threads.trustContactHistory': async (params) => {
-      const thread = ctx.thread(params.threadId);
-      thread.contactHold = null;
-      ctx.touch(thread);
+      // As the core: the thread and every conversation it continues.
+      for (let thread: Thread | undefined = ctx.thread(params.threadId); thread; thread = thread.parentThreadId ? ctx.threads.get(thread.parentThreadId) : undefined) {
+        if (!thread.contactHold) continue;
+        thread.contactHold = null;
+        ctx.touch(thread);
+      }
       return { ok: true };
     },
     'threads.subscribe': async (params) => {

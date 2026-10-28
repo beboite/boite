@@ -7,7 +7,12 @@ import {withLoad} from '../threads/records.ts';
 import type {AccessBinding} from './access-scopes.ts';
 import {incomingContact} from './human-letters.ts';
 
-interface LetterScope {bindings: AccessBinding[]; legacy: boolean; peers: string[]; trustedAt?: number}
+/**
+ * `peers` are every contact whose mail the history read; `holders` only those
+ * whose mail came outside a shared project and holds it. Scopes saved before
+ * `holders` existed hold through all their peers.
+ */
+interface LetterScope {bindings: AccessBinding[]; legacy: boolean; peers: string[]; holders?: string[]; trustedAt?: number}
 const checkedHistory = new WeakMap<Core, Set<string>>();
 
 function storedScope(core: Core, threadId: string): LetterScope | null {
@@ -21,7 +26,7 @@ function storedScope(core: Core, threadId: string): LetterScope | null {
   // grant for that history or silently resume its unrestricted native session.
   const rows = core.journal.db.query("SELECT DISTINCT json_extract(data,'$.contact.coreId') AS peer FROM coordination_letters WHERE thread_id=? AND direction='in' AND status IN ('delivered','uncertain') AND json_type(data,'$.contact.coreId')='text'").all(threadId) as {peer: string}[];
   if (!rows.length) return null;
-  const scope: LetterScope = {bindings: [], legacy: true, peers: rows.map(r => r.peer)};
+  const scope: LetterScope = {bindings: [], legacy: true, peers: rows.map(r => r.peer), holders: rows.map(r => r.peer)};
   core.journal.setSetting(`shared-file-letters:${threadId}`, scope);
   core.sharedAccess.execution.reconcile();
   return scope;
@@ -43,16 +48,17 @@ function history(core: Core, threadId: string): string[] {
 }
 
 export function letterScope(core: Core, threadId: string): LetterScope {
-  const bindings: AccessBinding[] = [], peers = new Set<string>();
+  const bindings: AccessBinding[] = [], peers = new Set<string>(), holders = new Set<string>();
   let legacy = false;
   for (const id of history(core, threadId)) {
     const scope = storedScope(core, id);
     if (!scope) continue;
     legacy ||= scope.legacy;
     for (const peer of scope.peers) peers.add(peer);
+    if (scope.legacy) for (const peer of scope.holders ?? scope.peers) holders.add(peer);
     for (const binding of scope.bindings) if (!bindings.some(b => b.job.sharedProjectId === binding.job.sharedProjectId && b.job.grantRevision === binding.job.grantRevision && b.checkoutPath === binding.checkoutPath)) bindings.push({...binding, threadId});
   }
-  return {bindings, legacy, peers: [...peers]};
+  return {bindings, legacy, peers: [...peers], holders: [...holders]};
 }
 
 /**
@@ -64,7 +70,7 @@ export function contactHold(core: Core, threadId: string): {contacts: string[]} 
   const scope = letterScope(core, threadId);
   if (!scope.legacy) return null;
   const known = core.contacts.peers();
-  return {contacts: scope.peers.map(coreId => known.find(peer => peer.coreId === coreId)?.name ?? coreId.slice(0, 8))};
+  return {contacts: scope.holders!.map(coreId => known.find(peer => peer.coreId === coreId)?.name ?? coreId.slice(0, 8))};
 }
 
 /**
@@ -77,7 +83,7 @@ export function trustLetters(core: Core, threadId: string): void {
   const ids = history(core, threadId);
   for (const id of ids) {
     const scope = storedScope(core, id);
-    if (scope?.legacy) core.journal.setSetting(`shared-file-letters:${id}`, {...scope, legacy: false, trustedAt: Date.now()});
+    if (scope?.legacy) core.journal.setSetting(`shared-file-letters:${id}`, {...scope, legacy: false, holders: [], trustedAt: Date.now()});
   }
   core.sharedAccess.execution.reconcile();
   announceHold(core, ids);
@@ -121,11 +127,16 @@ export function protectLetters(core: Core, threadId: string, letters: AgentLette
     if (['queued', 'running', 'waiting'].includes(thread.status)) throw refused('shared file policy: contact letter waits for protected native preparation after the local turn');
     core.threads.releaseAgent(threadId);
   }
+  const before = JSON.stringify(contactHold(core, threadId));
   const scope = storedScope(core, threadId) ?? {bindings: [], legacy: false, peers: []};
-  const held = scope.legacy;
+  scope.holders ??= scope.legacy ? [...scope.peers] : [];
   for (const letter of external) {
     if (!scope.peers.includes(letter.contact!.coreId)) scope.peers.push(letter.contact!.coreId);
-    if (!letter.sharedProjectId) {scope.legacy = true; continue;}
+    if (!letter.sharedProjectId) {
+      scope.legacy = true;
+      if (!scope.holders.includes(letter.contact!.coreId)) scope.holders.push(letter.contact!.coreId);
+      continue;
+    }
     // This validates the current association and canonical sender, even on a resumed inbox.
     const peer = core.contacts.peers().find(p => p.coreId === letter.from.coreId);
     if (!peer) throw refused('letter.from: expected the current contact route');
@@ -142,6 +153,6 @@ export function protectLetters(core: Core, threadId: string, letters: AgentLette
   }
   core.journal.setSetting(`shared-file-letters:${threadId}`, scope);
   core.sharedAccess.execution.reconcile();
-  if (scope.legacy && !held) announceHold(core, [threadId]);
+  if (JSON.stringify(contactHold(core, threadId)) !== before) announceHold(core, [threadId]);
   core.sharedAccess.assertTurn(threadId);
 }
