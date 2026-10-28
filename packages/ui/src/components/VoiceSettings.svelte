@@ -121,6 +121,7 @@
 
   async function addLink(event: SubmitEvent) {
     event.preventDefault();
+    if (off) return;
     const url = link.trim();
     if (url && await manage('speech.install', { url })) link = '';
   }
@@ -264,7 +265,7 @@
         <form class="switch-row link" onsubmit={addLink}>
           <span class="text ui-label-box" id="voice-link-label"><span class="ui-label">{strings.speech.link}</span><InfoTip topic={strings.speech.link} text={strings.speech.linkHint} /></span>
           <div class="field">
-            <input type="url" inputmode="url" spellcheck="false" autocomplete="off" data-testid="voice-model-url" aria-labelledby="voice-link-label" placeholder={strings.speech.linkPlaceholder} bind:value={link} />
+            <input type="url" inputmode="url" spellcheck="false" autocomplete="off" data-testid="voice-model-url" aria-labelledby="voice-link-label" placeholder={strings.speech.linkPlaceholder} disabled={off} bind:value={link} />
             <button type="submit" class="small" data-testid="voice-model-add" disabled={busy || off || status.installing || !link.trim()}><span class="ui-label">{strings.speech.add}</span></button>
           </div>
         </form>

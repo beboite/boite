@@ -77,7 +77,9 @@ test('the machine location per platform, and BOITE_POLICY_FILE only when the mac
   // on Windows it is the machine's real one, which a test never writes.
   if (process.platform !== 'win32') {
     const cwd = process.cwd();
-    process.chdir(join(programData, '..'));
+    const sandbox = mkdtempSync(join(tmpdir(), 'boite-policy-cwd-'));
+    cleanups.push(() => rmSync(sandbox, { recursive: true, force: true }));
+    process.chdir(sandbox);
     cleanups.push(() => process.chdir(cwd));
     const fallback = machinePolicyFile('win32', {});
     mkdirSync(join(fallback, '..'), { recursive: true });
@@ -224,6 +226,16 @@ test('updates.app: check locks the automatic install off and auto locks it on', 
   policy.write({ updates: { app: 'auto' } });
   await client.call('policy.get', {});
   expect((await client.call('settings.get', {})).autoInstallUpdates).toBe(true);
+  // A patch that repeats the held value is not the user's choice: lifting the policy gives back the saved one.
+  policy.remove();
+  await client.call('policy.get', {});
+  await client.call('settings.set', { autoInstallUpdates: false });
+  policy.write({ updates: { app: 'auto' } });
+  await client.call('policy.get', {});
+  expect((await client.call('settings.set', { autoInstallUpdates: true })).autoInstallUpdates).toBe(true);
+  policy.remove();
+  await client.call('policy.get', {});
+  expect((await client.call('settings.get', {})).autoInstallUpdates).toBe(false);
 });
 
 test('updates.server: no release check and no install when off', async () => {
@@ -297,6 +309,10 @@ test('gateway: false refuses the gateway and turns a saved one off without forge
   await client.call('policy.get', {});
   await refusedBy(client.call('subscriptionProxy.configure', { subscriptionProxy: { ...PROXY, enabled: false }, key: 'douane-policy-test-token' }), 'gateway');
   expect((await client.call('subscriptionProxy.configure', { subscriptionProxy: { ...PROXY, enabled: false } })).subscriptionProxy?.enabled).toBe(false);
+  // That save matches what the policy holds, so the saved switch stays on for when it lifts.
+  policy.remove();
+  await client.call('policy.get', {});
+  expect((await client.call('settings.get', {})).subscriptionProxy?.enabled).toBe(true);
 });
 
 test('gateway.allowedBaseUrls: only a listed address may serve', async () => {

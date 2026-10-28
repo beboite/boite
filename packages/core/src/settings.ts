@@ -97,7 +97,7 @@ export class SettingsStore {
     const saved = this.stored();
     const previous = this.overlay(saved);
     const checked = keepLaterFavorites(previous, this.normalize(patch));
-    const kept: Settings = { ...saved, ...checked };
+    const kept: Settings = { ...saved, ...this.withoutHeld(saved, checked) };
     const next = this.overlay(kept);
     this.core.journal.append({ type: 'settings.changed', threadId: null, version: 1, payload: next }, () => {
       // Private credentials share the transaction, never its public event payload.
@@ -129,6 +129,21 @@ export class SettingsStore {
     }
     this.core.group.settingsChanged();
     return next;
+  }
+
+  /** A value the policy holds anyway is not the user's choice: the saved one stays for when the policy lifts. */
+  private withoutHeld(saved: Settings, patch: Partial<Settings>): Partial<Settings> {
+    const held = this.core.policy.lockedSettings(saved);
+    const kept = { ...patch };
+    for (const key of ['listenOnLan', 'autoInstallUpdates', 'autoUpdateHarnesses', 'groupThreads', 'groupBots'] as const) {
+      if (key in held) Reflect.deleteProperty(kept, key);
+    }
+    const proxy = kept.subscriptionProxy;
+    // Switched off where the policy would hold it off anyway: the saved switch stays on.
+    if (proxy && !proxy.enabled && saved.subscriptionProxy?.enabled && this.core.policy.lockedSettings({ ...saved, subscriptionProxy: { ...proxy, enabled: true } }).subscriptionProxy) {
+      kept.subscriptionProxy = { ...proxy, enabled: true };
+    }
+    return kept;
   }
 
   /** The admin policy changed what it locks: everything that follows a setting hears of the new value. */

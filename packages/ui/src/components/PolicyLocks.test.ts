@@ -252,6 +252,8 @@ test('dictation held to local keeps the cloud engine and its fallback off; dicta
   expect(byId<HTMLButtonElement>('voice-install')?.disabled).toBe(true);
   expect(byId<HTMLInputElement>('voice-executable')?.disabled).toBe(true);
   expect(byId<HTMLInputElement>('voice-model-path')?.disabled).toBe(true);
+  // Enter in the link field submits the form even when the Add button is held.
+  expect(byId<HTMLInputElement>('voice-model-url')?.disabled).toBe(true);
   await unmount(mounted!, { outro: false });
 
   // A cloud engine saved before the policy: its provider and keys are held too.
