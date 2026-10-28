@@ -2,6 +2,7 @@ import { RpcErrorCode, PREVIEW_REFERENCES_PER_TURN, previewReferencesError, thre
 import { untrack } from 'svelte';
 import type { Attachment, ExperimentId, Message, MessageId, MessagePart, SentFrom, ThreadId, ThreadSummary, Turn, TurnInFlightData } from '@boite/contracts';
 import { drainQueue, SENDING_PREFIX, sentPrompt } from '../composer-queue';
+import { checkpoint } from '../composer-history';
 import { restorePreviewMentions } from '../preview-mentions';
 import { activityCommand, isActivityCommand } from '../activity-command';
 import { RpcFailure, readyAgain, wasUnanswered, type Client } from '../client';
@@ -242,13 +243,15 @@ export class Composer {
   /**
    * A sent message back in its thread's box to be edited: its words, pictures,
    * files and page references, marked as the message the next send replaces.
-   * Nothing leaves the thread until that send; the box's own draft gives way.
+   * Nothing leaves the thread until that send; the box's own draft gives way,
+   * one undo step back.
    */
   startEdit(threadId: string, message: Message): void {
     const prompt = sentPrompt(message);
     const restored = restorePreviewMentions(prompt.text, prompt.previewReferences);
     this.composerStates[threadId] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };
     const state = this.composerStates[threadId]!;
+    checkpoint(state);
     state.text = restored.text;
     state.previewReferences = restored.references;
     state.attachments = prompt.attachments;
@@ -328,6 +331,28 @@ export class Composer {
       ]
     };
     return this.staged[key]!;
+  }
+
+  /**
+   * The prompt that left `key`'s box and that the core has not answered yet,
+   * as the journal keeps it until it does: the page can die while a long
+   * prompt and its pictures go up, and by then the box is empty. A thread's
+   * is its outbox entry under the request id `turns.start` carries, so a core
+   * that already took it answers with that turn. A draft's has no request:
+   * its conversation may not exist, and it waits for the user. Neither has an
+   * edit whose rewind is under way, which waits as the edit it was (`editing`).
+   */
+  inFlight(key: string): (QueuedPrompt & { editing?: MessageId }) | null {
+    const local = this.staged[key];
+    if (!local || !local.turnId.startsWith(SENDING_PREFIX)) return null;
+    const prompt = sentPrompt(local);
+    const entry = { id: local.id.slice(SENDING_PREFIX.length), text: prompt.text, attachments: prompt.attachments, ...(prompt.previewReferences.length ? { previewReferences: prompt.previewReferences } : {}) };
+    if (key === DRAFT_STASH_KEY) return entry;
+    const editing = this.ctx.threads.rewinding[key];
+    if (editing) return { ...entry, editing };
+    const pending = this.pendingSends.get(key);
+    const id = pending && pending.prompt === prompt.text ? pending.id : entry.id;
+    return { ...entry, id, request: { id, choice: null, queuedAt: local.createdAt, sent: true } };
   }
 
   /** The send failed or was held: its local row leaves, wherever the thread's creation moved it. */
@@ -710,8 +735,12 @@ export class Composer {
     }
     let pending = this.pendingSends.get(threadId);
     if (!pending || pending.selectionVersion !== selectionVersion || pending.prompt !== prompt || JSON.stringify(pending.previewReferences) !== JSON.stringify(previewReferences) || pending.attachments.length !== attachments.length || pending.attachments.some((a, i) => a.kind !== attachments[i]?.kind || a.data !== attachments[i]?.data || a.mimeType !== attachments[i]?.mimeType || a.name !== attachments[i]?.name)) {
-      pending = { id: secureId(), prompt, attachments: [...attachments], previewReferences: JSON.parse(JSON.stringify(previewReferences)) as PreviewReference[], selectionVersion };
+      // The id the journal already keeps for this prompt (`inFlight`), so a restart asks under the one it went out with.
+      const local = this.staged[threadId];
+      const staged = !pending && local?.turnId.startsWith(SENDING_PREFIX) && sentPrompt(local).text === prompt ? local.id.slice(SENDING_PREFIX.length) : null;
+      pending = { id: staged ?? secureId(), prompt, attachments: [...attachments], previewReferences: JSON.parse(JSON.stringify(previewReferences)) as PreviewReference[], selectionVersion };
       this.pendingSends.set(threadId, pending);
+      this.ctx.drafts.persist(threadId);
     }
     return pending;
   }

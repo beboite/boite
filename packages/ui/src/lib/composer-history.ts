@@ -9,13 +9,15 @@ import { settleIn } from './composer-images';
  * used to lose a prompt for good. Each composer state keeps its own steps here,
  * the draft's included, and they follow the state object when the draft
  * becomes a thread. A step is the state before an edit: text, the same
- * Attachment objects, page references and selection.
+ * Attachment objects, page references, selection and the sent message the box
+ * was editing, so undoing an Edit gives back a plain draft, not an edit of it.
  */
 export interface ComposerSnapshot {
   text: string;
   attachments: Attachment[];
   previewReferences: PreviewReference[];
   selection: { start: number; end: number };
+  editing: string | null;
 }
 
 /** Typing that grows one step, or an edit that is a step on its own. */
@@ -55,12 +57,13 @@ export function snapshotOf(state: ComposerState, selection?: { start: number; en
     text: state.text,
     attachments: [...state.attachments],
     previewReferences: [...(state.previewReferences ?? [])],
-    selection: { start: at.start, end: at.end }
+    selection: { start: at.start, end: at.end },
+    editing: state.editing ?? null
   };
 }
 
 function same(a: ComposerSnapshot, b: ComposerSnapshot): boolean {
-  return a.text === b.text &&
+  return a.text === b.text && a.editing === b.editing &&
     a.attachments.length === b.attachments.length && a.attachments.every((item, index) => item === b.attachments[index]) &&
     a.previewReferences.length === b.previewReferences.length && a.previewReferences.every((item, index) => item === b.previewReferences[index]);
 }
