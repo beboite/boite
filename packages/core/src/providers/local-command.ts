@@ -94,7 +94,8 @@ export function registerLocalCommands(core: Core, reload: () => Promise<Provider
 
     mkdirSync(dir, { recursive: true });
     const partial = `${file}.${process.pid}.part`;
-    writeFileSync(partial, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+    // Owner-only: the file holds the environment values in plain text.
+    writeFileSync(partial, `${JSON.stringify(raw, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
     renameSync(partial, file);
     const list = await reload();
     if (!list.loaded.some((entry) => entry.id === id)) {

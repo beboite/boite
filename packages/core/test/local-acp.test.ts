@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
@@ -54,6 +54,8 @@ test('a local ACP command becomes a provider that runs a turn with its literal a
   expect(updates.at(-1)?.loaded.some((entry) => entry.id === 'local-fake')).toBe(true);
   const file = join(harness.dataDir, 'providers', 'local-fake.json');
   expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ id: 'local-fake', protocol: 'acp', auth: { kind: 'none' } });
+  // Its environment values are plain text: only the owner reads the file.
+  if (process.platform !== 'win32') expect(statSync(file).mode & 0o777).toBe(0o600);
 
   // No login of its own: the default account is the agent's own configuration.
   const account = (await client.call('accounts.list', {})).find((entry) => entry.providerId === 'local-fake');
