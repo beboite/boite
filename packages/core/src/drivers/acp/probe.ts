@@ -165,9 +165,10 @@ export interface ProbeEntry {
   /**
    * The agent's own model, only ever from a fresh `session/new` answer: a
    * prepared session's catalog may be a loaded one, whose current model is
-   * where that session was left.
+   * where that session was left. `undefined` until one was read; null for an
+   * agent that lists no models.
    */
-  ownModel: string | null;
+  ownModel: string | null | undefined;
 }
 
 /** The list with one model's effort scale written in; a scale of null leaves the model as it was. */

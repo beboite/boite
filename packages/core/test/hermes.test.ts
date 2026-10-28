@@ -332,6 +332,24 @@ describe('hermes', () => {
     expect(loggedLines('prompt ').at(-1)?.split(' ')[1]).toBe(QWEN);
   });
 
+  for (const probe of ['kept', 'dropped'] as const) test(`a load answered without models goes back to the agent own model, the account probe ${probe}`, async () => {
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const { threadId } = await hermesThread(client, LLAMA);
+    await runTurn(client, threadId, 'first');
+    await waitFor(() => harness?.core.procs.liveCount(threadId) === 0);
+    if (probe === 'dropped') {
+      const descriptorPath = join(harness?.dataDir ?? '', 'providers', 'hermes-fake.json');
+      writeFileSync(descriptorPath, readFileSync(descriptorPath, 'utf8').replace('"Fake Hermes"', '"Fake Hermes reloaded"'), 'utf8');
+      await client.call('providers.reload', {});
+    }
+
+    process.env['HERMES_FAKE_LOAD_BARE'] = '1';
+    await client.call('threads.update', { threadId, model: 'default' });
+    await runTurn(client, threadId, 'second');
+    expect(loggedLines('set_model ')).toEqual([LLAMA, QWEN]);
+    expect(loggedLines('prompt ').at(-1)?.split(' ')[1]).toBe(QWEN);
+  });
+
   test('a load answered without models still moves the session to the thread model', async () => {
     const client = await startCore({ warmProcessMinutes: 0 });
     const { threadId } = await hermesThread(client, LLAMA);

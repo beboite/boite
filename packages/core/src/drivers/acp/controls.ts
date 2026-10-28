@@ -115,6 +115,11 @@ export class SessionControls {
    */
   private ownListedModel: string | null = null;
   /**
+   * Whether `ownListedModel` was read at all: null once read is an agent that
+   * lists no models, null before is a question a throwaway session answers.
+   */
+  private ownListedModelRead = false;
+  /**
    * The options came from this session's own answers, not from another
    * session's seed: only then does a current value say what this one is on.
    */
@@ -134,9 +139,14 @@ export class SessionControls {
     this.noteOwnModel(options);
   }
 
-  /** The account's probed default, for a process whose first session is a load. */
-  seedOwnListedModel(modelId: string | null): void {
-    if (this.ownListedModel === null && modelId !== null) this.ownListedModel = modelId;
+  /**
+   * What a fresh `session/new` of the account said the agent's own model is,
+   * for a process whose first session is a load; `undefined` when nothing read it.
+   */
+  seedOwnListedModel(modelId: string | null | undefined): void {
+    if (this.ownListedModelRead || modelId === undefined) return;
+    this.ownListedModel = modelId;
+    this.ownListedModelRead = true;
   }
 
   /**
@@ -148,7 +158,7 @@ export class SessionControls {
   }
 
   knowsOwnListedModel(): boolean {
-    return this.ownListedModel !== null;
+    return this.ownListedModelRead;
   }
 
   /** The model option's value in a `session/new` answer, the first one kept. */
@@ -211,7 +221,10 @@ export class SessionControls {
     }
     const listed = agentModelsOf(answer);
     if (listed !== null) this.agentModels = listed;
-    if (fresh && listed !== null) this.ownListedModel = listed.currentModelId;
+    if (fresh) {
+      this.ownListedModel = listed?.currentModelId ?? null;
+      this.ownListedModelRead = true;
+    }
   }
 
   /**
@@ -230,8 +243,9 @@ export class SessionControls {
   async applyModel(ctx: SessionContext): Promise<void> {
     const grok = isGrok(ctx.provider);
     // An agent with a `model` option takes it in `applyConfig`, and one that
-    // lists no models has nothing to match the thread's model against.
-    if (!grok && (this.agentModels === null || categoryOption(this.configOptions, 'model') !== null)) return;
+    // lists no models has nothing to match the thread's model against. A load
+    // may omit the list: a known own model still says the agent has one.
+    if (!grok && ((this.agentModels === null && this.ownListedModel === null) || categoryOption(this.configOptions, 'model') !== null)) return;
     const { agent, sessionId } = this.target();
     if (agent === null || sessionId === null) return;
 

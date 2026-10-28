@@ -132,7 +132,7 @@ export class AcpSession {
     private readonly memory: AcpMemory,
     private readonly onEnded: (session: AcpSession) => void,
     /** The config options a session answered with, for the next session of the account to start from. */
-    private readonly onOptions: (options: SessionConfigOption[]) => void = () => undefined,
+    private readonly onOptions: (options: SessionConfigOption[], ownModel?: string | null) => void = () => undefined,
   ) {}
 
   async catalog(ctx: ProbeContext): Promise<ModelInfo[] | null> {
@@ -168,16 +168,19 @@ export class AcpSession {
    * The thread's model, options and mode, sent at the start of the process and
    * of every turn. A thread going back to the agent's own model on an agent
    * that lists models needs to know which one that is: a `session/load`
-   * reports the model the session was left on, and a reloaded descriptor
-   * drops the account's probe. Then one throwaway session says it, on a cold
-   * start or a warm turn alike.
+   * reports the model the session was left on, or no models at all, and a
+   * reloaded descriptor drops the account's probe. Then one throwaway session
+   * says it, on a cold start or a warm turn alike, and the account keeps it.
    */
   private async applyControls(ctx: SessionContext): Promise<void> {
     const agent = this.agent;
     if (agent !== null && !isGrok(ctx.provider) && ctx.thread.model === AGENT_OWN_MODEL
-      && this.controls.hasModels() && !this.controls.hasOptions() && !this.controls.knowsOwnListedModel()) {
+      && (this.controls.hasModels() || this.loaded) && !this.controls.hasOptions() && !this.controls.knowsOwnListedModel()) {
       const discovered = await agent.request('session/new', { cwd: ctx.thread.cwd, mcpServers: [] });
-      this.controls.seedOwnListedModel(agentModelsOf(discovered)?.currentModelId ?? null);
+      const listed = agentModelsOf(discovered);
+      this.controls.seedOwnListedModel(listed?.currentModelId ?? null);
+      this.controls.seedListedModels(listed);
+      this.onOptions(discovered.configOptions ?? [], listed?.currentModelId ?? null);
       await discardSession(agent, this.canDelete, discovered.sessionId);
     }
     await this.controls.applyModel(ctx);
@@ -185,7 +188,7 @@ export class AcpSession {
     await this.controls.applyMode(ctx);
   }
 
-  seedConfig(options: SessionConfigOption[], ownModel: string | null = null): void {
+  seedConfig(options: SessionConfigOption[], ownModel?: string | null): void {
     this.controls.seed(options);
     this.controls.seedOwnListedModel(ownModel);
   }
@@ -639,7 +642,7 @@ export class AcpSession {
         const discoveredModels = agentModelsOf(discovered);
         this.seedConfig(discovered.configOptions ?? [], discoveredModels?.currentModelId ?? null);
         this.controls.seedListedModels(discoveredModels);
-        this.onOptions(discovered.configOptions ?? []);
+        this.onOptions(discovered.configOptions ?? [], discoveredModels?.currentModelId ?? null);
         await discardSession(connection.agent, this.canDelete, discovered.sessionId);
       }
       return;
@@ -659,7 +662,7 @@ export class AcpSession {
     this.sessionId = created.sessionId;
     this.controls.noteSession(created.modes, created.configOptions ?? null, created, true);
     this.controls.noteOwnModel(created.configOptions ?? null);
-    this.onOptions(created.configOptions ?? []);
+    this.onOptions(created.configOptions ?? [], agentModelsOf(created)?.currentModelId ?? null);
   }
 
   private watch(child: SpawnedChild, ctx: SessionContext): void {
