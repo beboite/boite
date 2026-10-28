@@ -90,6 +90,8 @@ export class AcpSession {
   private canDelete = false;
   /** This process resumed the thread's session with `session/load`, rather than creating one. */
   private loaded = false;
+  /** This process already opened the session that reads the agent's own model: a refusal is not asked again. */
+  private ownModelAsked = false;
   /**
    * The thread's session this process could not load and replaced with a new
    * one: the turn that asked for it is sent the conversation so far.
@@ -175,13 +177,21 @@ export class AcpSession {
   private async applyControls(ctx: SessionContext): Promise<void> {
     const agent = this.agent;
     if (agent !== null && !isGrok(ctx.provider) && ctx.thread.model === AGENT_OWN_MODEL
-      && (this.controls.hasModels() || this.loaded) && !this.controls.hasModelOption() && !this.controls.knowsOwnListedModel()) {
-      const discovered = await agent.request('session/new', { cwd: ctx.thread.cwd, mcpServers: [] });
-      const listed = agentModelsOf(discovered);
-      this.controls.seedOwnListedModel(listed?.currentModelId ?? null);
-      this.controls.seedListedModels(listed);
-      this.onOptions(discovered.configOptions ?? [], listed?.currentModelId ?? null);
-      await discardSession(agent, this.canDelete, discovered.sessionId);
+      && (this.controls.hasModels() || this.loaded) && !this.controls.hasModelOption() && !this.controls.knowsOwnListedModel() && !this.ownModelAsked) {
+      this.ownModelAsked = true;
+      // Only a lookup: a refusal leaves the session where it is, as a refused
+      // `set_model` does, and the next process asks again.
+      const discovered = await agent.request('session/new', { cwd: ctx.thread.cwd, mcpServers: [] }).catch((error: unknown) => {
+        ctx.log('warn', `acp: ${ctx.provider.id} refused the session that reads its own model: ${messageOf(error)}`);
+        return null;
+      });
+      if (discovered !== null) {
+        const listed = agentModelsOf(discovered);
+        this.controls.seedOwnListedModel(listed?.currentModelId ?? null);
+        this.controls.seedListedModels(listed);
+        this.onOptions(discovered.configOptions ?? [], listed?.currentModelId ?? null);
+        await discardSession(agent, this.canDelete, discovered.sessionId);
+      }
     }
     await this.controls.applyModel(ctx);
     await this.controls.applyConfig(ctx);

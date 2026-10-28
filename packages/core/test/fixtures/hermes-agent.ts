@@ -20,6 +20,7 @@
  * `HERMES_FAKE_FORGET=1` makes it a Hermes whose `state.db` lost every session.
  * `HERMES_FAKE_LOAD_BARE=1` makes its `session/load` answer the modes alone,
  * `HERMES_FAKE_LOAD_OPTION=1` adds a config option that is not the model.
+ * `HERMES_FAKE_NEW_FAIL=1` refuses every `session/new`.
  */
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -99,6 +100,10 @@ const app = agent({ name: 'hermes-fake' })
     } as never;
   })
   .onRequest('session/new', () => {
+    if (process.env['HERMES_FAKE_NEW_FAIL'] === '1') {
+      log('new-refused');
+      throw RequestError.internalError({}, 'no session for you');
+    }
     const sessionId = crypto.randomUUID();
     const state = { model: AVAILABLE[0]!.modelId, mode: 'default' };
     save(sessionId, state);

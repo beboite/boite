@@ -29,7 +29,7 @@ const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwA
 let harness: TestCore | null = null;
 let logFile = '';
 /** The variables these tests set, as the process had them: a later test file gets them back. */
-const TOUCHED = ['HERMES_FAKE_LOG', 'HERMES_FAKE_FORGET', 'HERMES_FAKE_LOAD_BARE', 'HERMES_FAKE_LOAD_OPTION', 'OPENAI_API_KEY', 'LOCALAPPDATA'];
+const TOUCHED = ['HERMES_FAKE_LOG', 'HERMES_FAKE_FORGET', 'HERMES_FAKE_LOAD_BARE', 'HERMES_FAKE_LOAD_OPTION', 'HERMES_FAKE_NEW_FAIL', 'OPENAI_API_KEY', 'LOCALAPPDATA'];
 const outer = new Map(TOUCHED.map((name) => [name, process.env[name]]));
 
 afterEach(async () => {
@@ -309,6 +309,23 @@ describe('hermes', () => {
     await runTurn(client, threadId, 'second');
     expect(loggedLines('set_model ')).toEqual([LLAMA, QWEN]);
     expect(loggedLines('prompt ').at(-1)?.split(' ')[1]).toBe(QWEN);
+  });
+
+  test('a refused lookup of the agent own model leaves the loaded session usable', async () => {
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const { threadId } = await hermesThread(client, LLAMA);
+    await runTurn(client, threadId, 'first');
+    await waitFor(() => harness?.core.procs.liveCount(threadId) === 0);
+    const descriptorPath = join(harness?.dataDir ?? '', 'providers', 'hermes-fake.json');
+    writeFileSync(descriptorPath, readFileSync(descriptorPath, 'utf8').replace('"Fake Hermes"', '"Fake Hermes reloaded"'), 'utf8');
+    await client.call('providers.reload', {});
+
+    process.env['HERMES_FAKE_NEW_FAIL'] = '1';
+    await client.call('threads.update', { threadId, model: 'default' });
+    await runTurn(client, threadId, 'second');
+    expect(loggedLines('new-refused')).toHaveLength(1);
+    expect(loggedLines('loaded:')).toHaveLength(1);
+    expect(loggedLines('prompt ').at(-1)?.split(' ')[1]).toBe(LLAMA);
   });
 
   test('with no probe left, a warm process going back to the agent own model reads it the same way', async () => {
