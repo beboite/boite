@@ -5,6 +5,7 @@ import { basename } from 'node:path';
 import type { Core } from './core.ts';
 import { refused } from './errors.ts';
 import type { SpawnedProcess } from './procs.ts';
+import { EngineSlot } from './speech-engine.ts';
 
 /**
  * Half the logical processors, never fewer than whisper's own default of
@@ -36,6 +37,8 @@ interface Running {
   ready: Promise<void>;
   alive: boolean;
   loaded: boolean;
+  /** Stopped by the core: replaced, idle or closed. */
+  halted: boolean;
   /** The last line whisper-server wrote that names an error, never a transcript. */
   failure: string;
 }
@@ -51,7 +54,11 @@ export class SpeechServer {
   idleMs = SPEECH_IDLE_MS;
   /** How long a model may take to load. A test seam. */
   readyMs = 120_000;
-  private current: Running | null = null;
+  private readonly slot = new EngineSlot<Running>(async (running) => {
+    running.alive = false;
+    running.halted = true;
+    await running.child.stop();
+  });
   private idle: ReturnType<typeof setTimeout> | undefined;
   /** Inference requests still waiting for their answer. */
   private inflight = 0;
@@ -59,7 +66,7 @@ export class SpeechServer {
   constructor(private readonly core: Core, private readonly cwd: string) {}
 
   /** A server is up with its model loaded. */
-  get running(): boolean { return this.current?.alive === true && this.current.loaded; }
+  get running(): boolean { return this.slot.current?.alive === true && this.slot.current.loaded; }
 
   /**
    * Starts the server for this model unless it runs already, and resolves once
@@ -68,13 +75,11 @@ export class SpeechServer {
   async ensure(command: string[], model: string): Promise<string> {
     const key = JSON.stringify([command, model]);
     this.touch();
-    if (this.current && (this.current.key !== key || !this.current.alive)) await this.stop();
-    this.current ??= this.launch(command, model, key);
-    const running = this.current;
+    const running = await this.slot.acquire(key, () => this.launch(command, model, key), engine => engine.alive);
     try {
       await running.ready;
     } catch (error) {
-      if (this.current === running) this.current = null;
+      await this.slot.stop(running);
       throw error;
     }
     // The idle wait counts from the loaded model, not from the start of a load.
@@ -87,21 +92,18 @@ export class SpeechServer {
     clearTimeout(this.idle);
     this.idle = setTimeout(() => {
       // A model still loading is bounded by `readyMs`, a request by its own
-      // signal: each starts the wait again when it ends.
-      if (this.inflight > 0 || (this.current?.alive && !this.current.loaded)) return;
-      void this.stop();
+      // signal: each starts the wait again when it ends. Only the engine idle
+      // now is stopped, never one a start waiting for its turn brings.
+      const engine = this.slot.current;
+      if (this.inflight > 0 || engine === null || (engine.alive && !engine.loaded)) return;
+      void this.slot.stop(engine);
     }, this.idleMs);
     if (typeof this.idle.unref === 'function') this.idle.unref();
   }
 
   async stop(): Promise<void> {
     clearTimeout(this.idle);
-    const running = this.current;
-    this.current = null;
-    if (!running) return;
-    running.alive = false;
-    this.core.procs.killTree(running.id);
-    await running.child.exited;
+    await this.slot.stop();
   }
 
   async transcribe(command: string[], model: string, audio: Uint8Array, options: { language: string; audioCtx: number; signal: AbortSignal }): Promise<{ text: string; language?: string }> {
@@ -124,7 +126,7 @@ export class SpeechServer {
         response = await fetch(`${base}/inference`, { method: 'POST', body: form, signal: options.signal });
       } catch (error) {
         options.signal.throwIfAborted();
-        throw refused(`speech: whisper-server stopped answering${this.current ? '' : '; it will start again on the next dictation'} (${error instanceof Error ? error.message : String(error)})`);
+        throw refused(`speech: whisper-server stopped answering${this.slot.current ? '' : '; it will start again on the next dictation'} (${error instanceof Error ? error.message : String(error)})`);
       }
       try { body = await response.json(); } catch { body = null; }
     } finally {
@@ -152,11 +154,11 @@ export class SpeechServer {
       ...prefix, '-m', model, '-t', String(speechThreads()), '-ng', '-nt',
       '--host', '127.0.0.1', '--port', String(port), '--request-path', path,
     ], { cwd: this.cwd });
-    const running: Running = { id, key, base: `http://127.0.0.1:${port}${path}`, child, ready: Promise.resolve(), alive: true, loaded: false, failure: '' };
+    const running: Running = { id, key, base: `http://127.0.0.1:${port}${path}`, child, ready: Promise.resolve(), alive: true, loaded: false, halted: false, failure: '' };
     // Both pipes are drained or the server blocks on a full one; only an error line is kept.
     void drain(child.proc.stdout, () => {});
     void drain(child.proc.stderr, line => { if (/error|failed|couldn't/i.test(line)) running.failure = line.trim().slice(0, 300); });
-    const exited = child.exited.then(code => { running.alive = false; if (this.current === running) this.current = null; return code; });
+    const exited = child.exited.then(code => { running.alive = false; this.slot.vacate(running); return code; });
     running.ready = this.waitReady(running, exited, model).then(() => { running.loaded = true; });
     return running;
   }
@@ -166,6 +168,7 @@ export class SpeechServer {
     let stopped: number | null = null;
     void exited.then(code => { stopped = code; });
     for (;;) {
+      if (running.halted) throw refused(`speech: ${basename(model)} was unloaded before it loaded; the voice settings changed or another model started`);
       if (stopped !== null || !running.alive) {
         await Bun.sleep(20); // the last stderr line lands after the exit
         throw refused(`speech: whisper-server could not load ${basename(model)}${running.failure ? ` (${running.failure})` : ''}; check the model in Voice settings`);
@@ -175,8 +178,8 @@ export class SpeechServer {
         await response.body?.cancel();
         if (response.ok) return;
       } catch { /* not listening yet: the model loads before the port opens */ }
+      // The caller stops it, after which another start is admitted.
       if (Date.now() > deadline) {
-        this.core.procs.killTree(running.id);
         throw refused(`speech: whisper-server did not load ${basename(model)} within ${Math.round(this.readyMs / 1000)} s`);
       }
       await Bun.sleep(25);
