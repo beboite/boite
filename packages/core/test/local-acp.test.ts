@@ -40,12 +40,14 @@ test('a local ACP command becomes a provider that runs a turn with its literal a
   const updates: RpcEvents['providers.updated'][] = [];
   client.on('providers.updated', (payload) => updates.push(payload));
 
+  // A permissive umask, so the mode check below fails on a file written without its own mode.
+  const umask = process.umask(0o022);
   const added = await client.call('providers.addLocal', {
     name: '  Local Fake  ',
     command: 'bun',
     args: [FAKE_AGENT, 'two words', '$HOME', '--profile=acp'],
     env: { ACP_FAKE_LOG: logFile, ACP_FAKE_ARGV: '1' },
-  });
+  }).finally(() => process.umask(umask));
   expect(added.providerId).toBe('local-fake');
   expect(added.rejected).toEqual([]);
   expect(added.loaded.find((entry) => entry.id === 'local-fake')).toMatchObject({
