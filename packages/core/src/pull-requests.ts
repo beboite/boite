@@ -150,20 +150,37 @@ export interface MergedPrProof {
   mergedAt: string;
 }
 
+/** A remote URL's `host` and `owner/name`, HTTPS or SCP-style; null when it names neither. */
+function remoteIdentity(raw: string): { host: string; path: string } | null {
+  let hostname = '', path = '';
+  try { const url = new URL(raw); hostname = url.hostname; path = url.pathname; }
+  catch { const match = /^(?:[^@/\s]+@)?([^:/\s]+):(.+)$/.exec(raw); if (match) { hostname = match[1]!; path = match[2]!; } }
+  if (!hostname) return null;
+  return { host: hostname.toLowerCase(), path: path.replace(/^\//, '').replace(/\.git$/, '').replace(/\/$/, '') };
+}
+
 export function githubRepository(remotes: string, host = process.env.GH_HOST ?? 'github.com'): string | null {
   const identities = new Set<string>();
   for (const line of remotes.split('\n')) {
     const raw = line.trim().split(/\s+/)[1];
-    if (!raw) continue;
-    let hostname = '', path = '';
-    try { const url = new URL(raw); hostname = url.hostname; path = url.pathname; }
-    catch { const match = /^(?:[^@/\s]+@)?([^:/\s]+):(.+)$/.exec(raw); if (match) { hostname = match[1]!; path = match[2]!; } }
-    if (hostname.toLowerCase() !== host.toLowerCase()) continue;
-    path = path.replace(/^\//, '').replace(/\.git$/, '').replace(/\/$/, '');
-    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(path)) return null;
-    identities.add(`${hostname.toLowerCase()}/${path.toLowerCase()}`);
+    const remote = raw ? remoteIdentity(raw) : null;
+    if (remote === null || remote.host !== host.toLowerCase()) continue;
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(remote.path)) return null;
+    identities.add(`${remote.host}/${remote.path.toLowerCase()}`);
   }
   return identities.size === 1 ? [...identities][0]! : null;
+}
+
+/** Every repository `git remote -v` fetches from, as `host/owner/name` in lowercase, whatever the host. */
+export function fetchedRepositories(remotes: string): Set<string> {
+  const repositories = new Set<string>();
+  for (const line of remotes.split('\n')) {
+    if (!/\(fetch\)\s*$/.test(line)) continue;
+    const raw = line.trim().split(/\s+/)[1];
+    const remote = raw ? remoteIdentity(raw) : null;
+    if (remote !== null && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(remote.path)) repositories.add(`${remote.host}/${remote.path}`.toLowerCase());
+  }
+  return repositories;
 }
 
 /**

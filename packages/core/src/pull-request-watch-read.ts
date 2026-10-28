@@ -37,7 +37,7 @@ commits(last:1){nodes{commit{statusCheckRollup{state contexts{checkRunCountsBySt
 
 /** The detailed read, made only when the fingerprint moved: the checks one by one, with whether the base branch requires each. */
 export const DETAIL_QUERY = `query($owner:String!,$name:String!,$number:Int!){viewer{login} repository(owner:$owner,name:$name){pullRequest(number:$number){
-url state isDraft mergeable mergeStateStatus headRefOid baseRefName mergeQueueEntry{position}
+url state isDraft mergeable mergeStateStatus headRefOid headRefName headRepository{nameWithOwner} baseRefName mergeQueueEntry{position}
 commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){totalCount nodes{__typename
 ... on CheckRun{name status conclusion detailsUrl startedAt completedAt isRequired(pullRequestNumber:$number) checkSuite{workflowRun{workflow{name}}}}
 ... on StatusContext{context state targetUrl createdAt isRequired(pullRequestNumber:$number)}
@@ -114,6 +114,9 @@ export interface WatchCheck {
 export interface WatchDetail {
   state: Fingerprint['state'];
   head: string;
+  /** The head branch and its repository (`owner/name`): empty when GitHub does not say. */
+  branch?: string;
+  headRepository?: string;
   base: string;
   /** A draft cannot merge: a required context it never reports does not hold its verdict. */
   draft: boolean;
@@ -179,6 +182,8 @@ export function parseDetail(raw: string): WatchDetail {
   return {
     state: prState(pr.state),
     head: text(pr.headRefOid, 64) || text(commit.oid, 64),
+    branch: text(pr.headRefName, 255),
+    headRepository: text(row(pr.headRepository).nameWithOwner, 200),
     base: text(pr.baseRefName, 255),
     draft: pr.isDraft === true,
     mergeable: mergeable === 'MERGEABLE' || mergeable === 'CONFLICTING' ? mergeable : 'UNKNOWN',

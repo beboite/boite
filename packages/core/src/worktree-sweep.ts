@@ -15,6 +15,7 @@ import type { Project, ProjectId, ThreadId, ThreadSummary, WorktreeEntry } from 
 import type { Core } from './core.ts';
 import { folderGone, invalidParams, messageOf, refused } from './errors.ts';
 import { git as readGit } from './git/read.ts';
+import { fetchedRepositories } from './pull-requests.ts';
 import { occupiesCheckout } from './threads/occupancy.ts';
 import { withRegistration, worktreeRoot } from './worktree.ts';
 
@@ -356,6 +357,17 @@ export class WorktreeSweep {
       threadTitle: holder?.title ?? null,
       threadArchived: holder?.archived ?? false,
     };
+  }
+
+  /**
+   * The repositories the project fetches from, as `host/owner/name`. Null
+   * when git cannot say or names none that a pull request could live in.
+   */
+  async fetched(project: Project): Promise<ReadonlySet<string> | null> {
+    const remotes = await this.read(project, project.path, ['remote', '-v']).catch(() => null);
+    if (remotes === null || remotes.code !== 0) return null;
+    const repositories = fetchedRepositories(remotes.stdout);
+    return repositories.size > 0 ? repositories : null;
   }
 
   async dirty(project: Project, path: string): Promise<boolean> {

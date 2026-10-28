@@ -254,6 +254,37 @@ describe('settled worktree cleanup', () => {
     expect(existsSync(linked)).toBe(false);
   });
 
+  test('an open pull request claims a worktree only from a repository the project fetches', async () => {
+    const project = await repoProject();
+    git(project.path, 'remote', 'add', 'fork', 'git@github.com:me/repo.git');
+    const account = (await client.call('accounts.list', {})).find((entry) => entry.providerId === 'echo');
+    if (account === undefined) throw new Error('no echo account');
+    const worker = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, title: 'Worker' });
+    const link = (url: string, head: string, headRepository: string) => ({
+      url, repository: url.split('/').slice(3, 5).join('/'), number: Number(url.split('/').pop()), title: 'work', state: 'OPEN', draft: false,
+      head, base: 'main', headRepository, checkedAt: Date.now(),
+    });
+    const worktrees = Object.fromEntries(['unrelated', 'forked', 'unnamed'].map((slug) => {
+      const path = join(worktreeRoot(project.path), slug);
+      git(project.path, 'worktree', 'add', '-q', '-b', `boite/${slug}`, path);
+      ageGitFiles(path);
+      return [slug, path];
+    }));
+    harness.core.journal.setSetting(`linked-pull-requests:${worker.id}`, [
+      // Another repository's branch of the same name claims nothing here.
+      link('https://github.com/other/unrelated/pull/1', 'boite/unrelated', 'other/unrelated'),
+      // A pull request from the project's fork, and one whose head repository GitHub no longer names.
+      link('https://github.com/example/repo/pull/2', 'boite/forked', 'me/repo'),
+      link('https://github.com/example/repo/pull/3', 'boite/unnamed', ''),
+    ]);
+    const hourly = new WorktreeCleanup(harness.core, { graceMs: 3_600_000, startDelayMs: 3_600_000 });
+    expect((await hourly.run()).map((entry) => entry.branch)).toEqual(['boite/unrelated']);
+    await hourly.close();
+    expect(existsSync(worktrees.unrelated!)).toBe(false);
+    expect(existsSync(worktrees.forked!)).toBe(true);
+    expect(existsSync(worktrees.unnamed!)).toBe(true);
+  });
+
   test('the project policy is on by default, owner only, and refuses anything but a boolean', async () => {
     const project = await repoProject();
     expect((await client.call('projects.list', {})).find((entry) => entry.id === project.id)?.autoRemoveWorktrees).toBe(true);

@@ -10,7 +10,8 @@
  * project's `.boite/worktrees`, or the shared storage folder of that project.
  * A worktree no thread stands in also needs a `boite/` branch (or a detached
  * head), no draft reservation and an hour since git last touched it. Any
- * worktree stays while a live thread links an open pull request on its branch:
+ * worktree stays while a live thread links an open pull request whose head is
+ * its branch in a repository the project fetches from:
  * a delegated worker often runs from another folder and waits on CI there.
  */
 
@@ -20,7 +21,7 @@ import { join, resolve } from 'node:path';
 import type { Project, ThreadId, ThreadSummary, ThreadWorktreeRemoval } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { messageOf } from './errors.ts';
-import { openLinkedBranches } from './linked-pull-requests.ts';
+import { claimsBranch, openLinkedHeads, type LinkedHead } from './linked-pull-requests.ts';
 import { occupiesCheckout } from './threads/occupancy.ts';
 import { withLoad } from './threads/records.ts';
 import { BRANCH_PREFIX, worktreeRoot } from './worktree.ts';
@@ -50,6 +51,9 @@ interface Holder {
   settledAt: number | null;
   deleted: boolean;
 }
+
+/** Whether a branch is claimed, by the heads read at the pass's start or by `current`. */
+type Claims = (branch: string, current?: readonly LinkedHead[]) => Promise<boolean>;
 
 export interface WorktreeCleanupOptions {
   graceMs?: number;
@@ -121,7 +125,7 @@ export class WorktreeCleanup {
     const now = Date.now();
     for (const [key, until] of this.kept) if (until <= now) this.kept.delete(key);
     let holders: Holder[] | null = null;
-    let claimed: Set<string> | null = null;
+    let heads: LinkedHead[] | null = null;
     for (const project of this.core.journal.listProjects()) {
       if (this.stopped(deadline) || budget.removals === 0) break;
       if (this.core.journal.getSetting(autoRemoveWorktreesKey(project.id)) === false) continue;
@@ -129,8 +133,8 @@ export class WorktreeCleanup {
       if (!existsSync(join(project.path, '.git'))) continue;
       try {
         holders ??= await this.holders();
-        claimed ??= openLinkedBranches(this.core.journal);
-        removed.push(...await this.project(project, holders, claimed, deadline, budget));
+        heads ??= openLinkedHeads(this.core.journal);
+        removed.push(...await this.project(project, holders, this.claims(project, heads), deadline, budget));
       } catch (error) {
         // A folder gone or a git that fails here says nothing about the other projects.
         this.core.log('info', `worktree cleanup skipped ${project.name}: ${messageOf(error)}`, { source: 'worktree-cleanup', event: 'worktrees.cleanupSkipped' });
@@ -170,7 +174,21 @@ export class WorktreeCleanup {
     }));
   }
 
-  private async project(project: Project, holders: Holder[], claimed: Set<string>, deadline: number, budget: { removals: number; proofs: number }): Promise<WorktreeCleanupResult[]> {
+  /**
+   * Whether an open pull request a live conversation linked has this branch
+   * of this project as its head: the same name in a repository the project
+   * fetches from. The remotes are read once, and only for a name some head has.
+   */
+  private claims(project: Project, heads: readonly LinkedHead[]): Claims {
+    let remotes: Promise<ReadonlySet<string> | null> | null = null;
+    return async (branch, current = heads) => {
+      if (!current.some((head) => head.branch === branch)) return false;
+      remotes ??= this.sweep.fetched(project);
+      return claimsBranch(current, branch, await remotes);
+    };
+  }
+
+  private async project(project: Project, holders: Holder[], claimed: Claims, deadline: number, budget: { removals: number; proofs: number }): Promise<WorktreeCleanupResult[]> {
     const listed = await this.sweep.listed(project);
     const roots = await this.roots(project);
     const own = await realKey(project.path);
@@ -185,7 +203,7 @@ export class WorktreeCleanup {
       if (this.kept.has(memo)) continue;
       const standing = holders.filter((holder) => inside(key, holder.key));
       if (!(await this.settled(worktree, key, standing, reserved, claimed))) continue;
-      const result = await this.settle(project, worktree, standing, budget);
+      const result = await this.settle(project, worktree, standing, claimed, budget);
       if (result === null) {
         this.kept.set(memo, Date.now() + KEPT_FOR_MS);
         continue;
@@ -197,10 +215,10 @@ export class WorktreeCleanup {
   }
 
   /** Nothing live stands in it, and it has been that way long enough. */
-  private async settled(worktree: Listed, key: string, standing: Holder[], reserved: string[], claimed: Set<string>): Promise<boolean> {
+  private async settled(worktree: Listed, key: string, standing: Holder[], reserved: string[], claimed: Claims): Promise<boolean> {
     const now = Date.now();
     if (reserved.some((path) => inside(key, path) || inside(path, key))) return false;
-    if (worktree.branch !== null && claimed.has(worktree.branch)) return false;
+    if (worktree.branch !== null && await claimed(worktree.branch)) return false;
     if (standing.length > 0) {
       // Automatic Done may still have a prompt, including a runtime with no tracked process.
       return standing.every((holder) => !occupiesCheckout(this.core, holder) && holder.settledAt !== null && now - holder.settledAt >= this.graceMs);
@@ -212,7 +230,7 @@ export class WorktreeCleanup {
   }
 
   /** The removal when its work is proved safe, else null. */
-  private async settle(project: Project, worktree: Listed, standing: Holder[], budget: { proofs: number }): Promise<WorktreeCleanupResult | null> {
+  private async settle(project: Project, worktree: Listed, standing: Holder[], claimed: Claims, budget: { proofs: number }): Promise<WorktreeCleanupResult | null> {
     // The cheap reads first; `removeSettled` reads everything again before it removes.
     if (await this.sweep.dirty(project, worktree.path)) return null;
     let reason: ThreadWorktreeRemoval['reason'] = 'clean';
@@ -238,7 +256,7 @@ export class WorktreeCleanup {
     }
     // A restore or a thread that arrived during the awaits above is one
     // `removeSettled` refuses: it checks every thread again as git deletes.
-    if (worktree.branch !== null && openLinkedBranches(this.core.journal).has(worktree.branch)) return null;
+    if (worktree.branch !== null && await claimed(worktree.branch, openLinkedHeads(this.core.journal))) return null;
     let removal: { branch: string | null; branchDeleted: boolean };
     try {
       removal = await this.sweep.removeSettled(project, worktree.path, merged);
