@@ -47,12 +47,12 @@ export function isTailnetV6(address: string): boolean {
  * proof: 100.64.0.0/10 is also what a carrier or another VPN hands out, and a
  * listener opened there would face a network the owner never chose. Linux and
  * Windows name the interface (`tailscale0`, `Tailscale`); macOS gives it a
- * `utun` number like any tunnel, so there the Tailscale IPv6 address beside it
- * is what tells.
+ * `utun` number and Android's VpnService a `tun` one, like any other tunnel, so
+ * there the Tailscale IPv6 address beside it is what tells.
  */
 function isTailscaleInterface(name: string, entries: readonly NetworkInterfaceInfo[]): boolean {
   if (/^tailscale/i.test(name)) return true;
-  return /^utun\d+$/.test(name) && entries.some((entry) => isTailnetV6(entry.address));
+  return /^u?tun\d+$/.test(name) && entries.some((entry) => isTailnetV6(entry.address));
 }
 
 /** This machine's tailnet address, or null. `BOITE_TAILNET=0` answers null: tests never open a tailnet port. */

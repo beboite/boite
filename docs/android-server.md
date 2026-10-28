@@ -81,6 +81,11 @@ Wi-Fi and Tailscale addresses both answer; `tailscale` on the tailnet address
 alone, waiting until the phone joins it; `local` on this phone only. A change
 to `host` or `port` applies on the next start.
 
+While the Tailscale app is connected, the core finds the tailnet address on
+the `tun` interface the app opens. Unless `host` is `local`, the group's roster
+then gives the phone's MagicDNS name and tailnet address before the Wi-Fi one,
+so the other machines still reach the phone away from that Wi-Fi.
+
 `name` is what the other machines of a group and every client call the phone.
 Android gives every app the host name `localhost`, and the name set in the
 phone's own settings is out of Termux's reach, so without one the core goes by
