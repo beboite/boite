@@ -315,15 +315,22 @@ test('a bot asks to run on another provider; applying the card moves it there on
   await waitFor(() => settled(h, self));
 
   // Back to echo, then to the twin model whose id reads like the echo reference the card moves from.
-  const move = async (to: string, previous: string) => {
+  const move = async (to: string, previous: string, off?: string) => {
     expect((await run(['settings', 'bot', 'request', 'model', to, '--why', 'Move.'], self)).code).toBe(0);
     const [open] = cards(self);
     expect(open!.agentSetting).toMatchObject({ previous, value: to });
+    if (off !== undefined) {
+      // The card names its provider: turned off, Apply refuses rather than read the bot's own model of that id.
+      await owner.call('providers.setEnabled', { providerId: off, enabled: false });
+      expect(await thrown(owner.call('agents.settings.apply', { threadId: self, questionId: open!.id }))).toThrow(`${off} is not installed or is turned off`);
+      expect(cards(self).map(card => card.id)).toEqual([open!.id]);
+      await owner.call('providers.setEnabled', { providerId: off, enabled: true });
+    }
     await owner.call('agents.settings.apply', { threadId: self, questionId: open!.id });
     expect(drawn(self, open!.id)!.answer).toEqual({ optionIds: ['applied'], value: to });
     await waitFor(() => settled(h, self));
   };
-  await move('echo/echo', 'twin/echo/echo');
+  await move('echo/echo', 'twin/echo/echo', 'echo');
   expect(profile().selection).toMatchObject({ providerId: 'echo', model: 'echo' });
   await move('twin/echo/echo', 'echo/echo');
   expect(profile().selection).toMatchObject({ providerId: 'twin', model: 'echo/echo' });

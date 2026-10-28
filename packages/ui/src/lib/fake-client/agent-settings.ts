@@ -46,16 +46,16 @@ function accountOn(ctx: FakeContext, agent: AgentProfile, providerId: string): s
 }
 
 /** As the core: `<provider>/<model>` of an available provider, or a model id of the agent's own. */
-function modelRoute(ctx: FakeContext, agent: AgentProfile, wanted: string): { providerId: string; accountId: string; model: string } | null {
+function modelRoute(ctx: FakeContext, agent: AgentProfile, wanted: string, refs = false): { providerId: string; accountId: string; model: string } | null {
   const slash = wanted.indexOf('/');
   const named = slash > 0 ? ctx.providers.find(provider => provider.id === wanted.slice(0, slash) && (provider.id === agent.selection.providerId || (provider.available && providerEnabled(provider)))) : undefined;
   const accountId = named && accountOn(ctx, agent, named.id);
   if (named && accountId && modelsOf(ctx, named.id, accountId).some(entry => entry.id === wanted.slice(slash + 1))) return { providerId: named.id, accountId, model: wanted.slice(slash + 1) };
   const { providerId, accountId: own } = agent.selection;
-  return modelsOf(ctx, providerId, own).some(entry => entry.id === wanted) ? { providerId, accountId: own, model: wanted } : null;
+  return !refs && modelsOf(ctx, providerId, own).some(entry => entry.id === wanted) ? { providerId, accountId: own, model: wanted } : null;
 }
 
-function context(ctx: FakeContext, agent: AgentProfile): AgentSettingContext {
+function context(ctx: FakeContext, agent: AgentProfile, refs = false): AgentSettingContext {
   const { providerId, accountId } = agent.selection;
   const config = ctx.agents.configOf(agent.id);
   const models = () => modelsOf(ctx, providerId, accountId);
@@ -65,7 +65,7 @@ function context(ctx: FakeContext, agent: AgentProfile): AgentSettingContext {
     projects: ctx.projects.filter(project => project.kind !== 'drafts').map(project => ({ id: project.id, label: project.name })),
     bots: ctx.agents.liveProfiles(),
     model: model => {
-      const route = modelRoute(ctx, agent, model);
+      const route = modelRoute(ctx, agent, model, refs);
       if (route === null) return { ok: false, message: 'the provider does not offer this model' };
       const ref = `${route.providerId}/${route.model}`;
       // As the core: a model the settings do not allow yet is the owner's to allow by applying the card.
@@ -220,7 +220,7 @@ export function agentSettingMethods(ctx: FakeContext): Handlers {
       let value = setting.value;
       // As the core: a name is checked again, another card may have given it away since; a model too.
       if (params.value !== undefined || setting.key === 'name' || setting.key === 'model') {
-        const normalized = normalizeAgentSetting(setting.key, params.value ?? agentSettingProposal(setting, agent), context(ctx, agent));
+        const normalized = normalizeAgentSetting(setting.key, params.value ?? agentSettingProposal(setting, agent), context(ctx, agent, true));
         if (!normalized.ok) throw refused(normalized.message, { field: 'value', key: setting.key });
         value = normalized.value;
       }

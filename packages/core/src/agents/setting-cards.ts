@@ -59,7 +59,8 @@ export class AgentSettingCards {
     throw refused(`agent: no bot ${JSON.stringify(wanted)}; the bots are ${live.map(agent => agent.name).join(', ') || 'none yet'}`, { field: 'agent', expected: live.map(agent => agent.name) });
   }
 
-  private context(agent: AgentProfile): AgentSettingContext {
+  /** `refs`: a model is read as `<provider>/<model>` only, as a card holds it on Apply. */
+  private context(agent: AgentProfile, refs = false): AgentSettingContext {
     const provider = agentProvider(this.core, agent);
     const accountId = agent.selection.accountId;
     const checked = <T>(run: () => T): { ok: true; value: T } | { ok: false; message: string } => {
@@ -74,7 +75,7 @@ export class AgentSettingCards {
       projects: this.projectChoices(agent),
       bots: this.store.records.list('profile').filter(bot => bot.status !== 'archived'),
       model: model => checked(() => {
-        const route = this.modelRoute(agent, model);
+        const route = this.modelRoute(agent, model, refs);
         const ref = `${route.providerId}/${route.model}`;
         // An account the owner granted to other bots stays theirs. A model its settings do not allow yet
         // is the owner's to allow, which applying the card does.
@@ -88,20 +89,24 @@ export class AgentSettingCards {
   /**
    * The route a model card names: `<provider>/<model>` of any installed
    * provider, or a model id of the agent's own, which may hold a slash itself
-   * (`opencode/glm-5.3`).
+   * (`opencode/glm-5.3`). With `refs`, only the first.
    */
-  private modelRoute(agent: AgentProfile, wanted: string): { providerId: ProviderId; accountId: AccountId; model: string } {
+  private modelRoute(agent: AgentProfile, wanted: string, refs = false): { providerId: ProviderId; accountId: AccountId; model: string } {
     const own = agentProvider(this.core, agent);
     const ownRoute = () => ({ providerId: own.id, accountId: agent.selection.accountId, model: checkModel(own, agent.selection.accountId, wanted)! });
     const slash = wanted.indexOf('/');
     const named = slash > 0 ? this.core.providers.get(wanted.slice(0, slash)) : undefined;
-    if (named === undefined) return ownRoute();
+    if (named === undefined) {
+      if (refs) throw refused(`model: ${wanted} names no provider of this machine`, { field: 'model' });
+      return ownRoute();
+    }
     const model = wanted.slice(slash + 1);
     // Another provider must be installed and turned on: Apply would otherwise move the bot where its thread cannot follow.
     const usable = named.id === own.id || this.core.providers.available().some(summary => summary.id === named.id);
     const accountId = usable ? this.accountOn(agent, named.id) : undefined;
     if (accountId !== undefined && modelsFor(named, accountId).some(entry => entry.id === model)) return { providerId: named.id, accountId, model };
-    if (modelsFor(own, agent.selection.accountId).some(entry => entry.id === wanted)) return ownRoute();
+    // A drawn card's reference never falls back to an id of the agent's provider that reads the same.
+    if (!refs && modelsFor(own, agent.selection.accountId).some(entry => entry.id === wanted)) return ownRoute();
     if (!usable) throw refused(`model: ${named.id} is not installed or is turned off on this machine`, { field: 'model', providerId: named.id });
     if (accountId === undefined) throw refused(`model: ${named.id} has no signed-in account on this machine`, { field: 'model', providerId: named.id });
     return { providerId: named.id, accountId, model: checkModel(named, accountId, model)! };
@@ -181,7 +186,7 @@ export class AgentSettingCards {
     if (ask === undefined) throw notFound(`agents.settings.apply: ${String(params.questionId)} is no open agent setting card of thread ${String(params.threadId)}`, { field: 'questionId' });
     const agent = this.store.records.get('profile', ask.agentId);
     if (agent.status === 'archived') throw refused(`agents.settings.apply: ${agent.name} is archived`, { field: 'questionId' });
-    const ctx = this.context(agent);
+    const ctx = this.context(agent, true);
     let value = ask.value;
     // A name is checked again: another card may have given it to a bot since this one was drawn.
     // A model too: its provider may have signed out or been turned off.
