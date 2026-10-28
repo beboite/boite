@@ -2,6 +2,7 @@ import { appendFileSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync,
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { BRANCH_NAME_MAX, type Project, type ThreadId, type WorktreeStorage } from '@boite/contracts';
 import { CheckoutReservations } from './checkouts.ts';
+import { withVacantCheckout } from './checkout-removal.ts';
 import type { Core } from './core.ts';
 import { folderGone, messageOf, refused } from './errors.ts';
 import { newId } from './ids.ts';
@@ -353,8 +354,10 @@ export class Worktrees {
     }
     const checkoutOwned = timeoutMs === undefined || await this.checkoutBranch(threadId, project.path, placed.path, remaining()) === placed.branch;
     if (checkoutOwned) {
-      const removed = await this.registeredGit(threadId, project.path,
-        ['worktree', 'remove', '--force', ...(timeoutMs === undefined ? [] : ['--force']), placed.path], remaining());
+      const removed = await withRegistration(project.path, () => withVacantCheckout(this.core, project, placed.path,
+        () => this.git(threadId, project.path,
+          ['worktree', 'remove', '--force', ...(timeoutMs === undefined ? [] : ['--force']), placed.path], remaining())),
+      { timeoutMs: remaining() });
       if (removed.code !== 0) {
         this.core.log('warn', `could not remove the worktree ${placed.path}: ${removed.stderr.trim() || `exit ${removed.code}`}`);
         if (timeoutMs === undefined || existsSync(placed.path)) return false;

@@ -2,6 +2,7 @@ import type { Project, ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { removeDir } from '../fs-retry.ts';
 import { logMessageOf } from '../log-errors.ts';
+import { withVacantCheckout } from '../checkout-removal.ts';
 
 const SETTING = 'draftReservationOwnership';
 export const DRAFT_CLEANUP_TIMEOUT_MS = 10_000;
@@ -54,7 +55,8 @@ export class DraftReservationLedger {
     try {
       const removed = ownership.kind === 'worktree' && ownership.branch
         ? await this.core.worktrees.remove(ownership.threadId, ownership.project, { path: ownership.path, branch: ownership.branch }, DRAFT_CLEANUP_TIMEOUT_MS)
-        : await removeDir(ownership.path, message => this.core.log('warn', message));
+        : await withVacantCheckout(this.core, ownership.project, ownership.path,
+          () => removeDir(ownership.path, message => this.core.log('warn', message)));
       if (removed) this.forget(ownership.threadId);
       return removed;
     } catch (error) {

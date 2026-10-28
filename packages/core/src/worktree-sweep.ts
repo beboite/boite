@@ -9,8 +9,8 @@
  * a live thread stands in.
  */
 
-import { realpath, stat } from 'node:fs/promises';
-import { basename, dirname, join, resolve, sep } from 'node:path';
+import { stat } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 import type { Project, ProjectId, ThreadId, ThreadSummary, WorktreeEntry } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { folderGone, invalidParams, messageOf, refused } from './errors.ts';
@@ -19,7 +19,8 @@ import { inside, keyOf } from './checkouts.ts';
 import { fetchedRepositories } from './pull-requests.ts';
 
 export { inside, keyOf } from './checkouts.ts';
-import { occupiesCheckout } from './threads/occupancy.ts';
+import { assertCheckoutVacant, realKey, withVacantCheckout } from './checkout-removal.ts';
+export { realKey } from './checkout-removal.ts';
 import { withRegistration, worktreeRoot } from './worktree.ts';
 
 /**
@@ -52,26 +53,6 @@ export interface Listed {
 /** The trace id the sweep's git runs under: one per project, like `workspace:<id>` for a mission. */
 function traceId(projectId: ProjectId): string {
   return `worktrees:${projectId}`;
-}
-
-/**
- * The real path's key, so an 8.3 alias or a junction matches git's long form.
- * A folder already deleted resolves through its nearest parent that exists:
- * `/var/...` still meets git's `/private/var/...` on macOS.
- */
-export async function realKey(path: string): Promise<string> {
-  let head = resolve(path);
-  const tail: string[] = [];
-  for (;;) {
-    try {
-      return keyOf(join(await realpath(head), ...tail));
-    } catch {
-      const parent = dirname(head);
-      if (parent === head) return keyOf(path);
-      tail.unshift(basename(head));
-      head = parent;
-    }
-  }
 }
 
 /** `work` on every item, at most `limit` at once, the answers in the items' order. */
@@ -126,9 +107,6 @@ export function parseWorktreeList(out: string): Listed[] {
   return entries;
 }
 
-/** A thread found in a checkout, and whether it is a draft not sent yet, which only its processes make hold. */
-interface Occupant { thread: ThreadSummary; draft: boolean }
-
 export class WorktreeSweep {
   constructor(private readonly core: Core) {}
 
@@ -167,7 +145,7 @@ export class WorktreeSweep {
         projectId, path, field: 'path', expected: 'a linked worktree, not the main checkout',
       });
     }
-    this.refuseOccupied(project, path, await this.occupant(project, target.path));
+    await assertCheckoutVacant(this.core, project, target.path);
     const entry = await this.describe(project, target, wanted, await this.holders(project, listed));
     if (force !== true && (entry.dirty || entry.unmerged)) {
       const reasons = [
@@ -198,7 +176,7 @@ export class WorktreeSweep {
     if (target === undefined || target.main || wanted === (await realKey(project.path))) {
       throw refused(`${path} is not a linked worktree of ${project.name}`, { projectId: project.id, path });
     }
-    this.refuseOccupied(project, path, await this.occupant(project, target.path));
+    await assertCheckoutVacant(this.core, project, target.path);
     const entry = await this.describe(project, target, wanted, await this.holders(project, listed));
     if (entry.missing) throw refused(`${path} is already gone`, { projectId: project.id, path });
     if (entry.dirty) throw refused('This worktree has uncommitted changes.', { projectId: project.id, path, dirty: true });
@@ -206,54 +184,6 @@ export class WorktreeSweep {
     if (entry.unmerged && proof === null) throw refused('This worktree has commits on no other branch.', { projectId: project.id, path, unmerged: true });
     const branchDeleted = await this.detach(project, path, target, proof ?? 'merged-only');
     return { branch: target.branch, branchDeleted };
-  }
-
-  private refuseOccupied(project: Project, path: string, occupant: Occupant | null): void {
-    if (occupant === null) return;
-    const holder = occupant.thread;
-    const why = occupant.draft ? 'is a draft whose agent still runs there: send it, or discard it and let it stop'
-      : holder.archived ? 'is still running there: wait for it to finish' : 'works there: archive it first';
-    throw refused(`thread "${holder.title}" (${holder.id}) ${why} (${path})`, {
-      projectId: project.id, path, threadId: holder.id, threadTitle: holder.title,
-      field: 'path', expected: 'a worktree no live thread uses',
-    });
-  }
-
-  /**
-   * The threads standing in a worktree, their folders resolved, as a check
-   * that runs without awaiting: the first thread still using the checkout
-   * (`occupiesCheckout`), null when none does, or `moved` when a thread arrived
-   * or changed folder after the folders were resolved.
-   */
-  private async occupancy(project: Project, path: string): Promise<() => Occupant | null | 'moved'> {
-    const key = await realKey(path);
-    const near = this.near(project, [path]);
-    // A draft's thread is in no list until it is sent, yet its agent may already run there.
-    // Read again at each call: a draft sent meanwhile is a published thread, its row decides.
-    const threads = (): Occupant[] => [
-      ...this.core.threads.list({ includeArchived: true }).map((thread) => ({ thread, draft: false })),
-      ...this.core.drafts.threads().map((thread) => ({ thread, draft: true })),
-    ].filter(({ thread }) => thread.projectId === project.id || near(thread.cwd));
-    const keys = new Map<string, string>();
-    await Promise.all([...new Set(threads().map(({ thread }) => thread.cwd))].map(async (cwd) => { keys.set(cwd, await realKey(cwd)); }));
-    return () => {
-      let holder: Occupant | null = null;
-      for (const occupant of threads()) {
-        const { thread, draft } = occupant;
-        const at = keys.get(thread.cwd);
-        if (at === undefined) return 'moved';
-        const holds = draft ? this.core.procs.liveCount(thread.id) > 0 : occupiesCheckout(this.core, thread);
-        if (holder === null && inside(key, at) && holds) holder = occupant;
-      }
-      return holder;
-    };
-  }
-
-  private async occupant(project: Project, path: string): Promise<Occupant | null> {
-    for (;;) {
-      const holder = (await this.occupancy(project, path))();
-      if (holder !== 'moved') return holder;
-    }
   }
 
   /**
@@ -269,20 +199,9 @@ export class WorktreeSweep {
     // The one check every removal shares, made again at the moment git deletes:
     // no await between it and the spawn, so a thread restored or started during
     // the reads above keeps its checkout.
-    const keys = [await realKey(target.path), await realKey(path)];
-    const removed = await this.registered(project, async () => {
-      for (;;) {
-        const holder = (await this.occupancy(project, target.path))();
-        if (holder === 'moved') continue;
-        this.refuseOccupied(project, path, holder);
-        // Reserved in the same step as the check, until git ends: a restore, a
-        // new thread or a shell arriving meanwhile is refused, not deleted under.
-        const release = this.core.worktrees.reservations.reserve(target.path, keys);
-        try {
-          return await this.git(project, project.path, removal);
-        } finally { release(); }
-      }
-    });
+    const removed = await this.registered(project, () => withVacantCheckout(
+      this.core, project, target.path, () => this.git(project, project.path, removal), [path],
+    ));
     if (removed.code !== 0) {
       throw refused(`git worktree remove failed for ${path}: ${removed.stderr.trim() || `exit ${removed.code}`}`, { projectId: project.id, path });
     }

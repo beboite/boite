@@ -1,5 +1,5 @@
 import { mkdir, access, rm } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import type { RpcParams, ThreadSummary } from '@boite/contracts';
@@ -9,6 +9,7 @@ import type { SessionContext } from '../src/drivers/types.ts';
 import type { CoreClient } from '../src/client.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 import { rejection } from './settle.ts';
+import { DraftPreparations } from '../src/threads/draft-preparations.ts';
 
 let h: TestCore;
 let client: CoreClient;
@@ -184,7 +185,86 @@ test('requested worktree is prepared in its final directory, adopted or removed 
   expect(await exists(created.cwd)).toBe(true);
 });
 
+test('draft cleanup reserves its checkout until git removal exits', async () => {
+  const cwd = join(h.dataDir, 'repo'); await mkdir(cwd);
+  git(cwd, 'init', '-q'); git(cwd, 'commit', '-q', '--allow-empty', '-m', 'fixture');
+  const project = await client.call('projects.add', { path: cwd, name: 'repo' });
+  choice = { ...choice, projectId: project.id, worktree: {} };
+  const reservation = await prepare('draft_cleanup_admission');
+  await waitFor(() => prepared.length === 1);
+  const checkout = prepared[0]!.thread.cwd;
+  const signal = join(h.dataDir, 'remove-may-run');
+  const hold = 'const [signal, ...args] = process.argv.slice(1); while (!require("node:fs").existsSync(signal)) Bun.sleepSync(20);'
+    + ' process.exit(Bun.spawnSync(["git", ...args], { stdout: "inherit", stderr: "inherit" }).exitCode ?? 1);';
+  const spawn = h.core.procs.spawn.bind(h.core.procs);
+  let deleting = false;
+  const held = spyOn(h.core.procs, 'spawn').mockImplementation((id, command, args, options) => {
+    if (command !== 'git' || !args.includes('remove')) return spawn(id, command, args, options);
+    deleting = true;
+    return spawn(id, process.execPath, ['-e', hold, signal, ...args], options);
+  });
+  const releasing = client.call('drafts.release', { preparationId: reservation.preparationId });
+  try {
+    await waitFor(() => deleting);
+    expect((await rejection(client.call('threads.create', {
+      projectId: project.id, providerId: choice.providerId, accountId: choice.accountId, cwd: checkout,
+    }))).reason).toMatchObject({ rpc: { message: expect.stringContaining('is being removed') } });
+    expect(() => h.core.procs.spawnChild('cleanup-arrival', process.execPath, ['-e', ''], { cwd: checkout })).toThrow('is being removed');
+    expect(await exists(checkout)).toBe(true);
+  } finally { writeFileSync(signal, ''); await releasing; held.mockRestore(); }
+  expect(await exists(checkout)).toBe(false);
+});
+
 for (const kind of ['worktree', 'draft', 'incognito'] as const) {
+  test(`cleanup retains an owned ${kind} folder when another agent joins during its owner's stop`, async () => {
+    if (kind === 'worktree') {
+      const cwd = join(h.dataDir, 'repo'); await mkdir(cwd);
+      git(cwd, 'init', '-q'); git(cwd, 'commit', '-q', '--allow-empty', '-m', 'fixture');
+      const project = await client.call('projects.add', { path: cwd, name: 'repo' });
+      choice = { ...choice, projectId: project.id, worktree: {} };
+    } else if (kind === 'incognito') choice.incognito = true;
+    const reservation = await prepare(`draft_joined_${kind}`);
+    await waitFor(() => prepared.length === 1);
+    const cwd = prepared[0]!.thread.cwd;
+    const ready = Promise.withResolvers<void>();
+    const owner = h.core.procs.spawnChild(reservation.threadId, process.execPath, ['-e',
+      'process.on("SIGTERM", () => {}); console.log("ready"); setTimeout(() => {}, 60_000)',
+    ], { cwd });
+    owner.stdout.once('data', () => ready.resolve());
+    await ready.promise;
+    const waiting = Promise.withResolvers<void>(), resume = Promise.withResolvers<void>();
+    const wait = h.core.procs.waitForExit.bind(h.core.procs);
+    const held = spyOn(h.core.procs, 'waitForExit').mockImplementation(async (id, pids) => {
+      if (id === reservation.threadId) { waiting.resolve(); await resume.promise; }
+      return wait(id, pids);
+    });
+    try {
+      const releasing = client.call('drafts.release', { preparationId: reservation.preparationId });
+      await waiting.promise;
+      const otherProjectId = kind === 'incognito'
+        ? (await client.call('projects.add', { path: cwd, name: 'Joined incognito folder' })).id : choice.projectId;
+      const other = await client.call('threads.create', {
+        projectId: otherProjectId, providerId: choice.providerId, accountId: choice.accountId, cwd,
+      });
+      const childReady = Promise.withResolvers<void>();
+      const child = h.core.procs.spawnChild(other.id, process.execPath, ['-e',
+        'console.log("ready"); setTimeout(() => {}, 60_000)',
+      ], { cwd });
+      child.stdout.once('data', () => childReady.resolve());
+      await childReady.promise;
+      resume.resolve();
+      await releasing;
+      expect(h.core.procs.liveCount(other.id)).toBe(1);
+      expect(await exists(cwd)).toBe(true);
+      expect(h.core.journal.getSetting('draftReservationOwnership')).toEqual([expect.objectContaining({ threadId: reservation.threadId, path: cwd })]);
+      await h.core.procs.stopAndWait(other.id);
+      await client.call('threads.archive', { threadId: other.id, archived: true });
+      await new DraftPreparations(h.core).recover();
+      expect(await exists(cwd)).toBe(false);
+      expect(h.core.journal.getSetting('draftReservationOwnership')).toBeUndefined();
+    } finally { resume.resolve(); held.mockRestore(); }
+  });
+
   test(`release keeps an owned ${kind} folder and its cleanup intent until its agent exits`, async () => {
     if (kind === 'worktree') {
       const cwd = join(h.dataDir, 'repo'); await mkdir(cwd);
