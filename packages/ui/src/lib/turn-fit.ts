@@ -61,7 +61,7 @@ export function waterLevel(sizes: number[], budget: number): number {
 
 type Try = { blob: Blob; mimeType: Encoded['mimeType'] };
 
-/** The least reduced copy of `image` within `target` bytes, the lightest one when none is, or `image` when nothing beats it. */
+/** The least reduced copy of `image` within `target` bytes, the lightest one when none is, or `image` when nothing beats it or the codec fails. */
 async function shrink(image: Attachment, target: number, codec: ImageCodec): Promise<Attachment> {
   const weight = decodedBytes(image.data);
   let decoded: Decoded | null = null;
@@ -100,6 +100,9 @@ async function shrink(image: Attachment, target: number, codec: ImageCodec): Pro
     const name = renamed(image.name ?? 'image', pick.mimeType);
     const made = await readAttachmentFile(new File([pick.blob], name, { type: pick.mimeType }));
     return { ...made, name: image.name === null ? null : name };
+  } catch {
+    // An encoder or a read that failed leaves the picture as it was, like one that does not decode.
+    return image;
   } finally {
     source.close();
   }

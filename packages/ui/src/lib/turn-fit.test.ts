@@ -67,6 +67,17 @@ describe('fitTurn', () => {
     expect(fitted.attachments.slice(3).every(one => one.kind === 'image' && one.mimeType === 'image/jpeg' && one.name?.endsWith('.jpg'))).toBe(true);
   });
 
+  test('a picture its encoder fails on stays as it was, closed, and the turn says it does not fit', async () => {
+    let closed = 0;
+    const failing: ImageCodec = { async decode() {
+      return { width: 924, height: 2000, hasAlpha: () => false, close() { closed++; }, async encode() { throw new Error('encoder lost'); } };
+    } };
+    const turn = [jpeg('a.jpg', 600 * KB), jpeg('b.jpg', 600 * KB)];
+    const fitted = await fitTurn(turn, failing, MAX);
+    expect(fitted).toEqual({ attachments: turn, fits: false });
+    expect(closed).toBe(2);
+  });
+
   test('never under the floor: past it the turn says it does not fit', async () => {
     const encoded: { width: number; height: number }[] = [];
     const turn = Array.from({ length: 50 }, (_, at) => jpeg(`shot-${at}.jpg`, 512 * KB));
