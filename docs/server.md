@@ -257,9 +257,12 @@ starts no process while it holds it, so the kernel drops it with a killed
 holder. Whoever restores takes the data directory's `core.lock` and refuses
 while a live core holds it. It also locks the restored copy before the swap.
 Windows cannot rename these directories with the lock handles open, so the
-restorer writes live PID records without `osLock` in both, closes their handles,
-then takes the native lock again under the final data name. The maintenance
-lock stays held throughout. Both older cores and current cores honor these
+restorer publishes PID records without `osLock` from its first acquisition in
+both directories, closes their handles without rewriting those records, then
+takes the native lock again under the final data name. Rewriting a published
+record would expose an empty file during truncation to an older PID-only core,
+which could replace it and enter. The maintenance lock stays held throughout.
+Both older cores and current cores honor these
 live PID records, including a start that checked for a rollback before its
 record was published. If the restorer dies mid-swap, its PID records no longer
 block the next restore. It finishes that

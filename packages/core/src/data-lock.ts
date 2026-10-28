@@ -75,11 +75,12 @@ const held = new Set<{ lock: HeldFileLock; drop(path: string, keepRecord?: boole
  * Takes `file` for this process, or throws `busy(holder)` while another
  * process holds it. The operating system holds the lock (`platform/`), drops
  * it when its holder dies and never lets two holders in, so a lock is never
- * stale and never read half-written by someone who then takes it. The record
- * in the file names the holder for the message only.
+ * stale and never read half-written by someone who then takes it. Normally,
+ * the record only names the holder for the message; `recordKind: 'pid'`
+ * publishes the PID-only record a restorer keeps when its native handle closes.
  *
- * A record without `osLock` comes from a core older than this lock, which
- * held nothing but the file: the old judgement still keeps such a core's
+ * A record without `osLock` comes from an older core or a restorer that must
+ * close its handles for a directory swap. The old judgement keeps that core's
  * directory from a second one. A record from a run that is gone is replaced.
  * Gone includes a pid worn by someone else: a holder that started after the
  * lock was written is not the core that wrote it, nor is any process when the
@@ -93,7 +94,7 @@ const held = new Set<{ lock: HeldFileLock; drop(path: string, keepRecord?: boole
  * One that judged before the record was written and replaces the file after
  * that check still gets in, as two older cores could race each other.
  */
-export function takeLock(file: string, busy: (holder: number | null) => string, clock: LockClock = {}, lockFile: FileLocker = osLockFile): () => void {
+export function takeLock(file: string, busy: (holder: number | null) => string, clock: LockClock = {}, lockFile: FileLocker = osLockFile, recordKind?: 'pid'): () => void {
   const startedAt = clock.startedAt ?? processPlatform.startedAt;
   const bootedAt = clock.bootedAt ?? (() => Date.now() - uptime() * 1000);
   const startKey = clock.startKey ?? (pid => processPlatform.startKey?.(pid) ?? null);
@@ -117,7 +118,7 @@ export function takeLock(file: string, busy: (holder: number | null) => string, 
     // Through the held handle, never by path: a core older than this lock may have replaced the file
     // since it was judged, and a write by path would land in that core's file.
     try {
-      lock.write(`${JSON.stringify({ ...ownRecord, osLock: true }, null, 2)}\n`);
+      lock.write(`${JSON.stringify({ ...ownRecord, ...(recordKind === 'pid' ? {} : { osLock: true }) }, null, 2)}\n`);
     } catch (error) {
       // A full disk, say: still held, the lock would keep this process out of its own directory.
       lock.release();
@@ -132,9 +133,8 @@ export function takeLock(file: string, busy: (holder: number | null) => string, 
       lock,
       // Deleted while still held, so the next holder cannot lock a file the path no longer names unnoticed.
       drop(path: string, keepRecord = false) {
-        // During a rollback's directory swap, Windows needs the handle closed. Both old and current
-        // cores honor this live PID record without osLock until the restorer takes the native lock again.
-        if (keepRecord) lock.write(`${JSON.stringify(ownRecord, null, 2)}\n`);
+        // A restorer acquired with a PID record from the start. Rewriting it here would briefly
+        // expose an empty file to older cores, which would replace it while its holder is alive.
         held.delete(entry);
         if (!keepRecord && lock.stillAt(path)) rmSync(path, { force: true });
         lock.release();
@@ -151,7 +151,7 @@ export function takeLock(file: string, busy: (holder: number | null) => string, 
 
 /**
  * Releases this process's core lock wherever its directory moved. Under the maintenance lock,
- * `keepRecord` leaves a live PID record protecting a directory whose open handles must close before a rename.
+ * `keepRecord` leaves the PID record published at acquisition, protecting a directory whose handles must close before a rename.
  */
 export function releaseOwnLock(directory: string, keepRecord = false): void {
   const file = join(directory, 'core.lock');
@@ -182,8 +182,9 @@ export function lockDataDir(
   startedAt?: (pid: number) => number | null,
   bootedAt?: () => number,
   startKey?: (pid: number) => string | null,
+  recordKind?: 'pid',
 ): () => void {
   return takeLock(join(dataDir, 'core.lock'),
     holder => `another core is already running on ${dataDir} (pid ${holder ?? 'not written yet'}). Close it, or start this one with --data-dir on a directory of its own.`,
-    { startedAt, bootedAt, startKey });
+    { startedAt, bootedAt, startKey }, osLockFile, recordKind);
 }
