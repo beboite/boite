@@ -356,8 +356,7 @@ export class Accounts {
   async freshenHarnessUpdates(now = Date.now()): Promise<void> {
     const updates = this.harnessUpdates;
     if (updates.length === 0 || updates.some((update) => update.state !== 'idle')) return;
-    const read = updates.flatMap((update) => update.checkedAt === null ? [] : [update.checkedAt]);
-    if (updateStale(read.length === 0 ? null : Math.min(...read), now)) await this.loadHarnessUpdates(true, true);
+    if (updates.some((update) => updateStale(update.checkedAt, now))) await this.loadHarnessUpdates(true, true);
   }
 
   async updateHarness(providerId: ProviderId): Promise<void> {
