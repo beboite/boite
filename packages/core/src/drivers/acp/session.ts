@@ -653,7 +653,7 @@ export class AcpSession {
         resolve(code);
         // A process that dies on its own leaves nothing reusable behind: the
         // next turn of the thread starts a fresh one.
-        if (!this.closing) this.drop();
+        if (!this.closing) this.drop(this.exitSentence(code), this.exitSentence(code, true));
       });
       child.once('error', () => {
         resolve(null);
@@ -667,11 +667,18 @@ export class AcpSession {
     return diagnostic || this.lastStderr.length === 0 ? head : `${head}: ${this.lastStderr}`;
   }
 
-  /** The one teardown: the connection goes, then the child, through the registry. */
-  private drop(): void {
+  /** The turn settles before its connection and child go through the registry. */
+  private drop(reason = 'the acp session closed', diagnostic?: string): void {
     if (this.ended) return;
     this.ended = true;
     this.closing = true;
+    const current = this.current;
+    this.current = null;
+    if (current !== null) {
+      if (current.isStopped) current.stopNow();
+      else current.fail(reason, diagnostic);
+      current.settle();
+    }
     this.protection?.close(this.exited ?? Promise.resolve());
     this.protection = null;
     this.clearIdle();

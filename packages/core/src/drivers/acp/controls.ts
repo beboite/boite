@@ -371,6 +371,7 @@ export class SessionControls {
       // has to be asked for, or the session stays on the last one.
       const wanted = model === AGENT_OWN_MODEL && this.appliedModel !== undefined && this.ownModel !== null ? this.ownModel : model;
       const unapplied = await this.setOption(ctx, 'model', wanted);
+      if (unapplied?.kind === 'gone') throw new Error('the acp session went away before the prompt');
       if (unapplied === null) {
         // OpenCode 2 puts the effort back to its default with any other model:
         // what the answer now reports decides whether the effort goes again.
@@ -382,8 +383,10 @@ export class SessionControls {
         throw new ModelRefused(`thread.model: ${ctx.provider.name} ${unapplied.detail}`);
       }
     }
-    if (effort !== this.appliedEffort && (await this.setOption(ctx, 'thought_level', effort)) === null) {
-      this.appliedEffort = effort;
+    if (effort !== this.appliedEffort) {
+      const unapplied = await this.setOption(ctx, 'thought_level', effort);
+      if (unapplied?.kind === 'gone') throw new Error('the acp session went away before the prompt');
+      if (unapplied === null) this.appliedEffort = effort;
     }
   }
 
