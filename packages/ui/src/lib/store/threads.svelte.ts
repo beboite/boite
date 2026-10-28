@@ -308,8 +308,10 @@ export class Threads {
    * screen and the subscription, and an older one writes nothing, not even
    * `subscribedThreadId`. The order is subscribe then unsubscribe, so a
    * refused subscribe leaves the thread on screen with the socket it had
-   * rather than with none at all. A `listed` open is a load's: the thread
-   * list it asked just before reads this row too, so the open leaves it that.
+   * rather than with none at all. A `listed` open is a load's: the read of
+   * that load's thread list began just before (its call leaves after this
+   * open's `threads.get`) and covers this row too, so the open's read does
+   * not protect the row from it.
    */
   async open(threadId: ThreadId, navigate = true, options: { requests?: boolean; liveCreation?: boolean; listed?: boolean } = {}): Promise<void> {
     const s = this.ctx.store;
