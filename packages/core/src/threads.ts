@@ -43,6 +43,7 @@ import { SYSTEM_LABEL, nativeCommandPrompt, systemOperation } from './threads/op
 import { USER_ORIGIN, autonomousSource, originAutomatic, originOperation, type StartTurnOptions, type TurnInput, type TurnOrigin } from './threads/turn-origin.ts';
 import { saveThread, withLoad } from './threads/records.ts';
 import { isBusy, markQueued } from './threads/lifecycle.ts';
+import { admissionRefusal } from './threads/admission.ts';
 import { ThreadRecovery } from './threads/recovery.ts';
 import { LimitResumes } from './threads/limit-resume.ts';
 import { AutoContinues } from './threads/auto-continue.ts';
@@ -617,7 +618,8 @@ export class ThreadStore {
     const { fingerprint, turn: accepted } = checkTurnRequest(this.core.journal, threadId, prompt, attachments, previewReferences, clientRequestId);
     if (accepted) return accepted;
     this.checkSelection(thread, expectedSelectionVersion);
-    if (thread.archived) throw refused('cannot start a turn on an archived thread', { threadId });
+    const refusal = admissionRefusal(this.core, thread, executionChoice);
+    if (refusal !== null) throw refused(refusal, { threadId });
     if (this.isBusy(threadId)) {
       const data: TurnInFlightData = { threadId, reason: 'turn-in-flight', thread: this.withLoad(thread) };
       throw refused('this thread already has an in-flight turn', data);
@@ -629,7 +631,6 @@ export class ThreadStore {
     if (executionChoice) {
       const provider = this.core.providers.require(executionChoice.providerId);
       const account = this.core.accounts.require(executionChoice.accountId);
-      if (account.providerId !== provider.id || account.status === 'unauthenticated') throw refused('the queued account is unavailable; choose an account and enqueue this input again');
       const model = checkModel(provider, account.id, executionChoice.model);
       const sameAccount = thread.providerId === provider.id && thread.accountId === account.id;
       thread = { ...thread, providerId: provider.id, accountId: account.id, model,
