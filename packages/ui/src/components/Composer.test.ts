@@ -2201,6 +2201,63 @@ test('a send held by a fit is dropped when the composer moves to another thread 
   } finally { decode.mockRestore(); }
 });
 
+/** A question on t-trace the composer answers, pictures pasted over the byte total on a slow codec, and every answer recorded. */
+async function answerWhileFitting() {
+  const { copyImages } = await import('../lib/composer-clipboard');
+  const { browserCodec } = await import('../lib/image-prepare');
+  const { writeAnswer } = await import('../lib/question-reply.svelte');
+  const heavy = Array.from({ length: 30 }, (_, at) => ({ kind: 'image' as const, mimeType: 'image/jpeg' as const, data: Buffer.alloc(400 * 1024, at).toString('base64'), name: `shot-${at}.jpg` }));
+  vi.spyOn(browserCodec, 'decode').mockImplementation(async () => ({
+    width: 1170, height: 2532, hasAlpha: () => false, close() {},
+    async encode(_width, _height, mimeType) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return new Blob([new Uint8Array(100 * 1024)], { type: mimeType });
+    }
+  }));
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {});
+  await store.open('t-trace');
+  await store.send('question');
+  await waitFor(() => store.openThread?.status === 'waiting');
+  const question = store.pendingQuestions.find(item => item.threadId === 't-trace')!;
+  store.pendingQuestions = [...store.pendingQuestions, { ...question, id: `${question.id}-other` }];
+  writeAnswer(store, question.id);
+  const answers: { id: string; bytes: number }[] = [];
+  const { decodedBytes } = await import('@boite/contracts');
+  vi.spyOn(store, 'answerQuestion').mockImplementation(async (_thread, id, _options, _text, attachments) => {
+    answers.push({ id, bytes: (attachments ?? []).reduce((sum, one) => sum + decodedBytes(one.data), 0) });
+    return true;
+  });
+  const from = { text: heavy.map((_, at) => `[Image ${at + 1}]`).join(' '), attachments: heavy, queued: [], sending: false, paused: false };
+  const copied = clipboard();
+  expect(copyImages(copied, from, 0, from.text.length)).toBe(true);
+  await type('see ');
+  input().focus();
+  input().setSelectionRange(4, 4);
+  expect(clipboardEvent('paste', copied).defaultPrevented).toBe(true);
+  const fitted = () => waitFor(() => store.composerStates['t-trace']!.attachments.reduce((sum, one) => sum + decodedBytes(one.data), 0) <= 10 * 1024 * 1024, 4000);
+  return { question, answers, fitted, writeAnswer };
+}
+
+test('a card answered while its pictures are fitted sends them once they fit', async ({ app: _app }) => {
+  const { sendAnswer } = await import('../lib/question-reply.svelte');
+  const { question, answers } = await answerWhileFitting();
+  // The card's Send, while the box still weighs 12 MB.
+  expect(await sendAnswer(store, question)).toBe(true);
+  expect(answers).toHaveLength(1);
+  expect(answers[0]!.id).toBe(question.id);
+  expect(answers[0]!.bytes).toBeLessThanOrEqual(10 * 1024 * 1024);
+});
+
+test('another question chosen while the answer waits for its pictures does not take the draft', async ({ app: _app }) => {
+  const { question, answers, fitted, writeAnswer } = await answerWhileFitting();
+  press('Enter');
+  writeAnswer(store, `${question.id}-other`);
+  await fitted();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(answers).toEqual([]);
+  expect(store.composerStates['t-trace']!.attachments).toHaveLength(30);
+});
+
 test('copying an image reference carries its picture to another composer, and stays text in its own', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => !store.busy);

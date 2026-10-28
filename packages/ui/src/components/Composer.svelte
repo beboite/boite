@@ -343,11 +343,7 @@
   }
 
   async function submit(nextDraft = false) {
-    const ready = sendable(store, stateForInput(), stateForInput); if (!(typeof ready === 'boolean' ? ready : await ready)) return; // Pictures being fitted go once they fit, in the same box (`lib/composer-attachments.ts`).
     if (attachments.some(unresolvedAssetId)) { store.error = strings.errors.draftAttachment; return; }
-    const prompt = text;
-    const images = attachments;
-    const references = previewReferences;
     if (reply) {
       const answeredKey = key;
       if (canSend && await sendAnswer(store, reply)) {
@@ -357,6 +353,10 @@
       }
       return;
     }
+    const ready = sendable(store, stateForInput(), stateForInput); if (!(typeof ready === 'boolean' ? ready : await ready)) return; // Pictures being fitted go once they fit, in the same box (`lib/composer-attachments.ts`); an answer waits in `sendAnswer`.
+    const prompt = text;
+    const images = attachments;
+    const references = previewReferences;
     if (target) {
       if (canSend && await sendToTarget(target, stateForInput(), prompt, images)) recall = null;
       requestAnimationFrame(grow);

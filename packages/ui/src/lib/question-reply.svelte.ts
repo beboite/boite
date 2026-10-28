@@ -1,6 +1,7 @@
 import type { QuestionRequest } from '@boite/contracts';
 import type { Store } from './store.svelte';
 import { unresolvedAssetId } from './draft-attachments';
+import { sendable } from './composer-attachments';
 import { focusComposer } from './focus';
 import { strings } from './strings';
 
@@ -113,13 +114,19 @@ export function replyOf(store: Store, questionId: string): { replying: boolean; 
 
 /**
  * Sends the card's picks with what the composer holds when the composer answers
- * this question. Only what went out leaves the composer: text typed while the
+ * this question. Pictures still being fitted go once they fit; when the
+ * composer answers another question by then, or stays over the byte total,
+ * nothing goes. Only what went out leaves the composer: text typed while the
  * call was on its way stays. False gives the card back.
  */
 export async function sendAnswer(store: Store, question: QuestionRequest): Promise<boolean> {
   const held = repliesOf(store);
-  const optionIds = held.picks[question.id] ?? [];
   const state = replyTarget(store)?.id === question.id ? store.composerStates[question.threadId] : undefined;
+  if (state) {
+    const ready = sendable(store, state, () => store.composerStates[question.threadId]!);
+    if (!(typeof ready === 'boolean' ? ready : await ready) || replyTarget(store)?.id !== question.id) return false;
+  }
+  const optionIds = held.picks[question.id] ?? [];
   const text = state?.text ?? '';
   const attachments = state?.attachments ?? [];
   if (attachments.some(unresolvedAssetId)) { store.error = strings.errors.draftAttachment; return false; }
