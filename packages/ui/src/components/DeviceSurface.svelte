@@ -9,6 +9,7 @@
   import { fill, strings } from '../lib/strings';
   import { FRAME_INTERVAL, frameMaxWidth, framePoint, frameQuality, nextPollDelay } from '../lib/remote-browser-view';
   import { liveViews, machineName } from '../lib/live-view.svelte';
+  import { SnapshotFeed } from '../lib/snapshot-feed';
   /**
    * The simulators and emulators open in this conversation, live (docs/devices.md).
    * The core captures their screen; this polls JPEG frames the way the phone's
@@ -32,12 +33,14 @@
   const desk = hasKeyboard();
   let viewer = $state<HTMLElement>(), screen = $state<HTMLButtonElement>();
   // Keyboard, wheel and stream touch input, sent one at a time in order: without the stream, each is an adb process on the agent's machine.
-  let typed: MobileDeviceInput[] = [], typing: Promise<void> | null = null;
-  let wheelY = 0, wheelAt: { x: number; y: number } | null = null, wheelTimer: ReturnType<typeof setTimeout> | undefined;
+  // Each input keeps the connection and device it was made on, so one still queued when the tab changes never reaches another device.
+  type InputTarget = { client: NonNullable<Store['client']>; deviceId: string };
+  let typed: { to: InputTarget; input: MobileDeviceInput }[] = [], typing: Promise<void> | null = null;
+  let wheelY = 0, wheelAt: { x: number; y: number; to: InputTarget } | null = null, wheelTimer: ReturnType<typeof setTimeout> | undefined;
   // The live stream: its picture while the canvas plays it, why the panel shows screenshots instead, and the fingers down on it.
   let canvas = $state<HTMLCanvasElement>(), stream = $state.raw<StreamPicture | null>(null), streamNote = $state(''), notice = $state(''), areaHeight = $state(0), pageHidden = $state(document.hidden);
   const fingers = new Map<number, number>();
-  let notches = { x: 0, y: 0 }, notchAt: { x: number; y: number } | null = null, notchTimer: ReturnType<typeof setTimeout> | undefined, noticeTimer: ReturnType<typeof setTimeout> | undefined;
+  let notches = { x: 0, y: 0 }, notchAt: { x: number; y: number; to: InputTarget } | null = null, notchTimer: ReturnType<typeof setTimeout> | undefined, noticeTimer: ReturnType<typeof setTimeout> | undefined;
   const session = $derived(sessions.find(one => one.deviceId === selected) ?? sessions[0] ?? null);
   const key = $derived(store.threadKey(threadId));
   const revealed = $derived(liveViews.shown('device', key));
@@ -95,11 +98,31 @@
     timer = setTimeout(() => void poll(run), Math.max(60, FRAME_INTERVAL - (Date.now() - requestedAt)));
   }
 
-  async function refresh(): Promise<void> {
+  // The thread's sessions: read whole, kept by `devices.changed`; a change that lands while a read is out is applied after it.
+  let feed: SnapshotFeed<MobileDeviceSession[]> | null = null;
+  $effect(() => {
     const client = store.client;
     if (!client) return;
+    const changes = feed = new SnapshotFeed<MobileDeviceSession[]>(next => {
+      const known = new Set(sessions.map(one => one.deviceId));
+      sessions = next;
+      // A device just opened, by the agent or here, comes to the front.
+      const added = next.find(one => !known.has(one.deviceId));
+      if (added) { selected = added.deviceId; picking = false; }
+      if (next.length === 0) void refresh();
+    });
+    const off = client.on('devices.changed', event => { if (event.threadId === threadId) changes.push(event.sessions); });
+    untrack(() => void changes.read(() => client.call('devices.sessions', { threadId }), result => {
+      sessions = result.sessions;
+      if (result.sessions.length === 0) void refresh();
+    }).catch(cause => { if (feed === changes) error = errorText(cause); }));
+    return () => { changes.dispose(); off(); if (feed === changes) feed = null; };
+  });
+  async function refresh(): Promise<void> {
+    const client = store.client, changes = feed;
+    if (!client || !changes) return;
     loading = true;
-    try { list = await client.call('devices.list', { threadId }); sessions = list.sessions; error = ''; }
+    try { await changes.read(() => client.call('devices.list', { threadId }), value => { list = value; sessions = value.sessions; }); error = ''; }
     catch (cause) { error = errorText(cause); }
     finally { loading = false; }
   }
@@ -125,21 +148,30 @@
     if (!client || !target || !usable) return false;
     return (await act(() => client.call('devices.input', { threadId, deviceId: target.deviceId, input: value }))) !== undefined;
   }
-  /** Characters typed while adb is busy leave together in the next text; a finger's moves still waiting keep only the latest. */
-  function direct(value: MobileDeviceInput) {
-    const last = typed.at(-1);
-    if (value.kind === 'text' && last?.kind === 'text' && last.text.length + value.text.length <= MOBILE_TEXT_MAX) typed[typed.length - 1] = { kind: 'text', text: last.text + value.text };
-    else if (value.kind === 'touch' && value.action === 'move' && last?.kind === 'touch' && last.action === 'move' && last.pointerId === value.pointerId) typed[typed.length - 1] = value;
-    else typed.push(value);
+  /** The connection and device shown now, where an input made now goes. */
+  function inputTarget(): InputTarget | null {
+    const client = store.client;
+    return client && showing ? { client, deviceId: showing.deviceId } : null;
+  }
+  /** Characters typed while adb is busy leave together in the next text; a finger's moves still waiting keep only the latest. Only inputs for the same device merge. */
+  function direct(value: MobileDeviceInput, to = inputTarget()) {
+    if (!to) return;
+    const queued = typed.at(-1), last = queued && queued.to.client === to.client && queued.to.deviceId === to.deviceId ? queued.input : undefined;
+    if (value.kind === 'text' && last?.kind === 'text' && last.text.length + value.text.length <= MOBILE_TEXT_MAX) queued!.input = { kind: 'text', text: last.text + value.text };
+    else if (value.kind === 'touch' && value.action === 'move' && last?.kind === 'touch' && last.action === 'move' && last.pointerId === value.pointerId) queued!.input = value;
+    else typed.push({ to, input: value });
     typing ??= drain().finally(() => { typing = null; });
   }
   async function drain(): Promise<void> {
     while (typed.length) {
-      const value = typed.shift()!, client = store.client, target = showing;
-      if (!alive || !client || !target?.input || store.connection !== 'ready') { typed = []; return; }
-      // A pause drops what was typed, but a finger lifted still reaches the device, which would otherwise keep it pressed.
-      if (paused && !(value.kind === 'touch' && (value.action === 'up' || value.action === 'cancel'))) continue;
-      try { await client.call('devices.input', { threadId, deviceId: target.deviceId, input: value }); error = ''; }
+      const { to, input: value } = typed.shift()!, client = store.client, target = showing;
+      if (!alive || !client || store.connection !== 'ready') { typed = []; return; }
+      const lift = value.kind === 'touch' && (value.action === 'up' || value.action === 'cancel');
+      // A finger lifted still reaches the device it pressed, which would otherwise keep it down; anything else made for another device is dropped.
+      if (to.client !== client || (!lift && (to.deviceId !== target?.deviceId || !target.input))) continue;
+      // A pause drops what was typed, lifts excepted.
+      if (paused && !lift) continue;
+      try { await client.call('devices.input', { threadId, deviceId: to.deviceId, input: value }); error = ''; }
       catch (cause) { typed = []; if (alive) error = errorText(cause); return; }
       finally { if (alive) kick(); }
     }
@@ -159,28 +191,29 @@
     event.preventDefault();
     const at = pixel(event, frame);
     if (!at || !picture) return;
-    const unit = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? 400 : 1, current = frame;
-    wheelAt ??= at;
+    const unit = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? 400 : 1, current = frame, to = inputTarget();
+    if (!to) return;
+    wheelAt ??= { ...at, to };
     wheelY += event.deltaY * unit * current.width / Math.max(1, picture.getBoundingClientRect().width);
     clearTimeout(wheelTimer);
     wheelTimer = setTimeout(() => {
       const from = wheelAt, reach = Math.round(current.height * .6), by = Math.max(-reach, Math.min(reach, Math.round(wheelY)));
       wheelAt = null; wheelY = 0;
       if (!from || !by) return;
-      direct({ kind: 'swipe', from, to: { x: from.x, y: Math.max(0, Math.min(current.height - 1, from.y - by)) }, durationMs: 150 });
+      direct({ kind: 'swipe', from: { x: from.x, y: from.y }, to: { x: from.x, y: Math.max(0, Math.min(current.height - 1, from.y - by)) }, durationMs: 150 }, from.to);
     }, 80);
   }
   /** A notch is 100 pixels or 3 lines of the browser's wheel; what turns within 40 ms leaves as one scroll. */
   function scrolled(event: WheelEvent) {
-    const at = streamPoint(event, false);
-    if (!at) return;
+    const at = streamPoint(event, false), to = inputTarget();
+    if (!at || !to) return;
     const notch = event.deltaMode === 1 ? 1 / 3 : event.deltaMode === 2 ? 3 : 1 / 100;
-    notchAt ??= at;
+    notchAt ??= { ...at, to };
     notches = { x: notches.x + event.deltaX * notch, y: notches.y + event.deltaY * notch };
     notchTimer ??= setTimeout(() => {
       const from = notchAt, by = notches, fit = (n: number) => Math.max(-MOBILE_SCROLL_MAX, Math.min(MOBILE_SCROLL_MAX, Math.round(n * 100) / 100));
       notchAt = null; notches = { x: 0, y: 0 }; notchTimer = undefined;
-      if (from && (fit(by.x) || fit(by.y))) direct({ kind: 'scroll', ...from, dx: fit(by.x), dy: fit(by.y) });
+      if (from && (fit(by.x) || fit(by.y))) direct({ kind: 'scroll', x: from.x, y: from.y, dx: fit(by.x), dy: fit(by.y) }, from.to);
     }, 40);
   }
   $effect(() => {
@@ -214,20 +247,6 @@
     : reason.why === 'failed' ? fill(strings.devicePanel.streamFailed, { reason: reason.reason }).trim() : '';
 
   onMount(() => {
-    const client = store.client;
-    const off = client?.on('devices.changed', event => {
-      if (event.threadId !== threadId) return;
-      const known = new Set(sessions.map(one => one.deviceId));
-      sessions = event.sessions;
-      // A device just opened, by the agent or here, comes to the front.
-      const added = event.sessions.find(one => !known.has(one.deviceId));
-      if (added) { selected = added.deviceId; picking = false; }
-      if (event.sessions.length === 0) void refresh();
-    });
-    void client?.call('devices.sessions', { threadId }).then(result => {
-      sessions = result.sessions;
-      if (result.sessions.length === 0) void refresh();
-    }, cause => { error = errorText(cause); });
     const keyboard = liveInput(() => viewer, {
       key(event) {
         if (!showing?.input || (!frame && !live) || paused) return false;
@@ -246,7 +265,7 @@
     document.addEventListener('visibilitychange', visibility);
     for (const name of ['pageshow', 'online', 'focus'] as const) window.addEventListener(name, back);
     return () => {
-      alive = false; stop(); off?.(); keyboard.destroy(); clearTimeout(wheelTimer); clearTimeout(notchTimer); clearTimeout(noticeTimer);
+      alive = false; stop(); keyboard.destroy(); clearTimeout(wheelTimer); clearTimeout(notchTimer); clearTimeout(noticeTimer);
       document.removeEventListener('visibilitychange', visibility);
       for (const name of ['pageshow', 'online', 'focus'] as const) window.removeEventListener(name, back);
     };

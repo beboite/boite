@@ -24,7 +24,7 @@ import { runWrite } from './journal/statements.ts';
 import { WAL_LIMIT_BYTES, WalCheckpoints, type WalCheckpointOptions } from './journal/wal-checkpoints.ts';
 import { toAccount, toMessage, toProcess, toProject, toThread, toTurn, parseJson } from './journal/rows.ts';
 import { threadsWhere, VISIBLE_THREADS, writeThread } from './journal/thread-rows.ts';
-import { oneTurn, sumSessionUsage, writeTurn } from './journal/turn-rows.ts';
+import { oneTurn, sumSessionUsage, writeTurn, type SessionUsage } from './journal/turn-rows.ts';
 import type { AccountRow, MessageRow, ProcessRow, ProjectIconRow, ProjectRow, ThreadRow, TurnRow } from './journal/rows.ts';
 import type { DetectedIcon as StoredProjectIcon } from './project-icons.ts';
 import { copyStoredParts, foldStreamingParts, messageOfError, StreamBuffer } from './journal/stream-buffer.ts';
@@ -457,7 +457,7 @@ export class Journal {
   lastEndedTurn(threadId: string): Turn | null { return oneTurn(this.db, 'ended', threadId); }
   /** The oldest queued turn that runs `operation`. */
   queuedTurn(threadId: string, operation: string): Turn | null { return oneTurn(this.db, 'queued', threadId, operation); }
-  sessionUsage(threadId: string, generation: number, exceptTurnId: string): { costUsd: number; tokens: number } { return sumSessionUsage(this.db, threadId, generation, exceptTurnId); }
+  sessionUsage(threadId: string, generation: number, exceptTurnId: string): SessionUsage { return sumSessionUsage(this.db, threadId, generation, exceptTurnId); }
 
   /** A coordination contact needs one completion timestamp, without loading its turn history. */
   lastCompletedAt(threadId: string): number | null {

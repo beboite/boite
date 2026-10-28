@@ -17,7 +17,8 @@
     order?: string[];
     reorder?: (order: string[]) => Promise<boolean>;
     refresh: () => void;
-    connect: () => void;
+    /** Absent where Providers is out of reach: a phone or a paired device. */
+    connect?: () => void;
     settings: () => void;
     close: () => void;
     title?: Snippet;

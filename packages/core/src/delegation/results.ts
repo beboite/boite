@@ -2,6 +2,8 @@ import type { DelegatedAgent, DelegationResultPage, DelegationWaitResult, RpcPar
 import type { Core } from '../core.ts';
 import type { Connection } from '../router.ts';
 import { invalidParams, refused } from '../errors.ts';
+import { usageGroups } from '../journal/usage-sums.ts';
+import { usageTotal } from '../usage.ts';
 
 export const DELEGATION_WAIT_DEFAULT_MS = 600_000;
 export const DELEGATION_WAIT_MAX_MS = 3_600_000;
@@ -46,13 +48,8 @@ export function turnResult(core: Core, turn: Turn | null): string | null {
 
 /** What a team's children and the parent's delegation turns spent on this machine. */
 export function teamUsage(core: Core, rootId: string): Usage {
-  const totals = core.journal.db.query(`SELECT
-    SUM(json_extract(usage, '$.inputTokens')) AS inputTokens, SUM(json_extract(usage, '$.outputTokens')) AS outputTokens,
-    SUM(json_extract(usage, '$.cacheReadTokens')) AS cacheReadTokens, SUM(json_extract(usage, '$.cacheWriteTokens')) AS cacheWriteTokens,
-    SUM(json_extract(usage, '$.costUsdEquivalent')) AS costUsdEquivalent
-    FROM turns WHERE thread_id IN (SELECT thread_id FROM delegated_agents WHERE root_id = ?)
-    OR (thread_id = ? AND json_extract(execution, '$.operation') = 'delegation')` ).get(rootId, rootId) as Usage;
-  return { inputTokens: totals.inputTokens ?? 0, outputTokens: totals.outputTokens ?? 0, cacheReadTokens: totals.cacheReadTokens ?? 0, cacheWriteTokens: totals.cacheWriteTokens ?? 0, costUsdEquivalent: totals.costUsdEquivalent ?? null };
+  return usageTotal(core, usageGroups(core.journal.db, { where: `t.thread_id IN (SELECT thread_id FROM delegated_agents WHERE root_id = ?)
+    OR (t.thread_id = ? AND json_extract(t.execution, '$.operation') = 'delegation')` }, rootId, rootId));
 }
 
 /** A page of a child's answer to one turn: read here for a parent here, or for its parent on another machine. */

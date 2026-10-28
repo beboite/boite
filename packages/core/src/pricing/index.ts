@@ -48,7 +48,21 @@ export function priceOf(model: string | null, hourCache = false): UsagePrice | n
   return { model: id, rates };
 }
 
-/** What these tokens cost at these rates, in USD. `usage.inputTokens` must exclude the cache reads. */
+/**
+ * What `usage` costs on `model` at the public rates, its one-hour cache writes
+ * at the hour rate and the rest at the listed one; null when the list has no
+ * such model. `price` holds the write rate most of the writes were charged.
+ */
+export function priceUsage(model: string | null, usage: Usage): { price: UsagePrice; cost: number } | null {
+  const minutes = priceOf(model);
+  const hour = priceOf(model, true);
+  if (minutes === null || hour === null) return null;
+  const hourWrites = Math.min(usage.cacheWriteHourTokens ?? 0, usage.cacheWriteTokens);
+  const cost = costAt(minutes.rates, usage) + (hourWrites * (hour.rates.cacheWrite - minutes.rates.cacheWrite)) / 1_000_000;
+  return { price: hourWrites * 2 > usage.cacheWriteTokens ? hour : minutes, cost };
+}
+
+/** What these tokens cost at these rates, in USD, every cache write at `rates.cacheWrite`. */
 export function costAt(rates: TokenRates, usage: Usage): number {
   return (
     usage.inputTokens * rates.input +

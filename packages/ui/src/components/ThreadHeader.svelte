@@ -18,6 +18,7 @@
   import { projectName } from '../lib/format';
   import { workspace } from '../lib/workspace.svelte';
   import Menu from './Menu.svelte';
+  import { ThreadRename, commitOnUnmount } from '../lib/thread-rename.svelte';
   import { watchStatus } from '../lib/pull-request-watch';
   import ContextModeBadge from './ContextModeBadge.svelte';
   import CoordinationDialog from './CoordinationDialog.svelte';
@@ -31,8 +32,9 @@
     const machines = workspace.machinesOr(store);
     return [project ? projectName(project) : null, machines.length > 1 ? machines.find(m => m.store === store)?.label : null].filter(Boolean).join(' · ');
   });
-  let renaming = $state(false);
-  let renameText = $state('');
+  /** The rename in progress, bound to the thread it began on rather than to whatever is open later. */
+  let rename = $state<ThreadRename | null>(null);
+  commitOnUnmount(() => rename);
   let coordinationThreadId = $state<string | null>(null);
   $effect(() => {
     if (thread?.id !== coordinationThreadId) coordinationThreadId = null;
@@ -41,9 +43,16 @@
   function beginRename() {
     const thread = store.openThread;
     if (!thread) return;
-    renameText = thread.title;
-    renaming = true;
+    rename = new ThreadRename(store, thread.id, thread.title);
   }
+
+  // Another surface opened a different thread under the input: the title typed so far still goes to the thread it was typed for.
+  $effect(() => {
+    if (rename && rename.threadId !== thread?.id) {
+      void rename.commit();
+      rename = null;
+    }
+  });
 
   // The palette asks for a rename from outside this header.
   $effect(() => {
@@ -53,9 +62,9 @@
   });
 
   async function commitRename() {
-    const thread = store.openThread;
-    renaming = false;
-    if (thread) await store.rename(thread.id, renameText);
+    const current = rename;
+    rename = null;
+    await current?.commit();
   }
 
   let titleButton = $state<HTMLButtonElement | undefined>(undefined);
@@ -66,7 +75,8 @@
       event.preventDefault();
       void commitRename();
     } else if (event.key === 'Escape') {
-      renaming = false;
+      rename?.cancel();
+      rename = null;
     } else return;
     await tick();
     titleButton?.focus({ preventScroll: true });
@@ -151,10 +161,11 @@
           </button>
           <span class="crumb-sep" aria-hidden="true">/</span>
         {/if}
-        {#if renaming}
+        {#if rename}
           <input
             class="rename"
-            bind:value={renameText}
+            value={rename.text}
+            oninput={(event) => { if (rename) rename.text = event.currentTarget.value; }}
             onkeydown={onRenameKey}
             onblur={() => void commitRename()}
             placeholder={strings.thread.renamePlaceholder}

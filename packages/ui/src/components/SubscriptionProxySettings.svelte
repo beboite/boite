@@ -4,11 +4,16 @@
   import { checkSettingsPatch, type PluginState, type SubscriptionProxy, type SubscriptionProxyMode } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
+  import { MediaQuery } from 'svelte/reactivity';
+  import { desktopSettings } from '../lib/settings-tabs';
   import InfoTip from './InfoTip.svelte';
   import GatewayMoveDialog from './GatewayMoveDialog.svelte';
   import GatewayOpenButton from './GatewayOpenButton.svelte';
 
   let { store }: { store: Store } = $props();
+  /** Plugins is a desktop settings page: a phone says the plugin is missing and offers no way there. */
+  const phoneWidth = new MediaQuery('(max-width: 720px)');
+  let pluginsReachable = $derived(desktopSettings(phoneWidth.current));
   let config = $state<SubscriptionProxy>({ enabled: false, kind: 'douane', baseUrl: 'http://127.0.0.1:8787', dashboardUrl: 'http://127.0.0.1:8787/admin/#quotas' });
   let key = $state('');
   let clearKey = $state(false);
@@ -100,7 +105,7 @@
           : gateway.status === 'running' ? fill(strings.subscriptionProxy.localRunning, { version: gateway.version ?? '', port: String(gateway.port) }).replace('  ', ' ')
           : gateway.status === 'starting' || gateway.status === 'updating' ? strings.subscriptionProxy.localStarting
           : strings.subscriptionProxy.localStopped}</span>
-        {#if gateway?.status !== 'running'}
+        {#if gateway?.status !== 'running' && pluginsReachable}
           <button type="button" class="ghost small" onclick={() => store.showSettings('plugins')} data-testid="subscription-proxy-open-plugins"><span class="ui-label">{strings.subscriptionProxy.openPlugins}</span></button>
         {/if}
       </div>
