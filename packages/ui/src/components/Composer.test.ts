@@ -2130,6 +2130,45 @@ test('a pasted copy over the byte total holds Send until its pictures are fitted
   } finally { decode.mockRestore(); }
 });
 
+test('a send held by a fit is dropped when the composer moves to another thread meanwhile', async ({ app: _app }) => {
+  const { copyImages } = await import('../lib/composer-clipboard');
+  const { browserCodec } = await import('../lib/image-prepare');
+  const { ATTACHMENTS_TOTAL_MAX_BYTES, decodedBytes } = await import('@boite/contracts');
+  const heavy = Array.from({ length: 30 }, (_, at) => ({ kind: 'image' as const, mimeType: 'image/jpeg' as const, data: Buffer.alloc(400 * 1024, at).toString('base64'), name: `shot-${at}.jpg` }));
+  const decode = vi.spyOn(browserCodec, 'decode').mockImplementation(async () => ({
+    width: 1170, height: 2532, hasAlpha: () => false, close() {},
+    async encode(_width, _height, mimeType) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return new Blob([new Uint8Array(100 * 1024)], { type: mimeType });
+    }
+  }));
+  try {
+    await store.open('t-descriptors');
+    await waitFor(() => !store.busy);
+    await type('a draft for later');
+    const before = await store.client!.call('threads.get', { threadId: 't-descriptors' });
+    const from = { text: heavy.map((_, at) => `[Image ${at + 1}]`).join(' '), attachments: heavy, queued: [], sending: false, paused: false };
+    const copied = clipboard();
+    expect(copyImages(copied, from, 0, from.text.length)).toBe(true);
+    await store.open('t-trace');
+    await waitFor(() => !store.busy);
+    await type('look ');
+    input().focus();
+    input().setSelectionRange(5, 5);
+    expect(clipboardEvent('paste', copied).defaultPrevented).toBe(true);
+    press('Enter');
+    // Away before the pictures fit: the held send must not take the other thread's draft.
+    await store.open('t-descriptors');
+    const traced = store.composerStates['t-trace']!;
+    await waitFor(() => traced.attachments.reduce((sum, one) => sum + decodedBytes(one.data), 0) <= ATTACHMENTS_TOTAL_MAX_BYTES, 4000);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const after = await store.client!.call('threads.get', { threadId: 't-descriptors' });
+    expect(after.messages).toEqual(before.messages);
+    expect(input().value).toBe('a draft for later');
+    expect(traced.text.startsWith('look ')).toBe(true);
+  } finally { decode.mockRestore(); }
+});
+
 test('copying an image reference carries its picture to another composer, and stays text in its own', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => !store.busy);

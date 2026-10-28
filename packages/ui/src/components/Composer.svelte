@@ -343,7 +343,7 @@
   }
 
   async function submit(nextDraft = false) {
-    const fit = fitting(stateForInput()); if (fit) await fit; // Pictures still being fitted to the byte total go once they fit (`lib/turn-fit.ts`).
+    const box = stateForInput(), fit = fitting(box); if (fit && (await fit, stateForInput() !== box)) return; // Pictures being fitted go once they fit (`lib/turn-fit.ts`), unless the box moved to another thread meanwhile.
     if (attachments.some(unresolvedAssetId)) { store.error = strings.errors.draftAttachment; return; }
     const prompt = text;
     const images = attachments;
