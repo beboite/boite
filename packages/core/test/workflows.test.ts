@@ -758,6 +758,24 @@ test('an archive that rolls back leaves its run paused, and the committed one st
   expect(h.core.workflows.get(threadId, run.id)).toMatchObject({ status: 'stopped', error: 'The thread was archived.' });
 });
 
+test('a deletion whose archive rolls back leaves the run and its running step going', async () => {
+  const { held } = scripted(ctx => ctx.thread.parentThreadId ? { hold: true } : 'noted');
+  const { h, owner, threadId } = await setup();
+  const run = await owner.call('workflows.start', { threadId, plan: { name: 'Two', steps: [{ id: 'a', profile: 'fast', task: 'a' }, { id: 'b', profile: 'fast', task: 'b {{a}}' }] }, requestId: 'removal' });
+  await waitFor(() => held.size === 1);
+  const stepId = [...held.keys()][0]!;
+  const announce = h.core.projects.announce;
+  h.core.projects.announce = () => { throw new Error('injected failure after the thread was written'); };
+  try { expect(await thrown(h.core.threads.remove(threadId))).toThrow('injected failure'); }
+  finally { h.core.projects.announce = announce; }
+  expect([h.core.threads.require(threadId).archived, h.core.threads.require(stepId).archived]).toEqual([false, false]);
+  expect(h.core.workflows.get(threadId, run.id).status).toBe('running');
+  await Bun.sleep(20);
+  expect([...held.keys()]).toEqual([stepId]);
+  await h.core.threads.remove(threadId);
+  expect(held.size).toBe(0);
+});
+
 test('completed steps keep their summary while the team is paused and deliver once resumed', async () => {
   const { prompts, held: running } = scripted(() => ({ hold: true }));
   const { h, owner, threadId, config } = await setup();

@@ -493,8 +493,9 @@ export class ThreadStore {
     const family = this.core.journal.listThreads().filter(t => t.id === threadId || t.parentThreadId === threadId);
     for (const thread of family) this.removing.add(thread.id);
     try {
+      // One write hides the family; until it commits, its runs and steps go on.
+      this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => { for (const thread of family) this.archive(thread.id, true); })());
       this.core.workflows.stopRoot(threadId, 'Conversation deleted');
-      for (const thread of family) this.archive(thread.id, true);
       await Promise.all(family.map(thread => this.core.scheduler.stopAndWait(thread.id)));
       await Promise.all(family.flatMap(thread => [
         this.core.procs.stopAndWait(thread.id),
