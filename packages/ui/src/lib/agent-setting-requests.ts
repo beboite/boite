@@ -21,8 +21,11 @@ export function projectName(id: string, names: AgentSettingNames): string {
   return names.projects.find((project) => project.id === id)?.name ?? id;
 }
 
-/** `On`, `Paused`, `Claude · Claude Opus 5.5`, `High`, `boite, notes`; instructions by their length, the card shows their text. */
-export function agentSettingValueText(key: AgentSettingKey, value: unknown, names: AgentSettingNames): string {
+/**
+ * `On`, `Paused`, `Claude · Claude Opus 5.5`, `High`, `boite, notes`; instructions by their length, the card shows their text.
+ * `bare`: a model is an id of the agent's own provider, as a card drawn before cards named the provider holds it.
+ */
+export function agentSettingValueText(key: AgentSettingKey, value: unknown, names: AgentSettingNames, bare = false): string {
   const words = strings.agentSettingRequest;
   if (key === 'projects') {
     const ids = Array.isArray(value) ? value.map(String) : [];
@@ -36,9 +39,9 @@ export function agentSettingValueText(key: AgentSettingKey, value: unknown, name
   if (typeof value === 'boolean') return value ? words.on : words.off;
   if (key === 'dailyBudget' && typeof value === 'number') return fill(words.dollars, { amount: String(value) });
   if (key === 'model' && typeof value === 'string') {
-    // `<provider>/<model>`; a card drawn before cards named the provider holds the model id alone.
+    // `<provider>/<model>`, unless `bare`: an id such as `openai/gpt-5` then names no provider.
     const slash = value.indexOf('/');
-    const named = slash > 0 ? names.providers.find((provider) => provider.id === value.slice(0, slash)) : undefined;
+    const named = !bare && slash > 0 ? names.providers.find((provider) => provider.id === value.slice(0, slash)) : undefined;
     const model = named?.models.find((entry) => entry.id === value.slice(slash + 1));
     if (named && model) return `${named.name} · ${model.name}`;
     for (const provider of names.providers) {

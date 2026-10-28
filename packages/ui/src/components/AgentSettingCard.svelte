@@ -59,8 +59,9 @@
   const unchanged = $derived(edited !== null && JSON.stringify(edited) === JSON.stringify(Array.isArray(setting.previous) ? [...setting.previous].map(String).sort() : []));
   const canShow = $derived(store.owner && experimentOn('resident-agents'));
 
-  function value(raw: unknown): string {
-    return agentSettingValueText(setting.key, raw, names);
+  /** An answer's value always names the provider; a card's own values only once it says so (`modelRefs`). */
+  function value(raw: unknown, answered = false): string {
+    return agentSettingValueText(setting.key, raw, names, !answered && setting.modelRefs !== true);
   }
 
   function toggle(id: string): void {
@@ -94,16 +95,18 @@
   function verdict(given: QuestionAnswer): string {
     const outcome = given.optionIds[0];
     if (outcome === 'applied') return words.applied;
-    if (outcome === 'changed') return fill(words.changed, { value: value(given.value) });
+    if (outcome === 'changed') return fill(words.changed, { value: value(given.value, true) });
     return words.refused;
   }
 
   function subject(given: QuestionAnswer | null): string {
     const outcome = given?.optionIds[0];
-    const shown = outcome === 'applied' || outcome === 'changed' ? given?.value ?? setting.value : setting.previous;
+    const settled = outcome === 'applied' || outcome === 'changed';
+    const answered = settled && given?.value != null;
+    const shown = settled ? given?.value ?? setting.value : setting.previous;
     // A picture is a code no one reads: the row names the setting alone.
     if (setting.key === 'avatar') return `${setting.agentName} · ${agentSettingLabel(setting.key)}`;
-    return `${setting.agentName} · ${agentSettingLabel(setting.key)}: ${value(shown)}`;
+    return `${setting.agentName} · ${agentSettingLabel(setting.key)}: ${value(shown, answered)}`;
   }
 </script>
 

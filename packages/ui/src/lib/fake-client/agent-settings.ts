@@ -40,9 +40,12 @@ function agentFor(ctx: FakeContext, threadId: string, name: string | undefined):
   throw refused(`agent: no agent ${JSON.stringify(wanted)}; the agents are ${live.map(agent => agent.name).join(', ') || 'none yet'}`, { field: 'agent', expected: live.map(agent => agent.name) });
 }
 
-/** As the core: the agent's own login on its provider; on another, that provider's first. */
+/** As the core: the agent's own login on its provider; on another, that provider's signed-in login, the default location first. */
 function accountOn(ctx: FakeContext, agent: AgentProfile, providerId: string): string | undefined {
-  return providerId === agent.selection.providerId ? agent.selection.accountId : ctx.accounts.find(account => account.providerId === providerId && account.status !== 'unauthenticated')?.id;
+  if (providerId === agent.selection.providerId) return agent.selection.accountId;
+  const usable = ctx.accounts.filter(account => account.providerId === providerId && account.status !== 'unauthenticated');
+  return (usable.find(a => a.isolationDir === null && a.status === 'ok') ?? usable.find(a => a.status === 'ok')
+    ?? usable.find(a => a.isolationDir === null) ?? usable[0])?.id;
 }
 
 /** As the core: `<provider>/<model>` of an available provider, or a model id of the agent's own; else the core's refusal. */
