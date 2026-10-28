@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { renderBlock } from '../lib/markdown';
+  import { hasFence } from '../lib/fences';
   import { workspace } from '../lib/workspace.svelte';
   import { ParagraphScan, answerText } from '../lib/message-display';
   import { strings } from '../lib/strings';
@@ -158,7 +159,7 @@
     const node = host;
     if (!node) return;
     // Only a fenced block draws a `pre`: most paragraphs have no button to hang and wait for nothing.
-    if (!blocks.some(block => block.includes('```'))) return;
+    if (!blocks.some(hasFence)) return;
     // The `{@html}` write lands with the rest of the render, so the buttons go
     // on one tick later, once the new blocks are the ones in the document.
     void tick().then(() => {

@@ -1,4 +1,5 @@
 import type { Message, MessagePart, MoveNotice, ThreadLink, ThreadSummary } from '@boite/contracts';
+import { FenceScan } from './fences';
 
 /** Older cores journalled the whole goal instruction as a user message. */
 export function visibleUserText(text: string): string {
@@ -18,15 +19,9 @@ export function visibleAnswer(text: string): string {
   const index = from + tail.index;
   const start = index + (text[index] === '\n' ? 1 : 0);
   // A terminal marker inside an unfinished fenced example is still answer content.
-  let fence: string | null = null;
-  for (const line of text.slice(0, start).split('\n')) {
-    const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
-    if (!match) continue;
-    const delimiter = match[1]!;
-    if (!fence) fence = delimiter;
-    else if (delimiter[0] === fence[0] && delimiter.length >= fence.length && !match[2]!.trim()) fence = null;
-  }
-  return fence ? text : text.slice(0, start);
+  const fences = new FenceScan();
+  for (const line of text.slice(0, start).split('\n')) fences.line(line);
+  return fences.inside ? text : text.slice(0, start);
 }
 
 export function messagePreview(message: Message): string {
@@ -117,7 +112,7 @@ export function paragraphBlocks(text: string, live: boolean): string[] {
 export class ParagraphScan {
   #read = '';
   #start = 0;
-  #fence = '';
+  #fences = new FenceScan();
   #done: string[] = [];
   #tail = '';
   #result: string[] | null = null;
@@ -129,21 +124,17 @@ export class ParagraphScan {
     if (!text.startsWith(this.#read)) {
       this.#read = '';
       this.#start = 0;
-      this.#fence = '';
+      this.#fences.reset();
       this.#done = [];
       this.#result = null;
     }
     let offset = this.#read.length;
     let grew = false;
     for (let end = text.indexOf('\n', offset); end !== -1; end = text.indexOf('\n', offset)) {
-      const trimmed = text.slice(offset, end + 1).trim();
+      const line = text.slice(offset, end);
       offset = end + 1;
-      const marker = /^(?:`{3,}|~{3,})/.exec(trimmed)?.[0];
-      if (marker) {
-        if (!this.#fence) this.#fence = marker;
-        else if (marker[0] === this.#fence[0] && marker.length >= this.#fence.length && trimmed === marker) this.#fence = '';
-      }
-      if (!this.#fence && !trimmed) {
+      this.#fences.line(line);
+      if (!this.#fences.inside && !line.trim()) {
         const block = text.slice(this.#start, offset).trim();
         if (block) { this.#done.push(block); grew = true; }
         this.#start = offset;
