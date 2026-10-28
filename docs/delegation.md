@@ -435,8 +435,10 @@ saying so, and `boite delegate resume <thread-id>` (or Resume in the Subagents
 panel) continues it, while `boite delegate send <thread-id> "<instruction>"`
 steers it. A task that ends is given 30 seconds
 to wake the agent; after that a failed or vanished task counts as interrupted
-and a completed one as done. Work that ended with its agent process counts at
-once.
+and a completed one prompts a request for its final result. The checkpoint
+never becomes the final result just because the work ended. Work that ended
+with its agent process counts at once. These waits also apply on another
+machine; use `delegate send` to continue an interrupted child there.
 
 A child can send a question or blocker to its parent with `delegate send`.
 Its final answer returns automatically, so it should not send a duplicate

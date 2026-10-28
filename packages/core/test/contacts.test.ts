@@ -332,8 +332,10 @@ test('revoke rejects letters waiting for the closed project, queued wakes includ
   // A second letter already handed to a provider wake.
   const queued = await send('The dev server one.');
   await waitFor(() => letters(host, hostThread).find(entry => entry.id === queued.id)?.status === 'received', 10000);
-  (host.core.coordination as unknown as { update(letter: AgentLetter, status: string, error: string): void })
-    .update(letters(host, hostThread).find(entry => entry.id === queued.id)!, 'uncertain', 'Queued for provider delivery');
+  // Only `admit`, which protects the letter first, may hand it over.
+  const desk = host.core.coordination as unknown as { admit(threadId: string, letters: AgentLetter[], consume: () => void): void; update(letter: AgentLetter, status: string, error: string): void };
+  const entry = letters(host, hostThread).find(entry => entry.id === queued.id)!;
+  desk.admit(hostThread, [entry], () => desk.update(entry, 'uncertain', 'Queued for provider delivery'));
   await hostClient.call('contacts.revoke', { coreId: guestId, projectId: open.id });
   for (const id of [letter.id, queued.id]) expect(letters(host, hostThread).find(entry => entry.id === id)).toMatchObject({ status: 'rejected', error: 'Project closed to this contact' });
   expect(host.core.coordination.prepareWake(hostThread, 'turn_late')).toBe(false);

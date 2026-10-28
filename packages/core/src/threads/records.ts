@@ -68,7 +68,7 @@ export function withLoad(core: Core, thread: ThreadSummary): ThreadSummary {
     requestSince: busy || tasks.length > 0 || watches.some(pullRequestWatchWaits) ? core.journal.requestSince(thread.id) : null,
     progress: busy ? core.threads?.progress?.get(thread.id) ?? null : null,
     backgroundWork: tasks.length === 0 ? null : { kinds: tasks.map(task => task.kind), since: Math.min(...tasks.map(task => task.startedAt)) },
-    backgroundWait: thread.parentThreadId ? backgroundWaitOf(core, thread, tasks) : null,
+    backgroundWait: thread.parentThreadId || core.delegation?.remote.parentOf(thread.id) ? backgroundWaitOf(core, thread, tasks) : null,
     // An archived row, put away or done, has no move to apply.
     pendingMove: thread.archived ? null : core.threads?.moves?.pendingOf(thread.id) ?? null,
     moveNote: thread.agentSessionId ? null : pendingMoveNote(core, thread.id),

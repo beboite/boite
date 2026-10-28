@@ -77,22 +77,27 @@ function within<T>(job: Promise<T>, ms: number, what: string): Promise<T> {
 /** A member's thread as the contact addresses it: on the linked machine. */
 
 export class ContactMembers {
-  private readonly pushing = new Set<string>();
-  private readonly pending = new Set<Promise<unknown>>();
-  private closed = false;
+  readonly #pushing = new Set<string>();
+  readonly #pending = new Set<Promise<unknown>>();
+  #closed = false;
 
-  constructor(private readonly core: Core, private readonly contacts: LinkedContacts) {}
+  readonly #core: Core;
+  readonly #contacts: LinkedContacts;
+  constructor(core: Core, contacts: LinkedContacts) {
+    this.#core = core;
+    this.#contacts = contacts;
+  }
 
-  private members(): CoordinationPeer[] { return this.core.group.peers(); }
-  private selfId(): string { return this.core.coordination.card().coreId; }
+  #members(): CoordinationPeer[] { return this.#core.group.peers(); }
+  #selfId(): string { return this.#core.coordination.card().coreId; }
 
   // -- The linked machine's side.
 
   /** The member a `machine` field names, or null for this core. */
   member(value: unknown): CoordinationPeer | null {
-    if (value === undefined || value === null || value === '' || value === this.selfId()) return null;
+    if (value === undefined || value === null || value === '' || value === this.#selfId()) return null;
     const coreId = text(value, 'machine', 100);
-    const peer = this.members().find(entry => entry.coreId === coreId);
+    const peer = this.#members().find(entry => entry.coreId === coreId);
     if (!peer) throw invalidParams('machine: expected the core id of a machine of this core\'s group', { field: 'machine', expected: 'a member of this core\'s group' });
     return peer;
   }
@@ -101,7 +106,7 @@ export class ContactMembers {
   async project(member: CoordinationPeer, projectId: unknown): Promise<{ projectId: string; name: string }> {
     const id = text(projectId, 'projectId', 128);
     let answer: unknown;
-    try { answer = await within(this.core.coordination.request(member, 'relay.project', { projectId: id }), RELAY_MS, member.name); }
+    try { answer = await within(this.#core.coordination.request(member, 'relay.project', { projectId: id }), RELAY_MS, member.name); }
     catch (error) {
       if (!(error instanceof PeerRefusal)) throw unavailable(`${member.name} did not answer (${messageOf(error)}); open its project while it is on`);
       if (error.message.startsWith('operation:')) throw refused(`${member.name} runs an older Boite; update it to open its projects to a contact`);
@@ -112,9 +117,9 @@ export class ContactMembers {
   }
 
   /** The members whose projects are opened to this contact. */
-  private holders(contactId: string): CoordinationPeer[] {
-    const ids = new Set(this.contacts.find(contactId)?.grants.flatMap(grant => grant.machine ? [grant.machine] : []) ?? []);
-    return this.members().filter(member => ids.has(member.coreId));
+  #holders(contactId: string): CoordinationPeer[] {
+    const ids = new Set(this.#contacts.find(contactId)?.grants.flatMap(grant => grant.machine ? [grant.machine] : []) ?? []);
+    return this.#members().filter(member => ids.has(member.coreId));
   }
 
   /** The member and its own thread id behind an id the contact uses, when that member holds a project opened to it. */
@@ -123,15 +128,15 @@ export class ContactMembers {
     const at = threadId.lastIndexOf(MARK);
     if (at <= 0 || threadId.length - at - 1 !== PREFIX) return null;
     const prefix = threadId.slice(at + 1);
-    const member = this.holders(contactId).find(entry => entry.coreId.startsWith(prefix));
+    const member = this.#holders(contactId).find(entry => entry.coreId.startsWith(prefix));
     return member ? { member, threadId: threadId.slice(0, at) } : null;
   }
 
-  private entry(contactId: string, memberId: string): RelayedEntry | null {
-    const contact = this.contacts.find(contactId);
+  #entry(contactId: string, memberId: string): RelayedEntry | null {
+    const contact = this.#contacts.find(contactId);
     if (!contact) return null;
     return {
-      coreId: contact.coreId, name: contact.name, minTier: this.contacts.settings().minTier, link: this.contacts.linkOf(contact.coreId),
+      coreId: contact.coreId, name: contact.name, minTier: this.#contacts.settings().minTier, link: this.#contacts.linkOf(contact.coreId),
       offers: contact.offers.map(offer => offer.name),
       capabilities: contact.capabilities, projectOffers: contact.offers,
       grants: contact.grants.filter(grant => grant.machine === memberId).map(grant => ({ projectId: grant.projectId, readThreads: grant.readThreads })),
@@ -140,25 +145,25 @@ export class ContactMembers {
 
   /** One request of the contact, answered by the member. A refusal there is the contact's refusal; silence is not. */
   private async ask(member: CoordinationPeer, contactId: string, operation: Operation, payload: unknown): Promise<unknown> {
-    const contact = this.entry(contactId, member.coreId);
+    const contact = this.#entry(contactId, member.coreId);
     if (!contact) throw refused('no longer a contact');
     const admission = () => {
-      const entry = this.entry(contactId, member.coreId);
+      const entry = this.#entry(contactId, member.coreId);
       if (!entry) throw refused('no longer a contact');
       const {link: _link, ...policy} = entry;
-      return JSON.stringify([memberAdmission(this.core, member.coreId), this.core.contacts.find(contactId)?.addedAt, policy]);
+      return JSON.stringify([memberAdmission(this.#core, member.coreId), this.#core.contacts.find(contactId)?.addedAt, policy]);
     };
     const before = admission();
     let changed = false;
     // A revoked permission cannot authorize an old response when the owner later
     // restores the same values. Observe policy changes throughout this await.
-    const off = this.core.bus.onAny(name => {
+    const off = this.#core.bus.onAny(name => {
       if (name !== 'contacts.updated' && name !== 'group.updated') return;
       try { if (admission() !== before) changed = true; }
       catch { changed = true; }
     });
     try {
-      const answer = await within(this.core.coordination.request(member, 'relay.in', { contact, operation, payload }), RELAY_MS, member.name);
+      const answer = await within(this.#core.coordination.request(member, 'relay.in', { contact, operation, payload }), RELAY_MS, member.name);
       if (changed || admission() !== before) throw refused('relay: contact, member admission or project permissions changed during request');
       return answer;
     }
@@ -174,45 +179,43 @@ export class ContactMembers {
   }
 
   /** A member's thread under this core's id. */
-  private outward<T extends AgentContact>(entry: T, member: CoordinationPeer): T {
-    return { ...entry, coreId: this.selfId(), threadId: memberThreadId(member.coreId, entry.threadId), machine: this.core.info().hostname ?? 'Boite' };
+  #outward<T extends AgentContact>(entry: T, member: CoordinationPeer): T {
+    return { ...entry, coreId: this.#selfId(), threadId: memberThreadId(member.coreId, entry.threadId), machine: this.#core.info().hostname ?? 'Boite' };
   }
 
-  /** Each holder's threads open to the contact; a member that does not answer just lists none. */
-  async directory(contactId: string): Promise<AgentContact[]> {
-    const found = await Promise.all(this.holders(contactId).map(async member => {
-      try {
-        const answer = await this.ask(member, contactId, 'directory', {});
-        if (!Array.isArray(answer) || answer.length > 100) throw new Error('invalid directory');
-        return answer.map(entry => this.outward(checkRemoteContact(entry as AgentContact, member), member));
-      } catch (error) { this.warn(member, error); return []; }
-    }));
-    return found.flat();
+  /** Each holder's threads open to the contact, and how many holders did not answer. */
+  directory(contactId: string): Promise<{ entries: AgentContact[]; unavailable: number }> {
+    return this.#gather(contactId, 'directory', {}, (entry, member) => checkRemoteContact(entry as AgentContact, member));
   }
 
-  async search(contactId: string, words: string[]): Promise<AgentContact[]> {
-    const found = await Promise.all(this.holders(contactId).map(async member => {
+  search(contactId: string, words: string[]): Promise<{ entries: AgentContact[]; unavailable: number }> {
+    return this.#gather(contactId, 'search', { words }, (match, member) => ({ ...checkRemoteContact(match as AgentContact, member), ...checkMatchExtras(match as { matched?: unknown; excerpts?: unknown }) }));
+  }
+
+  /** One list from every holder: a member that fails or answers badly is counted, never read as an empty list. */
+  async #gather(contactId: string, operation: 'directory' | 'search', payload: unknown, check: (entry: unknown, member: CoordinationPeer) => AgentContact): Promise<{ entries: AgentContact[]; unavailable: number }> {
+    const found = await Promise.all(this.#holders(contactId).map(async member => {
       try {
-        const answer = await this.ask(member, contactId, 'search', { words });
-        if (!Array.isArray(answer) || answer.length > 100) throw new Error('invalid search');
-        return answer.map(match => this.outward({ ...checkRemoteContact(match as AgentContact, member), ...checkMatchExtras(match as { matched?: unknown; excerpts?: unknown }) }, member));
-      } catch (error) { this.warn(member, error); return []; }
+        const answer = await this.ask(member, contactId, operation, payload);
+        if (!Array.isArray(answer) || answer.length > 100) throw new Error(`invalid ${operation}`);
+        return answer.map(entry => this.#outward(check(entry, member), member));
+      } catch (error) { this.#warn(member, error); return null; }
     }));
-    return found.flat();
+    return { entries: found.flatMap(list => list ?? []), unavailable: found.filter(list => list === null).length };
   }
 
   async read(contactId: string, at: { member: CoordinationPeer; threadId: string }, payload: { limit?: unknown; before?: unknown }): Promise<unknown> {
     const answer = await this.ask(at.member, contactId, 'read', { threadId: at.threadId, limit: payload.limit, before: payload.before });
     const contact = checkRemoteContact((answer as { contact?: AgentContact } | null)?.contact as AgentContact, at.member);
     if (contact.threadId !== at.threadId) throw new Error('transcript of another thread');
-    return { contact: this.outward(contact, at.member), ...checkTranscript(answer) };
+    return { contact: this.#outward(contact, at.member), ...checkTranscript(answer) };
   }
 
   async deliver(contactId: string, at: { member: CoordinationPeer; threadId: string }, letter: AgentLetter): Promise<AgentLetter> {
     const shown = letter.to;
     const answer = await this.ask(at.member, contactId, 'deliver', { ...letter, to: { coreId: at.member.coreId, threadId: at.threadId } }) as AgentLetter | null;
     if (!answer || answer.id !== letter.id) throw new Error('invalid delivery receipt');
-    return { ...answer, to: shown, toMachine: this.core.info().hostname ?? 'Boite' };
+    return { ...answer, to: shown, toMachine: this.#core.info().hostname ?? 'Boite' };
   }
 
   /** The receipt of a letter the contact sent a member's thread: the members holding its projects are asked in turn. */
@@ -223,7 +226,7 @@ export class ContactMembers {
    * leaves the contact to ask again.
    */
   async receipt(contactId: string, payload: unknown): Promise<AgentLetter> {
-    const found = await Promise.all(this.holders(contactId).map(async member => {
+    const found = await Promise.all(this.#holders(contactId).map(async member => {
       try {
         const answer = await this.ask(member, contactId, 'receipt', payload) as AgentLetter | null;
         if (!answer || typeof answer !== 'object') return { member, letter: null, down: true };
@@ -233,7 +236,7 @@ export class ContactMembers {
     const hit = found.find(entry => entry.letter !== null);
     if (hit) {
       const to = address(hit.letter!.to, 'receipt.to');
-      return { ...hit.letter!, to: { coreId: this.selfId(), threadId: memberThreadId(hit.member.coreId, to.threadId) }, toMachine: this.core.info().hostname ?? 'Boite' };
+      return { ...hit.letter!, to: { coreId: this.#selfId(), threadId: memberThreadId(hit.member.coreId, to.threadId) }, toMachine: this.#core.info().hostname ?? 'Boite' };
     }
     if (found.some(entry => entry.down)) throw new Error('a machine holding this contact\'s projects did not answer');
     throw refused('unknown receipt');
@@ -249,24 +252,24 @@ export class ContactMembers {
     const contactId = text(request?.contact, 'relay.contact', 100);
     const operation = request?.operation as Operation;
     if (!RELAYED.includes(operation)) throw invalidParams('relay.operation: expected directory, search, read, deliver, receipt or contact.project');
-    if (!this.contacts.find(contactId)) throw refused('relay.contact: not a contact of this machine any more');
+    if (!this.#contacts.find(contactId)) throw refused('relay.contact: not a contact of this machine any more');
     // The member's copy may be behind a revoke it missed: this core's grants decide, and the copy is pushed again.
     if (!this.holdersOf(contactId).includes(member.coreId)) {
       this.mark([member.coreId]);
       throw refused('relay.contact: nothing of this machine is opened to that contact any more');
     }
-    const peer = this.core.contacts.peers().find(entry => entry.coreId === contactId && !this.core.contacts.isRelayPeer(entry));
+    const peer = this.#core.contacts.peers().find(entry => entry.coreId === contactId && !this.#core.contacts.isRelayPeer(entry));
     if (!peer) throw refused('relay.contact: not a contact of this machine any more');
     let payload = request?.payload;
     if (operation === 'contact.project') {
-      const route = projectRoute(payload), self = this.selfId();
+      const route = projectRoute(payload), self = this.#selfId();
       if (!route || route.source.ownerCoreId !== self || route.source.coreId !== member.coreId || route.target.ownerCoreId !== contactId
-        || !this.contacts.find(contactId)?.grants.some(g => g.machine === member.coreId && g.projectId === route.source.projectId)) throw refused('route.source: expected this member current granted endpoint');
-      const admission = projectAdmission(this.core, contactId, member.coreId, route.source.projectId);
+        || !this.#contacts.find(contactId)?.grants.some(g => g.machine === member.coreId && g.projectId === route.source.projectId)) throw refused('route.source: expected this member current granted endpoint');
+      const admission = projectAdmission(this.#core, contactId, member.coreId, route.source.projectId);
       let answer: unknown;
-      try { answer = await this.core.coordination.request(peer, operation, payload); }
+      try { answer = await this.#core.coordination.request(peer, operation, payload); }
       catch (error) { if (error instanceof PeerRefusal) throw refused(error.message); throw error; }
-      if (projectAdmission(this.core, contactId, member.coreId, route.source.projectId) !== admission) throw refused('route.source: member or project grant changed during request');
+      if (projectAdmission(this.#core, contactId, member.coreId, route.source.projectId) !== admission) throw refused('route.source: member or project grant changed during request');
       return answer;
     }
     let from: AgentAddress | null = null;
@@ -275,14 +278,14 @@ export class ContactMembers {
       from = address(letter?.from, 'letter.from');
       if (from.coreId !== member.coreId) throw refused('letter.from: expected a thread of the asking machine');
       // The member's name stays here, as in `outward`.
-      payload = { ...letter, from: { ...letter.from, coreId: this.selfId(), threadId: memberThreadId(member.coreId, from.threadId), machine: this.core.info().hostname ?? 'Boite' } };
+      payload = { ...letter, from: { ...letter.from, coreId: this.#selfId(), threadId: memberThreadId(member.coreId, from.threadId), machine: this.#core.info().hostname ?? 'Boite' } };
     } else if (operation === 'receipt') {
       const receipt = payload as { id?: unknown; fromThreadId?: unknown } | null;
       from = { coreId: member.coreId, threadId: text(receipt?.fromThreadId, 'receipt.fromThreadId', 128) };
       payload = { id: receipt?.id, fromThreadId: memberThreadId(member.coreId, from.threadId) };
     }
     let answer: unknown;
-    try { answer = await this.core.coordination.request(peer, operation, payload); }
+    try { answer = await this.#core.coordination.request(peer, operation, payload); }
     catch (error) {
       // The contact's refusal is final for the member too; a link down is retried there, as here.
       if (error instanceof PeerRefusal) throw refused(error.message);
@@ -296,11 +299,11 @@ export class ContactMembers {
 
   // -- Telling the members, retried until heard.
 
-  private pendingPush(): Record<string, number> { return (this.core.journal.getSetting(MIRROR_PENDING) as Record<string, number> | undefined) ?? {}; }
+  #pendingPush(): Record<string, number> { return (this.#core.journal.getSetting(MIRROR_PENDING) as Record<string, number> | undefined) ?? {}; }
 
   /** These members' copies are behind: each is pushed now and at every flush until it hears. */
   mark(memberIds: Iterable<string>): void {
-    const pending = this.pendingPush();
+    const pending = this.#pendingPush();
     let changed = false;
     for (const id of memberIds) {
       if (!id) continue;
@@ -308,60 +311,60 @@ export class ContactMembers {
       changed = true;
     }
     if (!changed) return;
-    this.core.journal.setSetting(MIRROR_PENDING, pending);
-    this.contacts.arm();
+    this.#core.journal.setSetting(MIRROR_PENDING, pending);
+    this.#contacts.arm();
     this.push();
   }
 
   /** A member's copy is still to push: the contacts' timer keeps running for it. */
-  behind(): boolean { return Object.keys(this.pendingPush()).length > 0; }
+  behind(): boolean { return Object.keys(this.#pendingPush()).length > 0; }
 
   /** The members that hold this contact's projects. */
   holdersOf(contactId: string): string[] {
-    return [...new Set(this.contacts.find(contactId)?.grants.flatMap(grant => grant.machine ? [grant.machine] : []) ?? [])];
+    return [...new Set(this.#contacts.find(contactId)?.grants.flatMap(grant => grant.machine ? [grant.machine] : []) ?? [])];
   }
 
   /** Every member's copy that is behind, once each. */
   push(): void {
-    if (this.closed) return;
-    const members = this.members();
-    const pending = this.pendingPush();
+    if (this.#closed) return;
+    const members = this.#members();
+    const pending = this.#pendingPush();
     for (const memberId of Object.keys(pending)) {
       const member = members.find(entry => entry.coreId === memberId);
       // A machine that left the group has nothing to keep.
-      if (!member) { this.settle(memberId, pending[memberId]!); continue; }
-      if (this.pushing.has(memberId)) continue;
-      this.pushing.add(memberId);
-      const job = this.tell(member, pending[memberId]!).finally(() => this.pushing.delete(memberId));
-      this.pending.add(job);
-      void job.catch(error => { if (!this.closed) this.core.log('warn', `contacts: ${member.name} did not take its copy of the contacts (${messageOf(error)})`, { source: 'contacts' }); })
-        .finally(() => this.pending.delete(job));
+      if (!member) { this.#settle(memberId, pending[memberId]!); continue; }
+      if (this.#pushing.has(memberId)) continue;
+      this.#pushing.add(memberId);
+      const job = this.#tell(member, pending[memberId]!).finally(() => this.#pushing.delete(memberId));
+      this.#pending.add(job);
+      void job.catch(error => { if (!this.#closed) this.#core.log('warn', `contacts: ${member.name} did not take its copy of the contacts (${messageOf(error)})`, { source: 'contacts' }); })
+        .finally(() => this.#pending.delete(job));
     }
   }
 
-  private async tell(member: CoordinationPeer, version: number): Promise<void> {
-    const contacts = this.contacts.list().flatMap(contact => contact.grants.some(grant => grant.machine === member.coreId) ? [this.entry(contact.coreId, member.coreId)!] : []);
-    try { await within(this.core.coordination.request(member, 'relay.mirror', { contacts }), RELAY_MS, member.name); }
+  async #tell(member: CoordinationPeer, version: number): Promise<void> {
+    const contacts = this.#contacts.list().flatMap(contact => contact.grants.some(grant => grant.machine === member.coreId) ? [this.#entry(contact.coreId, member.coreId)!] : []);
+    try { await within(this.#core.coordination.request(member, 'relay.mirror', { contacts }), RELAY_MS, member.name); }
     catch (error) { if (!(error instanceof PeerRefusal)) throw error; }
-    this.settle(member.coreId, version);
+    this.#settle(member.coreId, version);
   }
 
-  private settle(memberId: string, version: number): void {
-    const pending = this.pendingPush();
+  #settle(memberId: string, version: number): void {
+    const pending = this.#pendingPush();
     if (pending[memberId] !== version) return;
     delete pending[memberId];
-    this.core.journal.setSetting(MIRROR_PENDING, pending);
+    this.#core.journal.setSetting(MIRROR_PENDING, pending);
   }
 
   // -- The member's side.
 
-  private stored(): RelayedContact[] { return (this.core.journal.getSetting(MIRROR) as RelayedContact[] | undefined) ?? []; }
+  #stored(): RelayedContact[] { return (this.#core.journal.getSetting(MIRROR) as RelayedContact[] | undefined) ?? []; }
   /** The copies kept for members still in the group: one that left, or a group this core left, reaches nothing. */
   relayed(): RelayedContact[] {
-    const stored = this.stored();
+    const stored = this.#stored();
     if (stored.length === 0) return stored;
     return stored.filter(entry => {
-      try { return entry.admission === memberAdmission(this.core, entry.via); }
+      try { return entry.admission === memberAdmission(this.#core, entry.via); }
       catch { return false; }
     });
   }
@@ -371,7 +374,7 @@ export class ContactMembers {
   /** The member a relayed contact is reached through. */
   via(coreId: string): CoordinationPeer | null {
     const entry = this.relayedOf(coreId)[0];
-    return entry ? this.members().find(peer => peer.coreId === entry.via) ?? null : null;
+    return entry ? this.#members().find(peer => peer.coreId === entry.via) ?? null : null;
   }
 
   /** A request of this core's agent for a relayed contact, sent through the member it is linked to. */
@@ -379,14 +382,14 @@ export class ContactMembers {
     if (!RELAYED.includes(operation)) throw refused(`${operation}: ask from ${via.name}, the machine linked to that contact`);
     if (operation === 'contact.project') {
       const route = projectRoute(payload);
-      const gateway = route && this.members().find(p => p.coreId === route.source.ownerCoreId && this.relayedOf(contactId).some(e => e.via === p.coreId && e.grants.some(g => g.projectId === route.source.projectId)));
+      const gateway = route && this.#members().find(p => p.coreId === route.source.ownerCoreId && this.relayedOf(contactId).some(e => e.via === p.coreId && e.grants.some(g => g.projectId === route.source.projectId)));
       if (!gateway) throw refused('route.source: expected a currently admitted gateway for this endpoint');
       via = gateway;
     }
-    return this.core.coordination.request(via, 'relay.out', { contact: contactId, operation, payload });
+    return this.#core.coordination.request(via, 'relay.out', { contact: contactId, operation, payload });
   }
 
-  private checkEntry(value: unknown, field: string): RelayedEntry {
+  #checkEntry(value: unknown, field: string): RelayedEntry {
     const raw = value as Partial<RelayedEntry> | null;
     if (!raw || typeof raw !== 'object') throw invalidParams(`${field}: expected a contact`);
     if (!Array.isArray(raw.grants) || raw.grants.length > 256) throw invalidParams(`${field}.grants: expected up to 256 projects`);
@@ -407,7 +410,7 @@ export class ContactMembers {
   /** The member names one of its projects for a grant (`relay.project`). */
   projectFor(payload: unknown): { name: string } {
     const projectId = text((payload as { projectId?: unknown } | null)?.projectId, 'projectId', 128);
-    const project = this.core.journal.getProject(projectId);
+    const project = this.#core.journal.getProject(projectId);
     if (!project || project.archived || project.kind === 'drafts') throw refused(`no unarchived project ${projectId}`);
     return { name: project.name.slice(0, 200) };
   }
@@ -416,39 +419,39 @@ export class ContactMembers {
   mirrored(via: string, payload: unknown): { ok: true } {
     const list = (payload as { contacts?: unknown } | null)?.contacts;
     if (!Array.isArray(list) || list.length > 32) throw invalidParams('mirror.contacts: expected up to 32 contacts');
-    this.replace(via, list.map((entry, index) => this.checkEntry(entry, `mirror.contacts[${index}]`)), true);
+    this.#replace(via, list.map((entry, index) => this.#checkEntry(entry, `mirror.contacts[${index}]`)), true);
     return { ok: true };
   }
 
   /** The copy a relayed request carries (`relay.in`): the contact as it stands now. */
   adopt(via: string, value: unknown): RelayedEntry {
-    const entry = this.checkEntry(value, 'relay.contact');
-    this.replace(via, [entry], false);
+    const entry = this.#checkEntry(value, 'relay.contact');
+    this.#replace(via, [entry], false);
     return entry;
   }
 
   /** `whole`: `entries` are every contact of `via`, so the others are gone. */
-  private replace(via: string, entries: RelayedEntry[], whole: boolean): void {
-    const before = this.stored();
+  #replace(via: string, entries: RelayedEntry[], whole: boolean): void {
+    const before = this.#stored();
     const kept = before.filter(entry => entry.via !== via || (!whole && !entries.some(next => next.coreId === entry.coreId)));
-    const admission = memberAdmission(this.core, via);
+    const admission = memberAdmission(this.#core, via);
     const next = [...kept, ...entries.filter(entry => entry.grants.length > 0).map(entry => ({ ...entry, via, admission }))];
     if (JSON.stringify(before) === JSON.stringify(next)) return;
-    this.core.journal.setSetting(MIRROR, next);
-    this.contacts.reset();
+    this.#core.journal.setSetting(MIRROR, next);
+    this.#contacts.reset();
     // What the member no longer opens: its replies end and its letters go nowhere.
     for (const old of before.filter(entry => entry.via === via)) {
       const now = next.find(entry => entry.via === via && entry.coreId === old.coreId);
-      if (!now) { if (whole || entries.some(entry => entry.coreId === old.coreId)) this.contacts.projectsClosed(old.coreId, null); continue; }
+      if (!now) { if (whole || entries.some(entry => entry.coreId === old.coreId)) this.#contacts.projectsClosed(old.coreId, null); continue; }
       const dropped = old.grants.filter(grant => !now.grants.some(kept => kept.projectId === grant.projectId)).map(grant => grant.projectId);
-      if (dropped.length > 0) this.contacts.projectsClosed(old.coreId, dropped);
+      if (dropped.length > 0) this.#contacts.projectsClosed(old.coreId, dropped);
     }
   }
 
-  private warn(member: CoordinationPeer, error: unknown): void {
-    if (!this.closed) this.core.log('info', `contacts: ${member.name} did not answer for a contact (${messageOf(error)})`, { source: 'contacts' });
+  #warn(member: CoordinationPeer, error: unknown): void {
+    if (!this.#closed) this.#core.log('info', `contacts: ${member.name} did not answer for a contact (${messageOf(error)})`, { source: 'contacts' });
   }
 
-  beginClose(): void { this.closed = true; }
-  settled(): Promise<unknown> { return Promise.allSettled([...this.pending]); }
+  beginClose(): void { this.#closed = true; }
+  settled(): Promise<unknown> { return Promise.allSettled([...this.#pending]); }
 }

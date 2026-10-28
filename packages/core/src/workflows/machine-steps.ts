@@ -9,6 +9,7 @@ import type { Core } from '../core.ts';
 import { messageOf } from '../errors.ts';
 import { fingerprint } from '../contacts/project-journal.ts';
 import { memberNamed } from '../threads/group-spawn.ts';
+import { INTERRUPTION_TEXT } from '../delegation/interruption.ts';
 import { stepPrompt } from './prompt.ts';
 
 interface Hooks {
@@ -157,6 +158,15 @@ export class MachineWorkflowSteps {
     }
     // At work, or ended to wait on its own background work, or cut by a restart there that resumes it, or already judged.
     if (turn === null || ['queued', 'running'].includes(turn.status) || state.thread.backgroundWait?.state === 'waiting' || state.restarting || turn.id === machine.turnId) return;
+    if (record.interruption?.turnId === turn.id) {
+      this.#fail(runId, key, machine.requestId, record.interruption.error);
+      return;
+    }
+    const wait = state.thread.backgroundWait;
+    if (wait?.state === 'interrupted') {
+      this.#fail(runId, key, machine.requestId, `Its last message was a checkpoint, not its final result: ${wait.for} ${INTERRUPTION_TEXT[wait.reason]}`);
+      return;
+    }
     // A worktree of its own is settled there after the turn: the step ends once it is kept or removed, so the summary names what to merge.
     if (state.worktree?.state === 'active' && !state.worktree.error) return;
     const mark = `${runId}:${key}:${turn.id}`;

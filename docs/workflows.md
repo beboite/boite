@@ -83,6 +83,8 @@ launch with that refusal, which names the setting to propose. A brief that
 passes 12,000 characters once the step's instructions wrap it fails the step.
 
 The step settles from that machine's reports, with no polling: once its
+background work ends without a wake, it asks for the final answer; an
+interrupted wait fails the step rather than using its checkpoint. Once its
 subagent ends a turn there, the run reads its whole answer (up to 64,000
 characters, page by page from the offset each page gives, in code points), takes
 the last `json` block when the step has `output`, and asks that subagent once

@@ -537,6 +537,10 @@ export class RemoteDelegation {
     let record = this.#named(parentId, records[index]!, childId);
     const fresh = report.state !== undefined && readableState(report.state) && report.at >= record.at;
     if (fresh) record = { ...record, state: report.state!, at: report.at };
+    const turn = record.state?.lastTurn;
+    if (turn && report.letter?.origin === 'result' && report.letter.requestId === `result:interrupted:${turn.id}`) {
+      record = { ...record, interruption: { turnId: turn.id, error: text(report.letter.text, 'delegation.report.letter.text', 4000) } };
+    }
     records[index] = record;
     this.#save(parentId, records);
     if (fresh) this.#closedQuestions(peer, childId, report.state!);

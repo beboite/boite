@@ -127,8 +127,12 @@ function announceHold(core: Core, changed: string[]): void {
   }
 }
 
-/** Called before wake, steer and hook delivery. Unsupported native sessions never see the letter. */
-export function protectLetters(core: Core, threadId: string, letters: AgentLetter[]): void {
+/**
+ * Called before wake, steer and hook delivery. Unsupported native sessions never see the letter.
+ * `starting`: the thread is queued for the wake that carries these letters, which no provider runs yet,
+ * so that wake is judged as the idle thread that queued it was; a refusal there would only queue it again.
+ */
+export function protectLetters(core: Core, threadId: string, letters: AgentLetter[], starting = false): void {
   // Core-formatted request answers still contain the contact's untrusted reason.
   const contactMail = letters.filter(l => l.contact);
   if (!contactMail.length) return;
@@ -141,14 +145,15 @@ export function protectLetters(core: Core, threadId: string, letters: AgentLette
   if (!core.sharedAccess.execution.support(protocol, thread.providerId, thread.permissionMode).supported || protocol === 'echo' && thread.permissionMode !== 'default') throw refused('shared file policy: contact letter execution requires a protected provider route');
   const captured = core.sharedAccess.bound(threadId);
   const associations = captured ? [captured, ...(captured.additional ?? [])].map(b => b.job.sharedProjectId) : [];
-  if (protocol !== 'echo' && threadActive(thread.status)
+  const busy = threadActive(thread.status) && !(starting && thread.status === 'queued');
+  if (protocol !== 'echo' && busy
     && external.some(l => !l.sharedProjectId || !associations.includes(l.sharedProjectId))) {
     throw refused('shared file policy: new contact authority waits until the native turn is idle');
   }
   if (protocol !== 'echo' && !captured) {
     // An ordinary running session has unrestricted tools. Hold the letter until
     // that turn ends; it must never be steered into the old process.
-    if (threadActive(thread.status)) throw refused('shared file policy: contact letter waits for protected native preparation after the local turn');
+    if (busy) throw refused('shared file policy: contact letter waits for protected native preparation after the local turn');
     core.threads.releaseAgent(threadId);
   }
   const before = JSON.stringify(contactHold(core, threadId));

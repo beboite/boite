@@ -1,4 +1,5 @@
-import { afterEach, expect, test } from 'bun:test';
+import { BACKGROUND_WAKE_GRACE_MS } from '@boite/contracts';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -248,3 +249,56 @@ test('a step with both machine and compute is invalid', async () => {
   const both = await thrown(owner.call('workflows.check', { threadId, plan: { name: 'Both', steps: [{ id: 'far', machine, compute, task: 'Read.' }] } }));
   expect(both).toThrow('steps[0].machine: a step runs on another machine of the group or on a shared-project host, not both');
 });
+
+for (const ending of ['completed', 'error', 'refused'] as const) test(`a remote step waits past its checkpoint when background work ends ${ending}`, async () => {
+  const runs = new Map<string, { ctx: TurnContext; finish: (text: string) => void }>();
+  restores.push(setDriver('echo', { protocol: 'echo', startTurn(ctx) {
+    const done = Promise.withResolvers<TurnResult>();
+    const finish = (text: string) => {
+      const id = ctx.emit.startMessage('assistant');
+      ctx.emit.part(id, 0, { type: 'text', text });
+      ctx.emit.complete(id, 'complete');
+      done.resolve({ status: 'done', sessionId: `session:${ctx.thread.id}`, usage: null });
+    };
+    if (ctx.prompt.includes('step watch') || runs.has(ctx.thread.id)) runs.set(ctx.thread.id, { ctx, finish });
+    else finish('Summary read.');
+    return { done: done.promise, stop() { done.resolve({ status: 'stopped', sessionId: null, usage: null }); } };
+  } }));
+  const { desk, pc, owner, threadId, machine, onPc, run } = await setup();
+  const started = await owner.call('workflows.start', { threadId, requestId: `background-${ending}`, plan: {
+    name: 'Remote background', steps: [{ id: 'watch', machine, project: 'notes', task: 'Watch CI.' }],
+  } });
+  await waitFor(() => onPc().some(child => runs.has(child.id)));
+  const childId = onPc()[0]!.id, first = runs.get(childId)!;
+  const step = () => run(started.id).nodes[0]!.instances[0]!;
+  first.ctx.background!([{ id: 'ci', kind: 'monitor', description: 'Pending CI', toolId: null, startedAt: Date.now() }]);
+  first.finish('Checkpoint: waiting for CI.');
+  await waitFor(() => pc.core.threads.require(childId).status === 'idle');
+  expect(pc.core.threads.get(childId).backgroundWait).toMatchObject({ state: 'waiting' });
+  await waitFor(() => desk.core.delegation.remote.record(threadId, step().machine!.requestId)?.state?.thread.backgroundWait?.state === 'waiting');
+  expect(step()).toMatchObject({ status: 'running', result: null });
+  if (ending === 'refused') {
+    const start = spyOn(pc.core.threads, 'startTurn').mockImplementation(() => { throw new Error('provider disabled'); });
+    restores.push(() => start.mockRestore());
+  }
+  first.ctx.backgroundFinished!('ci', ending === 'error' ? 'error' : 'completed');
+  const now = Date.now.bind(Date);
+  const clock = spyOn(Date, 'now').mockImplementation(() => now() + BACKGROUND_WAKE_GRACE_MS + 1000);
+  restores.push(() => clock.mockRestore());
+  if (ending !== 'completed') {
+    await waitFor(() => ['failed', 'done'].includes(run(started.id).status));
+    clock.mockRestore();
+    expect(run(started.id).status).toBe('failed');
+    expect(step().result).toBeNull();
+    expect(step().error).toContain('checkpoint');
+    if (ending === 'refused') expect(step().error).toContain('provider disabled');
+    return;
+  }
+  await waitFor(() => runs.get(childId) !== first, 5000);
+  clock.mockRestore();
+  expect(step()).toMatchObject({ status: 'running', result: null });
+  expect(runs.get(childId)!.ctx.prompt).toContain('give your final result now');
+  runs.get(childId)!.finish('Final result: CI passed.');
+  await waitFor(() => run(started.id).status === 'done');
+  expect(step().result).toBe('Final result: CI passed.');
+}, 20_000);

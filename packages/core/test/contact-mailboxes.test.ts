@@ -336,3 +336,39 @@ test('a remembered gateway gives way once it stops offering the contact and anot
   await a.core.coordination.mailboxes.contacts(source);
   expect(a.core.coordination.mailboxes.route(source, ci)?.via).toBe(other.core.coordination.card().coreId);
 }, 30000);
+
+test('routed lookups name a silent gateway or a contact missing machines, never an empty answer', async () => {
+  const { a, b, c, bi, ci, source, recipient } = await routed();
+  const gateway = a.core.group.peers().find(peer => peer.coreId === bi)!.name;
+  const listed = (agents: { coreId: string; threadId: string }[]) => agents.some(agent => agent.coreId === ci && agent.threadId === recipient);
+  const handle = spyOn(b.core.coordination.mailboxes, 'handle').mockRejectedValue(new Error('gateway busy'));
+  try {
+    // Never heard from is not "no route": the send names the member that did not answer.
+    expect(await thrown(a.core.coordination.send({ threadId: source, to: { coreId: ci, threadId: recipient }, text: 'Hello', requestId: crypto.randomUUID() }))).toThrow(`${gateway} did not answer`);
+    const directory = await a.core.coordination.directory(source);
+    expect(listed(directory.agents)).toBe(false);
+    expect(directory.unavailable).toEqual([gateway]);
+    expect((await a.core.coordination.search(source, 'External contact worker')).unavailable).toEqual([gateway]);
+    // The whole member is down: its own directory fails too, and it is still named once.
+    const down = spyOn(b.core.coordination as unknown as { localDirectory(): unknown }, 'localDirectory').mockImplementation(() => { throw new Error('offline'); });
+    try {
+      expect((await a.core.coordination.directory(source)).unavailable).toEqual([gateway]);
+      expect((await a.core.coordination.search(source, 'External contact worker')).unavailable).toEqual([gateway]);
+    } finally { down.mockRestore(); }
+  } finally { handle.mockRestore(); }
+  const whole = await a.core.coordination.directory(source);
+  expect(listed(whole.agents)).toBe(true);
+  expect(whole.unavailable).toEqual([]);
+  // The contact answers, but two machines of its own group did not: its threads stay listed beside that notice.
+  const name = (await a.core.coordination.mailboxes.contacts(source)).find(entry => entry.coreId === ci)!.name;
+  const members = c.core.contacts.members;
+  const held = [spyOn(members, 'directory').mockResolvedValue({ entries: [], unavailable: 2 }), spyOn(members, 'search').mockResolvedValue({ entries: [], unavailable: 2 })];
+  try {
+    const partial = await a.core.coordination.directory(source);
+    expect(listed(partial.agents)).toBe(true);
+    expect(partial.unavailable).toEqual([`${name} (2 of its machines did not answer)`]);
+    const search = await a.core.coordination.search(source, 'External contact worker');
+    expect(listed(search.matches)).toBe(true);
+    expect(search.unavailable).toEqual([`${name} (2 of its machines did not answer)`]);
+  } finally { for (const spy of held) spy.mockRestore(); }
+}, 30000);

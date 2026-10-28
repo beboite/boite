@@ -75,6 +75,8 @@ export interface RemoteChild {
   stopping?: true;
   /** A workflow step's: its run follows it, so `delegate list` does not show it and its result and questions are not mail. */
   workflow?: true;
+  /** The member could not continue this checkpoint, retained across later state reports and caller restarts. */
+  interruption?: { turnId: string; error: string };
 }
 
 /** The member's link from a child here to its parent on another machine. `stop`: the number of the last stop applied to it. */
