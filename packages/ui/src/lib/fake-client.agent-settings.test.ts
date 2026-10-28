@@ -18,8 +18,8 @@ test('fake eventWakes settings use the same boolean card and preserve the active
   await client.call('turns.start', { threadId, prompt: 'Configure the bot.' });
   await client.settled();
   const read = await client.call('agents.settings.read', { threadId, agent: mira.id });
-  expect(read.settings.find(s => s.key === 'eventWakes')?.value).toBe(true);
-  for (const value of [false, true]) {
+  expect(read.settings.find(s => s.key === 'eventWakes')?.value).toBe(false);
+  for (const value of [true, false]) {
     const card = await client.call('agents.settings.request', { threadId, agent: mira.id, key: 'eventWakes', value, reason: 'Batch project news' });
     expect(card.setting.previous).toBe(!value);
     const saved = await client.call('agents.settings.apply', { threadId, questionId: card.questionId });
