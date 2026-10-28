@@ -80,7 +80,7 @@ export function spawnThere(ctx: FakeContext, parent: Thread, config: DelegationC
   if (worktree) there.delegationWorktrees.set(id, worktree);
   there.emit('thread.created', structuredClone(toSummary(child)));
   // Its result crosses back to the parent here, once per turn.
-  const off = there.bus.on('turn.finished', turn => {
+  const off = there.bus.observe('turn.finished', turn => {
     if (turn.threadId !== id) return;
     if (!there.threads.has(id)) { off(); return; }
     const root = ctx.threads.get(parent.id);

@@ -27,11 +27,14 @@ with mode `0600`; the owner requests a phone link through Settings or
 `pairing.grant`. Stop the scratch core before removing its directory.
 
 One core holds `<dataDir>/core.lock`. Another refuses to start on the same data.
-A dead holder can be replaced. Linux compares the holder's start key (boot id
-and start ticks) with the one in the lock, so a stepped wall clock never frees
-it; Windows compares process start time to reject a reused PID more than two
-seconds newer than the lock; macOS retains a lock while its recorded PID is
-alive.
+The operating system holds the lock (`flock` on Linux and macOS, `LockFileEx`
+on Windows, `packages/core/src/platform/`) and drops it when its holder dies,
+so a dead holder never blocks a start and two starts never both get in. The
+file's record (PID, start time, Linux start key, `osLock`) names the holder in
+the refusal only. A record without `osLock` comes from a core older than the
+OS lock: Linux compares its start key (boot id and start ticks), Windows
+rejects a reused PID more than two seconds newer than the record, and macOS
+retains it while its PID is alive.
 
 | Option | Meaning |
 | --- | --- |
@@ -639,7 +642,10 @@ live in `fake-client.parity.test.ts`. A fake path below a directory named
    domain is a file there, an `export *` and one line in each `extends`.
    A branch cut before the split, still editing the single `index.ts`, runs
    `bun scripts/migrate/split-contracts.ts` once `git merge origin/main`
-   stops: it replays its edits onto the domain files.
+   stops: it replays its edits onto the domain files. A rule for its params
+   in `RPC_PARAMS` (`packages/contracts/src/rpc-params.ts`) runs in the router
+   and the in-memory client before either handler, and refuses a bad field
+   with `InvalidParams` and `{ field }`; `settings.set` has one so far.
 2. Register the core handler in the domain's `register*Methods` function.
    For `threads.*`, use `registerThreadMethods` in
    `packages/core/src/threads/rpc.ts`, called by `packages/core/src/modules.ts`.
@@ -650,9 +656,9 @@ live in `fake-client.parity.test.ts`. A fake path below a directory named
    assembled in `fake-client.ts`; agent, plugin and workflow classes handle
    their own methods. A missing map entry fails `bun run check`.
    `packages/ui/src/lib/client.ts` already has a generic `call` method.
-4. Keep owner-only methods out of `DEVICE_METHODS` in
-   `packages/contracts/src/access.ts` and `AGENT_METHODS` in
-   `packages/core/src/access.ts`. Document the reason beside any permission.
+4. Keep owner-only methods out of `DEVICE_METHODS` and `AGENT_METHODS` in
+   `packages/contracts/src/access.ts`; the core and the in-memory client apply
+   the same `accessRefusal`. Document the reason beside any permission.
 5. Test the result and access boundary with a temporary core. Follow
    `packages/core/test/thread-remove.test.ts` for a paired-device refusal.
    The test client in `packages/core/src/client.ts` exposes `error.rpc.code`;

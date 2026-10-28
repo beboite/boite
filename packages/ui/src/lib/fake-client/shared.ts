@@ -16,9 +16,6 @@ import {
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
 
-/** The device boundary, the core's own sets: `packages/contracts/src/access.ts`. */
-export { DEVICE_METHODS } from '@boite/contracts';
-
 export const T0 = Date.UTC(2026, 8, 5, 9, 0, 0);
 
 export const DATA_DIR = 'C:\\Users\\you\\AppData\\Local\\boite2';

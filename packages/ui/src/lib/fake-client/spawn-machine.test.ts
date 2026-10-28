@@ -88,6 +88,7 @@ test('delegate spawn --machine starts the subagent on that machine, and its pare
 
   const waited = await desk.call('delegation.wait', { threadId: 't-trace', agentId: child.thread.id, timeoutMs: 5000 });
   expect(waited.state).toBe('result_available');
+  expect(waited.timedOut).toBe(false);
   const view = await desk.call('delegation.get', { threadId: 't-trace' });
   const agent = view.agents.find(entry => entry.thread.id === child.thread.id)!;
   expect(agent).toMatchObject({ machine: { coreId: 'pc', name: 'pc' }, task: 'Read the notes' });
@@ -98,12 +99,15 @@ test('delegate spawn --machine starts the subagent on that machine, and its pare
 
   // A message goes to that machine: the child takes it as a new turn there, and its answer crosses back.
   const send = () => desk.call('delegation.send', { threadId: 't-trace', toThreadId: child.thread.id, requestId: 'more-1', text: 'Read the summary too' });
+  // Internal results cross back even when the member's agent socket cannot hear turn.finished.
+  pc.becomes('agent', 't-trace');
   const letter = await send();
   expect(letter).toMatchObject({ status: 'delivered', to: { coreId: 'pc', threadId: child.thread.id }, toMachine: 'pc' });
   expect((await send()).id).toBe(letter.id);
   const results = async () => (await desk.call('delegation.get', { threadId: 't-trace' })).messages.filter(entry => entry.origin === 'result' && entry.from.threadId === child.thread.id).length;
   for (let i = 0; i < 400 && await results() < 2; i++) await new Promise(resolve => setTimeout(resolve, 2));
   expect(await results()).toBe(2);
+  pc.becomes('owner');
   const steered = await pc.call('threads.get', { threadId: child.thread.id });
   expect(steered.messages.filter(message => message.role === 'user').at(-1)!.parts).toMatchObject([{ type: 'text', text: 'Read the summary too' }]);
   const latest = (await desk.call('delegation.get', { threadId: 't-trace' })).agents.find(entry => entry.thread.id === child.thread.id)!;

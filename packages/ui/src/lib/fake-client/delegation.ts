@@ -309,9 +309,9 @@ function waitDelegation(ctx: FakeContext, params: RpcParams<'delegation.wait'>):
     // A child on another machine finishes on that machine's bus.
     for (const coreId of new Set(directChildren(ctx, params.threadId, params.agentId).flatMap(row => (row.machine ? [row.machine.coreId] : [])))) {
       const there = fakeCore(coreId);
-      if (there) subscriptions.push(there.bus.on('turn.finished', () => inspect()));
+      if (there) subscriptions.push(there.bus.observe('turn.finished', () => inspect()));
     }
-    subscriptions.push(ctx.bus.on('turn.finished', () => inspect()), ctx.bus.on('delegation.changed', () => inspect()), ctx.bus.on('thread.removed', () => inspect()), ctx.bus.on('thread.background', () => inspect()), ctx.bus.on('question.asked', () => inspect()), ctx.bus.on('permission.requested', () => inspect()));
+    subscriptions.push(ctx.bus.observe('turn.finished', () => inspect()), ctx.bus.observe('delegation.changed', () => inspect()), ctx.bus.observe('thread.removed', () => inspect()), ctx.bus.observe('thread.background', () => inspect()), ctx.bus.observe('question.asked', () => inspect()), ctx.bus.observe('permission.requested', () => inspect()));
     subscriptions.push(ctx.bus.onState(state => {
       if (state !== 'ready') { cleanup(); reject(new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation.wait: connection closed' })); }
     }));

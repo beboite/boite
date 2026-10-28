@@ -421,6 +421,22 @@ describe('the resident whisper-server', () => {
     expect(await thrown(request('bad', { language: 'fr-FR' }))).toThrow('speech.language');
   });
 
+  test('a request for one model never gets the server a request for another model started meanwhile', async () => {
+    const { server } = harness.core.speech.local;
+    const command = [process.execPath, join(import.meta.dir, 'fixtures', 'whisper-server.ts')];
+    const [a, b] = ['a.bin', 'b.bin'].map(name => join(harness.dataDir, name));
+    for (const file of [a, b]) writeFileSync(file!, 'fixture model');
+    await server.ensure(command, model);
+    const [forA, forB] = await Promise.allSettled([server.ensure(command, a!), server.ensure(command, b!)]);
+    // B's start stopped A's server while it loaded: A is refused, never given B's.
+    expect(forA.status === 'rejected' ? String(forA.reason) : forA.value).toContain('unloaded before it loaded');
+    expect(forB.status).toBe('fulfilled');
+    const form = new FormData();
+    form.set('file', new Blob([new Uint8Array(4)]), 'a.wav');
+    await (await fetch(`${(forB as PromiseFulfilledResult<string>).value}/inference`, { method: 'POST', body: form })).body?.cancel();
+    expect(existsSync(`${b}.log`)).toBe(true);
+  }, 15_000);
+
   test('a configured language wins over what a preview heard', async () => {
     harness.core.speech.configure({ ...DEFAULT_SPEECH, language: 'en', executable: process.execPath, modelPath: model });
     await request('final', { language: 'french' });

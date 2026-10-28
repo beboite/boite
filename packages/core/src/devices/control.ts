@@ -29,6 +29,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
+import { runCommand, type CommandRun } from '../run-command.ts';
 import { machineName } from '../paths.ts';
 import type { Connection } from '../router.ts';
 import {
@@ -59,12 +60,6 @@ const FRAME_KINDS_MAX = 8;
 /** Where `boite device` and the panel send someone whose stream is off. */
 export const STREAM_OFF = 'the live stream is off: the owner turns it on in Settings > Experiments, or an agent asks with `boite settings request deviceStream true --why "..."`';
 
-interface Run {
-  code: number | null;
-  stdout: Uint8Array;
-  stderr: string;
-  timedOut: boolean;
-}
 
 /** What a listed device needs to be driven: its adb serial or simulator UDID. */
 interface Located extends MobileDevice {
@@ -509,7 +504,7 @@ export class MobileDevices {
   }
 
   /** Since Xcode 27, `screenshot -` writes a file named `-` instead of stdout: simctl writes to a private folder, removed once read. */
-  async #simctlScreenshot(target: Located): Promise<Run> {
+  async #simctlScreenshot(target: Located): Promise<CommandRun> {
     const xcrun = this.#xcrun();
     let directory: string | undefined;
     try {
@@ -656,29 +651,13 @@ export class MobileDevices {
     return ['xcrun', 'simctl'];
   }
 
-  #why(run: Run): string {
+  #why(run: CommandRun): string {
     if (run.timedOut) return 'timed out';
     return (run.stderr.trim() || text(run.stdout).trim()).slice(-400);
   }
 
-  async #run(command: string, args: string[], timeoutMs: number): Promise<Run> {
-    let child: ReturnType<Core['procs']['spawn']>;
-    try {
-      child = this.#core.procs.spawn(SCOPE, command, args, { agentRoot: false });
-    } catch (error) {
-      return { code: null, stdout: new Uint8Array(), stderr: error instanceof Error ? error.message : String(error), timedOut: false };
-    }
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.proc.kill();
-    }, timeoutMs);
-    try {
-      const [stdout, stderr, code] = await Promise.all([new Response(child.proc.stdout).bytes(), new Response(child.proc.stderr).text(), child.exited]);
-      return { code, stdout, stderr, timedOut };
-    } finally {
-      clearTimeout(timer);
-    }
+  #run(command: string, args: string[], timeoutMs: number): Promise<CommandRun> {
+    return runCommand(this.#core.procs, SCOPE, command, args, timeoutMs);
   }
 }
 

@@ -8,7 +8,7 @@ import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { startServer } from '../src/server.ts';
 import { AUTO_CONTINUE, AUTO_CONTINUE_LABEL } from '../src/threads/auto-continue.ts';
 import { CRASH_RESUMING, CRASH_WHILE_RUNNING } from '../src/threads/recovery.ts';
-import { echoThread, removeDir, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { echoThread, removeDir, rolledBackArchive, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 const defaults = { ...AUTO_CONTINUE, delaysMs: [...AUTO_CONTINUE.delaysMs] };
 const restores: (() => void)[] = [];
@@ -181,6 +181,23 @@ test('the user writing, Stop or Do not resume cancels a planned resume', async (
     await client.call('turns.stop', { threadId });
     expect(retryOf()).toBeNull();
     expect(turns(h, threadId).map(turn => turn.execution?.operation ?? 'user')).toEqual(['user', 'user', 'user', 'user']);
+  } finally { await h.stop(); }
+});
+
+test('an archive that rolls back keeps the planned resume, which still fires', async () => {
+  AUTO_CONTINUE.delaysMs = [400, 400];
+  const h = await startTestCore();
+  scripted(failed(), done);
+  try {
+    const client = await h.connect();
+    const { threadId } = await echoThread(h, client);
+    const retryOf = () => h.core.threads.list({ includeArchived: true }).find(thread => thread.id === threadId)?.retry ?? null;
+    await client.call('turns.start', { threadId, prompt: 'one' });
+    await waitFor(() => retryOf()?.kind === 'auto-continue');
+    rolledBackArchive(h, threadId);
+    expect([h.core.threads.require(threadId).archived, retryOf()?.kind]).toEqual([false, 'auto-continue']);
+    await waitFor(() => turns(h, threadId)[1]?.status === 'done');
+    expect(turns(h, threadId)[1]!.execution?.operation).toBe('resume');
   } finally { await h.stop(); }
 });
 
