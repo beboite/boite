@@ -11,8 +11,8 @@ import type { SpawnedProcess, SpawnOptions } from '../procs.ts';
 import { Cdp } from './cdp.ts';
 import { chromiumArgs, clearActivePort, drawsWithGpu, IDENTITY_SCRIPT, pipesDevTools, trimProfile, waitForEndpoint, windowedUserAgent, type BrowserIdentity } from './chromium.ts';
 
-/** A browser process the core started and speaks to. */
-export interface Started { cdp: Cdp; kill(): void; exited: Promise<unknown> }
+/** A browser process the core started and speaks to. `kill` resolves once it and what it started ended. */
+export interface Started { cdp: Cdp; kill(): Promise<void>; exited: Promise<unknown> }
 
 export type SpawnBrowser = (path: string, args: string[], options: SpawnOptions) => SpawnedProcess;
 
@@ -21,8 +21,8 @@ const IDENTITY_TIMEOUT_MS = 20_000;
 
 /**
  * Starts the browser at `path` on a profile folder and connects to it. A
- * browser that does not answer within `timeoutMs` is killed, and has ended or
- * had five seconds to, before the error is thrown: only then may its folder go.
+ * browser that does not answer within `timeoutMs` is killed, and has ended,
+ * before the error is thrown: only then may its folder go or another start.
  */
 export async function startChromium(spawn: SpawnBrowser, path: string, dir: string, timeoutMs: number, userAgent?: string): Promise<Started> {
   mkdirSync(dir, { recursive: true });
@@ -34,7 +34,7 @@ export async function startChromium(spawn: SpawnBrowser, path: string, dir: stri
   void spawned.proc.stdout.pipeTo(new WritableStream()).catch(() => {});
   void spawned.proc.stderr.pipeTo(new WritableStream()).catch(() => {});
   // A clean close comes first; this stops the browser and every helper it started, not the scope's other browsers.
-  const kill = () => { void spawned.stop(); };
+  const kill = () => spawned.stop();
   try {
     let cdp: Cdp;
     if (piped) {
@@ -49,7 +49,7 @@ export async function startChromium(spawn: SpawnBrowser, path: string, dir: stri
     ]);
     return { cdp, kill, exited: spawned.exited };
   } catch (error) {
-    kill(); await Promise.race([spawned.exited, Bun.sleep(5000)]);
+    await kill();
     throw error;
   }
 }
@@ -113,8 +113,8 @@ export class BrowserIdentities {
       if (started) {
         await started.cdp.send('Browser.close', {}, undefined, 3000).catch(() => {});
         await Promise.race([started.exited, Bun.sleep(5000)]);
-        started.cdp.close(); started.kill();
-        await Promise.race([started.exited, Bun.sleep(5000)]);
+        started.cdp.close();
+        await started.kill();
       }
       this.#reading.delete(dir);
       this.removeDir(dir);

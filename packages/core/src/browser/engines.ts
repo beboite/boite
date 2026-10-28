@@ -20,7 +20,7 @@ const COOKIE_SAVE_DELAY_MS = 1000, COOKIE_SAVE_EVERY_MS = 30_000;
 export class BrowserEngines {
   readonly pending = new Map<string, Promise<Engine>>();
   readonly #identities = new BrowserIdentities(
-    (path, dir) => this.#start(path, dir), () => this.profileDir(PRIVATE_BROWSER_PROFILE), dir => this.removeDir(dir), message => this.core.log('warn', message));
+    (path, dir) => this.start(path, dir), () => this.profileDir(PRIVATE_BROWSER_PROFILE), dir => this.removeDir(dir), message => this.core.log('warn', message));
 
   constructor(
     private core: Core,
@@ -91,7 +91,8 @@ export class BrowserEngines {
     return engine;
   }
 
-  #start(path: string, dir: string, userAgent?: string): Promise<Started> {
+  /** Starts a browser process on `dir`. A test seam. */
+  start(path: string, dir: string, userAgent?: string): Promise<Started> {
     return startChromium((cmd, args, options) => this.core.procs.spawn(this.scope, cmd, args, options), path, dir, START_TIMEOUT_MS, userAgent);
   }
 
@@ -118,7 +119,7 @@ export class BrowserEngines {
     const identity = native ? profileIdentity(native, setting) : null;
     const dir = this.profileDir(profile);
     let started: Started;
-    try { started = await this.#start(found.path, dir, identity?.userAgent); }
+    try { started = await this.start(found.path, dir, identity?.userAgent); }
     catch (error) {
       if (profile === PRIVATE_BROWSER_PROFILE) this.removeDir(dir);
       throw refused(`the agent browser could not start on ${this.machine}: ${error instanceof Error ? error.message : String(error)}`);
@@ -138,8 +139,10 @@ export class BrowserEngines {
       if (!engine.throwaway) engine.saveEvery = setInterval(() => { if (engine.tabs.size) void this.saveCookies(engine); }, COOKIE_SAVE_EVERY_MS);
       return engine;
     } catch (error) {
-      kill();
-      if (profile === PRIVATE_BROWSER_PROFILE) void started.exited.then(() => this.removeDir(dir));
+      // The profile stays this start's until the browser exited: `get` keeps it taken while this rejects.
+      cdp.close();
+      await kill();
+      if (profile === PRIVATE_BROWSER_PROFILE) this.removeDir(dir);
       throw refused(`the agent browser could not start on ${this.machine}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }

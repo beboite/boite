@@ -118,6 +118,33 @@ test('a profile whose browser dropped its connection opens again only once that 
   expect(started).toHaveLength(2);
 });
 
+test('a profile whose browser failed while starting opens again only once that browser exited', async () => {
+  const { harness } = browserFixture;
+  const engines = new BrowserEngines(harness.core, { attached: false } as BrowserHost, () => ({ path: 'chromium' }), 'test', 'browser:test', () => {}, () => {}, { prepare: () => harness.dataDir, lost() {} });
+  const launch = engines.launch.bind(engines);
+  engines.launch = (profile) => launch(profile, false);
+  const gate = () => { let open!: () => void; return { promise: new Promise<void>((resolve) => { open = resolve; }), open: () => open() }; };
+  const exits: (() => void)[] = [];
+  engines.start = async () => {
+    const exited = gate();
+    const first = exits.length === 0;
+    exits.push(exited.open);
+    // The first browser answers, then its connection fails while it is set up.
+    const send = async (method: string) => { if (first && method === 'Target.setDiscoverTargets') throw new Error('connection lost'); return {}; };
+    return { cdp: { closed: new Promise(() => {}), close() {}, send } as unknown as Cdp, kill: () => exited.promise, exited: exited.promise };
+  };
+  const failing = engines.get('default').catch((error: Error) => error);
+  await Bun.sleep(50);
+  const during = engines.get('default').catch((error: Error) => error);
+  await Bun.sleep(50);
+  expect(exits).toHaveLength(1);
+  exits[0]!();
+  expect(String(await failing)).toContain('connection lost');
+  expect(String(await during)).toContain('connection lost');
+  await engines.get('default');
+  expect(exits).toHaveLength(2);
+});
+
 test('a deleted profile loses its folder even when its browser had already closed', async () => {
   const { harness, owner, agent, threadId } = browserFixture;
   const root = join(harness.dataDir, 'browser');
