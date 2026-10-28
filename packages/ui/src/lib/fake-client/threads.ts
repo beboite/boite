@@ -1,5 +1,6 @@
 import { noteUserMessage } from './checklist';
 import { createFakeThread, publishFakeThread } from './create-thread';
+import { trustContactMail } from './contact-hold';
 import { dismissMergedPr } from './merged-pr-archive';
 import { assertIdleFamily } from './completion';
 import { isThreadTerminal, protectedThreadIdsError, threadActive } from '@boite/contracts';
@@ -576,6 +577,11 @@ export function threadMethods(ctx: FakeContext) {
       ctx.touch(thread);
       return { ok: true };
     },
+    'threads.trustContactHistory': async (params) => {
+      ctx.thread(params.threadId);
+      trustContactMail(ctx, params.threadId);
+      return { ok: true };
+    },
     'threads.subscribe': async (params) => {
       // The core runs `threads.require` first, so an unknown id is a NotFound.
       ctx.thread(params.threadId);
@@ -647,6 +653,8 @@ export function threadMethods(ctx: FakeContext) {
           data: { field: 'accountId', accountId: account.id, providerId: account.providerId, expected: provider.id } });
         checkRunnable(provider, account);
       }
+      // As the core: echo in default mode keeps its tool-free route.
+      if (thread.contactHold && !(provider.protocol === 'echo' && thread.permissionMode === 'default')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'shared file policy: this tool has no enforceable shared execution boundary' });
       const error = attachmentError(params.attachments ?? [], provider);
       if (error) throw new RpcFailure({ code: RpcErrorCode.Refused, ...error });
       const rootId = thread.parentThreadId;

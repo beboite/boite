@@ -675,6 +675,26 @@ export class Threads {
   }
 
   /**
+   * The owner accepts the contact mail that holds this thread
+   * (`Thread.contactHold`), so its turns run again. Resolves whether the core
+   * took it; a refusal is reported like any failed action.
+   */
+  async trustContactHistory(threadId: ThreadId): Promise<boolean> {
+    const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
+    if (!client) return false;
+    try {
+      await client.call('threads.trustContactHistory', { threadId });
+      // The core announces the cleared hold before it answers; clearing it here
+      // again would erase a hold a letter set in between.
+      return this.ctx.currentClient(client, clientGeneration);
+    } catch (error) {
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
+      return false;
+    }
+  }
+
+  /**
    * The thread and its sub-threads into another project. The core answers
    * the row in its new place, or with `pendingMove` while its turn runs, and
    * tells every other client with `thread.updated`; the sidebar moves the row

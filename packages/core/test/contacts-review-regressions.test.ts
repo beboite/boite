@@ -114,6 +114,101 @@ test('SEC-01 legacy contact correspondence cannot use the ordinary local process
   expect(()=>b.h.core.sharedAccess.denyTool(b.t.id)).toThrow('shared file policy');
 },30000);
 
+test('contact mail outside a shared project holds a full-permission thread until its owner trusts the history',async()=>{
+  const {a,b}=await pair();
+  const letter=await a.c.call('collaboration.send',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'Ordinary contact note',requestId:'unassociated'});
+  await waitFor(()=>b.h.core.journal.lastTurn(b.t.id)?.finishedAt!=null);
+  // The owner's own agent works with every tool, as a bot does; a native provider has no tool-free route.
+  await b.c.call('threads.update',{threadId:b.t.id,permissionMode:'bypassPermissions'});
+  const name=b.h.core.contacts.peers().find(peer=>peer.coreId===a.id)!.name;
+  // Every client hears the hold change, so an open view and its rows follow it.
+  // A sub-thread continues that history, so it follows the same hold.
+  const child=b.h.core.threads.create({projectId:b.p.id,providerId:'echo',accountId:b.t.accountId},{id:'thr_hold_child',branch:null,parentThreadId:b.t.id});
+  const heard:unknown[]=[],heardChild:unknown[]=[];
+  b.c.on('thread.updated',summary=>{if(summary.contactHold===undefined)return;if(summary.id===b.t.id)heard.push(summary.contactHold);if(summary.id===child.id)heardChild.push(summary.contactHold);});
+  expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).toEqual({contacts:[name]});
+  expect(await thrown(b.c.call('turns.start',{threadId:b.t.id,prompt:'Owner work'}))).toThrow('shared file policy');
+  // Only the owner releases it, never the held agent.
+  const agent=await connect(b.h.url,b.h.core.agents.tokenFor(b.t.id));clients.push(agent);
+  expect(await thrown(agent.call('threads.trustContactHistory',{threadId:b.t.id}))).toThrow();
+  expect(await b.c.call('threads.trustContactHistory',{threadId:b.t.id})).toEqual({ok:true});
+  expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).toBeNull();
+  await waitFor(()=>heard.at(-1)===null&&heardChild.at(-1)===null);
+  await b.c.call('turns.start',{threadId:b.t.id,prompt:'Owner work'});
+  await waitFor(()=>b.h.core.journal.lastTurn(b.t.id)?.finishedAt!=null);
+  // A later letter outside a shared project holds it again.
+  await b.c.call('threads.update',{threadId:b.t.id,permissionMode:'default'});
+  const again=await a.c.call('collaboration.send',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'Another contact note',requestId:'unassociated-again'});
+  await waitFor(()=>b.h.core.coordination.get(b.t.id).messages.find(l=>l.id===again.id)?.status==='delivered');
+  expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).toEqual({contacts:[name]});
+  await waitFor(()=>JSON.stringify([heard.at(-1),heardChild.at(-1)])===JSON.stringify([{contacts:[name]},{contacts:[name]}]));
+},30000);
+
+test('the hold names only the contacts mailing outside a shared project, and trusting them keeps the shared-project boundary',async()=>{
+  const {a,b}=await pair(),c=await side('charlie');await link(c,b);
+  for(const [x,y] of [[c,b],[b,c]] as const)await x.c.call('contacts.grant',{coreId:y.id,projectId:x.p.id,readThreads:true});
+  const shared=await association(a,b);
+  for(const source of [a,c]){
+    const sent=await source.c.call('collaboration.send',{threadId:source.t.id,to:{coreId:b.id,threadId:b.t.id},text:'Ordinary contact note',requestId:'mixed'});
+    await waitFor(()=>b.h.core.coordination.get(b.t.id).messages.find(l=>l.id===sent.id)?.status==='delivered');
+    await waitFor(()=>b.h.core.threads.require(b.t.id).status==='idle');
+  }
+  const charlie=b.h.core.contacts.peers().find(peer=>peer.coreId===c.id)!.name;
+  expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).toEqual({contacts:[charlie]});
+  // As a protected native route would: the binding alone does not admit a held turn.
+  const access=b.h.core.sharedAccess,providers=b.h.core.providers,require=providers.require.bind(providers),support=access.execution.support.bind(access.execution);
+  providers.require=((id:string)=>id===b.t.providerId?{...require(id),protocol:'claude-sdk'}:require(id)) as typeof providers.require;
+  access.execution.support=(()=>({supported:true,boundary:'isolated-process'})) as typeof access.execution.support;
+  try{
+    expect(()=>access.assertTurn(b.t.id)).toThrow('shared file policy');
+    await b.c.call('threads.trustContactHistory',{threadId:b.t.id});
+    access.assertTurn(b.t.id);
+  }finally{providers.require=require;access.execution.support=support;}
+  expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).toBeNull();
+  // The association's mail keeps its captured authority, and its live limits still apply.
+  expect(b.h.core.sharedAccess.bound(b.t.id)?.job.sharedProjectId).toBe(shared);
+  await b.c.call('sharedProjects.configure',{sharedProjectId:shared,board:true});
+  expect(()=>b.h.core.sharedAccess.assertTurn(b.t.id)).toThrow('shared file policy');
+},30000);
+
+test('a native thread trusted while contact mail waits takes that letter, and a later letter holds it again',async()=>{
+  const {a,b}=await pair();
+  // As a protected native route would, with the echo driver standing in for its CLI.
+  const access=b.h.core.sharedAccess,providers=b.h.core.providers,require=providers.require.bind(providers),support=access.execution.support.bind(access.execution);
+  providers.require=((id:string)=>id===b.t.providerId?{...require(id),protocol:'claude-sdk'}:require(id)) as typeof providers.require;
+  access.execution.support=(()=>({supported:true,boundary:'isolated-process'})) as typeof access.execution.support;
+  const restore=setDriver('claude-sdk',getDriver('echo'));
+  try{
+    const status=(id:string)=>b.h.core.coordination.get(b.t.id).messages.find(l=>l.id===id)?.status;
+    const waiting=await a.c.call('collaboration.send',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'Ordinary contact note',requestId:'native-waiting'});
+    // The held native turn is refused, so the letter waits and coordination pauses.
+    await waitFor(()=>b.h.core.coordination.config(b.t.id).paused);
+    expect(status(waiting.id)).toBe('received');
+    expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).not.toBeNull();
+    await b.c.call('threads.trustContactHistory',{threadId:b.t.id});
+    // The owner trusted the mail the notice named: it reaches the thread without holding it again.
+    await waitFor(()=>status(waiting.id)==='delivered');
+    await waitFor(()=>b.h.core.journal.lastTurn(b.t.id)?.finishedAt!=null);
+    expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).toBeNull();
+    expect(b.h.core.coordination.config(b.t.id).paused).toBe(false);
+    // The approval covers that letter as the owner trusted it, never another letter reusing its id.
+    const approved=b.h.core.coordination.get(b.t.id).messages.find(l=>l.id===waiting.id)!;
+    expect(()=>protectLetters(b.h.core,b.t.id,[{...approved,text:'Different text'}])).toThrow('shared file policy');
+    expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).not.toBeNull();
+    await b.c.call('threads.trustContactHistory',{threadId:b.t.id});
+    expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).toBeNull();
+    // A letter that arrives later holds the free thread again.
+    const later=await a.c.call('collaboration.send',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'Another contact note',requestId:'native-later'});
+    await waitFor(()=>b.h.core.coordination.config(b.t.id).paused);
+    expect(status(later.id)).toBe('received');
+    expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).not.toBeNull();
+    // Trust ends that refused wake's pause even when its letter expired meanwhile.
+    b.h.core.journal.db.query("UPDATE coordination_letters SET data=json_set(data,'$.expiresAt',?) WHERE id=?").run(Date.now()-1,later.id);
+    await b.c.call('threads.trustContactHistory',{threadId:b.t.id});
+    expect(b.h.core.coordination.config(b.t.id).paused).toBe(false);
+  }finally{providers.require=require;access.execution.support=support;restore();}
+},30000);
+
 test('SEC-01 consumed associations intersect their live authority instead of replacing earlier history',async()=>{
   const {a,b}=await pair(),c=await side('charlie');await link(c,b);
   for(const [x,y] of [[c,b],[b,c]] as const)await x.c.call('contacts.grant',{coreId:y.id,projectId:x.p.id,readThreads:true});
