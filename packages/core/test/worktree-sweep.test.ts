@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync,
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type { WorktreeEntry } from '@boite/contracts';
+import { realKey as removalKey } from '../src/checkout-removal.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { echoDriver } from '../src/drivers/echo.ts';
 import { parseWorktreeList, WorktreeSweep } from '../src/worktree-sweep.ts';
@@ -528,11 +529,12 @@ describe('worktrees.remove', () => {
   test('the list reads a checkout a removal holds as leaving, without starting git in it', async () => {
     const project = await repoProject();
     const removable = addWorktree(project, 'removable');
-    // The moment `detach` holds it: Windows CI reached the list's status then.
-    const release = harness.core.worktrees.reservations.reserve(removable, []);
+    // The moment `detach` holds it, under the resolved key `withVacantCheckout` adds:
+    // Windows CI reached the list's status then, and macOS lists `/private/var`.
+    const release = harness.core.worktrees.reservations.reserve(removable, [await removalKey(removable)]);
     try {
       const listed = await client.call('worktrees.list', { projectId: project.id });
-      expect(listed.find((entry) => entry.path === removable)).toMatchObject({ missing: true, dirty: false });
+      expect(byPath(listed, removable)).toMatchObject({ missing: true, dirty: false });
     } finally { release(); }
   });
 
