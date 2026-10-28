@@ -45,7 +45,7 @@ test.each(['cli', 'pair', 'update-apply', 'update-recover'])('%s reaches its com
   const error = run.stderr.toString();
   if (command === 'cli') {
     expect(error).toStartWith('usage: boite');
-    expect(error).toEndWith('ends the flags: the words after it are text\n');
+    expect(error).toEndWith("ends Boite's flags: the words after it are the command's\n");
   } else if (command === 'pair') {
     expect(error).toBe(`boite-core pair: no core has run on ${dataDir}: ${join(dataDir, 'core.json')} does not exist. Start the core first.\n`);
   } else {
