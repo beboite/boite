@@ -198,8 +198,8 @@ export class SpeechStore {
       if (config.engine === 'local' && backend === 'whistle') {
         result = await transcribeWhistle(this.core, this.local, audio, config.language || p.language || '', signal);
       } else if (config.engine === 'local' && backend === 'nemotron') {
-        await this.local.native.ensure(this.local.nativeRuntime, dirname(this.local.modelFile(config)), signal);
-        result = await this.local.native.request('transcribe', { audio: p.audio, language: config.language }, signal);
+        const engine = await this.local.native.ensure(this.local.nativeRuntime, dirname(this.local.modelFile(config)), signal);
+        result = await this.local.native.request('transcribe', { audio: p.audio, language: config.language }, signal, engine);
       } else if (config.engine === 'local') {
         result = await transcribeLocal(this.core, this.local, audio, {
           executable: config.executable,

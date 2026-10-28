@@ -1297,7 +1297,10 @@ differ from what the session was given, the session gets
 
 The CLI's end releases the registration, not the turn's: a warm or viewed
 session keeps its CLI across turns, and the servers it started with it. The
-core then closes each server's stdin and kills it after 3 seconds. A server
+core then closes each server's stdin and, after 3 seconds, stops it with what
+it started. The core reads a server's stdout as lines of at most 16 MiB
+through the drivers' shared `LineSplitter`; a longer line fails every call the
+server owed and stops it the same way. A server
 whose command, arguments or environment hold a `${...}` reference stays with
 the CLI, which expands it. Set `BOITE_LAZY_MCP=0` in the core's environment
 to give the CLI the servers as configured.
