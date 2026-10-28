@@ -210,7 +210,8 @@ an `.html` file inside the thread's working directory, and then:
    SVG's `fill`, `stroke`, `mask`, `clip-path`, `filter`, `marker-*`,
    `cursor`); in script text, prose, a `<textarea>`, a `<title>` or another
    attribute (`title`, `data-*`, `onclick`) it is left as written. A
-   `>` inside a quoted attribute value does not end its tag. They must stay inside
+   `>` inside a quoted attribute value does not end its tag, a tag spelled
+   inside one starts nothing, and `<title-card>` is not a `<title>`. They must stay inside
    the working directory, and each is read through the descriptor of the file
    that was checked. The page with its files is at most 4 MB.
 2. Refuses a remote address in anything the page would load (`<script src>`,

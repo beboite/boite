@@ -47,9 +47,11 @@ const EMBEDDED: Record<string, string> = {
  * Each character has one reading, and a `<` outside quotes gives up on the
  * tag, so a page full of tags left open is still read in one pass.
  */
+/** Where a tag's name ends: `<title-card>` is not a `<title>`. */
+const NAME_END = String.raw`(?=[\s/>])`;
 const TAG_REST = String.raw`(?:[^<>"'=]|=(?!\s*["'])|=\s*"[^"]*"|=\s*'[^']*'|(?<!=\s*)["'])*>`;
 /** Tags whose address is fetched when the page loads. An `<a>` is not one: its link opens in the user's browser on a click. */
-const LOADING_TAG = new RegExp(`<(img|image|source|video|audio|track|script|link|use|input|iframe|embed|object)\\b${TAG_REST}`, 'gi');
+const LOADING_TAG = new RegExp(`<(img|image|source|video|audio|track|script|link|use|input|iframe|embed|object)${NAME_END}${TAG_REST}`, 'gi');
 const ADDRESS = new Set(['src', 'href', 'xlink:href', 'poster', 'data']);
 /** The attributes whose value is CSS: `style` and SVG's presentation attributes that take a `url(`. */
 const CSS_ATTRIBUTE = new Set(['style', 'fill', 'stroke', 'mask', 'clip-path', 'filter', 'marker-start', 'marker-mid', 'marker-end', 'cursor']);
@@ -57,7 +59,7 @@ const CSS_URL = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^'")\s]+))\s*\)/gi;
 const TAG = new RegExp(`<[a-z]${TAG_REST}`, 'gi');
 /** Each attribute of a tag in turn, so a name written inside another's quoted value is never read. */
 const ATTRIBUTE = /\s([^\s=>]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/dg;
-const STYLE_BODY = new RegExp(`<style\\b${TAG_REST}([\\s\\S]*?)(?=<\\/style\\s*>|$)`, 'dgi');
+const STYLE_BODY = new RegExp(`<style${NAME_END}${TAG_REST}([\\s\\S]*?)(?=<\\/style\\s*>|$)`, 'dgi');
 
 interface Edit { start: number; end: number; text: string }
 
@@ -127,12 +129,15 @@ export function buildView(source: string, directory: string, cwd: string, guard?
   };
 
   // Comments and element bodies blanked to the same length: a tag written in a string is not the page's.
-  const blank = (tags: string) => source.replace(new RegExp(`<!--[\\s\\S]*?(?:-->|$)|(<(${tags})\\b${TAG_REST})([\\s\\S]*?)(?=<\\/\\2\\s*>|$)`, 'gi'),
-    (match: string, open?: string, _tag?: string, body?: string) => open === undefined ? ' '.repeat(match.length) : open + ' '.repeat(body?.length ?? 0));
+  // Every other tag is read whole, and a `<` in its quoted values blanked, so a tag spelled there starts nothing.
   // A textarea's or title's body is text, not tags: what it spells is never loaded.
-  const markup = blank('script|style|textarea|title');
+  const inert = (tag: string) => tag[0] + tag.slice(1).replace(/</g, ' ');
   /** The page without its scripts and text bodies: where a `url(` or an `@import` is a rule and not a string. */
-  const styled = blank('script|textarea|title');
+  const styled = source.replace(new RegExp(`<!--[\\s\\S]*?(?:-->|$)|(<(script|textarea|title)${NAME_END}${TAG_REST})([\\s\\S]*?)(?=<\\/\\2\\s*>|$)|<\\/?[a-z]${TAG_REST}`, 'gi'),
+    (match: string, open?: string, _tag?: string, body?: string) => match.startsWith('<!--') ? ' '.repeat(match.length) : open === undefined ? inert(match) : inert(open) + ' '.repeat(body?.length ?? 0));
+  const styles = [...styled.matchAll(STYLE_BODY)].map(body => body.indices![1]!);
+  /** And without its style bodies: where a tag is the page's. */
+  const markup = styles.reduce((page, [start, end]) => page.slice(0, start) + ' '.repeat(end - start) + page.slice(end), styled);
   for (const tag of markup.matchAll(LOADING_TAG)) {
     const name = tag[1]!.toLowerCase();
     const at = tag.index;
@@ -166,8 +171,7 @@ export function buildView(source: string, directory: string, cwd: string, guard?
    * `title` or an `onclick` keep theirs as written. The data URL goes
    * unquoted, which no attribute's quotes can end early.
    */
-  const css: [number, number][] = [];
-  for (const body of styled.matchAll(STYLE_BODY)) css.push(body.indices![1]!);
+  const css: [number, number][] = [...styles];
   for (const tag of markup.matchAll(TAG)) {
     for (const value of tag[0].matchAll(ATTRIBUTE)) {
       if (!CSS_ATTRIBUTE.has(value[1]!.toLowerCase())) continue;

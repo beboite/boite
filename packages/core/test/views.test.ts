@@ -164,6 +164,9 @@ test('local files are embedded, and a remote address or a missing file is a prob
     '<div title="url(gone.png)" data-css="@import \'x.css\'">tip</div>',
     '<button onclick="alert(\'url(dot.png)\')">show</button>',
     '<svg><rect fill="url(dot.png)"/></svg>',
+    // A tag spelled inside a quoted value starts nothing, and a custom element named like a text one is markup.
+    '<div title="<textarea>" data-a="<style>" data-b="<img src=gone.png>"></div><p>url(gone.png) after</p>',
+    '<title-card><img src="dot.png" alt="card"></title-card>',
   ].join('\n'), '<link rel="stylesheet" href="look.css"><link rel="stylesheet" href="theme/skin.css">'), join(harness.dataDir, 'views'), harness.dataDir);
   expect(built.problems).toEqual([]);
   const data = `data:image/png;base64,${PNG.toString('base64')}`;
@@ -176,6 +179,8 @@ test('local files are embedded, and a remote address or a missing file is a prob
   expect(built.html).toContain('<div title="url(gone.png)" data-css="@import \'x.css\'">tip</div>');
   expect(built.html).toContain('<button onclick="alert(\'url(dot.png)\')">show</button>');
   expect(built.html).toContain(`<rect fill="url(${data})"/>`);
+  expect(built.html).toContain('<div title="<textarea>" data-a="<style>" data-b="<img src=gone.png>"></div><p>url(gone.png) after</p>');
+  expect(built.html).toContain(`<title-card><img src="${data}" alt="card"></title-card>`);
   const script = /<script>(const css[^<]*)<\/script>/.exec(built.html)![1]!;
   expect(script).toBe('const css = "url(dot.png)";');
   expect(() => new Function(script)).not.toThrow();
