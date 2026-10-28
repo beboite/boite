@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { ROOTS } from './inventory.ts';
 import { BUN_TEST_ROOTS, nestedTickSites, readBunTestSources } from './nested-tick.ts';
 
 // Built from parts so that this file does not trip the check it tests.
@@ -57,7 +58,7 @@ test('files of every extension bun test loads are read, declarations are not', (
 test('check:architecture fails on a promise matcher, naming the nested tick and the docs', () => {
   const root = mkdtempSync(join(tmpdir(), 'nested-tick-check-'));
   try {
-    for (const dir of ['packages/contracts/src', 'packages/core/src', 'packages/ui/src', 'scripts/architecture', ...BUN_TEST_ROOTS]) {
+    for (const dir of [...ROOTS, 'scripts/architecture', ...BUN_TEST_ROOTS]) {
       mkdirSync(join(root, dir), { recursive: true });
     }
     writeFileSync(join(root, 'scripts/architecture/size-budget.json'), '{ "ceiling": 900, "allow": {}, "exempt": {} }\n');

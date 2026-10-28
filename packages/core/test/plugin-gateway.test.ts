@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import * as fs from 'node:fs';
+import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { checkSettingsPatch, type PluginState, type SubscriptionProxy } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
@@ -37,11 +38,11 @@ afterEach(async () => {
 const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 
 /** Douane's reviewed entry, pointed at a download this test serves. */
-function douane(version: string, bytes: Uint8Array) {
+function douane(version: string, bytes: Uint8Array, executable = 'douane') {
   served.set(version, bytes);
   return parseManifest({
     schema: 1, id: 'douane', name: 'Douane', version,
-    description: 'Subscription gateway.', homepage: 'https://github.com/mtsu-dev/douane', executable: 'douane',
+    description: 'Subscription gateway.', homepage: 'https://github.com/mtsu-dev/douane', executable,
     artifacts: { [platformKey()]: { url: `${ARTIFACT}/${version}`, sha256: sha256(bytes) } },
     provides: { gateway: {} },
   }, 'recommended.json[1]');
@@ -213,7 +214,7 @@ test.skipIf(process.platform === 'win32')('an update waits for the requests in f
   writeFileSync(inFlight, '0');
   const updated = await until(() => state(owner), (plugin) => plugin.status === 'installed' && plugin.gateway?.status === 'running' && plugin.gateway.version === '0.4.0', 'the new release running');
   expect(updated.version).toBe('0.4.0');
-  expect(existsSync(`${binary}.previous`)).toBe(false);
+  expect(readdirSync(dirname(binary)).filter((name) => name.includes('.previous'))).toEqual([]);
 
   // A release that exits at once: the one that worked comes back, and the update says why.
   harness!.core.plugins.recommended = [douane('0.5.0', new TextEncoder().encode('#!/bin/sh\nexit 1\n'))];
@@ -224,6 +225,38 @@ test.skipIf(process.platform === 'win32')('an update waits for the requests in f
   expect(back.error).toMatch(/exited with code 1.*0\.4\.0 runs again/);
   expect(readFileSync(binary, 'utf8')).toContain('0.4.0');
   expect(live()).toBe(1);
+}, 60_000);
+
+test.skipIf(process.platform === 'win32')('an update that renames the gateway executable starts the new one before its record names it, with its saved settings', async () => {
+  delete process.env[DOUANE_BINARY_ENV];
+  const { owner } = await core('0.3.0', program('0.3.0'));
+  harness!.core.plugins.gateways.readyMs = 3_000;
+  await owner.call('plugins.install', { id: 'douane' });
+  expect((await gatewayIs(owner, 'running')).gateway?.version).toBe('0.3.0');
+  const dir = join(harness!.dataDir, 'plugins', 'douane');
+  const data = join(harness!.dataDir, 'douane');
+  // A setting Douane saved into its configuration.
+  appendFileSync(join(data, 'douane.toml'), '\n[routing]\nsaved = "kept"\n');
+
+  // The first renamed candidate fails after its configuration is copied.
+  harness!.core.plugins.recommended = [douane('0.4.0', new TextEncoder().encode('#!/bin/sh\nexit 1\n'), 'douane-next')];
+  await owner.call('plugins.install', { id: 'douane' });
+  await until(() => state(owner), (plugin) => plugin.status === 'error' && plugin.gateway?.status === 'running', 'the previous release back');
+  expect(readFileSync(join(data, 'douane-next.toml'), 'utf8')).toContain('saved = "kept"');
+  // Settings saved while the old release runs must replace the failed candidate's copy on retry.
+  writeFileSync(join(data, 'douane.toml'), readFileSync(join(data, 'douane.toml'), 'utf8').replace('saved = "kept"', 'saved = "changed"'));
+
+  harness!.core.plugins.recommended = [douane('0.4.0', program('0.4.0'), 'douane-next')];
+  await owner.call('plugins.install', { id: 'douane' });
+  const updated = await until(() => state(owner), (plugin) => plugin.status !== 'installing' && plugin.gateway?.status === 'running', 'the update settled');
+  expect(updated).toMatchObject({ status: 'installed', version: '0.4.0', error: null });
+  expect(updated.gateway?.version).toBe('0.4.0');
+  expect(existsSync(join(dir, 'douane-next'))).toBe(true);
+  expect(existsSync(join(dir, 'douane'))).toBe(false);
+  expect(readFileSync(join(data, 'douane-next.toml'), 'utf8')).toContain('saved = "changed"');
+  // The previous name's file stays, for a release that goes back to it.
+  expect(readFileSync(join(data, 'douane.toml'), 'utf8')).toContain('saved = "changed"');
+  await until(live, (count) => count === 1, 'one gateway process');
 }, 60_000);
 
 test('an update whose release exits at once says so, even when its relaunch would come before the answer', async () => {
@@ -242,6 +275,54 @@ test('an update whose release exits at once says so, even when its relaunch woul
   expect(back.version).toBe('0.3.0');
   expect(back.error).toBe('douane exited with code 1. 0.3.0 runs again.');
   await until(live, (count) => count === 1, 'one gateway process');
+}, 30_000);
+
+test('an update whose record cannot be written after its gateway answered puts the previous binary back and runs it', async () => {
+  const { owner } = await core();
+  await owner.call('plugins.install', { id: 'douane' });
+  await gatewayIs(owner, 'running');
+  const dir = join(harness!.dataDir, 'plugins', 'douane');
+  const binary = join(dir, process.platform === 'win32' ? 'douane.exe' : 'douane');
+  const realRename = fs.renameSync;
+  // The commit fails, as a full disk would make it.
+  const full = spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+    if (String(from).endsWith('installed.json.part')) throw new Error('ENOSPC: no space left on device');
+    realRename(from, to);
+  });
+  harness!.core.plugins.recommended = [douane('0.5.0', new Uint8Array([5]))];
+  let back: PluginState;
+  try {
+    await owner.call('plugins.install', { id: 'douane' });
+    back = await until(() => state(owner), (plugin) => plugin.status === 'error' && plugin.gateway?.status === 'running', 'the previous release back');
+  } finally { full.mockRestore(); }
+  expect(back.version).toBe('0.3.0');
+  expect(back.error).toMatch(/0\.3\.0 runs again\.$/);
+  expect([...readFileSync(binary)]).toEqual([1, 2, 3]);
+  expect(readdirSync(dirname(binary)).filter((name) => name.includes('.previous'))).toEqual([]);
+  await until(live, (count) => count === 1, 'one gateway process');
+}, 30_000);
+
+test('a failed update whose previous gateway never answers health reports that restart failure', async () => {
+  const { owner } = await core();
+  await owner.call('plugins.install', { id: 'douane' });
+  await gatewayIs(owner, 'running');
+  const runs = join(harness!.dataDir, 'runs');
+  process.env.FAKE_DOUANE_RUNS_FILE = runs;
+  // The candidate exits immediately; the restored gateway stays silent past its readiness deadline.
+  writeFileSync(runs, 'exit\nlate\n');
+  harness!.core.plugins.gateways.readyMs = 200;
+  harness!.core.plugins.gateways.relaunchDelaysMs = [];
+  harness!.core.plugins.recommended = [douane('0.5.0', new Uint8Array([5]))];
+  await owner.call('plugins.install', { id: 'douane' });
+  const back = await until(() => state(owner), (plugin) => plugin.status === 'error', 'the failed rollback restart');
+  expect(back.version).toBe('0.3.0');
+  expect(back.gateway?.status).toBe('crashed');
+  expect(back.error).toContain('0.3.0 did not start again:');
+  expect(back.error).toContain('did not answer /health');
+  expect(back.error).not.toContain('runs again');
+  const binary = join(harness!.dataDir, 'plugins', 'douane', process.platform === 'win32' ? 'douane.exe' : 'douane');
+  expect([...readFileSync(binary)]).toEqual([1, 2, 3]);
+  await until(live, (count) => count === 0, 'no gateway process left');
 }, 30_000);
 
 test('an updated gateway that crashes later starts again', async () => {

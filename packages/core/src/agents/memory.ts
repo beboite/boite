@@ -208,7 +208,7 @@ export class MemoryKeeper {
       }, undefined, false, { contextMode: TOOL_FREE_CONTEXT, permissionMode: CONTEXT_TRIMMABLE_PROTOCOLS.includes(provider.protocol) ? 'dontAsk' : 'plan' });
       this.record(agent.id, { threadId: child, status: 'running', summary: null, at: keeper.startedAt });
       const today = new Date().toISOString().slice(0, 10);
-      this.core.threads.startTurn(child, memoryPrompt(agent, brain.memory.slice(0, 64_000), cut(exchange.asked, ASKED_MAX, exchange.joined), cut(exchange.answered, ANSWERED_MAX, exchange.joined), today), [], undefined, 'delegation', undefined, undefined, `Update ${agent.name}'s memory`);
+      this.core.threads.startTurn(child, { prompt: memoryPrompt(agent, brain.memory.slice(0, 64_000), cut(exchange.asked, ASKED_MAX, exchange.joined), cut(exchange.answered, ANSWERED_MAX, exchange.joined), today), display: `Update ${agent.name}'s memory` }, { kind: 'delegation' });
     } catch (error) {
       if (child) this.end(child, this.keepers.get(child)!, 'error', `The memory pass could not start: ${messageOf(error)}`);
       else this.core.log('warn', `memory pass for agent ${agent.id} could not start: ${messageOf(error)}`);
@@ -249,7 +249,7 @@ export class MemoryKeeper {
     try {
       this.keepers.set(threadId, next);
       this.core.journal.setSetting(`${KEEPER}${threadId}`, next);
-      this.core.threads.startTurn(threadId, memoryRetryPrompt(agent, rewrite), [], undefined, 'delegation', undefined, undefined, `Shorten ${agent.name}'s memory`);
+      this.core.threads.startTurn(threadId, { prompt: memoryRetryPrompt(agent, rewrite), display: `Shorten ${agent.name}'s memory` }, { kind: 'delegation' });
       return true;
     } catch (error) {
       this.core.log('warn', `memory pass ${threadId}: the retry could not start: ${messageOf(error)}`);

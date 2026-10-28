@@ -243,7 +243,7 @@ test('the base branch names what it requires through its rulesets and its classi
 });
 
 test('a draft passes on the required checks it reports, without waiting for one it never reports', () => {
-  // mtsu-dev/boite's draft run names its planning job apart, so a draft never satisfies the ruleset (docs/ci.md#draft-pull-requests).
+  // A repository whose draft run names its planning job apart, so a draft never satisfies its ruleset.
   const required = ['Plan and repository checks', 'Build UI'];
   const draft = parseDetail(detailJson([{ name: 'Plan and repository checks (draft)' }, { name: 'Build UI' }], { isDraft: true }));
   expect(draft.draft).toBe(true);

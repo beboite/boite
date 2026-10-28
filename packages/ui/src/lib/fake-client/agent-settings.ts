@@ -7,7 +7,7 @@
  * `agents/create.ts`.
  */
 import {
-  AGENT_SETTING_KEYS, AGENT_STATUSES, RpcErrorCode, agentSettingValue, checkAgentCreate, checkAgentSettingRequest, normalizeAgentSetting, settledAgentSetting,
+  AGENT_SETTING_KEYS, AGENT_STATUSES, RpcErrorCode, agentModelRoute, agentSettingProposal, agentSettingValue, providerEnabled, checkAgentCreate, checkAgentSettingRequest, normalizeAgentSetting, settledAgentSetting,
   type AgentCreateContext, type AgentProfile, type AgentSelection, type AgentSettingAsk, type AgentSettingContext, type AgentSettingReading, type AgentSettingRequestParams,
   type DelegationConfig, type RpcParams, type RpcResult, type Thread, type Turn,
 } from '@boite/contracts';
@@ -40,7 +40,32 @@ function agentFor(ctx: FakeContext, threadId: string, name: string | undefined):
   throw refused(`agent: no agent ${JSON.stringify(wanted)}; the agents are ${live.map(agent => agent.name).join(', ') || 'none yet'}`, { field: 'agent', expected: live.map(agent => agent.name) });
 }
 
-function context(ctx: FakeContext, agent: AgentProfile): AgentSettingContext {
+/** As the core: the agent's own login on its provider; on another, that provider's signed-in login, the default location first. */
+function accountOn(ctx: FakeContext, agent: AgentProfile, providerId: string): string | undefined {
+  if (providerId === agent.selection.providerId) return agent.selection.accountId;
+  const usable = ctx.accounts.filter(account => account.providerId === providerId && account.status !== 'unauthenticated');
+  return (usable.find(a => a.isolationDir === null && a.status === 'ok') ?? usable.find(a => a.status === 'ok')
+    ?? usable.find(a => a.isolationDir === null) ?? usable[0])?.id;
+}
+
+/** As the core: `<provider>/<model>` of an available provider, or a model id of the agent's own; else the core's refusal. */
+function modelRoute(ctx: FakeContext, agent: AgentProfile, wanted: string, refs = false): { providerId: string; accountId: string; model: string } | string {
+  const { providerId, accountId: own } = agent.selection;
+  const ownRoute = modelsOf(ctx, providerId, own).some(entry => entry.id === wanted) ? { providerId, accountId: own, model: wanted } : 'the provider does not offer this model';
+  const slash = wanted.indexOf('/');
+  const named = slash > 0 ? ctx.providers.find(provider => provider.id === wanted.slice(0, slash)) : undefined;
+  if (named === undefined) return refs ? `model: ${wanted} names no provider of this machine` : ownRoute;
+  const model = wanted.slice(slash + 1);
+  const usable = named.id === providerId || (named.available && providerEnabled(named));
+  const accountId = usable ? accountOn(ctx, agent, named.id) : undefined;
+  if (accountId !== undefined && modelsOf(ctx, named.id, accountId).some(entry => entry.id === model)) return { providerId: named.id, accountId, model };
+  if (!refs && typeof ownRoute !== 'string') return ownRoute;
+  if (!usable) return `model: ${named.id} is not installed or is turned off on this machine`;
+  if (accountId === undefined) return `model: ${named.id} has no signed-in account on this machine`;
+  return 'the provider does not offer this model';
+}
+
+function context(ctx: FakeContext, agent: AgentProfile, refs = false): AgentSettingContext {
   const { providerId, accountId } = agent.selection;
   const config = ctx.agents.configOf(agent.id);
   const models = () => modelsOf(ctx, providerId, accountId);
@@ -50,12 +75,12 @@ function context(ctx: FakeContext, agent: AgentProfile): AgentSettingContext {
     projects: ctx.projects.filter(project => project.kind !== 'drafts').map(project => ({ id: project.id, label: project.name })),
     bots: ctx.agents.liveProfiles(),
     model: model => {
-      if (!models().some(entry => entry.id === model)) return { ok: false, message: 'the provider does not offer this model' };
-      // The same test `agents.profile.save` makes once the owner set a policy.
-      if (ctx.agents.hasPolicy(agent.id) && !config.allowedRoutes.some(route => route.providerId === providerId && route.accountId === accountId && route.model === model)) {
-        return { ok: false, message: `model: ${model} is not among the models ${agent.name} may use; the owner allows models in its settings` };
-      }
-      return { ok: true, value: model };
+      const route = modelRoute(ctx, agent, model, refs);
+      if (typeof route === 'string') return { ok: false, message: route };
+      const ref = `${route.providerId}/${route.model}`;
+      // As the core: a model the settings do not allow yet is the owner's to allow by applying the card.
+      if (!ctx.agents.accountAllowed(agent.id, route.accountId)) return { ok: false, message: `model: ${ref} runs on an account the owner has not granted ${agent.name}` };
+      return { ok: true, value: ref };
     },
     effort: effort => {
       if (effort === null) return { ok: true, value: null };
@@ -101,10 +126,23 @@ function write(ctx: FakeContext, agent: AgentProfile, key: AgentSettingAsk['key'
     case 'status': return ctx.agents.writeSetting(agent.id, { profile: { status: value as AgentProfile['status'] } });
     case 'projects': return ctx.agents.writeSetting(agent.id, { projectIds: value as string[] });
     case 'model': {
+      const { providerId, model } = agentModelRoute(value as string);
+      const accountId = accountOn(ctx, agent, providerId);
+      if (accountId === undefined) throw refused(`model: ${providerId} has no signed-in account on this machine`, { field: 'value', key });
       // A level the new model lacks goes back to its default rather than refusing the change.
-      const levels = modelsOf(ctx, agent.selection.providerId, agent.selection.accountId).find(entry => entry.id === value)?.effort?.levels ?? [];
+      const levels = modelsOf(ctx, providerId, accountId).find(entry => entry.id === model)?.effort?.levels ?? [];
       const effort = agent.selection.effort !== null && levels.some(level => level.id === agent.selection.effort) ? agent.selection.effort : null;
-      return ctx.agents.writeSetting(agent.id, { selection: { ...agent.selection, model: value as string, effort } });
+      const selection = { ...agent.selection, providerId, accountId, model, effort };
+      if (!ctx.agents.hasPolicy(agent.id)) return ctx.agents.writeSetting(agent.id, { selection });
+      // As the core: applying the card allows the route in the agent's settings.
+      const routes = config.allowedRoutes, ref = `${providerId}/${model}`;
+      const listed = routes.some(route => route.providerId === providerId && route.accountId === accountId && route.model === model);
+      const name = (modelsOf(ctx, providerId, accountId).find(entry => entry.id === model)?.name ?? model).slice(0, 100);
+      // The route's id is the reference, numbered until no route holds it.
+      let id = ref.slice(0, 64);
+      for (let n = 2; routes.some(route => route.id === id); n++) id = `${ref.slice(0, 60)}-${n}`;
+      const allowedRoutes = listed ? routes : [...routes, { id, name, providerId, accountId, model, effort }];
+      return ctx.agents.writeSetting(agent.id, { selection, config: { ...config, defaultRoute: selection, allowedRoutes } });
     }
     case 'effort': return ctx.agents.writeSetting(agent.id, { selection: { ...agent.selection, effort: value as string | null } });
     case 'autoMemory': return ctx.agents.writeSetting(agent.id, { config: { ...config, autoMemory: value as boolean } });
@@ -157,13 +195,20 @@ export function agentSettingMethods(ctx: FakeContext): Handlers {
       ctx.thread(params.threadId);
       const agent = agentFor(ctx, params.threadId, params.agent);
       const checks = context(ctx, agent);
-      const models = modelsOf(ctx, agent.selection.providerId, agent.selection.accountId);
-      const model = models.find(entry => entry.id === agent.selection.model);
+      const model = modelsOf(ctx, agent.selection.providerId, agent.selection.accountId).find(entry => entry.id === agent.selection.model);
+      // As the core: its provider's models, then the current ones of each other provider signed in here.
+      const providers = ctx.providers.filter(provider => provider.available && providerEnabled(provider))
+        .sort((a, b) => Number(b.id === agent.selection.providerId) - Number(a.id === agent.selection.providerId));
+      const models = providers.flatMap(provider => {
+        const accountId = accountOn(ctx, agent, provider.id);
+        const own = provider.id === agent.selection.providerId;
+        return accountId === undefined ? [] : modelsOf(ctx, provider.id, accountId).filter(entry => own || !entry.legacy).map(entry => ({ id: `${provider.id}/${entry.id}`, label: entry.name }));
+      });
       const settings = AGENT_SETTING_KEYS.map((key): AgentSettingReading => {
         const value = agentSettingValue(agent, checks.config, key);
         if (key === 'status') return { key, value, choices: AGENT_STATUSES.map(status => ({ id: status, label: status })) };
         if (key === 'projects') return { key, value, choices: [...checks.projects] };
-        if (key === 'model') return { key, value, choices: models.filter(entry => checks.model(entry.id).ok).map(entry => ({ id: entry.id, label: entry.name })) };
+        if (key === 'model') return { key, value, choices: models.filter(entry => checks.model(entry.id).ok) };
         if (key === 'effort' && model?.effort?.levels.length) return { key, value, choices: model.effort.levels.map(level => ({ id: level.id, label: level.label })) };
         return { key, value };
       });
@@ -186,9 +231,9 @@ export function agentSettingMethods(ctx: FakeContext): Handlers {
       if (!agent) throw refused(`unknown profile ${setting.agentId}`);
       if (agent.status === 'archived') throw refused(`agents.settings.apply: ${agent.name} is archived`, { field: 'questionId' });
       let value = setting.value;
-      // As the core: a name is checked again, another card may have given it away since.
-      if (params.value !== undefined || setting.key === 'name') {
-        const normalized = normalizeAgentSetting(setting.key, params.value ?? setting.value, context(ctx, agent));
+      // As the core: a name is checked again, another card may have given it away since; a model too.
+      if (params.value !== undefined || setting.key === 'name' || setting.key === 'model') {
+        const normalized = normalizeAgentSetting(setting.key, params.value ?? agentSettingProposal(setting, agent), context(ctx, agent, true));
         if (!normalized.ok) throw refused(normalized.message, { field: 'value', key: setting.key });
         value = normalized.value;
       }

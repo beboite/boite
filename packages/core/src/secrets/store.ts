@@ -17,7 +17,7 @@ import { notFound, refused } from '../errors.ts';
 import { newId } from '../ids.ts';
 import type { SecretVault } from '../platform/types.ts';
 import type { Connection } from '../router.ts';
-import { setThreadStatus } from '../threads/records.ts';
+import { markRunning } from '../threads/lifecycle.ts';
 import { SecretIndex, type TransitEntry } from './index-file.ts';
 import { maskDeep, SecretMasks } from './mask.ts';
 import { execSecret, writeSecret } from './use.ts';
@@ -193,7 +193,7 @@ export class SecretStore {
     const timer = setTimeout(() => { const live = this.#pending.get(request.id); if (live) this.#settle(live, 'timed_out', null); }, minutes * 60_000);
     const pending: Pending = { request, messageId: message.id, partIndex: 0, part, timer, waiters: 0, done, resolve };
     this.#pending.set(request.id, pending);
-    setThreadStatus(this.core, thread.id, 'waiting');
+    markRunning(this.core, thread.id);
     this.core.bus.emit('secret.requested', request);
     this.core.logs.info(`Secret ${request.name} asked on a card`, {
       source: 'secrets', event: 'secret.requested', threadId: thread.id, turnId: turn.id, requestId: request.id, data: { name: request.name, timeoutMinutes: minutes, storage },
@@ -230,7 +230,7 @@ export class SecretStore {
     this.core.bus.emit('secret.resolved', { requestId: request.id, threadId, status, ref });
     this.core.logs.info(`Secret ${request.name} card closed: ${status}`, { source: 'secrets', event: 'secret.resolved', threadId, turnId: request.turnId, requestId: request.id, data: { name: request.name, status } });
     if (touchStatus && this.core.journal.runningTurn(threadId)?.id === request.turnId) {
-      setThreadStatus(this.core, threadId, this.core.threads.cards.waitingOn(threadId) ? 'waiting' : 'running');
+      markRunning(this.core, threadId);
     }
     const result: AskResult = { requestId: request.id, outcome: status, ref, storage: 'memory' };
     this.#settled.set(request.id, { threadId, result });

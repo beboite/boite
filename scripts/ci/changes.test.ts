@@ -24,7 +24,7 @@ test('the shell Rust tests run only for the inputs they compile', () => {
     if (file.startsWith('packages/')) expect(checks.desktop).toBe(true);
   }
   expect(affectedChecks(['packages/core/src/main.ts', 'apps/shell/src-tauri/src/lib.rs']).shellRust).toBe(true);
-  for (const mode of ['pr', 'warm', 'full'] as const) {
+  for (const mode of ['pr', 'queue', 'warm', 'full'] as const) {
     expect(plan(affectedChecks(['packages/core/src/main.ts']), mode).shellRust).toBe(false);
     expect(plan(affectedChecks(['unknown']), mode).shellRust).toBe(true);
   }
@@ -62,13 +62,13 @@ test('telemetry-only changes require behavioral relay coverage on PRs and main',
   for (const file of ['telemetry/src/index.ts', 'telemetry/wrangler.toml']) {
     const checks = affectedChecks([file]);
     expect(checks).toEqual({ ...none, web: true, telemetry: true });
-    for (const mode of ['pr', 'warm', 'full'] as const) expect(plan(checks, mode).telemetry).toBe(true);
+    for (const mode of ['pr', 'queue', 'warm', 'full'] as const) expect(plan(checks, mode).telemetry).toBe(true);
   }
 });
 
 test('E2E-only changes require focused type checking without UI unit tests', () => {
   for (const file of ['tests/e2e/ui.test.ts', 'tests/e2e/lib/core.ts', 'tests/e2e/tsconfig.json']) {
-    expect(plan(affectedChecks([file]), 'pr')).toMatchObject({ desktop: true, e2e: true, e2eTypes: true, web: false });
+    expect(plan(affectedChecks([file]), 'queue')).toMatchObject({ desktop: true, e2e: true, e2eTypes: true, web: false });
   }
 });
 
@@ -76,7 +76,7 @@ test('stress fixtures and their bench helpers require the bounded stress suite',
   for (const file of ['tests/stress/drivers.test.ts', 'tests/stress/lib/protocol-load.ts', 'bench/agent-stress.ts', 'bench/lib/health.ts']) {
     expect(affectedChecks([file])).toEqual({ ...none, web: true, stress: true });
   }
-  for (const mode of ['pr', 'warm', 'full'] as const) {
+  for (const mode of ['queue', 'warm', 'full'] as const) {
     expect(plan(affectedChecks(['packages/core/src/scheduler.ts']), mode).stress).toBe(true);
   }
   expect(affectedChecks(['packages/ui/src/App.svelte'])).toEqual({ ...none, web: true, desktop: true, server: true, stress: true });
@@ -106,16 +106,16 @@ test('workflow lint follows workflows, local actions and their decision scripts'
 test('native Windows proof follows protection code and shared toolchain inputs', () => {
   for (const file of ['packages/core/src/platform/windows/protected-tool.c', 'packages/core/src/platform/protected-checkout.ts', 'packages/core/src/execution-policy.ts', 'packages/core/src/drivers/muse/protected.ts', 'packages/core/src/drivers/protected-bridge.ts', 'packages/core/src/contacts/native-execution.ts', 'packages/core/bin/install-windows-sandbox.ts', 'packages/core/test/protected-windows.test.ts', 'bun.lock', 'package.json', '.github/workflows/ci.yml', 'scripts/ci/changes.ts', 'new-config.json']) {
     expect(needsNativeWindows([file]), file).toBe(true);
-    const draft = plan(affectedChecks([file]), 'draft', needsNativeWindows([file]));
-    expect(draft.nativeWindows).toBe(true);
-    expect(JSON.parse(draft.coreRunners).map((runner: { os: string }) => runner.os)).toEqual(['ubuntu-24.04', 'windows-2025']);
-    expect(draft.desktop).toBe(false);
+    const pr = plan(affectedChecks([file]), 'pr', needsNativeWindows([file]));
+    expect(pr.nativeWindows).toBe(true);
+    expect(JSON.parse(pr.coreRunners).map((runner: { os: string }) => runner.os)).toEqual(['ubuntu-24.04', 'windows-2025']);
+    expect(pr.desktop).toBe(false);
   }
   for (const file of ['docs/ci.md', 'packages/ui/src/App.svelte', 'packages/core/src/cli.ts', 'Dockerfile']) {
     expect(needsNativeWindows([file]), file).toBe(false);
-    expect(plan(affectedChecks([file]), 'draft', needsNativeWindows([file])).coreRunners).toBe(plan(affectedChecks([file]), 'draft').coreRunners);
+    expect(plan(affectedChecks([file]), 'pr', needsNativeWindows([file])).coreRunners).toBe(plan(affectedChecks([file]), 'pr').coreRunners);
   }
-  for (const mode of ['pr', 'warm', 'full'] as const) {
+  for (const mode of ['queue', 'warm', 'full'] as const) {
     expect(plan(allChecks, mode, true).nativeWindows).toBe(true);
   }
 });
@@ -127,12 +127,11 @@ test('runtime, build inputs and unknown files require the complete suite', () =>
 });
 
 test('pull requests, main pushes and forced runs pick their mode', () => {
+  // Draft or ready, a pull request runs the same plan.
   expect(ciMode('pull_request', false)).toBe('pr');
-  expect(ciMode('pull_request', false, true)).toBe('draft');
-  expect(ciMode('pull_request', true, true)).toBe('full');
-  // A merge group compares with its main base and runs what its pull requests ran.
-  expect(ciMode('merge_group', false)).toBe('pr');
-  expect(ciMode('push', false, true)).toBe('warm');
+  expect(ciMode('pull_request', true)).toBe('full');
+  // A merge group compares with its main base and runs the full matrix.
+  expect(ciMode('merge_group', false)).toBe('queue');
   expect(ciMode('push', false)).toBe('warm');
   expect(ciMode('push', true)).toBe('full');
   expect(ciMode('workflow_dispatch', false)).toBe('full');
@@ -141,10 +140,10 @@ test('pull requests, main pushes and forced runs pick their mode', () => {
 
 test('main pushes run affected tests while warming the extra portable architectures', () => {
   const all = affectedChecks(['packages/core/src/main.ts']);
-  const pr = plan(all, 'pr');
-  expect(pr).toMatchObject({ core: true, web: true, desktop: true, server: true, e2e: true });
+  const queue = plan(all, 'queue');
+  expect(queue).toMatchObject({ core: true, web: true, desktop: true, server: true, e2e: true });
   const runners = (portable: string) => JSON.parse(portable).map((platform: { runner: string; target?: string }) => platform.target ?? platform.runner);
-  expect(runners(pr.portable)).toEqual(['ubuntu-22.04', 'macos-15']);
+  expect(runners(queue.portable)).toEqual(['ubuntu-22.04', 'macos-15']);
   const warm = plan(all, 'warm');
   expect(warm).toMatchObject({ core: true, web: true, desktop: true, server: true, e2e: true, stress: true });
   // Intel macOS is cross-built on Apple Silicon: no portable leg waits for an Intel runner.
@@ -156,22 +155,32 @@ test('main pushes run affected tests while warming the extra portable architectu
   expect(plan(affectedChecks(['README.md']), 'warm')).toMatchObject({ ...none, e2e: false });
 });
 
-test('a draft runs only the Linux checks and leaves the rest to the ready pull request', () => {
+test('a pull request runs only the Linux checks and leaves the rest to the merge queue', () => {
   const all = affectedChecks(['packages/core/src/main.ts']);
-  const draft = plan(all, 'draft');
-  expect(draft).toMatchObject({ core: true, web: true, desktop: false, e2e: false, server: false, android: false, androidServer: false, stress: false });
-  expect(JSON.parse(draft.coreRunners)).toEqual([{ os: 'ubuntu-24.04', name: 'Linux x64' }]);
+  const pr = plan(all, 'pr');
+  expect(pr).toMatchObject({ core: true, web: true, desktop: false, e2e: false, server: false, android: false, androidServer: false, stress: false });
+  expect(JSON.parse(pr.coreRunners)).toEqual([{ os: 'ubuntu-24.04', name: 'Linux x64' }]);
+  // Bundle size still measures a desktop change: the queue skips it.
+  expect(pr.size).toBe(true);
+  expect(plan(affectedChecks(['telemetry/src/index.ts']), 'pr').size).toBe(false);
   // Focused checks still stand in for absent full suites.
-  expect(plan(affectedChecks(['tests/e2e/ui.test.ts']), 'draft')).toMatchObject({ e2eTypes: true, desktop: false, e2e: false });
-  expect(plan(affectedChecks(['telemetry/src/index.ts']), 'draft')).toMatchObject({ web: true, telemetry: true });
-  expect(plan(affectedChecks(['README.md']), 'draft')).toMatchObject({ ...none, e2e: false });
+  expect(plan(affectedChecks(['tests/e2e/ui.test.ts']), 'pr')).toMatchObject({ e2eTypes: true, desktop: false, e2e: false, size: true });
+  expect(plan(affectedChecks(['telemetry/src/index.ts']), 'pr')).toMatchObject({ web: true, telemetry: true });
+  expect(plan(affectedChecks(['README.md']), 'pr')).toMatchObject({ ...none, e2e: false, size: false });
 });
 
-test('pull requests run the core suite without the Intel Mac; main, releases and manual runs keep it', () => {
+test('the merge queue runs every check the changes select, on every pull request platform', () => {
+  const queue = plan(affectedChecks(['unknown']), 'queue', true);
+  expect(queue).toMatchObject({ ...allChecks, telemetry: false, e2eTypes: false, e2e: true, nativeWindows: true });
+  expect(JSON.parse(queue.coreRunners).map((runner: { os: string }) => runner.os)).toEqual(['ubuntu-24.04', 'ubuntu-24.04-arm', 'windows-2025', 'macos-15']);
+  expect(JSON.parse(queue.portable)).toHaveLength(2);
+});
+
+test('the merge queue runs the core suite without the Intel Mac; main, releases and manual runs keep it', () => {
   const all = affectedChecks(['packages/core/src/main.ts']);
-  const runners = (mode: 'pr' | 'warm' | 'full') => JSON.parse(plan(all, mode).coreRunners).map((runner: { os: string }) => runner.os);
-  expect(runners('pr')).toEqual(['ubuntu-24.04', 'ubuntu-24.04-arm', 'windows-2025', 'macos-15']);
-  for (const mode of ['warm', 'full'] as const) expect(runners(mode)).toEqual([...runners('pr'), 'macos-15-intel']);
+  const runners = (mode: 'queue' | 'warm' | 'full') => JSON.parse(plan(all, mode).coreRunners).map((runner: { os: string }) => runner.os);
+  expect(runners('queue')).toEqual(['ubuntu-24.04', 'ubuntu-24.04-arm', 'windows-2025', 'macos-15']);
+  for (const mode of ['warm', 'full'] as const) expect(runners(mode)).toEqual([...runners('queue'), 'macos-15-intel']);
   // ci.yml names each core job after its runner: `Core tests (macOS x64)`.
   expect(JSON.parse(plan(all, 'full').coreRunners).map((runner: { name: string }) => runner.name))
     .toEqual(['Linux x64', 'Linux arm64', 'Windows x64', 'macOS arm64', 'macOS x64']);

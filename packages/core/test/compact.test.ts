@@ -217,7 +217,7 @@ describe('automatic compaction', () => {
     const { threadId } = await quiet(client);
     await turn(client, threadId, 'x'.repeat(950));
     const pinged = client.next('turn.finished', t => t.threadId === threadId && t.execution?.operation === 'keepalive');
-    h.core.threads.startTurn(threadId, '[error]', [], undefined, 'keepalive');
+    h.core.threads.startTurn(threadId, '[error]', { kind: 'keepalive' });
     expect((await pinged).status).toBe('error');
     await client.call('settings.set', { autoCompact: { tokens: 1000, moments: [] } });
     expect((await client.call('threads.get', { threadId })).context?.tokens ?? 0).toBeGreaterThanOrEqual(1000);

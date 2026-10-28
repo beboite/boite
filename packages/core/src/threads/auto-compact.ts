@@ -180,7 +180,7 @@ export class AutoCompaction {
    */
   private expected(threadId: ThreadId): boolean {
     if (this.threads.deferred.pendingWakes.has(threadId) || this.threads.deferred.deferredAnswers.has(threadId) || this.threads.deferred.consumed.has(threadId)) return true;
-    if (this.threads.autoContinue.retryOf(threadId) !== null) return true;
+    if (this.threads.resumes.retryOf(threadId)?.kind === 'auto-continue') return true;
     const activity = this.core.activity.get(threadId);
     if (activity.goal?.status === 'active' || activity.loop?.status === 'active') return true;
     try {

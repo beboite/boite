@@ -895,18 +895,30 @@ quoting a performance figure and include its command and date.
 
 ## Architecture checks
 
-`bun run check` includes `bun run check:architecture`; the latter uses Bun's
-parser without workspace dependencies. `bun test scripts/architecture` covers
-cycle detection, resolution, boundaries and source sizes. Runtime-import scope
+`bun run check` includes `bun run check:architecture`; it reads imports with
+Bun's transpiler and the `<script>` blocks of Svelte components with the UI's
+own `svelte/compiler`, so a component's imports are edges of the graph and a
+cycle through a component fails. `bun test scripts/architecture` covers
+cycle detection, resolution, boundaries and source sizes. The roots it reads
+are `ROOTS` in `scripts/architecture/inventory.ts`; a missing root fails rather
+than narrowing the check. Runtime-import scope
 and exclusions are documented in
 [architecture](architecture.md#module-boundaries-and-complexity).
 
-Production TypeScript, JavaScript and Svelte files have a 900-line ceiling.
-Existing exceptions in `scripts/architecture/size-budget.json` may shrink.
+Production TypeScript, JavaScript, Svelte, Rust, Kotlin and Java files have a
+900-line ceiling; tests, declarations and a Rust module's `tests.rs` do not
+count. Two files above it have an allowance in
+`scripts/architecture/size-budget.json` that may only shrink:
+
+- `apps/android-server/termux/boite-server.ts`: the Termux controller ships as
+  one file, which `install.sh` fetches alone and an update copies alone. It
+  splits once the bootstrap carries a directory.
+- `apps/shell/src-tauri/src/browser.rs`: the shell's browser surfaces, above
+  the ceiling before Rust entered the check.
+
 `--write-size-budget` lowers or removes allowances; it never raises them.
 `--rebaseline-size-budget` can raise them for a reviewed integration of branches
-written before the limits existed. Exempt contract, client and string tables
-have an explicit reason in that file.
+written before the limits existed. Nothing is exempt.
 
 `bun run audit:complexity --json` produces an advisory comparison for TypeScript,
 JavaScript and Svelte scripts, excluding Rust. A high score requires review of
@@ -1113,6 +1125,21 @@ browser decodes them (Safari does); elsewhere they travel as a plain file. A
 source over 50 MB is refused before decoding, since a phone's canvas would not
 hold it. So twenty iPhone screenshots, 2 to 4 MB each as PNG, fit one turn at
 around 400 KB each.
+
+None of this holds the box. A pasted, dropped or picked file shows at once as
+a loading tile, a picture with its `[Image N]` at the caret, and the box keeps
+taking keys while the file is read (`receiveFiles`, `lib/composer-attachments.ts`).
+The reduction runs in a worker (`lib/image-prepare.worker.ts`, `OffscreenCanvas`)
+and falls back to the page where a browser has neither. Files of one composer
+settle in the order they came, each into its placeholder's place, its undo
+steps included. A placeholder is never saved, synced or uploaded; when a sync
+conflict moves the words to a new draft, the file lands in that draft instead
+(`followRead`, `lib/draft-attachments.ts`). Send pressed meanwhile waits on a
+spinner and goes once every file is ready, in the box it was pressed in; typing
+on, or a sync that swaps the box, cancels it. A refused file drops its tile
+and its reference, in the box and in its undo steps, and says why. A file past
+the twenty, from the same drop or a later one, waits for one of them to be
+refused, and is refused itself only once they are all read.
 
 The Claude driver fits every prompt image to the same edge again before it
 goes in (`drivers/claude/images.ts`, Bun's image codec, same format), because

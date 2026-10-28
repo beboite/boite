@@ -106,6 +106,10 @@ test('a subagent on another machine runs on the parent\'s model there, or on the
   const first = prompts.get(plain.thread.id)![0]!;
   expect(first).toContain(`for parent agent ${threadId} on ${desk.core.coordination.identity().name}, another machine of the user's`);
   expect(first).toContain('You cannot start subagents or threads.');
+  const message = pc.core.journal.listMessages(plain.thread.id).find(message => message.role === 'user')!;
+  expect(message.parts[0]).toMatchObject({ type: 'text', displayText: 'Read the notes', startedBy: {
+    threadId, title: parent.title, projectId: parent.projectId, project: 'test', machine: desk.core.coordination.identity().name,
+  } });
 
   const named = await spawn('Read the notes', '--project', 'notes', '--model', 'twin-b', '--effort', 'low', '--request-id', 'model-2');
   expect(pc.core.threads.require(named.thread.id)).toMatchObject({ projectId: notes.id, cwd: notesPath, providerId: 'twin', model: 'twin-b', effort: 'low' });

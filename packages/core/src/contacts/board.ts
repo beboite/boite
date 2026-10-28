@@ -1,6 +1,6 @@
 /** Durable replicas of the existing Todo/goal board. Its original project owner arbitrates claims. */
 import type { RpcParams, SharedBoardCard, SharedBoardCommand, SharedBoardPage, SharedBoardReceipt, SharedProject, SharedProjectPeerMethods, SharedThreadRef, Todo } from '@boite/contracts';
-import { RpcErrorCode } from '@boite/contracts';
+import { threadActive, RpcErrorCode } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import type { Connection } from '../router.ts';
 import { refused, invalidParams, RpcFailure, diskFull } from '../errors.ts';
@@ -33,7 +33,7 @@ export class SharedBoard {
   guardStart: (ctx: SharedPeerContext, worker: SharedThreadRef) => void | Promise<void> = async (_ctx, worker) => {
     const thread = this.core.threads.require(worker.threadId);
     if (!this.core.sharedAccess.execution.support(this.core.providers.require(thread.providerId).protocol, thread.providerId, thread.permissionMode).supported) throw refused('sharedBoard.start: this host must install shared execution file protection for this provider');
-    if (!['queued', 'running', 'waiting'].includes(thread.status)) {
+    if (!threadActive(thread.status)) {
       this.core.threads.releaseAgent(thread.id);
       await this.core.procs.stopAndWait(thread.id);
     }
@@ -363,7 +363,7 @@ export class SharedBoard {
       if (current.goal || current.loop || captured.some(id => {
         const processes = this.core.procs.liveCount(id);
         const status = processes > 0 ? undefined : this.core.journal.getThread(id)?.status ?? 'idle';
-        if (processes > 0 || ['queued', 'running', 'waiting'].includes(status!)) {unsettled = {threadId: id, processes, status}; return true;}
+        if (processes > 0 || threadActive(status!)) {unsettled = {threadId: id, processes, status}; return true;}
         return false;
       })) {
         try {

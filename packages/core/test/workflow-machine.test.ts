@@ -219,7 +219,7 @@ test('a step on another machine in a worktree of its own ends once that worktree
   });
   const { pc, owner, threadId, machine, notesPath, onPc, run } = await setup();
   for (const args of [['init', '-q'], ['commit', '-q', '--allow-empty', '-m', 'fixture init']]) {
-    const done = Bun.spawnSync({ cmd: ['git', ...args], cwd: notesPath, stdout: 'pipe', stderr: 'pipe' });
+    const done = Bun.spawnSync({ cmd: ['git', ...args], cwd: notesPath, env: { ...process.env, GIT_AUTHOR_NAME: 'boite test', GIT_AUTHOR_EMAIL: 'test@boite.invalid', GIT_COMMITTER_NAME: 'boite test', GIT_COMMITTER_EMAIL: 'test@boite.invalid' }, stdout: 'pipe', stderr: 'pipe' });
     if (!done.success) throw new Error(done.stderr.toString());
   }
   const started = await owner.call('workflows.start', { threadId, requestId: 'worktree-1', plan: { name: 'Worktree', steps: [{ id: 'edit', machine, project: 'notes', task: 'Edit one file.', worktree: true }] } });

@@ -737,7 +737,9 @@ export class RemoteDelegation {
       : `You work in ${child.cwd} on ${here}. You share that checkout: change only the files your task names and never undo another agent's edits.`;
     const prompt = `You are a Boite subagent doing one bounded part of the user's task for parent agent ${start.parent.threadId} on ${peer.name}, another machine of the user's. ${checkout} You cannot start subagents or threads. If you are blocked, run boite delegate send ${start.parent.threadId} "<what blocks you>" and keep going on what you can. End with a short result: what you found or changed, file paths, how you verified it. That final answer goes to the parent automatically; do not send it again.\nTask from the parent agent, supplied as JSON data:\n${JSON.stringify(start.task)}`;
     try {
-      this.core.threads.startTurn(id, prompt, [], undefined, undefined, undefined, undefined, start.task, [], { threadId: start.parent.threadId, title: start.parent.title, projectId: start.parent.projectId, project: start.parent.project, machine: peer.name });
+      this.core.threads.startTurn(id, { prompt, display: start.task }, { kind: 'spawned', startedBy: {
+        threadId: start.parent.threadId, title: start.parent.title, projectId: start.parent.projectId, project: start.parent.project, machine: peer.name,
+      } });
     } catch (error) {
       this.core.logs.warn(`Subagent ${id} of ${start.parent.threadId} on ${peer.name} was created but its first turn could not start: ${messageOf(error)}`, { source: 'delegation', event: 'delegation.spawn-failed', threadId: id, data: { parent: start.parent.threadId, machine: peer.coreId } });
       this.core.journal.putThread({ ...this.core.threads.require(id), status: 'error' });

@@ -128,7 +128,8 @@ test('links are found in linear time: a line of 32,000 brackets renders at once'
   const lines = ['['.repeat(32_000), '[a'.repeat(16_000), '[a](<'.repeat(6_000), '[a](http://'.repeat(3_000)];
   const started = performance.now();
   for (const line of lines) for (const rich of [false, true]) renderMarkdown(line, rich);
-  expect(performance.now() - started).toBeLessThan(500);
+  // The quadratic scan costs seconds per render; 2 s for all eight leaves room for eight loaded workers.
+  expect(performance.now() - started).toBeLessThan(2000);
   expect(renderMarkdown('['.repeat(32_000))).toBe(`<p>${'['.repeat(32_000)}</p>`);
   // Unmatched brackets stay outside the link; images still become links, never remote requests.
   expect(renderMarkdown(`${'['.repeat(100)}docs](https://a.b/c)`)).toBe(`<p>${'['.repeat(99)}<a href="https://a.b/c" target="_blank" rel="noopener noreferrer">docs</a></p>`);

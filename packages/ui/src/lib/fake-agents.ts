@@ -121,6 +121,8 @@ export class FakeAgents {
   configOf(id: string): AgentRuntimeConfig { return this.runtime(id); }
   /** Whether the owner set the agent's runtime policy: only then does it limit the models. */
   hasPolicy(id: string): boolean { return this.configs.has(id); }
+  /** As the core: an account the owner granted to other agents only stays theirs. */
+  accountAllowed(agentId: string, accountId: string): boolean { const grant = this.grants.find(g => g.accountId === accountId); return !grant || grant.agentIds === null || grant.agentIds.includes(agentId); }
   /** The agent whose own thread this is, as the core's `resident.ownerOf`. */
   ownerOf(threadId: string): string | null { return [...this.sessions.values()].find(s => s.threadId === threadId)?.agentId ?? null; }
   /** An applied agent setting card, written as the agent's settings would. */
