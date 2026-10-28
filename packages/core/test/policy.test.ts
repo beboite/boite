@@ -469,6 +469,40 @@ test('network.groups: false refuses groups and turns the group settings off', as
   await refusedBy(client.call('settings.set', { groupThreads: true }), 'network.groups');
 });
 
+for (const duringBody of [false, true]) {
+  test(`group boundary: an old invitation is refused when groups are disabled ${duringBody ? 'during body reading' : 'before joining'}`, async () => {
+    const host = await core();
+    const guest = await core();
+    await host.client.call('group.create', { name: 'Policy fixtures' });
+    const { invite } = await host.client.call('group.invite', {});
+    const reading = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    if (duringBody) {
+      const http = host.harness.core.group.http.bind(host.harness.core.group);
+      const delayed = spyOn(host.harness.core.group, 'http').mockImplementation(request => http(new Request(request, {
+        body: request.body!.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+          async transform(chunk, controller) { reading.resolve(); await release.promise; controller.enqueue(chunk); }
+        }))
+      })));
+      cleanups.push(() => { release.resolve(); delayed.mockRestore(); });
+    }
+    const disable = async () => {
+      host.policy.write({ network: { groups: false } });
+      await host.client.call('policy.get', {});
+    };
+    if (!duringBody) await disable();
+    const denied = rejection(guest.client.call('group.join', { invite }));
+    if (duringBody) { await reading.promise; await disable(); release.resolve(); }
+    expect(await denied).toHaveProperty('reason');
+    expect(host.harness.core.group.view('owner')?.cores).toHaveLength(1);
+    expect(guest.harness.core.group.view('owner')).toBeNull();
+    // The policy refusal does not spend the invitation; it works when the restriction lifts.
+    host.policy.remove();
+    await host.client.call('policy.get', {});
+    expect((await guest.client.call('group.join', { invite })).cores).toHaveLength(2);
+  });
+}
+
 test('network.contacts: false refuses contacts and the Tailscale API', async () => {
   const { harness, client } = await core({ network: { contacts: false } });
   await refusedBy(client.call('contacts.invite', {} as never), 'network.contacts');
