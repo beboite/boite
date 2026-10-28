@@ -59,7 +59,6 @@ const CSS_URL = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^'")\s]+))\s*\)/gi;
 const TAG = new RegExp(`<[a-z]${TAG_REST}`, 'gi');
 /** Each attribute of a tag in turn, so a name written inside another's quoted value is never read. */
 const ATTRIBUTE = /\s([^\s=>]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/dg;
-const STYLE_BODY = new RegExp(`<style${NAME_END}${TAG_REST}([\\s\\S]*?)(?=<\\/style\\s*>|$)`, 'dgi');
 
 interface Edit { start: number; end: number; text: string }
 
@@ -130,14 +129,18 @@ export function buildView(source: string, directory: string, cwd: string, guard?
 
   // Comments and element bodies blanked to the same length: a tag written in a string is not the page's.
   // Every other tag is read whole, and a `<` in its quoted values blanked, so a tag spelled there starts nothing.
-  // A textarea's or title's body is text, not tags: what it spells is never loaded.
+  // A script's, style's, textarea's or title's body is text, not tags: what it spells is never loaded.
   const inert = (tag: string) => tag[0] + tag.slice(1).replace(/</g, ' ');
-  /** The page without its scripts and text bodies: where a `url(` or an `@import` is a rule and not a string. */
-  const styled = source.replace(new RegExp(`<!--[\\s\\S]*?(?:-->|$)|(<(script|textarea|title)${NAME_END}${TAG_REST})([\\s\\S]*?)(?=<\\/\\2\\s*>|$)|<\\/?[a-z]${TAG_REST}`, 'gi'),
-    (match: string, open?: string, _tag?: string, body?: string) => match.startsWith('<!--') ? ' '.repeat(match.length) : open === undefined ? inert(match) : inert(open) + ' '.repeat(body?.length ?? 0));
-  const styles = [...styled.matchAll(STYLE_BODY)].map(body => body.indices![1]!);
-  /** And without its style bodies: where a tag is the page's. */
-  const markup = styles.reduce((page, [start, end]) => page.slice(0, start) + ' '.repeat(end - start) + page.slice(end), styled);
+  /** Where each style body is: its rules are CSS, read from `source`. */
+  const styles: [number, number][] = [];
+  /** The page in one pass without its comments and element bodies: where a tag is the page's. */
+  const markup = source.replace(new RegExp(`<!--[\\s\\S]*?(?:-->|$)|(<(script|style|textarea|title)${NAME_END}${TAG_REST})([\\s\\S]*?)(?=<\\/\\2\\s*>|$)|<\\/?[a-z]${TAG_REST}`, 'gi'),
+    (match: string, open: string | undefined, element: string | undefined, body: string | undefined, at: number) => {
+      if (match.startsWith('<!--')) return ' '.repeat(match.length);
+      if (open === undefined) return inert(match);
+      if (element!.toLowerCase() === 'style') styles.push([at + open.length, at + match.length]);
+      return inert(open) + ' '.repeat(body!.length);
+    });
   for (const tag of markup.matchAll(LOADING_TAG)) {
     const name = tag[1]!.toLowerCase();
     const at = tag.index;

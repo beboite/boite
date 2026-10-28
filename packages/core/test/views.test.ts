@@ -167,6 +167,8 @@ test('local files are embedded, and a remote address or a missing file is a prob
     // A tag spelled inside a quoted value starts nothing, and a custom element named like a text one is markup.
     '<div title="<textarea>" data-a="<style>" data-b="<img src=gone.png>"></div><p>url(gone.png) after</p>',
     '<title-card><img src="dot.png" alt="card"></title-card>',
+    // A style body is CSS, not tags: a script, textarea or title spelled in its strings hides nothing after it.
+    '<style>.icon::after { content: "<script>" } .note::before { content: "<textarea><title>" } .icon { background: url(dot.png) }</style><img src="dot.png" alt="after-style">',
   ].join('\n'), '<link rel="stylesheet" href="look.css"><link rel="stylesheet" href="theme/skin.css">'), join(harness.dataDir, 'views'), harness.dataDir);
   expect(built.problems).toEqual([]);
   const data = `data:image/png;base64,${PNG.toString('base64')}`;
@@ -181,6 +183,7 @@ test('local files are embedded, and a remote address or a missing file is a prob
   expect(built.html).toContain(`<rect fill="url(${data})"/>`);
   expect(built.html).toContain('<div title="<textarea>" data-a="<style>" data-b="<img src=gone.png>"></div><p>url(gone.png) after</p>');
   expect(built.html).toContain(`<title-card><img src="${data}" alt="card"></title-card>`);
+  expect(built.html).toContain(`.icon { background: url(${data}) }</style><img src="${data}" alt="after-style">`);
   const script = /<script>(const css[^<]*)<\/script>/.exec(built.html)![1]!;
   expect(script).toBe('const css = "url(dot.png)";');
   expect(() => new Function(script)).not.toThrow();
@@ -211,6 +214,14 @@ test('local files are embedded, and a remote address or a missing file is a prob
   expect(refused.some(line => /^line 11: the stylesheet uses @import/.test(line))).toBe(true);
   expect(refused.some(line => /^line 11: gone\.png: .*does not exist/.test(line))).toBe(true);
   expect(refused.some(line => /^line 11: url\(https:\/\/example\.com\/b\.png\) in the stylesheet is remote/.test(line))).toBe(true);
+});
+
+test('a page of many small style blocks is read in one pass', () => {
+  // 32,000 blocks, 864 KB: one pass takes tens of milliseconds, a copy of the page per block takes seconds.
+  const started = performance.now();
+  const built = buildView('<style>a{color:red}</style>'.repeat(32_000), join(harness.dataDir, 'views'), harness.dataDir);
+  expect(performance.now() - started).toBeLessThan(1_000);
+  expect(built.problems).toEqual([]);
 });
 
 test('boite view publishes a page as an artifact that opens only on the view route, under its sandbox', async () => {
