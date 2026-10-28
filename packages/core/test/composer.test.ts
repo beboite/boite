@@ -633,25 +633,19 @@ test('an archived project holds a queue even when its thread remains unarchived'
   await waitFor(() => h.core.journal.listTurns(threadId).some(turn => turn.status === 'done'));
 });
 
-test.each(['explicit', 'origin preferences'] as const)('queued goal2 retains %s semantics across another client and a cold restart', async source => {
+test('a queued /goal2 stays a reviewed goal across a cold restart, its stale goal2 experiment id dropped', async () => {
   restartDir = mkdtempSync(join(tmpdir(), 'composer-goal2-'));
   h = await startTestCore({ dataDir: restartDir });
-  const a = await h.connect(), b = await h.connect();
+  const a = await h.connect();
   const { threadId } = await echoThread(h, a);
-  await a.call('client.preferences', { app: 'origin-app', language: 'en', experiments: ['goal2'], labels: {} });
-  await b.call('client.preferences', { app: 'another-app', language: 'en', experiments: ['theme-grain'], labels: {} });
-  await b.call('client.preferences', { app: 'another-app', language: 'en', experiments: [], labels: {} });
   h.core.composer.stop();
-  const first = await a.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: 0, value: { input: { ...value('').input, queued: [{ id: `reviewed-${source}`, text: '/goal2 keep the review', attachments: [], ...(source === 'explicit' ? { experiments: ['goal2' as const] } : {}) }] } } });
-  const changed = structuredClone(first.record.value!);
-  changed.input.queued[0]!.experiments = [];
-  await b.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: first.record.revision, value: changed });
-  a.close(); b.close();
+  // An older app still stamps the id of the experiment `/goal2` graduated from.
+  await a.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: 0, value: { input: { ...value('').input, queued: [{ id: 'reviewed', text: '/goal2 keep the review', attachments: [], experiments: ['goal2'] as never }] } } });
+  a.close();
   await h.stop();
   h = await startTestCore({ dataDir: restartDir });
   await waitFor(() => h.core.activity.get(threadId).goal !== null || h.core.journal.listTurns(threadId).length > 0, 1000);
   expect(h.core.activity.get(threadId).goal).toMatchObject({ objective: 'keep the review', review: expect.any(Object) });
-  expect(h.core.clients.current()).toBeNull();
 });
 
 test('a missing project in a delivered receipt does not abort startup of another eligible queue', async () => {

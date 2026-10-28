@@ -341,9 +341,9 @@ The core owns this work, so switching threads or closing a client does not
 cancel it. A goal continues through scheduled turns until the agent emits
 `[BOITE_GOAL_COMPLETE]` on its own line. The prompt requests that marker only
 after verification. `[BOITE_GOAL_BLOCKED]`, an error or Escape pauses it.
-With the Reviewed goals experiment, `/goal2` turns that marker into a claim
-that a fresh reviewer conversation must pass, and keeps a checklist of the
-user's requests that each turn hears ([experiments](experiments.md#the-checklist)).
+`/goal2` turns that marker into a claim that a fresh reviewer conversation
+must pass, and keeps a checklist of the user's requests that each turn hears
+([reviewed goals](goals.md#the-checklist)).
 A blocked goal is marked `blocked`: the bar asks for an answer, and the user's
 next message, other than a native `/command`, resumes the goal once that reply's
 turn ends. Escape also pauses a loop between runs. The activity bar has pause, resume,
@@ -386,8 +386,9 @@ Accepted queues run on the core without an open client, including after restart
 when delivery is known to be safe. Unconfirmed provider submissions stay held.
 Provider, account, model, effort and speed stay captured; permission modes follow
 the thread's current selection, including for queued input.
-Queued commands retain the enqueueing app's experiments, so a reviewed goal
-keeps its meaning after a restart or another device changes its preferences.
+Queued prompts retain the enqueueing app's experiments, so a prompt an
+experiment gives another meaning keeps it after a restart or another device
+changes its preferences.
 A restored ordinary queue whose previous acceptance cannot be proved stays
 paused until explicitly resumed.
 Input written while the core is unreachable stays on the device until a client

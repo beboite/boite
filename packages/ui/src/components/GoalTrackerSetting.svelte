@@ -35,22 +35,22 @@
     })
   );
   let items = $derived<MenuItem[]>([
-    { id: AUTO, label: strings.experiments.goal2.trackerAuto, hint: strings.experiments.goal2.trackerAutoHint, active: chosen === null },
+    { id: AUTO, label: strings.settings.goalTrackerAuto, hint: strings.settings.goalTrackerAutoHint, active: chosen === null },
     ...groups.flatMap(({ provider, suggested, models }) => [
       separator(`sep-${provider.id}`),
       ...models.map((model) => ({
         id: idOf(provider.id, model.id),
         label: model.name,
-        hint: model.id === suggested ? `${provider.shortName} · ${strings.experiments.goal2.trackerAuto}` : provider.shortName,
+        hint: model.id === suggested ? `${provider.shortName} · ${strings.settings.goalTrackerAuto}` : provider.shortName,
         active: chosen?.providerId === provider.id && chosen.model === model.id
       }))
     ])
   ]);
   let model = $derived(chosen ? groups.find((group) => group.provider.id === chosen.providerId)?.models.find((entry) => entry.id === chosen.model) ?? null : null);
-  let current = $derived(chosen === null ? strings.experiments.goal2.trackerAuto : (model?.name ?? chosen.model));
+  let current = $derived(chosen === null ? strings.settings.goalTrackerAuto : (model?.name ?? chosen.model));
   let levels = $derived(model?.effort?.levels ?? []);
   let efforts = $derived<MenuItem[]>(levels.map((level) => ({ id: level.id, label: level.label, active: chosen?.effort === level.id })));
-  let effort = $derived(levels.find((level) => level.id === chosen?.effort)?.label ?? chosen?.effort ?? strings.experiments.goal2.trackerEffortDefault);
+  let effort = $derived(levels.find((level) => level.id === chosen?.effort)?.label ?? chosen?.effort ?? strings.settings.goalTrackerEffortDefault);
 
   function pick(id: string) {
     if (id === AUTO) {
@@ -68,16 +68,16 @@
   }
 </script>
 
-<div class="switch-row tracker" data-testid="goal2-tracker">
+<div class="switch-row" data-testid="goal-tracker">
   <span class="text ui-label-box">
-    <span class="ui-label">{strings.experiments.goal2.trackerModel}</span><InfoTip topic={strings.experiments.goal2.trackerModel} text={strings.experiments.goal2.trackerModelHint} />
+    <span class="ui-label">{strings.settings.goalTrackerModel}</span><InfoTip topic={strings.settings.goalTrackerModel} text={strings.settings.goalTrackerModelHint} />
   </span>
   <span class="controls">
-    <Menu {items} onpick={pick} label={strings.experiments.goal2.trackerModel} placement="bottom" align="end" testid="goal2-tracker-model">
+    <Menu {items} onpick={pick} label={strings.settings.goalTrackerModel} placement="bottom" align="end" testid="goal-tracker-model">
       <span class="current ui-label">{current}</span><ChevronDown size={13} />
     </Menu>
     {#if efforts.length > 0}
-      <Menu items={efforts} onpick={pickEffort} label={strings.experiments.goal2.trackerEffort} placement="bottom" align="end" testid="goal2-tracker-effort">
+      <Menu items={efforts} onpick={pickEffort} label={strings.settings.goalTrackerEffort} placement="bottom" align="end" testid="goal-tracker-effort">
         <span class="current ui-label">{effort}</span><ChevronDown size={13} />
       </Menu>
     {/if}
@@ -85,10 +85,6 @@
 </div>
 
 <style>
-  /* Under its experiment's switch, a step in so it reads as that switch's own setting. The row's own padding belongs to the settings grammar. */
-  .tracker .text {
-    padding-inline-start: 16px;
-  }
   .controls {
     display: inline-flex;
     align-items: center;

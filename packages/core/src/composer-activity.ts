@@ -4,8 +4,8 @@ import { invalidParams } from './errors.ts';
 export function isComposerActivity(text: string): boolean { return /^\/(goal2?|loop)(?:\s|$)/.test(text.trim()); }
 
 /** Same user command grammar as the composer, executed without a live app. */
-export function composerActivity(text: string, experiments: readonly string[] = []): Omit<RpcParams<'threads.activity.set'>, 'threadId' | 'attachments'> | null {
-  const match = (experiments.includes('goal2') ? /^\/(goal2|goal|loop)(?:\s+([\s\S]*))?$/ : /^\/(goal|loop)(?:\s+([\s\S]*))?$/).exec(text.trim());
+export function composerActivity(text: string): Omit<RpcParams<'threads.activity.set'>, 'threadId' | 'attachments'> | null {
+  const match = /^\/(goal2|goal|loop)(?:\s+([\s\S]*))?$/.exec(text.trim());
   if (!match) return null;
   const body = match[2]?.trim();
   if (!body) throw invalidParams(`/${match[1]}: expected an objective or loop cadence and prompt`);

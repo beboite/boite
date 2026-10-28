@@ -208,7 +208,7 @@ export class Composer {
         const current = this.core.journal.getThread(id);
         if (this.closed || this.core.stopping || !current || current.archived || (current.projectId && this.core.projects.require(current.projectId).archived)) return;
         if (current.projectId) await this.core.projects.requireFolder(current.projectId);
-        const activity = composerActivity(item.text, item.experiments ?? this.core.clients.current()?.experiments);
+        const activity = composerActivity(item.text);
         this.atomic(() => {
           const target = this.core.journal.getThread(id);
           if (!target || target.archived || (target.projectId && this.core.projects.require(target.projectId).archived)) return;

@@ -3,7 +3,6 @@ import { RpcErrorCode, type ComposerRecord, type RpcMethodName, type Thread } fr
 import { RpcFailure } from './client';
 import { FakeClient } from './fake-client';
 import { FakeComposerState } from './fake-client/composer';
-import { setExperiment } from './experiments';
 import { Store } from './store.svelte';
 
 // jsdom has no IndexedDB: the durable journal is a recorder here, and the
@@ -681,17 +680,15 @@ test('words and file names that read like a local file id still reach the core, 
     text: 'Box "local:cache" note', attachments: [{ name: file.name }], queued: [{ text: 'Queued "local:cache" note' }] }));
 });
 
-test('a prompt queued offline runs with the experiments it was queued with, after a restart that turned them off', async () => {
+test('a /goal2 queued offline runs as a reviewed goal after a restart', async () => {
   const desk = await device('desk', new FakeClient({ delayMs: 0 }));
   let phone = await device('phone', desk.client.composerPeer({ delayMs: 0, principal: 'session' }));
-  setExperiment('goal2', true);
   phone.client.drop();
   await phone.client.settled();
   queue(phone.store, 't-trace', '/goal2 Ship the release');
   stores.splice(stores.indexOf(phone.store), 1);
   phone.store.detach();
   phone.client.close();
-  setExperiment('goal2', false);
   phone = await device('phone', desk.client.composerPeer({ delayMs: 0, principal: 'session' }));
   await vi.waitFor(() => expect(phone.store.composerStates['t-trace']?.queued).toMatchObject([{ text: '/goal2 Ship the release' }]));
   await phone.store.sendQueuedNow('t-trace');

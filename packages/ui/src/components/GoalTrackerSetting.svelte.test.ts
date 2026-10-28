@@ -44,17 +44,17 @@ function render(goalTracker: GoalTrackerModel | null) {
 }
 
 const trigger = (testid: string) => document.querySelector<HTMLButtonElement>(`[data-testid="${testid}"]`);
-const rows = () => [...document.querySelectorAll<HTMLElement>('[data-testid="goal2-tracker-model-menu"] > *')].map((row) =>
+const rows = () => [...document.querySelectorAll<HTMLElement>('[data-testid="goal-tracker-model-menu"] > *')].map((row) =>
   row.classList.contains('separator') ? '---' : `${row.querySelector('.label')!.textContent!.trim()} | ${row.querySelector('.hint')?.textContent ?? ''}`);
 
 test('the checklist model starts on Automatic, which suggests Opus and Sol and never a small model', async () => {
   const store = render(null);
   await settle();
-  expect(trigger('goal2-tracker-model')!.textContent).toContain('Automatic');
+  expect(trigger('goal-tracker-model')!.textContent).toContain('Automatic');
   // Automatic carries its own level: no reasoning menu until a model is picked.
-  expect(trigger('goal2-tracker-effort')).toBeNull();
+  expect(trigger('goal-tracker-effort')).toBeNull();
 
-  trigger('goal2-tracker-model')!.click();
+  trigger('goal-tracker-model')!.click();
   await settle();
   // Pi is not installed; Haiku and Luna are offered, never suggested.
   expect(rows()).toEqual([
@@ -71,30 +71,30 @@ test('the checklist model starts on Automatic, which suggests Opus and Sol and n
   await settle();
   // A model of a suggested family starts on that family's level, not on the model's own default.
   expect(store.saveSettings).toHaveBeenLastCalledWith({ goalTracker: { providerId: 'codex', model: 'gpt-6.1-sol', effort: 'high' } });
-  expect(trigger('goal2-tracker-model')!.textContent).toContain('GPT-6.1-Sol');
-  expect(trigger('goal2-tracker-effort')!.textContent).toContain('High');
+  expect(trigger('goal-tracker-model')!.textContent).toContain('GPT-6.1-Sol');
+  expect(trigger('goal-tracker-effort')!.textContent).toContain('High');
 });
 
 test('a small model is the user\'s own pick, on its own default level, and its level can change', async () => {
   const store = render(null);
   await settle();
-  trigger('goal2-tracker-model')!.click();
+  trigger('goal-tracker-model')!.click();
   await settle();
   document.querySelector<HTMLButtonElement>('[data-value=\'["claude","claude-haiku-5-5"]\']')!.click();
   await settle();
   expect(store.saveSettings).toHaveBeenLastCalledWith({ goalTracker: { providerId: 'claude', model: 'claude-haiku-5-5', effort: 'high' } });
 
-  trigger('goal2-tracker-effort')!.click();
+  trigger('goal-tracker-effort')!.click();
   await settle();
-  expect([...document.querySelectorAll('[data-testid="goal2-tracker-effort-menu"] .label')].map((label) => label.textContent?.trim())).toEqual(['Low', 'Medium', 'High']);
-  document.querySelector<HTMLButtonElement>('[data-testid="goal2-tracker-effort-menu"] [data-value="medium"]')!.click();
+  expect([...document.querySelectorAll('[data-testid="goal-tracker-effort-menu"] .label')].map((label) => label.textContent?.trim())).toEqual(['Low', 'Medium', 'High']);
+  document.querySelector<HTMLButtonElement>('[data-testid="goal-tracker-effort-menu"] [data-value="medium"]')!.click();
   await settle();
   expect(store.saveSettings).toHaveBeenLastCalledWith({ goalTracker: { providerId: 'claude', model: 'claude-haiku-5-5', effort: 'medium' } });
 
-  trigger('goal2-tracker-model')!.click();
+  trigger('goal-tracker-model')!.click();
   await settle();
   document.querySelector<HTMLButtonElement>('[data-value="auto"]')!.click();
   await settle();
   expect(store.saveSettings).toHaveBeenLastCalledWith({ goalTracker: null });
-  expect(trigger('goal2-tracker-model')!.textContent).toContain('Automatic');
+  expect(trigger('goal-tracker-model')!.textContent).toContain('Automatic');
 });

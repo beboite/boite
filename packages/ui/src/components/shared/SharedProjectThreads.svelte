@@ -52,7 +52,7 @@
     {@const remote = view?.threads.filter(row => sameSharedProject(row.ref.project, project.remote)) ?? []}
     <section class="shared" data-testid="shared-project-people" data-shared-project={project.shared.id}>
       <header><span class="person">{project.contact.name} · {remote[0]?.machine ?? ''}</span>
-        {#if experimentOn('goal2') && store.core?.features?.projectBoard}<button type="button" class="ghost icon" aria-label={strings.shared.board} disabled={!project.shared.access.every(a => a.board)} onclick={() => void board(scope)} data-testid="shared-open-board"><SquareKanban size={13} /></button>{/if}
+        {#if store.core?.features?.projectBoard}<button type="button" class="ghost icon" aria-label={strings.shared.board} disabled={!project.shared.access.every(a => a.board)} onclick={() => void board(scope)} data-testid="shared-open-board"><SquareKanban size={13} /></button>{/if}
         <button type="button" class="ghost icon" aria-label={strings.shared.heading} onclick={() => { settings = scope; }} data-testid="shared-open-settings"><Settings2 size={13} /></button>
       </header>
       {#each remote as row (store.shared.threadKey(row.ref))}

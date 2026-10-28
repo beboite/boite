@@ -3,7 +3,6 @@
   import CompactionSettings from './CompactionSettings.svelte';
   import CacheKeepaliveSettings from './CacheKeepaliveSettings.svelte';
   import DeviceStreamSettings from './DeviceStreamSettings.svelte';
-  import GoalTrackerSetting from './GoalTrackerSetting.svelte';
   import { untrack } from 'svelte';
   import { EXPERIMENT_IDS, canFollowDesktop, desktopExperiments, followsDesktop, readExperiments, setExperiment, setFollowDesktop, subscribeExperiments, type ExperimentId } from '../lib/experiments';
   import { experimentCopy } from '../lib/experiment-copy';
@@ -66,10 +65,6 @@
           onchange={(event) => toggle(id, event.currentTarget.checked)}
         />
       </label>
-      <!-- Only the owner sets the machine's checklist model: a paired device's save would be refused. -->
-      {#if id === 'goal2' && enabled.includes(id) && store?.settings && store.owner}
-        <GoalTrackerSetting {store} />
-      {/if}
     {/each}
   </section>
 

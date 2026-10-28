@@ -6,7 +6,6 @@ import {
   MAX_PANES, activeTab, addTab, firstLayout, nextPane, panesOf, parseLayout, reconcile, removePane, resizePanes, splitPane, terminalIdOf,
   type SplitDirection, type TerminalLayout
 } from '../terminal-layout';
-import { experimentOn } from '../experiments.svelte';
 import type { StoreContext } from './context';
 
 /** Per core and thread: the tabs and splits, and whether the drawer was open. */
@@ -131,10 +130,10 @@ export class Terminals {
     else this.showTerminal(open.id);
   }
 
-  /** The board lives behind the `/goal2` experiment, on a core that links cards to goals, in a thread of a project. */
+  /** The board needs a core that links cards to goals, in a thread of a project. */
   boardAvailable(): boolean {
     const s = this.ctx.store;
-    return experimentOn('goal2') && s.core?.features?.projectBoard === true && Boolean(s.openThread?.projectId);
+    return s.core?.features?.projectBoard === true && Boolean(s.openThread?.projectId);
   }
 
   /**
@@ -183,7 +182,7 @@ export class Terminals {
    */
   projectBoardThread(projectId: ProjectId): ThreadSummary | null {
     const s = this.ctx.store;
-    if (!experimentOn('goal2') || s.core?.features?.projectBoard !== true) return null;
+    if (s.core?.features?.projectBoard !== true) return null;
     let last: ThreadSummary | null = null;
     for (const thread of s.threadsOf(projectId)) {
       if (!thread.archived && !thread.incognito && (!last || thread.updatedAt > last.updatedAt)) last = thread;

@@ -1,13 +1,11 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { FakeClient } from '../lib/fake-client';
-import { setExperiment } from '../lib/experiments';
 import { Store } from '../lib/store.svelte';
 import DrawerTabs from './DrawerTabs.svelte';
 import ProjectBoard from './ProjectBoard.svelte';
 
 afterEach(() => {
-  setExperiment('goal2', false);
   localStorage.removeItem('boite:drawer-tab');
   document.body.innerHTML = '';
 });
@@ -21,7 +19,6 @@ async function settle(): Promise<void> {
 }
 
 async function ready(options: ConstructorParameters<typeof FakeClient>[0] = {}): Promise<{ store: Store; client: FakeClient }> {
-  setExperiment('goal2', true);
   const client = new FakeClient({ delayMs: 0, boardDemo: true, ...options });
   const store = new Store();
   store.attach(client);
@@ -196,13 +193,14 @@ test('Ctrl+J opens the drawer on the tab picked last; a device without a shell o
   expect([store.boardShown, store.terminalShown('t-board-dark')]).toEqual([true, false]);
   await store.open('t-trace');
 
-  setExperiment('goal2', false);
+  // A core that does not link cards to goals has no board: Ctrl+J is the terminal again.
+  store.core!.features!.projectBoard = false;
   expect(store.boardAvailable()).toBe(false);
   store.hideBoard();
   store.toggleDrawer();
   expect([store.boardShown, store.terminalShown('t-trace')]).toEqual([false, true]);
+  store.core!.features!.projectBoard = true;
 
-  setExperiment('goal2', true);
   const phone = await ready({ principal: 'session' });
   phone.store.toggleDrawer();
   expect(phone.store.boardShown).toBe(true);

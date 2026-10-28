@@ -311,9 +311,9 @@ export class GoalTracker {
     const chosen = this.core.settings.get().goalTracker;
     if (chosen) {
       const provider = this.core.providers.get(chosen.providerId);
-      if (!provider) throw refused(`the checklist model ${chosen.providerId}/${chosen.model} is not installed on this machine; pick another in Settings, Experiments`, { field: 'goalTracker' });
+      if (!provider) throw refused(`the checklist model ${chosen.providerId}/${chosen.model} is not installed on this machine; pick another in Settings, General`, { field: 'goalTracker' });
       const account = accountFor(this.core, parent, provider.id);
-      if (!account || account.status === 'unauthenticated') throw refused(`${provider.name} has no signed-in account to keep the checklist; sign in or pick another model in Settings, Experiments`, { field: 'goalTracker' });
+      if (!account || account.status === 'unauthenticated') throw refused(`${provider.name} has no signed-in account to keep the checklist; sign in or pick another model in Settings, General`, { field: 'goalTracker' });
       const listed = modelsFor(provider, account.id).some(model => model.id === chosen.model);
       const effort = listed ? checkEffort(provider, account.id, chosen.model, chosen.effort) : chosen.effort;
       return { id: 'goal-tracker', name: chosen.model, providerId: provider.id, accountId: account.id, model: chosen.model, effort };

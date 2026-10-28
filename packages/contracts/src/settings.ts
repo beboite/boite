@@ -253,7 +253,7 @@ export interface TitleModel {
   model: string;
 }
 
-/** One provider's model and reasoning level, picked in Settings, Experiments to keep `/goal2` checklists. */
+/** One provider's model and reasoning level, picked in Settings, General to keep `/goal2` checklists. */
 export interface GoalTrackerModel {
   providerId: ProviderId;
   model: string;

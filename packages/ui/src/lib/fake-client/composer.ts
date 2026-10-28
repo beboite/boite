@@ -151,7 +151,7 @@ export class FakeComposerState {
         if (!outcome.accepted) { this.boundaries.delete(row.id); return; }
       } else {
         this.boundaries.delete(row.id);
-        const command = activityCommand(payload.prompt, head.experiments ?? ctx.clientPreferences?.experiments ?? []);
+        const command = activityCommand(payload.prompt);
         if (command) await methods['threads.activity.set']({ threadId: row.id, ...command, ...(payload.attachments.length ? { attachments: payload.attachments } : {}) });
         else {
           const chosen = head.request?.choice ?? head.choice;

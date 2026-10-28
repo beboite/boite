@@ -20,7 +20,7 @@ export const strings = {
     goalDescription: 'Keep working toward an objective',
     loopDescription: 'Repeat a task a set number of times or on a schedule',
     goalUsage: 'Use /goal followed by an objective.',
-    /** `/goal2`, the Reviewed goals experiment: a fresh reviewer must pass the work. */
+    /** `/goal2`, a reviewed goal: a fresh reviewer must pass the work. */
     goal2: 'Reviewed goal',
     goal2Description: 'Work toward an objective until a fresh reviewer passes it',
     goal2Usage: 'Use /goal2 followed by an objective.',

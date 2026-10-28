@@ -15,7 +15,7 @@ afterEach(async () => {
   if (mounted) await unmount(mounted);
   mounted = undefined; store?.detach(); client?.close();
   workspace.machines = []; workspace.active = previousActive;
-  setExperiment('contacts', false); setExperiment('goal2', false);
+  setExperiment('contacts', false);
   vi.restoreAllMocks(); document.body.innerHTML = ''; localStorage.clear();
 });
 
@@ -165,7 +165,7 @@ test("a contact's page opened from the list leaves for the board on the chat scr
   vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
     media, matches: true, onchange: null, addListener() {}, removeListener() {}
   }));
-  setExperiment('contacts', true); setExperiment('goal2', true);
+  setExperiment('contacts', true);
   client = new FakeClient({ delayMs: 0 });
   store = new Store(); store.attach(client); await store.connect();
   workspace.machines = [{ id: 'local', label: 'Local', store }]; workspace.active = store;
