@@ -3,9 +3,10 @@ import type { AgentRoutine } from '@boite/contracts';
 import { mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { CoreClient } from '../src/client.ts';
+import { connect, type CoreClient } from '../src/client.ts';
+import { runCli } from '../src/cli.ts';
 import { notifiesOnFinish } from '@boite/contracts';
-import { AgentRuntime, EVENT_PROMPT_MAX, isAgentHeld, NOTICES_PER_HOUR } from '../src/agents/runtime.ts';
+import { AgentRuntime, EVENT_PROMPT_MAX, eventPrompt, isAgentHeld, NOTICES_PER_HOUR } from '../src/agents/runtime.ts';
 import { agentGuide, BOT_GUIDE, OWN_SETTINGS } from '../src/agent-guide.ts';
 import { DELEGATION_WORDS } from '../src/delegation/guide.ts';
 import { agentContext } from '../src/agents/context.ts';
@@ -260,9 +261,9 @@ test('facts gather into one event turn once the thread is free and the first is 
   const { agent, threadId } = await makeAgent(h, client);
   await client.call('turns.start', { threadId, prompt: 'Hold on' });
   await waitFor(() => h.core.threads.require(threadId).status === 'running');
-  expect(h.core.agentRuntime.fact(agent.id, { key: 'turn:one', text: 'Thread one finished.', delay: 0 })).toBe(true);
-  expect(h.core.agentRuntime.fact(agent.id, { key: 'turn:two', text: 'Thread two finished.', delay: 0 })).toBe(true);
-  expect(h.core.agentRuntime.fact(agent.id, { key: 'turn:two', text: 'again' })).toBe(false);
+  expect(h.core.agentRuntime.fact(agent.id, { urgent: true, key: 'turn:one', text: 'Thread one finished.', delay: 0 })).toBe(true);
+  expect(h.core.agentRuntime.fact(agent.id, { urgent: true, key: 'turn:two', text: 'Thread two finished.', delay: 0 })).toBe(true);
+  expect(h.core.agentRuntime.fact(agent.id, { urgent: true, key: 'turn:two', text: 'again' })).toBe(false);
   await Bun.sleep(700);
   expect(turnsOf(h, threadId).filter(t => t.execution?.operation === 'event')).toHaveLength(1);
   driver.release();
@@ -274,6 +275,52 @@ test('facts gather into one event turn once the thread is free and the first is 
   expect(h.core.agentRuntime.facts(agent.id)).toEqual([]);
 });
 
+test('a paired device lands an outside event on a bot: it wakes it with default settings, the same key replaces a pending one, an agent token is refused', async () => {
+  const driver = scripted(() => ({ text: '[quiet] read it' })); restore = driver.restore;
+  const { agent, threadId } = await makeAgent(h, client);
+  const events = () => turnsOf(h, threadId).filter(t => t.execution?.operation === 'event');
+  const before = events().length;
+  const { grant } = await client.call('pairing.grant', {});
+  const session = h.core.sessions.exchange(grant, { name: 'ci-runner', version: '1' });
+  const device = await connect(h.url, session.token);
+  const bot = await connect(h.url, h.core.agents.tokenFor(threadId));
+  try {
+    expect(await device.call('agents.event', { agent: 'Ada', key: 'ci', text: 'FIRST build failed' })).toEqual({ agentId: agent.id, key: 'external:ci' });
+    // The CLI from another host: the device's own token, the bot by name.
+    let err = '';
+    expect(await runCli(['bot', 'event', 'Ada', '--key', 'ci', 'SECOND build failed on main', '--core', h.url], { out: () => undefined, err: s => { err += s; }, env: { BOITE_TOKEN: session.token }, cwd: h.dataDir })).toBe(0);
+    expect(err).toBe('');
+    expect(h.core.agentRuntime.facts(agent.id).map(f => f.key)).toEqual(['external:ci']);
+    expect(await bot.call('agents.event', { agent: agent.id, text: 'from inside' }).catch(error => error)).toMatchObject({ rpc: { message: 'agents.event is not one of the agent\'s methods' } });
+    expect(await device.call('agents.event', { agent: 'Ada', key: 'bad key!', text: 'x' }).catch(error => error)).toMatchObject({ rpc: { data: { field: 'key' } } });
+  } finally { device.close(); bot.close(); }
+  const pending = (h.core.agentRuntime as unknown as { pending: Map<string, { facts: { notBefore: number }[] }> }).pending.get(agent.id)!;
+  for (const fact of pending.facts) fact.notBefore = 0;
+  await waitFor(() => events().length === before + 1 && settled(h, threadId));
+  const prompt = driver.prompts.get(threadId)!.at(-1)!;
+  expect(prompt).toContain('"SECOND build failed on main"');
+  expect(prompt).toContain('"ci-runner"');
+  expect(prompt).not.toContain('FIRST');
+  expect(h.core.agentRuntime.facts(agent.id)).toEqual([]);
+  // Quoting escapes a control character into six: the wake it makes stays under the cap, its quote still JSON.
+  const noise = await connect(h.url, session.token);
+  try { await noise.call('agents.event', { agent: 'Ada', key: 'noise', text: '\u0001'.repeat(EVENT_PROMPT_MAX) }); } finally { noise.close(); }
+  const fact = h.core.agentRuntime.facts(agent.id).find(f => f.key === 'external:noise')!;
+  expect(eventPrompt([fact]).length).toBeLessThanOrEqual(EVENT_PROMPT_MAX);
+  expect(JSON.parse(/you: ("(?:[^"\\]|\\.)*")/.exec(fact.text)![1]!)).toMatch(/^\u0001{2000,}$/);
+  expect(fact.text).toEndWith(`of ${EVENT_PROMPT_MAX} characters)`);
+  // A device names itself: a long control-heavy name is cut too, and the text still lands whole.
+  const named = h.core.sessions.exchange((await client.call('pairing.grant', {})).grant, { name: '\u0001'.repeat(3000), version: '1' });
+  const loud = await connect(h.url, named.token);
+  try { await loud.call('agents.event', { agent: 'Ada', key: 'loud', text: 'x' }); } finally { loud.close(); }
+  const signed = h.core.agentRuntime.facts(agent.id).find(f => f.key === 'external:loud')!;
+  expect(eventPrompt([signed]).length).toBeLessThanOrEqual(EVENT_PROMPT_MAX);
+  expect(JSON.parse(/device ("(?:[^"\\]|\\.)*")/.exec(signed.text)![1]!)).toMatch(/^\u0001{10,}$/);
+  expect(signed.text).toContain('(name cut by Boite at ');
+  expect(signed.text).toContain(' of 3000 characters)');
+  expect(signed.text).toEndWith('you: "x"');
+});
+
 test('scheduled-only bots retain facts across runtime restart and failed admission, then deliver once with a routine', async () => {
   const driver = scripted(() => ({ text: 'Caught up.' })); restore = driver.restore;
   const { agent, threadId } = await makeAgent(h, client);
@@ -282,11 +329,11 @@ test('scheduled-only bots retain facts across runtime restart and failed admissi
   const runtime = () => h.core.agentRuntime as unknown as Omit<AgentRuntime, 'tick'> & { tick(): void };
   const events = () => turnsOf(h, threadId).filter(t => t.execution?.operation === 'event');
   const before = events().length;
-  expect(runtime().fact(agent.id, { key: 'saved:0', text: 'MARKER_0', threadIds: [], delay: 0 })).toBe(true);
+  expect(runtime().fact(agent.id, { urgent: false, key: 'saved:0', text: 'MARKER_0', threadIds: [], delay: 0 })).toBe(true);
   runtime().tick();
   expect(events()).toHaveLength(before);
-  for (let i = 1; i < 65; i++) expect(runtime().fact(agent.id, { key: `saved:${i}`, text: `MARKER_${i} ${'x'.repeat(300)}`, threadIds: [], delay: 0 })).toBe(true);
-  runtime().fact(agent.id, { key: 'revoked', text: 'REVOKED_FACT', threadIds: ['thr_inaccessible'], delay: 0 });
+  for (let i = 1; i < 65; i++) expect(runtime().fact(agent.id, { urgent: false, key: `saved:${i}`, text: `MARKER_${i} ${'x'.repeat(300)}`, threadIds: [], delay: 0 })).toBe(true);
+  runtime().fact(agent.id, { urgent: false, key: 'revoked', text: 'REVOKED_FACT', threadIds: ['thr_inaccessible'], delay: 0 });
   await runtime().close();
   // Reconstruct from the durable journal, as startup does, with no event wake.
   (h.core as { agentRuntime: AgentRuntime }).agentRuntime = new AgentRuntime(h.core);
@@ -326,15 +373,15 @@ test('deferred arrivals leave the automatic event allowance available after re-e
     agentId: agent.id, expectedRevision: h.core.workforce.records.get('profile', agent.id).revision, config: { ...config, eventWakes },
   });
   await save(false);
-  for (let i = 0; i < NOTICES_PER_HOUR; i++) h.core.agentRuntime.fact(agent.id, { key: `deferred:${i}`, text: `Deferred ${i}.`, threadIds: [] });
+  for (let i = 0; i < NOTICES_PER_HOUR; i++) h.core.agentRuntime.fact(agent.id, { urgent: false, key: `deferred:${i}`, text: `Deferred ${i}.`, threadIds: [] });
   expect(h.core.agentRuntime.start(agent, { kind: 'routine', label: 'Morning', prompt: 'Catch up.' })).toBeDefined();
   await waitFor(() => settled(h, threadId));
   expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(0);
   await save(true);
   for (let i = 0; i < NOTICES_PER_HOUR; i++) {
-    expect(h.core.agentRuntime.fact(agent.id, { key: `automatic:${i}`, text: `Automatic ${i}.`, threadIds: [] })).toBe(true);
+    expect(h.core.agentRuntime.fact(agent.id, { urgent: false, key: `automatic:${i}`, text: `Automatic ${i}.`, threadIds: [] })).toBe(true);
   }
-  expect(h.core.agentRuntime.fact(agent.id, { key: 'over-cap', text: 'Over cap.', threadIds: [] })).toBe(false);
+  expect(h.core.agentRuntime.fact(agent.id, { urgent: false, key: 'over-cap', text: 'Over cap.', threadIds: [] })).toBe(false);
   expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(NOTICES_PER_HOUR);
 });
 
@@ -353,7 +400,7 @@ test('re-enabling event wakes drains a deferred backlog in bounded batches witho
   // Facts in one burst share a timestamp; each batch must still have its own receipt.
   Date.now = () => arrived;
   try {
-    for (let i = 0; i < 5; i++) h.core.agentRuntime.fact(agent.id, { key: `backlog:${i}`, text: `BACKLOG_${i} ${'x'.repeat(6000)}`, threadIds: [], delay: 0 });
+    for (let i = 0; i < 5; i++) h.core.agentRuntime.fact(agent.id, { urgent: false, key: `backlog:${i}`, text: `BACKLOG_${i} ${'x'.repeat(6000)}`, threadIds: [], delay: 0 });
   } finally { Date.now = now; }
   const before = events().length;
   await save(true);
@@ -362,7 +409,7 @@ test('re-enabling event wakes drains a deferred backlog in bounded batches witho
     tick();
     if (remaining === 4) {
       await waitFor(() => driver.held.length === 1);
-      expect(h.core.agentRuntime.fact(agent.id, { key: 'new-live', text: 'NEW_LIVE', threadIds: [], delay: 0 })).toBe(true);
+      expect(h.core.agentRuntime.fact(agent.id, { urgent: false, key: 'new-live', text: 'NEW_LIVE', threadIds: [], delay: 0 })).toBe(true);
       const keys = ['backlog:2', 'backlog:3', 'backlog:4', 'new-live'];
       expect(h.core.agentRuntime.facts(agent.id).map(f => f.key)).toEqual(keys);
       const persisted = h.core.journal.getSetting(`agents:pending:${agent.id}`) as { facts: { key: string }[] };
@@ -383,7 +430,7 @@ test('re-enabling event wakes drains a deferred backlog in bounded batches witho
     expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(remaining);
     if (remaining === 4) {
       // Protection must also survive the runtime reconstruction, before the next lot starts.
-      expect(h.core.agentRuntime.fact(agent.id, { key: 'restart-live', text: 'RESTART_LIVE', threadIds: [], delay: 0 })).toBe(true);
+      expect(h.core.agentRuntime.fact(agent.id, { urgent: false, key: 'restart-live', text: 'RESTART_LIVE', threadIds: [], delay: 0 })).toBe(true);
       const keys = ['backlog:2', 'backlog:3', 'backlog:4', 'new-live', 'restart-live'];
       expect(h.core.agentRuntime.facts(agent.id).map(f => f.key)).toEqual(keys);
       const persisted = h.core.journal.getSetting(`agents:pending:${agent.id}`) as { facts: { key: string }[] };
@@ -405,7 +452,7 @@ test('routine fact consumption rolls back before any driver starts and commits b
   const { agent, threadId } = await makeAgent(h, client);
   const config = await client.call('agents.runtime.get', { agentId: agent.id });
   await client.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: agent.revision, config: { ...config, eventWakes: false } });
-  h.core.agentRuntime.fact(agent.id, { key: 'durable', text: 'DURABLE_FACT', threadIds: [], delay: 0 });
+  h.core.agentRuntime.fact(agent.id, { urgent: false, key: 'durable', text: 'DURABLE_FACT', threadIds: [], delay: 0 });
   const before = turnsOf(h, threadId).length;
   const calls = delivered.length;
   const remove = h.core.journal.deleteSetting;
@@ -429,14 +476,14 @@ test('routine fact consumption rolls back before any driver starts and commits b
   expect(delivered.at(-1)).toEqual({ prompt: expect.stringContaining('DURABLE_FACT'), inTransaction: false });
   expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(0);
   expect(h.core.journal.getSetting(`agents:pending:${agent.id}`)).toBeUndefined();
-  h.core.agentRuntime.fact(agent.id, { key: 'later', text: 'LATER_FACT', threadIds: [], delay: 0 });
+  h.core.agentRuntime.fact(agent.id, { urgent: false, key: 'later', text: 'LATER_FACT', threadIds: [], delay: 0 });
   expect(h.core.agentRuntime.attempt(agent, wake).turn?.id).toBe(turn.id);
   expect(h.core.agentRuntime.facts(agent.id).map(f => f.key)).toEqual(['later']);
   expect(delivered).toHaveLength(calls + 1);
   expect(turnsOf(h, threadId)).toHaveLength(before + 1);
 });
 
-test('default event wakes still spend facts skipped for budget or failed admission, without a later retry', async () => {
+test('urgent facts still spend facts skipped for budget or failed admission, without a later retry', async () => {
   const driver = scripted(() => ({ text: 'Seen.', usage: costing(0.5) })); restore = driver.restore;
   const { agent, threadId } = await makeAgent(h, client);
   const config = await client.call('agents.runtime.get', { agentId: agent.id });
@@ -444,7 +491,7 @@ test('default event wakes still spend facts skipped for budget or failed admissi
   const tick = () => (h.core.agentRuntime as unknown as { tick(): void }).tick();
   const before = turnsOf(h, threadId).length;
   await save(0.4);
-  h.core.agentRuntime.fact(agent.id, { key: 'budget', text: 'Over budget.', delay: 0, threadIds: [] });
+  h.core.agentRuntime.fact(agent.id, { urgent: true, key: 'budget', text: 'Over budget.', delay: 0, threadIds: [] });
   tick();
   expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(0);
   await save(null);
@@ -453,7 +500,7 @@ test('default event wakes still spend facts skipped for budget or failed admissi
   const begin = h.core.threads.startTurn;
   h.core.threads.startTurn = () => { throw new Error('Admission unavailable'); };
   try {
-    h.core.agentRuntime.fact(agent.id, { key: 'failed', text: 'Failed admission.', delay: 0, threadIds: [] });
+    h.core.agentRuntime.fact(agent.id, { urgent: true, key: 'failed', text: 'Failed admission.', delay: 0, threadIds: [] });
     tick();
     expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(0);
   } finally { h.core.threads.startTurn = begin; }

@@ -35,6 +35,17 @@ test('changed instructions wake the agent once; a rename does not', async ({ rea
   expect(thread.turns.map(t => promptOf(thread.messages, t.id)?.displayText)).toEqual(['Just created', 'Instructions changed']);
 });
 
+test('an outside event wakes the bot in the fake as in the core, quoted as data under its key', async ({ ready }) => {
+  const { client } = await ready({ delayMs: 0 });
+  const agent = await client.call('agents.profile.save', { value: { name: 'Scout', domain: '', instructions: '', avatar: '', selection, status: 'active' } });
+  const { threadId } = await client.call('agents.open', { agentId: agent.id });
+  await vi.waitFor(async () => expect((await client.call('threads.get', { threadId })).status).toBe('idle'));
+  expect(await client.call('agents.event', { agent: 'scout', key: 'ci', text: 'Build failed on main' })).toEqual({ agentId: agent.id, key: 'external:ci' });
+  await expect(client.call('agents.event', { agent: 'Scout', key: 'bad key!', text: 'x' })).rejects.toThrow('key');
+  const thread = await client.call('threads.get', { threadId });
+  expect(promptOf(thread.messages, thread.turns.at(-1)!.id)).toMatchObject({ displayText: 'Outside event ci', text: expect.stringContaining('"Build failed on main"') });
+});
+
 test('a routine run is a routine turn on the agent\'s thread, and a quiet answer sets its outcome and leaves nothing unread', async ({ ready }) => {
   const { client } = await ready({ delayMs: 0 });
   const agent = await client.call('agents.profile.save', { value: { name: 'Scout', domain: '', instructions: '', avatar: '', selection, status: 'active' } });

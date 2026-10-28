@@ -457,6 +457,7 @@ boite bot routines
 boite bot schedule <json>
 boite bot unschedule <routine-id>
 boite bot watch|unwatch <thread-id>
+boite bot event <bot> [--key <key>] <text>
 boite delegate models|profiles|list
 boite delegate spawn <brief> [--model <provider/model>] [--effort <level>] [--speed <tier>] [--profile <id>] [--title <t>] [--worktree] [context flags]
 boite delegate send <thread-id> <text>
@@ -756,9 +757,11 @@ and its choices span every provider signed in on the machine. The listing cuts
 long instructions and choice lists to their start, one key or `--json` prints
 them whole. `--bot <name or id>`
 names the bot; in a bot's own conversation it defaults to that bot.
-`eventWakes` defaults to `true`. Setting it to `false` keeps the bot active for
-user messages and routines while project and desk facts wait durably for the
-next admitted routine. Permission checks run again before delivery. Facts are
+`eventWakes` defaults to `false`: a bot wakes at once only for threads it
+started, was entrusted or watches, and for outside events, while the other
+project and desk facts wait durably for the next admitted routine. Setting it
+to `true` wakes the bot for every fact. User messages and routines run either
+way. Permission checks run again before delivery. Facts are
 journaled with that routine once, including after a restart; failed admission
 keeps them queued. Creation and instruction-change wakes keep their behavior.
 
@@ -814,8 +817,17 @@ MEMORY.md and its path; `bot remember <fact>` adds a dated line to it. `bot
 routines` lists its routines, `bot schedule <json>` saves one (`name`,
 `prompt`, `schedule`, with `id` to edit one and `enabled`), `bot unschedule
 <routine-id>` removes one. `bot watch|unwatch <thread-id>` puts a thread of
-its projects on its desk or takes one off. Use `--json` to
+its projects on its desk or takes one off; a watched thread wakes the bot at
+once, one it only wrote to waits for its routines. Use `--json` to
 preserve the structured result.
+
+`bot event <bot> [--key <key>] <text>` is the exception: it is for a service
+outside Boite, never a bot's thread, and wakes the named bot (id or name) with
+an outside event ([bots](bots.md#outside-events)). On the host it reads the
+owner token from `core.json`; from another host it takes `--core <url>` with a
+paired device's session token in `BOITE_TOKEN`. A second event with the same
+key replaces one the bot has not read yet. Pair one device per service, so
+the bot's prompt names it and revoking it cuts that service alone.
 Pass `--request-id <stable-id>` when retrying a send after a lost response. The
 flag covers `threads send`, `threads reply`, `delegate spawn` and `delegate
 send`: a retry with the id of a call that already landed returns that letter

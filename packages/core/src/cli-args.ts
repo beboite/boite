@@ -43,6 +43,8 @@ export interface Parsed {
   core?: string;
   /** `thread new --machine <name>`, `settings request --machine <name>`: another machine of the group. */
   machine?: string;
+  /** `bot event --key <key>`: the outside event a later one with the same key replaces. */
+  key?: string;
   /** `--context`, `--keep`, `--drop`, `--tools`, `--rules`, `--rules-file`, as typed: `contextRequest` reads them. */
   context?: { preset?: string; keep?: string; drop?: string; tools?: string; rules?: string; rulesFile?: string };
 }
@@ -101,6 +103,7 @@ export function parse(argv: string[]): Parsed {
     else if (arg === '--instructions-file') parsed.instructionsFile = next();
     else if (arg === '--core') parsed.core = next();
     else if (arg === '--machine') parsed.machine = next();
+    else if (arg === '--key' && parsed.positional[0] === 'bot') parsed.key = next();
     else if (arg === '--limit') {
       const value = number(arg, next());
       // The widest any command takes (`boite logs`); a command with a lower cap checks its own.

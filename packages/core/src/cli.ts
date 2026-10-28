@@ -168,6 +168,10 @@ ${CONTROL_HELP}
   bot watch|unwatch <thread-id>  put a thread of its projects on its desk, or
                                  take one off; <machine>/<thread-id> for a
                                  project another machine entrusted to it
+  bot event <bot> <text>         wake a bot with an event from outside Boite
+                                 (--key <key>: a later event with the same key
+                                 replaces it while it waits); from a terminal
+                                 as the owner, or --core with a paired device
   --request-id <id>              reuse to retry threads send|reply or delegate spawn|send
   delegate models                models, reasoning levels and speeds a subagent can use
   delegate spawn <brief>         start a subagent on one bounded job; its result
@@ -461,6 +465,12 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       print([`server: ${state.currentVersion}`, `update: ${state.phase}`, ...(state.version ? [`version: ${state.version}`] : []), ...(state.error ? [`error: ${state.error}`] : [])], state);
     },
     bot: async () => {
+      if (rest[0] === 'event') {
+        if (rest.length < 3) throw new Usage('bot event needs a bot and the text: boite bot event <bot> [--key <key>] <text>');
+        const sent = await client.call('agents.event', { agent: rest[1]!, text: rest.slice(2).join(' '), ...(parsed.key === undefined ? {} : { key: parsed.key }) });
+        print([`event: ${sent.key} for ${sent.agentId}`, 'It wakes the bot once its thread is free; a later event with the same key replaces it until then.'], sent);
+        return;
+      }
       const result = await botCommand(client, threadId, rest);
       print([JSON.stringify(result)], result);
     },

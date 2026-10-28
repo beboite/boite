@@ -29,11 +29,11 @@ export class ResidentAgents {
     const agent = this.records.get('profile',agentId);
     // Configurations saved by older cores also hold `compactAfterTurns` and `maxRunMinutes`: nothing reads them.
     const saved = this.core.journal.getSetting(`agents:runtime:${agentId}`) as (AgentRuntimeConfig & Record<string, unknown>) | undefined;
-    if (saved) return { defaultRoute: agent.selection, allowedRoutes: saved.allowedRoutes, subagents: saved.subagents, autoMemory: saved.autoMemory !== false, eventWakes: saved.eventWakes !== false, dailyBudgetUsd: saved.dailyBudgetUsd ?? null };
+    if (saved) return { defaultRoute: agent.selection, allowedRoutes: saved.allowedRoutes, subagents: saved.subagents, autoMemory: saved.autoMemory !== false, eventWakes: saved.eventWakes === true, dailyBudgetUsd: saved.dailyBudgetUsd ?? null };
     const model = agent.selection.model ?? agentProvider(this.core, agent).models.find(m => m.default)?.id ?? agentProvider(this.core, agent).models[0]?.id;
     if (!model) throw refused('default model: choose a model for this bot');
     // Subagents are on by default: an agent splits its work the way a thread does, on any granted model.
-    return { defaultRoute:{...agent.selection,model}, allowedRoutes:[{...agent.selection,model,id:'default',name:'Default'}], subagents:{enabled:true,paused:false,profiles:[],anyModel:true}, autoMemory:true, eventWakes:true, dailyBudgetUsd:null };
+    return { defaultRoute:{...agent.selection,model}, allowedRoutes:[{...agent.selection,model,id:'default',name:'Default'}], subagents:{enabled:true,paused:false,profiles:[],anyModel:true}, autoMemory:true, eventWakes:false, dailyBudgetUsd:null };
   }
   grants(): AgentAccountGrant[] { return (this.core.journal.getSetting('agents:account-grants') as AgentAccountGrant[] | undefined) ?? []; }
   accountAllowed(agentId: string, accountId: string): boolean { const grant=this.grants().find(g=>g.accountId===accountId); return !grant || grant.agentIds===null || grant.agentIds.includes(agentId); }
@@ -72,7 +72,7 @@ export class ResidentAgents {
     if(v.eventWakes!==undefined&&typeof v.eventWakes!=='boolean')throw refused('eventWakes: expected true or false');
     const budget=v.dailyBudgetUsd??null;
     if(budget!==null&&(typeof budget!=='number'||!Number.isFinite(budget)||budget<AGENT_DAILY_BUDGET.min||budget>AGENT_DAILY_BUDGET.max))throw refused(`dailyBudgetUsd: expected dollars a day from ${AGENT_DAILY_BUDGET.min} to ${AGENT_DAILY_BUDGET.max}, or null for no cap`,{field:'dailyBudgetUsd'});
-    const config:AgentRuntimeConfig={defaultRoute:selection,allowedRoutes:routes,subagents,autoMemory:v.autoMemory!==false,eventWakes:v.eventWakes??previous.eventWakes??true,dailyBudgetUsd:budget===null?null:Math.round(budget*100)/100};
+    const config:AgentRuntimeConfig={defaultRoute:selection,allowedRoutes:routes,subagents,autoMemory:v.autoMemory!==false,eventWakes:v.eventWakes??previous.eventWakes??false,dailyBudgetUsd:budget===null?null:Math.round(budget*100)/100};
     const saved=this.records.transaction(()=>{
       // saveProfile validates the permission mode. Persist policy first in the same transaction.
       this.core.journal.setSetting(`agents:runtime:${agent.id}`,config);
