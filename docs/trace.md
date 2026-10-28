@@ -569,8 +569,11 @@ It never reaches the scope's other processes. A short system command
 and its pipes are given half a second to close, so a helper holding them
 cannot hold the caller. On Windows the stop goes through `taskkill /T` only
 while the root has not exited: until Bun reports the exit it holds the
-process's handle, so the pid is still the root's; after it, the pid may be
-another process's, and only the root's own kill runs. A helper of a root that
+process's handle, so the pid is still the root's. In that same tick the
+backend opens a handle of its own on the root and keeps it until taskkill
+ended (`platform/windows/tree-kill.ts`), so a root that exits meanwhile keeps
+its pid. After the exit, the pid may be another process's, and only the
+root's own kill runs. A helper of a root that
 already exited is not reached there. Normal
 shutdown waits for escalation; a hard shell kill does not guarantee core exit
 on Linux/macOS. `TraceCapability` exposes OS, mode (`events`, `poll`, `none`) and

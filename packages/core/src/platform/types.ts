@@ -177,7 +177,11 @@ export interface ProcessPlatform {
   terminate(threadId: string): boolean;
   /** A held Windows handle, or a matching registered/sampled Linux birth. */
   terminateProcess(threadId: string, pid: number, startedAt?: number | null): boolean;
-  /** Windows' fallback tree kill, for a pid outside the job: `killAll` waits for a returned promise. */
+  /**
+   * Windows' fallback tree kill, for a pid outside the job: `killAll` waits for a returned promise.
+   * Call it in the tick that saw the root running: it holds the root by a handle of its own from
+   * then until the kill ended, so the pid cannot pass to another process meanwhile.
+   */
   terminateUnassigned(pid: number): void | Promise<unknown>;
   sample(threadId: string): ProcessSample | null;
   /** Toggle optional detailed counters without changing protection sampling. */

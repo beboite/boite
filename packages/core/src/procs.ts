@@ -425,8 +425,8 @@ export class ProcRegistry {
    * leader that exited; on Windows taskkill's tree first, while the root still
    * names it, then the root, since `proc.kill` reaches no grandchild there.
    * Only while `running`, the spawner's own view: until it reports the exit it
-   * holds the process's handle, so Windows cannot give the pid to another
-   * process, and after it the pid may already be a stranger's.
+   * holds the process's handle, so the pid is still the root's, and the backend
+   * takes its own hold in the same tick; after it the pid may be a stranger's.
    */
   private managedStop(pid: number, running: () => boolean, kill: () => Promise<void> | undefined, exited: Promise<unknown>): ManagedStop {
     return () => {
