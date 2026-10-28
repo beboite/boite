@@ -18,7 +18,7 @@ whole. A queued turn keeps what it was accepted with.
 | Codex | `turn/settings/update`, from the next request | same request, as the service tier |
 | ACP agents | `session/set_config_option`, as the agent applies it | none in the protocol |
 | pi | `set_thinking_level`, from the next model call | none |
-| Grok, Hermes, Muse, Antigravity | next turn | next turn |
+| Grok, Muse, Antigravity | next turn | next turn |
 
 Checked on 2026-10-07. Claude CLI 2.1.291: the tool hooks of the same turn
 reported the new effort, and answers went from `fast` to `standard` after the

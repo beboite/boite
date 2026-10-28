@@ -177,14 +177,24 @@ describe('hermes', () => {
     expect(windows[0]?.value.endsWith(join(homedir(), 'AppData', 'Local', 'hermes', 'hermes-agent', 'venv', 'Scripts', 'hermes.exe'))).toBe(true);
     expect(windows[1]).toEqual({ kind: 'path', value: 'hermes' });
     expect(descriptor.profiles.linux?.executable[0]).toEqual({ kind: 'path', value: 'hermes' });
-    // With no `HERMES_HOME` set, the default account's login is in Hermes' own home.
-    const saved = process.env['HERMES_HOME'];
+    // With no `HERMES_HOME` set, the default account's login is in Hermes' own
+    // home: `~/.hermes`, or `%LOCALAPPDATA%\hermes` on Windows wherever that points.
+    const saved = { home: process.env['HERMES_HOME'], local: process.env['LOCALAPPDATA'] };
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform');
     delete process.env['HERMES_HOME'];
     try {
-      const own = process.platform === 'win32' ? join(homedir(), 'AppData', 'Local', 'hermes') : join(homedir(), '.hermes');
-      expect(variableHome('HERMES_HOME')).toBe(own);
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+      expect(variableHome('HERMES_HOME')).toBe(join(homedir(), '.hermes'));
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      process.env['LOCALAPPDATA'] = join(harness?.dataDir ?? homedir(), 'elsewhere');
+      expect(variableHome('HERMES_HOME')).toBe(join(harness?.dataDir ?? homedir(), 'elsewhere', 'hermes'));
+      delete process.env['LOCALAPPDATA'];
+      expect(variableHome('HERMES_HOME')).toBe(join(homedir(), 'AppData', 'Local', 'hermes'));
     } finally {
-      if (saved !== undefined) process.env['HERMES_HOME'] = saved;
+      if (platform !== undefined) Object.defineProperty(process, 'platform', platform);
+      if (saved.home !== undefined) process.env['HERMES_HOME'] = saved.home;
+      if (saved.local !== undefined) process.env['LOCALAPPDATA'] = saved.local;
+      else delete process.env['LOCALAPPDATA'];
     }
   });
 
@@ -344,10 +354,17 @@ describe('hermes', () => {
     }
 
     process.env['HERMES_FAKE_LOAD_BARE'] = '1';
+    await client.call('settings.set', { warmProcessMinutes: 5 });
     await client.call('threads.update', { threadId, model: 'default' });
     await runTurn(client, threadId, 'second');
     expect(loggedLines('set_model ')).toEqual([LLAMA, QWEN]);
     expect(loggedLines('prompt ').at(-1)?.split(' ')[1]).toBe(QWEN);
+    // The same warm process then takes an explicit model.
+    await client.call('threads.update', { threadId, model: LLAMA });
+    await runTurn(client, threadId, 'third');
+    expect(loggedLines('loaded:')).toHaveLength(1);
+    expect(loggedLines('set_model ')).toEqual([LLAMA, QWEN, LLAMA]);
+    expect(loggedLines('prompt ').at(-1)?.split(' ')[1]).toBe(LLAMA);
   });
 
   test('a load answered without models still moves the session to the thread model', async () => {

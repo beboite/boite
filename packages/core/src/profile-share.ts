@@ -37,11 +37,6 @@ export const ISOLATION_DEFAULTS: Record<string, string[]> = {
   HERMES_HOME: ['.hermes'],
 };
 
-/** The defaults that differ on Windows, where Hermes keeps its home under `%LOCALAPPDATA%`. */
-const WINDOWS_DEFAULTS: Record<string, string[]> = {
-  HERMES_HOME: ['AppData', 'Local', 'hermes'],
-};
-
 /** The file at the root of an account's directory that says what Boite linked and copied there. */
 export const SHARE_MARKER = '.boite-shared.json';
 
@@ -64,7 +59,13 @@ interface Marker {
 export function variableHome(variable: string, profile?: Pick<OsProfile, 'env'>): string | null {
   const value = profile?.env?.[variable] ?? process.env[variable];
   if (value !== undefined && value.length > 0) return value;
-  const fallback = (process.platform === 'win32' ? WINDOWS_DEFAULTS[variable] : undefined) ?? ISOLATION_DEFAULTS[variable];
+  // On Windows Hermes keeps its home in `%LOCALAPPDATA%\hermes`, as its own
+  // `_get_platform_default_hermes_home` reads it.
+  if (variable === 'HERMES_HOME' && currentOs() === 'windows') {
+    const local = process.env['LOCALAPPDATA'];
+    return join(local !== undefined && local.length > 0 ? local : join(homePath(), 'AppData', 'Local'), 'hermes');
+  }
+  const fallback = ISOLATION_DEFAULTS[variable];
   return fallback === undefined ? null : join(homePath(), ...fallback);
 }
 
