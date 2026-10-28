@@ -111,6 +111,24 @@ test('a start whose answer the link lost is asked again under its id and makes o
   expect(await titled(client, 'Only once please')).toHaveLength(1);
 });
 
+test.for([false, true])('pictures taken back past the byte total that cannot be fitted say so (codec failing: %s)', async (failing) => {
+  const { browserCodec } = await import('./image-prepare');
+  // jsdom has no canvas, so the pictures cannot shrink; a failing codec rejects instead.
+  if (failing) vi.spyOn(browserCodec, 'decode').mockImplementation(async () => ({ width: 1170, height: 2532, hasAlpha: () => false, close() {}, encode: async () => { throw new Error('encoder lost'); } }));
+  const { store, client } = await machine('one');
+  await store.connect();
+  const project = store.projects.find(entry => entry.kind !== 'drafts')!;
+  store.startDraft(project.id, { fresh: true });
+  client.drop();
+  const shot = (name: string) => ({ kind: 'image' as const, mimeType: 'image/jpeg' as const, data: Buffer.alloc(6 * 1024 * 1024).toString('base64'), name });
+  store.queuePrompt('draft', { text: 'First', attachments: [shot('first.jpg')] }, { choice: store.defaultChoice() });
+  store.queuePrompt('draft', { text: 'Second', attachments: [shot('second.jpg')] }, { choice: store.defaultChoice() });
+  const [row] = store.draftEntries;
+  store.cancelQueuedDraft(row!.id);
+  expect(store.composerStates.draft?.attachments).toHaveLength(2);
+  await vi.waitFor(() => expect(store.error).toBe('The files of one turn weigh 10 MB at most together, so second.jpg was left out.'));
+});
+
 test('cancelling a queued start brings its words back into the draft, which no longer starts by itself', async () => {
   const { store, client, creates } = await machine('one');
   await store.connect();

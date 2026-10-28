@@ -3,7 +3,8 @@ import { APP_LANGUAGES, ATTACHMENTS_TOTAL_MAX_BYTES, EXPERIMENT_IDS, previewRefe
 import type { Choice, Draft } from '../store.svelte';
 import type { Composer, OutboxRequest } from './composer.svelte';
 import type { StoreContext } from './context';
-import { strings } from '../strings';
+import { fill, strings } from '../strings';
+import { bytes } from '../format';
 import { readDraftJournal, writeDraftJournal } from '../draft-journal';
 import { unresolvedAssetId, type DraftAttachment } from '../draft-attachments';
 import { secureId } from '../secure-id';
@@ -348,7 +349,13 @@ export class Drafts {
     if (references.length) input.previewReferences = references;
     input.paused = false;
     this.persist();
-    if (attachedBytes(input.attachments) > ATTACHMENTS_TOTAL_MAX_BYTES) void fitHeld(input).then(() => this.persist());
+    if (attachedBytes(input.attachments) <= ATTACHMENTS_TOTAL_MAX_BYTES) return;
+    // Past the floor, or failed, the box says so like a paste does (`lib/composer-editing.ts`); either way it is saved.
+    const last = input.attachments.at(-1);
+    void fitHeld(input).catch(() => false).then((fits) => {
+      this.persist();
+      if (!fits) s.error = fill(strings.composer.attachTotalTooLarge, { name: last?.name ?? strings.composer.attachUnnamed, max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) });
+    });
   }
 
   /**
