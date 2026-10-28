@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { coreReadiness, FILES, judgeCoreHealth, planActivation, startTimeOf, type Layout } from './boite-server.ts';
+import { coreReadiness, FILES, judgeCoreHealth, planActivation, startTimeOf, switchGeneration, type Layout } from './boite-server.ts';
 
 const CONTROLLER = join(import.meta.dir, 'boite-server.ts');
 const BUN = { version: '1.4.3', sha256: 'a'.repeat(64) };
@@ -128,6 +128,22 @@ test.skipIf(process.platform === 'win32')('a committed activation keeps only the
   activation.commit();
   expect(readFileSync(layout.controller, 'utf8')).toBe('// controller of 1.0.0, reinstalled');
   expect(Bun.spawnSync(['ls', layout.releases]).stdout.toString().trim()).toBe('1.0.0');
+});
+
+test.skipIf(process.platform === 'win32')('a failed way back keeps why the update failed and why going back did too', async () => {
+  const layout = installed(temporary(), '1.0.0');
+  const before = { version: '1.0.0' };
+  const server = (start: () => Promise<void>) => ({ start, stop: async () => undefined });
+  // The new core never answers, then the previous one does not either.
+  let starts = 0;
+  const neither = server(async () => { starts += 1; throw new Error(`no answer ${starts}`); });
+  const restart = await switchGeneration(planActivation(prepared(layout, '2.0.0', 'new'), layout), '2.0.0', before, true, () => undefined, neither).catch(String);
+  expect(restart).toBe('Error: Boite 2.0.0 did not start, and going back to 1.0.0 failed: no answer 2. no answer 1');
+  // A step of the rollback fails: the installation is only partly back.
+  const failing = failingAt(6);
+  const partial = await switchGeneration(planActivation(prepared(layout, '2.0.0', 'again'), layout, failing.files), '2.0.0', before, true, () => undefined, server(async () => { throw new Error('no answer'); })).catch(String);
+  expect(partial).toStartWith('Error: Boite 2.0.0 did not start, and going back to 1.0.0 failed: the previous installation is only partly back: ');
+  expect(partial).toEndWith('. no answer');
 });
 
 /** Runs the controller as Termux would, in its own home, against stand-in cores on a free local port. */

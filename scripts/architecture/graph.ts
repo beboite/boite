@@ -11,14 +11,28 @@ const aliases = new Map([
 ]);
 
 interface SvelteScript { content: { start: number; end: number } }
-type SvelteParse = (source: string, options: { modern: true }) => { module: SvelteScript | null; instance: SvelteScript | null };
+type SvelteParse = (source: string, options: { modern: true }) => { module: SvelteScript | null; instance: SvelteScript | null; fragment: unknown };
 let svelteParse: SvelteParse | undefined;
 
-/** The module and instance scripts of a component, read with the UI's own Svelte parser: markup cannot import. */
+/** The literal specifiers of `import(...)` in markup expressions, which Svelte parses as ESTree. */
+function markupImports(node: unknown, found: string[] = []): string[] {
+  if (Array.isArray(node)) {
+    for (const child of node) markupImports(child, found);
+  } else if (node && typeof node === 'object') {
+    const { type, source } = node as { type?: unknown; source?: { type?: unknown; value?: unknown; expressions?: unknown[]; quasis?: { value: { cooked: string } }[] } };
+    if (type === 'ImportExpression' && source?.type === 'Literal' && typeof source.value === 'string') found.push(source.value);
+    else if (type === 'ImportExpression' && source?.type === 'TemplateLiteral' && source.expressions?.length === 0) found.push(source.quasis![0]!.value.cooked);
+    for (const [key, child] of Object.entries(node)) if (key !== 'metadata') markupImports(child, found);
+  }
+  return found;
+}
+
+/** A component's module and instance scripts, then the dynamic imports of its markup, read with the UI's own Svelte parser. */
 function svelteScripts(source: string): string {
   svelteParse ??= (createRequire(new URL('../../packages/ui/package.json', import.meta.url))('svelte/compiler') as { parse: SvelteParse }).parse;
   const root = svelteParse(source, { modern: true });
-  return [root.module, root.instance].flatMap(script => script ? [source.slice(script.content.start, script.content.end)] : []).join('\n');
+  const scripts = [root.module, root.instance].flatMap(script => script ? [source.slice(script.content.start, script.content.end)] : []);
+  return [...scripts, ...markupImports(root.fragment).map(specifier => `import(${JSON.stringify(specifier)});`)].join('\n');
 }
 
 function runtimeImports(file: string, source: string): string[] {
@@ -31,7 +45,8 @@ function runtimeImports(file: string, source: string): string[] {
 
 /**
  * Bun's parser excludes type-only imports and includes literal dynamic imports.
- * A `.svelte` source contributes the imports of its scripts, components included.
+ * A `.svelte` source contributes the imports of its scripts, components included,
+ * and the literal dynamic imports of its markup.
  */
 export function dependencyGraph(sources: Sources): Graph {
   const graph: Graph = new Map();

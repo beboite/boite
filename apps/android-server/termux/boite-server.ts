@@ -478,6 +478,8 @@ export const FILES = {
 
 const targetOf = (link: string) => { try { return readlinkSync(link); } catch { return null; } };
 
+const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
+
 /**
  * Moving a prepared release into place, as one transaction. What runs now is read when it is planned, before
  * the core stops; `apply` points `current`, Bun and this controller at the new release, and `rollback` puts
@@ -495,7 +497,7 @@ export function planActivation({ staging, release, runtime, controller }: Prepar
   const rollback = () => {
     const failed: string[] = [];
     for (const revert of undo.splice(0).reverse()) {
-      try { revert(); } catch (error) { failed.push(error instanceof Error ? error.message : String(error)); }
+      try { revert(); } catch (error) { failed.push(messageOf(error)); }
     }
     if (failed.length) throw new Error(`the previous installation is only partly back: ${failed.join('; ')}`);
   };
@@ -512,6 +514,29 @@ export function planActivation({ staging, release, runtime, controller }: Prepar
     return readRelease(dir);
   };
   return { apply, rollback, commit: () => { undo.length = 0; rmSync(aside, { recursive: true, force: true }); } };
+}
+
+/** Applies an activation to a stopped core and starts it if it ran; a failure goes back and says why, and why going back failed too. */
+export async function switchGeneration(activation: ReturnType<typeof planActivation>, version: string, before: { version: string } | null,
+  wasRunning: boolean, say: (line: string) => void, server = { start: startServer, stop: stopServer }): Promise<Release> {
+  let installed: Release | null = null;
+  try {
+    installed = activation.apply();
+    if (wasRunning) await server.start();
+    return installed;
+  } catch (error) {
+    const failed = `Boite ${version} ${installed ? 'did not start' : 'could not be installed'}`;
+    const previous = before?.version ?? 'no installation';
+    say(`${failed}, going back to ${previous}`);
+    try {
+      if (installed) await server.stop();
+      activation.rollback();
+      if (wasRunning) await server.start();
+    } catch (recovery) {
+      throw new Error(`${failed}, and going back to ${previous} failed: ${messageOf(recovery)}. ${messageOf(error)}`);
+    }
+    throw new Error(`${failed}; ${before ? `${before.version} ${wasRunning ? 'runs' : 'is in place'} again` : 'nothing else was installed'}. ${messageOf(error)}`);
+  }
 }
 
 /** Keeps the current release and the one before it, for `rollback`. */
@@ -663,7 +688,7 @@ function signIn(args: Args, say: (line: string) => void): { ok: true; agent: str
     return { ok: true, agent, signedIn: coreSignIns(release, true)[agent] === 'ok' };
   } catch (error) {
     // The login went through all the same: the core reads it when it starts again.
-    say(`Boite did not answer: ${error instanceof Error ? error.message : String(error)}`);
+    say(`Boite did not answer: ${messageOf(error)}`);
     return { ok: true, agent, signedIn: null };
   }
 }
@@ -870,7 +895,7 @@ async function supervise(): Promise<void> {
       }
       line(`core exited with ${await exited}`);
     } catch (error) {
-      line(`core did not start: ${error instanceof Error ? error.message : String(error)}`);
+      line(`core did not start: ${messageOf(error)}`);
     }
     child = null;
     writeJson(PATHS.state, { supervisor: self });
@@ -1046,19 +1071,7 @@ async function update(args: Args, say: (line: string) => void): Promise<Record<s
   writeCliShim();
   const wasRunning = alive(readState().supervisor) || alive(readState().core);
   if (wasRunning) await stopServer();
-  let installed: Release | null = null;
-  try {
-    installed = activation.apply();
-    if (wasRunning) await startServer();
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    const failed = `Boite ${prepared.release.version} ${installed ? 'did not start' : 'could not be installed'}`;
-    say(`${failed}, going back to ${before?.version ?? 'no installation'}`);
-    if (installed) await stopServer();
-    activation.rollback();
-    if (wasRunning) await startServer();
-    throw new Error(`${failed}; ${before ? `${before.version} ${wasRunning ? 'runs' : 'is in place'} again` : 'nothing else was installed'}. ${reason}`);
-  }
+  const installed = await switchGeneration(activation, prepared.release.version, before, wasRunning, say);
   activation.commit();
   const previous = before && before.version !== installed.version ? before : null;
   pruneReleases([installed.dir, ...(previous ? [previous.dir] : [])]);
@@ -1222,7 +1235,7 @@ async function main(argv: string[]): Promise<void> {
 if (import.meta.main) {
   const argv = process.argv.slice(2);
   main(argv).catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = messageOf(error);
     if (argv.includes('--json')) process.stdout.write(`${JSON.stringify({ ok: false, error: message })}\n`);
     else process.stderr.write(`boite-server: ${message}\n`);
     process.exit(1);

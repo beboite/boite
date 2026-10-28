@@ -153,7 +153,7 @@ function localePreload(): Plugin {
 
 /**
  * The phone's navigation is a chunk the page imports outside the shell
- * (`src/lib/deferred-parts.ts`), not a file index.html names, so the service
+ * (`src/lib/mobile-navigation.ts`), not a file index.html names, so the service
  * worker would not store it at install and an offline phone would open with
  * no header. index.html gets its static graph, JavaScript and styles, in a
  * meta tag the browser fetches nothing for and `public/sw.js` precaches.
@@ -169,7 +169,7 @@ function offlineParts(): Plugin {
         const navigation = Object.values(bundle).find(
           (file) => file.type === 'chunk' && /[\\/]src[\\/]components[\\/]MobileNavigation\.svelte$/.test(file.facadeModuleId ?? '')
         );
-        if (!navigation) throw new Error('src/components/MobileNavigation.svelte is not a chunk of its own: deferred-parts.ts must import it dynamically');
+        if (!navigation) throw new Error('src/components/MobileNavigation.svelte is not a chunk of its own: lib/mobile-navigation.ts must import it dynamically');
         const files = new Set<string>();
         const visit = (name: string) => {
           const file = bundle[name];

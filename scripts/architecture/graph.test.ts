@@ -73,13 +73,15 @@ test('a component script is a module: its imports are edges and its component im
   ]);
 });
 
-test('a component script that imports the core breaks the UI boundary', () => {
+test('a component script or markup expression that imports the core breaks the UI boundary', () => {
   const graph = dependencyGraph(new Map([
     ['packages/ui/src/components/Panel.svelte', "<script lang=\"ts\">import { core } from '@boite/core';</script>"],
+    ['packages/ui/src/components/Button.svelte', "<button onclick={() => import('@boite/core')}>{`import('./NotAnImport.svelte')`}</button>"],
     ['packages/core/src/index.ts', 'export const core = 1;'],
   ]));
   expect(boundaryViolations(graph)).toEqual([
     'packages/ui/src/components/Panel.svelte -> packages/core/src/index.ts: the UI must use contracts, not core implementation',
+    'packages/ui/src/components/Button.svelte -> packages/core/src/index.ts: the UI must use contracts, not core implementation',
   ]);
 });
 
