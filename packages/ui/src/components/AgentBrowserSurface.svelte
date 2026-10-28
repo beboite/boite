@@ -7,6 +7,8 @@
   import { fill, strings } from '../lib/strings';
   import { liveViews, machineName } from '../lib/live-view.svelte';
   import { normalizeUrl } from '../lib/browser-bridge';
+  import { lockedBy, policySearch } from '../lib/policy';
+  import PolicyLock from './PolicyLock.svelte';
   import RemoteBrowser from './RemoteBrowser.svelte';
   import AgentNativeView from './AgentNativeView.svelte';
   import { agentHost } from '../lib/agent-browser-host.svelte';
@@ -67,7 +69,7 @@
   async function openTab(event: SubmitEvent) {
     event.preventDefault();
     if (opening) return;
-    const url = normalizeUrl(address), client = store.client;
+    const url = normalizeUrl(address, policySearch(store.policy)), client = store.client;
     if (!url) { failure = strings.remoteBrowser.badAddress; return; }
     if (!client) return;
     opening = true; failure = '';
@@ -120,7 +122,12 @@
 </script>
 
 <section class="agent-browser" data-testid="agent-browser-surface" aria-label={strings.rightPanel.browser}>
-  {#if status && !status.available}
+  {#if lockedBy(store.policy, 'agentBrowser')}
+    <div class="empty" data-testid="agent-browser-policy">
+      <AppWindow size={20} strokeWidth={1.75} />
+      <p class="heading">{fill(strings.policy.browserOff, { machine })}<PolicyLock {store} keys={['agentBrowser']} /></p>
+    </div>
+  {:else if status && !status.available}
     <div class="empty" data-testid="agent-browser-unavailable">
       <AppWindow size={20} strokeWidth={1.75} />
       <p class="heading">{fill(strings.agentBrowser.unavailable, { machine })}</p>

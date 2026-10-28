@@ -6,6 +6,7 @@ import type { FakeContext, FakeMethods } from './context';
 import { gatewayQuotas } from './accounts';
 import { fakeCore } from './coordination';
 import { settleMachineSetting, settleSettings } from './requests';
+import { checkPolicySettings } from './policy';
 
 export function settingsMethods(ctx: FakeContext) {
   const methods = {
@@ -106,6 +107,7 @@ export function settingsMethods(ctx: FakeContext) {
       if (tracker && !ctx.providers.some(p => p.id === tracker.providerId)) {
         throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `goalTracker names ${tracker.providerId}, which is not a loaded provider`, data: { field: 'goalTracker' } });
       }
+      checkPolicySettings(ctx, checked.patch);
       const before = Object.fromEntries(MACHINE_SETTINGS.map(key => [key, ctx.settings[key] === true]));
       ctx.settings = { ...ctx.settings, ...keepLaterFavorites(ctx.settings, checked.patch) };
       // As the core's `setting.changed`: the other members' cards about this machine settle.

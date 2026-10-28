@@ -99,6 +99,7 @@ import { fr as onboarding } from './strings/fr/onboarding';
 import { fr as contacts } from './strings/fr/contacts';
 import { fr as shared } from './strings/fr/shared';
 import { fr as windows } from './strings/fr/windows';
+import { fr as policy } from './strings/fr/policy';
 
 export const fr: Translation = {
   ...subscriptionProxy,
@@ -190,4 +191,5 @@ export const fr: Translation = {
   ...contacts,
   ...shared,
   ...windows,
+  ...policy,
 };

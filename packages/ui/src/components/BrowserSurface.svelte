@@ -8,6 +8,7 @@
   import Menu from './Menu.svelte';
   import { rightPanel } from '../lib/right-panel.svelte';
   import { browserBridge, normalizeUrl } from '../lib/browser-bridge';
+  import { policySearch } from '../lib/policy';
   import { linuxShell } from '../lib/shell-platform';
   import { watchBrowserBounds } from '../lib/browser-bounds';
   import { browserPresentation } from '../lib/browser-presentation';
@@ -157,7 +158,7 @@
 
   function submit(event: Event): void {
     event.preventDefault();
-    const next = normalizeUrl(draft ?? '');
+    const next = normalizeUrl(draft ?? '', policySearch(store.policy));
     if (!next) { problem = strings.browser.invalidUrl; return; }
     problem = '';
     loading = true;

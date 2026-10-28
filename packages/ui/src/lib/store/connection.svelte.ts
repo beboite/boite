@@ -653,7 +653,12 @@ export class Connection {
     const secondary = [
       slice(client.call('scheduler.get', {}), value => { if (revisions.scheduler === this.ctx.metadataRevision.scheduler) s.scheduler = value; }),
       slice(s.owner ? client.call('accounts.logins', {}) : Promise.resolve([]), rows => accounts.restoreLogins(rows, loginRevision)),
-      slice(client.call('keybindings.get', {}), value => { if (revisions.keybindings === this.ctx.metadataRevision.keybindings) s.keybindings = value; })
+      slice(client.call('keybindings.get', {}), value => { if (revisions.keybindings === this.ctx.metadataRevision.keybindings) s.keybindings = value; }),
+      // A core older than the admin policy has none to tell: nothing is locked.
+      slice(client.call('policy.get', {}).catch((error: unknown) => {
+        if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) return null;
+        throw error;
+      }), value => { if (revisions.policy === this.ctx.metadataRevision.policy) s.policy = value; })
     ];
     const essential = Promise.all(primary).then(() => {
       ready();

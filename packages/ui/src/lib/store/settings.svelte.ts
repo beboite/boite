@@ -4,6 +4,7 @@ import { RpcFailure } from '../client';
 import type {
   KeybindingCommand,
   Keybindings,
+  PolicyState,
   RpcParams,
   RpcResult,
   SchedulerState,
@@ -48,6 +49,8 @@ export class CoreSettings {
     // Every arrival, whether read, pushed by the core or answered to a save.
     this.ctx.models.syncFavorites();
   }
+  /** The admin policy this core enforces; null until read, or on a core too old to have one. */
+  policy = $state.raw<PolicyState | null>(null);
   /** The keybindings file as the core last read it; null until the first `keybindings.get`. */
   keybindings = $state<Keybindings | null>(null);
   /** Every command with its chord: the defaults, the file's entries over them. */

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { lockedBy } from '../lib/policy';
   import type { Snippet } from 'svelte';
   import type { ConnectionGroup } from '../lib/connection-group.svelte';
   import type { GroupCore, GroupDevice } from '@boite/contracts';
@@ -11,6 +12,7 @@
   import type { Store } from '../lib/store.svelte';
   import { listedName, workspace } from '../lib/workspace.svelte';
   import InfoTip from './InfoTip.svelte';
+  import PolicyLock from './PolicyLock.svelte';
   import MachineIcon from './MachineIcon.svelte';
 
   /**
@@ -280,10 +282,10 @@
   <AddDevice {store} />
   {#if alone}
     <form class="join" onsubmit={(event) => { event.preventDefault(); void join(); }}>
-      <span class="labelled"><label for="{uid}-join">{strings.group.joinLabel}</label><InfoTip topic={strings.group.join} text={strings.group.joinHint} /></span>
+      <span class="labelled"><label for="{uid}-join">{strings.group.joinLabel}</label><InfoTip topic={strings.group.join} text={strings.group.joinHint} /><PolicyLock {store} keys={['network.groups']} /></span>
       <div class="field">
         <input id="{uid}-join" bind:value={invitation} data-testid="group-join-input" type="password" autocomplete="off" spellcheck="false" />
-        <button type="submit" data-testid="group-join" disabled={busy !== null || !invitation.trim()}>
+        <button type="submit" data-testid="group-join" disabled={busy !== null || !invitation.trim() || lockedBy(store.policy, 'network.groups') !== null}>
           {busy === 'join' ? strings.group.joining : strings.group.join}
         </button>
       </div>

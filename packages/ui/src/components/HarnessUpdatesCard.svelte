@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { lockedBy } from '../lib/policy';
   import { onMount } from 'svelte';
   import { RefreshCw } from '@lucide/svelte';
   import { providerEnabled } from '@boite/contracts';
@@ -7,12 +8,16 @@
   import ProviderVersion from './ProviderVersion.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import InfoTip from './InfoTip.svelte';
+  import PolicyLock from './PolicyLock.svelte';
 
   let { store }: { store: Store } = $props();
   const uid = $props.id();
   let checking = $state(false);
   const connected = $derived(store.owner && store.connection === 'ready');
   const busy = $derived(checking || store.harnessUpdates.some(update => update.state === 'checking'));
+  /** The admin policy's `updates.agents`: `off` checks and updates nothing, any value holds the automatic update. */
+  const agentsPolicy = $derived(lockedBy(store.policy, 'updates.agents') ? store.policy?.values.updates?.agents ?? null : null);
+  const updatesOff = $derived(agentsPolicy === 'off');
   // A provider turned off is never asked its version and never updated.
   const providers = $derived(store.providers.filter(provider => {
     if (!providerEnabled(provider)) return false;
@@ -32,14 +37,14 @@
     if (!await store.saveSettings({ autoUpdateHarnesses: input.checked })) input.checked = store.settings?.autoUpdateHarnesses ?? false;
   }
 
-  onMount(() => { if (connected && store.harnessUpdates.length === 0) void check(); });
+  onMount(() => { if (connected && !updatesOff && store.harnessUpdates.length === 0) void check(); });
 </script>
 
 <!-- Each machine's agents and their versions, on that machine's Providers page. -->
 <section class="card agent-updates" id="settings-agent-updates" data-testid="harness-updates-card">
   <header>
-    <h2 class="ui-label-box"><span class="ui-label">{strings.harnessUpdates.heading}</span><InfoTip topic={strings.harnessUpdates.heading} text={strings.harnessUpdates.intro} /></h2>
-    <button type="button" class="ghost small" data-testid="harness-updates-check" disabled={!connected || busy} onclick={() => void check()}>
+    <h2 class="ui-label-box"><span class="ui-label">{strings.harnessUpdates.heading}</span><InfoTip topic={strings.harnessUpdates.heading} text={strings.harnessUpdates.intro} />{#if updatesOff}<PolicyLock {store} keys={['updates.agents']} />{/if}</h2>
+    <button type="button" class="ghost small" data-testid="harness-updates-check" disabled={!connected || busy || updatesOff} onclick={() => void check()}>
       <RefreshCw size={13} /><span class="ui-label">{busy ? strings.harnessUpdates.checking : strings.providerSettings.checkUpdates}</span>
     </button>
   </header>
@@ -51,7 +56,7 @@
       <div class="agent" data-testid="machine-agent-update" data-provider-id={provider.id}>
         <div class="agent-row">
           <span class="name"><ProviderLogo providerId={provider.id} size={16} /><span class="ui-label">{provider.name}</span></span>
-          <ProviderVersion {store} {provider} controls main {installing} disabled={!connected || busy}
+          <ProviderVersion {store} {provider} controls main {installing} disabled={!connected || busy || updatesOff}
             oninstall={() => void store.installProvider(provider.id)} />
           {#if installing}
             <span class="progress ui-label" role="status">{strings.providerSettings.updating}</span>
@@ -77,9 +82,9 @@
     {/each}
   </div>
   <label class="auto" for="{uid}-auto-update">
-    <span class="ui-label-box"><span class="ui-label">{strings.providerSettings.autoUpdate}</span><InfoTip topic={strings.providerSettings.autoUpdate} text={strings.harnessUpdates.autoHint} /></span>
+    <span class="ui-label-box"><span class="ui-label">{strings.providerSettings.autoUpdate}</span><InfoTip topic={strings.providerSettings.autoUpdate} text={strings.harnessUpdates.autoHint} /><PolicyLock {store} keys={['updates.agents']} /></span>
     <input id="{uid}-auto-update" type="checkbox" role="switch" data-testid="setting-auto-update-harnesses"
-      checked={store.settings?.autoUpdateHarnesses ?? false} disabled={!connected || !store.settings}
+      checked={store.settings?.autoUpdateHarnesses ?? false} disabled={!connected || !store.settings || agentsPolicy !== null}
       onchange={(event) => void toggleAuto(event.currentTarget)} />
   </label>
 </section>

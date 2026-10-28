@@ -17,6 +17,7 @@ import {
   type ExperimentId,
   type HookRun,
   type MemoryEvent,
+  type PolicyState,
   type ProcessRecord,
   type Principal,
   type RpcEventName,
@@ -80,6 +81,7 @@ import { holdAfterRestart } from './fake-client/recovery';
 import { journalInspectionMethods } from './fake-client/journal-inspection';
 import { forkReturnMethods } from './fake-client/fork-return';
 import { startLoad } from './fake-client/load';
+import { applyPolicy, policyGate } from './fake-client/policy';
 
 export type { FakeClientOptions } from './fake-client/context';
 
@@ -335,6 +337,8 @@ export class FakeClient implements ObservableClient {
     if (bus.principal === 'session' && method !== 'hello' && !DEVICE_METHODS.has(method)) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is for the owner only` });
     }
+    // The admin policy's gate runs before the method, as the core's router does.
+    policyGate(this.#ctx, method, params);
     if (bus.principal === 'session' && method === 'git.diff' && ![undefined, '', 'HEAD'].includes((params as RpcParams<'git.diff'>).ref)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'git.diff: paired devices compare the working tree with HEAD only' });
     if (bus.principal === 'session' && (method === 'quotas.list' || method === 'subscriptionProxy.quotas') && (params as { refresh?: unknown }).refresh === true) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method}: paired devices read the last reading; refresh must be false or absent` });
     if (bus.principal === 'agent' && /^(?:sharedProjects|sharedBoard|sharedCompute|sharedAccess)\.|^contacts\.sendHuman$/.test(method)) {
@@ -392,6 +396,13 @@ export class FakeClient implements ObservableClient {
   reportDesktopExperiments(experiments: ExperimentId[]): void {
     this.#ctx.desktopExperiments = [...experiments];
     this.#ctx.emit('client.desktopExperiments', { experiments: [...experiments] });
+  }
+
+  /** The policy file edited on the fake machine, as the core's watcher rereads it and announces the change. */
+  changePolicy(policy: PolicyState): void {
+    this.#ctx.policy = structuredClone(policy);
+    applyPolicy(this.#ctx);
+    this.#ctx.emit('policy.changed', structuredClone(policy));
   }
 
   /** A line of the core's own log, as `core.log` carries it: a failed scheduler, a guard at work. */

@@ -3,6 +3,8 @@
   import { watchBrowserBounds } from '../lib/browser-bounds';
   import { browserPresentation } from '../lib/browser-presentation';
   import { strings } from '../lib/strings';
+  import { policySearch } from '../lib/policy';
+  import { workspace } from '../lib/workspace.svelte';
   import BrowserNav from './BrowserNav.svelte';
 
   /**
@@ -37,7 +39,7 @@
 
   function go(event: SubmitEvent) {
     event.preventDefault();
-    const next = normalizeUrl(draft ?? '');
+    const next = normalizeUrl(draft ?? '', policySearch(workspace.machines.find((machine) => machine.store.localCore)?.store.policy));
     if (!next) { problem = strings.remoteBrowser.badAddress; return; }
     problem = ''; draft = null; loading = true;
     (document.activeElement as HTMLElement | null)?.blur?.();

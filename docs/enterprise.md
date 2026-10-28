@@ -119,5 +119,19 @@ read it, so a phone shows which controls are locked and why. A refusal is an
 RPC error with code `Refused` and `data: { policy, file }`; a provider the
 policy blocks carries the same `policy` object in its summary.
 
+The app draws each control a key locks disabled, with a lock that opens the
+key and the file that hold it. Settings > General lists the active keys under
+"Managed by your organization", and a banner above every settings page lists
+the problems while the file has any. A provider the policy blocks shows as
+turned off by the organization, with no switch to turn it back on. The agent
+browser's address bar searches at `agentBrowser.searchUrl`. Pull request links
+and watches have no control in the app: the `boite` CLI meets the refusal.
+
+The in-memory client takes the same three states for development:
+`?fake=1&policy=managed` locks every key a control shows,
+`?fake=1&policy=broken` adds problems, and `?fake=1&policy=closed` stands for a
+file that does not parse. Its gate lists the core's gated methods one for one,
+which `packages/ui/src/lib/fake-client/policy.test.ts` checks.
+
 The desktop shell reads the same file for `updates.app` before it checks for
 or downloads an app update.

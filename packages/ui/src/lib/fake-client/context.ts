@@ -85,6 +85,7 @@ import { FakeWorkflows } from './workflows';
 import { initialDesktopUpdate, initialServerUpdate } from './server-update';
 import { observeLog } from './logs';
 import { followGoal } from './todos';
+import { applyPolicy, policyFixture } from './policy';
 import type { FakeWorktree } from './worktrees';
 
 /**
@@ -155,6 +156,8 @@ export interface FakeClientOptions {
   rttMs?: number;
   /** Stable public identity for multi-machine coordination tests. */
   coreId?: string;
+  /** The admin policy this core enforces; `?fake=1&policy=managed`, `broken` or `closed` picks a fixture (`policy.ts`). */
+  policy?: PolicyState;
   coreName?: string;
   publicUrl?: string;
   /**
@@ -207,8 +210,8 @@ export class FakeContext {
   /** Each agent's own hooks and the runs that did not pass (`hooks.ts`). */
   hooks: HooksStatus = seedHooks();
   telemetry: TelemetryState = { mode: 'basic', configured: true, pendingDeletion: false };
-  /** The admin policy, as `policy.get` answers it: none, as on most machines. */
-  policy: PolicyState = { file: '/etc/boite/policy.json', present: false, values: {}, locked: [], problems: [], failedClosed: false, readAt: 0 };
+  /** The admin policy, as `policy.get` answers it: none, as on most machines, unless `?policy=` names a fixture (`policy.ts`). */
+  policy: PolicyState;
   projects: Project[] = [];
   /** The image of each project whose icon is one, as `projects.icon` answers it. */
   projectImages = new Map<string, { version: string; dataUrl: string }>();
@@ -455,6 +458,8 @@ export class FakeContext {
       running: [],
       queued: []
     };
+    this.policy = options.policy ?? policyFixture(typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('policy'));
+    applyPolicy(this);
   }
 
   // -------------------------------------------------------------------------

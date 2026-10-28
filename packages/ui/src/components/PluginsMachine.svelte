@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { lockedBy } from '../lib/policy';
   import { errorText } from '../lib/errors';
   import InfoTip from './InfoTip.svelte';
+  import PolicyLock from './PolicyLock.svelte';
   import { Download, ExternalLink, Play, Puzzle, RefreshCw, RotateCw, ShieldAlert, Square, TriangleAlert } from '@lucide/svelte';
   import type { PluginAppState, PluginGatewayState, PluginPool, PluginPreview, PluginRejected, PluginState, PluginUpdates, RpcParams } from '@boite/contracts';
   import { gatewayDashboardReachable } from '@boite/contracts';
@@ -18,6 +20,8 @@
    * answer still on its way from the previous core lands in a discarded page.
    */
   let { store }: { store: Store } = $props();
+  /** The admin policy forbids installs: the buttons that download are off, removing stays open. */
+  const installLocked = $derived(lockedBy(store.policy, 'plugins.install') !== null);
   const t = strings.plugins;
 
   let plugins = $state<PluginState[]>([]);
@@ -330,13 +334,13 @@
         {#if plugin.status === 'installing'}
           <button class="quiet small" data-testid="plugin-cancel" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.cancel')}><span class="ui-label">{strings.common.cancel}</span></button>
         {:else if plugin.status === 'not-installed'}
-          <button class="primary small" data-testid="plugin-install" data-plugin={plugin.id} disabled={working || plugin.artifact === null} onclick={() => void change(plugin, 'plugins.install')}><Download size={14} /><span class="ui-label">{t.install}</span></button>
+          <button class="primary small" data-testid="plugin-install" data-plugin={plugin.id} disabled={working || plugin.artifact === null || installLocked} onclick={() => void change(plugin, 'plugins.install')}><Download size={14} /><span class="ui-label">{t.install}</span></button>
         {:else}
           {#if plugin.status === 'installed' && plugin.availableVersion && plugin.availableVersion !== plugin.version}
-            <button class="primary small" data-testid="plugin-update" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.install')}><span class="ui-label">{fill(t.update, { version: `v${plugin.availableVersion}` })}</span></button>
+            <button class="primary small" data-testid="plugin-update" data-plugin={plugin.id} disabled={working || installLocked} onclick={() => void change(plugin, 'plugins.install')}><span class="ui-label">{fill(t.update, { version: `v${plugin.availableVersion}` })}</span></button>
           {/if}
           {#if plugin.status === 'error' || (plugin.status === 'rejected' && plugin.origin === 'recommended')}
-            <button class="small" data-testid="plugin-retry" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.install')}><RefreshCw size={14} /><span class="ui-label">{plugin.status === 'error' ? strings.common.retry : t.reinstall}</span></button>
+            <button class="small" data-testid="plugin-retry" data-plugin={plugin.id} disabled={working || installLocked} onclick={() => void change(plugin, 'plugins.install')}><RefreshCw size={14} /><span class="ui-label">{plugin.status === 'error' ? strings.common.retry : t.reinstall}</span></button>
           {/if}
         {/if}
         {#if plugin.updates && plugin.status !== 'installing'}
@@ -477,7 +481,7 @@
 
   {#if recommended.length > 0}
     <section aria-labelledby="plugins-recommended" data-testid="plugins-recommended">
-      <h2 id="plugins-recommended" class="section-label"><span class="ui-label">{t.recommendedHeading}</span></h2>
+      <h2 id="plugins-recommended" class="section-label"><span class="ui-label">{t.recommendedHeading}</span><PolicyLock {store} keys={['plugins.install', 'plugins.recommended']} /></h2>
       <div class="card list">
         {#each recommended as plugin (plugin.id)}{@render row(plugin)}{/each}
       </div>
@@ -485,14 +489,14 @@
   {/if}
 
   <section aria-labelledby="plugins-add" data-testid="plugins-add">
-    <h2 id="plugins-add" class="section-label"><span class="ui-label">{t.addHeading}</span><InfoTip topic={t.addHeading} text={t.addHint} /></h2>
+    <h2 id="plugins-add" class="section-label"><span class="ui-label">{t.addHeading}</span><InfoTip topic={t.addHeading} text={t.addHint} /><PolicyLock {store} keys={['plugins.install']} /></h2>
     <div class="card add">
       <form onsubmit={inspect}>
         <input class="url" data-testid="plugin-url" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false"
-          aria-label={t.urlLabel} placeholder={t.urlPlaceholder} bind:value={url} />
+          aria-label={t.urlLabel} placeholder={t.urlPlaceholder} bind:value={url} disabled={installLocked} />
         <input class="ref" data-testid="plugin-ref" autocomplete="off" autocapitalize="off" spellcheck="false"
-          aria-label={t.refLabel} title={t.refLabel} placeholder={t.refPlaceholder} bind:value={ref} />
-        <button type="submit" data-testid="plugin-inspect" disabled={url.trim() === '' || inspecting}><span class="ui-label">{inspecting ? t.inspecting : t.inspect}</span></button>
+          aria-label={t.refLabel} title={t.refLabel} placeholder={t.refPlaceholder} bind:value={ref} disabled={installLocked} />
+        <button type="submit" data-testid="plugin-inspect" disabled={url.trim() === '' || inspecting || installLocked}><span class="ui-label">{inspecting ? t.inspecting : t.inspect}</span></button>
       </form>
       {#if inspectError}<p class="bad" role="alert" data-testid="plugin-inspect-error">{inspectError}</p>{/if}
       {#if preview}
@@ -538,7 +542,7 @@
           <div class="act end">
             <button class="quiet small" data-testid="plugin-dismiss" onclick={() => { preview = null; }}><span class="ui-label">{preview.rejected ? strings.common.dismiss : strings.common.cancel}</span></button>
             {#if preview.previewId && preview.manifest}
-              <button class="primary small" data-testid="plugin-add" disabled={adding} onclick={() => void add()}><Download size={14} /><span class="ui-label">{fill(t.confirmAdd, { name: preview.manifest.name })}</span></button>
+              <button class="primary small" data-testid="plugin-add" disabled={adding || installLocked} onclick={() => void add()}><Download size={14} /><span class="ui-label">{fill(t.confirmAdd, { name: preview.manifest.name })}</span></button>
             {/if}
           </div>
         </div>
