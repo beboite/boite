@@ -16,6 +16,9 @@ const PENDING_RECORDS = 1024;
 /** Records kept in memory only: written while persistence fails, or dropped from a full pending buffer. */
 const UNPERSISTED_RECORDS = 4096;
 const FLUSH_MS = 250;
+/** The wait before the first retry of a write that failed, doubled on each failure up to `RETRY_MAX_MS`. */
+const RETRY_MS = 1000;
+const RETRY_MAX_MS = 60_000;
 /** How far ahead of the core a record's time may be: clients' times are kept within 10 minutes. */
 const CLOCK_SKEW_MS = 10 * 60_000;
 /** A process that exits cleanly this soon after its start is counted in a batch, not written on its own. */
@@ -51,20 +54,23 @@ export class DiagnosticLogs {
   /**
    * Records the files do not hold yet, oldest first: pending ones and the batch being
    * appended, which a query running meanwhile still sees, plus those that will never be
-   * written (persistence failed, the pending buffer was full, a record too large for a
-   * file). An append removes what it wrote: the files answer for it from then on.
+   * written (the pending buffer was full, a record too large for a file). An append
+   * removes what it wrote: the files answer for it from then on.
    */
   private readonly unpersisted = new Map<string, CoreLogRecord>();
   private pending: CoreLogRecord[] = [];
   private writing: Promise<void> = Promise.resolve();
   private readonly ready: Promise<void>;
+  /** Whether the folder exists and `bytes` matches the newest file; a failed write sets it back, so the next one checks again. */
+  private prepared = false;
+  /** Writes that failed in a row; 0 while the files keep up. */
+  private failures = 0;
   private bytes = 0;
   private sequence = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
   private flushing = false;
   private failureReported = false;
-  private failed = false;
   private overflowReported = false;
   private dropped = 0;
   private unsubscribe: (() => void) | undefined;
@@ -78,7 +84,7 @@ export class DiagnosticLogs {
   constructor(dataDir: string, private readonly secrets: readonly string[] = [], private readonly report: (message: string) => void = message => console.error(message), private readonly fileBytes = LOG_FILE_BYTES) {
     this.directory = join(dataDir, 'logs');
     // Startup performs only bounded metadata operations. History is read on demand.
-    this.ready = this.initialize().catch(error => { this.failed = true; this.failure(error); });
+    this.ready = this.initialize().then(() => { this.prepared = true; }, error => this.setback([], error));
   }
 
   private path(index: number): string { return join(this.directory, `core.${index}.ndjson`); }
@@ -96,6 +102,7 @@ export class DiagnosticLogs {
   }
 
   private async initialize(): Promise<void> {
+    this.bytes = 0;
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     await chmod(this.directory, 0o700);
     for (let index = 0; index < LOG_FILE_COUNT; index += 1) {
@@ -182,18 +189,21 @@ export class DiagnosticLogs {
     };
     this.unpersisted.set(record.id, record);
     if (this.unpersisted.size > UNPERSISTED_RECORDS) this.unpersisted.delete(this.unpersisted.keys().next().value!);
-    if (this.failed) return;
     if (this.pending.length >= PENDING_RECORDS) {
       this.dropped += 1;
       if (!this.overflowReported) { this.overflowReported = true; this.safeReport('diagnostic logs: pending buffer is full; new records remain only in memory and will not be persisted'); }
       return;
     }
     this.pending.push(record);
+    // After a failed write, the retry already waits on its timer: a new record does not bring it forward.
+    if (this.failures > 0) return;
     if (this.pending.length >= 64 && this.timer !== null) { clearTimeout(this.timer); this.timer = null; }
-    if (this.timer === null && !this.flushing) {
-      this.timer = setTimeout(() => { this.timer = null; void this.flush(); }, this.pending.length >= 64 ? 0 : FLUSH_MS);
-      this.timer.unref();
-    }
+    if (this.timer === null && !this.flushing) this.schedule(this.pending.length >= 64 ? 0 : FLUSH_MS);
+  }
+
+  private schedule(delay: number): void {
+    this.timer = setTimeout(() => { this.timer = null; if (!this.closed) void this.flush(); }, delay);
+    this.timer.unref();
   }
 
   debug(message: string, context: Partial<LogContext> = {}): void { this.record('debug', message, context); }
@@ -339,8 +349,15 @@ export class DiagnosticLogs {
       while (this.pending.length > 0) {
         const batch = this.pending;
         this.pending = [];
-        if (this.failed) break;
-        await this.append(batch);
+        const progress = { written: 0 };
+        try {
+          if (!this.prepared) { await this.initialize(); this.prepared = true; }
+          await this.append(batch, progress);
+        } catch (error) {
+          this.setback(batch.slice(progress.written), error);
+          return;
+        }
+        this.recovered();
         this.overflowReported = false;
         if (this.dropped > 0) {
           const count = this.dropped;
@@ -348,28 +365,61 @@ export class DiagnosticLogs {
           this.record('warn', `${count} diagnostics were not persisted because the pending buffer was full`, { source: 'logs', event: 'logs.dropped', data: { count } });
         }
       }
-    }).catch(error => { this.failed = true; this.pending = []; this.failure(error); }).finally(() => { this.flushing = false; });
+    }).finally(() => { this.flushing = false; });
     return this.writing;
   }
 
-  private async append(batch: CoreLogRecord[]): Promise<void> {
+  /**
+   * A write that failed: what it did not write goes back to the head of the
+   * queue, the next attempt checks the folder and the newest file again, and it
+   * waits longer after each failure in a row. The records stay queryable from
+   * memory meanwhile. A full disk or a folder briefly in the way no longer ends
+   * persistence for the rest of the run. Reported once per outage.
+   */
+  private setback(unwritten: CoreLogRecord[], error: unknown): void {
+    const queue = [...unwritten, ...this.pending];
+    this.dropped += Math.max(0, queue.length - PENDING_RECORDS);
+    this.pending = queue.slice(0, PENDING_RECORDS);
+    this.prepared = false;
+    this.failures += 1;
+    this.failure(error);
+    if (this.timer !== null) clearTimeout(this.timer);
+    this.schedule(Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** (this.failures - 1)));
+  }
+
+  /** The first write after an outage: the next failure is reported again, and the log says how long it lasted. */
+  private recovered(): void {
+    if (this.failures === 0) return;
+    const failures = this.failures;
+    this.failures = 0;
+    this.failureReported = false;
+    this.record('warn', `diagnostic logs are written again after ${failures} failed ${failures === 1 ? 'attempt' : 'attempts'}`, { source: 'logs', event: 'logs.recovered', data: { failures } });
+  }
+
+  /** `progress.written` counts the records of `batch` the files hold, so a failure part way re-queues only the rest. */
+  private async append(batch: CoreLogRecord[], progress: { written: number }): Promise<void> {
     let chunk = '';
     let chunkBytes = 0;
     let written: string[] = [];
+    // The records of `batch` up to the chunk's last one, skipped ones included.
+    let covered = progress.written;
     const write = async (): Promise<void> => {
-      if (!chunk) return;
-      const handle = await open(this.path(0), 'a', 0o600);
-      try { await handle.writeFile(chunk); } finally { await handle.close(); }
-      this.bytes += chunkBytes; chunk = ''; chunkBytes = 0;
-      for (const id of written) this.unpersisted.delete(id);
-      written = [];
+      if (chunk) {
+        const handle = await open(this.path(0), 'a', 0o600);
+        try { await handle.writeFile(chunk); } finally { await handle.close(); }
+        this.bytes += chunkBytes; chunk = ''; chunkBytes = 0;
+        for (const id of written) this.unpersisted.delete(id);
+        written = [];
+      }
+      progress.written = covered;
     };
     for (const record of batch) {
       const line = `${JSON.stringify(record)}\n`;
       const bytes = Buffer.byteLength(line);
-      if (bytes > this.fileBytes) continue;
+      // Too large for any file: it stays in memory only, and no retry tries it again.
+      if (bytes > this.fileBytes) { covered += 1; continue; }
       if (this.bytes + chunkBytes + bytes > this.fileBytes) { await write(); await this.rotate(); }
-      chunk += line; chunkBytes += bytes; written.push(record.id);
+      chunk += line; chunkBytes += bytes; written.push(record.id); covered += 1;
     }
     await write();
   }
@@ -479,6 +529,7 @@ export class DiagnosticLogs {
     await this.flush();
     await this.ready;
     this.closed = true;
+    if (this.timer !== null) { clearTimeout(this.timer); this.timer = null; }
   }
 }
 
