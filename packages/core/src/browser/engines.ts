@@ -42,10 +42,14 @@ export class BrowserEngines {
       : join(this.core.dataDir, 'browser', profile);
   }
 
-  /** A profile keeps one engine, including while its User-Agent or the attached host changes. */
+  /**
+   * A profile keeps one engine, including while its User-Agent or the attached
+   * host changes. One that is closing or lost keeps the profile until its
+   * process exited: a browser started sooner would find the old one's lock.
+   */
   get(profile: string): Promise<Engine> {
     const current = this.pending.get(profile) ?? this.pending.get(`host:${profile}`);
-    if (current) return current.then(engine => this.#closing.has(engine) ? engine.exited.then(() => this.get(profile)) : engine);
+    if (current) return current.then(engine => this.#closing.has(engine) || this.#ended.has(engine) ? engine.exited.then(() => this.get(profile)) : engine);
     // A webview has no per-profile process flags. Custom identities use Chromium
     // so its workers and popups inherit the same User-Agent as its pages.
     const hosted = this.host.attached && !this.#userAgent(profile);
@@ -55,7 +59,10 @@ export class BrowserEngines {
       engine = this.launch(profile, true, hosted);
       this.pending.set(key, engine);
       engine.then(started => {
-        void started.exited.then(() => this.lost(started));
+        void started.exited.then(() => {
+          this.lost(started);
+          if (this.pending.get(key) === engine) this.pending.delete(key);
+        });
         started.cdp.closed.then(() => this.lost(started));
       }, () => { if (this.pending.get(key) === engine) this.pending.delete(key); });
     }
@@ -139,7 +146,7 @@ export class BrowserEngines {
 
   /** Engines whose end is already in the log (the exit, the closed socket and a shutdown all call `lost`), those the core is closing, and page checks. */
   readonly #ended = new WeakSet<Engine>(); readonly #closing = new WeakSet<Engine>(); readonly #probing = new WeakSet<Engine>();
-  /** The process ended or dropped its connection: its tabs are gone. */
+  /** The process ended or dropped its connection: its tabs are gone, its profile is free once the process exited. */
   lost(engine: Engine): void {
     if (!this.#ended.has(engine)) {
       this.#ended.add(engine);
@@ -148,8 +155,6 @@ export class BrowserEngines {
       this.core.logs.record(!expected ? 'warn' : this.#probing.has(engine) ? 'debug' : 'info', `Agent browser for profile ${engine.profile} ended${expected ? '' : ' on its own'} with ${engine.tabs.size} tabs open`, {
         source: 'browser', event: expected ? 'browser.ended' : 'browser.lost', data: { profile: engine.profile, tabs: engine.tabs.size, hosted: engine.hosted } });
     }
-    const current = this.pending.get(engine.key);
-    void current?.then(value => { if (value === engine) this.pending.delete(engine.key); }, () => {});
     this.#stopTimers(engine);
     this.downloads.lost(engine);
     for (const id of [...engine.tabs]) this.drop(id);
