@@ -136,6 +136,9 @@ hours after the kept reading when that is later, unless a row was dropped
 because its program moved, which brings the check back to ten minutes, and waits
 ten more minutes while any turn is queued, running or waiting. A check started
 from the card counts: the timer does not read again within six hours of it.
+An owner client also checks when it connects or its window is shown again and
+the newest reading is more than 15 minutes old, unless a row is checking,
+updating or shows a failure.
 
 A managed update has no time limit: it waits for its download, which retries a
 dropped connection by itself and fails once the retries run out

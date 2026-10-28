@@ -234,6 +234,11 @@ export class Coordination {
     const reason = this.core.journal.getSetting(`${AUTO_PAUSE_PREFIX}${threadId}`);
     return Boolean(reason) && reason !== 'stop';
   }
+  /** The owner trusted the contact mail a held wake refused: a failure's pause ends, Stop's and the owner's stay, and the letters go again. */
+  resumeTrusted(threadId: string): void {
+    this.resumeForAgent(threadId);
+    this.kick(threadId);
+  }
   private resumeForAgent(threadId: string): void {
     if (this.wakesForAgent(threadId)) this.resumeForUser(threadId);
   }

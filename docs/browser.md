@@ -324,7 +324,11 @@ any port; `Target.createTarget`, `attachToTarget` and `closeTarget` create,
 name and close webviews; a page's events, its address and title, and the
 windows it opens come back with `browser.hostReply`. Network events are cut
 to what the core reads: a request's address, and a response only when it
-failed, with its status and address (`compactPageEvent`). The shell lets an agent
+failed, with its status and address (`compactPageEvent`). A call the page makes
+to its servers (`Fetch`, `XHR`, a document, an event stream) also keeps its
+method, headers, type and response headers, and its end comes back with the
+bytes it took, so [`browser network`](#network-calls) lists hosted tabs too.
+The shell lets an agent
 webview (an id starting with `agent-`) take the Page, Runtime, Input,
 Emulation, Network, Log and DOM domains, never the profile's cookies
 (`apps/shell/src-tauri/src/browser_control.rs`). An agent webview out of sight
@@ -356,6 +360,79 @@ the connection ends the relay, and the next tab opens in the core's own
 browser again. Other clients of the conversation, a phone or another machine,
 still watch a hosted tab as frames, taken through the app. The Linux and
 macOS apps do not host; their webviews have no DevTools channel to relay.
+
+## Network calls
+
+`boite browser network` lists the calls a tab's page makes to its servers:
+fetch and XHR calls, documents and event streams, never its scripts, styles,
+images or fonts. Capture is off until an agent asks: every tab enables the
+`Network` domain with no buffer for bodies, and the first `browser network`
+in a tab enables it again with 20 MB for responses (4 MB each) and 64 KB of
+request body, then lists only what the page does from there; reloading or
+acting on the page fills the list. `browser network --filter <text>` keeps
+the calls whose method, address or type contains the text. A tab keeps its
+last 300 calls (`packages/core/src/browser/network.ts`).
+
+`browser network <id>` shows one call: its headers, without the ones the
+browser sets itself, its request and response bodies up to 50,000 characters,
+and the `page.fetch` line that sends it again from the page. A binary
+response is described, never sent. Credentials are hidden before anything
+leaves the core: a header, a query parameter or a JSON or form field named
+like a cookie, an authorization, a password, a secret, a key, a session, a
+signature or a token reads `<hidden, N characters>`, after an acronym or in
+the plural too (`APIToken`, `apiKeys`). A list or an object under such a name
+is hidden whole, as is a value nested past 20 levels. The address in a
+`Location`, `Content-Location` or `Referer` header has its query masked as a
+call's address is. A body is masked whole, then cut. One that does not parse
+as JSON (a guard prefix, a stream of values, a page's inline script) has each
+`"name": value` pair masked on its own, a list or an object up to its closing
+bracket. Only pagination tokens stay readable (`page_token`,
+`next_page_token`, `continuation_token`, `next_token` and the like), since an
+agent pages through results with them; `page_access_token` is hidden. The
+note under a call with hidden values tells the agent to read them from the
+page each time. `browser network stop` forgets the calls and gives Chromium's buffers
+back.
+
+`page.fetch(url, { method, headers, body })` in a script runs `fetch` in the
+page, so the request carries the page's cookies and passes its CORS rules as
+the site's own code would. It returns the status, final address, headers and
+the body as `json` when the reply is typed JSON or starts with `{` or `[` and
+parses, as `text` otherwise (a bare `42` stays text). It reads no further
+than 2,000,000 characters and returns them with `truncated: true`. A status of 400 or more fails the step with
+the start of the body. The step's label leaves the query and the body out. The
+request travels as one page expression, so address, headers and body fit in
+32,000 characters; a longer body is built in the page and sent from `page.eval`.
+
+## Recipes
+
+A recipe is a `browser run` script kept on the machine under a name, so the
+next agent with the same task on the same site runs it in one call instead of
+driving the pages again (`packages/core/src/browser-recipe.ts`).
+`boite browser recipe save <name> <file|-> --about "<what it does>"
+[--usage "<its args>"] [args...]` runs the script with those words first and
+keeps it only if the run passes; its flags come before the script's first
+word, and every word from there on is the script's own. It is kept under the sites it asked for, reached after
+redirects or fetched, and the site its tab ended on. Saving a name again replaces the script and keeps its
+`--about` and `--usage` unless new ones are given. `recipe list` shows each
+recipe's command, sites, runs and last result; `recipe show <name>` adds its
+script; `recipe delete <name>` removes it. `browser open` and `navigate` name
+the recipes kept for the site they reach.
+
+`boite browser recipe run <name> [--tab <id>] [args...]` runs the script as
+`browser run` would and records the result on the recipe. A run that fails
+names the step and shows the page it stopped on, as any script does, then
+says how to repair the recipe: show its script, fix it against that page and
+save it again under the same name. The agent that ran it does the repair in
+its own turn; `recipe list` marks the recipe broken, with the step and the
+reason, until a save or a run passes.
+
+The core only stores recipes: one JSON file each in
+`<data>/browser-recipes/`, mode 0600, at most 200 of 64 KB each, outside
+`browser/`, whose unknown folders the profile cleanup removes
+(`packages/core/src/browser/recipes.ts`). A recipe runs in the agent's CLI
+process with the agent's own rights, as any script it wrote would. Recipes
+belong to the machine, not to one conversation, and any agent of the machine
+may run, replace or delete one. A demo client keeps none.
 
 ## Downloads
 
@@ -561,7 +638,11 @@ one kept awake by `browser.remoteWatch`, and a machine without a browser. `brows
 stubbed, that a command arriving during a freeze runs after the wake, and that
 a held or closed tab never sleeps, that a running turn holds an unused
 tab only 5 minutes, and that a wake call that misses its time fails at once and then names who stalled. `AgentBrowserSurface.test.ts` checks that the desktop app
-reports a hosted tab it shows, only while its window is visible. `browser-cli.test.ts` checks the CLI's files and `browser run` scripts with the browser stubbed.
+reports a hosted tab it shows, only while its window is visible. `browser-cli.test.ts` checks the CLI's files and `browser run` scripts with the browser stubbed,
+and recipes kept only after a run passes, a failed run recorded with the way to repair it and a repaired one saved again, against the core's own store.
+`browser-network.test.ts` captures a page's API call in a real Chromium, reads its body after capture started, hides its authorization, password,
+query token and session field, repeats it with `page.fetch`, and keeps and runs a recipe built on it. `browser-host.test.ts` checks the fields a
+hosted tab relays for a call; the Windows app's relay of them runs only on Windows.
 `browser-frames.test.ts` reads and drives a payment form in a frame of the
 page's origin, one of another site, one of another origin of the same site
 below the fold, and a frame of another site nested in the second: native clicks land in each (`isTrusted`),
