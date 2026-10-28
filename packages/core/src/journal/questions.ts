@@ -7,8 +7,9 @@ import type { QuestionRequest } from '@boite/contracts';
  * thirty days (`journal/retention.ts`): this projection keeps the card, written
  * in the transaction of the event that asks or closes it.
  */
-export function createPendingQuestions(db: Database): void {
+export function createPendingQuestions(db: Database, backfill: boolean): void {
   db.exec('CREATE TABLE IF NOT EXISTS pending_questions (id TEXT NOT NULL UNIQUE, thread_id TEXT NOT NULL, payload TEXT NOT NULL)');
+  if (!backfill) return;
   // A journal from before the projection reads its open cards from the events it still has.
   db.exec(`INSERT OR IGNORE INTO pending_questions (id, thread_id, payload)
     SELECT json_extract(asked.payload, '$.id'), asked.thread_id, asked.payload FROM events asked

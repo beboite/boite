@@ -470,7 +470,8 @@ export function migrate(db: Database, file: string): { from: number; to: number 
     version = 44;
   }
   if (version < 45) {
-    createPendingQuestions(db);
+    // A new journal has no events to read; reading them anyway marks `events` for ANALYZE on SQLite before 3.46.
+    createPendingQuestions(db, (row?.user_version ?? 0) > 0);
     version = 45;
   }
   createSharedProjects(db);
