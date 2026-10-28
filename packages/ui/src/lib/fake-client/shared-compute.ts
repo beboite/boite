@@ -12,6 +12,8 @@ const states=new WeakMap<FakeContext,HostState>();
 function stateOf(ctx:FakeContext):HostState{let state=states.get(ctx);if(!state){state={nativeProtected:false,bindings:new Map(),jobs:new Map(),requests:new Map(),sources:new Map(),repos:new Map()};states.set(ctx,state);}return state;}
 const terminal=(job:SharedComputeJob)=>['done','failed','cancelled','revoked'].includes(job.status);
 /** Fixture capability only. The in-memory client never attests an actual OS boundary. */
+/** A remote job's thread, whose history starts at the job like the core's. */
+export function sharedWorker(ctx:FakeContext,threadId:string):boolean{return [...stateOf(ctx).jobs.values()].some(r=>r.job.worker?.threadId===threadId);}
 export function setSharedNativeExecution(ctx:FakeContext,available:boolean):void{stateOf(ctx).nativeProtected=available;}
 export function sharedPermission(protocol:Protocol,mode:PermissionMode,providerId?:string):boolean{
   if(protocol==='pi')return mode==='yolo'||mode==='bypassPermissions';

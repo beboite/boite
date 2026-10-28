@@ -685,13 +685,9 @@ export class Threads {
     if (!client) return false;
     try {
       await client.call('threads.trustContactHistory', { threadId });
-      if (!this.ctx.currentClient(client, clientGeneration)) return false;
-      // The core announces it to every client; this one shows it at once.
-      const row = this.rowOf(threadId);
-      if (row) row.contactHold = null;
-      const open = this.openThread;
-      if (open && open.id === threadId) open.contactHold = null;
-      return true;
+      // The core announces the cleared hold before it answers; clearing it here
+      // again would erase a hold a letter set in between.
+      return this.ctx.currentClient(client, clientGeneration);
     } catch (error) {
       if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
       return false;

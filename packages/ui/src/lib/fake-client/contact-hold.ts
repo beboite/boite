@@ -1,5 +1,6 @@
 import type { Thread, ThreadId } from '@boite/contracts';
 import type { FakeContext } from './context';
+import { sharedWorker } from './shared-compute';
 
 /*
  * As the core's letter scopes: a thread holds through its own contact mail
@@ -17,7 +18,10 @@ function heldMail(ctx: FakeContext): Map<ThreadId, string[]> {
 
 function history(ctx: FakeContext, threadId: ThreadId): ThreadId[] {
   const ids: ThreadId[] = [];
-  for (let thread = ctx.threads.get(threadId); thread && !ids.includes(thread.id); thread = thread.parentThreadId ? ctx.threads.get(thread.parentThreadId) : undefined) ids.push(thread.id);
+  for (let thread = ctx.threads.get(threadId); thread && !ids.includes(thread.id); thread = thread.parentThreadId ? ctx.threads.get(thread.parentThreadId) : undefined) {
+    ids.push(thread.id);
+    if (sharedWorker(ctx, thread.id)) break;
+  }
   return ids;
 }
 
@@ -37,12 +41,13 @@ function settle(ctx: FakeContext, changed: ThreadId[]): void {
     if (!thread) continue;
     const hold = holdOf(ctx, id);
     if (JSON.stringify(thread.contactHold ?? null) !== JSON.stringify(hold)) { thread.contactHold = hold; ctx.touch(thread); }
-    for (const child of ctx.threads.values()) if (child.parentThreadId === id) queue.push(child.id);
+    for (const child of ctx.threads.values()) if (child.parentThreadId === id && !sharedWorker(ctx, child.id)) queue.push(child.id);
   }
 }
 
+/** Mail from these contacts, outside a shared project, reached the thread; earlier holders stay. */
 export function holdContactMail(ctx: FakeContext, threadId: ThreadId, contacts: string[]): void {
-  heldMail(ctx).set(threadId, contacts);
+  heldMail(ctx).set(threadId, [...new Set([...(heldMail(ctx).get(threadId) ?? []), ...contacts])]);
   settle(ctx, [threadId]);
 }
 

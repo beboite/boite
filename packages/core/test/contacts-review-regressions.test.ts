@@ -155,7 +155,15 @@ test('the hold names only the contacts mailing outside a shared project, and tru
   }
   const charlie=b.h.core.contacts.peers().find(peer=>peer.coreId===c.id)!.name;
   expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).toEqual({contacts:[charlie]});
-  await b.c.call('threads.trustContactHistory',{threadId:b.t.id});
+  // As a protected native route would: the binding alone does not admit a held turn.
+  const access=b.h.core.sharedAccess,providers=b.h.core.providers,require=providers.require.bind(providers),support=access.execution.support.bind(access.execution);
+  providers.require=((id:string)=>id===b.t.providerId?{...require(id),protocol:'claude-sdk'}:require(id)) as typeof providers.require;
+  access.execution.support=(()=>({supported:true,boundary:'isolated-process'})) as typeof access.execution.support;
+  try{
+    expect(()=>access.assertTurn(b.t.id)).toThrow('shared file policy');
+    await b.c.call('threads.trustContactHistory',{threadId:b.t.id});
+    access.assertTurn(b.t.id);
+  }finally{providers.require=require;access.execution.support=support;}
   expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).toBeNull();
   // The association's mail keeps its captured authority, and its live limits still apply.
   expect(b.h.core.sharedAccess.bound(b.t.id)?.job.sharedProjectId).toBe(shared);

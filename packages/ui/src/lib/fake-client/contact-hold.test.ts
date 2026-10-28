@@ -16,6 +16,10 @@ test('trusting a held bot frees its sub-agent as the core does, and a sub-agent 
 
   client.holdForContactMail(threadId, ['Chris']);
   expect(heard.get(child)).toEqual({ contacts: ['Chris'] });
+  // As the core: only the owner trusts it, never the held agent.
+  client.becomes('agent');
+  await expect(client.call('threads.trustContactHistory', { threadId })).rejects.toThrow('not one of the agent');
+  client.becomes('owner');
   await client.call('threads.trustContactHistory', { threadId });
   expect([heard.get(threadId), heard.get(child)]).toEqual([null, null]);
 
