@@ -310,7 +310,7 @@ function waitDelegation(ctx: FakeContext, params: RpcParams<'delegation.wait'>):
         resolve({ state: asks ? 'needs_input' : waiting ? 'waiting_for_children' : params.agentId && agents.some(agent => agent.settlement === 'result_available') ? 'result_available' : 'settled', timedOut: timedOut && !asks, agents });
       } catch (error) { cleanup(); reject(error); }
     };
-    subscriptions.push(ctx.bus.on('turn.finished', () => inspect()), ctx.bus.on('delegation.changed', () => inspect()), ctx.bus.on('thread.removed', () => inspect()), ctx.bus.on('thread.background', () => inspect()), ctx.bus.on('question.asked', () => inspect()), ctx.bus.on('permission.requested', () => inspect()));
+    subscriptions.push(ctx.bus.observe('turn.finished', () => inspect()), ctx.bus.observe('delegation.changed', () => inspect()), ctx.bus.observe('thread.removed', () => inspect()), ctx.bus.observe('thread.background', () => inspect()), ctx.bus.observe('question.asked', () => inspect()), ctx.bus.observe('permission.requested', () => inspect()));
     subscriptions.push(ctx.bus.onState(state => {
       if (state !== 'ready') { cleanup(); reject(new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation.wait: connection closed' })); }
     }));

@@ -1,6 +1,6 @@
 import type { ServerWebSocket } from 'bun';
 import type { Channel, RpcEventName, RpcEvents, ThreadId } from '@boite/contracts';
-import { APP_ORIGIN, FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode, VIEW_ROUTE } from '@boite/contracts';
+import { APP_ORIGIN, FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode, VIEW_ROUTE, SUBSCRIBED_EVENTS, agentHearsEvent } from '@boite/contracts';
 import { timingSafeEqual } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
 import { hostname, networkInterfaces } from 'node:os';
@@ -816,8 +816,8 @@ export function startServer(options: ServerOptions): RunningServer {
     for (const connection of connections) {
       if (!connection.authenticated) continue;
       if (!mayReceiveEvent(name, connection)) continue;
-      if (connection.identity.principal === 'agent' && name !== 'todos.updated' && name !== 'agents.changed' && connection.identity.threadId !== threadId) continue;
-      if ((name === 'collaboration.changed' || name === 'delegation.changed' || name === 'workflows.changed') && !connection.subscriptions.has(threadId ?? '')) continue;
+      if (connection.identity.principal === 'agent' && !agentHearsEvent(name, payload, connection.identity.threadId, id => core.journal.getThread(id)?.projectId ?? null)) continue;
+      if (SUBSCRIBED_EVENTS.has(name) && !connection.subscriptions.has(threadId ?? '')) continue;
       if (scoped && !agentQuestion && (threadId === null || !(connection.subscriptions.has(threadId) || (parentId !== null && connection.subscriptions.has(parentId))))) continue;
       // The whole activity, loop history included, is for the clients that have
       // that thread open; an agent socket still gets its own thread's.

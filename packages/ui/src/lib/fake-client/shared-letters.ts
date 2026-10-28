@@ -43,7 +43,7 @@ function flushContactMail():void {
 export function sharedLetterMethods(ctx:FakeContext,ordinary:Pick<FakeMethods,'collaboration.send'|'collaboration.configure'|'collaboration.get'>){
   mailCores.add(ctx);
   ctx.bus.onState(state=>{if(state==='closed')mailCores.delete(ctx);});
-  ctx.bus.on('contacts.updated',flushContactMail);
+  ctx.bus.observe('contacts.updated',flushContactMail);
   sharedState(ctx).listeners.add(flushContactMail);
   async function send(p:RpcParams<'contacts.sendHuman'>,human:boolean):Promise<AgentLetter>{
     const contact=sharedContact(ctx,p.to?.coreId);
