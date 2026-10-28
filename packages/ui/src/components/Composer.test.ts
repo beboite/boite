@@ -2270,6 +2270,28 @@ test('on a phone, the Undo offer of a cleared draft ends when another conversati
   expect(store.composerStates['t-trace']?.text ?? '').toBe('');
 });
 
+test('on a phone, the Undo offer of a cleared new conversation ends when another new conversation opens in the same box', async ({ app: _app }) => {
+  store.startDraft(null, { fresh: true });
+  await waitFor(() => !store.openThread && store.draft !== null && input() !== null);
+  vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
+    media, matches: media === '(pointer: coarse)', onchange: null, addListener() {}, removeListener() {},
+  }) as unknown as MediaQueryList);
+  await type('another conversation, parked');
+  const other = store.draft!.id;
+  store.startDraft(null, { fresh: true });
+  await waitFor(() => store.draft !== null && store.draft.id !== other && input().value === '');
+  await type('a long prompt typed on the phone '.repeat(300));
+  const full = input().value;
+  input().focus();
+  input().setSelectionRange(0, full.length);
+  edit('deleteContentBackward', '', 0);
+  await waitFor(() => document.querySelector('[data-testid=undo-toast]') !== null);
+  // Both are the box's `draft` key: only the draft's own identity tells them apart.
+  store.startDraft(null, { draftId: other });
+  await waitFor(() => store.draft?.id === other && input().value === 'another conversation, parked');
+  await waitFor(() => document.querySelector('[data-testid=undo-toast]') === null);
+});
+
 test('on a phone, a file attached after the draft was cleared ends the Undo offer, which would take the file back instead', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => !store.busy);

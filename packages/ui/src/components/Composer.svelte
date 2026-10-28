@@ -46,7 +46,7 @@
   const side = new ComposerSide();
   $effect(() => { key; store.client; return () => side.clear(); });
   let key = $derived(target?.key ?? store.openThread?.id ?? DRAFT_STASH_KEY);
-  $effect(() => { const left = key; return () => closeDraftUndo(left); }); // A phone's Undo toast ends as the box moves to another draft.
+  $effect(() => { const left = key; if (left === DRAFT_STASH_KEY) void store.draft?.id; return () => closeDraftUndo(left); }); // A phone's Undo toast ends as the box moves to another draft, new conversations included.
   /** The thread this box sends to: none when it speaks to an agent, whatever thread is open behind it. */
   let thread = $derived(target ? null : store.openThread);
   let composer = $derived(store.composerStates[key]);
