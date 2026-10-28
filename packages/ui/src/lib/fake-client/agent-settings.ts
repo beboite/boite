@@ -7,7 +7,7 @@
  * `agents/create.ts`.
  */
 import {
-  AGENT_SETTING_KEYS, AGENT_STATUSES, RpcErrorCode, agentModelRoute, agentSettingValue, providerEnabled, checkAgentCreate, checkAgentSettingRequest, normalizeAgentSetting, settledAgentSetting,
+  AGENT_SETTING_KEYS, AGENT_STATUSES, RpcErrorCode, agentModelRoute, agentSettingProposal, agentSettingValue, providerEnabled, checkAgentCreate, checkAgentSettingRequest, normalizeAgentSetting, settledAgentSetting,
   type AgentCreateContext, type AgentProfile, type AgentSelection, type AgentSettingAsk, type AgentSettingContext, type AgentSettingReading, type AgentSettingRequestParams,
   type DelegationConfig, type RpcParams, type RpcResult, type Thread, type Turn,
 } from '@boite/contracts';
@@ -48,7 +48,7 @@ function accountOn(ctx: FakeContext, agent: AgentProfile, providerId: string): s
 /** As the core: `<provider>/<model>` of an available provider, or a model id of the agent's own. */
 function modelRoute(ctx: FakeContext, agent: AgentProfile, wanted: string): { providerId: string; accountId: string; model: string } | null {
   const slash = wanted.indexOf('/');
-  const named = slash > 0 ? ctx.providers.find(provider => provider.id === wanted.slice(0, slash) && provider.available && providerEnabled(provider)) : undefined;
+  const named = slash > 0 ? ctx.providers.find(provider => provider.id === wanted.slice(0, slash) && (provider.id === agent.selection.providerId || (provider.available && providerEnabled(provider)))) : undefined;
   const accountId = named && accountOn(ctx, agent, named.id);
   if (named && accountId && modelsOf(ctx, named.id, accountId).some(entry => entry.id === wanted.slice(slash + 1))) return { providerId: named.id, accountId, model: wanted.slice(slash + 1) };
   const { providerId, accountId: own } = agent.selection;
@@ -220,7 +220,7 @@ export function agentSettingMethods(ctx: FakeContext): Handlers {
       let value = setting.value;
       // As the core: a name is checked again, another card may have given it away since; a model too.
       if (params.value !== undefined || setting.key === 'name' || setting.key === 'model') {
-        const normalized = normalizeAgentSetting(setting.key, params.value ?? setting.value, context(ctx, agent));
+        const normalized = normalizeAgentSetting(setting.key, params.value ?? agentSettingProposal(setting, agent), context(ctx, agent));
         if (!normalized.ok) throw refused(normalized.message, { field: 'value', key: setting.key });
         value = normalized.value;
       }

@@ -208,7 +208,7 @@ export {
 } from './setting-requests.ts';
 export {
   AGENT_AVATAR_MAX, AGENT_DAILY_BUDGET, AGENT_DOMAIN_MAX, AGENT_INSTRUCTIONS_MAX, AGENT_NAME_MAX, AGENT_PROJECTS_MAX, AGENT_SETTING_KEYS, AGENT_STATUSES,
-  agentModelRef, agentModelRoute, agentProjectIds, agentSettingAnswerText, agentSettingValue, checkAgentSettingRequest, isAgentSettingKey,
+  agentModelRef, agentModelRoute, agentProjectIds, agentSettingAnswerText, agentSettingProposal, agentSettingValue, checkAgentSettingRequest, isAgentSettingKey,
   normalizeAgentSetting, settledAgentSetting,
   type AgentSettingApplyParams, type AgentSettingAsk, type AgentSettingChoice, type AgentSettingContext, type AgentSettingKey, type AgentSettingReading,
   type AgentSettingRequestCheck, type AgentSettingRequestParams, type AgentSettingsReading, type AgentSettingsReadParams,

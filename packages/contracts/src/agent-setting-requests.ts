@@ -54,6 +54,12 @@ export interface AgentSettingAsk {
    * core knew them: the client lists only its own machine's projects.
    */
   labels?: Record<string, string>;
+  /**
+   * On a `model` card, its value and previous name the provider
+   * (`<provider>/<model>`). A card drawn before cards named the provider
+   * lacks it and holds model ids of the agent's provider.
+   */
+  modelRefs?: true;
 }
 
 /** One choice a setting offers, as `agents.settings.read` lists it. */
@@ -242,7 +248,7 @@ export function checkAgentSettingRequest(params: Pick<AgentSettingRequestParams,
   const remote = key === 'projects' ? [...new Set([...(normalized.value as string[]), ...(previous as string[])])].filter(id => id.includes('/')) : [];
   const labels = Object.fromEntries(remote.map(id => [id, ctx.projects.find(project => project.id === id)?.label ?? id]));
   return {
-    ok: true, reason, setting: { agentId: ctx.profile.id, agentName: ctx.profile.name, key, value: normalized.value, previous, ...(remote.length ? { labels } : {}) },
+    ok: true, reason, setting: { agentId: ctx.profile.id, agentName: ctx.profile.name, key, value: normalized.value, previous, ...(remote.length ? { labels } : {}), ...(key === 'model' ? { modelRefs: true as const } : {}) },
     // Applied is never an answer: the core says it when the value moves.
     options: [{ id: 'refuse', label: 'Refuse' }],
   };
@@ -259,10 +265,15 @@ export function settledAgentSetting(setting: AgentSettingAsk, profile: AgentProf
   const archiving = setting.key === 'status' && setting.value === 'archived';
   if (!archiving && (config === null || profile.status === 'archived')) return 'close';
   const now = archiving ? profile.status : agentSettingValue(profile, config!, setting.key);
-  // A model card drawn before cards named the provider holds the bare model id.
-  const held = (value: unknown) => (setting.key === 'model' && value === profile.selection.model ? now : value);
-  if (sameSetting(now, held(setting.previous))) return null;
-  return { optionIds: [sameSetting(now, held(setting.value)) ? 'applied' : 'changed'], value: now };
+  // A model card drawn before cards named the provider compares model ids.
+  const held = setting.key === 'model' && setting.modelRefs !== true ? profile.selection.model : now;
+  if (sameSetting(held, setting.previous)) return null;
+  return { optionIds: [sameSetting(held, setting.value) ? 'applied' : 'changed'], value: now };
+}
+
+/** The value a card proposes, as `<provider>/<model>` for a model card drawn with a model id of the agent's provider. */
+export function agentSettingProposal(setting: AgentSettingAsk, profile: AgentProfile): unknown {
+  return setting.key === 'model' && setting.modelRefs !== true && typeof setting.value === 'string' ? `${profile.selection.providerId}/${setting.value}` : setting.value;
 }
 
 /** The longest value a refusal or an outcome quotes: a bot's instructions run to thousands of characters. */

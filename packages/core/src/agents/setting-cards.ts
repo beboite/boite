@@ -10,7 +10,7 @@
  * contracts/agent-setting-requests.ts, where the in-memory client reads them.
  */
 import {
-  agentModelRoute, agentSettingAnswerText, agentSettingValue, AGENT_SETTING_KEYS, AGENT_STATUSES, checkAgentSettingRequest, normalizeAgentSetting, settledAgentSetting,
+  agentModelRoute, agentSettingAnswerText, agentSettingProposal, agentSettingValue, AGENT_SETTING_KEYS, AGENT_STATUSES, checkAgentSettingRequest, normalizeAgentSetting, settledAgentSetting,
   type AgentProfile, type AgentSettingApplyParams, type AgentSettingAsk, type AgentSettingContext, type AgentSettingReading,
   type AccountId, type AgentSettingChoice, type AgentSettingRequestParams, type AgentSettingsReading, type AgentSettingsReadParams,
   type ProviderId, type QuestionAnswer, type RequestId,
@@ -97,9 +97,12 @@ export class AgentSettingCards {
     const named = slash > 0 ? this.core.providers.get(wanted.slice(0, slash)) : undefined;
     if (named === undefined) return ownRoute();
     const model = wanted.slice(slash + 1);
-    const accountId = this.accountOn(agent, named.id);
+    // Another provider must be installed and turned on: Apply would otherwise move the bot where its thread cannot follow.
+    const usable = named.id === own.id || this.core.providers.available().some(summary => summary.id === named.id);
+    const accountId = usable ? this.accountOn(agent, named.id) : undefined;
     if (accountId !== undefined && modelsFor(named, accountId).some(entry => entry.id === model)) return { providerId: named.id, accountId, model };
     if (modelsFor(own, agent.selection.accountId).some(entry => entry.id === wanted)) return ownRoute();
+    if (!usable) throw refused(`model: ${named.id} is not installed or is turned off on this machine`, { field: 'model', providerId: named.id });
     if (accountId === undefined) throw refused(`model: ${named.id} has no signed-in account on this machine`, { field: 'model', providerId: named.id });
     return { providerId: named.id, accountId, model: checkModel(named, accountId, model)! };
   }
@@ -181,9 +184,9 @@ export class AgentSettingCards {
     const ctx = this.context(agent);
     let value = ask.value;
     // A name is checked again: another card may have given it to a bot since this one was drawn.
-    // A model too: its provider may have signed out, and a card drawn before cards named the provider holds a bare id.
+    // A model too: its provider may have signed out or been turned off.
     if (params.value !== undefined || ask.key === 'name' || ask.key === 'model') {
-      const normalized = normalizeAgentSetting(ask.key, params.value ?? ask.value, ctx);
+      const normalized = normalizeAgentSetting(ask.key, params.value ?? agentSettingProposal(ask, agent), ctx);
       if (!normalized.ok) throw refused(normalized.message, { field: 'value', key: ask.key });
       value = normalized.value;
     }

@@ -539,8 +539,10 @@ needs no prefix. On its own provider the bot keeps its account, on another it
 takes that provider's signed-in default; an account the owner granted only to
 other bots is refused. A model outside the bot's allowed routes can be
 proposed: applying the card is the owner allowing it, so the route joins
-the allowed routes and becomes the default one. A model card drawn before
-cards named the provider (a bare model id) is checked again on Apply. Any change to the bot, from the card or from the page,
+the allowed routes and becomes the default one. Apply checks the model again
+and refuses it once its provider is turned off or signed out. A model card
+drawn before cards named the provider holds a model id of the bot's provider
+and settles on that id. Any change to the bot, from the card or from the page,
 settles the cards it answers, and a card whose key no longer exists closes, as
 does one about a bot archived since, except the card that archived it; the
 asking thread reads the outcome as a message. Code:
