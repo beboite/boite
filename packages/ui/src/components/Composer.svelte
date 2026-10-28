@@ -291,8 +291,7 @@
     }
     // A host whose undo could not be cancelled already rewrote the box: the old path keeps its references.
     const nativeUndo = input.inputType === 'historyUndo' || input.inputType === 'historyRedo';
-    const state = stateForInput(); noteTyping(store, key);
-    closeDraftUndo();
+    const state = stateForInput(); noteTyping(store, key); closeDraftUndo();
     const prior = { text: state.text, attachments: state.attachments.length };
     // Still writing: a send pressed while files were loading waits for the next Send.
     sendWhenLoaded = null;
