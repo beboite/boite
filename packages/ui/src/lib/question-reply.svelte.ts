@@ -1,6 +1,6 @@
 import type { QuestionRequest } from '@boite/contracts';
 import type { Store } from './store.svelte';
-import { unresolvedAssetId } from './draft-attachments';
+import { isLoading, unresolvedAssetId } from './draft-attachments';
 import { focusComposer } from './focus';
 import { strings } from './strings';
 
@@ -123,6 +123,8 @@ export async function sendAnswer(store: Store, question: QuestionRequest): Promi
   const text = state?.text ?? '';
   const attachments = state?.attachments ?? [];
   if (attachments.some(unresolvedAssetId)) { store.error = strings.errors.draftAttachment; return false; }
+  // The card's own button skips the composer's wait: a file still being read has no bytes to send.
+  if (attachments.some(isLoading)) { store.error = strings.errors.filesLoading; return false; }
   if (state) state.sending = true;
   try {
     if (!await store.answerQuestion(question.threadId, question.id, optionIds, text.trim(), attachments)) return false;

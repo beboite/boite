@@ -7,7 +7,7 @@ import { FakeClient } from '../lib/fake-client';
 import { RpcFailure } from '../lib/client';
 import { defaultPrefs, PREFS_STORAGE_KEY, STASH_STORAGE_KEY } from '../lib/prefs';
 import { store } from '../lib/store.svelte';
-import { repliesOf, TYPING_PAUSE_MS } from '../lib/question-reply.svelte';
+import { repliesOf, sendAnswer, TYPING_PAUSE_MS } from '../lib/question-reply.svelte';
 import { closeTour } from '../lib/onboarding.svelte';
 import { freshWork, work, WORK_STORAGE_KEY } from '../lib/work-prefs.svelte';
 import { setExperiment } from '../lib/experiments';
@@ -1265,6 +1265,29 @@ test('a question asked while the user types takes the emptied composer only afte
   // Once released, typing again does not hand the box back to messages.
   await type('my answer');
   expect(query('[data-testid=composer-reply]').dataset.question).toBe(asked.id);
+});
+
+test('a question card\'s own submit never answers with a file still being read', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await send('check this [ask]');
+  await waitFor(() => document.querySelector('[data-testid=composer-reply]') !== null);
+  const asked = store.pendingQuestions.find((question) => question.threadId === 't-trace')!;
+  await type('here are the notes');
+  let release!: () => void;
+  const read = FileReader.prototype.readAsDataURL;
+  vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (this: FileReader, blob: Blob) { release = () => read.call(this, blob); });
+  paste(new File(['notes'], 'notes.txt', { type: 'text/plain' }));
+  await waitFor(() => chips().length === 1 && !loaded());
+  const call = vi.spyOn(store.client!, 'call');
+  // The card's submit (`sendAnswer`) does not go through the box's Send, which waits.
+  expect(await sendAnswer(store, asked)).toBe(false);
+  expect(call.mock.calls.some(([method]) => method === 'questions.answer')).toBe(false);
+  expect(store.error).toBe('A file is still loading. Answer once it is ready.');
+  release();
+  await waitFor(() => loaded());
+  expect(await sendAnswer(store, asked)).toBe(true);
+  const answered = call.mock.calls.find(([method]) => method === 'questions.answer')![1] as { attachments?: { data: string }[] };
+  expect(answered.attachments?.map(file => file.data)).toEqual([btoa('notes')]);
 });
 
 test('a question card does not take a sent message being edited as its answer', async ({ app: _app }) => {
