@@ -20,7 +20,7 @@ import { stderrLines } from '../lines.ts';
 import { exitWithin } from '../exit.ts';
 import type { LiveTurnSettings, ProbeContext, ProbeFilter, SessionContext } from '../types.ts';
 import { OpenCommands } from './commands.ts';
-import { SessionControls } from './controls.ts';
+import { ModelRefused, SessionControls } from './controls.ts';
 import { failureText, loadRefusal, LoadRefused, rpcReason, rpcRefusal } from './load.ts';
 import { AGENT_OWN_MODEL } from './models.ts';
 import { canDeleteSessions, CLIENT_NAME, discardSession, EXIT_GRACE_MS, isGrok, STDERR_MAX, type AcpDeps, type Timer } from './protocol.ts';
@@ -29,6 +29,7 @@ import { commandsOf, imageBlocksOf, usdCostOf, type AcpTurn } from './turn.ts';
 import { answerPermission, drawUpdate, sessionNotificationOf } from './updates.ts';
 import { errorCodeOf, noteReady } from '../driver-log.ts';
 import { SessionRetention } from '../session-retention.ts';
+import { releaseChild } from '../session-close.ts';
 import { OpenCodeConnection } from './opencode-connection.ts';
 import {protectedAcp} from './protected.ts';
 
@@ -326,7 +327,7 @@ export class AcpSession {
         turn.stopNow();
       } else if (error instanceof LoadRefused && error.lost) {
         turn.loseSession(error.message);
-      } else if (error instanceof LoadRefused) {
+      } else if (error instanceof LoadRefused || error instanceof ModelRefused) {
         turn.fail(error.message);
       } else {
         // An agent that exits while it starts takes the connection with it,
@@ -376,10 +377,20 @@ export class AcpSession {
     // Every turn, not only the first: a warm session outlives a change to any
     // of the three, the agent may have switched on its own since the last
     // prompt, and a `session/load` reports none of them reliably. Each call
-    // sends nothing when what it carries has not moved.
-    await this.controls.applyModel(turn.ctx);
-    await this.controls.applyConfig(turn.ctx);
-    await this.controls.applyMode(turn.ctx);
+    // sends nothing when what it carries has not moved. A model the agent did
+    // not take ends the turn here: the prompt would run on the previous one.
+    try {
+      await this.controls.applyModel(turn.ctx);
+      await this.controls.applyConfig(turn.ctx);
+      await this.controls.applyMode(turn.ctx);
+    } catch (error) {
+      if (!(error instanceof ModelRefused)) throw error;
+      // A stop closes the agent under a switch it has not answered.
+      if (turn.isStopped) turn.stopNow();
+      else turn.fail(error.message);
+      this.endTurn(turn, turn.isStopped);
+      return;
+    }
     const judged = this.costBaseline(turn);
     this.current = turn;
     let response: PromptResponse;
@@ -642,7 +653,7 @@ export class AcpSession {
         resolve(code);
         // A process that dies on its own leaves nothing reusable behind: the
         // next turn of the thread starts a fresh one.
-        if (!this.closing) this.drop();
+        if (!this.closing) this.drop(this.exitSentence(code), this.exitSentence(code, true));
       });
       child.once('error', () => {
         resolve(null);
@@ -656,11 +667,18 @@ export class AcpSession {
     return diagnostic || this.lastStderr.length === 0 ? head : `${head}: ${this.lastStderr}`;
   }
 
-  /** The one teardown: the connection goes, then the child, through the registry. */
-  private drop(): void {
+  /** The turn settles before its connection and child go through the registry. */
+  private drop(reason = 'the acp session closed', diagnostic?: string): void {
     if (this.ended) return;
     this.ended = true;
     this.closing = true;
+    const current = this.current;
+    this.current = null;
+    if (current !== null) {
+      if (current.isStopped) current.stopNow();
+      else current.fail(reason, diagnostic);
+      current.settle();
+    }
     this.protection?.close(this.exited ?? Promise.resolve());
     this.protection = null;
     this.clearIdle();
@@ -675,19 +693,7 @@ export class AcpSession {
     }
     const child = this.child;
     this.child = null;
-    if (child !== null) {
-      try {
-        child.stdin.end();
-      } catch {
-        // the pipe is already gone
-      }
-      try {
-        if (this.killTree !== null) this.killTree();
-        else child.kill();
-      } catch {
-        // already exited
-      }
-    }
+    releaseChild(child, this.killTree);
     this.onEnded(this);
   }
 

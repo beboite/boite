@@ -4,7 +4,7 @@ import { releaseThread } from '../drivers/index.ts';
 import type { Driver, TurnContext, TurnHandle, TurnResult } from '../drivers/types.ts';
 import type { Resume } from '../providers/update-resume.ts';
 import type { ThreadStore } from '../threads.ts';
-import { totalTokens } from '../usage.ts';
+import { sumUsage, totalTokens } from '../usage.ts';
 import { LivePermissions } from './live-permissions.ts';
 import { LiveSettings } from './live-settings.ts';
 import { saveThread, withLoad } from './records.ts';
@@ -270,7 +270,7 @@ export class TurnAttempts {
       if (result.status === 'error' && result.refusal?.kind === 'capacity' && capacityTries < CAPACITY_RETRY.delaysMs.length && !this.core.stopping) {
         const delay = CAPACITY_RETRY.delaysMs[capacityTries]!;
         capacityTries += 1;
-        usage = sumUsage(usage, result.usage);
+        usage = sumAttempts(usage, result.usage);
         this.keepSession(state, result);
         const outcome = await this.waitToRetry(state, capacityTries, delay, provider);
         if (outcome === 'stop') {
@@ -290,7 +290,7 @@ export class TurnAttempts {
       // Stopped between two tool calls for an agent update: the same turn
       // waits for it, then goes on in the same session.
       if (this.pausing.delete(threadId) && result.status === 'stopped') {
-        usage = sumUsage(usage, result.usage);
+        usage = sumAttempts(usage, result.usage);
         this.keepSession(state, result);
         const resume = await this.pause(threadId, turnId, provider);
         if (resume === null) {
@@ -303,7 +303,7 @@ export class TurnAttempts {
         continue;
       }
       if (!permissions.restarting || result.status === 'done') break;
-      usage = sumUsage(usage, result.usage);
+      usage = sumAttempts(usage, result.usage);
       this.keepSession(state, result);
       this.threads.cards.clearPermissionsOf(threadId, 'mode change');
       this.threads.cards.clearQuestionsOf(threadId, false, 'mode change');
@@ -311,7 +311,9 @@ export class TurnAttempts {
       resumed = true;
       because = 'after a permission mode change';
     }
-    result = { ...result, usage: sumUsage(usage, result.usage), ...(totals ? { agentTotals: totals } : {}) };
+    // The drivers hand over canonical buckets: the turn records that it holds them.
+    const spent = sumAttempts(usage, result.usage);
+    result = { ...result, usage: spent === null ? null : { ...spent, buckets: 1 }, ...(totals ? { agentTotals: totals } : {}) };
     if (state.running.execution) state.running.execution = { ...state.running.execution, permissionMode: state.thread.permissionMode };
     return result;
   }
@@ -578,14 +580,8 @@ function sessionAfter(before: TurnContext['sessionBefore'], usage: Usage | null,
 }
 
 /** Native attempts belong to one visible turn, including their reported usage. */
-function sumUsage(left: Usage | null, right: Usage | null): Usage | null {
+function sumAttempts(left: Usage | null, right: Usage | null): Usage | null {
   if (!left) return right;
   if (!right) return left;
-  return {
-    inputTokens: left.inputTokens + right.inputTokens,
-    outputTokens: left.outputTokens + right.outputTokens,
-    cacheReadTokens: left.cacheReadTokens + right.cacheReadTokens,
-    cacheWriteTokens: left.cacheWriteTokens + right.cacheWriteTokens,
-    costUsdEquivalent: left.costUsdEquivalent === null && right.costUsdEquivalent === null ? null : (left.costUsdEquivalent ?? 0) + (right.costUsdEquivalent ?? 0),
-  };
+  return sumUsage(left, right);
 }
