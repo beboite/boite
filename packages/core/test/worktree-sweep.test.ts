@@ -525,6 +525,17 @@ describe('worktrees.remove', () => {
     } finally { release.resolve(); spy.mockRestore(); }
   });
 
+  test('the list reads a checkout a removal holds as leaving, without starting git in it', async () => {
+    const project = await repoProject();
+    const removable = addWorktree(project, 'removable');
+    // The moment `detach` holds it: Windows CI reached the list's status then.
+    const release = harness.core.worktrees.reservations.reserve(removable, []);
+    try {
+      const listed = await client.call('worktrees.list', { projectId: project.id });
+      expect(listed.find((entry) => entry.path === removable)).toMatchObject({ missing: true, dirty: false });
+    } finally { release(); }
+  });
+
   test('an archived thread does not hold its worktree, and a turn after the restore is refused by folder', async () => {
     const project = await repoProject();
     const accountId = await echoAccount();

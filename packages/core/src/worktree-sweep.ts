@@ -274,11 +274,17 @@ export class WorktreeSweep {
   }
 
   async describe(project: Project, worktree: Listed, key: string, holders: { key: string; thread: ThreadSummary }[]): Promise<WorktreeEntry> {
-    const missing = !(await exists(worktree.path));
+    // A removal holds this checkout: no git may start in it, and it is about to be gone.
+    const leaving = (): boolean => this.core.worktrees.reservations.holder(worktree.path) !== null;
+    let missing = leaving() || !(await exists(worktree.path));
     const standing = holders.filter((holder) => inside(key, holder.key)).map((holder) => holder.thread);
     const holder = standing.find((thread) => !thread.archived) ?? standing[0] ?? null;
     const [dirty, unmerged] = await Promise.all([
-      missing ? Promise.resolve(false) : this.dirty(project, worktree.path),
+      missing ? Promise.resolve(false) : this.dirty(project, worktree.path).catch((error: unknown) => {
+        if (!leaving()) throw error;
+        missing = true;
+        return false;
+      }),
       this.unmerged(project, worktree),
     ]);
     return {
