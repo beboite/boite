@@ -22,6 +22,8 @@ export interface EditingHost {
   /** Where pasted pictures go; null for an answer, whose files reach the agent as paths whatever it reads. */
   provider: { name: string; capabilities: { images: boolean } } | null;
   moved: (caret: number) => void;
+  /** The key the box shows now, when it can move to another one while a toast waits. */
+  shown?: () => string;
 }
 
 /** The box's own selection, or nothing before it exists. */
@@ -42,25 +44,33 @@ export function travel(host: EditingHost, back: boolean): void {
 
 /** Less than this gone, and no picture: a box cleared on a phone is no loss worth a toast. */
 const WORTH_UNDO_CHARS = 40;
-let offered = 0;
+let offered: { id: number; key: string } | null = null;
 
 /**
  * A phone has no Ctrl+Z: a draft emptied in one go, or replaced by Edit,
  * offers its way back in the undo toast for a few seconds, the step Ctrl+Z
- * would take. Typing closes the offer (`closeDraftUndo`), and a box changed
- * since is left alone, so the toast never takes back another step.
+ * would take. Typing, a file going in or the box moving to another
+ * conversation closes the offer (`closeDraftUndo`), and a box whose text or
+ * files changed since, or that shows another key, is left alone, so the toast
+ * never takes back another step or rewrites a draft off screen.
  */
 export function offerDraftUndo(host: EditingHost, before: { text: string; attachments: number }, message: string): void {
   if (!touchScreen() || (before.text.trim().length < WORTH_UNDO_CHARS && before.attachments === 0)) return;
-  const { state } = host, after = state.text;
-  undo.offer(message, async () => { if (state.text === after) travel(host, true); });
-  offered = undo.current?.id ?? 0;
+  const { store, key, state } = host, after = state.text, files = [...state.attachments];
+  const untouched = () => state.text === after && state.attachments.length === files.length && state.attachments.every((file, at) => file === files[at]);
+  undo.offer(message, async () => {
+    const mine = offered?.key === key;
+    offered = null;
+    if (mine && (host.shown?.() ?? key) === key && store.composerStates[key] === state && untouched()) travel(host, true);
+  });
+  offered = { id: undo.current?.id ?? 0, key };
 }
 
-/** The composer's undo offer ends with the next edit. */
-export function closeDraftUndo(): void {
-  if (offered && undo.current?.id === offered) undo.dismiss();
-  offered = 0;
+/** The composer's undo offer ends with the next edit; given a key, only that key's offer ends, as its box leaves it. */
+export function closeDraftUndo(key?: string): void {
+  if (!offered || (key !== undefined && offered.key !== key)) return;
+  if (undo.current?.id === offered.id) undo.dismiss();
+  offered = null;
 }
 
 /** Text, pictures, page references and selection exactly as the step held them. */
@@ -99,8 +109,11 @@ export function copySelection(host: EditingHost, event: ClipboardEvent, cut: boo
   if (!copyImages(event.clipboardData, state, start, end)) return;
   event.preventDefault();
   if (!cut) return;
+  const before = { text: state.text, attachments: state.attachments.length };
+  closeDraftUndo();
   recordEdit(state, 'big', { start, end });
   writeEdit(host, state.text.slice(0, start) + state.text.slice(end), { start, end }, start);
+  if (!state.text && !state.attachments.length) offerDraftUndo(host, before, strings.composer.draftCleared);
 }
 
 /**
@@ -113,6 +126,7 @@ export function pasteImages(host: EditingHost, event: ClipboardEvent): boolean {
   const copied = copiedFrom(event.clipboardData);
   if (!copied || !box || pastesAsText(copied, state)) return false;
   event.preventDefault();
+  closeDraftUndo();
   const start = box.selectionStart, end = box.selectionEnd;
   const fitted = fitCopy(copied, state.attachments, (incoming) => {
     if (incoming.length === 0) return [];

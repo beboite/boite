@@ -2231,6 +2231,62 @@ test('on a phone, a draft emptied at once or replaced by Edit offers Undo in a t
   expect(store.composerStates['t-trace']!.editing ?? null).toBeNull();
 });
 
+test('on a phone, cutting a whole draft with its image offers Undo that brings both back', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
+    media, matches: media === '(pointer: coarse)', onchange: null, addListener() {}, removeListener() {},
+  }) as unknown as MediaQueryList);
+  await type('a long prompt typed on the phone '.repeat(300));
+  paste(pngFile('phone.png'));
+  await waitFor(() => chips().length === 1);
+  const full = input().value;
+  input().focus();
+  // Cut takes the `[Image 1]` reference and its picture through the composer's own clipboard path.
+  input().setSelectionRange(0, full.length);
+  clipboardEvent('cut', clipboard());
+  await waitFor(() => input().value === '' && chips().length === 0);
+  await waitFor(() => document.querySelector('[data-testid=undo-toast]')?.textContent?.includes(strings.composer.draftCleared) === true);
+  query<HTMLButtonElement>('[data-testid=undo-action]').click();
+  await waitFor(() => input().value === full && chips().length === 1);
+});
+
+test('on a phone, the Undo offer of a cleared draft ends when another conversation opens, so it never rewrites the one left behind', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
+    media, matches: media === '(pointer: coarse)', onchange: null, addListener() {}, removeListener() {},
+  }) as unknown as MediaQueryList);
+  await type('a long prompt typed on the phone '.repeat(300));
+  const full = input().value;
+  input().focus();
+  input().setSelectionRange(0, full.length);
+  edit('deleteContentBackward', '', 0);
+  await waitFor(() => document.querySelector('[data-testid=undo-toast]') !== null);
+  // The same box now writes to another conversation: an Undo here would put the first one's draft back behind the user's back.
+  await store.open('t-descriptors');
+  await waitFor(() => store.openThread?.id === 't-descriptors' && !store.busy);
+  await waitFor(() => document.querySelector('[data-testid=undo-toast]') === null);
+  expect(store.composerStates['t-trace']?.text ?? '').toBe('');
+});
+
+test('on a phone, a file attached after the draft was cleared ends the Undo offer, which would take the file back instead', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
+    media, matches: media === '(pointer: coarse)', onchange: null, addListener() {}, removeListener() {},
+  }) as unknown as MediaQueryList);
+  await type('a long prompt typed on the phone '.repeat(300));
+  const full = input().value;
+  input().focus();
+  input().setSelectionRange(0, full.length);
+  edit('deleteContentBackward', '', 0);
+  await waitFor(() => chips().length === 0 && document.querySelector('[data-testid=undo-toast]') !== null);
+  paste(new File(['notes'], 'notes.txt', { type: 'text/plain' }));
+  await waitFor(() => chips().length === 1);
+  await waitFor(() => document.querySelector('[data-testid=undo-toast]') === null);
+});
+
 test('a retry whose resend fails leaves the words typed meanwhile in the box and holds its prompt in the queue', async ({ oldCoreApp: _app }) => {
   await store.open('t-trace');
   await send('the prompt to retry');

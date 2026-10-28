@@ -46,6 +46,7 @@
   const side = new ComposerSide();
   $effect(() => { key; store.client; return () => side.clear(); });
   let key = $derived(target?.key ?? store.openThread?.id ?? DRAFT_STASH_KEY);
+  $effect(() => { const left = key; return () => closeDraftUndo(left); }); // A phone's Undo toast ends as the box moves to another draft.
   /** The thread this box sends to: none when it speaks to an agent, whatever thread is open behind it. */
   let thread = $derived(target ? null : store.openThread);
   let composer = $derived(store.composerStates[key]);
@@ -319,7 +320,7 @@
   /** What the composer's own edits write to (`lib/composer-editing.ts`). An answer's files reach the agent as paths, so it takes images whatever the provider reads. */
   function editing(): EditingHost {
     return { store, key, box, state: stateForInput(), provider: reply ? null : provider,
-      moved: (at) => { caret = at; recall = null; if (!sizesItself) grow(); else syncInput(); } };
+      moved: (at) => { caret = at; recall = null; if (!sizesItself) grow(); else syncInput(); }, shown: () => key };
   }
 
   /**
@@ -429,7 +430,7 @@
       // Each picture that arrives is one undo step, its reference in the text included.
       const holder = {
         get attachments() { return state.attachments; },
-        set attachments(value: Attachment[]) { checkpoint(state); state.attachments = value; }
+        set attachments(value: Attachment[]) { closeDraftUndo(); checkpoint(state); state.attachments = value; }
       };
       await attachFiles(inputStore, files, holder, attachmentProvider, () => {
         if (inputStore.composerStates[inputKey] === state) insertImageReference(inputStore, inputKey);
