@@ -463,6 +463,21 @@ test('a box the core refuses as over its attachment limit says so and keeps ever
   expect(desk.store.error).toBeNull();
 });
 
+test('a box over the limit, then emptied back to what the core holds, drops its warning with no put to make', async () => {
+  const desk = await device('desk', new FakeClient({ delayMs: 0 }));
+  desk.store.editComposerText('t-trace', 'one prompt, too many pictures');
+  desk.store.composerStates['t-trace']!.attachments = Array.from({ length: ATTACHMENTS_PER_TURN + 1 }, (_, index) =>
+    ({ kind: 'image' as const, mimeType: 'image/png', name: `shot-${index}.png`, data: btoa(`picture ${index}`) }));
+  desk.store.editComposerText('t-trace', 'one prompt, too many pictures.');
+  await vi.waitFor(() => expect(desk.store.error).toBe(fill(strings.errors.draftOverLimit, { count: String(ATTACHMENTS_PER_TURN), max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) })));
+  const puts = putsOf(desk, 't-trace').length;
+  // Cleared: the core never held this box, so the empty one matches it and nothing goes up.
+  desk.store.composerStates['t-trace']!.attachments = [];
+  desk.store.editComposerText('t-trace', '');
+  await vi.waitFor(() => expect(desk.store.error).toBeNull());
+  expect(putsOf(desk, 't-trace')).toHaveLength(puts);
+});
+
 test('a box trimmed while the core was refusing it as over the limit goes up without another edit', async () => {
   const desk = await device('desk', new FakeClient({ delayMs: 0 }));
   let release!: () => void;

@@ -577,12 +577,19 @@ export class ComposerSync {
   // Sending
   // ---------------------------------------------------------------------------
 
+  /** The over-limit warning `key` raised ends once that box no longer has to reach the core. */
+  #fits(key: string): void {
+    if (this.#overLimit?.key !== key) return;
+    if (this.ctx.store.error === this.#overLimit.message) this.ctx.store.error = null;
+    this.#overLimit = null;
+  }
+
   async #flush(key: string): Promise<void> {
     const client = this.ctx.client;
     if (!client || client !== this.#client || !this.#listed || this.ctx.store.connection !== 'ready' || !this.active) return;
     if (this.#inflight.has(key)) return;
     const source = this.#source(key);
-    if (source && this.ctx.drafts.isIncognito(source)) { this.#dirty.delete(key); return; }
+    if (source && this.ctx.drafts.isIncognito(source)) { this.#dirty.delete(key); this.#fits(key); return; }
     let local = this.#localOf(source);
     const known = this.#known.get(key);
     const files = local ? [...local.input.attachments, ...local.input.queued.flatMap(entry => entry.attachments)] : [];
@@ -590,7 +597,7 @@ export class ComposerSync {
     if (files.some(file => unresolvedAssetId(file) !== undefined && !this.#remote(unresolvedAssetId(file)!))) return;
     const sendNow = this.#forced.has(key);
     let value = this.#shape(local);
-    if (!sendNow && this.#parts(value).hash === (known?.hash ?? EMPTY.hash)) { this.#dirty.delete(key); return; }
+    if (!sendNow && this.#parts(value).hash === (known?.hash ?? EMPTY.hash)) { this.#dirty.delete(key); this.#fits(key); return; }
     const epoch = this.#epoch;
     this.#inflight.add(key);
     this.#dirty.delete(key);
@@ -610,7 +617,7 @@ export class ComposerSync {
         const now = this.#localOf(this.#source(key));
         if (result.accepted) {
           if (sendNow) this.#forced.delete(key);
-          if (this.#overLimit?.key === key) { if (this.ctx.store.error === this.#overLimit.message) this.ctx.store.error = null; this.#overLimit = null; }
+          this.#fits(key);
           this.#know(key, result.record);
           const stored = this.#known.get(key)!;
           if (stored.hash === sent.hash) { if (this.#parts(this.#shape(now)).hash !== sent.hash) this.#dirty.add(key); return; }
@@ -643,6 +650,7 @@ export class ComposerSync {
         this.#apply(key, null);
         this.ctx.drafts.persist(id);
         this.#dirty.delete(key); this.#known.delete(key);
+        this.#fits(key);
         this.#saveMeta();
         return;
       }
