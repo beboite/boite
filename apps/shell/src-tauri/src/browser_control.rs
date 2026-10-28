@@ -65,11 +65,11 @@ pub async fn browser_protocol(app: AppHandle, webview: Webview, id: String, meth
 
 /// The DevTools events an agent surface relays to the UI, which hands them to
 /// the core's agent browser. Page-level only, like the methods it may call.
-pub const AGENT_EVENTS: [&str; 15] = [
+pub const AGENT_EVENTS: [&str; 16] = [
     "Page.frameNavigated", "Page.javascriptDialogOpening", "Page.loadEventFired", "Page.domContentEventFired",
     "Page.screencastFrame", "Page.frameStartedLoading", "Page.frameStoppedLoading",
     "Runtime.consoleAPICalled", "Runtime.exceptionThrown", "Runtime.executionContextCreated", "Runtime.executionContextsCleared",
-    "Network.requestWillBeSent", "Network.responseReceived", "Network.loadingFailed", "Log.entryAdded",
+    "Network.requestWillBeSent", "Network.responseReceived", "Network.loadingFinished", "Network.loadingFailed", "Log.entryAdded",
 ];
 const MAX_EVENT_NAMES: usize = 32;
 

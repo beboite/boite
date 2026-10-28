@@ -6,6 +6,7 @@ import type { TabRecorder } from './recorder.ts';
 import type { PageInfo, ScreenTurns } from './frames.ts';
 import type { AgentPage } from './automation.ts';
 import type { SleepState } from './sleep.ts';
+import type { NetworkCapture } from './network.ts';
 
 /** One Chromium process: a profile folder, or a throwaway one for private tabs. */
 export interface Engine {
@@ -46,6 +47,8 @@ export interface Tab {
   dropped: number;
   history: BrowserHistoryEntry[];
   requests: Map<string, string>;
+  /** The page's calls while an agent captures them (`network.ts`), null otherwise. */
+  network: NetworkCapture | null;
   recorder: TabRecorder | null;
   /** The agent's turn ended while its recording ran: the video was thrown away. */
   discarded: boolean;
