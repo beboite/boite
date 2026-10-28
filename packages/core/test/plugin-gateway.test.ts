@@ -238,6 +238,14 @@ test.skipIf(process.platform === 'win32')('an update that renames the gateway ex
   // A setting Douane saved into its configuration.
   appendFileSync(join(data, 'douane.toml'), '\n[routing]\nsaved = "kept"\n');
 
+  // The first renamed candidate fails after its configuration is copied.
+  harness!.core.plugins.recommended = [douane('0.4.0', new TextEncoder().encode('#!/bin/sh\nexit 1\n'), 'douane-next')];
+  await owner.call('plugins.install', { id: 'douane' });
+  await until(() => state(owner), (plugin) => plugin.status === 'error' && plugin.gateway?.status === 'running', 'the previous release back');
+  expect(readFileSync(join(data, 'douane-next.toml'), 'utf8')).toContain('saved = "kept"');
+  // Settings saved while the old release runs must replace the failed candidate's copy on retry.
+  writeFileSync(join(data, 'douane.toml'), readFileSync(join(data, 'douane.toml'), 'utf8').replace('saved = "kept"', 'saved = "changed"'));
+
   harness!.core.plugins.recommended = [douane('0.4.0', program('0.4.0'), 'douane-next')];
   await owner.call('plugins.install', { id: 'douane' });
   const updated = await until(() => state(owner), (plugin) => plugin.status !== 'installing' && plugin.gateway?.status === 'running', 'the update settled');
@@ -245,9 +253,9 @@ test.skipIf(process.platform === 'win32')('an update that renames the gateway ex
   expect(updated.gateway?.version).toBe('0.4.0');
   expect(existsSync(join(dir, 'douane-next'))).toBe(true);
   expect(existsSync(join(dir, 'douane'))).toBe(false);
-  expect(readFileSync(join(data, 'douane-next.toml'), 'utf8')).toContain('saved = "kept"');
+  expect(readFileSync(join(data, 'douane-next.toml'), 'utf8')).toContain('saved = "changed"');
   // The previous name's file stays, for a release that goes back to it.
-  expect(readFileSync(join(data, 'douane.toml'), 'utf8')).toContain('saved = "kept"');
+  expect(readFileSync(join(data, 'douane.toml'), 'utf8')).toContain('saved = "changed"');
   await until(live, (count) => count === 1, 'one gateway process');
 }, 60_000);
 
@@ -292,6 +300,29 @@ test('an update whose record cannot be written after its gateway answered puts t
   expect([...readFileSync(binary)]).toEqual([1, 2, 3]);
   expect(readdirSync(dirname(binary)).filter((name) => name.includes('.previous'))).toEqual([]);
   await until(live, (count) => count === 1, 'one gateway process');
+}, 30_000);
+
+test('a failed update whose previous gateway never answers health reports that restart failure', async () => {
+  const { owner } = await core();
+  await owner.call('plugins.install', { id: 'douane' });
+  await gatewayIs(owner, 'running');
+  const runs = join(harness!.dataDir, 'runs');
+  process.env.FAKE_DOUANE_RUNS_FILE = runs;
+  // The candidate exits immediately; the restored gateway stays silent past its readiness deadline.
+  writeFileSync(runs, 'exit\nlate\n');
+  harness!.core.plugins.gateways.readyMs = 200;
+  harness!.core.plugins.gateways.relaunchDelaysMs = [];
+  harness!.core.plugins.recommended = [douane('0.5.0', new Uint8Array([5]))];
+  await owner.call('plugins.install', { id: 'douane' });
+  const back = await until(() => state(owner), (plugin) => plugin.status === 'error', 'the failed rollback restart');
+  expect(back.version).toBe('0.3.0');
+  expect(back.gateway?.status).toBe('crashed');
+  expect(back.error).toContain('0.3.0 did not start again:');
+  expect(back.error).toContain('did not answer /health');
+  expect(back.error).not.toContain('runs again');
+  const binary = join(harness!.dataDir, 'plugins', 'douane', process.platform === 'win32' ? 'douane.exe' : 'douane');
+  expect([...readFileSync(binary)]).toEqual([1, 2, 3]);
+  await until(live, (count) => count === 0, 'no gateway process left');
 }, 30_000);
 
 test('an updated gateway that crashes later starts again', async () => {

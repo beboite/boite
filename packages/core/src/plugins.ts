@@ -544,7 +544,10 @@ export class PluginStore {
       if (ran) await this.gateways.kill(id);
       activation?.rollback();
       if (!ran || previous === null) throw error;
-      await this.gateways.launch(id);
+      const restarted = await this.gateways.launch(id);
+      if (!restarted) {
+        throw new Error(`${why ?? messageOf(error)}. ${previous.version} did not start again: ${this.gateways.state(id, dir).error ?? 'the gateway is not running'}.`);
+      }
       throw new Error(`${why ?? messageOf(error)}. ${previous.version} runs again.`);
     }
   }

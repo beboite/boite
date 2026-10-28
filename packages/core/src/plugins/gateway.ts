@@ -218,15 +218,15 @@ export class PluginGateways {
   /**
    * Writes the configuration once, then only moves its `listen` line: Douane
    * saves its own settings into the same file. A release that renames the
-   * executable starts from the file of the one it `replaces`, which stays for
-   * a rollback to that release.
+   * executable starts each attempt from the file of the one it `replaces`,
+   * which stays for a rollback to that release.
    */
   private writeConfig(id: string, executable: string, port: number, replaces: string | null): string {
     const dir = this.dataDir(id);
     mkdirSync(join(dir, 'auth'), { recursive: true });
     const file = join(dir, `${executable}.toml`);
     const previous = replaces === null || replaces === executable ? null : join(dir, `${replaces}.toml`);
-    const source = existsSync(file) ? file : previous !== null && existsSync(previous) ? previous : null;
+    const source = previous !== null && existsSync(previous) ? previous : existsSync(file) ? file : null;
     if (source === null) writeFileSync(file, configText(port));
     else {
       const text = readFileSync(source, 'utf8');

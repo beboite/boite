@@ -475,7 +475,10 @@ describe('managed installs', () => {
       expect(statSync(agentDir('current', 'bin', 'agent.exe')).size).toBe(EXE_V2.byteLength);
       expect(existsSync(agentDir('releases', '1.1.0', 'bin', 'agent.exe'))).toBe(true);
     } finally {
-      chmodSync(agentDir('current.previous', 'locked'), 0o700);
+      for (const name of ['current', 'current.previous']) {
+        const locked = agentDir(name, 'locked');
+        if (existsSync(locked)) chmodSync(locked, 0o700);
+      }
     }
   });
 
