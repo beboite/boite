@@ -164,10 +164,12 @@ export const SCENARIOS: Record<string, Scenario> = {
 
     const add = (patch: Record<string, unknown>) => env.call('providers.addLocal', { name: 'Other', command: 'bun', args: [], env: {}, ...patch });
     same((await refusedWith(add({ name: 'Contract  local!' }), RpcErrorCode.InvalidParams, ['expected']))['field'], 'name', 'a name whose id is taken');
-    same((await refusedWith(add({ name: 'Echo' }), RpcErrorCode.InvalidParams))['providerId'], 'echo', 'a shipped id');
+    const shipped = await refusedWith(add({ name: 'Echo' }), RpcErrorCode.InvalidParams, ['expected']);
+    same([shipped['field'], shipped['providerId']], ['name', 'echo'], 'a shipped id');
     same((await refusedWith(add({ command: 'dir/agent' }), RpcErrorCode.InvalidParams))['field'], 'command', 'a relative path');
     same((await refusedWith(add({ args: [''] }), RpcErrorCode.InvalidParams))['field'], 'args[0]', 'an empty argument');
     same((await refusedWith(add({ env: { 'NOT-A-NAME': 'x' } }), RpcErrorCode.InvalidParams))['field'], 'env.NOT-A-NAME', 'a bad variable name');
+    same((await refusedWith(add({ env: JSON.parse('{"__proto__":"x"}') }), RpcErrorCode.InvalidParams))['field'], 'env.__proto__', 'a variable a plain object drops');
 
     same((await refusedWith(env.call('providers.removeLocal', { providerId: 'echo' }), RpcErrorCode.Refused))['field'], 'providerId', 'removing a shipped provider');
     await refusedWith(env.call('providers.removeLocal', { providerId: 'contract-missing' }), RpcErrorCode.NotFound);

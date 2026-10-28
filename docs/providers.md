@@ -861,7 +861,8 @@ in-memory client runs too) and refuses with the field it names (`name`,
   and no quoting. `{home}` and the other load-time tokens expand as in any
   descriptor.
 - Environment values are saved in plain text in the provider file. An API key
-  belongs in the agent's own sign-in.
+  belongs in the agent's own sign-in. A variable named `__proto__` is refused:
+  the descriptor loader builds a plain object, which drops that key.
 
 The core writes an ordinary user descriptor to `<dataDir>/providers/<id>.json`
 (`localAcpDescriptor` in `packages/core/src/providers/local-command.ts`) and
