@@ -14,10 +14,12 @@ import {
   workflowLevels,
   type DelegationConfig,
   type DelegationProfile,
+  type DelegationWorktree,
   type Principal,
   type RpcMethodName,
   type RpcParams,
   type RpcResult,
+  type SettingMachine,
   type Thread,
   type ThreadId,
   type Usage,
@@ -47,6 +49,12 @@ export interface WorkflowHost {
   child(root: Thread, profile: ChildRoute, title: string, task: string): ThreadId;
   /** The child's answer lands and it goes idle; `ok` false leaves an error instead. */
   answer(threadId: ThreadId, text: string, ok: boolean): void;
+  /** A step's `machine` names another member of the group, refused in `delegate spawn --machine`'s words under `field`. */
+  member(query: string, field: string): void;
+  /** The step's subagent on that member, routed there; throws what that machine or the core refuses. */
+  there(root: Thread, profile: ChildRoute, step: WorkflowStepPlan, title: string, task: string): { machine: SettingMachine; childId: ThreadId; providerId: string; model: string | null; effort: string | null; worktree: DelegationWorktree | null };
+  /** As `answer`, for the subagent on that machine; null while the page does not reach it. Answers the turn it ended. */
+  answerThere(coreId: string, threadId: ThreadId, text: string, ok: boolean): string | null;
   changed(rootId: ThreadId, runId: string): void;
   now(): number;
   delayMs(): number;
@@ -121,6 +129,10 @@ export class FakeWorkflows {
   }
   /** The step threads, so the Agents panel does not drop one it is showing. */
   owns(threadId: ThreadId): boolean { return this.#steps.has(threadId); }
+  /** The subagents its runs started on other machines, which the core retires with the conversation. */
+  childrenThere(rootId: ThreadId): { coreId: string; threadId: ThreadId }[] {
+    return [...this.#runs.values()].filter(run => run.rootThreadId === rootId).flatMap(run => run.nodes.flatMap(node => node.instances.flatMap(inst => (inst.machine?.coreId && inst.machine.childId ? [{ coreId: inst.machine.coreId, threadId: inst.machine.childId }] : []))));
+  }
   /** Full retained collection, including paused runs beyond the display page. */
   active(rootId: ThreadId): boolean { return [...this.#runs.values()].some(run => run.rootThreadId === rootId && (run.status === 'running' || run.status === 'paused' || ((run.status === 'done' || run.status === 'failed') && !run.delivered))); }
   /** As the core: a run at work now, which Mark done waits for while it stops a paused one. */
@@ -140,6 +152,7 @@ export class FakeWorkflows {
     'workflows.check': ({ threadId, plan }) => {
       const config = this.#team(this.#rootOf(threadId).id);
       const checked = planError(() => checkPlan(plan, { profiles: config.profiles.map(p => p.id) }));
+      this.#members(checked.steps);
       return { levels: workflowLevels(checked.steps.map(s => ({ id: s.id, after: s.deps }))) };
     },
     'workflows.start': (params) => this.#view(this.start(params.threadId, params.plan, params.requestId, params.templateId, 'user')),
@@ -155,6 +168,7 @@ export class FakeWorkflows {
       if (run.status !== 'running' && run.status !== 'paused') throw refusal(`the run is ${run.status}; only a running or paused run takes new steps`);
       const config = this.#team(run.rootThreadId);
       const steps = planError(() => checkSteps(params.steps, { profiles: config.profiles.map(p => p.id), existing: run.nodes.map(n => ({ id: n.id, after: n.after })) }));
+      this.#members(steps);
       run.plan.steps.push(...steps.map(({ deps: _deps, ...step }) => step));
       run.nodes.push(...steps.map(step => this.#node(step, step.deps)));
       this.#requests.set(key, { fingerprint, runId: run.id });
@@ -221,6 +235,7 @@ export class FakeWorkflows {
     }
     const config = this.#team(root.id);
     const checked = planError(() => checkPlan(plan, { profiles: config.profiles.map(p => p.id) }));
+    this.#members(checked.steps);
     if (templateId !== undefined && !this.#templates.has(templateId)) throw invalid(`templateId: no template ${templateId}`);
     const active = [...this.#runs.values()].filter(run => run.rootThreadId === root.id && (run.status === 'running' || run.status === 'paused')).length;
     if (active >= ACTIVE_RUNS) throw refusal(`this thread already has ${active} unfinished workflows; stop or finish one first`);
@@ -249,6 +264,12 @@ export class FakeWorkflows {
     const output = step.output === undefined || failing ? null : sampleOf(step.output, step.id, 0, inst.index ?? 0);
     const answer = failing ? 'The step could not finish: the task asked it to fail.' : output === null ? `${step.title ?? step.id}: done, nothing else to report.` : `Done.\n\n\`\`\`json\n${JSON.stringify(output, null, 2)}\n\`\`\``;
     if (inst.threadId) this.host.answer(inst.threadId, answer, !failing);
+    else if (inst.machine?.childId && inst.machine.coreId) {
+      const turnId = this.host.answerThere(inst.machine.coreId, inst.machine.childId, answer, !failing);
+      // Out of reach, that machine reports nothing: the step waits, as the core's does.
+      if (turnId === null) return;
+      inst.machine.turnId = turnId;
+    }
     const now = this.host.now();
     if (failing) Object.assign(inst, { status: 'failed', error: 'The turn failed', finishedAt: now });
     else Object.assign(inst, { status: 'done', result: answer.slice(0, WORKFLOW_LIMITS.resultChars), output, finishedAt: now });
@@ -266,6 +287,11 @@ export class FakeWorkflows {
     for (const id of ids) this.#runs.delete(id);
     for (const [key, request] of this.#requests) if (ids.has(request.runId)) this.#requests.delete(key);
     for (const [threadId, step] of this.#steps) if (ids.has(step.runId)) this.#steps.delete(threadId);
+  }
+
+  /** As the core's `checkRoutes`: a member named, its switch and models asked only when the step starts there. */
+  #members(steps: WorkflowStepPlan[], field = 'steps'): void {
+    steps.forEach((step, i) => { if (step.machine !== undefined) this.host.member(step.machine, `${field}[${i}]`); });
   }
 
   #rootOf(threadId: ThreadId): Thread {
@@ -422,16 +448,18 @@ export class FakeWorkflows {
 
   #launch(run: WorkflowRun, node: WorkflowNode, inst: WorkflowInstance, config: DelegationConfig): void {
     const now = this.host.now();
-    if (inst.threadId === null) {
+    const step = run.plan.steps.find(s => s.id === node.id)!;
+    if (step.machine !== undefined) {
+      if (!this.#launchThere(run, node, step, inst, config)) return;
+    } else if (inst.threadId === null) {
       const root = this.host.thread(run.rootThreadId);
-      const profile: ChildRoute | undefined = config.profiles.find(p => p.id === node.profileId)
-        ?? (node.profileId === null || node.profileId === CONVERSATION_PROFILE_ID ? { id: CONVERSATION_PROFILE_ID, name: root.model ?? root.providerId, providerId: root.providerId, accountId: root.accountId, model: root.model, effort: root.effort ?? null } : undefined);
+      const profile = this.#route(root, config, node.profileId);
       if (!profile) {
         Object.assign(inst, { status: 'failed', error: `profile ${node.profileId} is no longer a profile of this thread`, startedAt: now, finishedAt: now });
         return;
       }
-      const title = `${run.name} · ${node.title}${inst.label ? ` · ${inst.label}` : ''}`.slice(0, 120);
-      const effort = run.plan.steps.find(step => step.id === node.id)?.effort ?? profile.effort;
+      const title = this.#title(run, node, inst);
+      const effort = step.effort ?? profile.effort;
       const threadId = this.host.child(root, { ...profile, effort }, title, inst.task ?? '');
       this.#steps.set(threadId, { runId: run.id, key: inst.key });
       Object.assign(inst, { threadId, providerId: profile.providerId, model: profile.model, effort });
@@ -444,6 +472,42 @@ export class FakeWorkflows {
       this.finish(runId, key);
     }, this.host.delayMs() * STEP_TICKS);
     this.#timers.add(timer);
+  }
+
+  #route(root: Thread, config: DelegationConfig, profileId: string | null): ChildRoute | undefined {
+    return config.profiles.find(p => p.id === profileId)
+      ?? (profileId === null || profileId === CONVERSATION_PROFILE_ID ? { id: CONVERSATION_PROFILE_ID, name: root.model ?? root.providerId, providerId: root.providerId, accountId: root.accountId, model: root.model, effort: root.effort ?? null } : undefined);
+  }
+
+  #title(run: WorkflowRun, node: WorkflowNode, inst: WorkflowInstance): string {
+    return `${run.name} · ${node.title}${inst.label ? ` · ${inst.label}` : ''}`.slice(0, 120);
+  }
+
+  /**
+   * As the core's `MachineWorkflowSteps.launch`: each attempt a new subagent on that machine, its id kept
+   * in `machine.childId` and never as a thread of this one. A refusal there fails the step, not the start.
+   */
+  #launchThere(run: WorkflowRun, node: WorkflowNode, step: WorkflowStepPlan, inst: WorkflowInstance, config: DelegationConfig): boolean {
+    const now = this.host.now();
+    inst.machine = { name: step.machine!, coreId: null, requestId: `wf-${run.id}-${inst.key}-${++this.#seq}`, childId: null, turnId: null, corrections: 0 };
+    const fail = (error: string) => void Object.assign(inst, { status: 'failed', error: error.slice(0, 500), startedAt: inst.startedAt ?? now, finishedAt: now });
+    const root = this.host.thread(run.rootThreadId);
+    const profile = this.#route(root, config, node.profileId);
+    if (!profile) {
+      fail(`profile ${node.profileId} is no longer a profile of this thread`);
+      return false;
+    }
+    try {
+      const child = this.host.there(root, profile, step, this.#title(run, node, inst), inst.task ?? '');
+      inst.machine = { ...inst.machine, name: child.machine.name, coreId: child.machine.coreId, childId: child.childId };
+      Object.assign(inst, { providerId: child.providerId, model: child.model, effort: child.effort });
+      if (child.worktree) inst.worktree = child.worktree;
+      else delete inst.worktree;
+      return true;
+    } catch (error) {
+      fail(error instanceof Error ? error.message : String(error));
+      return false;
+    }
   }
 
   #settleNodes(run: WorkflowRun): void {
@@ -539,6 +603,7 @@ export class FakeWorkflows {
       for (const inst of node.instances) {
         if (inst.status === 'waiting' || inst.status === 'running') {
           if (inst.status === 'running' && inst.threadId) this.host.answer(inst.threadId, reason, false);
+          else if (inst.status === 'running' && inst.machine?.childId && inst.machine.coreId) this.host.answerThere(inst.machine.coreId, inst.machine.childId, reason, false);
           Object.assign(inst, { status: 'stopped', error: reason, finishedAt: now });
         }
       }

@@ -88,7 +88,23 @@ test('delegate spawn --machine starts the subagent on that machine, and its pare
   const page = await desk.call('delegation.result', { threadId: 't-trace', agentId: child.thread.id, turnId: agent.resultRef!.turnId });
   expect(page.text).toBe(agent.result);
 
+  // A message goes to that machine: the child takes it as a new turn there, and its answer crosses back.
+  const send = () => desk.call('delegation.send', { threadId: 't-trace', toThreadId: child.thread.id, requestId: 'more-1', text: 'Read the summary too' });
+  const letter = await send();
+  expect(letter).toMatchObject({ status: 'delivered', to: { coreId: 'pc', threadId: child.thread.id }, toMachine: 'pc' });
+  expect((await send()).id).toBe(letter.id);
+  const results = async () => (await desk.call('delegation.get', { threadId: 't-trace' })).messages.filter(entry => entry.origin === 'result' && entry.from.threadId === child.thread.id).length;
+  for (let i = 0; i < 400 && await results() < 2; i++) await new Promise(resolve => setTimeout(resolve, 2));
+  expect(await results()).toBe(2);
+  const steered = await pc.call('threads.get', { threadId: child.thread.id });
+  expect(steered.messages.filter(message => message.role === 'user').at(-1)!.parts).toMatchObject([{ type: 'text', text: 'Read the summary too' }]);
+  const latest = (await desk.call('delegation.get', { threadId: 't-trace' })).agents.find(entry => entry.thread.id === child.thread.id)!;
+
+  // Archived here, the parent's subagent there is stopped and archived too.
+  await desk.call('threads.archive', { threadId: 't-trace' });
+  expect((await pc.call('threads.get', { threadId: child.thread.id })).archived).toBe(true);
+
   // Out of reach, its parent keeps what it last saw.
   pc.close();
-  expect((await desk.call('delegation.get', { threadId: 't-trace' })).agents.find(entry => entry.thread.id === child.thread.id)).toMatchObject({ machine: { coreId: 'pc' }, result: agent.result });
+  expect((await desk.call('delegation.get', { threadId: 't-trace' })).agents.find(entry => entry.thread.id === child.thread.id)).toMatchObject({ machine: { coreId: 'pc' }, result: latest.result });
 });

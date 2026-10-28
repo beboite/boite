@@ -8,7 +8,7 @@ import { modelsOf, PROBED_PROTOCOLS, probe } from './provider-catalog';
 import type { FakeContext, FakeMethods } from './context';
 import { delegationProject } from './delegation-project';
 import { accountFor, memberModels, modelChoices } from './thread-models';
-import { childContext, remoteAgent, spawnThere, type DelegationRow } from './delegation-machine';
+import { childContext, remoteAgent, sendThere, spawnThere, type DelegationRow } from './delegation-machine';
 import { fakeCore } from './coordination';
 import { fakeMember } from './requests';
 
@@ -465,9 +465,8 @@ export function delegationMethods(ctx: FakeContext) {
     'delegation.send': async (params) => {
       if (params.requestId.startsWith('result:')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'requestId prefix result: is reserved' });
       const sender = ctx.thread(params.threadId);
-      if ((ctx.delegationAgents.get(sender.id) ?? []).some(row => row.threadId === params.toThreadId && row.machine !== undefined)) {
-        throw new RpcFailure({ code: RpcErrorCode.Unavailable, message: 'the in-memory client does not steer a subagent on another machine', data: { field: 'machine' } });
-      }
+      const far = sender.parentThreadId ? undefined : (ctx.delegationAgents.get(sender.id) ?? []).find(row => row.threadId === params.toThreadId && row.machine !== undefined);
+      if (far) return sendThere(ctx, sender, far, params);
       const recipient = ctx.thread(params.toThreadId);
       const root = delegationRoot(ctx, sender.id);
       const direct = sender.parentThreadId ? recipient.id === sender.parentThreadId : recipient.parentThreadId === sender.id;

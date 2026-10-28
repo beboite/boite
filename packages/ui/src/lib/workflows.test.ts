@@ -4,6 +4,7 @@ import { RpcErrorCode, type WorkflowPlan, type WorkflowRun } from '@boite/contra
 import { STEP_GAP, STEP_MIN, edgesOf, fitsPhase, nodeProgress, phasesOf, retryable, routeOf, runProgress, shown } from './workflow-view';
 import { FakeContext } from './fake-client/context';
 import { seed } from './fake-client/seed';
+import type { FakeClient, FakeClientOptions } from './fake-client';
 
 const plan: WorkflowPlan = {
   name: 'Check the lexer',
@@ -189,6 +190,78 @@ test('a paired device follows, pauses and stops a run but cannot start or resume
   const stopped = await phone.call('workflows.control', { threadId: 't-trace', runId: run!.id, action: 'stop' });
   expect(stopped.status).toBe('stopped');
   expect(stopped.nodes.find(node => node.id === 'review')!.instances.filter(inst => inst.status === 'stopped')).toHaveLength(2);
+});
+
+/** Two in-memory machines of one group; `delayMs` paces the first one's steps. */
+async function pair(createClient: (options: FakeClientOptions) => Promise<FakeClient>, delayMs = 0) {
+  const desk = await createClient({ delayMs, coreId: 'desk', coreName: 'desk', publicUrl: 'https://desk.test' });
+  const pc = await createClient({ delayMs: 0, coreId: 'pc', coreName: 'pc', publicUrl: 'https://pc.test' });
+  await desk.call('group.create', { name: 'Home' });
+  await pc.call('group.join', { invite: (await desk.call('group.invite', {})).invite });
+  return { desk, pc };
+}
+
+test('a step on another machine names a member of the group at check, start and extend, as the core does', async ({ createClient }) => {
+  const { desk } = await pair(createClient, 10);
+  const far = (machine: string): WorkflowPlan => ({ name: 'Far', steps: [{ id: 'far', machine, task: 'Read.' }] });
+  await expect(desk.call('workflows.check', { threadId: 't-trace', plan: far('nowhere') })).rejects.toMatchObject({ code: RpcErrorCode.Refused, message: 'steps[0].machine: no machine nowhere in this group; the others are pc' });
+  await expect(desk.call('workflows.start', { threadId: 't-trace', plan: far('desk'), requestId: 'self' })).rejects.toThrow('steps[0].machine: desk is this machine; leave --machine out');
+  expect(await desk.call('workflows.list', { threadId: 't-trace' })).toEqual([]);
+  // Known, the member is asked about its switch and models only when the step starts.
+  await expect(desk.call('workflows.check', { threadId: 't-trace', plan: far('pc') })).resolves.toEqual({ levels: [['far']] });
+  const run = await desk.call('workflows.start', { threadId: 't-trace', plan: { name: 'Here', steps: [{ id: 'here', task: 'Quick.' }] }, requestId: 'here' });
+  await expect(desk.call('workflows.extend', { threadId: 't-trace', runId: run.id, requestId: 'more', steps: [{ id: 'far', machine: 'nowhere', task: 'Read.' }] })).rejects.toThrow('steps[0].machine: no machine nowhere in this group');
+  await desk.call('workflows.control', { threadId: 't-trace', runId: run.id, action: 'stop' });
+});
+
+test('a step on another machine runs there as a subagent: the run names that machine and child, never a local thread, and mails nothing', async ({ createClient }) => {
+  const { desk, pc } = await pair(createClient);
+  await pc.call('settings.set', { groupThreads: true });
+  const mail = (await desk.call('delegation.get', { threadId: 't-trace' })).messages.length;
+  const plan: WorkflowPlan = { name: 'There', steps: [
+    { id: 'far', machine: 'pc', task: 'List the lexer files.', output: { files: ['string'] } },
+    { id: 'near', after: ['far'], task: 'Summarize {{far.files}}.' },
+  ] };
+  const run = await desk.call('workflows.start', { threadId: 't-trace', plan, requestId: 'there' });
+  const far = run.nodes[0]!.instances[0]!;
+  expect(far).toMatchObject({ status: 'running', threadId: null, machine: { name: 'pc', coreId: 'pc', turnId: null, corrections: 0 } });
+  const childId = far.machine!.childId!;
+  const child = await pc.call('threads.get', { threadId: childId });
+  expect([child.title, child.parentThreadId, far.providerId, far.model]).toEqual(['There · far', undefined, child.providerId, child.model]);
+  expect(child.messages[0]!.parts).toMatchObject([{ type: 'text', text: 'List the lexer files.' }]);
+  // A step of the run, not a member of the conversation's team.
+  expect((await desk.call('delegation.get', { threadId: 't-trace' })).agents.map(agent => agent.thread.id)).not.toContain(childId);
+
+  const done = await until(() => desk.call('workflows.get', { threadId: 't-trace', runId: run.id }), value => value.status !== 'running');
+  expect(done.status).toBe('done');
+  expect(done.nodes[0]!.instances[0]!.machine!.turnId).toBe((await pc.call('threads.get', { threadId: childId })).turns.at(-1)!.id);
+  expect((await pc.call('threads.get', { threadId: childId })).status).toBe('idle');
+  const near = done.nodes[1]!.instances[0]!;
+  expect([near.machine, near.threadId === null]).toEqual([undefined, false]);
+  expect(near.task).toContain('src/parser/lexer.ts');
+  expect((await desk.call('delegation.get', { threadId: 't-trace' })).messages).toHaveLength(mail);
+  // The conversation archived here, its step there is archived as well.
+  await desk.call('threads.archive', { threadId: 't-trace' });
+  expect((await pc.call('threads.get', { threadId: childId })).archived).toBe(true);
+});
+
+test('a step on another machine fails at launch while it keeps group threads off, and stops there with its run', async ({ createClient }) => {
+  const { desk, pc } = await pair(createClient, 10);
+  const plan: WorkflowPlan = { name: 'There', steps: [{ id: 'far', machine: 'pc', task: 'Build it.' }] };
+  const run = await desk.call('workflows.start', { threadId: 't-trace', plan, requestId: 'off' });
+  const failed = await until(() => desk.call('workflows.get', { threadId: 't-trace', runId: run.id }), value => value.status !== 'running');
+  expect(failed.status).toBe('failed');
+  expect(failed.nodes[0]!.instances[0]!.error).toContain('pc does not let the other machines of its group start threads there; propose the switch to the user with boite settings request groupThreads true --machine pc');
+  expect(failed.nodes[0]!.instances[0]!.machine?.childId ?? null).toBeNull();
+
+  await pc.call('settings.set', { groupThreads: true });
+  const retried = await desk.call('workflows.control', { threadId: 't-trace', runId: run.id, action: 'retry' });
+  const childId = retried.nodes[0]!.instances[0]!.machine!.childId!;
+  expect((await pc.call('threads.get', { threadId: childId })).status).toBe('running');
+  const stopped = await desk.call('workflows.control', { threadId: 't-trace', runId: run.id, action: 'stop' });
+  expect(stopped.nodes[0]!.instances[0]!.status).toBe('stopped');
+  const there = await pc.call('threads.get', { threadId: childId });
+  expect([there.status, there.turns.at(-1)!.status]).toEqual(['idle', 'error']);
 });
 
 test('the store follows the runs of the open thread and of its parent from a step', async ({ createStore }) => {

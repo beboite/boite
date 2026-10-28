@@ -85,7 +85,9 @@ import { initialDesktopUpdate, initialServerUpdate } from './server-update';
 import { observeLog } from './logs';
 import { followGoal } from './todos';
 import type { FakeWorktree } from './worktrees';
-import type { DelegationRow } from './delegation-machine';
+import { workflowThere, type DelegationRow } from './delegation-machine';
+import { fakeCore } from './coordination';
+import { fakeMember } from './requests';
 
 /**
  * One handler per contract method; plugins, agents and workflows answer from
@@ -386,6 +388,14 @@ export class FakeContext {
       },
       child: (root, profile, title, task) => workflowChild(this, root, profile, title, task),
       answer: (threadId, text, ok) => workflowAnswer(this, threadId, text, ok),
+      member: (query, field) => void fakeMember(this, query, field),
+      there: (root, profile, step, title, task) => workflowThere(this, root, delegationConfig(this, root.id), profile, step, title, task),
+      answerThere: (coreId, threadId, text, ok) => {
+        const there = fakeCore(coreId);
+        if (!there?.threads.has(threadId)) return null;
+        workflowAnswer(there, threadId, text, ok);
+        return there.thread(threadId).turns.at(-1)?.id ?? null;
+      },
       changed: (rootId, runId) => this.emitToThread(rootId, 'workflows.changed', { threadId: rootId, runId }),
       // The wall clock, as the team demo uses: a running step's elapsed time counts from it.
       now: () => Date.now() + this.workflowLag,
