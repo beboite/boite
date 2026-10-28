@@ -39,14 +39,16 @@ export class CoordinationLookups {
           return { peer, contacts: remote.entries.map(a => checkRemoteContact(a as AgentContact, peer)), missing: remote.unavailable };
         } catch { return { peer, contacts: null, missing: 0 }; }
       }));
+      const routed = await this.side.mailboxes.directory(threadId);
+      // Trust is read after the last await: a peer revoked while the routed lookup was pending is named, not listed.
+      const trusted = new Set(this.side.trusted().map(peer => peer.coreId));
       for (const result of found) {
-        if (result.contacts === null || !this.side.trusted().some(peer => peer.coreId === result.peer.coreId)) unavailable.push(result.peer.name);
+        if (result.contacts === null || !trusted.has(result.peer.coreId)) unavailable.push(result.peer.name);
         else {
           agents.push(...result.contacts);
           if (result.missing > 0) unavailable.push(partialName(result.peer.name, result.missing));
         }
       }
-      const routed = await this.side.mailboxes.directory(threadId);
       agents.push(...routed.entries);
       unavailable.push(...routed.unavailable);
     }
