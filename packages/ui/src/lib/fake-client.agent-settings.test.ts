@@ -145,6 +145,14 @@ test('fake model cards name the provider and move an agent to another one, allow
   expect(read.value).toBe('echo/echo-1');
   expect(read.choices?.slice(0, 3)).toEqual([{ id: 'echo/echo-1', label: 'Echo' }, { id: 'opencode/default', label: 'OpenCode default' }, { id: 'codex/default', label: 'Codex default' }]);
   await expect(client.call('agents.settings.request', { threadId, agent: mira.id, key: 'model', value: 'echo-1', reason: 'r' })).rejects.toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'value', key: 'model' } });
+  // The refusal names why the model is out of reach, as the core's does.
+  const ask = (value: string) => client.call('agents.settings.request', { threadId, agent: mira.id, key: 'model', value, reason: 'r' });
+  await client.call('providers.setEnabled', { providerId: 'codex', enabled: false });
+  await expect(ask('codex/default')).rejects.toThrow('codex is not installed or is turned off');
+  await client.call('providers.setEnabled', { providerId: 'codex', enabled: true });
+  await client.call('accounts.remove', { accountId: 'a-opencode' });
+  await expect(ask('opencode/default')).rejects.toThrow('opencode has no signed-in account');
+  await expect(ask('codex/gpt-9')).rejects.toThrow('the provider does not offer this model');
 
   const card = await client.call('agents.settings.request', { threadId, agent: mira.id, key: 'model', value: 'codex/default', reason: 'Reviews need a larger model' });
   expect(card.setting).toMatchObject({ key: 'model', previous: 'echo/echo-1', value: 'codex/default' });

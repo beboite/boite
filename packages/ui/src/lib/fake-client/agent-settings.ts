@@ -45,14 +45,21 @@ function accountOn(ctx: FakeContext, agent: AgentProfile, providerId: string): s
   return providerId === agent.selection.providerId ? agent.selection.accountId : ctx.accounts.find(account => account.providerId === providerId && account.status !== 'unauthenticated')?.id;
 }
 
-/** As the core: `<provider>/<model>` of an available provider, or a model id of the agent's own. */
-function modelRoute(ctx: FakeContext, agent: AgentProfile, wanted: string, refs = false): { providerId: string; accountId: string; model: string } | null {
-  const slash = wanted.indexOf('/');
-  const named = slash > 0 ? ctx.providers.find(provider => provider.id === wanted.slice(0, slash) && (provider.id === agent.selection.providerId || (provider.available && providerEnabled(provider)))) : undefined;
-  const accountId = named && accountOn(ctx, agent, named.id);
-  if (named && accountId && modelsOf(ctx, named.id, accountId).some(entry => entry.id === wanted.slice(slash + 1))) return { providerId: named.id, accountId, model: wanted.slice(slash + 1) };
+/** As the core: `<provider>/<model>` of an available provider, or a model id of the agent's own; else the core's refusal. */
+function modelRoute(ctx: FakeContext, agent: AgentProfile, wanted: string, refs = false): { providerId: string; accountId: string; model: string } | string {
   const { providerId, accountId: own } = agent.selection;
-  return !refs && modelsOf(ctx, providerId, own).some(entry => entry.id === wanted) ? { providerId, accountId: own, model: wanted } : null;
+  const ownRoute = modelsOf(ctx, providerId, own).some(entry => entry.id === wanted) ? { providerId, accountId: own, model: wanted } : 'the provider does not offer this model';
+  const slash = wanted.indexOf('/');
+  const named = slash > 0 ? ctx.providers.find(provider => provider.id === wanted.slice(0, slash)) : undefined;
+  if (named === undefined) return refs ? `model: ${wanted} names no provider of this machine` : ownRoute;
+  const model = wanted.slice(slash + 1);
+  const usable = named.id === providerId || (named.available && providerEnabled(named));
+  const accountId = usable ? accountOn(ctx, agent, named.id) : undefined;
+  if (accountId !== undefined && modelsOf(ctx, named.id, accountId).some(entry => entry.id === model)) return { providerId: named.id, accountId, model };
+  if (!refs && typeof ownRoute !== 'string') return ownRoute;
+  if (!usable) return `model: ${named.id} is not installed or is turned off on this machine`;
+  if (accountId === undefined) return `model: ${named.id} has no signed-in account on this machine`;
+  return 'the provider does not offer this model';
 }
 
 function context(ctx: FakeContext, agent: AgentProfile, refs = false): AgentSettingContext {
@@ -66,7 +73,7 @@ function context(ctx: FakeContext, agent: AgentProfile, refs = false): AgentSett
     bots: ctx.agents.liveProfiles(),
     model: model => {
       const route = modelRoute(ctx, agent, model, refs);
-      if (route === null) return { ok: false, message: 'the provider does not offer this model' };
+      if (typeof route === 'string') return { ok: false, message: route };
       const ref = `${route.providerId}/${route.model}`;
       // As the core: a model the settings do not allow yet is the owner's to allow by applying the card.
       if (!ctx.agents.accountAllowed(agent.id, route.accountId)) return { ok: false, message: `model: ${ref} runs on an account the owner has not granted ${agent.name}` };
