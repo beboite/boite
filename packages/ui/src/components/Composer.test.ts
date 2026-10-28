@@ -2149,6 +2149,15 @@ test('a pasted copy that stays over the byte total at its smallest says to remov
     const over = 'These pictures still weigh over 10 MB together at their smallest: remove some before sending.';
     await waitFor(() => store.error === over, 4000);
     expect(store.composerStates['t-trace']!.attachments).toHaveLength(30);
+    // Enter then keeps the box and says it again, rather than sending what the core would refuse.
+    const before = await store.client!.call('threads.get', { threadId: 't-trace' });
+    store.error = null;
+    press('Enter');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(store.error).toBe(over);
+    expect(store.composerStates['t-trace']!.attachments).toHaveLength(30);
+    expect(store.composerStates['t-trace']!.queued).toHaveLength(0);
+    expect((await store.client!.call('threads.get', { threadId: 't-trace' })).messages).toEqual(before.messages);
   } finally { decode.mockRestore(); }
 });
 

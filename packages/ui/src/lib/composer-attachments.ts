@@ -3,10 +3,8 @@ import { acceptAttachments, attachedBytes, decodedBytes, isImageMimeType, readAt
 import { bytes } from './format';
 import { IMAGE_SOURCE_MAX_BYTES, isReducible, prepareImage, type ImageCodec } from './image-prepare';
 import { fill, strings } from './strings';
-import { fitTurn, queued, type Fitted } from './turn-fit';
+import { fitTurn, fitting, queued, type Fitted } from './turn-fit';
 
-/** The composer reads the running fit of its box here, beside the other ways pictures come in. */
-export { fitting } from './turn-fit';
 import type { Store } from './store.svelte';
 
 /** Files dropped on the shell window, wherever they land (`lib/native-drop.ts`). */
@@ -113,6 +111,21 @@ async function admitFitted(waiting: { attachment: Attachment; name: string }[], 
 
 function same(one: Attachment[], other: Attachment[]): boolean {
   return one.length === other.length && one.every((attachment, at) => other[at] === attachment);
+}
+
+/**
+ * Whether a send from `box` may go: once what runs on it ended, still the box
+ * the composer shows (`current`) and within the byte total, said in
+ * `store.error` when not, the box kept as it is. Waits only while a fit runs.
+ */
+export function sendable(store: Store, box: { attachments: Attachment[] }, current: () => object): boolean | Promise<boolean> {
+  const within = (): boolean => {
+    if (attachedBytes(box.attachments) <= ATTACHMENTS_TOTAL_MAX_BYTES) return true;
+    store.error = fill(strings.composer.attachTotalOver, { max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) });
+    return false;
+  };
+  const fit = fitting(box);
+  return fit ? fit.then(() => current() === box && within()) : within();
 }
 
 /** The composer's way in: `gatherAttachments` on its state, a refusal in `store.error`. */

@@ -6,7 +6,7 @@
   import { agentSlashItems, boiteSlashItems, skillSlashItems, slashCompletion, listKey, mentionQueryOf, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
   import { AgentsView, agentOfThread } from '../lib/agents.svelte';
   import { composerPlaceholder } from '../lib/composer-placeholder';
-  import { attachFiles, fitting, receiveDroppedFiles } from '../lib/composer-attachments';
+  import { attachFiles, receiveDroppedFiles, sendable } from '../lib/composer-attachments';
   import { rewindComposerEdit } from '../lib/composer-edit';
   import { editWhole } from '../lib/reading-window';
   import { fitHeight, selfSizing } from '../lib/composer-size';
@@ -343,7 +343,7 @@
   }
 
   async function submit(nextDraft = false) {
-    const box = stateForInput(), fit = fitting(box); if (fit && (await fit, stateForInput() !== box)) return; // Pictures being fitted go once they fit (`lib/turn-fit.ts`), unless the box moved to another thread meanwhile.
+    const ready = sendable(store, stateForInput(), stateForInput); if (!(typeof ready === 'boolean' ? ready : await ready)) return; // Pictures being fitted go once they fit, in the same box (`lib/composer-attachments.ts`).
     if (attachments.some(unresolvedAssetId)) { store.error = strings.errors.draftAttachment; return; }
     const prompt = text;
     const images = attachments;
