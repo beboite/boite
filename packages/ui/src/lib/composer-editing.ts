@@ -1,9 +1,12 @@
+import { ATTACHMENTS_TOTAL_MAX_BYTES } from '@boite/contracts';
 import type { ComposerState } from './composer-queue';
 import type { Store } from './store.svelte';
 import { editComposerInput } from './composer-images';
 import { recordEdit, redoStep, settled, undoStep, type ComposerSnapshot } from './composer-history';
 import { copiedFrom, copyImages, fitCopy, pastesAsText } from './composer-clipboard';
-import { acceptAttachments } from './attachments';
+import { acceptAttachments, attachedBytes } from './attachments';
+import { bytes } from './format';
+import { fitHeld } from './turn-fit';
 import { fill, strings } from './strings';
 
 /**
@@ -94,7 +97,7 @@ export function pasteImages(host: EditingHost, event: ClipboardEvent): boolean {
       store.error = fill(strings.composer.attachNoImages, { provider: provider.name });
       return [];
     }
-    const result = acceptAttachments(state.attachments, incoming);
+    const result = acceptAttachments(state.attachments, incoming, { fit: true });
     if (result.refused !== null) store.error = result.refused;
     return incoming.filter((item) => result.accepted.includes(item));
   });
@@ -103,5 +106,12 @@ export function pasteImages(host: EditingHost, event: ClipboardEvent): boolean {
   recordEdit(state, 'big', { start, end });
   state.attachments = fitted.attachments;
   writeEdit(host, state.text.slice(0, start) + fitted.text + state.text.slice(end), { start, end }, start + fitted.text.length);
+  // Past the byte total, the pictures give way (`lib/turn-fit.ts`); the floor says when they cannot.
+  if (attachedBytes(state.attachments) > ATTACHMENTS_TOTAL_MAX_BYTES) {
+    const last = fitted.attachments.at(-1);
+    void fitHeld(state).then((fits) => {
+      if (!fits) store.error = fill(strings.composer.attachTotalTooLarge, { name: last?.name ?? strings.composer.attachUnnamed, max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) });
+    });
+  }
   return true;
 }

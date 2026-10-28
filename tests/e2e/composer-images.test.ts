@@ -314,3 +314,56 @@ test('a full attachment strip stays one row and folds the rest behind a +N tile'
     await server.close();
   }
 }, 90_000);
+
+test('fifty pasted screenshots fit one turn, shown on desktop and phone', async () => {
+  const port = await freePort();
+  const server = await startDevUi(port);
+  let page: BrowserPage | undefined;
+  try {
+    page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent`, windowSize: { width: 1280, height: 900 } });
+    await page.waitFor('document.querySelector("[data-testid=composer-input]")');
+    await page.type('[data-testid=composer-input]', 'Fifty problems, one screenshot each ');
+    // Phone and desktop captures of a chat, noisy enough to weigh a few MB as PNG, all in one paste.
+    await page.evaluate(`(async () => {
+      const transfer = new DataTransfer();
+      for (let at = 0; at < 50; at++) {
+        const phone = at % 2 === 0;
+        const canvas = document.createElement('canvas'); canvas.width = phone ? 1170 : 2560; canvas.height = phone ? 2532 : 1440;
+        const ctx = canvas.getContext('2d');
+        const pixels = ctx.createImageData(canvas.width, canvas.height);
+        let state = at + 1;
+        for (let i = 0; i < pixels.data.length; i += 4) {
+          state = (state * 1103515245 + 12345) & 0x7fffffff;
+          const shade = 215 + ((state >> 16) % 20);
+          pixels.data[i] = shade - at; pixels.data[i + 1] = shade; pixels.data[i + 2] = shade + 10; pixels.data[i + 3] = 255;
+        }
+        ctx.putImageData(pixels, 0, 0);
+        ctx.fillStyle = 'hsl(' + (at * 37) % 360 + ' 60% 45%)'; ctx.fillRect(0, 0, canvas.width, 120);
+        ctx.fillStyle = '#182534'; ctx.font = '48px sans-serif';
+        for (let line = 0; line < 30; line++) ctx.fillText('Problem ' + (at + 1) + ': the list jumps when line ' + line + ' loads', 40, 220 + line * 70);
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        transfer.items.add(new File([blob], (phone ? 'IMG_' : 'Screenshot ') + at + '.png', { type: 'image/png' }));
+        canvas.width = 0; canvas.height = 0;
+      }
+      document.querySelector('[data-testid=composer-input]').dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer }));
+    })()`, 180_000);
+    const heldNow = `import('/src/lib/store.svelte.ts').then(({ store }) => {
+      const state = Object.values(store.composerStates).find(one => one.attachments.length > 0);
+      return { count: state?.attachments.length ?? 0, total: state?.attachments.reduce((sum, one) => sum + Math.floor(one.data.length * 3 / 4), 0) ?? 0, error: store.error };
+    })`;
+    await page.waitFor(`${heldNow}.then(held => held.count === 50 || held.error)`, 240_000);
+    const held = await page.evaluate<{ count: number; total: number; error: string | null }>(heldNow);
+    expect(held.error).toBeNull();
+    expect(held.count).toBe(50);
+    expect(held.total).toBeLessThanOrEqual(10 * 1024 * 1024);
+    for (const phone of [false, true]) {
+      await page.send('Emulation.setDeviceMetricsOverride', { width: phone ? 390 : 1280, height: phone ? 844 : 900, deviceScaleFactor: 1, mobile: phone });
+      // The strip folds past one row; opened, it shows all fifty.
+      if (await page.evaluate('!!document.querySelector("[data-testid=composer-attachments-more]")')) await page.click('[data-testid=composer-attachments-more]');
+      await page.waitFor('document.querySelectorAll("[data-testid=composer-attachment]").length === 50');
+      await page.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
+      await page.screenshot(join(import.meta.dir, '.artifacts', `fifty-images-${phone ? 'phone' : 'desktop'}.png`));
+    }
+    expect(page.errors()).toEqual([]);
+  } finally { await page?.close(); await server.close(); }
+}, 600_000);

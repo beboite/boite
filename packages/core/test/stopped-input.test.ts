@@ -148,6 +148,21 @@ test('interrupted instructions survive a core restart without an in-memory pendi
   } finally { await next.close(); }
 });
 
+test('interrupted images carried into the next turn stay within its byte total, oldest left as files', async () => {
+  const { seen, start, stop, complete } = await setup('native-session');
+  await start('Establish the native session');
+  await complete();
+  const heavy = (name: string) => ({ kind: 'image' as const, mimeType: 'image/png' as const, data: Buffer.alloc(3 * 1024 * 1024, name.length).toString('base64'), name });
+  const images = [heavy('a.png'), heavy('bb.png'), heavy('ccc.png')];
+  await start('Three heavy screenshots', images);
+  await stop();
+  const current = heavy('current.png');
+  await start('And this one', [current]);
+  // 3 MB now leaves 7 MB: the two newest fit, the oldest goes as a file.
+  expect(seen[2]?.attachments).toEqual([images[1]!, images[2]!, current]);
+  expect(seen[2]!.prompt.split('\n').some(line => line.startsWith('{') && line.includes('a.png'))).toBe(true);
+});
+
 test('interrupted images keep native attachment limits and leave overflow readable as files', async () => {
   const { seen, start, stop, complete } = await setup('native-session');
   await start('Establish the native session');
