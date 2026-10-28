@@ -1,6 +1,7 @@
-import type { Attachment } from '@boite/contracts';
+import type { Attachment, PreviewReference } from '@boite/contracts';
 import type { Store } from './store.svelte';
 import type { ComposerState } from './composer-queue';
+import { editPreviewMentions } from './preview-mentions';
 import { fill, strings } from './strings';
 
 const pendingImageSends = new WeakMap<ComposerState, { text: string; inserted: boolean; edited: boolean }>();
@@ -73,6 +74,43 @@ export function removeImageReferences(store: Store, key: string, at: number) {
     if (state.selection) state.selection = { start: shift(state.selection.start), end: shift(state.selection.end) };
   }
   if (state.selection) state.mentionInsertion = (state.mentionInsertion ?? 0) + 1;
+}
+
+/** A box nobody types in: a step of the undo history, or a draft set aside. */
+export interface QuietBox {
+  text: string;
+  attachments: Attachment[];
+  previewReferences?: PreviewReference[];
+  selection?: { start: number; end: number };
+}
+
+/**
+ * A file still being read settled while `box` held its placeholder: `ready`
+ * takes its place, or nothing does. A picture that did not stay one leaves
+ * the text the way `removeImageReferences` leaves the live box, its
+ * reference gone, those above it renumbered, mentions and caret on their
+ * words. The index it was at, or -1 when `box` never held it.
+ */
+export function settleIn(box: QuietBox, placeholder: Attachment, ready: Attachment | null): number {
+  const at = box.attachments.indexOf(placeholder);
+  if (at < 0) return -1;
+  if (placeholder.kind === 'image' && ready?.kind !== 'image') {
+    const images = box.attachments.filter(item => item.kind === 'image');
+    const number = images.indexOf(placeholder) + 1;
+    for (const match of [...box.text.matchAll(/\[Image ([1-9]\d*)\]/g)].reverse()) {
+      const index = Number(match[1]);
+      if (index < number || index > images.length) continue;
+      const start = match.index, end = start + match[0].length;
+      const replacement = index === number ? '' : imageLabel(index - 1);
+      const text = box.text.slice(0, start) + replacement + box.text.slice(end);
+      if (box.previewReferences) box.previewReferences = editPreviewMentions(box.text, text, box.previewReferences, { start, end });
+      const shift = (at: number) => at >= end ? at + replacement.length - (end - start) : Math.min(at, start + replacement.length);
+      if (box.selection) box.selection = { start: shift(box.selection.start), end: shift(box.selection.end) };
+      box.text = text;
+    }
+  }
+  box.attachments = ready ? box.attachments.map((item, index) => index === at ? ready : item) : box.attachments.filter((_, index) => index !== at);
+  return at;
 }
 
 /** True when `edit` (a range of `text`) reaches into an image reference: removing it is a step of its own. */

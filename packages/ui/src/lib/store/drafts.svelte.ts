@@ -5,7 +5,10 @@ import type { Composer, OutboxRequest } from './composer.svelte';
 import type { StoreContext } from './context';
 import { strings } from '../strings';
 import { readDraftJournal, writeDraftJournal } from '../draft-journal';
-import { readyAttachments, unresolvedAssetId, type DraftAttachment } from '../draft-attachments';
+import { followRead, isLoading, loadedFrom, readyAttachments, unresolvedAssetId, type DraftAttachment } from '../draft-attachments';
+import { keepSource } from '../attachments';
+import { settleIn } from '../composer-images';
+import { replaceInHistory } from '../composer-history';
 import { secureId } from '../secure-id';
 
 export type Input = Composer['composerStates'][string];
@@ -316,7 +319,19 @@ export class Drafts {
    */
   keepAside(projectId: string | null, box: Pick<Input, 'text' | 'attachments' | 'previewReferences'>): void {
     const draft = newDraft(projectId, false);
-    this.saved[draftKey(draft)] = { draft, choice: null, input: { ...empty(), ...box }, parked: created() };
+    const id = draftKey(draft);
+    this.saved[id] = { draft, choice: null, input: { ...empty(), ...box }, parked: created() };
+    // A file still being read in the box it left lands here too, where its `[Image N]` went.
+    for (const placeholder of box.attachments.filter(isLoading)) followRead(placeholder, ready => {
+      const input = this.liveSource('drafts', id)?.input;
+      if (!input) return;
+      const at = settleIn(input, placeholder, ready);
+      const landed = ready && at >= 0 ? input.attachments[at] ?? null : null;
+      if (ready && landed) { loadedFrom(landed, placeholder); keepSource(ready, landed); }
+      // Its own undo steps too, typed in it while the file was read, or a step undone back past it.
+      replaceInHistory(input, placeholder, landed ?? ready);
+      if (at >= 0) this.persist();
+    });
   }
 
   /** Drops one draft by its key. The open draft's composer is left to the caller. */

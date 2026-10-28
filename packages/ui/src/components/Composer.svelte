@@ -61,7 +61,7 @@
   /** Files still being read into this prompt: their tiles show, Send waits for them. */
   let loadingFiles = $derived(attachments.some(isLoading));
   /** Send pressed while files were still being read: it goes once they are ready, unless the user types on. */
-  let sendWhenLoaded = $state<{ store: Store; key: string; nextDraft: boolean } | null>(null);
+  let sendWhenLoaded = $state<{ store: Store; key: string; state: ComposerState; nextDraft: boolean } | null>(null);
   let dictating = $state(false);
   let speechPreview = $state(''), speechStatus = $state(''), speechError = $state(false);
   let box = $state<HTMLTextAreaElement | undefined>(undefined);
@@ -153,7 +153,7 @@
   let canSend = $derived(sendable && !loadingFiles);
   $effect(() => {
     const waiting = sendWhenLoaded;
-    if (waiting && !loadingFiles) untrack(() => { sendWhenLoaded = null; if (waiting.store === store && waiting.key === key) void submit(waiting.nextDraft); });
+    if (waiting && !loadingFiles) untrack(() => { sendWhenLoaded = null; if (waiting.store === store && waiting.key === key && waiting.state === store.composerStates[key]) void submit(waiting.nextDraft); });
   });
   // Another conversation or machine on screen: the waiting send stays with the box it was pressed in, unsent.
   $effect(() => { void key; void store; untrack(() => { sendWhenLoaded = null; }); });
@@ -357,7 +357,7 @@
 
   async function submit(nextDraft = false) {
     if (attachments.some(unresolvedAssetId)) { store.error = strings.errors.draftAttachment; return; }
-    if (loadingFiles) { if (sendable) sendWhenLoaded = { store, key, nextDraft }; return; }
+    if (loadingFiles) { if (sendable) sendWhenLoaded = { store, key, state: stateForInput(), nextDraft }; return; }
     const prompt = text;
     const images = attachments;
     const references = previewReferences;
@@ -434,7 +434,8 @@
     if (files.length === 0) return;
     track();
     // An answer's files reach the agent as paths, so it takes images whatever the provider reads.
-    void takeFiles(store, stateForInput(), files, reply ? null : provider, () => { sendWhenLoaded = null; });
+    const taken = stateForInput();
+    void takeFiles(store, taken, files, reply ? null : provider, () => { if (sendWhenLoaded?.state === taken) sendWhenLoaded = null; });
   }
 
   function onpaste(event: ClipboardEvent) {

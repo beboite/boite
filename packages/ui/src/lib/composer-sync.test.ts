@@ -5,6 +5,12 @@ import { FakeClient } from './fake-client';
 import { FakeComposerState } from './fake-client/composer';
 import { setExperiment } from './experiments';
 import { Store } from './store.svelte';
+import { takeFiles } from './composer-attachments';
+import { checkpoint, undoStep } from './composer-history';
+import { isLoading } from './draft-attachments';
+
+// One transparent pixel.
+const PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
 // jsdom has no IndexedDB: the durable journal is a recorder here, and the
 // synchronous backup in localStorage is what a restarted Store reads back.
@@ -195,6 +201,43 @@ test('edits made on both sides while one was offline all survive: the core keeps
   });
   await quiet();
   for (const side of [desk, phone]) expect(side.store.draftEntries.filter(entry => entry.text === 'Phone words')).toHaveLength(1);
+});
+
+test('a picture still being read when its words move to a draft lands in that draft, beside its reference', async () => {
+  const desk = await device('desk', new FakeClient({ delayMs: 0 }));
+  const phone = await device('phone', desk.client.composerPeer({ delayMs: 0, principal: 'session' }));
+  desk.store.editComposerText('t-trace', 'Base');
+  await vi.waitFor(() => expect(phone.store.composerStates['t-trace']?.text).toBe('Base'));
+  phone.client.drop();
+  await phone.client.settled();
+  desk.store.editComposerText('t-trace', 'Desk words');
+  await vi.waitFor(async () => expect((await recordOf(desk.client, 'inputs', 't-trace'))?.value?.input.text).toBe('Desk words'));
+  const read = FileReader.prototype.readAsDataURL;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (this: FileReader, blob: Blob) { void gate.then(() => read.call(this, blob)); });
+  phone.store.editComposerText('t-trace', 'Phone words');
+  const taking = takeFiles(phone.store, phone.store.composerStates['t-trace']!, [new File([Uint8Array.from(atob(PIXEL), c => c.charCodeAt(0))], 'pixel.png', { type: 'image/png' })], null, () => {});
+  expect(phone.store.composerStates['t-trace']!.text).toBe('Phone words [Image 1] ');
+  await phone.client.restore();
+  await vi.waitFor(() => expect(phone.store.composerStates['t-trace']?.text).toBe('Desk words'));
+  // Opened and typed in while the read goes on: that draft's own undo steps hold the placeholder.
+  const aside = phone.store.draftEntries.find(entry => entry.text === 'Phone words [Image 1] ')!;
+  phone.store.startDraft(undefined, { draftId: aside.id });
+  await vi.waitFor(() => expect(phone.store.composerStates.draft?.text).toBe('Phone words [Image 1] '));
+  const box = phone.store.composerStates.draft!;
+  checkpoint(box);
+  phone.store.editComposerText('draft', 'Phone words [Image 1] more');
+  release();
+  await taking;
+  // The core's copy of the draft holds the picture its `[Image 1]` names, not a reference to nothing.
+  await vi.waitFor(async () => {
+    const record = (await desk.client.call('composer.list', {})).find(row => row.section === 'drafts' && row.value?.input.text === 'Phone words [Image 1] more');
+    expect(record?.value?.input.attachments.map(file => file.kind)).toEqual(['image']);
+  });
+  const step = undoStep(box)!;
+  expect(step.text).toBe('Phone words [Image 1] ');
+  expect(step.attachments.map(file => [file.kind, isLoading(file)])).toEqual([['image', false]]);
 });
 
 test('a late list and an out-of-order push never take a newer record back', async () => {

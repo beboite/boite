@@ -1435,6 +1435,28 @@ test('Send pressed during a file read goes once the file is ready, unless the us
   expect(input().value).toBe('');
 });
 
+test('a send waiting on a draft\'s file never sends another draft opened in the same box', async ({ app: _app }) => {
+  await openDraft();
+  await type('Second draft words');
+  const parked = store.draft!.id!;
+  store.startDraft(undefined, { fresh: true });
+  await waitFor(() => store.draft?.id !== parked && input().value === '');
+  await type('First words');
+  vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(() => {});
+  paste(new File(['notes'], 'notes.txt', { type: 'text/plain' }));
+  await waitFor(() => chips().length === 1);
+  const send = () => query<HTMLButtonElement>('[data-testid=composer-send]');
+  press('Enter');
+  await waitFor(() => send().dataset.waiting === 'true');
+  // Same store, same 'draft' key, another box: what waited stays with the box it was pressed in.
+  store.startDraft(undefined, { draftId: parked });
+  await waitFor(() => input().value === 'Second draft words');
+  await new Promise(resolve => setTimeout(resolve, 300));
+  expect(store.draft?.id).toBe(parked);
+  expect(input().value).toBe('Second draft words');
+  expect(send().dataset.waiting).toBeUndefined();
+});
+
 test.for([true, false])('an image pasted during a pending send preserves only unsent content when accepted=%s', async (accepted, { app: _app }) => {
   await store.open('t-trace');
   paste(pngFile('sent.png'));
@@ -2107,6 +2129,34 @@ test('Ctrl+Z after deleting everything and a stray key brings back the text and 
   await new Promise(resolve => setTimeout(resolve, 10));
   expect(input().value).toBe('');
   expect(chips()).toEqual([]);
+});
+
+test('a picture refused while it loads leaves no undo step naming it, and keeps the typing done meanwhile', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  await type('Look at ');
+  let fail: (() => void) | undefined;
+  vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (this: FileReader) {
+    fail = () => this.onerror?.(new ProgressEvent('error') as ProgressEvent<FileReader>);
+  });
+  paste(pngFile('broken.png'));
+  await waitFor(() => input().value === 'Look at [Image 1] ' && fail !== undefined);
+  input().focus();
+  // Typing while it loads records steps that hold its placeholder.
+  edit('insertText', 'Look at [Image 1] a', 19, 'a');
+  fail!();
+  await waitFor(() => chips().length === 0);
+  expect(store.error).toContain('broken.png');
+  expect(input().value).toBe('Look at  a');
+  const seen: string[] = [];
+  for (let step = 0; step < 4; step++) {
+    press('z', { ctrlKey: true });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    seen.push(input().value);
+  }
+  expect(seen.filter(value => value.includes('[Image'))).toEqual([]);
+  // The letter typed during the read is its own step, then the box before the paste.
+  expect(seen.slice(0, 2)).toEqual(['Look at  ', 'Look at ']);
 });
 
 test('copying an image reference carries its picture to another composer, and stays text in its own', async ({ app: _app }) => {

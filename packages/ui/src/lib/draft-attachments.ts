@@ -29,6 +29,19 @@ export function loadedFrom(ready: Attachment, placeholder: Attachment): void {
   placeholders.set(ready, placeholder);
 }
 
+/** Other boxes that took a copy of a placeholder, told once its file is read or refused. */
+const followers = new WeakMap<Attachment, ((ready: Attachment | null) => void)[]>();
+
+export function followRead(placeholder: Attachment, then: (ready: Attachment | null) => void): void {
+  followers.set(placeholder, [...(followers.get(placeholder) ?? []), then]);
+}
+
+export function readSettled(placeholder: Attachment, ready: Attachment | null): void {
+  const waiting = followers.get(placeholder);
+  followers.delete(placeholder);
+  for (const then of waiting ?? []) then(ready);
+}
+
 /** The key a list draws an attachment under: its placeholder's while it had one. */
 export function tileKey(attachment: Attachment): Attachment {
   return placeholders.get(attachment) ?? attachment;

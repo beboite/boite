@@ -3,7 +3,7 @@ import { acceptAttachments, attachedBytes, isImageMimeType, keepSource, readAtta
 import { checkpoint, replaceInHistory } from './composer-history';
 import { insertImageReference, removeImageReferences } from './composer-images';
 import type { ComposerState } from './composer-queue';
-import { loadedFrom, type DraftAttachment } from './draft-attachments';
+import { loadedFrom, readSettled, type DraftAttachment } from './draft-attachments';
 import { bytes } from './format';
 import { IMAGE_SOURCE_MAX_BYTES, isReducible, prepareImageAway, type ImageCodec } from './image-prepare';
 import { fill, strings } from './strings';
@@ -162,6 +162,7 @@ export function takeFiles(store: Store, state: ComposerState, files: File[], att
       if (placeholder.kind === 'image' && key !== undefined) insertImageReference(store, key);
     },
     settle(placeholder, ready) {
+      readSettled(placeholder, ready);
       const at = state.attachments.indexOf(placeholder);
       if (at < 0) { replaceInHistory(state, placeholder, ready); return; }
       if (!ready) refused();
