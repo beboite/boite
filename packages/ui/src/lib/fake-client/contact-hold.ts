@@ -1,6 +1,5 @@
 import type { Thread, ThreadId } from '@boite/contracts';
 import type { FakeContext } from './context';
-import { sharedWorker } from './shared-compute';
 
 /*
  * As the core's letter scopes: a thread holds through its own contact mail
@@ -9,6 +8,16 @@ import { sharedWorker } from './shared-compute';
  * as it now stands, its own mail kept.
  */
 const mail = new WeakMap<FakeContext, Map<ThreadId, string[]>>();
+// The shared-compute fake names its remote job threads, where a history stops.
+const workers = new WeakMap<FakeContext, (threadId: ThreadId) => boolean>();
+
+export function holdBoundary(ctx: FakeContext, isWorker: (threadId: ThreadId) => boolean): void {
+  workers.set(ctx, isWorker);
+}
+
+function sharedWorker(ctx: FakeContext, threadId: ThreadId): boolean {
+  return workers.get(ctx)?.(threadId) ?? false;
+}
 
 function heldMail(ctx: FakeContext): Map<ThreadId, string[]> {
   let held = mail.get(ctx);

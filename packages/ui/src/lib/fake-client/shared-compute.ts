@@ -1,6 +1,7 @@
 /** Host-owned routes and captured fake jobs. Fixture Git is explicit; no caller result is trusted. */
 import { CONVERSATION_PROFILE_ID, type Protocol, type PermissionMode, type SharedExecutionProtection, type SharedComputeJob, type SharedComputePolicy, type SharedComputeRoute, type SharedProject, type SharedProjectRef, type RpcParams } from '@boite/contracts';
 import type { FakeContext, FakeMethods } from './context';
+import { holdBoundary } from './contact-hold';
 import { contactState, modelTier } from './contacts';
 import { delegationConfig, workflowChild, workflowAnswer, type ChildRoute } from './delegation';
 import { secureId } from '../secure-id';
@@ -13,7 +14,7 @@ function stateOf(ctx:FakeContext):HostState{let state=states.get(ctx);if(!state)
 const terminal=(job:SharedComputeJob)=>['done','failed','cancelled','revoked'].includes(job.status);
 /** Fixture capability only. The in-memory client never attests an actual OS boundary. */
 /** A remote job's thread, whose history starts at the job like the core's. */
-export function sharedWorker(ctx:FakeContext,threadId:string):boolean{return [...stateOf(ctx).jobs.values()].some(r=>r.job.worker?.threadId===threadId);}
+function sharedWorker(ctx:FakeContext,threadId:string):boolean{return [...stateOf(ctx).jobs.values()].some(r=>r.job.worker?.threadId===threadId);}
 export function setSharedNativeExecution(ctx:FakeContext,available:boolean):void{stateOf(ctx).nativeProtected=available;}
 export function sharedPermission(protocol:Protocol,mode:PermissionMode,providerId?:string):boolean{
   if(protocol==='pi')return mode==='yolo'||mode==='bypassPermissions';
@@ -85,6 +86,7 @@ function records(ctx:FakeContext,s:SharedProject,threadId:string):{host:FakeCont
   return [...new Map([...stateOf(ctx).jobs.values(),...stateOf(ctx).sources.values()].filter(r=>r.job.sharedProjectId===s.id&&(ctx.bus.principal!=='agent'||sameProject(r.job.source.project,local)&&r.job.source.threadId===threadId)).map(record=>[record.job.id,{host:record.job.host.coreId===ctx.identity.coreId?ctx:remoteShared(ctx,s)??ctx,record}])).values()];
 }
 export function sharedComputeMethods(ctx:FakeContext){
+  holdBoundary(ctx,id=>sharedWorker(ctx,id));
   sharedState(ctx).hostJob=(id,jobId)=>{const job=stateOf(ctx).jobs.get(jobId)?.job;return job?.sharedProjectId===id?job:undefined;};
   sharedState(ctx).listeners.add(id=>{
     const s=requireShared(ctx,id),policy=s.access[endpoints(ctx,s).index].compute;

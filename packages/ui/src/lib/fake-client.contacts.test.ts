@@ -67,6 +67,8 @@ test('a group contact keeps both sides of its exchange in the initiating convers
   const mine = (await source!.call('collaboration.get', { threadId: 't-trace' })).messages;
   expect(mine.map(letter => letter.id)).toEqual([sent.id, answer.id]);
   expect(mine[1]).toMatchObject({ from: { coreId: 'core-outside', threadId: 't-trace' }, to: { coreId: 'core-source', threadId: 't-trace' }, status: 'delivered' });
+  // As the core: routed contact mail outside a shared project holds the recipient.
+  expect((await source!.call('threads.get', { threadId: 't-trace' })).contactHold).toEqual({ contacts: [mine[1]!.contact!.name] });
   expect((await gateway!.call('collaboration.get', { threadId: 't-trace' })).messages).toEqual([]);
   const asked = await source!.call('collaboration.ask', { threadId: 't-trace', contact: 'outside', text: 'An agent for the notes project' });
   expect(asked.from.coreId).toBe('core-source');
@@ -96,6 +98,7 @@ test('a direct contact preserves mutual-trust sends, search and transcript grant
   const sent = await source.call('collaboration.send', { threadId: 't-trace', to: address, text: 'Use the trusted link', requestId: 'mutual-trust' });
   expect(sent.status).toBe('delivered');
   expect(sent.contact).toBeUndefined();
+  // As the core: contact mail outside a shared project holds the receiving thread.
   expect((await source.call('collaboration.contacts', { threadId: 't-trace' })).map(contact => contact.coreId)).toContain(to.coreId);
   for (const client of [source, target]) await client.call('contacts.settings', { settings: { minTier: 2 } });
   expect((await source.call('collaboration.ask', { threadId: 't-trace', contact: to.coreId, text: 'Open another project' })).coreId).toBe(to.coreId);
