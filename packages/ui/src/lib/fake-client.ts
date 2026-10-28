@@ -8,7 +8,7 @@ import { sharedState, sharedContact, reconcileShared, refusedShared } from './fa
 import { startupMethods, resetStartup } from './fake-client/startup';
 import { composerMethods } from './fake-client/composer';
 import { holdContactMail } from './fake-client/contact-hold';
-import { seedWorking } from './fake-client/working-seed';
+import { seedIdle, seedWorking } from './fake-client/working-seed';
 import { sweepMergedPrFixtures, type MergedPrFixture } from './fake-client/merged-pr-archive';
 import {
   RPC_CHUNK_BYTES,
@@ -118,7 +118,7 @@ export class FakeClient implements ObservableClient {
     this.#ctx = ctx;
     this.#methods = this.#answer(ctx);
     this.#missing = new Set(options.missing ?? []);
-    ctx.core.features = { ...ctx.core.features, composerPersistence: !this.#missing.has('composer.list') };
+    ctx.core.features = { ...ctx.core.features, composerPersistence: !this.#missing.has('composer.list'), listChanges: !this.#missing.has('threads.listChanges') };
     this.#agentSettings = agentSettingMethods(ctx);
     registerCore(ctx);
     seed(ctx);
@@ -128,6 +128,7 @@ export class FakeClient implements ObservableClient {
     if (options.boardDemo) seedBoardDemo(ctx);
     seedRetry(ctx);
     this.#stopWorking = seedWorking(ctx, options.working ?? 0);
+    seedIdle(ctx, options.idle ?? 0);
     if (options.watchDemo) {
       const at = Date.now();
       const watch = (number: number) => ({ url: `https://github.com/mtsu-dev/boite/pull/${number}`, repository: 'mtsu-dev/boite', number, since: at - 600_000 });
@@ -313,6 +314,14 @@ export class FakeClient implements ObservableClient {
     return this.#ctx.core;
   }
 
+  /**
+   * Another device's call on this core, which runs while this socket is down:
+   * its events of the gap reach nobody here, as after `drop`.
+   */
+  elsewhere<M extends RpcMethodName>(method: M, params: RpcParams<M>): Promise<RpcResult<M>> {
+    return this.#dispatch(method, params) as Promise<RpcResult<M>>;
+  }
+
   /** The ids the core holds this socket on, the set `emitToThread` gates on. */
   get coreSubscribers(): ThreadId[] {
     return [...this.#ctx.bus.subscribed];
@@ -382,6 +391,11 @@ export class FakeClient implements ObservableClient {
     const thread = this.#ctx.thread(threadId);
     thread.load = { processes, cpuPercent: 12, memoryBytes: 48 * 1024 * 1024 };
     this.#ctx.emit('thread.load', { threadId, load: structuredClone(thread.load) });
+  }
+
+  /** The thread's last process exits: its row has no load, and no event says so to the list. */
+  endLoad(threadId: ThreadId): void {
+    this.#ctx.thread(threadId).load = null;
   }
 
   /** Explicit deterministic Git fixture, separate from any RPC input. */

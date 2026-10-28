@@ -549,6 +549,29 @@ export interface ThreadRewind {
   files?: { status: 'restored' | 'unchanged' | 'unavailable'; count: number; reason?: string; busy?: true };
 }
 
+/**
+ * Where an answer of `threads.listChanges` left a client: the core's run (a
+ * new id each time the core starts) and its count of summary changes then.
+ */
+export interface ListCursor {
+  run: string;
+  seq: number;
+}
+
+/**
+ * `full`: every thread `threads.list({})` answers, in its order. It comes
+ * when no cursor was given, the core restarted (`run` differs), or the core
+ * no longer remembers every thread changed since (`LIST_CHANGES_IDS`).
+ *
+ * `changes`: the unarchived threads changed since the cursor, plus every
+ * thread with running processes, so a held row absent from `threads` has no
+ * load. `removed` are threads changed since that are now deleted or
+ * archived. A held row in neither list is unchanged.
+ */
+export type ThreadListChanges =
+  | { kind: 'full'; cursor: ListCursor; threads: ThreadSummary[] }
+  | { kind: 'changes'; cursor: ListCursor; threads: ThreadSummary[]; removed: ThreadId[] };
+
 export interface ThreadsRpcMethods {
   /** Owner-only, private bounded diagnostic history, including earlier runs. */
   'journal.inspect': { params: { cursor?: JournalInspectionCursor | null; limit?: number }; result: JournalInspection };
@@ -563,6 +586,12 @@ export interface ThreadsRpcMethods {
   'threads.tasks.get': { params: { threadId: ThreadId }; result: AgentTask[] };
 
   'threads.list': { params: { projectId?: ProjectId; includeArchived?: boolean }; result: ThreadSummary[] };
+  /**
+   * The sidebar's list, `threads.list({})`, read again after a reconnect:
+   * whole without `since`, else only what changed since that answer
+   * (`features.listChanges`). See `ThreadListChanges`.
+   */
+  'threads.listChanges': { params: { since?: ListCursor }; result: ThreadListChanges };
   /** Read the thread's own branch PR using the execution machine's GitHub CLI. Null when the thread has no branch. */
   /** `refresh`: a user asked, so what the core kept for this repository is read again, and a missing gh is tried again. */
   'threads.pullRequest': { params: { threadId: ThreadId; refresh?: boolean }; result: ThreadSummary['pullRequest'] };
