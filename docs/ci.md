@@ -27,13 +27,17 @@ E2E, stress, Docker and APK jobs a pull request run leaves out
 ([pull request runs](#pull-request-runs)). `Bundle size` skips there, since it
 compares a pull request with its base. A group's `PR
 title` checks the squash title of its last commit, the one `main` receives.
-The queue builds up to five groups at once, each on top of the ones ahead of
-it, without waiting to fill a group. Pull requests land in queue order: one
-whose group passed waits for those ahead of it. A failed group removes its pull
-request and rebuilds the groups behind it without that one; so do checks that
-have not reported within 60 minutes. A green `ci` run takes about 12 minutes
-(2026-10-20): that is the shortest time from entering the queue to landing, and
-waits or rebuilds add to it.
+The queue builds up to three groups at once, each on top of the ones ahead of
+it, without waiting to fill a group: with five, the full matrices shared the
+organization's 20 hosted runners and groups timed out (2026-10-28). Pull
+requests land in queue order: one whose group passed waits for those ahead of
+it. A failed group removes its pull request and rebuilds the groups behind it
+without that one; so do checks that have not reported within 120 minutes.
+GitHub does not cancel the `ci` runs of a group it drops: they hold their
+runners until they finish, so cancel a `merge_group` run whose
+`gh-readonly-queue/main/pr-<n>-<sha>` branch no longer exists. A green `ci` run
+takes about 12 minutes (2026-10-20): that is the shortest time from entering
+the queue to landing, and waits or rebuilds add to it.
 
 An agent merges with `gh pr merge <number> --squash --match-head-commit <sha>`:
 the pull request enters the queue once its own checks pass, and lands when its
