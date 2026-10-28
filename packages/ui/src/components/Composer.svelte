@@ -6,7 +6,7 @@
   import { agentSlashItems, boiteSlashItems, skillSlashItems, slashCompletion, listKey, mentionQueryOf, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
   import { AgentsView, agentOfThread } from '../lib/agents.svelte';
   import { composerPlaceholder } from '../lib/composer-placeholder';
-  import { attachFiles, receiveDroppedFiles } from '../lib/composer-attachments';
+  import { attachFiles, fitting, receiveDroppedFiles } from '../lib/composer-attachments';
   import { rewindComposerEdit } from '../lib/composer-edit';
   import { editWhole } from '../lib/reading-window';
   import { fitHeight, selfSizing } from '../lib/composer-size';
@@ -343,6 +343,7 @@
   }
 
   async function submit(nextDraft = false) {
+    const fit = fitting(stateForInput()); if (fit) await fit; // Pictures still being fitted to the byte total go once they fit (`lib/turn-fit.ts`).
     if (attachments.some(unresolvedAssetId)) { store.error = strings.errors.draftAttachment; return; }
     const prompt = text;
     const images = attachments;
@@ -846,8 +847,7 @@
     transition: border-color var(--dur-3) var(--ease-out-quint), box-shadow var(--dur-3) var(--ease-out-quint);
   }
 
-  /* The bottom gap sits under the box, not inside it: a textarea scrolls its text
-     through its own padding, and a line cut there read as running under the bar. */
+  /* The bottom gap sits under the box: a textarea scrolls its text through its own padding, up to the bar. */
   .input-wrap { position: relative; margin-bottom: var(--composer-input-gap, 6px); }
 
   .input-highlight {

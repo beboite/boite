@@ -4,6 +4,9 @@ import { bytes } from './format';
 import { IMAGE_SOURCE_MAX_BYTES, isReducible, prepareImage, type ImageCodec } from './image-prepare';
 import { fill, strings } from './strings';
 import { fitTurn } from './turn-fit';
+
+/** The composer reads the running fit of its box here, beside the other ways pictures come in. */
+export { fitting } from './turn-fit';
 import type { Store } from './store.svelte';
 
 /** Files dropped on the shell window, wherever they land (`lib/native-drop.ts`). */
