@@ -768,7 +768,8 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       const action = want(0, 'track');
       if (action !== 'track') throw new Usage(`goal: unknown action ${action}`);
       const activity = await client.call('threads.goal.track', { threadId });
-      print([`goal: reviewed, tracking the user's last prompt (${activity.goal?.objective.length ?? 0} characters)`], activity);
+      // This turn is the goal's first: its claim counts, so the agent learns the marker here.
+      print([`goal: reviewed, tracking the user's last prompt (${activity.goal?.objective.length ?? 0} characters)`, 'when it is done and verified, end this turn with [BOITE_GOAL_COMPLETE] alone on its last line; a reviewer then checks it'], activity);
     },
   };
   const handler = command !== undefined && Object.hasOwn(commands, command) ? commands[command] : undefined;

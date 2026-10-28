@@ -122,8 +122,12 @@ number under the switch on the Experiments page; the core accepts 200 to 20000.
 A steer, a slash command or a queued `/goal` or `/loop` never starts one, and a
 subagent's thread never does.
 
-The prompt still goes to the agent as typed, and the goal's objective is that
-same prompt, verbatim. The core decides in `threads.startTurn` from the
+The message stays as typed, and the goal's objective is that same prompt,
+verbatim, its spaces included. The turn it starts is the goal's first: the agent
+hears the prompt with the goal's rules, as a `/goal2` turn, and a claim or a
+blocker it ends on counts, so no second run comes before the review. A prompt
+queued with the experiment on never shares a delivery with one queued with it
+off. The core decides in `threads.startTurn` from the
 experiments of the app that sent the prompt (`turns.start`) or that queued it
 (the composer item's `experiments`), so a queued prompt keeps its decision
 across a restart and another device's switch never changes it. The goal carries
@@ -135,14 +139,16 @@ to the project board, linked to the conversation (`goalThreadId`), with the
 first line of the prompt as its text, cut to 2000 characters. The card follows
 the goal as a card the board started does: In progress while it runs, claimed
 (In review) once a review passes, Done when the user confirms. Removing the
-goal, or replacing it with another, leaves its open card in To do, linked to
-nothing.
+goal, or replacing it with another, unlinks its cards: an open one stays in To
+do, a claimed or done one keeps its column.
 
 An agent may ask for one below the threshold: `boite goal track`
 (`threads.goal.track`) starts the same goal on its own thread, its objective
-the user's last prompt that started a turn. The core refuses it when the
-desktop app has the experiment off, when a goal or a loop is under way, and
-when that prompt already started a goal (`auto-goal:<thread>` keeps the turn).
+the user's last prompt, a steer included. Called during the turn, it makes that
+turn the goal's first, and its output tells the agent the claim marker. The
+core refuses it when the desktop app has the experiment off, when a goal or a
+loop is under way, and when that prompt already started a goal
+(`auto-goal:<thread>` keeps its message).
 While the experiment is on, the agent guide of a top-level thread says to run
 it when the user's prompt lists several distinct requests.
 

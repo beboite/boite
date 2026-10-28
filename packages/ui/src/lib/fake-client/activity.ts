@@ -186,7 +186,7 @@ function setGoal(ctx: FakeContext, thread: Thread, activity: ThreadActivity, goa
   if (activity.goal?.auto) ctx.unlinkGoalCards(thread);
   activity.goal = goal === null ? null : {
     ...(auto ? { auto: true as const } : {}),
-    objective: goal.objective.trim(), status: 'active', iterations: 0, error: null,
+    objective: auto ? goal.objective : goal.objective.trim(), status: 'active', iterations: 0, error: null,
     ...(goal.review ? { review: { phase: 'working' as const, maxRounds: 5, reviewerThreadId: null, claimTurnId: null, delivered: 0, verdicts: [] }, checklist: { threadId: null, phase: 'idle' as const, items: [], model: null, effort: null, error: null } } : {}),
   };
 }
@@ -264,13 +264,18 @@ export function startsAutoGoal(ctx: FakeContext, text: string, experiments: read
   return text.trim().length >= (ctx.settings.autoGoalMinChars ?? AUTO_GOAL_MIN_CHARS.default);
 }
 
-/** As the core's `ActivityStore.autoGoal`: the prompt of `turnId` becomes a reviewed goal and a linked card. */
-export function startAutoGoal(ctx: FakeContext, thread: Thread, turnId: string, objective: string): boolean {
+/** As the core's `ActivityStore.autoGoal`: the user's message `messageId` becomes a reviewed goal and a linked card. */
+export function startAutoGoal(ctx: FakeContext, thread: Thread, turnId: string, messageId: string, objective: string): boolean {
   if (thread.archived || thread.parentThreadId || busy(thread) || !objective.trim()) return false;
   const activity = structuredClone(thread.activity ?? { goal: null, loop: null, tasks: [] });
   setGoal(ctx, thread, activity, { objective, review: true }, true);
   thread.activity = activity;
-  ctx.autoGoalTurns.set(thread.id, turnId);
+  // The turn still under way is the goal's first: its claim counts.
+  if (['queued', 'running', 'waiting'].includes(thread.turns.find(turn => turn.id === turnId)?.status ?? '')) {
+    ctx.activityTurns.set(turnId, { kind: 'goal', generation: ctx.activityGenerations.get(`${thread.id}:goal`) ?? 0 });
+    activity.goal!.iterations = 1;
+  }
+  ctx.autoGoalMessages.set(thread.id, messageId);
   startChecklist(ctx, thread);
   ctx.publishActivity(thread);
   ctx.addGoalCard(thread, objective);
@@ -278,15 +283,14 @@ export function startAutoGoal(ctx: FakeContext, thread: Thread, turnId: string, 
   return true;
 }
 
-/** The prompt of the newest turn the user started, as the core's `lastPrompt`. */
-function lastPrompt(thread: Thread): { turnId: string; text: string } | null {
+/** The user's newest prompt, a steer included, as the core's `lastPrompt`. */
+function lastPrompt(thread: Thread): { turnId: string; messageId: string; text: string } | null {
   for (const message of [...thread.messages].reverse()) {
     if (message.role !== 'user' || !message.turnId || thread.turns.find(turn => turn.id === message.turnId)?.execution?.operation) continue;
-    if (thread.messages.find(other => other.turnId === message.turnId)?.id !== message.id) continue;
     const part = message.parts[0];
     if (part?.type !== 'text' || part.activity || part.startedBy) continue;
     const text = part.displayText ?? part.text;
-    if (text.trim() && !NATIVE_COMMAND.test(text)) return { turnId: message.turnId, text };
+    if (text.trim() && !NATIVE_COMMAND.test(text)) return { turnId: message.turnId, messageId: message.id, text };
   }
   return null;
 }
@@ -314,8 +318,8 @@ export function activityMethods(ctx: FakeContext) {
       if (busy(thread)) throw refusal('this conversation already has a goal or a loop; it must finish or be removed first');
       const last = lastPrompt(thread);
       if (!last) throw refusal('this conversation has no prompt of the user to track');
-      if (ctx.autoGoalTurns.get(thread.id) === last.turnId) throw refusal("the user's last prompt already started a goal");
-      if (!startAutoGoal(ctx, thread, last.turnId, last.text)) throw refusal('a reviewed goal starts reviewer conversations; start it in a top-level conversation');
+      if (ctx.autoGoalMessages.get(thread.id) === last.messageId) throw refusal("the user's last prompt already started a goal");
+      if (!startAutoGoal(ctx, thread, last.turnId, last.messageId, last.text)) throw refusal('a reviewed goal starts reviewer conversations; start it in a top-level conversation');
       return structuredClone(thread.activity!);
     },
     'threads.activity.control': async (params) => {

@@ -256,8 +256,8 @@ export class FakeContext {
   usageSeeded = true;
   /** The project todo lists, every thread of a project reading the same cards. */
   todos: Todo[] = [];
-  /** Per thread, the turn whose prompt started its automatic goal, as the core's `auto-goal:<thread>` row. */
-  readonly autoGoalTurns = new Map<string, string>();
+  /** Per thread, the user's message that started its automatic goal, as the core's `auto-goal:<thread>` row. */
+  readonly autoGoalMessages = new Map<string, string>();
   /** The experiments a queued prompt was queued with, read by `turns.start` while the composer delivers it. */
   queuedExperiments: readonly string[] | null = null;
   /** The working tree `files.list`, `files.read` and `files.write` share. */

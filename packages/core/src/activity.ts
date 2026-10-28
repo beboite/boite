@@ -148,21 +148,27 @@ export class ActivityStore {
   }
 
   /**
-   * An automatic goal (`auto-goal` experiment, `docs/goals.md`): the prompt
-   * that started `turnId` becomes a reviewed goal's objective, verbatim, and
+   * An automatic goal (`auto-goal` experiment, `docs/goals.md`): the user's
+   * message `messageId` becomes a reviewed goal's objective, verbatim, and
    * the project's board gets a card linked to it. False, and nothing changes,
    * when the conversation is a subthread or already holds a goal or a loop.
    * It never throws: the turn it follows is already accepted, so a goal that
    * cannot start is logged and the prompt runs alone.
    */
-  autoGoal(threadId: string, turnId: string, objective: string, executionChoice?: ComposerChoice): boolean {
+  autoGoal(threadId: string, turnId: string, messageId: string, objective: string, executionChoice?: ComposerChoice): boolean {
     const thread = this.core.journal.getThread(threadId);
     if (!thread || thread.archived || thread.parentThreadId || this.busy(threadId) || !objective.trim()) return false;
     try { this.set({ threadId, goal: { objective, review: true } }, undefined, executionChoice, true); } catch (error) {
       this.core.log('warn', `automatic goal: ${messageOf(error)}`);
       return false;
     }
-    this.core.journal.setSetting(`auto-goal:${threadId}`, { turnId });
+    // The turn still under way is the goal's first: its claim or blocker counts, and no second run starts before them.
+    if (['queued', 'running', 'waiting'].includes(this.core.journal.getTurn(turnId)?.status ?? '')) {
+      this.ownTurns.set(turnId, { kind: 'goal', generation: this.generations.get(`${threadId}:goal`) ?? 0, iteration: 1 });
+      this.states.get(threadId)!.goal!.iterations = 1;
+      this.save(threadId);
+    }
+    this.core.journal.setSetting(`auto-goal:${threadId}`, { turnId, messageId });
     try { addGoalCard(this.core, threadId, objective); } catch (error) { this.core.log('warn', `automatic goal card: ${messageOf(error)}`); }
     return true;
   }
@@ -180,28 +186,27 @@ export class ActivityStore {
     if (this.busy(threadId)) throw refused('this conversation already has a goal or a loop; it must finish or be removed first', { reason: 'busy' });
     const last = this.lastPrompt(threadId);
     if (!last) throw refused('this conversation has no prompt of the user to track', { reason: 'no-prompt' });
-    const started = this.core.journal.getSetting(`auto-goal:${threadId}`) as { turnId?: string } | undefined;
-    if (started?.turnId === last.turnId) throw refused("the user's last prompt already started a goal", { reason: 'already-tracked' });
-    if (!this.autoGoal(threadId, last.turnId, last.text)) throw refused('a reviewed goal starts reviewer conversations; start it in a top-level conversation', { reason: 'subthread' });
+    const started = this.core.journal.getSetting(`auto-goal:${threadId}`) as { messageId?: string } | undefined;
+    if (started?.messageId === last.messageId) throw refused("the user's last prompt already started a goal", { reason: 'already-tracked' });
+    if (!this.autoGoal(threadId, last.turnId, last.messageId, last.text)) throw refused('a reviewed goal starts reviewer conversations; start it in a top-level conversation', { reason: 'subthread' });
     return this.get(threadId);
   }
 
-  /** The prompt of the newest turn the user started: no operation, no goal or loop turn, no native command. */
-  private lastPrompt(threadId: string): { turnId: string; text: string } | null {
+  /** The user's newest prompt, a steer included: no operation, no goal or loop turn, no native command. */
+  private lastPrompt(threadId: string): { turnId: string; messageId: string; text: string } | null {
     for (const message of this.core.journal.walkMessages(threadId, { newestFirst: true, blobs: false })) {
       if (message.role !== 'user' || !message.turnId || this.core.journal.getTurn(message.turnId)?.execution?.operation) continue;
-      let first: typeof message | undefined;
-      for (const opening of this.core.journal.walkTurnMessages(threadId, message.turnId, { blobs: false })) { first = opening; break; }
-      // A steer is a later message of its turn; the turn's prompt comes up further back.
-      if (first?.id !== message.id) continue;
       const part = message.parts[0];
       if (part?.type !== 'text' || part.activity || part.startedBy) continue;
       const text = part.displayText ?? part.text;
       if (!text.trim() || nativeCommandPrompt(text)) continue;
-      return { turnId: message.turnId, text };
+      return { turnId: message.turnId, messageId: message.id, text };
     }
     return null;
   }
+
+  /** A user's turn an automatic goal took as its first: the agent hears the goal's rules on it. */
+  autoGoalTurn(turnId: string): boolean { return this.ownTurns.get(turnId)?.kind === 'goal'; }
 
   set(params: RpcParams<'threads.activity.set'>, sharedClaim?: {sharedProjectId: string; cardId: string; claimId: string}, executionChoice?: ComposerChoice, auto = false): ThreadActivity {
     const thread = this.core.journal.getThread(params.threadId);
@@ -219,7 +224,7 @@ export class ActivityStore {
       this.bounced.delete(params.threadId);
       // A goal that replaces an automatic one leaves its card in To do, linked to nothing.
       if (state.goal?.auto) unlinkGoalCards(this.core, params.threadId);
-      state.goal = params.goal === null ? null : { objective: params.goal.objective.trim(), status: 'active', iterations: 0, error: null, ...(params.goal.review ? { review: newReview(), checklist: newChecklist() } : {}), ...(auto ? { auto: true as const } : {}) };
+      state.goal = params.goal === null ? null : { objective: auto ? params.goal.objective : params.goal.objective.trim(), status: 'active', iterations: 0, error: null, ...(params.goal.review ? { review: newReview(), checklist: newChecklist() } : {}), ...(auto ? { auto: true as const } : {}) };
       // This second argument is core-only. An ordinary RPC goal replacement cannot inherit another claim's stop authority.
       if (sharedClaim && params.goal) this.core.journal.setSetting(`activity:shared:${params.threadId}`, sharedClaim);
       else this.core.journal.deleteSetting(`activity:shared:${params.threadId}`);

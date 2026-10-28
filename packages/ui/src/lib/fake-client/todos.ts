@@ -66,9 +66,9 @@ export function addGoalCard(ctx: FakeContext, thread: Thread, prompt: string): v
   emitTodos(ctx, thread.projectId);
 }
 
-/** A removed automatic goal: its open cards go back to To do, linked to nothing. */
+/** A goal removed or replaced: its cards let go of the conversation, an open one back in To do. */
 export function unlinkGoalCards(ctx: FakeContext, thread: Thread): void {
-  const linked = ctx.todos.filter((todo) => todo.goalThreadId === thread.id && todo.status === 'open');
+  const linked = ctx.todos.filter((todo) => todo.goalThreadId === thread.id);
   if (!linked.length || thread.projectId === null) return;
   for (const todo of linked) { todo.goalThreadId = null; todo.updatedAt = ctx.now(); }
   emitTodos(ctx, thread.projectId);

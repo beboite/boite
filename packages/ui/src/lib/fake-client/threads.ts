@@ -660,7 +660,7 @@ export function threadMethods(ctx: FakeContext) {
       if (rootId) ctx.delegationTurns.set(rootId, (ctx.delegationTurns.get(rootId) ?? 0) + 1);
       if (key) ctx.turnRequests.set(key, { content, turn, messageId: thread.messages[messageIndex]!.id });
       // A long prompt may start an automatic goal, decided from the experiments it was sent or queued with; otherwise a `/goal2`'s checklist reads what the user adds.
-      const automatic = !rootId && startsAutoGoal(ctx, params.prompt, ctx.queuedExperiments ?? ctx.clientPreferences?.experiments) && startAutoGoal(ctx, thread, turn.id, params.prompt);
+      const automatic = !rootId && startsAutoGoal(ctx, params.prompt, ctx.queuedExperiments ?? ctx.clientPreferences?.experiments) && startAutoGoal(ctx, thread, turn.id, thread.messages[messageIndex]!.id, params.prompt);
       if (!rootId && !automatic) noteUserMessage(ctx, thread, params.prompt);
       return turn;
     },

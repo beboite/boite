@@ -262,12 +262,12 @@ export function addGoalCard(core: Core, threadId: ThreadId, prompt: string): Tod
   return todo;
 }
 
-/** A goal removed from its conversation: its open cards go back to To do, linked to nothing. */
+/** A goal removed or replaced: its cards let go of the conversation, an open one back in To do, a claimed or done one where it is. */
 export function unlinkGoalCards(core: Core, threadId: ThreadId): void {
   const projectId = core.journal.getThread(threadId)?.projectId;
   if (!projectId || !linkedThreads(core, projectId).has(threadId)) return;
   const now = Date.now();
-  save(core, projectId, stored(core, projectId).map((todo) => todo.goalThreadId === threadId && todo.status === 'open' ? { ...todo, goalThreadId: null, updatedAt: now } : todo));
+  save(core, projectId, stored(core, projectId).map((todo) => todo.goalThreadId === threadId ? { ...todo, goalThreadId: null, updatedAt: now } : todo));
 }
 
 export function removeTodo(core: Core, params: RpcParams<'todos.remove'>): void {

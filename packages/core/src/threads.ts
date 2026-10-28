@@ -735,7 +735,7 @@ export class ThreadStore {
       // so a pause the core left on Stop, a failure or a restart ends with it; the owner's stays.
       if (!activity && !startedBy && (!operation || operation === 'resume' || (operation === 'delegation' && thread.parentThreadId))) this.core.coordination.resumeForUser(threadId);
       // `autoGoal`, the prompt as typed, may start an automatic goal (`docs/goals.md`); otherwise a `/goal2`'s checklist reads what the user adds, drops or changes.
-      if (!activity && !operation && !startedBy && !nativeCommandPrompt(prompt) && !(autoGoal !== undefined && this.core.activity.autoGoal(threadId, turn.id, autoGoal, executionChoice))) this.core.activity.userMessage(threadId, prompt);
+      if (!activity && !operation && !startedBy && !nativeCommandPrompt(prompt) && !(autoGoal !== undefined && this.core.activity.autoGoal(threadId, turn.id, message.id, autoGoal, executionChoice))) this.core.activity.userMessage(threadId, prompt);
     });
     this.autoCompact.cancel(threadId);
     this.cacheKeepalive.cancel(threadId);

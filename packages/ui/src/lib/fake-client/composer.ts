@@ -14,6 +14,8 @@ const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const keyOf = (section: ComposerRecord['section'], id: string) => JSON.stringify([section, id]);
 /** The core's test (`isComposerActivity`): a command goes alone, whichever experiments then run it. */
 const isCommand = (text: string) => /^\/(goal2?|loop)(?:\s|$)/.test(text.trim());
+// The batch is decided from its first prompt's experiments, so a prompt queued with Automatic goals in another state goes alone.
+const autoGoal = (entry: ComposerQueuedPrompt) => entry.experiments?.includes('auto-goal') ?? false;
 /** As `composerBatch` compares choices: key order and an absent speed do not count. */
 const sameChoice = (a?: ComposerChoice, b?: ComposerChoice) => {
   const digest = (choice?: ComposerChoice) => JSON.stringify(Object.entries({ ...choice, speed: choice?.speed ?? null }).sort(([x], [y]) => x < y ? -1 : 1));
@@ -119,7 +121,7 @@ export class FakeComposerState {
     let files = 0, bytes = 0, refs = 0;
     for (const entry of queue) {
       const nextBytes = entry.attachments.reduce((sum, file) => sum + decodedBytes(this.assets.get(file.assetId)?.data ?? ''), 0);
-      if (entries.length && (entry.request || isCommand(entry.text) || !sameChoice(entry.choice, head.choice) || JSON.stringify(entry.sentFrom ?? null) !== JSON.stringify(head.sentFrom ?? null) || entry.afterBoundary !== head.afterBoundary || files + entry.attachments.length > ATTACHMENTS_PER_TURN || bytes + nextBytes > ATTACHMENTS_TOTAL_MAX_BYTES || refs + (entry.previewReferences?.length ?? 0) > PREVIEW_REFERENCES_PER_TURN)) break;
+      if (entries.length && (entry.request || isCommand(entry.text) || !sameChoice(entry.choice, head.choice) || JSON.stringify(entry.sentFrom ?? null) !== JSON.stringify(head.sentFrom ?? null) || entry.afterBoundary !== head.afterBoundary || autoGoal(entry) !== autoGoal(head) || files + entry.attachments.length > ATTACHMENTS_PER_TURN || bytes + nextBytes > ATTACHMENTS_TOTAL_MAX_BYTES || refs + (entry.previewReferences?.length ?? 0) > PREVIEW_REFERENCES_PER_TURN)) break;
       entries.push(entry); files += entry.attachments.length; bytes += nextBytes; refs += entry.previewReferences?.length ?? 0;
     }
     return entries;

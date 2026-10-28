@@ -35,7 +35,7 @@ const cards = (client: CoreClient, threadId: string) => client.call('todos.list'
  * top-level conversation running until `release`: a steer has a turn to
  * join, and a goal stays under way.
  */
-function roles(options: { hold?: boolean } = {}) {
+function roles(options: { hold?: boolean; prompts?: string[] } = {}) {
   const held: (() => void)[] = [];
   restore = setDriver('echo', {
     protocol: 'echo',
@@ -44,7 +44,7 @@ function roles(options: { hold?: boolean } = {}) {
       if (h.core.activity.ownsTracker(ctx.thread.id)) {
         ctx.emit.part(id, 0, { type: 'text', text: ctx.prompt.includes('Say which open items') ? json({ done: [1] }) : json({ items: [{ text: 'Fix the login page', source: 'Fix the login page.' }] }) });
       } else if (h.core.activity.ownsReviewer(ctx.thread.id)) ctx.emit.part(id, 0, { type: 'text', text: 'Checks pass.\nVERDICT: PASS' });
-      else ctx.emit.part(id, 0, { type: 'text', text: 'Fixed.\n[BOITE_GOAL_COMPLETE]' });
+      else { options.prompts?.push(ctx.prompt); ctx.emit.part(id, 0, { type: 'text', text: 'Fixed.\n[BOITE_GOAL_COMPLETE]' }); }
       ctx.emit.complete(id, 'complete');
       const result = { status: 'done' as const, sessionId: null, usage: null };
       if (!options.hold || ctx.thread.parentThreadId) return { stop() {}, done: Promise.resolve(result) };
@@ -79,12 +79,13 @@ async function boite(threadId: string, args: string[]): Promise<{ code: number; 
 
 test('a prompt of 1500 characters with the experiment on starts a reviewed goal on it and a linked card', async () => {
   h = await startTestCore();
-  roles();
+  // Its first turn held, the goal stays under way while the test reads it.
+  const held = roles({ hold: true });
   const { client, threadId } = await desktop();
   const text = prompt(1500);
   await client.call('turns.start', { threadId, prompt: text });
   await waitFor(() => goalOf(threadId) !== null);
-  // The prompt goes to the agent as typed; the goal follows it.
+  // The message stays as typed; the goal follows it.
   const user = h.core.journal.listMessages(threadId).filter(message => message.role === 'user');
   expect(user[0]!.parts[0]).toMatchObject({ type: 'text', text });
   expect(user[0]!.parts[0]).not.toHaveProperty('activity');
@@ -92,6 +93,7 @@ test('a prompt of 1500 characters with the experiment on starts a reviewed goal 
   const list = await cards(client, threadId);
   expect(list).toHaveLength(1);
   expect(list[0]).toMatchObject({ text: 'Fix the login page.', status: 'open', goalThreadId: threadId });
+  held.release();
 });
 
 test('1499 characters, the experiment off, or a command start no goal', async () => {
@@ -208,4 +210,96 @@ test('the card of an automatic goal is claimed once its review passes', async ()
 test('the agent guide names goal track only while the experiment is on', () => {
   expect(agentGuide(true, false, [], false, true)).toContain('`boite goal track`');
   expect(agentGuide(true, false, [], false, false)).not.toContain('goal track');
+});
+
+test('the prompt that starts an automatic goal is its first goal turn: one turn claims it, then the review runs', async () => {
+  h = await startTestCore();
+  const prompts: string[] = [];
+  roles({ prompts });
+  const { client, threadId } = await desktop();
+  const text = prompt(1500);
+  await client.call('turns.start', { threadId, prompt: text });
+  await waitFor(() => goalOf(threadId)?.status === 'complete', 10_000);
+  // The agent heard the goal's rules on the user's own turn and claimed it there: no second run before the review.
+  expect(prompts).toHaveLength(1);
+  expect(prompts[0]).toContain(`Work toward this goal: ${text}`);
+  expect(prompts[0]).toContain('[BOITE_GOAL_COMPLETE]');
+  expect(goalOf(threadId)).toMatchObject({ iterations: 1, review: { verdicts: [{ verdict: 'pass' }] } });
+  expect(h.core.journal.listTurns(threadId)).toHaveLength(1);
+});
+
+test('a queued batch never lends one prompt\'s experiments to another', async () => {
+  h = await startTestCore();
+  roles();
+  const { client, threadId } = await desktop([]);
+  const text = prompt(1500);
+  const value: ComposerValue = { input: { text: '', attachments: [], paused: false, queued: [
+    { id: 'short-off', text: 'A short one', attachments: [], experiments: [] },
+    { id: 'long-on', text, attachments: [], experiments: ['auto-goal'] },
+  ] } };
+  await client.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: 0, value });
+  await waitFor(() => goalOf(threadId) !== null, 5000);
+  expect(goalOf(threadId)).toMatchObject({ objective: text, auto: true });
+});
+
+test('goal track takes the user\'s last prompt, a steer included', async () => {
+  h = await startTestCore();
+  const held = roles({ hold: true });
+  const { client, threadId } = await desktop();
+  const turn = await client.call('turns.start', { threadId, prompt: 'Start' });
+  await waitFor(() => h.core.threads.runner.handles.has(threadId));
+  expect(await client.call('turns.steer', { threadId, turnId: turn.id, prompt: 'Fix the login and the signup', clientRequestId: 'steer_track_01', expectedSelectionVersion: 0 })).toEqual({ accepted: true });
+  held.release();
+  await waitFor(() => h.core.journal.listTurns(threadId).every(entry => entry.status === 'done'));
+  expect(await boite(threadId, ['goal', 'track'])).toMatchObject({ code: 0, err: '' });
+  expect(goalOf(threadId)).toMatchObject({ objective: 'Fix the login and the signup', auto: true });
+  held.release();
+});
+
+test('a goal that replaces an automatic one unlinks its cards, a claimed one included', async () => {
+  h = await startTestCore();
+  roles();
+  const { client, threadId } = await desktop();
+  await client.call('turns.start', { threadId, prompt: prompt(1500) });
+  const stored = () => h.core.journal.getSetting(`todos:${h.core.threads.require(threadId).projectId}`) as { status: string; goalThreadId: string | null }[] | undefined;
+  await waitFor(() => stored()?.[0]?.status === 'claimed', 10_000);
+  await client.call('threads.activity.set', { threadId, goal: { objective: 'Something else' } });
+  expect(stored()![0]).toMatchObject({ status: 'claimed', goalThreadId: null });
+});
+
+test('an automatic goal keeps the prompt verbatim, its surrounding spaces included', async () => {
+  h = await startTestCore();
+  roles();
+  const { client, threadId } = await desktop();
+  const text = `  ${prompt(1500)}\n  `;
+  await client.call('turns.start', { threadId, prompt: text });
+  await waitFor(() => goalOf(threadId) !== null);
+  expect(goalOf(threadId)!.objective).toBe(text);
+});
+
+test('a /goal2 the user sets runs its first goal turn itself, so one turn claims it there too', async () => {
+  h = await startTestCore();
+  const prompts: string[] = [];
+  roles({ prompts });
+  const { client, threadId } = await desktop([]);
+  await client.call('threads.activity.set', { threadId, goal: { objective: 'Fix the login page.', review: true } });
+  await waitFor(() => goalOf(threadId)?.status === 'complete', 10_000);
+  expect(prompts).toHaveLength(1);
+  expect(goalOf(threadId)).toMatchObject({ iterations: 1 });
+});
+
+test('goal track during the turn makes that turn the goal\'s first, so its claim counts', async () => {
+  h = await startTestCore();
+  const prompts: string[] = [];
+  const held = roles({ hold: true, prompts });
+  const { client, threadId } = await desktop();
+  await client.call('turns.start', { threadId, prompt: 'Fix the login and the signup' });
+  await waitFor(() => h.core.threads.runner.handles.has(threadId));
+  const tracked = await boite(threadId, ['goal', 'track']);
+  expect(tracked.out).toContain('[BOITE_GOAL_COMPLETE]');
+  held.release();
+  await waitFor(() => goalOf(threadId)?.review?.verdicts.length === 1, 10_000);
+  expect(prompts).toHaveLength(1);
+  expect(goalOf(threadId)).toMatchObject({ iterations: 1, review: { verdicts: [{ verdict: 'pass' }] } });
+  held.release();
 });
