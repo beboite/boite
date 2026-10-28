@@ -172,7 +172,7 @@ test('a bot sees, drives and hears a thread of a project another machine entrust
   expect(cut.code).not.toBe(0);
   expect(cut.err).toContain('does not let the bots of the other machines of its group look after its projects');
   // Its thread stays on the desk as last seen, saying why it cannot be reached.
-  expect((await cli(['threads'])).out).toStartWith(`${ref} idle "Letter to the bank" desk=followed machine=${machine} unreachable="${pc.core.info().hostname} has groupBots off"\nunavailable: `);
+  expect((await cli(['threads'])).out).toStartWith(`${ref} idle "Letter to the bank" desk=touched machine=${machine} unreachable="${pc.core.info().hostname} has groupBots off"\nunavailable: `);
   expect(await thrown(pc.core.workforce.groupHost.handle(peer, 'bot.thread', { lease, target: letter }))).toThrow('groupBots is off on this machine');
 }, 30_000);
 

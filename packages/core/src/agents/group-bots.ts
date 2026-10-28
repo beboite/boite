@@ -136,7 +136,9 @@ export class GroupBots {
     const follows = this.follows(agentId);
     const key = `${peer.coreId}/${row.id}`;
     const fresh = follows[key] === undefined;
-    this.writeFollows(agentId, { ...follows, [key]: { at: follows[key]?.at ?? Date.now(), origin: follows[key]?.origin ?? origin, row: { ...row, machine: machineArg(this.core, peer) }, seenAt: Date.now() } });
+    // The first origin stays, except that a watch turns a `touched` follow into `followed`.
+    const was = follows[key]?.origin;
+    this.writeFollows(agentId, { ...follows, [key]: { at: follows[key]?.at ?? Date.now(), origin: was === undefined || (was === 'touched' && origin === 'followed') ? origin : was, row: { ...row, machine: machineArg(this.core, peer) }, seenAt: Date.now() } });
     if (fresh) this.schedule(peer.coreId, SYNC_MS);
   }
   unfollow(agentId: string, coreId: string, threadId: ThreadId): boolean {
@@ -183,6 +185,13 @@ export class GroupBots {
     return this.desk(agent).map(watch => `- ${JSON.stringify({ thread: `${watch.machine}/${watch.threadId}`, title: watch.title, machine: watch.machine, state: watch.unreachable ? `unreachable (${watch.unreachable})` : watch.state })}`);
   }
 
+  /** Whether a fact about `<core-id>/<project-id>/<thread-id>` wakes the agent whatever `eventWakes` says: its desk holds the thread, not only as `touched`. */
+  urgent(agentId: string, id: string): boolean {
+    const [coreId, , threadId] = id.split('/');
+    const follow = this.follows(agentId)[`${coreId}/${threadId}`];
+    const agent = this.store.records.find('profile', agentId);
+    return follow !== undefined && follow.origin !== 'touched' && agent !== null && this.holds(agent, `${coreId}/${threadId}`, follow);
+  }
   /** Whether a fact about `<core-id>/<project-id>/<thread-id>` may still reach the bot: that project is still entrusted to it. */
   mayHear(agent: AgentProfile, id: string): boolean {
     const [coreId, projectId] = id.split('/');
@@ -428,7 +437,7 @@ export class GroupBots {
     try {
       const { agent: bot, peer, result } = await this.ask(params.threadId, params.machine, 'resident.send', 'bot.send', { target: params.target, text: params.text, id });
       const row = rowOf((result as { thread?: unknown } | null)?.thread);
-      if (row !== null) this.follow(bot.id, peer, row);
+      if (row !== null) this.follow(bot.id, peer, row, 'touched');
       return { id, status: 'received' };
     } finally {
       if (pending) {
@@ -454,11 +463,11 @@ export class GroupBots {
 
   private async followAfter(agent: AgentProfile, peer: CoordinationPeer, threadId: ThreadId): Promise<void> {
     const known = this.follows(agent.id)[`${peer.coreId}/${threadId}`];
-    if (known) { this.follow(agent.id, peer, known.row); return; }
+    if (known) { this.follow(agent.id, peer, known.row, 'touched'); return; }
     try {
       const { result } = await this.ask(this.store.sessionOf(agent.id)!.threadId, machineArg(this.core, peer), 'resident.answer', 'bot.thread', { target: threadId });
       const row = rowOf((result as ProjectThreadDetail | null)?.thread);
-      if (row !== null) this.follow(agent.id, peer, row);
+      if (row !== null) this.follow(agent.id, peer, row, 'touched');
     } catch { /* The answer went; the desk catches up with the next event. */ }
   }
 }

@@ -284,7 +284,7 @@ test('its status names the step it is on and what it waits on, and counts today\
 
 test('a dropped fact leaves a line in the agent\'s thread naming it, up to ten an hour', async () => {
   h.core.workforce.setLimits({ paused: true });
-  const fact = (i: number, text = `"Worker" (thr_w${i}) turn ${i} done.`) => h.core.agentRuntime.fact(agent.id, { key: `turn:${i}`, text });
+  const fact = (i: number, text = `"Worker" (thr_w${i}) turn ${i} done.`) => h.core.agentRuntime.fact(agent.id, { urgent: true, key: `turn:${i}`, text });
   // The size cap: an event turn holds 16,000 characters, the oldest fact gives way.
   expect(fact(0, `"Big" (thr_big) wrote a lot.\n${'x'.repeat(9000)}`)).toBe(true);
   expect(fact(1, `"Bigger" (thr_bigger) wrote more.\n${'y'.repeat(9000)}`)).toBe(true);
@@ -356,7 +356,7 @@ test('a project taken back takes the follows the agent made through it, their fa
   } finally { own.close(); }
 
   // A fact that waited from before is read again when it is delivered: what the agent may no longer see is dropped.
-  h.core.agentRuntime.fact(agent.id, { key: 'turn:late', text: `Turn done in thread ${worker}, titled "PRIVATE_AFTER_REVOCATION".`, threadIds: [worker] });
+  h.core.agentRuntime.fact(agent.id, { urgent: true, key: 'turn:late', text: `Turn done in thread ${worker}, titled "PRIVATE_AFTER_REVOCATION".`, threadIds: [worker] });
   hurry();
   h.core.workforce.setLimits({ paused: false });
   const event = () => (prompts.get(self) ?? []).find(p => p.includes(EVENT_HEADER));
