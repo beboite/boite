@@ -40,8 +40,8 @@ export function machinePolicyFile(platform: NodeJS.Platform = process.platform, 
 export function policyFileFor(given: string | undefined, env: Record<string, string | undefined> = process.env, platform: NodeJS.Platform = process.platform): string {
   if (given !== undefined) return given;
   const machine = machinePolicyFile(platform, env);
-  // `ProgramData` is the user's environment too: pointing it elsewhere does not hide the default location.
-  const candidates = platform === 'win32' ? [...new Set([machine, machinePolicyFile(platform, {})])] : [machine];
+  // `ProgramData` is the user's environment too: the default location, when it holds a file, wins over it.
+  const candidates = platform === 'win32' ? [...new Set([machinePolicyFile(platform, {}), machine])] : [machine];
   for (const file of candidates) if (present(file)) return file;
   const named = env.BOITE_POLICY_FILE;
   return named !== undefined && named.length > 0 ? named : machine;
@@ -113,7 +113,7 @@ export function parsePolicy(text: string | null, file: string): Parsed {
     return value;
   };
   const ids = (field: string, value: unknown): string[] => {
-    if (Array.isArray(value) && value.every(item => typeof item === 'string' && /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(item))) return [...new Set(value as string[])];
+    if (Array.isArray(value) && value.every(item => typeof item === 'string' && /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(item))) return [...new Set((value as string[]).map(id => id.toLowerCase()))];
     problem(field, 'an array of provider ids', shape(value));
     return [];
   };

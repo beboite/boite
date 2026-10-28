@@ -127,6 +127,7 @@
 
   function saveKeys(event: SubmitEvent) {
     event.preventDefault();
+    if (dictation !== null) return;
     void apply({}, { ...(groqKey.trim() ? { groqKey: groqKey.trim() } : {}), ...(openrouterKey.trim() ? { openrouterKey: openrouterKey.trim() } : {}) });
   }
 
@@ -278,8 +279,8 @@
             </div>
           {/if}
           <div class="paths">
-            <label>{strings.speech.executable}<input data-testid="voice-executable" bind:value={config.executable} oninput={() => edited('executable')} onchange={() => void apply()} spellcheck="false" placeholder={status.canInstallRuntime ? '' : 'whisper-cli'} /></label>
-            <label>{strings.speech.modelPath}<input data-testid="voice-model-path" bind:value={config.modelPath} oninput={() => edited('modelPath')} onchange={() => void apply()} spellcheck="false" /></label>
+            <label>{strings.speech.executable}<input data-testid="voice-executable" disabled={off} bind:value={config.executable} oninput={() => edited('executable')} onchange={() => void apply()} spellcheck="false" placeholder={status.canInstallRuntime ? '' : 'whisper-cli'} /></label>
+            <label>{strings.speech.modelPath}<input data-testid="voice-model-path" disabled={off} bind:value={config.modelPath} oninput={() => edited('modelPath')} onchange={() => void apply()} spellcheck="false" /></label>
             <div class="actions"><InfoTip topic={strings.speech.advanced} text={strings.speech.pathHint} /></div>
           </div>
         </details>
@@ -290,7 +291,7 @@
           <span class="text ui-label-box"><span class="ui-label">{strings.speech.provider}</span><InfoTip topic={strings.speech.provider} text={strings.speech.providerHint} /></span>
           <div class="segmented" role="radiogroup" aria-label={strings.speech.provider}>
             {#each PROVIDERS as id (id)}
-              <button type="button" role="radio" class:on={config.apiProvider === id} aria-checked={config.apiProvider === id} data-testid="voice-provider-{id}" disabled={busy} onclick={() => { if (config!.apiProvider !== id) void apply({ apiProvider: id }); }}><span class="ui-label">{provider(id)}</span></button>
+              <button type="button" role="radio" class:on={config.apiProvider === id} aria-checked={config.apiProvider === id} data-testid="voice-provider-{id}" disabled={busy || dictation !== null} onclick={() => { if (config!.apiProvider !== id) void apply({ apiProvider: id }); }}><span class="ui-label">{provider(id)}</span></button>
             {/each}
           </div>
         </div>
@@ -300,16 +301,16 @@
             <span class="text" id="voice-{id}-label">{id === 'groq' ? strings.speech.groqKey : strings.speech.openrouterKey}{#if set}<span class="hint ok">{strings.speech.keySaved}</span>{/if}</span>
             <div class="field">
               {#if id === 'groq'}
-                <input type="password" autocomplete="new-password" data-testid="voice-groq-key" aria-labelledby="voice-groq-label" bind:value={groqKey} placeholder={set ? strings.speech.keyReplace : strings.speech.keyEmpty} />
+                <input type="password" autocomplete="new-password" data-testid="voice-groq-key" disabled={dictation !== null} aria-labelledby="voice-groq-label" bind:value={groqKey} placeholder={set ? strings.speech.keyReplace : strings.speech.keyEmpty} />
               {:else}
-                <input type="password" autocomplete="new-password" data-testid="voice-openrouter-key" aria-labelledby="voice-openrouter-label" bind:value={openrouterKey} placeholder={set ? strings.speech.keyReplace : strings.speech.keyEmpty} />
+                <input type="password" autocomplete="new-password" data-testid="voice-openrouter-key" disabled={dictation !== null} aria-labelledby="voice-openrouter-label" bind:value={openrouterKey} placeholder={set ? strings.speech.keyReplace : strings.speech.keyEmpty} />
               {/if}
-              {#if set}<button type="button" class="quiet small" data-testid="voice-{id}-remove" disabled={busy} onclick={() => void apply({}, id === 'groq' ? { groqKey: '' } : { openrouterKey: '' })}><span class="ui-label">{strings.speech.removeKey}</span></button>{/if}
+              {#if set}<button type="button" class="quiet small" data-testid="voice-{id}-remove" disabled={busy || dictation !== null} onclick={() => void apply({}, id === 'groq' ? { groqKey: '' } : { openrouterKey: '' })}><span class="ui-label">{strings.speech.removeKey}</span></button>{/if}
             </div>
           </div>
         {/each}
         {#if groqKey.trim() || openrouterKey.trim()}
-          <div class="actions save"><button type="submit" class="primary small" data-testid="voice-save" disabled={busy}><span class="ui-label">{strings.speech.saveKeys}</span></button></div>
+          <div class="actions save"><button type="submit" class="primary small" data-testid="voice-save" disabled={busy || dictation !== null}><span class="ui-label">{strings.speech.saveKeys}</span></button></div>
         {/if}
         <label class="switch-row">
           <span class="text ui-label-box"><span class="ui-label">{strings.speech.fallback}</span><InfoTip topic={strings.speech.fallback} text={strings.speech.fallbackHint} /></span>

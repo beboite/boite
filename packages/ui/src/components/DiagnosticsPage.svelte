@@ -48,6 +48,8 @@
   let exportNote = $state('');
   let reporting = $state(false);
   const reportsLocked = $derived(lockedBy(store.policy, 'issueReports') !== null);
+  // Closed by the lock, the report dialog does not reopen when it lifts.
+  $effect(() => { if (reportsLocked) reporting = false; });
   /**
    * The machine's core predates the anonymized log (#411): it still answers
    * `core.logs`, so the log reads, but the status, the export and the report

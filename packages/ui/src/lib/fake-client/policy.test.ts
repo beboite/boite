@@ -3,7 +3,7 @@ import { RpcErrorCode } from '@boite/contracts';
 import { test } from '../../test/fake-client';
 import { RpcFailure } from '../client';
 import { normalizeUrl } from '../browser-bridge';
-import { policySearch } from '../policy';
+import { lockedBy, policySearch } from '../policy';
 import { FAKE_GATED_METHODS, policyFixture } from './policy';
 import source from '../../../../core/src/policy-gate.ts?raw';
 
@@ -49,7 +49,7 @@ test('the store follows a policy file edited while connected', async ({ ready })
 });
 
 test('a core without the policy method leaves nothing locked', async ({ createStore }) => {
-  const { store, client } = createStore({ delayMs: 0, policy: policyFixture('managed') });
+  const { store, client } = createStore({ delayMs: 0, policy: policyFixture(null) });
   const call = client.call.bind(client);
   vi.spyOn(client, 'call').mockImplementation(((method: string, params: unknown) => method === 'policy.get'
     ? Promise.reject(new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: 'unknown method policy.get' }))
@@ -58,4 +58,6 @@ test('a core without the policy method leaves nothing locked', async ({ createSt
   await store.connect();
   await vi.waitFor(() => expect(store.providers.length).toBeGreaterThan(0));
   expect(store.policy).toBeNull();
+  expect(store.providers.some((provider) => provider.policy !== undefined)).toBe(false);
+  expect(lockedBy(store.policy, 'network.push')).toBeNull();
 });

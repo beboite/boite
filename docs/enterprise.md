@@ -53,7 +53,7 @@ Windows registry policies are not read yet; the file is the only source.
 | `agentBrowser` | `false`, or `{ "searchUrl": "https://...{query}..." }` | `false` refuses every agent browser command, from an agent, the CLI or the panel. `searchUrl` is the address used for text typed in the browser's address bar that is not a URL; it must be https and contain `{query}`. |
 | `network.lan` | `false` | The core listens on loopback only, whatever the setting or `--lan`/`--host` say. An explicit loopback `--host` is kept. |
 | `network.tailscaleServe` | `false` | Serving the core over Tailscale HTTPS is refused. |
-| `network.groups` | `false` | Creating, joining and inviting to groups is refused, group exchanges with other machines stop, the extra tailnet listener closes, and the group settings are off. |
+| `network.groups` | `false` | Creating, joining and inviting to groups is refused, group exchanges with other machines stop, the extra tailnet listener closes, and the group settings are off. Adding a device of the user's own (the pairing link of Settings > Devices) stays available. |
 | `network.contacts` | `false` | Contacts, invitations and the Tailscale API are refused, kept links are not dialed, and Funnel routes close at startup. |
 | `network.push` | `false` | Web Push subscriptions are refused and nothing is sent to subscriptions kept from before. |
 | `pullRequests` | `false` | Boite runs no `gh` command: pull request discovery, linking, watching and the merged-PR archive stop. |
@@ -103,9 +103,9 @@ does not inspect where an allowed agent sends its own model traffic.
 A bad file never stops the core.
 
 - A file that is not valid JSON, is not a JSON object, cannot be read or is
-  larger than 256 KB fails closed: every key takes its strictest value, as in
-  the "local models only" example with `providers.allow` empty, until the file
-  is fixed.
+  larger than 256 KB fails closed: every key takes its strictest value, until
+  the file is fixed. That is the "local models only" example with
+  `providers.allow` empty, so no provider is allowed at all.
 - In a file that parses, a key with a bad value takes that key's strictest
   value, an unknown key is ignored, and every other key applies.
 

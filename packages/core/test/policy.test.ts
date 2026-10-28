@@ -13,7 +13,8 @@ import type { CoreClient } from '../src/client.ts';
 import { runCli } from '../src/cli.ts';
 import type { Core } from '../src/core.ts';
 import { Bus } from '../src/bus.ts';
-import { listenHost, parseFlags, resolveHost } from '../src/main.ts';
+import { parseFlags } from '../src/main.ts';
+import { listenHost, resolveHost } from '../src/listen-host.ts';
 import { parseManifest, platformKey } from '../src/plugins/manifest.ts';
 import { GATED_METHODS } from '../src/policy-gate.ts';
 import { PolicyStore, STRICTEST_POLICY, lockedKeys, machinePolicyFile, parsePolicy, policyFileFor, readPolicy } from '../src/policy.ts';
@@ -71,8 +72,22 @@ test('the machine location per platform, and BOITE_POLICY_FILE only when the mac
   mkdirSync(join(programData, 'Boite'));
   writeFileSync(join(programData, 'Boite', 'policy.json'), '{}');
   expect(policyFileFor(undefined, env, 'win32')).toBe(join(programData, 'Boite', 'policy.json'));
+  // The default location, when it holds a file, wins over a ProgramData the user pointed elsewhere.
+  // Off Windows that location is a relative path, made here under a temporary working directory;
+  // on Windows it is the machine's real one, which a test never writes.
+  if (process.platform !== 'win32') {
+    const cwd = process.cwd();
+    process.chdir(join(programData, '..'));
+    cleanups.push(() => process.chdir(cwd));
+    const fallback = machinePolicyFile('win32', {});
+    mkdirSync(join(fallback, '..'), { recursive: true });
+    writeFileSync(fallback, '{}');
+    expect(policyFileFor(undefined, env, 'win32')).toBe(fallback);
+    rmSync(fallback);
+  }
   // A machine location that cannot be checked is the one read, so the read fails closed instead of falling back.
-  if (process.getuid?.() !== 0) {
+  // Windows chmod sets only the read-only bit, so the directory is never sealed there.
+  if (process.platform !== 'win32' && process.getuid?.() !== 0) {
     const sealed = join(programData, 'sealed');
     mkdirSync(join(sealed, 'Boite'), { recursive: true });
     chmodSync(join(sealed, 'Boite'), 0);
@@ -116,6 +131,8 @@ test('a bad value takes its key\'s strictest value, an unknown key is ignored, a
   expect(lockedKeys(parsed.values)).toEqual(['analytics', 'network.lan', 'network.push']);
   // One bad id in a deny list denies every provider, not none.
   expect(parsePolicy(JSON.stringify({ providers: { deny: ['echo', 'bad id'] } }), '/x/policy.json').values).toEqual({ providers: { allow: [] } });
+  // Provider ids are lowercase: an id written in another case still names its provider.
+  expect(parsePolicy(JSON.stringify({ providers: { deny: ['OpenCode'] } }), '/x/policy.json').values).toEqual({ providers: { deny: ['opencode'] } });
 });
 
 test('problems reach the log and the client, naming file, field and expected value', async () => {
@@ -260,11 +277,15 @@ test('providers.deny: a denied provider is off and its turn is refused naming th
 const PROXY = { enabled: true, kind: 'douane', baseUrl: 'https://douane.example/v1', dashboardUrl: 'https://douane.example/admin/#quotas' } as const;
 
 test('gateway: false refuses the gateway and turns a saved one off without forgetting it', async () => {
-  const { client, policy } = await core();
+  const { harness, client, policy } = await core();
   await client.call('settings.set', { subscriptionProxy: PROXY });
+  // An open settings card hears the value the policy now holds, as it hears a change from the page.
+  const settle = spyOn(harness.core.threads.cards, 'settleSettings');
+  cleanups.push(() => settle.mockRestore());
   policy.write({ gateway: false });
   await client.call('policy.get', {});
   expect((await client.call('settings.get', {})).subscriptionProxy?.enabled).toBe(false);
+  expect(settle).toHaveBeenCalledWith(expect.objectContaining({ subscriptionProxy: expect.objectContaining({ enabled: false }) }));
   await refusedBy(client.call('subscriptionProxy.setEnabled', { enabled: true }), 'gateway');
   await refusedBy(client.call('subscriptionProxy.configure', { subscriptionProxy: PROXY }), 'gateway');
   await refusedBy(client.call('subscriptionProxy.movePlan', {}), 'gateway');
@@ -299,6 +320,25 @@ test('quotaReads: false sends no account token to a quota endpoint and refuses r
   expect(row).toMatchObject({ status: 'disabled', error: expect.stringContaining('key quotaReads in') });
   expect(fetcher).not.toHaveBeenCalled();
   await refusedBy(client.call('quotas.reset', { accountId: account.id, confirmed: true }), 'quotaReads');
+});
+
+test('quotaReads: false turned on while a read is running answers the refusal, not that read', async () => {
+  const { harness, client, policy } = await core();
+  const account = harness.core.accounts.add({ providerId: 'claude', label: 'Fixture' });
+  const directory = harness.core.accounts.accountEnv(account, harness.core.providers.require('claude'))['CLAUDE_CONFIG_DIR']!;
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'fixture-token' } }));
+  let answer = () => {};
+  const asked = new Promise<void>(resolve => {
+    const fetcher = spyOn(globalThis, 'fetch').mockImplementation((() => { resolve(); return new Promise<Response>(done => { answer = () => done(Response.json({ five_hour: { utilization: 1 } })); }); }) as unknown as typeof fetch);
+    cleanups.push(() => fetcher.mockRestore());
+  });
+  const listed = harness.core.quotas.list();
+  await asked;
+  policy.write({ quotaReads: false });
+  await client.call('policy.get', {});
+  answer();
+  expect((await listed).find(quota => quota.accountId === account.id)).toMatchObject({ status: 'disabled', windows: [], error: expect.stringContaining('key quotaReads in') });
 });
 
 test('plugins.install: false refuses installs from the catalog and from a URL', async () => {

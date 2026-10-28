@@ -140,6 +140,7 @@ export class SettingsStore {
     this.core.scheduler.onSettingsChanged();
     this.core.procs.applySettings(next);
     this.core.bus.emit('settings.updated', next);
+    this.core.threads.cards.settleSettings(next);
     for (const key of MACHINE_SETTINGS) {
       if ((previous[key] === true) === (next[key] === true)) continue;
       if (key === 'groupBots') this.core.workforce.groupHost.allowedChanged(next[key] === true);

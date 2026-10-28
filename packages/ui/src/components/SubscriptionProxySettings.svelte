@@ -70,7 +70,7 @@
 
   async function save() {
     const client = store.client;
-    if (!client || !store.owner || busy) return;
+    if (!client || !store.owner || busy || blocked) return;
     busy = true; result = ''; failed = false;
     try {
       const checked = checkSettingsPatch({ subscriptionProxy: { ...config } });

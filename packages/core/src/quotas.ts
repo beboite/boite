@@ -336,7 +336,7 @@ export class QuotaStore {
       }));
     }));
     // An observation kept from before the row was turned off, by the user or the policy, does not stand in for it.
-    return [...result.map((row) => { const seen = row.status === 'disabled' ? undefined : this.observations.get(row.accountId); return seen ? this.alerts.decorate(seen) : row; }), ...await gateway];
+    return [...result.map((row) => { const seen = row.status === 'disabled' || row.status === 'unsupported' ? undefined : this.observations.get(row.accountId); return seen ? this.alerts.decorate(seen) : row; }), ...await gateway];
   }
   /**
    * One account's reading, through the same cache, backoff and shared read as
@@ -357,7 +357,7 @@ export class QuotaStore {
     // Refresh cannot bypass failure backoff or turn a hover into a request flood.
     if (cached && (Date.now() < cached.retryAt || (!refresh && Date.now() - (cached.value.checkedAt ?? 0) < CACHE_MS))) return cached.value;
     const existing = this.pending.get(account.id);
-    if (existing) return existing;
+    if (existing) return this.settled(account, existing);
     const generation = this.generation;
     const accountGeneration = this.accountGenerations.get(account.id) ?? 0;
     const epoch = this.epochs.get(account.id) ?? 0;
@@ -385,7 +385,13 @@ export class QuotaStore {
       return value;
     })();
     this.pending.set(account.id, running);
-    try { return await running; } finally { this.pending.delete(account.id); }
+    try { return await this.settled(account, running); } finally { this.pending.delete(account.id); }
+  }
+  /** A read still running when its row was turned off, by the user or the policy, answers the row as it is now. */
+  private async settled(account: Account, read: Promise<AccountQuota>): Promise<AccountQuota> {
+    const value = await read;
+    const now = this.base(account);
+    return now.status === 'unavailable' ? value : now;
   }
   async configure(accountId: string, enabled: boolean): Promise<AccountQuota[]> {
     this.core.accounts.require(accountId);

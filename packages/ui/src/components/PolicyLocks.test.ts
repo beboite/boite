@@ -141,6 +141,12 @@ test('the gateway turned off: its settings cannot turn it on or save it, and the
   await show(SubscriptionProxySettings, { store });
   expect(byId<HTMLInputElement>('subscription-proxy-enabled')?.disabled).toBe(true);
   for (const save of document.querySelectorAll<HTMLButtonElement>('[data-testid="subscription-proxy-save"]')) expect(save.disabled).toBe(true);
+  // Enter submits the form whatever the button says: nothing is saved.
+  const call = vi.spyOn(store.client!, 'call');
+  for (const form of document.querySelectorAll('form')) form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  flushSync();
+  expect(call.mock.calls.filter(([method]) => method === 'subscriptionProxy.configure')).toEqual([]);
+  call.mockRestore();
   expect(lockOf('gateway')).not.toBeNull();
   await unmount(mounted!, { outro: false });
 
@@ -206,14 +212,28 @@ test('issue reports turned off hide the report button; the anonymized export sta
   expect(byId('diagnostics-report')).toBeNull();
 });
 
+test('a report dialog the lock closed does not reopen by itself when the lock lifts', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0, policy: policyFixture(null) });
+  await show(DiagnosticsPage, { store });
+  await vi.waitFor(() => expect(byId<HTMLButtonElement>('diagnostics-report')?.disabled).toBe(false));
+  byId<HTMLButtonElement>('diagnostics-report')!.click();
+  flushSync();
+  expect(byId('diagnostics-report-dialog')).not.toBeNull();
+  client.changePolicy(policyFixture('managed'));
+  await vi.waitFor(() => expect(byId('diagnostics-report-dialog')).toBeNull());
+  client.changePolicy(policyFixture(null));
+  await vi.waitFor(() => expect(byId('diagnostics-report')).not.toBeNull());
+  expect(byId('diagnostics-report-dialog')).toBeNull();
+});
+
 const speechStatus = (): SpeechStatus => ({
   revision: 'r1', engine: 'local', ready: false, localReady: false, groqKeySet: false, openrouterKeySet: false,
   installing: false, downloadedBytes: 0, totalBytes: 1, error: null, canInstallRuntime: true, downloading: null, runtimeOutdated: false,
   models: SPEECH_CATALOGUE.map((entry) => ({ id: entry.id, kind: 'catalogue' as const, name: entry.name, bytes: entry.bytes, tier: entry.tier, legacy: entry.legacy, installed: false })),
 });
 const speechConfig: SpeechConfig = { engine: 'local', language: '', apiProvider: 'groq', fallback: false, executable: '', modelPath: '', model: 'small-q5_1' };
-const voiceStore = (kind: string) => ({
-  client: { call: async (method: string) => method === 'speech.config' ? speechConfig : speechStatus() },
+const voiceStore = (kind: string, config: SpeechConfig = speechConfig) => ({
+  client: { call: async (method: string) => method === 'speech.config' ? config : speechStatus() },
   connection: 'ready', owner: true, core: { hostname: 'build-box' }, policy: policyFixture(kind),
 }) as unknown as Store;
 
@@ -230,6 +250,16 @@ test('dictation held to local keeps the cloud engine and its fallback off; dicta
   await vi.waitFor(() => expect(byId('voice-api')).not.toBeNull());
   expect(byId<HTMLButtonElement>('voice-local')?.disabled).toBe(true);
   expect(byId<HTMLButtonElement>('voice-install')?.disabled).toBe(true);
+  expect(byId<HTMLInputElement>('voice-executable')?.disabled).toBe(true);
+  expect(byId<HTMLInputElement>('voice-model-path')?.disabled).toBe(true);
+  await unmount(mounted!, { outro: false });
+
+  // A cloud engine saved before the policy: its provider and keys are held too.
+  await show(VoiceSettings, { store: voiceStore('managed', { ...speechConfig, engine: 'api' }) });
+  await vi.waitFor(() => expect(byId('voice-provider-groq')).not.toBeNull());
+  expect(byId<HTMLButtonElement>('voice-provider-groq')?.disabled).toBe(true);
+  expect(byId<HTMLInputElement>('voice-groq-key')?.disabled).toBe(true);
+  expect(byId<HTMLInputElement>('voice-openrouter-key')?.disabled).toBe(true);
 });
 
 test('a provider the policy denies stays listed, off, saying so, with a lock and no switch to turn it back on', async ({ ready }) => {

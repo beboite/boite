@@ -245,9 +245,9 @@ fn policy_file() -> PathBuf {
     let machines = if cfg!(windows) {
         let at = |root: PathBuf| root.join("Boite").join("policy.json");
         let named = at(PathBuf::from(std::env::var_os("ProgramData").unwrap_or_else(|| "C:\\ProgramData".into())));
-        // `ProgramData` is the user's environment too: pointing it elsewhere does not hide the default location.
+        // `ProgramData` is the user's environment too: the default location, when it holds a file, wins over it.
         let default = at(PathBuf::from("C:\\ProgramData"));
-        if named == default { vec![named] } else { vec![named, default] }
+        if named == default { vec![named] } else { vec![default, named] }
     } else if cfg!(target_os = "macos") {
         vec![PathBuf::from("/Library/Application Support/Boite/policy.json")]
     } else {
@@ -478,8 +478,10 @@ mod tests {
     }
     #[test]
     fn policy_read_is_bounded_and_the_first_present_location_wins() {
-        let dir = std::env::temp_dir().join(format!("boite-updater-policy-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("boite-updater-policy-{}-{nanos}", std::process::id()));
+        // Created here or the test fails: the cleanup below removes only what this run made.
+        std::fs::create_dir(&dir).unwrap();
         let small = dir.join("small.json");
         std::fs::write(&small, r#"{"updates":{"app":"check"}}"#).unwrap();
         assert_eq!(read_policy(&small).as_deref(), Some(r#"{"updates":{"app":"check"}}"#));

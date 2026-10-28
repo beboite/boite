@@ -60,6 +60,14 @@ test('Muse quotas come only from observed host notifications, never a probe or a
   expect(await quota()).toMatchObject({ status: 'disabled', windows: [] });
   await client.call('quotas.configure', { accountId: thread.accountId!, enabled: true });
   expect(await quota()).toMatchObject({ status: 'unavailable', windows: [], checkedAt: null });
+  // A provider the policy denies is not read; an observation from before it was denied does not stand in for it.
+  await runTurn(client, threadId, '[quota]');
+  expect(await quota()).toMatchObject({ status: 'ready' });
+  writeFileSync(policy, JSON.stringify({ providers: { deny: [PROVIDER] } }));
+  await client.call('policy.get', {});
+  await runTurn(client, threadId, '[quota]').catch(() => undefined);
+  expect(await quota()).toMatchObject({ status: 'unsupported', windows: [] });
+  rmSync(policy);
 });
 
 let harness: TestCore | null = null;
