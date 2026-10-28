@@ -559,7 +559,16 @@ required. The notice follows `memoryProtection` and stops nothing.
 Registered POSIX children start detached in their own process group.
 `resources.killTree` sends group SIGTERM, probes every 100 ms and sends SIGKILL
 two seconds later only if the group remains. It can reach members after the
-leader exits. A child that starts its own session escapes that group. Normal
+leader exits. A child that starts its own session escapes that group.
+Each spawn also returns its own `stop`, bound to that process: it stops the
+process and, on Linux and macOS, its group, even after the process exited and
+left the registry, and resolves once the stop ended and the process exited.
+It never reaches the scope's other processes. A short system command
+(`tailscale`, the firewall, device SDK tools) runs through `runCommand`
+(`packages/core/src/run-command.ts`): at its deadline it is stopped that way
+and its pipes are given half a second to close, so a helper holding them
+cannot hold the caller. On Windows the stop goes through `taskkill /T`, which
+cannot reach a tree whose root already exited. Normal
 shutdown waits for escalation; a hard shell kill does not guarantee core exit
 on Linux/macOS. `TraceCapability` exposes OS, mode (`events`, `poll`, `none`) and
 failure notes; clients must read it before promising native capabilities.

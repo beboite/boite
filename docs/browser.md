@@ -87,7 +87,9 @@ browser identity; create a named profile to customize it.
 A profile keeps its current engine until it closes, including when the desktop
 app attaches or the User-Agent setting changes. Its next engine starts after
 the previous engine finishes saving cookies, so two engines never overwrite
-the same profile's saved cookie snapshot.
+the same profile's saved cookie snapshot. An engine that ended, closed by
+the core or lost when its connection dropped, holds its profile until its
+process exited: a browser started sooner would find the folder still locked.
 
 A customized profile starts a separate Chromium process even while the desktop
 app hosts other agent tabs: webviews cannot set per-profile process flags for
