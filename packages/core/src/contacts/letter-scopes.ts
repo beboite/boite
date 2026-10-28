@@ -80,13 +80,25 @@ export function trustLetters(core: Core, threadId: string): void {
     if (scope?.legacy) core.journal.setSetting(`shared-file-letters:${id}`, {...scope, legacy: false, trustedAt: Date.now()});
   }
   core.sharedAccess.execution.reconcile();
-  for (const id of ids) announceHold(core, id);
+  announceHold(core, ids);
 }
 
-/** Every client's row and open view take the thread's hold as it now stands. */
-function announceHold(core: Core, threadId: string): void {
-  const thread = core.journal.getThread(threadId);
-  if (thread) core.bus.emit('thread.updated', {...withLoad(core, thread), contactHold: contactHold(core, threadId)});
+/**
+ * Every client's row and open view take the hold as it now stands, on these
+ * threads and every descendant whose history walks through them. A remote
+ * job's history stops at the job, so the walk does not enter one.
+ */
+function announceHold(core: Core, changed: string[]): void {
+  const seen = new Set<string>();
+  const queue = [...changed];
+  for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const thread = core.journal.getThread(id);
+    if (thread) core.bus.emit('thread.updated', {...withLoad(core, thread), contactHold: contactHold(core, id)});
+    const children = core.journal.db.query('SELECT id FROM threads WHERE parent_thread_id=?').all(id) as {id: string}[];
+    for (const child of children) if (!core.sharedCompute.journal.worker(child.id)) queue.push(child.id);
+  }
 }
 
 /** Called before wake, steer and hook delivery. Unsupported native sessions never see the letter. */
@@ -130,6 +142,6 @@ export function protectLetters(core: Core, threadId: string, letters: AgentLette
   }
   core.journal.setSetting(`shared-file-letters:${threadId}`, scope);
   core.sharedAccess.execution.reconcile();
-  if (scope.legacy && !held) announceHold(core, threadId);
+  if (scope.legacy && !held) announceHold(core, [threadId]);
   core.sharedAccess.assertTurn(threadId);
 }
