@@ -649,10 +649,11 @@ export class ComposerSync {
       this.#dirty.add(key);
       if (error instanceof RpcFailure && error.code === RpcErrorCode.InvalidParams && error.message.startsWith('composer.attachments:')) {
         // Past what one message may carry, no retry can fit: the box stays on this device, and the next edit tries again.
+        // An edit made while this put was on its way found the key busy: that edit is the next try.
         const message = fill(strings.errors.draftOverLimit, { count: String(ATTACHMENTS_PER_TURN), max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) });
         this.ctx.store.error = message;
         this.#overLimit = { key, message };
-        failed = true;
+        failed = this.#parts(this.#shape(this.#localOf(this.#source(key)))).hash === this.#parts(value).hash;
         return;
       }
       // A core that restarted dropped the assets nothing referenced: what this device holds the bytes of goes up again.

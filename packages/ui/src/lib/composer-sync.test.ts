@@ -463,6 +463,29 @@ test('a box the core refuses as over its attachment limit says so and keeps ever
   expect(desk.store.error).toBeNull();
 });
 
+test('a box trimmed while the core was refusing it as over the limit goes up without another edit', async () => {
+  const desk = await device('desk', new FakeClient({ delayMs: 0 }));
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let held = 0;
+  desk.calls.mockImplementation(async (method, params) => {
+    if (method === 'composer.put' && held++ === 0) await gate;
+    return desk.original(method, params);
+  });
+  desk.store.editComposerText('t-trace', 'one prompt, too many pictures');
+  desk.store.composerStates['t-trace']!.attachments = Array.from({ length: ATTACHMENTS_PER_TURN + 1 }, (_, index) =>
+    ({ kind: 'image' as const, mimeType: 'image/png', name: `shot-${index}.png`, data: btoa(`picture ${index}`) }));
+  desk.store.editComposerText('t-trace', 'one prompt, too many pictures.');
+  await vi.waitFor(() => expect(held).toBe(1));
+  // The user takes a picture out while that put is still on its way: the edit's own flush finds the key busy.
+  const box = desk.store.composerStates['t-trace']!;
+  box.attachments = box.attachments.slice(0, ATTACHMENTS_PER_TURN);
+  desk.store.editComposerText('t-trace', 'one prompt, the right number of pictures.');
+  await new Promise(resolve => setTimeout(resolve, 1200));
+  release();
+  await vi.waitFor(async () => expect((await recordOf(desk.client, 'inputs', 't-trace'))?.value?.input.attachments).toHaveLength(ATTACHMENTS_PER_TURN), { timeout: 4000 });
+});
+
 test('the open draft follows the worktree switch and model another device chose for it', async () => {
   const desk = await device('desk', new FakeClient({ delayMs: 0 }));
   const phone = await device('phone', desk.client.composerPeer({ delayMs: 0, principal: 'session' }));
