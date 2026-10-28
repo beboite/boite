@@ -182,10 +182,12 @@ describe('automatic compaction', () => {
 
   test('a thread left above a limit set later compacts once when a client shows it, not at its next prompt', async () => {
     // A thread idle at 212k before a 200k limit existed made its next prompt wait a minute for the agent's own compaction.
+    // Its turn armed the cache's moment minutes ahead: the lower limit must not wait for that timer.
     const client = await h.connect();
     const { threadId } = await quiet(client);
+    await client.call('settings.set', { autoCompact: { tokens: 100_000, moments: ['cache-expiry'] } });
     await turn(client, threadId, 'x'.repeat(950));
-    await client.call('settings.set', { autoCompact: { tokens: 1000, moments: [] } });
+    await client.call('settings.set', { autoCompact: { tokens: 1000, moments: ['cache-expiry'] } });
     await pause(120);
     expect(await compactions(client, threadId)).toEqual([]);
     const compacted = client.next('turn.finished', t => t.threadId === threadId && t.execution?.operation === 'compact');

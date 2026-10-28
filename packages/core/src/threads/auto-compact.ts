@@ -95,13 +95,14 @@ export class AutoCompaction {
     if (this.core.stopping || this.core.journal.isClosed()) return;
     const thread = this.core.journal.getThread(threadId);
     const reading = thread?.context ?? null;
-    if (thread === null || reading === null || this.timers.has(threadId)) return;
+    if (thread === null || reading === null) return;
     const limit = effectiveCompaction(this.core.settings.get(), thread).autoCompact?.tokens ?? null;
     if (limit === null || reading.tokens < limit) return;
     // A keepalive's ping says nothing of the conversation, as after a turn.
     const last = this.core.journal.lastTurn(threadId, true);
     if (last !== null && (last.status !== 'done' || last.execution?.operation === 'compact')) return;
-    this.fire(threadId);
+    // A timer armed below an older limit, for the cache's moment, would wait minutes: the moment is worked out again.
+    this.recheck(threadId);
   }
 
   /** Done lets the final answer finish, but has no further context to prepare. */
