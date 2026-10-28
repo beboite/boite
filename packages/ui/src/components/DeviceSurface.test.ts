@@ -216,6 +216,26 @@ test('input still queued for one device never reaches the device a tab change sh
   } finally { vi.unstubAllGlobals(); }
 });
 
+test('a device opened while the first list is out stays listed once that older list answers', async () => {
+  const real = client.call.bind(client), on = client.on.bind(client);
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let changed!: (event: { threadId: string; sessions: unknown[] }) => void;
+  const session = (deviceId: string, name: string) => ({ threadId: thread, deviceId, name, platform: 'android' as const, state: 'ready' as const, input: true, openedAt: 1 });
+  vi.spyOn(client, 'call').mockImplementation((async (method: string, params: unknown) => {
+    if (method === 'devices.sessions') { await held; return { sessions: [session('device-b', 'Device B')] }; }
+    return real(method as never, params as never);
+  }) as never);
+  vi.spyOn(client, 'on').mockImplementation(((event: string, handler: never) => {
+    if (event === 'devices.changed') changed = handler;
+    return on(event as never, handler);
+  }) as never);
+  app = mount(DeviceSurface, { target: document.body, props: { store, threadId: thread } }); await settle();
+  changed({ threadId: thread, sessions: [session('device-b', 'Device B'), session('device-a', 'Device A')] });
+  release(); await settle();
+  expect([...document.querySelectorAll('[data-testid=device-tab]')].map(tab => tab.textContent?.trim())).toEqual(['Device B', 'Device A']);
+});
+
 /** A WebCodecs decoder that keeps what it was given and outputs one 72 by 160 frame per chunk. */
 function stubDecoder(supported = true) {
   const seen = { configs: [] as VideoDecoderConfig[], chunks: [] as { type: string; timestamp: number; head: number[] }[] };

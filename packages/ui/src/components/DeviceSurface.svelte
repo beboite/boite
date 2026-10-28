@@ -9,6 +9,7 @@
   import { fill, strings } from '../lib/strings';
   import { FRAME_INTERVAL, frameMaxWidth, framePoint, frameQuality, nextPollDelay } from '../lib/remote-browser-view';
   import { liveViews, machineName } from '../lib/live-view.svelte';
+  import { SnapshotFeed } from '../lib/snapshot-feed';
   /**
    * The simulators and emulators open in this conversation, live (docs/devices.md).
    * The core captures their screen; this polls JPEG frames the way the phone's
@@ -97,11 +98,31 @@
     timer = setTimeout(() => void poll(run), Math.max(60, FRAME_INTERVAL - (Date.now() - requestedAt)));
   }
 
-  async function refresh(): Promise<void> {
+  // The thread's sessions: read whole, kept by `devices.changed`; a change that lands while a read is out is applied after it.
+  let feed: SnapshotFeed<MobileDeviceSession[]> | null = null;
+  $effect(() => {
     const client = store.client;
     if (!client) return;
+    const changes = feed = new SnapshotFeed<MobileDeviceSession[]>(next => {
+      const known = new Set(sessions.map(one => one.deviceId));
+      sessions = next;
+      // A device just opened, by the agent or here, comes to the front.
+      const added = next.find(one => !known.has(one.deviceId));
+      if (added) { selected = added.deviceId; picking = false; }
+      if (next.length === 0) void refresh();
+    });
+    const off = client.on('devices.changed', event => { if (event.threadId === threadId) changes.push(event.sessions); });
+    untrack(() => void changes.read(() => client.call('devices.sessions', { threadId }), result => {
+      sessions = result.sessions;
+      if (result.sessions.length === 0) void refresh();
+    }).catch(cause => { if (feed === changes) error = errorText(cause); }));
+    return () => { changes.dispose(); off(); if (feed === changes) feed = null; };
+  });
+  async function refresh(): Promise<void> {
+    const client = store.client, changes = feed;
+    if (!client || !changes) return;
     loading = true;
-    try { list = await client.call('devices.list', { threadId }); sessions = list.sessions; error = ''; }
+    try { await changes.read(() => client.call('devices.list', { threadId }), value => { list = value; sessions = value.sessions; }); error = ''; }
     catch (cause) { error = errorText(cause); }
     finally { loading = false; }
   }
@@ -226,20 +247,6 @@
     : reason.why === 'failed' ? fill(strings.devicePanel.streamFailed, { reason: reason.reason }).trim() : '';
 
   onMount(() => {
-    const client = store.client;
-    const off = client?.on('devices.changed', event => {
-      if (event.threadId !== threadId) return;
-      const known = new Set(sessions.map(one => one.deviceId));
-      sessions = event.sessions;
-      // A device just opened, by the agent or here, comes to the front.
-      const added = event.sessions.find(one => !known.has(one.deviceId));
-      if (added) { selected = added.deviceId; picking = false; }
-      if (event.sessions.length === 0) void refresh();
-    });
-    void client?.call('devices.sessions', { threadId }).then(result => {
-      sessions = result.sessions;
-      if (result.sessions.length === 0) void refresh();
-    }, cause => { error = errorText(cause); });
     const keyboard = liveInput(() => viewer, {
       key(event) {
         if (!showing?.input || (!frame && !live) || paused) return false;
@@ -258,7 +265,7 @@
     document.addEventListener('visibilitychange', visibility);
     for (const name of ['pageshow', 'online', 'focus'] as const) window.addEventListener(name, back);
     return () => {
-      alive = false; stop(); off?.(); keyboard.destroy(); clearTimeout(wheelTimer); clearTimeout(notchTimer); clearTimeout(noticeTimer);
+      alive = false; stop(); keyboard.destroy(); clearTimeout(wheelTimer); clearTimeout(notchTimer); clearTimeout(noticeTimer);
       document.removeEventListener('visibilitychange', visibility);
       for (const name of ['pageshow', 'online', 'focus'] as const) window.removeEventListener(name, back);
     };
