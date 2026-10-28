@@ -14,7 +14,8 @@
  *   question, message) is filed once by its request id.
  * - `delegation.letter`, caller to member: the parent steers its child or
  *   answers its question, keyed by the parent and its request id. A stop
- *   still waiting for that child travels with it and is applied first.
+ *   still waiting for that child travels with it and is applied first. The
+ *   letter is numbered among the stops: one asked after it cancels it.
  * - `delegation.read`, caller to member: a page of a result, read live.
  * - `delegation.stop`, caller to member: an outbox of stops, and of
  *   retirements when the parent is archived or deleted.
@@ -56,6 +57,8 @@ const seqOf = (value: unknown, field: string): number => {
   if (typeof value !== 'number' || !Number.isFinite(value)) throw invalidParams(`${field}: expected the stop's number`);
   return value;
 };
+/** The number of the last stop applied to a child here, 0 when none was. */
+const applied = (link: ParentLink | undefined): number => (typeof link?.stop === 'number' ? link.stop : 0);
 
 /** What the delegation module lends this one: its private state and its mail. */
 export interface RemoteHost {
@@ -87,7 +90,7 @@ export class RemoteDelegation {
   /** Told of each parent here whose children elsewhere reported: workflow steps settle from it. */
   private readonly watchers = new Set<(rootId: string) => void>();
   private closed = false;
-  /** The number of the last stop asked from here: the clock's, and always above the one before. */
+  /** The number of the last stop or letter asked from here: the clock's, and always above the one before. */
   private lastStop = 0;
   private readonly boot: ReturnType<typeof setTimeout>;
 
@@ -368,8 +371,10 @@ export class RemoteDelegation {
     const peer = this.peerOf(record);
     // A stop asked before this instruction and not taken yet goes with it: it ends the turn it meant, never the one the instruction opens.
     const stop = this.stops.entries(record.coreId).find(entry => entry.key === `child:${childId}`);
+    // Numbered among the stops: one asked after it cancels it there, even when taken first.
+    this.lastStop = Math.max(Date.now(), this.lastStop + 1);
     let answer: unknown;
-    try { answer = await this.core.coordination.request(peer, 'delegation.letter', { parentId: root.id, childId, requestId, text: body, origin, ...(stop ? { stop: stop.seq } : {}) }); }
+    try { answer = await this.core.coordination.request(peer, 'delegation.letter', { parentId: root.id, childId, requestId, text: body, origin, seq: this.lastStop, ...(stop ? { stop: stop.seq } : {}) }); }
     catch (error) {
       if (error instanceof PeerRefusal) throw peerRefusal(this.core, peer, error, 'steer subagents for another machine');
       throw unavailable(`${peer.name} did not answer: ${messageOf(error)}; the same --request-id sends it once`, { field: 'machine' });
@@ -789,8 +794,13 @@ export class RemoteDelegation {
     const origin = raw.origin;
     // A stop of the parent's that left before this letter and has not arrived yet ends the turn it meant first.
     if (raw.stop !== undefined) this.applyStop(childId, link, seqOf(raw.stop, 'delegation.letter.stop'), false);
+    const known = raw.seq !== undefined ? seqOf(raw.seq, 'delegation.letter.seq') : applied(this.parents.get(childId));
     // Filed once the turn a stop ended is over: that turn's end would take this instruction for the stop.
     await this.ending.get(childId);
+    // Admitted on what holds now: the owner may have turned this off, that machine left, or a stop asked after this letter landed.
+    if (this.core.settings.get().groupThreads !== true) throw refused(GROUP_THREADS_OFF);
+    if (!this.core.group.peers().some(member => member.coreId === peer.coreId)) throw refused(`delegation.letter: ${peer.name} is no longer in this group`);
+    const current = this.linked(peer, raw.parentId, raw.childId, 'delegation.letter').link;
     const sender = `${peer.coreId}:${link.parentId}`;
     const fingerprint = hash([childId, body, origin]);
     const existing = this.core.journal.db.query('SELECT data, fingerprint FROM delegation_messages WHERE sender_id = ? AND request_id = ?').get(sender, requestId) as { data: string; fingerprint: string } | null;
@@ -799,6 +809,7 @@ export class RemoteDelegation {
       const filed = JSON.parse(existing.data) as AgentLetter;
       return { id: filed.id, status: filed.status, ...(filed.answered === undefined ? {} : { answered: filed.answered }) };
     }
+    if (applied(current) > known) throw refused('delegation.letter: a stop asked after this instruction ended it; send it again to resume the subagent', { field: 'requestId' });
     const child = this.core.threads.require(childId);
     if (child.archived) throw refused('delegation messages require unarchived threads');
     // A parent writing to a child that waits on a question answers that question.
@@ -851,7 +862,7 @@ export class RemoteDelegation {
    */
   private applyStop(childId: string, link: ParentLink, seq: number, retire: boolean): boolean {
     let busy = false;
-    if (seq > (typeof link.stop === 'number' ? link.stop : 0)) {
+    if (seq > applied(link)) {
       const next = { ...link, stop: seq };
       this.parents.set(childId, next);
       this.core.journal.setSetting(`${PARENT}${childId}`, next);

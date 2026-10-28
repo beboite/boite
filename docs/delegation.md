@@ -280,7 +280,7 @@ or be away:
 | --- | --- | --- | --- |
 | `delegation.start` | parent's machine | parent and `--request-id` | starts the child, or answers the one it started for that key; other content under the same key is refused. `groupThreads` and the caller's membership are checked again right before the child is created |
 | `delegation.report` | child's machine | child, and a letter's request id | keeps the newest state; files a result, question or message once |
-| `delegation.letter` | parent's machine | parent and request id | applies the stop it carries first and waits for the turn that stop ended, then files the steer once, answering an open question when it is one |
+| `delegation.letter` | parent's machine | parent and request id | applies the stop it carries first and waits for the turn that stop ended, then checks `groupThreads`, the caller's membership and the link again and files the steer once, answering an open question when it is one; a stop numbered after the letter refuses it |
 | `delegation.read` | parent's machine | none, read only | returns a page of the named turn's answer |
 | `delegation.stop` | parent's machine | the stop's number | stops it once, and archives it when the parent was archived or deleted; the same number again, or one older than the last applied, stops nothing |
 
@@ -301,7 +301,9 @@ its answer was lost, or arriving after a later one, does not cut the
 instruction that followed it. `delegate send` carries the stop still waiting
 for that child; the child's machine applies it before the letter and files the
 letter once the turn it stopped is over, so the stop ends the turn it meant
-and the instruction opens the next one. A restart
+and the instruction opens the next one. The letter takes a number in the same
+order: a stop asked after it, taken before it arrives or while it waits,
+refuses it, so a final stop is not undone by an older instruction. A restart
 handoff on the child's machine keeps a turn the parent's letter opened and
 continues it like the turns of a child here. Until that machine's next core
 continues a cut turn, its reports mark the child `restarting`, which the parent

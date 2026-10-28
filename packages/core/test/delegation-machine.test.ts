@@ -16,8 +16,8 @@ const cores: TestCore[] = [];
 const restores: (() => void)[] = [];
 afterEach(async () => { for (const h of cores.splice(0)) await h.stop(); for (const restore of restores.splice(0)) restore(); });
 
-/** An echo driver that records every prompt and answers with its folder's name; a prompt with HOLD-ON waits until released or stopped. */
-function answering() {
+/** An echo driver that records every prompt and answers with its folder's name; a prompt with HOLD-ON waits until released or stopped, and a stopped turn ends once `stopping` settles. */
+function answering(stopping?: () => Promise<void>) {
   const prompts = new Map<string, string[]>();
   const held = new Map<string, () => void>();
   restores.push(setDriver('echo', { protocol: 'echo', startTurn(ctx: TurnContext) {
@@ -34,7 +34,8 @@ function answering() {
     }
     const finished = Promise.withResolvers<TurnResult>();
     held.set(ctx.thread.id, () => { held.delete(ctx.thread.id); answer(); finished.resolve(done); });
-    return { done: finished.promise, stop() { held.delete(ctx.thread.id); finished.resolve({ status: 'stopped', sessionId: null, usage: null }); } };
+    const end = () => finished.resolve({ status: 'stopped', sessionId: null, usage: null });
+    return { done: finished.promise, stop() { held.delete(ctx.thread.id); if (stopping) void stopping().then(end); else end(); } };
   } }));
   const wakes = (threadId: string) => (prompts.get(threadId) ?? []).filter(prompt => prompt.includes('Boite delegation messages')).length;
   return { prompts, held, wakes };
@@ -392,6 +393,67 @@ test('a stop sent again because its answer was lost does not stop the instructio
   expect(desk.core.delegation.remote.waiting(pcId).stops).toBe(0);
   expect(held.has(child.thread.id)).toBe(true);
   expect(pc.core.journal.listTurns(child.thread.id)[2]?.status).toBe('running');
+});
+
+test('a stop asked after an instruction cancels it, whether it lands while that instruction waits or before it arrives', async () => {
+  const slow = Promise.withResolvers<void>(), asked = Promise.withResolvers<void>();
+  const { held, prompts } = answering(() => { asked.resolve(); return slow.promise; });
+  const { desk, pc, threadId, pcId, cli, spawn } = await setup();
+  const child = await spawn('Read HOLD-ON', '--project', 'notes', '--request-id', 'overtaken-child');
+  await waitFor(() => held.has(child.thread.id));
+  const request = desk.core.coordination.request.bind(desk.core.coordination);
+  let stops = false, transit: Promise<void> | null = null;
+  desk.core.coordination.request = (async (peer, operation, payload) => {
+    if (operation === 'delegation.stop' && !stops) throw new Error('stop not delivered');
+    if (operation === 'delegation.letter' && transit) await transit;
+    return request(peer, operation, payload);
+  }) as typeof desk.core.coordination.request;
+  const send = (text: string, requestId: string) => thrown(desk.core.delegation.remote.send({ threadId, toThreadId: child.thread.id, requestId, text }, 'agent'));
+
+  // The instruction carries the stop that did not get through and waits for the turn it ends; a later stop lands meanwhile.
+  desk.core.delegation.remote.stop(threadId, child.thread.id);
+  await desk.core.delegation.remote.flush(pcId);
+  const waiting = send('Read the next page HOLD-ON', 'overtaken-waiting');
+  await asked.promise;
+  stops = true;
+  desk.core.delegation.remote.stop(threadId, child.thread.id);
+  await desk.core.delegation.remote.flush(pcId);
+  slow.resolve();
+  expect(await waiting).toThrow('a stop asked after this instruction');
+  expect(held.has(child.thread.id)).toBe(false);
+  expect(pc.core.journal.listTurns(child.thread.id).map(turn => turn.status)).toEqual(['stopped']);
+
+  // A stop asked while the instruction is on its way, and taken first, cancels it too.
+  expect((await cli(['delegate', 'send', child.thread.id, 'Read again HOLD-ON', '--request-id', 'overtaken-resume'])).err).toBe('');
+  await waitFor(() => held.has(child.thread.id));
+  const gate = Promise.withResolvers<void>();
+  transit = gate.promise;
+  const late = send('Read the last page HOLD-ON', 'overtaken-late');
+  desk.core.delegation.remote.stop(threadId, child.thread.id);
+  await desk.core.delegation.remote.flush(pcId);
+  gate.resolve();
+  expect(await late).toThrow('a stop asked after this instruction');
+  expect(held.has(child.thread.id)).toBe(false);
+  expect(prompts.get(child.thread.id)).toHaveLength(2);
+});
+
+test('an instruction waiting for a stopped turn starts nothing once the owner turns groupThreads off', async () => {
+  const slow = Promise.withResolvers<void>(), asked = Promise.withResolvers<void>();
+  const { held, prompts } = answering(() => { asked.resolve(); return slow.promise; });
+  const { desk, pc, threadId, pcId, spawn } = await setup();
+  const child = await spawn('Read HOLD-ON', '--project', 'notes', '--request-id', 'revoked-child');
+  await waitFor(() => held.has(child.thread.id));
+  const request = desk.core.coordination.request.bind(desk.core.coordination);
+  desk.core.coordination.request = ((peer, operation, payload) => (operation === 'delegation.stop' ? Promise.reject(new Error('stop not delivered')) : request(peer, operation, payload))) as typeof desk.core.coordination.request;
+  desk.core.delegation.remote.stop(threadId, child.thread.id);
+  await desk.core.delegation.remote.flush(pcId);
+  const waiting = thrown(desk.core.delegation.remote.send({ threadId, toThreadId: child.thread.id, requestId: 'revoked-letter', text: 'Read more HOLD-ON' }, 'agent'));
+  await asked.promise;
+  await pc.core.settings.set({ groupThreads: false });
+  slow.resolve();
+  expect(await waiting).toThrow('does not let the other machines of its group start threads there');
+  expect(held.has(child.thread.id)).toBe(false);
+  expect(prompts.get(child.thread.id)).toHaveLength(1);
 });
 
 test('a turn the parent there started with delegate send is cut by a restart handoff and continued after it', async () => {
