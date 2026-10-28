@@ -1,8 +1,8 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'bun:test';
-import { lockDataDir } from '../src/data-lock.ts';
+import { lockDataDir, takeLock } from '../src/data-lock.ts';
 import { removeDir } from './harness.ts';
 
 /*
@@ -87,4 +87,24 @@ test('two cores reclaiming one stale lock never both hold it', () => {
   const results = both.map(each => each.result());
   expect(results.filter(result => result === 'admitted')).toHaveLength(1);
   expect(results.filter(result => result.startsWith('busy'))).toHaveLength(1);
+});
+
+test('a core older than this lock that replaces the file before the record is written keeps its directory', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'boite-lock-race-'));
+  dirs.push(dir);
+  const file = join(dir, 'core.lock');
+  // An older core holds nothing but the file: it unlinks a record it judged stale and writes its own.
+  const older = JSON.stringify({ pid: process.ppid, startedAt: Date.now(), startKey: 'older-run' });
+  let replaced = false;
+  expect(() => takeLock(file, holder => `busy ${holder}`, {
+    startedAt: () => null,
+    bootedAt: () => 0,
+    startKey: (pid) => {
+      if (pid !== process.pid) return 'older-run';
+      // Locked and judged, the record not yet written: the older core replaces the path now.
+      if (!replaced) { replaced = true; rmSync(file); writeFileSync(file, older, 'utf8'); }
+      return null;
+    },
+  })).toThrow(`busy ${process.ppid}`);
+  expect(readFileSync(file, 'utf8')).toBe(older);
 });

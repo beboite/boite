@@ -144,6 +144,8 @@ export interface SecretVault {
 export interface HeldFileLock {
   /** Is the locked file still the one `path` names? False once released, moved away or deleted. */
   stillAt(path: string): boolean;
+  /** Replaces the locked file's content through the held handle, whatever the path names by then. */
+  write(text: string): void;
   release(): void;
 }
 

@@ -1,4 +1,4 @@
-import { readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, statSync } from 'node:fs';
 import { uptime } from 'node:os';
 import { join } from 'node:path';
 import { lockFile as osLockFile, processPlatform } from './platform/index.ts';
@@ -86,6 +86,12 @@ const held = new Set<{ lock: HeldFileLock; drop(path: string): void }>();
  * lock predates the last boot (macOS cannot read a start time). Where the OS
  * names a run with a key (Linux), the key decides alone: the Linux start and
  * boot times follow every step of the wall clock.
+ *
+ * Such an older core replaces a record it judged stale by path. This core
+ * writes its record through the lock it holds and then checks the path still
+ * names that file, so an older core that replaced it first is found and kept.
+ * One that judged before the record was written and replaces the file after
+ * that check still gets in, as two older cores could race each other.
  */
 export function takeLock(file: string, busy: (holder: number | null) => string, clock: LockClock = {}, lockFile: FileLocker = osLockFile): () => void {
   const startedAt = clock.startedAt ?? processPlatform.startedAt;
@@ -107,7 +113,14 @@ export function takeLock(file: string, busy: (holder: number | null) => string, 
       throw new Error(busy(holder));
     }
     const key = startKey(process.pid);
-    writeFileSync(file, `${JSON.stringify({ pid: process.pid, startedAt: Date.now(), ...(key === null ? {} : { startKey: key }), osLock: true }, null, 2)}\n`, 'utf8');
+    // Through the held handle, never by path: a core older than this lock may have replaced the file
+    // since it was judged, and a write by path would land in that core's file.
+    lock.write(`${JSON.stringify({ pid: process.pid, startedAt: Date.now(), ...(key === null ? {} : { startKey: key }), osLock: true }, null, 2)}\n`);
+    // Replaced meanwhile: the next attempt locks that core's file and reads its record.
+    if (!lock.stillAt(file)) {
+      lock.release();
+      continue;
+    }
     const entry = {
       lock,
       // Deleted while still held, so the next holder cannot lock a file the path no longer names unnoticed.

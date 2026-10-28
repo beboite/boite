@@ -25,6 +25,8 @@ function loadKernel32() {
     CreateFileW: { args: [FFIType.ptr, FFIType.u32, FFIType.u32, FFIType.ptr, FFIType.u32, FFIType.u32, FFIType.ptr], returns: FFIType.u64 },
     LockFileEx: { args: [FFIType.u64, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.ptr], returns: FFIType.i32 },
     GetFileInformationByHandle: { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 },
+    WriteFile: { args: [FFIType.u64, FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
+    SetEndOfFile: { args: [FFIType.u64], returns: FFIType.i32 },
     CloseHandle: { args: [FFIType.u64], returns: FFIType.i32 },
     GetLastError: { args: [], returns: FFIType.u32 },
   });
@@ -72,6 +74,16 @@ export function windowsLockFile(file: string): HeldFileLock | null {
       const other = open(path, FILE_READ_ATTRIBUTES, OPEN_EXISTING);
       if (other === null) return false;
       try { return identity(other) === id; } finally { kernel32!.CloseHandle(other); }
+    },
+    write(text) {
+      const bytes = new Uint8Array(Buffer.from(text, 'utf8'));
+      const written = new Uint32Array(1);
+      // Offset 0 in the OVERLAPPED; the file pointer then stands after the record, where SetEndOfFile cuts.
+      const at = new Uint8Array(32);
+      if (kernel32!.WriteFile(handle, ptr(bytes), bytes.byteLength, ptr(written), ptr(at)) === 0 || written[0] !== bytes.byteLength
+        || kernel32!.SetEndOfFile(handle) === 0) {
+        throw new Error(`could not write ${file}: error ${kernel32!.GetLastError()}`);
+      }
     },
     release() {
       if (!held) return;

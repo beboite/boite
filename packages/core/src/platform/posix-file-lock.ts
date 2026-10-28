@@ -1,4 +1,4 @@
-import { closeSync, fstatSync, openSync, statSync } from 'node:fs';
+import { closeSync, fstatSync, ftruncateSync, openSync, statSync, writeSync } from 'node:fs';
 import type { HeldFileLock } from './types.ts';
 
 const LOCK_EX = 2;
@@ -50,6 +50,11 @@ export function posixLockFile(os: 'linux' | 'macos'): (file: string) => HeldFile
     return {
       stillAt(path) {
         try { return open && statSync(path, { bigint: true }).ino === id; } catch { return false; }
+      },
+      write(text) {
+        // Opened for append: once truncated, the write lands at the start.
+        ftruncateSync(handle, 0);
+        writeSync(handle, text);
       },
       release() {
         if (!open) return;
