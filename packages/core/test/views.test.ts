@@ -157,6 +157,9 @@ test('local files are embedded, and a remote address or a missing file is a prob
     // A quoted `>` does not end its tag, and an address quoted in another attribute is that attribute's text.
     '<div title="a > b" style="background: url(dot.png)"></div>',
     '<img alt="x > y src=gone.png" src="dot.png">',
+    // Prose and a textarea's text are no rules, nor tags: nothing in them is loaded or refused.
+    '<p>Write @import url("theme.css") in a stylesheet.</p>',
+    '<textarea><style>.x { background: url(gone.png) }</style><img src="gone.png"></textarea>',
   ].join('\n'), '<link rel="stylesheet" href="look.css"><link rel="stylesheet" href="theme/skin.css">'), join(harness.dataDir, 'views'), harness.dataDir);
   expect(built.problems).toEqual([]);
   const data = `data:image/png;base64,${PNG.toString('base64')}`;
@@ -165,6 +168,7 @@ test('local files are embedded, and a remote address or a missing file is a prob
   expect(built.html).toContain(`<rect style='fill: url(${data})'/>`);
   expect(built.html).toContain(`<div title="a > b" style="background: url(${data})"></div>`);
   expect(built.html).toContain(`<img alt="x > y src=gone.png" src="${data}">`);
+  expect(built.html).toContain('<textarea><style>.x { background: url(gone.png) }</style><img src="gone.png"></textarea>');
   const script = /<script>(const css[^<]*)<\/script>/.exec(built.html)![1]!;
   expect(script).toBe('const css = "url(dot.png)";');
   expect(() => new Function(script)).not.toThrow();

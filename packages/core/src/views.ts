@@ -127,9 +127,10 @@ export function buildView(source: string, directory: string, cwd: string, guard?
   // Comments and element bodies blanked to the same length: a tag written in a string is not the page's.
   const blank = (tags: string) => source.replace(new RegExp(`<!--[\\s\\S]*?(?:-->|$)|(<(${tags})\\b${TAG_REST})([\\s\\S]*?)(?=<\\/\\2\\s*>|$)`, 'gi'),
     (match: string, open?: string, _tag?: string, body?: string) => open === undefined ? ' '.repeat(match.length) : open + ' '.repeat(body?.length ?? 0));
-  const markup = blank('script|style');
-  /** The page without its scripts: where a `url(` or an `@import` is a rule and not a string. */
-  const styled = blank('script');
+  // A textarea's or title's body is text, not tags: what it spells is never loaded.
+  const markup = blank('script|style|textarea|title');
+  /** The page without its scripts and text bodies: where a `url(` or an `@import` is a rule and not a string. */
+  const styled = blank('script|textarea|title');
   for (const tag of markup.matchAll(LOADING_TAG)) {
     const name = tag[1]!.toLowerCase();
     const at = tag.index;
@@ -183,10 +184,13 @@ export function buildView(source: string, directory: string, cwd: string, guard?
       edits.push({ start: at, end: at + found[0].length, text: `url(${dataUrl(file)})` });
     }
   }
-  for (const found of styled.matchAll(/@import\s+(?:url\(\s*)?["']?([^"')\s;]+)/gi)) {
-    problem(found.index, remote(found[1] ?? '')
-      ? `@import of ${found[1]} is remote, and a view loads nothing remote.`
-      : `@import of ${found[1]} is not followed: name the stylesheet with <link rel="stylesheet" href="${found[1]}">.`);
+  // An import in prose is no rule either: only the same CSS regions are read.
+  for (const [start, end] of css) {
+    for (const found of source.slice(start, end).matchAll(/@import\s+(?:url\(\s*)?["']?([^"')\s;]+)/gi)) {
+      problem(start + found.index, remote(found[1] ?? '')
+        ? `@import of ${found[1]} is remote, and a view loads nothing remote.`
+        : `@import of ${found[1]} is not followed: name the stylesheet with <link rel="stylesheet" href="${found[1]}">.`);
+    }
   }
 
   let html = '';
