@@ -85,6 +85,7 @@ afterEach(async () => {
   delete process.env['ACP_FAKE_MODE_OPTION'];
   delete process.env['ACP_FAKE_LATE_MODEL'];
   delete process.env['ACP_FAKE_REFUSE_SMART'];
+  delete process.env['ACP_FAKE_HANG_SMART'];
   delete process.env['ACP_FAKE_NO_IMAGES'];
   delete process.env['ACP_FAKE_HANG_INIT'];
   delete process.env['ACP_FAKE_EXIT_AT_START'];
@@ -1415,6 +1416,23 @@ describe('acp driver', () => {
     await runTurn(client, threadId, 'again');
     expect(configCount('model fake-smart')).toBe(2);
     expect(countLogLines(fakeLog(), 'session/prompt')).toBe(prompts + 1);
+  });
+
+  test('a stop while the agent has not answered a model switch ends the turn as stopped', async () => {
+    process.env['ACP_FAKE_HANG_SMART'] = '1';
+    const client = await startCore({ warmProcessMinutes: 5 });
+    const threadId = await acpThread(client);
+    await runTurn(client, threadId, 'on the default');
+
+    await client.call('threads.update', { threadId, model: 'fake-smart' });
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'never switched' });
+    await waitFor(() => configCount('model fake-smart') === 1, 10000);
+
+    expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
+    const done = await finished;
+    expect(done.status).toBe('stopped');
+    expect(done.error).toBeNull();
   });
 
   test('an agent that lists its modes as a config option is moved through that option', async () => {

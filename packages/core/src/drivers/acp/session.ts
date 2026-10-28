@@ -385,8 +385,10 @@ export class AcpSession {
       await this.controls.applyMode(turn.ctx);
     } catch (error) {
       if (!(error instanceof ModelRefused)) throw error;
-      turn.fail(error.message);
-      this.endTurn(turn, false);
+      // A stop closes the agent under a switch it has not answered.
+      if (turn.isStopped) turn.stopNow();
+      else turn.fail(error.message);
+      this.endTurn(turn, turn.isStopped);
       return;
     }
     const judged = this.costBaseline(turn);
