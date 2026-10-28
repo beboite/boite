@@ -87,9 +87,17 @@ export class ResumePlanner {
     let changed = false;
     for (const [threadId, entry] of Object.entries(record)) {
       const thread = this.core.journal.getThread(threadId);
-      if (thread === null || thread.archived) {
+      if (thread === null || (thread.archived && entry.resumedWindow === undefined)) {
         delete record[threadId];
         changed = true;
+        continue;
+      }
+      // An archived thread can come back: the window it resumed after stays, as `forget` keeps it.
+      if (thread.archived) {
+        if (Object.keys(entry).length > 1) {
+          record[threadId] = { resumedWindow: entry.resumedWindow };
+          changed = true;
+        }
         continue;
       }
       const plan = entry.plan;

@@ -224,6 +224,26 @@ test('a resume refuses a thread whose model changed since the limit', async () =
   } finally { await h.stop(); }
 });
 
+test('an archived thread keeps the usage window it resumed after across a restart', async () => {
+  const h = await startTestCore({ settings: { autoResumeLimitedThreads: true } });
+  const client = await h.connect();
+  const { threadId } = await echoThread(h, client);
+  await client.call('threads.archive', { threadId });
+  // Unarchived later, a failure in the same window must not resume a second time.
+  h.core.journal.setSetting('resumes', { [threadId]: { handled: 'trn_old', resumedWindow: 1_234 } });
+  client.close();
+  await h.server.stop();
+  await h.core.close();
+
+  const next = new Core({ dataDir: h.dataDir, token: h.token });
+  try {
+    expect((next.journal.getSetting('resumes') as Record<string, unknown>)[threadId]).toEqual({ resumedWindow: 1_234 });
+  } finally {
+    await next.close();
+    await removeDir(h.dataDir);
+  }
+});
+
 test('a planned resume survives a core restart and fires on the next core', async () => {
   const h = await startTestCore({ settings: { autoResumeLimitedThreads: true } });
   const client = await h.connect();
