@@ -372,8 +372,8 @@ A skip passes in a ruleset, so a draft must not satisfy it:
   draft cannot merge, and marking it ready runs a full run whose planning
   replaces that success before anything else.
 
-`PR title` reports the same name in both modes. CodeRabbit reviews drafts
-(`.coderabbit.yaml`).
+`PR title` reports the same name in both modes. mtsu-patrol reviews once the
+pull request is ready.
 
 Of the 5,632 runner minutes spent by the 86 pull request runs started on
 2026-10-18 between 12:34 and 21:35 UTC, 2,476 went to runs a newer push
@@ -385,9 +385,10 @@ all on Linux.
 An agent's pull request flow:
 
 1. `gh pr create --draft`.
-2. Fix the draft's CI failures and review findings, batching pushes.
-3. `gh pr ready <number>` once the draft's checks pass and the threads are answered.
-4. After that, push only for a full-run failure or a new finding.
+2. Fix the draft's CI failures in one push.
+3. `gh pr ready <number>` once the draft's checks pass.
+4. After that, one push per round: wait for the full run and mtsu-patrol's
+   review of the head, then fix everything they found together.
 
 ## Build cost
 
@@ -672,10 +673,13 @@ domain's DNS names `mtsu-dev.github.io`.
 
 ## Pull request reviews
 
-`.coderabbit.yaml` enables advisory reviews and chat replies, drafts included
-(`auto_review.drafts`), and skips generated artifacts. CodeRabbit is not a
-required check. Its installed App, plan eligibility and quotas are external
-prerequisites.
+mtsu-patrol reviews each ready head; it is not a required check.
+`.coderabbit.yaml` turns CodeRabbit's automatic reviews and chat replies off:
+its free quota left most pull requests with a limit notice instead of a review.
+
+A review with no critical or major finding is the last one: the push that
+answers it needs no second review, and mtsu-patrol skips a small push after
+such a review, saying so in its summary.
 
 Follow the [PR rules](../AGENTS.md#follow-through-on-pull-requests): inspect CI
 and review findings together, verify and group fixes before pushing, and report

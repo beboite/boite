@@ -96,7 +96,8 @@ Check CI and new review findings after a push. Track CI and reviews together;
 do not wait for one to finish before inspecting the other. A paused,
 quota-limited or delayed review is an explicit status to report.
 Finish when required checks pass, automatic reviews of the current head have
-finished and actionable findings are addressed. If work
+finished, or the head only answers a review that found no critical or major
+issue, and actionable findings are addressed. If work
 remains, report the current head, failing checks, unresolved finding links and
 the next action. Never describe an unchecked head or a confirmed unresolved bug
 as ready to merge.
