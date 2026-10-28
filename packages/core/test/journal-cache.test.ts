@@ -7,11 +7,18 @@ import { Journal } from '../src/journal.ts';
 
 let dir: string;
 let journal: Journal | undefined;
+let previousDataDir: string | undefined;
 
-beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'boite-journal-cache-')); });
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), 'boite-journal-cache-'));
+  previousDataDir = process.env.BOITE_DATA_DIR;
+  process.env.BOITE_DATA_DIR = dir;
+});
 afterEach(() => {
   journal?.close();
   journal = undefined;
+  if (previousDataDir === undefined) delete process.env.BOITE_DATA_DIR;
+  else process.env.BOITE_DATA_DIR = previousDataDir;
   rmSync(dir, { recursive: true, force: true });
 });
 

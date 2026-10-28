@@ -157,14 +157,20 @@ function listing(): Record<string, number> {
       journal.db.exec(`PRAGMA cache_size = ${cache}`);
       const first = journal.getThread('thr_0');
       journal.listThreads(); // Fills what this cache holds: the lists below read what it could not keep.
-      let bytes = 0, lists = 0;
-      out[`list${name}Ms`] = time(20, () => {
-        journal.putThread({ ...first, updatedAt: first.updatedAt + ++lists });
-        const before = bytesRead();
+      // Five lists warm up, twenty count; the write before each list is outside the time.
+      const samples: number[] = [];
+      let bytes = 0;
+      for (let i = 0; i < 25; i++) {
+        journal.putThread({ ...first, updatedAt: first.updatedAt + i + 1 });
+        const before = bytesRead(), at = performance.now();
         journal.listThreads();
-        bytes += bytesRead() - before;
-      });
-      out[`list${name}KiB`] = bytes / lists / 1024;
+        const took = performance.now() - at, read = bytesRead() - before;
+        if (i < 5) continue;
+        samples.push(took);
+        bytes += read;
+      }
+      out[`list${name}Ms`] = median(samples);
+      out[`list${name}KiB`] = bytes / samples.length / 1024;
     }
     return out;
   } finally {
