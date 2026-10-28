@@ -97,7 +97,7 @@ export class ServerUpdater {
    * cached answer can say up to date about a release published since.
    */
   async freshen(now = Date.now()): Promise<void> {
-    if (this.snapshot === null) await this.load();
+    if (this.snapshot === null && !this.legacy) await this.load();
     const state = this.snapshot;
     // Only an installation the core can update checks at all; a download or a failure stays shown as it is.
     if (state?.mode === 'systemd' && ['idle', 'current'].includes(state.phase) && updateStale(state.checkedAt, now)) await this.load(true);

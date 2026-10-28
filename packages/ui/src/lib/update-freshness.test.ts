@@ -19,7 +19,7 @@ const HOURS = 60 * 60_000;
  * A server whose core last checked `age` ago and said up to date, while a
  * release came out since: only a new check finds it, as on the real core.
  */
-async function server(age: number) {
+async function server(age: number, fresh: string | null = null) {
   const client = new FakeClient({ delayMs: 0, coreId: 'server', coreName: 'server' });
   const call = client.call.bind(client);
   const checkedAt = Date.now() - age;
@@ -28,7 +28,8 @@ async function server(age: number) {
   const found: ServerUpdateStatus = { ...reading, phase: 'available', version: '2.0.0-nightly.20261028.1', publishedAt: '2026-10-28T10:02:51Z', checkedAt: Date.now() };
   const spy = vi.spyOn(client, 'call').mockImplementation((async (method: string, params: { refresh?: boolean }) => {
     if (method === 'core.updateStatus') return params.refresh ? found : reading;
-    if (method === 'providers.updates' && !params.refresh) return (await call('providers.updates', {})).map((update): HarnessUpdate => ({ ...update, checkedAt }));
+    if (method === 'providers.updates' && !params.refresh) return (await call('providers.updates', {}))
+      .map((update): HarnessUpdate => ({ ...update, checkedAt: update.providerId === fresh ? Date.now() : checkedAt }));
     return call(method as never, params as never);
   }) as typeof client.call);
   const store = new Store(); stores.push(store);
@@ -45,6 +46,12 @@ test('connecting to a machine whose last check is hours old checks its Boite and
   expect(store.serverUpdater.snapshot?.version).toBe('2.0.0-nightly.20261028.1');
   await vi.waitFor(() => expect(refreshes('providers.updates')).toBe(1));
   expect(refreshes('core.updateStatus')).toBe(1);
+});
+
+test('one agent updated a moment ago does not hide the others\' stale readings', async () => {
+  // Updating Claude stamps only its row: the other agents still go hours unchecked.
+  const { refreshes } = await server(3 * HOURS, 'claude');
+  await vi.waitFor(() => expect(refreshes('providers.updates')).toBe(1));
 });
 
 test('a reading taken minutes ago is shown as it is, without a new check', async () => {

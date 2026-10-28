@@ -348,16 +348,16 @@ export class Accounts {
   }
 
   /**
-   * Checks this machine's agents again when their last check is stale: the
-   * core checks every six hours from its start, so its reading can miss a
-   * release published since. Nothing starts while one of them is checking,
-   * updating or shows a failure.
+   * Checks this machine's agents again when one of their readings is stale:
+   * the core checks every six hours from its start, so its reading can miss a
+   * release published since, and updating one agent stamps only its own row.
+   * Nothing starts while one of them is checking, updating or shows a failure.
    */
   async freshenHarnessUpdates(now = Date.now()): Promise<void> {
     const updates = this.harnessUpdates;
     if (updates.length === 0 || updates.some((update) => update.state !== 'idle')) return;
-    const newest = Math.max(...updates.map((update) => update.checkedAt ?? 0));
-    if (updateStale(newest === 0 ? null : newest, now)) await this.loadHarnessUpdates(true, true);
+    const read = updates.flatMap((update) => update.checkedAt === null ? [] : [update.checkedAt]);
+    if (updateStale(read.length === 0 ? null : Math.min(...read), now)) await this.loadHarnessUpdates(true, true);
   }
 
   async updateHarness(providerId: ProviderId): Promise<void> {
