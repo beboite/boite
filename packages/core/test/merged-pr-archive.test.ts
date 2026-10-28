@@ -127,6 +127,12 @@ test.each(['badge', 'linked PR'] as const)('a merge detected by the %s moves dir
     else await f.client.call('threads.linkPullRequest', { threadId: f.threadId, url: f.candidates[0]!.url });
     await waitFor(() => core.threads.require(f.threadId).doneAt != null, 1500);
     expect(core.threads.require(f.threadId)).toMatchObject({ archived: true, status: 'running' });
+    // Done only hides the row: what the finishing prompt still runs in the background stays on it.
+    const running = core.threads.require(f.threadId);
+    const owner = { providerId: running.providerId, sessionGeneration: running.sessionGeneration ?? 0, parentTurnId: turn.id };
+    core.threads.agentState.noteBackground(f.threadId, [{ id: 'merged-task', kind: 'shell', description: 'Native work', toolId: null, startedAt: Date.now() }], owner);
+    expect(await f.client.call('threads.get', { threadId: f.threadId })).toMatchObject({ archived: true, backgroundWork: { kinds: ['shell'] } });
+    core.threads.agentState.noteBackground(f.threadId, [], owner);
     expect(stops).toBe(0);
     expect(core.procs.liveCount(f.threadId)).toBe(1);
     expect(await agent.call('agent.where', { threadId: f.threadId })).toMatchObject({ threadId: f.threadId });

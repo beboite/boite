@@ -55,14 +55,17 @@ export function pendingMoveNote(core: Core, threadId: ThreadId): MoveNotice | nu
 /** The row as a client sees it: the stored summary plus what only lives in memory. */
 export function withLoad(core: Core, thread: ThreadSummary): ThreadSummary {
   const busy = thread.status === 'running' || thread.status === 'waiting';
-  // Archive summaries are built before commit; what the archive puts away on
-  // commit (`putAway`: background work, held answers, open cards, the move) stays
-  // in memory until then so a rollback keeps it, but an archived row has none.
-  const tasks = thread.archived ? [] : core.threads?.agentState.background.get(thread.id) ?? [];
+  const archiveReason = thread.archived ? archiveState(core.journal, thread.id).reason : undefined;
+  // Archive summaries are built before commit; what an archive puts away on
+  // commit (`putAway`: background work, held answers, open cards) stays in memory
+  // until then so a rollback keeps it, but a row put away has none. A merged PR's
+  // Done only hides the row: its prompt still finishes and shows what it runs.
+  const putAway = thread.archived && archiveReason === undefined;
+  const tasks = putAway ? [] : core.threads?.agentState.background.get(thread.id) ?? [];
   const watches = core.pullRequestWatches?.of(thread.id) ?? [];
   return {
     ...thread,
-    archiveReason: thread.archived ? archiveState(core.journal, thread.id).reason : undefined,
+    archiveReason,
     worktreeRemoved: thread.branch === null ? undefined : worktreeRemovalOf(core.journal, thread) ?? undefined,
     load: core.procs.loadOf(thread.id),
     runningSince: busy ? core.journal.runningSince(thread.id) : null,
@@ -71,10 +74,11 @@ export function withLoad(core: Core, thread: ThreadSummary): ThreadSummary {
     progress: busy ? core.threads?.progress?.get(thread.id) ?? null : null,
     backgroundWork: tasks.length === 0 ? null : { kinds: tasks.map(task => task.kind), since: Math.min(...tasks.map(task => task.startedAt)) },
     backgroundWait: thread.parentThreadId ? backgroundWaitOf(core, thread, tasks) : null,
+    // An archived row, put away or done, has no move to apply.
     pendingMove: thread.archived ? null : core.threads?.moves?.pendingOf(thread.id) ?? null,
     moveNote: thread.agentSessionId ? null : pendingMoveNote(core, thread.id),
-    pendingAnswers: thread.archived ? [] : [...(core.threads?.deferred?.deferredAnswers.get(thread.id) ?? [])],
-    openQuestions: thread.archived ? 0 : core.threads?.cards?.openAsyncCount(thread.id) ?? 0,
+    pendingAnswers: putAway ? [] : [...(core.threads?.deferred?.deferredAnswers.get(thread.id) ?? [])],
+    openQuestions: putAway ? 0 : core.threads?.cards?.openAsyncCount(thread.id) ?? 0,
     retry: core.threads?.runner?.retryOf(thread.id) ?? core.threads?.limitResumes?.retryOf(thread.id) ?? core.threads?.autoContinue?.retryOf(thread.id) ?? null,
     pullRequestWatches: watches,
   };

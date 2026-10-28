@@ -435,7 +435,8 @@ describe('threads.move', () => {
     const held = h.core.threads.require(moving.id);
     h.core.threads.agentState.noteBackground(moving.id, [{ id: 'archive-task', kind: 'shell', description: 'Native work', toolId: null, startedAt: Date.now() }], { providerId: held.providerId, sessionGeneration: held.sessionGeneration ?? 0, parentTurnId: turnId });
     h.core.threads.deferred.deferredAnswers.set(moving.id, ['held answer']);
-    expect(await client.call('threads.get', { threadId: moving.id })).toMatchObject({ backgroundWork: { kinds: ['shell'] }, pendingAnswers: ['held answer'] });
+    await client.call('questions.ask', { threadId: moving.id, text: 'Which file?' });
+    expect(await client.call('threads.get', { threadId: moving.id })).toMatchObject({ backgroundWork: { kinds: ['shell'] }, pendingAnswers: ['held answer'], openQuestions: 1 });
     const updates: ThreadSummary[] = [];
     const off = h.core.bus.onCommitted((name, payload) => {
       if (name === 'thread.updated' && (payload as ThreadSummary).id === moving.id) updates.push(payload as ThreadSummary);
