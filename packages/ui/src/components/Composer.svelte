@@ -430,7 +430,7 @@
       // Each picture that arrives is one undo step, its reference in the text included.
       const holder = {
         get attachments() { return state.attachments; },
-        set attachments(value: Attachment[]) { closeDraftUndo(); checkpoint(state); state.attachments = value; }
+        set attachments(value: Attachment[]) { closeDraftUndo(inputKey, state); checkpoint(state); state.attachments = value; }
       };
       await attachFiles(inputStore, files, holder, attachmentProvider, () => {
         if (inputStore.composerStates[inputKey] === state) insertImageReference(inputStore, inputKey);
@@ -467,11 +467,11 @@
   function removeAttachment(at: number) {
     const state = stateForInput();
     checkpoint(state);
-    // The keyboard's remove button goes with its chip, so the focus comes back to
-    // the box. A tap leaves it where it was: focusing the box would open a phone's keyboard.
+    // The keyboard's remove button goes with its chip, so focus returns to the box; a tap leaves it, which would open a phone's keyboard.
     const refocus = focusWithin(box?.closest('[data-testid="composer"]'));
     removeImageReferences(store, key, at);
     state.attachments = state.attachments.filter((_, index) => index !== at);
+    if (!state.text && !state.attachments.length) offerDraftUndo(editing(), { text: '', attachments: 1 }, strings.composer.draftCleared);
     if (refocus) focusInitial(box, box?.closest<HTMLElement>('[data-testid=composer]'));
   }
 

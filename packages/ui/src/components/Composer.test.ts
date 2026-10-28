@@ -2309,6 +2309,45 @@ test('on a phone, a file attached after the draft was cleared ends the Undo offe
   await waitFor(() => document.querySelector('[data-testid=undo-toast]') === null);
 });
 
+test('on a phone, removing the only file of a draft offers Undo that brings it back', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
+    media, matches: media === '(pointer: coarse)', onchange: null, addListener() {}, removeListener() {},
+  }) as unknown as MediaQueryList);
+  paste(new File(['notes'], 'notes.txt', { type: 'text/plain' }));
+  await waitFor(() => chips().length === 1);
+  // The chip's remove button fires no input event, yet it empties the draft as surely as select-all and delete.
+  query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').click();
+  await waitFor(() => chips().length === 0 && document.querySelector('[data-testid=undo-toast]')?.textContent?.includes(strings.composer.draftCleared) === true);
+  query<HTMLButtonElement>('[data-testid=undo-action]').click();
+  await waitFor(() => chips().length === 1);
+});
+
+test('on a phone, a file that finishes reading in a conversation left behind keeps the Undo offer of the one on screen', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
+    media, matches: media === '(pointer: coarse)', onchange: null, addListener() {}, removeListener() {},
+  }) as unknown as MediaQueryList);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const read = FileReader.prototype.readAsDataURL;
+  vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (this: FileReader, file: Blob) { void gate.then(() => read.call(this, file)); });
+  paste(new File(['notes'], 'slow.txt', { type: 'text/plain' }));
+  await store.open('t-descriptors');
+  await waitFor(() => store.openThread?.id === 't-descriptors' && !store.busy);
+  await type('a long prompt typed on the phone '.repeat(300));
+  const full = input().value;
+  input().focus();
+  input().setSelectionRange(0, full.length);
+  edit('deleteContentBackward', '', 0);
+  await waitFor(() => document.querySelector('[data-testid=undo-toast]') !== null);
+  release();
+  await waitFor(() => store.composerStates['t-trace']?.attachments.length === 1);
+  expect(document.querySelector('[data-testid=undo-toast]')).not.toBeNull();
+});
+
 test('a retry whose resend fails leaves the words typed meanwhile in the box and holds its prompt in the queue', async ({ oldCoreApp: _app }) => {
   await store.open('t-trace');
   await send('the prompt to retry');

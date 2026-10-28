@@ -44,7 +44,7 @@ export function travel(host: EditingHost, back: boolean): void {
 
 /** Less than this gone, and no picture: a box cleared on a phone is no loss worth a toast. */
 const WORTH_UNDO_CHARS = 40;
-let offered: { id: number; key: string } | null = null;
+let offered: { id: number; key: string; state: ComposerState } | null = null;
 
 /**
  * A phone has no Ctrl+Z: a draft emptied in one go, or replaced by Edit,
@@ -63,12 +63,15 @@ export function offerDraftUndo(host: EditingHost, before: { text: string; attach
     offered = null;
     if (mine && (host.shown?.() ?? key) === key && store.composerStates[key] === state && untouched()) travel(host, true);
   });
-  offered = { id: undo.current?.id ?? 0, key };
+  offered = { id: undo.current?.id ?? 0, key, state };
 }
 
-/** The composer's undo offer ends with the next edit; given a key, only that key's offer ends, as its box leaves it. */
-export function closeDraftUndo(key?: string): void {
-  if (!offered || (key !== undefined && offered.key !== key)) return;
+/**
+ * The composer's undo offer ends with the next edit; given a key, only that
+ * key's offer ends, as its box leaves it, and given a draft, only that draft's.
+ */
+export function closeDraftUndo(key?: string, state?: ComposerState): void {
+  if (!offered || (key !== undefined && offered.key !== key) || (state !== undefined && offered.state !== state)) return;
   if (undo.current?.id === offered.id) undo.dismiss();
   offered = null;
 }
