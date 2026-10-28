@@ -98,6 +98,26 @@ describe('fitTurn', () => {
     expect(box.attachments).not.toContain(removed);
   });
 
+  test('a fit that could not reach the budget tries again when what made it heavy left meanwhile', async () => {
+    const pdf: Attachment = { kind: 'file', mimeType: 'application/pdf', name: 'big.pdf', data: Buffer.alloc(Math.round(1.2 * MAX)).toString('base64') };
+    const box = { attachments: [pdf, jpeg('kept.jpg', 90 * KB)] };
+    const weighing = weighingCodec(90 * KB);
+    let swapped = false;
+    // As the first picture is encoded, the heavy file goes and twelve pictures come.
+    const codec: ImageCodec = {
+      async decode(file) {
+        const image = (await weighing.decode(file))!;
+        return { ...image, async encode(...args) {
+          if (!swapped) { swapped = true; box.attachments = [...box.attachments.slice(1), ...Array.from({ length: 12 }, (_, at) => jpeg(`new-${at}.jpg`, 90 * KB))]; }
+          return image.encode(...args);
+        } };
+      }
+    };
+    expect(await fitHeld(box, codec, MAX)).toBe(true);
+    expect(box.attachments).toHaveLength(13);
+    expect(box.attachments.reduce((sum, one) => sum + decodedBytes(one.data), 0)).toBeLessThanOrEqual(MAX);
+  });
+
   test('a file picked while the box is fitted waits for that fit, then the pictures make room for it', async () => {
     const slow = (codec: ImageCodec, delay: number): ImageCodec => ({
       async decode(file) {

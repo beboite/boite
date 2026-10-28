@@ -168,8 +168,8 @@ async function fitNow(target: { attachments: Attachment[] }, codec: ImageCodec |
       target.attachments = target.attachments.map(attachment => swaps.get(attachment) ?? attachment);
     }
     if (attachedBytes(target.attachments) <= max) return true;
-    // Over budget: fit again only when pictures joined while this one ran.
+    // Over budget: fit again only when the box changed while this one ran, a picture joined or one left.
     const seen = new Set([...before, ...fitted.attachments]);
-    if (!fitted.fits || target.attachments.every(attachment => seen.has(attachment))) return false;
+    if (target.attachments.length === before.length && target.attachments.every(attachment => seen.has(attachment))) return false;
   }
 }
