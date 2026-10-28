@@ -20,6 +20,9 @@
  * `ACP_FAKE_NO_MODES=1` makes it answer no `modes` at all, which is the agent
  * the mode mapping has to survive without sending anything.
  *
+ * `ACP_FAKE_ARGV=1` logs `argv <json>` with the arguments after the script at
+ * `initialize`, so a test sees what reached the program, one entry each.
+ *
  * `ACP_FAKE_NO_IMAGES=1` makes `initialize` answer with no
  * `promptCapabilities.image`, which is the agent a driver must refuse to send
  * an attachment to. Otherwise the fake advertises image support, and every
@@ -269,6 +272,7 @@ function chunksOf(text: string): string[] {
 const app = agent({ name: 'acp-fake' })
   .onRequest('initialize', async () => {
     log('initialize');
+    if (process.env['ACP_FAKE_ARGV'] === '1') log(`argv ${JSON.stringify(process.argv.slice(2))}`);
     if (process.env['ACP_FAKE_HANG_INIT'] === '1') await new Promise<void>(() => undefined);
     return {
       protocolVersion: PROTOCOL_VERSION,
