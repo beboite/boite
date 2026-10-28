@@ -162,7 +162,9 @@ test('the browser CLI reads agent-browser command lines into actions', () => {
   expect([logs.positional, logs.core]).toEqual([['logs', '--core', 'payload'], undefined]);
   // Inside a command's text, `--` is that text.
   expect(parse(['browser', 'fill', '#q', '--', '--json']).positional).toEqual(['browser', 'fill', '#q', '--', '--json']);
-  expect(parse(['browser', 'profiles', 'add', '--channel', 'dev']).positional).toEqual(['browser', 'profiles', 'add', '--channel', 'dev']);
+  // A profile's name is no text: a global flag after it stays global, and `--` hands over a name that looks like a flag.
+  expect(parse(['browser', 'profiles', 'add', 'Account', 'B', '--json', '--channel', 'dev'])).toMatchObject({ positional: ['browser', 'profiles', 'add', 'Account', 'B'], json: true, channel: 'dev' });
+  expect(parse(['browser', 'profiles', 'add', '--', '--odd']).positional).toEqual(['browser', 'profiles', 'add', '--odd']);
   expect(parse(['browser', 'profiles', '--json'])).toMatchObject({ positional: ['browser', 'profiles'], json: true });
 });
 

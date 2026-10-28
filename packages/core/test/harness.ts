@@ -165,13 +165,17 @@ let stops = 0;
 
 /**
  * Archives the thread through a write that fails after the thread row is
- * saved, so the whole transaction rolls back. Returns the error it threw.
+ * saved, so the whole transaction rolls back. Returns the error it threw;
+ * any other failure, an early refusal included, is thrown on.
  */
 export function rolledBackArchive(harness: TestCore, threadId: string): unknown {
   const announce = harness.core.projects.announce;
   harness.core.projects.announce = () => { throw new Error('injected failure after the thread was written'); };
   try { harness.core.threads.archive(threadId, true); }
-  catch (error) { return error; }
+  catch (error) {
+    if (!(error instanceof Error) || !error.message.includes('injected failure')) throw error;
+    return error;
+  }
   finally { harness.core.projects.announce = announce; }
   throw new Error('the archive did not fail');
 }

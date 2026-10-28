@@ -431,13 +431,18 @@ describe('threads.move', () => {
     expect(rolledBackArchive(h, moving.id)).toBeInstanceOf(Error);
     expect(await client.call('threads.get', { threadId: moving.id })).toMatchObject({ archived: false, pendingMove: pending.pendingMove });
     expect(h.core.journal.getTurn(turnId)?.finishedAt).toBeNull();
+    // What the archive puts away once it commits is already gone from the summary it announces.
+    const held = h.core.threads.require(moving.id);
+    h.core.threads.agentState.noteBackground(moving.id, [{ id: 'archive-task', kind: 'shell', description: 'Native work', toolId: null, startedAt: Date.now() }], { providerId: held.providerId, sessionGeneration: held.sessionGeneration ?? 0, parentTurnId: turnId });
+    h.core.threads.deferred.deferredAnswers.set(moving.id, ['held answer']);
+    expect(await client.call('threads.get', { threadId: moving.id })).toMatchObject({ backgroundWork: { kinds: ['shell'] }, pendingAnswers: ['held answer'] });
     const updates: ThreadSummary[] = [];
     const off = h.core.bus.onCommitted((name, payload) => {
       if (name === 'thread.updated' && (payload as ThreadSummary).id === moving.id) updates.push(payload as ThreadSummary);
     });
     const archived = await client.call('threads.archive', { threadId: moving.id });
     off();
-    expect(updates.find(summary => summary.archived)?.pendingMove).toBeNull();
+    expect(updates.find(summary => summary.archived)).toMatchObject({ pendingMove: null, backgroundWork: null, backgroundWait: null, pendingAnswers: [], openQuestions: 0 });
     expect(archived.pendingMove ?? null).toBeNull();
     expect(h.core.threads.moves.pendingOf(moving.id)).toBeNull();
     await waitFor(() => h.core.journal.getTurn(turnId)?.finishedAt != null);

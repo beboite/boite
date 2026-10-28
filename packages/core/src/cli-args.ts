@@ -89,7 +89,6 @@ const isFlag = (word: string): boolean => word.length > 1 && word.startsWith('-'
 function browserText(words: string[]): boolean {
   const [action = '', ...rest] = words;
   const plain = rest.filter((word, index) => !isFlag(word) && rest[index - 1] !== '--tab');
-  if (action === 'profiles') return plain[0] === 'add';
   const before = BROWSER_TEXT[action];
   return before !== undefined && plain.length >= before;
 }
