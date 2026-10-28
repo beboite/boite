@@ -137,6 +137,19 @@ export interface SecretVault {
   ids?(): Promise<string[] | null>;
 }
 
+/**
+ * An exclusive lock the OS holds on one file for this process until `release`
+ * or the process's death, whichever comes first. Never stale, never shared.
+ */
+export interface HeldFileLock {
+  /** Is the locked file still the one `path` names? False once released, moved away or deleted. */
+  stillAt(path: string): boolean;
+  release(): void;
+}
+
+/** Locks `file`, created if missing, or answers null while another holder has it, one in this process included. */
+export type FileLocker = (file: string) => HeldFileLock | null;
+
 /** OS services used by the shared process registry. No native imports here. */
 export interface ProcessPlatform {
   /** Model tool execution only. Trusted account/control processes never gain authority from this descriptor. */

@@ -1,7 +1,8 @@
-import { closeSync, fstatSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { uptime } from 'node:os';
 import { join } from 'node:path';
-import { processPlatform } from './platform/index.ts';
+import { lockFile as osLockFile, processPlatform } from './platform/index.ts';
+import type { FileLocker, HeldFileLock } from './platform/types.ts';
 
 /**
  * How much later than the lock's own time a holder may have started and still
@@ -50,66 +51,89 @@ export interface LockClock {
   startKey?: (pid: number) => string | null;
 }
 
+interface LockRecord { pid: number | null; lockedAt: number | null; lockedKey: string | null; osLock: boolean }
+
+function readRecord(file: string): LockRecord | null {
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<{ pid: number; startedAt: number; startKey: string; osLock: boolean }>;
+    return {
+      pid: typeof parsed.pid === 'number' ? parsed.pid : null,
+      lockedAt: typeof parsed.startedAt === 'number' ? parsed.startedAt : null,
+      lockedKey: typeof parsed.startKey === 'string' ? parsed.startKey : null,
+      osLock: parsed.osLock === true,
+    };
+  } catch {
+    // Missing, empty while its holder writes it, or cut by a power loss.
+    return null;
+  }
+}
+
+/** The locks this process holds, so `releaseOwnLock` finds one wherever its directory moved. */
+const held = new Set<{ lock: HeldFileLock; drop(path: string): void }>();
+
 /**
- * Takes `file` for this process, or throws `busy(holder)` while a live
- * process that wrote it holds it. A lock whose holder is gone is taken over.
+ * Takes `file` for this process, or throws `busy(holder)` while another
+ * process holds it. The operating system holds the lock (`platform/`), drops
+ * it when its holder dies and never lets two holders in, so a lock is never
+ * stale and never read half-written by someone who then takes it. The record
+ * in the file names the holder for the message only.
  *
- * Gone includes a pid worn by someone else. A core that died without releasing
- * the lock, in a reboot say, leaves its pid to whatever asks next: a browser
- * tab held the pid of a dead core and kept every later core from starting. A
- * holder that started after the lock was written is not the core that wrote it.
- * Nor is any process when the lock predates the last boot: that is the only
- * test macOS can make, since `startedAt` cannot read a start time there.
- * Where the OS names a run with a key (Linux), the key decides alone: the
- * Linux start time and boot time both follow every step of the wall clock,
- * so after an NTP step the live holder would look like a stranger.
+ * A record without `osLock` comes from a core older than this lock, which
+ * held nothing but the file: the old judgement still keeps such a core's
+ * directory from a second one. A record from a run that is gone is replaced.
+ * Gone includes a pid worn by someone else: a holder that started after the
+ * lock was written is not the core that wrote it, nor is any process when the
+ * lock predates the last boot (macOS cannot read a start time). Where the OS
+ * names a run with a key (Linux), the key decides alone: the Linux start and
+ * boot times follow every step of the wall clock.
  */
-export function takeLock(file: string, busy: (holder: number) => string, clock: LockClock = {}): () => void {
+export function takeLock(file: string, busy: (holder: number | null) => string, clock: LockClock = {}, lockFile: FileLocker = osLockFile): () => void {
   const startedAt = clock.startedAt ?? processPlatform.startedAt;
   const bootedAt = clock.bootedAt ?? (() => Date.now() - uptime() * 1000);
   const startKey = clock.startKey ?? (pid => processPlatform.startKey?.(pid) ?? null);
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const handle = openSync(file, 'wx');
-      const key = startKey(process.pid);
-      writeFileSync(handle, `${JSON.stringify({ pid: process.pid, startedAt: Date.now(), ...(key === null ? {} : { startKey: key }) }, null, 2)}\n`, 'utf8');
-      const { ino } = fstatSync(handle, { bigint: true });
-      closeSync(handle);
-      // Only the file this call made: its directory may have moved away, and another lock taken its path.
-      return () => {
-        try {
-          if (statSync(file, { bigint: true }).ino === ino) rmSync(file, { force: true });
-        } catch {
-          // The directory may be gone already; nothing left to release.
-        }
-      };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      let holder: number | null = null;
-      let lockedAt: number | null = null;
-      let lockedKey: string | null = null;
-      try {
-        const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<{ pid: number; startedAt: number; startKey: string }>;
-        holder = typeof parsed.pid === 'number' ? parsed.pid : null;
-        lockedAt = typeof parsed.startedAt === 'number' ? parsed.startedAt : null;
-        lockedKey = typeof parsed.startKey === 'string' ? parsed.startKey : null;
-      } catch {
-        holder = null;
-      }
-      if (holder !== null && holder !== process.pid && alive(holder) && sameRun(holder, lockedAt, lockedKey, startedAt, bootedAt, startKey)) throw new Error(busy(holder));
-      rmSync(file, { force: true });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const lock = lockFile(file);
+    if (!lock) throw new Error(busy(readRecord(file)?.pid ?? null));
+    // The previous holder deleted the file as it let go: this lock is on a file no longer at the path.
+    if (!lock.stillAt(file)) {
+      lock.release();
+      continue;
     }
+    const record = readRecord(file);
+    const holder = record?.pid ?? null;
+    if (record && !record.osLock && holder !== null && holder !== process.pid && alive(holder)
+      && sameRun(holder, record.lockedAt, record.lockedKey, startedAt, bootedAt, startKey)) {
+      lock.release();
+      throw new Error(busy(holder));
+    }
+    const key = startKey(process.pid);
+    writeFileSync(file, `${JSON.stringify({ pid: process.pid, startedAt: Date.now(), ...(key === null ? {} : { startKey: key }), osLock: true }, null, 2)}\n`, 'utf8');
+    const entry = {
+      lock,
+      // Deleted while still held, so the next holder cannot lock a file the path no longer names unnoticed.
+      drop(path: string) {
+        held.delete(entry);
+        if (lock.stillAt(path)) rmSync(path, { force: true });
+        lock.release();
+      },
+    };
+    held.add(entry);
+    // Only the file this call locked: its directory may have moved away, and another lock taken its path.
+    return () => {
+      try { entry.drop(file); } catch { /* The directory may be gone already; the lock is released all the same. */ lock.release(); }
+    };
   }
   throw new Error(`could not take the lock ${file}: it keeps coming back`);
 }
 
-/** Removes the core lock in `directory` if this process wrote it, wherever the directory has moved since. */
+/** Releases the core lock in `directory` if this process holds it, wherever the directory has moved since. */
 export function releaseOwnLock(directory: string): void {
   const file = join(directory, 'core.lock');
-  try {
-    if ((JSON.parse(readFileSync(file, 'utf8')) as { pid?: unknown }).pid === process.pid) rmSync(file, { force: true });
-  } catch {
-    // No lock there, or not one this process can read: not this process's.
+  try { statSync(file); } catch { return; }
+  for (const entry of held) {
+    if (!entry.lock.stillAt(file)) continue;
+    try { entry.drop(file); } catch { entry.lock.release(); }
+    return;
   }
 }
 
@@ -130,6 +154,6 @@ export function lockDataDir(
   startKey?: (pid: number) => string | null,
 ): () => void {
   return takeLock(join(dataDir, 'core.lock'),
-    holder => `another core is already running on ${dataDir} (pid ${holder}). Close it, or start this one with --data-dir on a directory of its own.`,
+    holder => `another core is already running on ${dataDir} (pid ${holder ?? 'not written yet'}). Close it, or start this one with --data-dir on a directory of its own.`,
     { startedAt, bootedAt, startKey });
 }
