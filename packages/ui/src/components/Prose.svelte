@@ -1,7 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { renderBlock } from '../lib/markdown';
-  import { hasFence } from '../lib/fences';
   import { workspace } from '../lib/workspace.svelte';
   import { ParagraphScan, answerText } from '../lib/message-display';
   import { strings } from '../lib/strings';
@@ -158,10 +157,10 @@
     if (live) return;
     const node = host;
     if (!node) return;
-    // Only a fenced block draws a `pre`: most paragraphs have no button to hang and wait for nothing.
-    if (!blocks.some(hasFence)) return;
     // The `{@html}` write lands with the rest of the render, so the buttons go
-    // on one tick later, once the new blocks are the ones in the document.
+    // on one tick later, once the new blocks are the ones in the document. They
+    // hang on the `pre` the renderer drew: a fence it nests, in a quote, is
+    // one no reading of the raw lines would see.
     void tick().then(() => {
       for (const pre of node.querySelectorAll('pre')) hangCopy(pre);
     });

@@ -60,6 +60,24 @@ test('streamed blocks and the final render read fences with one grammar', () => 
     expect(blocks.map(block => renderMarkdown(block)).join('')).toBe(renderMarkdown(text));
   }
 });
+test('an indented fence keeps its indent through the stream, so its code outdents as in the final render', () => {
+  const code = (html: string) => {
+    const box = document.createElement('div');
+    box.innerHTML = html;
+    return [...box.querySelectorAll('pre code')].map(node => node.textContent);
+  };
+  for (const [text, expected] of [
+    ['  ~~~py\n  x = 1\n   y = 2\n  ~~~\n\nAfter', 'x = 1\n y = 2'],
+    ['Intro\n\n   ```py\n   x = 1\n    y = 2\n   ```\n\nAfter', 'x = 1\n y = 2'],
+    [' ````\n x = 1\n\n  y = 2\n ````', 'x = 1\n\n y = 2']
+  ] as const) {
+    const scan = new ParagraphScan();
+    for (let end = 1; end <= text.length; end += 3) scan.blocks(text.slice(0, end), true);
+    const blocks = scan.blocks(text, false);
+    expect(code(renderMarkdown(text))).toEqual([expected]);
+    expect(code(blocks.map(block => renderMarkdown(block)).join(''))).toEqual([expected]);
+  }
+});
 test('internal goal markers stay out of prose, even during partial arrival', () => {
   expect(answerText('Done\n\n[BOITE_GOAL_COMPLETE]', false)).toBe('Done\n\n');
   expect(answerText('Done\n\n[BOITE_GOAL_COM', true)).not.toContain('[BOITE_');

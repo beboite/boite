@@ -104,6 +104,15 @@ export function paragraphBlocks(text: string, live: boolean): string[] {
 }
 
 /**
+ * A block as the renderer must see it: blank lines and trailing space go, the
+ * first line's indent stays. A fence indented by one to three spaces outdents
+ * its code by that much, so trimming the opening line alone shifted the code.
+ */
+function blockText(text: string): string {
+  return text.replace(/^(?:[ \t]*\r?\n)+/, '').trimEnd();
+}
+
+/**
  * paragraphBlocks for a text that grows: a new text that extends the last one
  * resumes at the last complete line, so a delta reads only its own lines. The
  * same array comes back until a paragraph completes. Only complete lines are
@@ -135,13 +144,13 @@ export class ParagraphScan {
       offset = end + 1;
       this.#fences.line(line);
       if (!this.#fences.inside && !line.trim()) {
-        const block = text.slice(this.#start, offset).trim();
+        const block = blockText(text.slice(this.#start, offset));
         if (block) { this.#done.push(block); grew = true; }
         this.#start = offset;
       }
     }
     this.#read = text.slice(0, offset);
-    const tail = live ? '' : text.slice(this.#start).trim();
+    const tail = live ? '' : blockText(text.slice(this.#start));
     if (this.#result && !grew && tail === this.#tail) return this.#result;
     this.#tail = tail;
     this.#result = tail ? [...this.#done, tail] : [...this.#done];

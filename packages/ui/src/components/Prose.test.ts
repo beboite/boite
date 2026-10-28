@@ -197,6 +197,19 @@ test('tilde and longer backtick fences render as code with a copy button, blank 
   expect(document.querySelectorAll('[data-testid=code-copy]')).toHaveLength(2);
 });
 
+test('fenced code inside a quote carries its copy button too', async () => {
+  running = mount(Prose, {
+    target: document.body,
+    props: { text: 'Quoted:\n\n> ```sh\n> echo hello\n> ```\n\n> ~~~\n> echo tilde\n> ~~~\n' }
+  });
+  flushSync();
+  await tick();
+
+  const code = [...document.querySelectorAll('pre code')].map(node => node.textContent);
+  expect(code).toEqual(['echo hello', 'echo tilde']);
+  expect(document.querySelectorAll('blockquote [data-testid=code-copy]')).toHaveLength(2);
+});
+
 test('a block that is still being written carries no button yet', async () => {
   // The pass that hangs them walks every block of the answer, and it ran every
   // 48 ms while the part streamed, for a button on code nobody can copy yet.

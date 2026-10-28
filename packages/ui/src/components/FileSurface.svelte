@@ -29,8 +29,6 @@
 
   // The editor
   let draft = $state('');
-  /** What the disk last answered with: the dirty dot is the distance to it. */
-  let stored = $state('');
   let saving = $state(false);
   let area = $state<HTMLTextAreaElement | undefined>(undefined);
   let offset = $state(0);
@@ -62,6 +60,12 @@
   let threadId = $derived(store.openThread?.id ?? null);
   let path = $derived(surface.path ?? null);
   const language = $derived(codeLanguage(path ?? '', content?.kind === 'text' ? content.language : null));
+  /**
+   * What the disk last answered with, held by the panel: an editor mounted
+   * while another one's save was out learns what that save wrote. The dirty
+   * dot is the distance to it.
+   */
+  let stored = $derived(panel.disk(surface.id) ?? '');
   let dirty = $derived(content?.kind === 'text' && draft !== stored);
   let readOnly = $derived(content?.kind === 'text' && (content.truncated || !store.owner));
   let lineCount = $derived(content?.kind === 'text' ? draft.split('\n').length : 0);
@@ -77,6 +81,7 @@
 
   async function load(id: string, wanted: string): Promise<void> {
     loading = true;
+    const sends = panel.reading(surface.id);
     const answer = await store.readFile(id, wanted);
     loading = false;
     // The tab may have been asked for another file while the call was out.
@@ -89,10 +94,10 @@
     problem = null;
     content = answer.value;
     if (answer.value.kind === 'text') {
-      stored = answer.value.text;
+      panel.read(surface.id, wanted, answer.value.text, sends);
       // An edit made before this tab was last unmounted comes back over the
       // disk's text, and the dirty dot with it.
-      draft = panel.draft(surface.id) ?? answer.value.text;
+      draft = panel.draft(surface.id) ?? panel.disk(surface.id) ?? answer.value.text;
       offset = 0;
     } else {
       natural = null;
@@ -123,18 +128,19 @@
     const owner = panel;
     const surfaceId = surface.id;
     saving = true;
+    owner.sending(surfaceId);
     const answer = await store.writeFile(id, wanted, text);
     saving = false;
     if (!answer.ok) {
+      owner.unsent(surfaceId, wanted);
       problem = fill(strings.files.writeFailed, { reason: answer.error });
       return;
     }
     problem = null;
-    stored = text;
-    // The answer settles the panel's draft of the file it was sent for, not this
-    // editor's text: an edit made since, here or in an editor mounted after this
-    // one was closed, stays a draft.
-    owner.saved(surfaceId, text);
+    // The answer settles the panel's disk and draft of the file it was sent for,
+    // not this editor's text: an edit made since, here or in an editor mounted
+    // after this one was closed, stays a draft.
+    owner.saved(surfaceId, wanted, text);
     content = { ...file, text, bytes: answer.value.bytes, modifiedAt: answer.value.modifiedAt };
   }
 
@@ -144,7 +150,7 @@
    * since the last save used to go with it.
    */
   function keep(): void {
-    panel.keepDraft(surface.id, draft === stored ? null : draft);
+    panel.edited(surface.id, draft);
   }
 
   function edit(text: string): void {

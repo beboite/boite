@@ -63,9 +63,3 @@ export class FenceScan {
     this.#open = null;
   }
 }
-
-/** Whether any line of the text opens a fenced block. */
-export function hasFence(text: string): boolean {
-  if (!text.includes('```') && !text.includes('~~~')) return false;
-  return text.split('\n').some((line) => openFence(line) !== null);
-}

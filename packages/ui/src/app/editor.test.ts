@@ -241,6 +241,54 @@ test('a save that answers after its editor closed keeps the edit a newer editor 
   store.panel.closeAll();
 });
 
+/** The tab goes to Tasks and back, so the file's editor is a new one. */
+async function remount(id: string, text: string): Promise<void> {
+  store.panel.openTasks();
+  await waitFor(() => document.querySelector('[data-testid=file-text]') === null);
+  store.panel.activate(id);
+  await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value === text);
+}
+
+async function saveHeld(): Promise<() => Promise<void>> {
+  const release = holdWrites();
+  await waitFor(() => document.querySelector<HTMLButtonElement>('[data-testid=file-save]')?.disabled === false);
+  query<HTMLButtonElement>('[data-testid=file-save]').click();
+  flushSync();
+  return release;
+}
+
+test('an editor mounted while a save is out keeps the old disk text as an edit, typed before or after the save answers', async () => {
+  await openWorkbench();
+  const file = store.panel.openFile('docs/guide/tree.md');
+  await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value.includes('# The tree') === true);
+  const original = query<HTMLTextAreaElement>('[data-testid=file-text]').value;
+  const sent = `${original}Saved from A.\n`;
+  await edit(sent);
+  let release = await saveHeld();
+
+  // Undone back to the disk it read, before the save answers: once it does, that is an edit.
+  await remount(file.id, sent);
+  await edit(original);
+  await release();
+  vi.restoreAllMocks();
+  expect(store.panel.draft(file.id)).toBe(original);
+  expect(document.querySelector('[data-testid=file-dirty]')).not.toBeNull();
+  await remount(file.id, original);
+
+  // Typed back to the disk it read after the save answered: still an edit.
+  release = await saveHeld();
+  await remount(file.id, original);
+  await edit(`${original}Elsewhere.\n`);
+  await release();
+  vi.restoreAllMocks();
+  await edit(sent);
+  expect(store.panel.draft(file.id)).toBe(sent);
+  expect(document.querySelector('[data-testid=file-dirty]')).not.toBeNull();
+  await remount(file.id, sent);
+  store.panel.keepDraft(file.id, null);
+  store.panel.closeAll();
+});
+
 test('the same path in two threads is two editors: a save in one never turns the text of the other into its draft', async () => {
   await openWorkbench();
   // Another thread on the same folder already shows the file on its active tab.
