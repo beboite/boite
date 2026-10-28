@@ -31,6 +31,8 @@ export interface ProbeReading {
   models: ModelInfo[];
   /** Null when no model was named, or the agent has no per-model scale to read. */
   effort: { model: string; scale: ModelInfo['effort'] | null } | null;
+  /** The `currentModelId` of the probe's own `session/new`: the agent's own model. */
+  ownModel: string | null;
 }
 
 /**
@@ -134,7 +136,7 @@ export async function readModels(ctx: ProbeContext, deps: AcpDeps, noteOptions: 
     // waits a moment for the exit, whose code and stderr line say why.
     const answer = await Promise.race([read.catch((error: unknown) => preferExit(died, error)), died, expired]);
     noteOptions(answer.options ?? []);
-    return { models: modelsFrom(ctx.provider, answer.options, answer.listed), effort: answer.effort };
+    return { models: modelsFrom(ctx.provider, answer.options, answer.listed), effort: answer.effort, ownModel: answer.listed?.currentModelId ?? null };
   } finally {
     if (timer !== null) clearTimeout(timer);
     try {
@@ -160,6 +162,12 @@ export interface ProbeEntry {
   result: ProbeResult | null;
   /** Models whose own effort scale was asked for already, found or not, so each costs one process at most. */
   effortRead: Set<string>;
+  /**
+   * The agent's own model, only ever from a fresh `session/new` answer: a
+   * prepared session's catalog may be a loaded one, whose current model is
+   * where that session was left.
+   */
+  ownModel: string | null;
 }
 
 /** The list with one model's effort scale written in; a scale of null leaves the model as it was. */

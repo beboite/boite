@@ -1,6 +1,6 @@
 import type { SessionConfigOption } from '@agentclientprotocol/sdk';
 import type { AccountId, ModelInfo, ProviderDescriptor, ProviderId, ThreadId } from '@boite/contracts';
-import { AGENT_OWN_MODEL, agentModelsOf, modelsFrom, plainObject } from './acp/models.ts';
+import { agentModelsOf, modelsFrom, plainObject } from './acp/models.ts';
 import { AcpSession, sessionKey, type AcpMemory } from './acp/session.ts';
 import { readModels, withModelEffort, type ProbeEntry } from './acp/probe.ts';
 import { isGrok, MINUTE_MS, type AcpDeps } from './acp/protocol.ts';
@@ -60,6 +60,7 @@ export function createAcpDriver(deps: AcpDeps): Driver {
             running: null,
             result: null,
             effortRead: new Set<string>(),
+            ownModel: null,
           };
           if (entry.options.length === 0) entry.options = structuredClone(options);
           probes.set(probeKey, entry);
@@ -70,8 +71,7 @@ export function createAcpDriver(deps: AcpDeps): Driver {
     const running = session;
     if (viewed.has(threadId)) running.setViewed(true);
     const probed = probes.get(probeKey);
-    const ownModel = probed?.result?.models.find((model) => model.default === true && model.id !== AGENT_OWN_MODEL)?.id ?? null;
-    running.seedConfig(probed?.options ?? [], ownModel);
+    running.seedConfig(probed?.options ?? [], probed?.ownModel ?? null);
     return running;
   }
 
@@ -93,6 +93,7 @@ export function createAcpDriver(deps: AcpDeps): Driver {
         running: null,
         result: null,
         effortRead: new Set<string>(),
+        ownModel: null,
       };
       probes.set(key, entry);
       // One process at a time per account: a caller naming a model waits for the
@@ -130,6 +131,7 @@ export function createAcpDriver(deps: AcpDeps): Driver {
         // otherwise start an agent process on every probe that names it.
         if (missing && wanted !== undefined) entry.effortRead.add(wanted);
         else if (reading.effort !== null) entry.effortRead.add(reading.effort.model);
+        if (reading.ownModel !== null) entry.ownModel = reading.ownModel;
         // A second look keeps the scales the earlier ones found.
         const earlier = new Map((known?.models ?? []).filter((model) => model.effort !== undefined).map((model) => [model.id, model.effort]));
         const models = withModelEffort(reading.models, reading.effort).map((model) => (model.effort === undefined && earlier.has(model.id) ? { ...model, effort: earlier.get(model.id) } : model));
@@ -169,9 +171,11 @@ export function createAcpDriver(deps: AcpDeps): Driver {
         running: null,
         result: null,
         effortRead: new Set<string>(),
+        ownModel: null,
       };
       entry.options = options ?? [];
       entry.result = { models, probedAt: Date.now() };
+      entry.ownModel = agentModelsOf(created)?.currentModelId ?? entry.ownModel;
       for (const model of models) if (model.effort !== undefined) entry.effortRead.add(model.id);
       probes.set(key, entry);
       return models;

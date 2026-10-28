@@ -636,7 +636,9 @@ export class AcpSession {
       if (!isGrok(ctx.provider) && !this.controls.hasOptions()
         && (ctx.thread.effort !== null || (ctx.thread.model !== AGENT_OWN_MODEL && !this.controls.hasModels()))) {
         const discovered = await connection.agent.request('session/new', { cwd: ctx.thread.cwd, mcpServers: [] });
-        this.seedConfig(discovered.configOptions ?? [], agentModelsOf(discovered)?.currentModelId ?? null);
+        const discoveredModels = agentModelsOf(discovered);
+        this.seedConfig(discovered.configOptions ?? [], discoveredModels?.currentModelId ?? null);
+        this.controls.seedListedModels(discoveredModels);
         this.onOptions(discovered.configOptions ?? []);
         await discardSession(connection.agent, this.canDelete, discovered.sessionId);
       }

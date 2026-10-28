@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { PermissionMode, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
+import { getDriver } from '../src/drivers/index.ts';
 import { variableHome } from '../src/profile-share.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -33,6 +34,7 @@ afterEach(async () => {
   harness = null;
   delete process.env['HERMES_FAKE_LOG'];
   delete process.env['HERMES_FAKE_FORGET'];
+  delete process.env['HERMES_FAKE_LOAD_BARE'];
   delete process.env['OPENAI_API_KEY'];
   if (open !== null) await open.stop();
 });
@@ -298,6 +300,49 @@ describe('hermes', () => {
     await runTurn(client, threadId, 'third');
     expect(loggedLines('initialize').length).toBe(3);
     expect(loggedLines('new:')).toHaveLength(opened + 1);
+    expect(loggedLines('prompt ').at(-1)?.split(' ')[1]).toBe(QWEN);
+  });
+
+  test('a catalog read from a prepared, loaded session does not become the agent own model', async () => {
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const { threadId, accountId } = await hermesThread(client, LLAMA);
+    await runTurn(client, threadId, 'first');
+    await waitFor(() => harness?.core.procs.liveCount(threadId) === 0);
+    // A prepared process loads the session, left on Llama, and the picker
+    // reads its catalog: there Llama is the current model.
+    const core = harness!.core;
+    const ctx = core.threads.contexts.makeSessionContext(core.threads.get(threadId), core.providers.require('hermes-fake'), core.accounts.require(accountId));
+    const driver = getDriver('acp');
+    driver.setViewed!(threadId, true);
+    await driver.prepare!(ctx);
+    expect(loggedLines('loaded:')).toHaveLength(1);
+    const probed = await driver.probe!({
+      catalogThread: ctx.thread, provider: ctx.provider, accountId, accountEnv: ctx.accountEnv, cwd: core.dataDir, log: ctx.log,
+      spawnChild: (cmd, args, opts) => core.procs.spawnChild('hermes-catalog-probe', cmd, args, opts),
+      killTree: () => { core.procs.killTree('hermes-catalog-probe'); },
+    });
+    expect(probed.models.find((model) => model.default === true && model.id !== 'default')?.id).toBe(LLAMA);
+    driver.setViewed!(threadId, false);
+    driver.releaseThread!(threadId);
+    await waitFor(() => core.procs.liveCount(threadId) === 0);
+
+    await client.call('threads.update', { threadId, model: 'default' });
+    await runTurn(client, threadId, 'second');
+    expect(loggedLines('set_model ')).toEqual([LLAMA, QWEN]);
+    expect(loggedLines('prompt ').at(-1)?.split(' ')[1]).toBe(QWEN);
+  });
+
+  test('a load answered without models still moves the session to the thread model', async () => {
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const { threadId } = await hermesThread(client, LLAMA);
+    await runTurn(client, threadId, 'first');
+    await waitFor(() => harness?.core.procs.liveCount(threadId) === 0);
+
+    process.env['HERMES_FAKE_LOAD_BARE'] = '1';
+    await client.call('threads.update', { threadId, model: QWEN });
+    await runTurn(client, threadId, 'second');
+    expect(loggedLines('loaded:')).toHaveLength(1);
+    expect(loggedLines('set_model ')).toEqual([LLAMA, QWEN]);
     expect(loggedLines('prompt ').at(-1)?.split(' ')[1]).toBe(QWEN);
   });
 

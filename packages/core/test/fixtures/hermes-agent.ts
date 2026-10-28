@@ -18,6 +18,7 @@
  * `set_model <modelId>`, `set_mode <modeId>`, `set_config_option <id> <value>`,
  * `prompt <sessionId> <model> <mode>` and `image <mimeType>`.
  * `HERMES_FAKE_FORGET=1` makes it a Hermes whose `state.db` lost every session.
+ * `HERMES_FAKE_LOAD_BARE=1` makes its `session/load` answer the modes alone.
  */
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -116,6 +117,7 @@ const app = agent({ name: 'hermes-fake' })
       update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'replayed question' } },
     });
     log(`loaded:${params.sessionId}`);
+    if (process.env['HERMES_FAKE_LOAD_BARE'] === '1') return { modes: answer(state)['modes'] } as never;
     return answer(state) as never;
   })
   .onRequest('session/set_config_option', ({ params }) => {

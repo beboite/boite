@@ -139,6 +139,14 @@ export class SessionControls {
     if (this.ownListedModel === null && modelId !== null) this.ownListedModel = modelId;
   }
 
+  /**
+   * The models a throwaway session listed, for a loaded session that listed
+   * none: which one the loaded session is on stays unknown.
+   */
+  seedListedModels(listed: AgentModels | null): void {
+    if (this.agentModels === null && listed !== null) this.agentModels = { currentModelId: null, available: listed.available };
+  }
+
   knowsOwnListedModel(): boolean {
     return this.ownListedModel !== null;
   }
