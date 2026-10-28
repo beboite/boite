@@ -354,13 +354,13 @@ export class AgentRuntime {
     if (prior) return this.core.journal.getTurn(prior.turn_id)!;
     const agent = this.store.agentOfThread(thread.id);
     const pending = agent && wake.kind === 'routine' && this.store.resident.config(agent.id).eventWakes === false ? this.held(agent.id) : null;
-    if (!pending?.facts.length) return this.core.threads.startTurn(thread.id, wake.prompt, [], undefined, wake.kind, undefined, wake.requestId, wake.label);
+    if (!pending?.facts.length) return this.core.threads.startTurn(thread.id, { prompt: wake.prompt, display: wake.label }, { kind: wake.kind, requestId: wake.requestId });
     const facts = pending?.facts.filter(f => this.factThreads(f).every(id => this.store.projects.mayHear(agent!, id))) ?? [];
     const prompt = facts.length ? `${wake.prompt}\n\n${this.eventPrompt(facts)}` : wake.prompt;
     const keys = new Set(pending.facts.map(f => f.key));
     // Acceptance journals the facts with the routine and consumes the durable queue
     // in the same transaction. Failed admission leaves the queue intact.
-    return this.core.threads.startTurn(thread.id, prompt, [], undefined, wake.kind, undefined, wake.requestId, wake.label, [], undefined, null, () => {
+    return this.core.threads.startTurn(thread.id, { prompt, display: wake.label }, { kind: wake.kind, requestId: wake.requestId }, { persistAdmission: () => {
       const held = this.held(agent!.id);
       const next = { ...held, facts: held.facts.filter(f => !keys.has(f.key)) };
       const empty = next.facts.length === 0 && next.events.length === 0;
@@ -371,7 +371,7 @@ export class AgentRuntime {
         else this.pending.set(agent!.id, next);
         this.store.changed();
       };
-    });
+    } });
   }
 
   /** What the agent's thread spent today, in API-equivalent dollars, through the partial index `turns_by_thread_queue`. */

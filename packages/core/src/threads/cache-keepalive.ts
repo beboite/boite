@@ -192,7 +192,7 @@ export class CacheKeepalive {
     if (plan > Date.now()) { this.schedule(threadId, wait, plan - Date.now()); return; }
     if (this.expected(threadId)) { this.schedule(threadId, wait, CACHE_KEEPALIVE.retryMs); return; }
     try {
-      const turn = this.threads.startTurn(threadId, KEEPALIVE_PROMPT, [], undefined, 'keepalive', undefined, undefined, KEEPALIVE_LABEL);
+      const turn = this.threads.startTurn(threadId, { prompt: KEEPALIVE_PROMPT, display: KEEPALIVE_LABEL }, { kind: 'keepalive' });
       this.log('info', threadId, `Prompt cache keepalive ping ${wait.pings + 1} sent`, 'cache-keepalive.ping', turn.id, { pings: wait.pings + 1 });
     } catch (error) {
       this.end(threadId, `the ping was refused: ${messageOf(error)}`);

@@ -195,7 +195,7 @@ export class RestartHandoff {
           this.core.scheduler.enqueue(turn, turn.execution?.accountId ?? thread.accountId);
           resumed += 1;
         } else if (admitted === null && entry.was === 'running' && turn.status === 'stopped') {
-          const continuation = this.threads.startTurn(thread.id, this.continuation(turn), [], undefined, 'resume', undefined, this.requestId(entry));
+          const continuation = this.threads.startTurn(thread.id, this.continuation(turn), { kind: 'resume', reason: 'handoff', requestId: this.requestId(entry) });
           this.remember(entry, continuation.id);
           resumed += 1;
         } else this.consume(entry);

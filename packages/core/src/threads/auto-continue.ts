@@ -350,7 +350,7 @@ export class AutoContinues {
     let resumeTurnId: TurnId | null = null;
     try {
       // The request id makes the resume one turn whatever happens: a second call returns the first.
-      const turn = this.threads.startTurn(threadId, plan.prompt, [], undefined, 'resume', undefined, `auto-continue_${plan.turnId}`, AUTO_CONTINUE_LABEL[plan.reason]);
+      const turn = this.threads.startTurn(threadId, { prompt: plan.prompt, display: AUTO_CONTINUE_LABEL[plan.reason] }, { kind: 'resume', reason: 'carry-on', requestId: `auto-continue_${plan.turnId}` });
       sent = true;
       resumeTurnId = turn.id;
       this.log('info', threadId, `Turn ${turn.id} resumes the thread after turn ${plan.turnId} stopped (${plan.reason})`, 'auto-continue.started', plan);

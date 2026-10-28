@@ -382,7 +382,7 @@ export class ActivityStore {
       }
       const checklist = list?.items.length ? { open: list.items.filter(item => item.status === 'open').map(item => item.text), bounced: this.bounced.delete(threadId) } : undefined;
       const turnActivity: ActivityTurn = { kind, iteration, ...(feedback ? { review: feedback } : {}), ...(checklist ? { checklist } : {}) };
-      const turn = this.core.threads.startTurn(threadId, prompt, pending[kind] ?? [], undefined, undefined, turnActivity, undefined, undefined, [], undefined, null, undefined, choice);
+      const turn = this.core.threads.startTurn(threadId, { prompt, attachments: pending[kind] ?? [] }, { kind: 'goal', activity: turnActivity }, { choice });
       delete pending[kind];
       this.saveAttachments(threadId, pending);
       this.ownTurns.set(turn.id, { kind, generation: this.generations.get(`${threadId}:${kind}`) ?? 0, iteration });
@@ -460,7 +460,7 @@ export class ActivityStore {
       this.reviewing.set(reviewer, { threadId, generation, round });
       review.reviewerThreadId = reviewer;
       this.save(threadId);
-      this.core.threads.startTurn(reviewer, reviewPrompt(goal.objective, claim, round, goal.checklist?.items ?? []), [], undefined, 'delegation', undefined, undefined, `Review the goal: ${goal.objective}`.slice(0, 500));
+      this.core.threads.startTurn(reviewer, { prompt: reviewPrompt(goal.objective, claim, round, goal.checklist?.items ?? []), display: `Review the goal: ${goal.objective}`.slice(0, 500) }, { kind: 'delegation' });
     } catch (error) {
       if (reviewer) this.reviewing.delete(reviewer);
       review.reviewerThreadId = null;

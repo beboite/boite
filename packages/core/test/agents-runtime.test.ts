@@ -213,9 +213,9 @@ test('a turn the core starts by itself meets the pause and the budget: held with
   const held = () => lines(threadId).filter(text => text.startsWith('Held the turn its background work asked for'));
   expect(held()).toEqual(['Held the turn its background work asked for: bots are paused. It runs once bots resume.']);
   // Every other way the core starts a turn by itself meets the same gate.
-  for (const [operation, requestId] of [['coordination'], ['delegation'], ['pull-request'], ['resume', 'auto-continue_trn_x']] as const) {
+  for (const origin of [{ kind: 'coordination' }, { kind: 'delegation' }, { kind: 'goal-check' }, { kind: 'pull-request' }, { kind: 'resume', reason: 'carry-on', requestId: 'auto-continue_trn_x' }] as const) {
     let error: unknown = null;
-    try { h.core.threads.startTurn(threadId, 'autonomous', [], undefined, operation, undefined, requestId); } catch (caught) { error = caught; }
+    try { h.core.threads.startTurn(threadId, 'autonomous', origin); } catch (caught) { error = caught; }
     expect(isAgentHeld(error)).toBe(true);
   }
   await Bun.sleep(10);

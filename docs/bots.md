@@ -170,7 +170,8 @@ Every other turn the core starts by itself on the bot's thread meets the
 same policy in `threads.startTurn` (`AgentRuntime.admit`): the output of a
 background shell, an automatic resume, a letter from another thread, the
 results of its subagents or a workflow's summary, pull request news and the
-next turn of a goal. While the bot or the engine is paused, the bot is
+next turn of a goal. The turn's origin decides which ones count
+(`autonomousSource` in `threads/turn-origin.ts`); a request id never does. While the bot or the engine is paused, the bot is
 archived or its budget is spent, the turn does not start: one line in the
 bot's thread says what was held and why, and it starts once the bot may
 run again (`whenAdmitted`), except an automatic resume, which is dropped.

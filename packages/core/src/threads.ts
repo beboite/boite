@@ -1,11 +1,9 @@
 import { archiveState, archiveStateKey } from './merged-pr-archive-state.ts';
 import { assertIdleFamily } from './threads/completion.ts';
 import { repositoryOf, type MergedPrProof } from './pull-requests.ts';
-import { previewReferencesError, previewPrompt, threadActive, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type ActivityTurn, type AgentProfile } from '@boite/contracts';
+import { previewReferencesError, previewPrompt, threadActive, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type AgentProfile } from '@boite/contracts';
 import type {
-  Account, AccountId, Attachment, ComposerChoice, PreviewReference,
-  SentFrom,
-  ThreadLink,
+  Account, AccountId, Attachment,
   ImageMimeType,
   Message,
   MessageId,
@@ -41,7 +39,8 @@ import { MOVE_NOTE_PREFIX, pendingMove, ThreadMove } from './threads/move.ts';
 import { ThreadSpawns } from './threads/spawn.ts';
 import { checkAttachmentArray, checkAttachments, checkTurnRequest, titleOf } from './threads/inputs.ts';
 import { RestartHandoff } from './threads/handoff.ts';
-import { SYSTEM_LABEL, autonomousSource, nativeCommandPrompt, systemOperation } from './threads/operations.ts';
+import { SYSTEM_LABEL, nativeCommandPrompt, systemOperation } from './threads/operations.ts';
+import { USER_ORIGIN, autonomousSource, originAutomatic, originOperation, type StartTurnOptions, type TurnInput, type TurnOrigin } from './threads/turn-origin.ts';
 import { saveThread, withLoad } from './threads/records.ts';
 import { isBusy, markQueued } from './threads/lifecycle.ts';
 import { ThreadRecovery } from './threads/recovery.ts';
@@ -569,7 +568,7 @@ export class ThreadStore {
     const refusal = this.compactRefusal(thread);
     if (refusal !== null) throw refused(refusal, { threadId });
     const protocol = this.core.providers.require(thread.providerId).protocol;
-    return this.startTurn(threadId, protocol === 'echo' ? '[compact]' : '/compact', [], expectedSelectionVersion, 'compact', undefined, undefined, automatic ? AUTO_COMPACT_LABEL : undefined);
+    return this.startTurn(threadId, { prompt: protocol === 'echo' ? '[compact]' : '/compact', ...(automatic ? { display: AUTO_COMPACT_LABEL } : {}) }, { kind: 'compact', automatic }, { expectedSelectionVersion });
   }
 
   /** Why this thread's agent cannot compact, or null. */
@@ -599,7 +598,15 @@ export class ThreadStore {
     return this.moves.userMove(threadId, projectId, stopBackground);
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: ActivityTurn, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], startedBy?: ThreadLink, sentFrom: SentFrom | null = null, persistAdmission?: () => (() => void), executionChoice?: ComposerChoice): Turn {
+  /** Accepts a turn and queues it (`threads/turn-origin.ts`): `origin` says who starts it and why. */
+  startTurn(threadId: ThreadId, input: string | TurnInput, origin: TurnOrigin = USER_ORIGIN, options: StartTurnOptions = {}): Turn {
+    let { prompt, attachments = [], previews: previewReferences = [], display: displayText } = typeof input === 'string' ? { prompt: input } : input;
+    const { expectedSelectionVersion, persistAdmission, choice: executionChoice } = options;
+    const operation = originOperation(origin), automatic = originAutomatic(origin);
+    const clientRequestId = origin.requestId;
+    const activity = origin.kind === 'goal' ? origin.activity : undefined;
+    const startedBy = origin.kind === 'spawned' ? origin.startedBy : undefined;
+    const sentFrom = origin.kind === 'user' ? origin.sentFrom ?? null : null;
     if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
     let thread = this.require(threadId);
     this.codeCheckpoints.assertAvailable(thread.cwd);
@@ -616,7 +623,7 @@ export class ThreadStore {
       throw refused('this thread already has an in-flight turn', data);
     }
     // A turn the core starts by itself on a persistent agent's thread meets the agent's pause and budget first.
-    const autonomous = autonomousSource(operation, activity, clientRequestId);
+    const autonomous = autonomousSource(origin);
     if (autonomous !== null) this.core.agentRuntime.admit(thread, autonomous);
     // A signed-out or removed account hands the thread to another of its agent (`threads/account-fallback.ts`).
     if (executionChoice) {
@@ -658,9 +665,6 @@ export class ThreadStore {
       }
     }
 
-    // A compaction with a label is the core's own (`threads/auto-compact.ts`): Boite speaks, not the user.
-    // So is every keepalive (`threads/cache-keepalive.ts`).
-    const automatic = (operation === 'compact' && displayText !== undefined) || operation === 'keepalive';
     const now = Date.now();
     // The first message after a move carries the note to the agent. A compact,
     // a keepalive or a slash command goes to the agent as the command alone, so

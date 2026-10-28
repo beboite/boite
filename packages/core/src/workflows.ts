@@ -444,7 +444,7 @@ export class Workflows {
       ? `Try this workflow step again. The previous attempt ended with: ${previous ?? 'no result'}. The task is unchanged.\n${this.prompt(run, node, inst)}`
       : this.prompt(run, node, inst));
     try {
-      this.core.threads.startTurn(threadId, prompt, [], undefined, 'delegation', undefined, undefined, correction ? 'Workflow output did not match' : inst.task ?? undefined);
+      this.core.threads.startTurn(threadId, { prompt, display: correction ? 'Workflow output did not match' : inst.task ?? undefined }, { kind: 'delegation' });
     } catch (error) {
       this.mutate(run.id, current => {
         const found = this.instance(current, inst.key);
@@ -702,7 +702,7 @@ export class Workflows {
 
   /** One turn of the root carrying a prompt, on a persistent agent's thread as on any other. */
   private handTo(root: ThreadSummary, prompt: string, display: string): void {
-    this.core.threads.startTurn(root.id, prompt, [], undefined, 'delegation', undefined, undefined, display);
+    this.core.threads.startTurn(root.id, { prompt, display }, { kind: 'delegation' });
   }
 
   /** A held summary goes again once the owner resumes the team. */

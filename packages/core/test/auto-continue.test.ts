@@ -123,7 +123,7 @@ test('a cache ping neither cancels a planned resume nor holds it back: it gives 
     const { threadId } = await echoThread(h, client);
     await client.call('turns.start', { threadId, prompt: 'port the shader' });
     await waitFor(() => turns(h, threadId)[0]?.status === 'error');
-    h.core.threads.startTurn(threadId, 'ping', [], undefined, 'keepalive');
+    h.core.threads.startTurn(threadId, 'ping', { kind: 'keepalive' });
     await waitFor(() => pinged);
     expect(h.core.threads.list({ includeArchived: true }).find(thread => thread.id === threadId)?.retry?.kind).toBe('auto-continue');
     await waitFor(() => turns(h, threadId).length === 3 && turns(h, threadId)[2]!.status === 'done');

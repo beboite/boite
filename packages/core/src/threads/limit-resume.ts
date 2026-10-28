@@ -212,7 +212,7 @@ export class LimitResumes {
     this.save(record);
     try {
       // The request id makes the resume one turn whatever happens: a second call returns the first.
-      const turn = this.threads.startTurn(threadId, LIMIT_RESUME_PROMPT, [], undefined, 'resume', undefined, `limit-resume_${plan.turnId}`, LIMIT_RESUME_LABEL);
+      const turn = this.threads.startTurn(threadId, { prompt: LIMIT_RESUME_PROMPT, display: LIMIT_RESUME_LABEL }, { kind: 'resume', reason: 'limit', requestId: `limit-resume_${plan.turnId}` });
       this.log('info', threadId, `The usage limit of turn ${plan.turnId} has reset; turn ${turn.id} resumes the thread`, 'limit-resume.started', plan);
     } catch (error) {
       this.log('warn', threadId, `The usage limit resume of turn ${plan.turnId} could not start: ${messageOf(error)}`, 'limit-resume.failed', plan);

@@ -216,7 +216,7 @@ export class Composer {
           if (activity) {
             if (item.previewReferences?.length) throw refused('Activity commands do not accept page references.');
             this.core.activity.set({ threadId: id, ...activity, attachments }, undefined, choice);
-          } else this.core.threads.startTurn(id, batch.text, attachments, current.selectionVersion ?? 0, undefined, undefined, batch.requestId, undefined, batch.previewReferences, undefined, batch.entries[0]!.sentFrom ?? null, undefined, choice);
+          } else this.core.threads.startTurn(id, { prompt: batch.text, attachments, previews: batch.previewReferences }, { kind: 'user', requestId: batch.requestId, sentFrom: batch.entries[0]!.sentFrom ?? null }, { expectedSelectionVersion: current.selectionVersion ?? 0, choice });
           this.complete(section, id, batch.entries.map(entry => entry.id));
         });
       } catch (error) {

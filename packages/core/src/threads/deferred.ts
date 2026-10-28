@@ -172,7 +172,7 @@ export class DeferredInput {
       return;
     }
     try {
-      this.threads.startTurn(threadId, text, [], undefined, 'background');
+      this.threads.startTurn(threadId, text, { kind: 'background' });
     } catch (error) {
       if (isAgentHeld(error)) {
         this.heldWakes.set(threadId, [...this.heldWakes.get(threadId) ?? [], text]);

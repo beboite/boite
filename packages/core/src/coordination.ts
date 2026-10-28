@@ -732,7 +732,7 @@ export class Coordination {
         this.core.journal.db.transaction(() => {
           for (const letter of letters) this.update(letter, 'uncertain', 'Queued for provider delivery');
           this.core.journal.db.query('INSERT INTO coordination_wakes VALUES (?, ?)').run(threadId, Date.now());
-          this.core.threads.startTurn(threadId, prompt, [], undefined, 'coordination');
+          this.core.threads.startTurn(threadId, prompt, { kind: 'coordination' });
         })();
       }
     } catch (error) {

@@ -369,7 +369,7 @@ export class PullRequestWatches {
     if (this.core.threads.isBusy(threadId)) return;
     const { text, label } = wakeMessage(due.map(record => ({ number: record.number, url: record.url, changes: record.pending })));
     try {
-      this.core.threads.startTurn(threadId, text, [], undefined, 'pull-request', undefined, undefined, label);
+      this.core.threads.startTurn(threadId, { prompt: text, display: label }, { kind: 'pull-request' });
     } catch (error) {
       // Tried again after another interval, never in a tight loop.
       for (const record of due) record.pendingSince = now + this.#timing.intervalMs - this.#timing.coalesceMs;
