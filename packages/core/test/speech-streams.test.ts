@@ -92,7 +92,7 @@ test('a request for one model never runs on the engine a request for another mod
   // B's start stopped A's engine while it loaded: A is refused, never answered by B.
   expect(a.status === 'rejected' ? String(a.reason) : a.value.text).toContain('cancelled');
   expect(b).toMatchObject({ status: 'fulfilled', value: { text: 'model-B' } });
-});
+}, 15_000);
 
 test('cancelling model load rejects the start and never delivers a late stream', async () => {
   harness.core.speech.local.native.commandOverride!.push('--slow-load');

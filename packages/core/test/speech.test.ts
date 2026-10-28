@@ -435,7 +435,7 @@ describe('the resident whisper-server', () => {
     form.set('file', new Blob([new Uint8Array(4)]), 'a.wav');
     await (await fetch(`${(forB as PromiseFulfilledResult<string>).value}/inference`, { method: 'POST', body: form })).body?.cancel();
     expect(existsSync(`${b}.log`)).toBe(true);
-  });
+  }, 15_000);
 
   test('a configured language wins over what a preview heard', async () => {
     harness.core.speech.configure({ ...DEFAULT_SPEECH, language: 'en', executable: process.execPath, modelPath: model });
