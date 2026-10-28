@@ -386,6 +386,15 @@ OpenCode's descriptor, with the `linux` and `macos` profiles, `shared` and
   `{ type: 'image', base64Data, mediaType }` part per attachment to its own
   `turn/start` `input`; pi adds an `images` array of
   `{ type: 'image', data, mimeType }` entries to the `prompt` command.
+  Each of them takes a turn's 50 images (`ATTACHMENTS_PER_TURN`) in that one
+  prompt, with no count of its own: the bytes are what weigh, and the 10 MB
+  turn total keeps the frame each driver writes the size it was with 20.
+  Claude's API counts the images of the whole request, earlier turns included
+  (platform.claude.com, build-with-claude/vision, read 2026-10-28): past 20,
+  each must be within 2000 px (`IMAGE_MAX_EDGE`); a request takes 100 images
+  on a 200k-token model and 600 on a 1M one, and its body stops at 32 MB.
+  What the Claude CLI does once a conversation holds more images than that is
+  its own business and is not tested here.
 
 A thread's `/commands` come from wherever the protocol says an agent lists its
 own, never from the descriptor: `commands(list)` on `TurnContext` carries the

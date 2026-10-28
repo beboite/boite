@@ -237,9 +237,11 @@ This is a recency rule, not a cache invalidation detector;
 [cache lifetimes](prompt-cache.md) can differ. An account change uses the
 history-transfer warning above instead.
 
-Historical images use remaining slots within the eight-image turn limit. The
-current prompt's attachments take priority, then the most recent historical
-images. Delivery is chronological. The receiving agent is told which older
+Historical images use what the current prompt's attachments leave of one
+turn's limits: 50 images and 10 MB together (`ATTACHMENTS_PER_TURN`,
+`ATTACHMENTS_TOTAL_MAX_BYTES`). The current prompt's attachments take
+priority, then the most recent historical images, newest first until either
+limit is reached, so a request never carries more image bytes than one turn. Delivery is chronological. The receiving agent is told which older
 image references lack an attachment. An image-incapable destination refuses
 continuation of an image-bearing history explicitly.
 

@@ -1085,7 +1085,7 @@ zoom; plain browsers keep their native shortcut behavior.
 
 ### File attachments
 
-Desktop and paired devices can pick, paste or drop files. A turn accepts twenty
+Desktop and paired devices can pick, paste or drop files. A turn accepts fifty
 attachments, at most 5 MB each and 10 MB together. On a core advertising
 `features.attachmentUploads`, selected files upload before Send through
 `attachments.upload`. Finished uploads replace the corresponding
@@ -1113,6 +1113,27 @@ browser decodes them (Safari does); elsewhere they travel as a plain file. A
 source over 50 MB is refused before decoding, since a phone's canvas would not
 hold it. So twenty iPhone screenshots, 2 to 4 MB each as PNG, fit one turn at
 around 400 KB each.
+
+Fifty of them weigh about 26 MB prepared, and the 10 MB total cannot grow: the
+user message travels in one `turns.start` frame and stays inline in the
+journal, and Claude refuses a request body over 32 MB, history included. So
+the composer fits the turn instead of refusing it (`lib/turn-fit.ts`). While
+the turn is under budget nothing moves. Past it, the budget is shared out: an
+image lighter than its share stays as it is, and each heavier one is encoded
+again from the copy it arrived with, at the least loss that fits its share,
+down a ladder of JPEG quality (0.75 to 0.35) and long edge (2000 to 1280 px).
+It never goes under 1280 px, where a screenshot's text stops being readable;
+past that floor the files that still do not fit are refused, by name, with the
+usual total message. A GIF keeps its frames, a transparent picture tries PNG
+first, and files count at their weight. Every way in goes through it: the
+paperclip, pasted and dropped files and a question's answer files
+(`gatherAttachments`, which fits the files that pass the total once with the
+rest of their batch), pictures pasted from another composer, and queued
+prompts taken back into the box. A message brought back for editing or after
+a failed retry already fitted one turn. Measured on 2026-10-28 with Bun's
+encoders (`packages/ui/src/lib/turn-fit.test.ts`): 50 generated screenshots,
+1170x2532 and 2560x1440 PNGs of 3.0 to 4.9 MB, went in as one 9.0 MB turn of
+154 to 204 KB JPEGs, 1440 to 1600 px on their long edge.
 
 The Claude driver fits every prompt image to the same edge again before it
 goes in (`drivers/claude/images.ts`, Bun's image codec, same format), because
