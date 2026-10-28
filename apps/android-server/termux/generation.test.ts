@@ -130,6 +130,18 @@ test.skipIf(process.platform === 'win32')('a committed activation keeps only the
   expect(Bun.spawnSync(['ls', layout.releases]).stdout.toString().trim()).toBe('1.0.0');
 });
 
+test.skipIf(process.platform === 'win32')('a copy set aside by an interrupted activation neither blocks a reinstall nor goes away with it', () => {
+  const layout = installed(temporary(), '1.0.0');
+  // An earlier process with this PID died between setting the copy aside and the commit.
+  const leftover = join(layout.releases, `1.0.0.replaced-${process.pid}`);
+  release(leftover, '1.0.0', Buffer.from('// controller of 1.0.0, interrupted'));
+  const activation = planActivation(prepared(layout, '1.0.0', 'reinstalled'), layout);
+  expect(activation.apply().version).toBe('1.0.0');
+  activation.commit();
+  expect(readFileSync(join(leftover, 'boite-server.ts'), 'utf8')).toBe('// controller of 1.0.0, interrupted');
+  expect(readFileSync(join(layout.releases, '1.0.0', 'boite-server.ts'), 'utf8')).toBe('// controller of 1.0.0, reinstalled');
+});
+
 /** Runs the controller as Termux would, in its own home, against stand-in cores on a free local port. */
 async function server(root: string) {
   const prefix = join(root, 'prefix');

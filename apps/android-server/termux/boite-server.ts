@@ -11,7 +11,7 @@
  * reads their `--json` answers. docs/android-server.md.
  */
 import { spawn, spawnSync, type ChildProcess, type SpawnSyncReturns } from 'node:child_process';
-import { createHash, createPublicKey, verify, type KeyObject } from 'node:crypto';
+import { createHash, createPublicKey, randomUUID, verify, type KeyObject } from 'node:crypto';
 import {
   chmodSync, closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, readlinkSync,
   realpathSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync, writeSync,
@@ -485,7 +485,7 @@ const messageOf = (error: unknown) => error instanceof Error ? error.message : S
  */
 export function planActivation({ staging, release, runtime, controller }: Prepared, layout: Layout = PATHS, files = FILES) {
   const dir = join(layout.releases, release.version);
-  const aside = `${dir}.replaced-${process.pid}`;
+  const aside = `${dir}.replaced-${randomUUID()}`;
   const bun = join(layout.bin, 'bun');
   const before = { bun: targetOf(bun), current: targetOf(layout.current), controller: existsSync(layout.controller) ? readFileSync(layout.controller) : null };
   const back = (link: string, target: string | null) => () => target === null ? files.unlink(link) : files.link(link, target);

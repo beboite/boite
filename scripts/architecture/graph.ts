@@ -28,7 +28,9 @@ function markupImports(node: unknown, found: string[] = []): string[] {
 }
 
 /** A component's module and instance scripts, then the dynamic imports of its markup, read with the UI's own Svelte parser. */
-function svelteScripts(source: string): string {
+function svelteScripts(file: string): string {
+  // Svelte measures its offsets after dropping a byte order mark.
+  const source = file.replace(/^\uFEFF/, '');
   svelteParse ??= (createRequire(new URL('../../packages/ui/package.json', import.meta.url))('svelte/compiler') as { parse: SvelteParse }).parse;
   const root = svelteParse(source, { modern: true });
   const scripts = [root.module, root.instance].flatMap(script => script ? [source.slice(script.content.start, script.content.end)] : []);

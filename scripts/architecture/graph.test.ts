@@ -64,7 +64,8 @@ test('a component script is a module: its imports are edges and its component im
     ['packages/ui/src/components/Panel.svelte', `<script module lang="ts">import { help } from '../lib/help';</script>
 <script lang="ts">import type { T } from '../lib/types'; import Row from './Row.svelte'; let row = $state<T | null>(null);</script>
 <Row {row} /><p>import './NotAnImport.svelte'</p>`],
-    ['packages/ui/src/components/Row.svelte', "<script lang=\"ts\">import { open } from '../lib/open';</script><button onclick={open}>open</button>"],
+    // Saved with a byte order mark, which Svelte drops before it measures the scripts.
+    ['packages/ui/src/components/Row.svelte', "\uFEFF<script lang=\"ts\">import { open } from '../lib/open';</script><button onclick={open}>open</button>"],
     ['packages/ui/src/lib/help.ts', 'export const help = 1;'],
   ]));
   expect(graph.get('packages/ui/src/components/Panel.svelte')).toEqual(['packages/ui/src/components/Row.svelte', 'packages/ui/src/lib/help.ts']);
