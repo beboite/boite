@@ -25,7 +25,8 @@
 
   let saving = $state(false);
   async function save() {
-    if (!valid || chars === saved) return;
+    if (!valid) return;
+    if (chars === saved) { dirty = false; return; }
     saving = true;
     const ok = await store.saveSettings({ autoGoalMinChars: chars as number }).finally(() => { saving = false; });
     if (ok) dirty = false;
