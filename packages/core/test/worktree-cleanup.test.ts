@@ -87,12 +87,13 @@ async function summary(threadId: string): Promise<ThreadSummary> {
 }
 
 /** `gh pr list` answers this merged pull request for any branch it is asked about. */
-function mergedPullRequest(branch: string, sha: string): { calls: () => number } {
+function mergedPullRequest(branch: string, sha: string, during?: () => void): { calls: () => number } {
   let calls = 0;
   const spawn = harness.core.procs.spawn.bind(harness.core.procs);
   const replacement = spyOn(harness.core.procs, 'spawn').mockImplementation((scope, command, args, options) => {
     if (command !== 'gh') return spawn(scope, command, args, options);
     calls++;
+    during?.();
     const pr = { number: 12, url: 'https://github.com/example/repo/pull/12', state: 'MERGED', headRefName: branch, headRefOid: sha, headRepository: { name: 'repo' }, headRepositoryOwner: { login: 'example' }, isCrossRepository: false, mergedAt: '2026-10-15T10:00:00Z' };
     return spawn(scope, process.execPath, ['-e', `console.log(${JSON.stringify(JSON.stringify([pr]))})`], options);
   });
@@ -114,6 +115,17 @@ describe('settled worktree cleanup', () => {
     journal.putThread({ ...journal.getThread(thread.id)!, status: 'idle' });
     expect(await cleanup.run()).toEqual([expect.objectContaining({ projectId: project.id, branch: thread.branch, reason: 'pr-merged' })]);
     expect(existsSync(thread.cwd)).toBe(false);
+  });
+
+  test('keeps a worktree whose conversation is restored while the merge proof is read', async () => {
+    const project = await repoProject();
+    const thread = await worktreeThread(project, 'Restored meanwhile');
+    const sha = commitWork(thread.cwd);
+    await client.call('threads.archive', { threadId: thread.id });
+    const gh = mergedPullRequest(thread.branch!, sha, () => harness.core.journal.putThread({ ...harness.core.journal.getThread(thread.id)!, archived: false }));
+    expect(await cleanup.run()).toEqual([]);
+    expect(gh.calls()).toBeGreaterThan(0);
+    expect(existsSync(thread.cwd)).toBe(true);
   });
 
   test('removes an archived thread\'s clean worktree with its branch, and the restored thread says so', async () => {

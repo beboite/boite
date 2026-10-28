@@ -1,10 +1,10 @@
-import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type { WorktreeEntry } from '@boite/contracts';
 import { parseWorktreeList } from '../src/worktree-sweep.ts';
 import { worktreeRoot } from '../src/worktree.ts';
-import { startTestCore } from './harness.ts';
+import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 import type { CoreClient } from '../src/client.ts';
 import { rejection, thrown } from './settle.ts';
@@ -270,6 +270,78 @@ describe('worktrees.remove', () => {
     expect(listed).not.toContain('boite/target');
     expect(listed).not.toContain('boite/old');
     expect(listed).toContain('boite/fresh');
+  });
+
+  test('an archived thread holds its worktree while it runs, a process or a shell lives, or a restore lands during the checks', async () => {
+    const project = await repoProject();
+    const accountId = await echoAccount();
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Finishing in Done', worktree: {} });
+    const journal = harness.core.journal;
+    const put = (patch: Partial<ReturnType<typeof journal.getThread> & object>): void => journal.putThread({ ...journal.getThread(thread.id)!, ...patch });
+    const held = async (): Promise<void> => {
+      expect((await rejection(client.call('worktrees.remove', { projectId: project.id, path: thread.cwd, force: true }))).reason).toMatchObject({
+        rpc: { data: expect.objectContaining({ threadId: thread.id, expected: 'a worktree no live thread uses' }) },
+      });
+      expect(existsSync(thread.cwd)).toBe(true);
+    };
+    // Automatic Done moves a merged conversation away while its prompt finishes, with no tracked process.
+    put({ archived: true, archivedAt: 1, doneAt: 1, status: 'running' });
+    await held();
+    put({ status: 'idle' });
+    const procs = harness.core.procs, liveCount = procs.liveCount.bind(procs);
+    const live = spyOn(procs, 'liveCount').mockImplementation((id) => (id === thread.id ? 1 : liveCount(id)));
+    try { await held(); } finally { live.mockRestore(); }
+    const shells = spyOn(harness.core.terminals, 'threadProcesses').mockImplementation((id) => (id === thread.id ? 1 : 0));
+    try { await held(); } finally { shells.mockRestore(); }
+    // Restored while git status reads the worktree: the removal checks again before it deletes.
+    const spawn = procs.spawn.bind(procs);
+    const restoring = spyOn(procs, 'spawn').mockImplementation((scope, command, args, options) => {
+      if (command === 'git' && args.includes('status')) put({ archived: false });
+      return spawn(scope, command, args, options);
+    });
+    try { await held(); } finally { restoring.mockRestore(); }
+    put({ archived: true, archivedAt: 1 });
+    expect(await client.call('worktrees.remove', { projectId: project.id, path: thread.cwd })).toEqual({ ok: true, branchDeleted: true });
+  });
+
+  test('the list and a removal wait for a registration in progress in the same repository', async () => {
+    const project = await repoProject();
+    const row = harness.core.projects.require(project.id);
+    const removable = addWorktree(project, 'removable');
+    const registering = harness.core.worktrees.pathFor(row, 'boite/registering');
+    const paused = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+    let released = false;
+    const early: string[] = [];
+    const procs = harness.core.procs, spawn = procs.spawn.bind(procs);
+    const spy = spyOn(procs, 'spawn').mockImplementation((scope, command, args, options) => {
+      const child = spawn(scope, command, args, options);
+      if (command === 'git' && String(scope).startsWith('worktrees:') && !released) early.push(args.filter((arg) => !arg.startsWith('core.')).join(' '));
+      if (command !== 'git' || !args.includes('add') || !args.includes('boite/registering')) return child;
+      return { ...child, exited: child.exited.then(async (code) => {
+        // Git's half-written registration: commondir is empty until the add completes.
+        const file = join(project.path, '.git', 'worktrees', basename(registering), 'commondir');
+        const saved = readFileSync(file);
+        writeFileSync(file, '');
+        paused.resolve();
+        try { await release.promise; } finally { writeFileSync(file, saved); released = true; }
+        return code;
+      }) };
+    });
+    try {
+      const adding = harness.core.worktrees.add('thr_registering', row, 'boite/registering');
+      await paused.promise;
+      const listing = Promise.allSettled([client.call('worktrees.list', { projectId: project.id })]);
+      const removing = Promise.allSettled([client.call('worktrees.remove', { projectId: project.id, path: removable })]);
+      // Long enough for an ungated read to reach git while the registration is half written.
+      await waitFor(() => early.length > 0, 500).catch(() => undefined);
+      release.resolve();
+      await adding;
+      const [[listed], [removed]] = await Promise.all([listing, removing]);
+      expect(early).toEqual([]);
+      expect(listed).toMatchObject({ status: 'fulfilled' });
+      expect(removed).toMatchObject({ status: 'fulfilled', value: { ok: true } });
+      expect(existsSync(removable)).toBe(false);
+    } finally { release.resolve(); spy.mockRestore(); }
   });
 
   test('an archived thread does not hold its worktree, and a turn after the restore is refused by folder', async () => {

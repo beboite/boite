@@ -21,6 +21,7 @@ import type { Project, ThreadId, ThreadSummary, ThreadWorktreeRemoval } from '@b
 import type { Core } from './core.ts';
 import { messageOf } from './errors.ts';
 import { openLinkedBranches } from './linked-pull-requests.ts';
+import { occupiesCheckout } from './threads/occupancy.ts';
 import { withLoad } from './threads/records.ts';
 import { BRANCH_PREFIX, worktreeRoot } from './worktree.ts';
 import { autoRemoveWorktreesKey, worktreeRemovalKey } from './worktree-cleanup-state.ts';
@@ -43,7 +44,9 @@ interface Holder {
   cwd: string;
   branch: string | null;
   key: string;
-  /** When it was archived or deleted, null while it is live. */
+  archived: boolean;
+  status: ThreadSummary['status'];
+  /** When it was archived or deleted, null while it is visible. */
   settledAt: number | null;
   deleted: boolean;
 }
@@ -149,22 +152,21 @@ export class WorktreeCleanup {
     return Promise.all(this.rows().map(async (row) => ({ ...row, key: await realKey(row.cwd) })));
   }
 
-  /** The threads' rows as they are now; `ids` narrows them without reading every folder again. */
-  private rows(ids?: ThreadId[]): Omit<Holder, 'key'>[] {
+  /** The threads' rows as they are now. */
+  private rows(): Omit<Holder, 'key'>[] {
     const query = `SELECT t.id, t.cwd, t.branch, t.status, t.archived, t.archived_at, t.updated_at, d.deleted_at
       FROM threads t LEFT JOIN thread_deletions d ON d.thread_id = t.id`;
-    type Row = { id: ThreadId; cwd: string; branch: string | null; status: string; archived: number; archived_at: number | null; updated_at: number; deleted_at: number | null };
-    const rows = ids === undefined
-      ? this.core.journal.db.query(query).all() as Row[]
-      : ids.flatMap((id) => (this.core.journal.db.query(`${query} WHERE t.id = ?`).all(id) as Row[]));
+    type Row = { id: ThreadId; cwd: string; branch: string | null; status: ThreadSummary['status']; archived: number; archived_at: number | null; updated_at: number; deleted_at: number | null };
+    const rows = this.core.journal.db.query(query).all() as Row[];
     return rows.map((row) => ({
       id: row.id,
       cwd: row.cwd,
       branch: row.branch,
+      archived: row.archived === 1,
+      status: row.status,
       deleted: row.deleted_at !== null,
-      // Automatic Done may still have a prompt, including a runtime with no tracked process.
       // An archive written by an older core has no date of its own.
-      settledAt: row.deleted_at ?? (row.archived && row.status === 'idle' ? row.archived_at ?? row.updated_at : null),
+      settledAt: row.deleted_at ?? (row.archived ? row.archived_at ?? row.updated_at : null),
     }));
   }
 
@@ -200,8 +202,8 @@ export class WorktreeCleanup {
     if (reserved.some((path) => inside(key, path) || inside(path, key))) return false;
     if (worktree.branch !== null && claimed.has(worktree.branch)) return false;
     if (standing.length > 0) {
-      return standing.every((holder) => holder.settledAt !== null && now - holder.settledAt >= this.graceMs
-        && this.core.procs.liveCount(holder.id) === 0 && this.core.terminals.threadProcesses(holder.id) === 0);
+      // Automatic Done may still have a prompt, including a runtime with no tracked process.
+      return standing.every((holder) => !occupiesCheckout(this.core, holder) && holder.settledAt !== null && now - holder.settledAt >= this.graceMs);
     }
     // No thread: only a branch the core names, and not one a draft is about to adopt.
     if (worktree.branch !== null && !worktree.branch.startsWith(BRANCH_PREFIX)) return false;
@@ -234,10 +236,8 @@ export class WorktreeCleanup {
         return null;
       }
     }
-    // Read again after the awaits above: a restore in between keeps the worktree.
-    // A thread that arrived meanwhile is one `removeSettled` sees and refuses.
-    const fresh = this.rows(standing.map((holder) => holder.id));
-    if (fresh.length < standing.filter((holder) => !holder.deleted).length || fresh.some((holder) => holder.settledAt === null || this.core.procs.liveCount(holder.id) > 0)) return null;
+    // A restore or a thread that arrived during the awaits above is one
+    // `removeSettled` refuses: it checks every thread again as git deletes.
     if (worktree.branch !== null && openLinkedBranches(this.core.journal).has(worktree.branch)) return null;
     let removal: { branch: string | null; branchDeleted: boolean };
     try {

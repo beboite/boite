@@ -15,7 +15,8 @@ import type { Project, ProjectId, ThreadId, ThreadSummary, WorktreeEntry } from 
 import type { Core } from './core.ts';
 import { folderGone, invalidParams, messageOf, refused } from './errors.ts';
 import { git as readGit } from './git/read.ts';
-import { worktreeRoot } from './worktree.ts';
+import { occupiesCheckout } from './threads/occupancy.ts';
+import { withRegistration, worktreeRoot } from './worktree.ts';
 
 /**
  * How many worktrees are described at once. Each costs a `git status` walk of
@@ -171,8 +172,8 @@ export class WorktreeSweep {
         projectId, path, field: 'path', expected: 'a linked worktree, not the main checkout',
       });
     }
+    this.refuseOccupied(project, path, await this.occupant(project, target.path));
     const entry = await this.describe(project, target, wanted, await this.holders(project, listed));
-    this.refuseLive(project, path, entry);
     if (force !== true && (entry.dirty || entry.unmerged)) {
       const reasons = [
         ...(entry.dirty ? ['This worktree has uncommitted changes.'] : []),
@@ -202,8 +203,8 @@ export class WorktreeSweep {
     if (target === undefined || target.main || wanted === (await realKey(project.path))) {
       throw refused(`${path} is not a linked worktree of ${project.name}`, { projectId: project.id, path });
     }
+    this.refuseOccupied(project, path, await this.occupant(project, target.path));
     const entry = await this.describe(project, target, wanted, await this.holders(project, listed));
-    this.refuseLive(project, path, entry);
     if (entry.missing) throw refused(`${path} is already gone`, { projectId: project.id, path });
     if (entry.dirty) throw refused('This worktree has uncommitted changes.', { projectId: project.id, path, dirty: true });
     const proof = merged !== null && target.head === merged.sha ? merged : null;
@@ -212,12 +213,43 @@ export class WorktreeSweep {
     return { branch: target.branch, branchDeleted };
   }
 
-  private refuseLive(project: Project, path: string, entry: WorktreeEntry): void {
-    if (entry.threadId === null || entry.threadArchived) return;
-    throw refused(`thread "${entry.threadTitle}" (${entry.threadId}) works in ${path}: archive it first`, {
-      projectId: project.id, path, threadId: entry.threadId, threadTitle: entry.threadTitle,
+  private refuseOccupied(project: Project, path: string, holder: ThreadSummary | null): void {
+    if (holder === null) return;
+    const why = holder.archived ? 'is still running there: wait for it to finish' : 'works there: archive it first';
+    throw refused(`thread "${holder.title}" (${holder.id}) ${why} (${path})`, {
+      projectId: project.id, path, threadId: holder.id, threadTitle: holder.title,
       field: 'path', expected: 'a worktree no live thread uses',
     });
+  }
+
+  /**
+   * The threads standing in a worktree, their folders resolved, as a check
+   * that runs without awaiting: the first thread still using the checkout
+   * (`occupiesCheckout`), null when none does, or `moved` when a thread arrived
+   * or changed folder after the folders were resolved.
+   */
+  private async occupancy(project: Project, path: string): Promise<() => ThreadSummary | null | 'moved'> {
+    const key = await realKey(path);
+    const near = this.near(project, [path]);
+    const threads = (): ThreadSummary[] => this.core.threads.list({ includeArchived: true }).filter((thread) => thread.projectId === project.id || near(thread.cwd));
+    const keys = new Map<string, string>();
+    await Promise.all([...new Set(threads().map((thread) => thread.cwd))].map(async (cwd) => { keys.set(cwd, await realKey(cwd)); }));
+    return () => {
+      let holder: ThreadSummary | null = null;
+      for (const thread of threads()) {
+        const at = keys.get(thread.cwd);
+        if (at === undefined) return 'moved';
+        if (holder === null && inside(key, at) && occupiesCheckout(this.core, thread)) holder = thread;
+      }
+      return holder;
+    };
+  }
+
+  private async occupant(project: Project, path: string): Promise<ThreadSummary | null> {
+    for (;;) {
+      const holder = (await this.occupancy(project, path))();
+      if (holder !== 'moved') return holder;
+    }
   }
 
   /**
@@ -230,19 +262,29 @@ export class WorktreeSweep {
     // A vanished directory loses its registration to the same unforced
     // `remove` (git 2.55 exits 0 on it); `prune --expire` would keep it for an hour.
     const removal = ['worktree', 'remove', ...(branchRule === 'force' ? ['--force'] : []), target.path];
-    const removed = await this.git(project, project.path, removal);
+    // The one check every removal shares, made again at the moment git deletes:
+    // no await between it and the spawn, so a thread restored or started during
+    // the reads above keeps its checkout.
+    const removed = await this.registered(project, async () => {
+      for (;;) {
+        const holder = (await this.occupancy(project, target.path))();
+        if (holder === 'moved') continue;
+        this.refuseOccupied(project, path, holder);
+        return this.git(project, project.path, removal);
+      }
+    });
     if (removed.code !== 0) {
       throw refused(`git worktree remove failed for ${path}: ${removed.stderr.trim() || `exit ${removed.code}`}`, { projectId: project.id, path });
     }
     let branchDeleted = false;
     if (target.branch !== null) {
       const deleted = typeof branchRule === 'string'
-        ? await this.git(project, project.path, ['branch', branchRule === 'force' ? '-D' : '-d', target.branch])
+        ? await this.registered(project, () => this.git(project, project.path, ['branch', branchRule === 'force' ? '-D' : '-d', target.branch!]))
         : await this.deleteProvedBranch(project, target.branch, branchRule);
       branchDeleted = deleted.code === 0;
       if (!branchDeleted) this.core.log('info', `kept the branch ${target.branch} after removing ${path}: ${deleted.stderr.trim() || `exit ${deleted.code}`}`);
     }
-    const pruned = await this.git(project, project.path, ['worktree', 'prune', '--expire', PRUNE_EXPIRE]);
+    const pruned = await this.registered(project, () => this.git(project, project.path, ['worktree', 'prune', '--expire', PRUNE_EXPIRE]));
     if (pruned.code !== 0) this.core.log('warn', `git worktree prune failed in ${project.path}: ${pruned.stderr.trim() || `exit ${pruned.code}`}`);
     return branchDeleted;
   }
@@ -251,7 +293,7 @@ export class WorktreeSweep {
     if (proof.branch !== branch) return { code: 1, stdout: '', stderr: `the merged pull request proved ${proof.branch ?? 'a detached head'}, not ${branch}` };
     const holder = (await this.listed(project)).find((worktree) => worktree.branch === branch);
     if (holder !== undefined) return { code: 1, stdout: '', stderr: `${branch} is checked out at ${holder.path}` };
-    return this.git(project, project.path, ['update-ref', '-d', `refs/heads/${branch}`, proof.sha]);
+    return this.registered(project, () => this.git(project, project.path, ['update-ref', '-d', `refs/heads/${branch}`, proof.sha]));
   }
 
   private project(projectId: ProjectId): Project {
@@ -267,7 +309,7 @@ export class WorktreeSweep {
         projectId: project.id, path: project.path, field: 'projectId', expected: 'a project that is a git repository',
       });
     }
-    const listed = await this.read(project, project.path, ['worktree', 'list', '--porcelain', '-z']);
+    const listed = await this.registered(project, () => this.read(project, project.path, ['worktree', 'list', '--porcelain', '-z']));
     if (listed.code !== 0) throw refused(`cannot list worktrees in ${project.path}: ${listed.stderr.trim() || `exit ${listed.code}`}`, { projectId: project.id });
     return parseWorktreeList(listed.stdout);
   }
@@ -280,15 +322,20 @@ export class WorktreeSweep {
    * database went through `realpath` before, most of them in other projects.
    */
   async holders(project: Project, listed: readonly Listed[]): Promise<{ key: string; thread: ThreadSummary }[]> {
-    const roots = new Set([project.path, worktreeRoot(project.path, this.core.settings.get().worktreeStorage, project.id), ...listed.map((worktree) => worktree.path)].map(keyOf));
-    const near = (cwd: string): boolean => {
+    const near = this.near(project, listed.map((worktree) => worktree.path));
+    const threads = this.core.threads.list({ includeArchived: true }).filter((thread) => thread.projectId === project.id || near(thread.cwd));
+    return Promise.all(threads.map(async (thread) => ({ key: await realKey(thread.cwd), thread })));
+  }
+
+  /** Whether a folder as written lies in the project, its worktree folder or one of `paths`. */
+  private near(project: Project, paths: readonly string[]): (cwd: string) => boolean {
+    const roots = new Set([project.path, worktreeRoot(project.path, this.core.settings.get().worktreeStorage, project.id), ...paths].map(keyOf));
+    return (cwd) => {
       for (let at = keyOf(cwd); ; at = dirname(at)) {
         if (roots.has(at)) return true;
         if (dirname(at) === at) return false;
       }
     };
-    const threads = this.core.threads.list({ includeArchived: true }).filter((thread) => thread.projectId === project.id || near(thread.cwd));
-    return Promise.all(threads.map(async (thread) => ({ key: await realKey(thread.cwd), thread })));
   }
 
   async describe(project: Project, worktree: Listed, key: string, holders: { key: string; thread: ThreadSummary }[]): Promise<WorktreeEntry> {
@@ -333,6 +380,11 @@ export class WorktreeSweep {
    */
   private read(project: Project, cwd: string, args: string[]): Promise<GitRun> {
     return readGit(this.core, traceId(project.id) as ThreadId, cwd, args, undefined, 'the worktree list');
+  }
+
+  /** A registration command of the project's repository, behind the gate `Worktrees.add` holds. */
+  private registered<T>(project: Project, work: () => Promise<T>): Promise<T> {
+    return withRegistration(project.path, work);
   }
 
   /** A change under the project's trace id. No deadline: deleting a large tree takes what it takes. */

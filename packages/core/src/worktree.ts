@@ -39,6 +39,39 @@ export function worktreeRoot(projectPath: string, storage?: WorktreeStorage, pro
   return join(projectPath, '.boite', 'worktrees');
 }
 
+/**
+ * Runs `work` alone among the registration commands of one repository: every
+ * `worktree add`, `list`, `remove` and `prune` of its linked checkouts and of
+ * the sweep goes through here. Git exposes a partial registration (an empty
+ * `commondir`) before an add completes, and a list or another add that reads
+ * it then fails. `timeoutMs` bounds the wait and the work together; `work`
+ * gets what is left of it.
+ */
+export async function withRegistration<T>(cwd: string, work: (remainingMs: number | undefined) => Promise<T>, options: { timeoutMs?: number; assertActive?: () => void; what?: () => string } = {}): Promise<T> {
+  const { timeoutMs, assertActive } = options;
+  const key = realpathSync(gitCommonDirOf(cwd) ?? cwd);
+  const previous = registrations.get(key) ?? Promise.resolve();
+  const release = Promise.withResolvers<void>();
+  const tail = previous.then(() => release.promise);
+  registrations.set(key, tail);
+  const started = performance.now();
+  const expired = () => refused(`${options.what?.() ?? 'a worktree registration'} did not finish within ${timeoutMs} ms`, { cwd });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    if (timeoutMs === undefined) await previous;
+    else await Promise.race([previous, new Promise<never>((_, reject) => {timer = setTimeout(() => reject(expired()), timeoutMs);})]);
+    clearTimeout(timer);
+    const remaining = timeoutMs === undefined ? undefined : timeoutMs - (performance.now() - started);
+    if (remaining !== undefined && remaining <= 0) throw expired();
+    assertActive?.();
+    return await work(remaining);
+  } finally {
+    clearTimeout(timer); release.resolve();
+    // A timed-out waiter still sits behind its predecessor until that owner exits.
+    void tail.then(() => {if (registrations.get(key) === tail) registrations.delete(key);});
+  }
+}
+
 export interface PlacedWorktree {
   branch: string;
   path: string;
@@ -395,29 +428,8 @@ export class Worktrees {
     } catch (error) { throw refused(`cannot exclude worktrees in ${file}: ${messageOf(error)}`); }
   }
 
-  /** Git exposes a partial registration before commondir is readable by another add/list. */
-  private async registeredGit(threadId: ThreadId, cwd: string, args: string[], timeoutMs?: number, assertActive?: () => void): Promise<{ code: number; stderr: string; stdout: string }> {
-    const key = realpathSync(gitCommonDirOf(cwd) ?? cwd);
-    const previous = registrations.get(key) ?? Promise.resolve();
-    const release = Promise.withResolvers<void>();
-    const tail = previous.then(() => release.promise);
-    registrations.set(key, tail);
-    const started = performance.now();
-    const expired = () => refused(`git ${args.join(' ')} did not finish within ${timeoutMs} ms`, { cwd, args });
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      if (timeoutMs === undefined) await previous;
-      else await Promise.race([previous, new Promise<never>((_, reject) => {timer = setTimeout(() => reject(expired()), timeoutMs);})]);
-      clearTimeout(timer);
-      const remaining = timeoutMs === undefined ? undefined : timeoutMs - (performance.now() - started);
-      if (remaining !== undefined && remaining <= 0) throw expired();
-      assertActive?.();
-      return await this.git(threadId, cwd, args, remaining);
-    } finally {
-      clearTimeout(timer); release.resolve();
-      // A timed-out waiter still sits behind its predecessor until that owner exits.
-      void tail.then(() => {if (registrations.get(key) === tail) registrations.delete(key);});
-    }
+  private registeredGit(threadId: ThreadId, cwd: string, args: string[], timeoutMs?: number, assertActive?: () => void): Promise<{ code: number; stderr: string; stdout: string }> {
+    return withRegistration(cwd, (remaining) => this.git(threadId, cwd, args, remaining), { timeoutMs, assertActive, what: () => `git ${args.join(' ')}` });
   }
 
   private async git(threadId: ThreadId, cwd: string, args: string[], timeoutMs?: number, input?: string, indexFile?: string): Promise<{ code: number; stderr: string; stdout: string }> {
