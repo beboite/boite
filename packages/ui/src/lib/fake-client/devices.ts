@@ -35,8 +35,8 @@ export function devicesMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
   const list = (threadId: string) => [...(sessions.get(threadId)?.values() ?? [])].map(session => ({ ...session }));
   const changed = (threadId: string) => ctx.emitToThread(threadId, 'devices.changed', { threadId, sessions: list(threadId) });
   const release = (threadId: string) => { if (sessions.delete(threadId)) changed(threadId); };
-  ctx.bus.on('thread.updated', thread => { if (thread.archived) release(thread.id); });
-  ctx.bus.on('thread.removed', ({ threadId }) => release(threadId));
+  ctx.bus.observe('thread.updated', thread => { if (thread.archived) release(thread.id); });
+  ctx.bus.observe('thread.removed', ({ threadId }) => release(threadId));
   const thread = (threadId: string) => {
     if (ctx.thread(threadId).archived) throw refusal('the Device panel needs an active conversation', { threadId });
     if (!ctx.bus.subscribed.has(threadId)) throw refusal('subscribe to the conversation before using its Device panel', { threadId });

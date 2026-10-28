@@ -83,7 +83,7 @@ import { startTurn, stopTurn } from './turns';
 import { FakeWorkflows } from './workflows';
 import { initialDesktopUpdate, initialServerUpdate } from './server-update';
 import { observeLog } from './logs';
-import { followGoal } from './todos';
+import { agentTodos, followGoal } from './todos';
 import type { FakeWorktree } from './worktrees';
 
 /**
@@ -336,7 +336,7 @@ export class FakeContext {
     this.quotaExtras = options.quotaExtras ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('quotaExtras') === '1');
     this.brainLinkPermission = options.brainLinkPermission ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('brainLinkPermission') === '1');
     this.plainLink = options.plainLink ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('plainLink') === '1');
-    this.bus = new FakeBus(options.principal ?? 'owner', { threadId: () => this.agentThreadId, projectOf: id => this.threads.get(id)?.projectId ?? null });
+    this.bus = new FakeBus(options.principal ?? 'owner', { threadId: () => this.agentThreadId, projectOf: id => this.threads.get(id)?.projectId ?? null, visibleTodos: (id, todos) => agentTodos(this, id, todos) });
     this.agents = new FakeAgents(revision => {
       this.emit('agents.changed', { revision });
       // As the core: a change to any agent may answer a card, settled once per burst after it commits.

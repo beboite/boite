@@ -161,6 +161,34 @@ test('an agent hears its own thread and its project\'s board only, as server.ts 
   expect(lines).toEqual([`activity ${own.id}`, `todos ${own.projectId}`]);
 });
 
+test('team and subagent changes reach a socket only while it is subscribed to their thread, as server.ts broadcast', async () => {
+  const { FakeContext } = await import('./fake-client/context');
+  const { seed } = await import('./fake-client/seed');
+  const ctx = new FakeContext({ delayMs: 0, principal: 'agent', agentThreadId: 't-trace' });
+  seed(ctx);
+  ctx.bus.setState('ready');
+  const lines: string[] = [];
+  for (const name of ['collaboration.changed', 'delegation.changed', 'workflows.changed', 'thread.activity'] as const) ctx.bus.on(name, () => lines.push(name));
+  // Core-side listeners, such as `delegation.wait`, still hear every change.
+  let observed = 0;
+  ctx.bus.observe('delegation.changed', () => { observed += 1; });
+  const round = () => {
+    ctx.bus.deliver('collaboration.changed', { threadId: 't-trace' } as never);
+    ctx.bus.deliver('delegation.changed', { threadId: 't-trace' });
+    ctx.bus.deliver('workflows.changed', { threadId: 't-trace', runId: 'run' } as never);
+    ctx.bus.deliver('thread.activity', { threadId: 't-trace' } as never);
+    return lines.splice(0);
+  };
+  // An agent socket still gets its own thread's activity without a subscription.
+  expect(round()).toEqual(['thread.activity']);
+  ctx.bus.subscribed.add('t-trace');
+  // Workflow changes are the owner's alone.
+  expect(round()).toEqual(['collaboration.changed', 'delegation.changed', 'thread.activity']);
+  ctx.bus.subscribed.delete('t-trace');
+  expect(round()).toEqual(['thread.activity']);
+  expect(observed).toBe(3);
+});
+
 test('settings.set refuses what is not a setting before applying any of it, as router.ts checkRpcParams', async () => {
   const client = await fake();
   const before = await client.call('settings.get', {});

@@ -107,6 +107,8 @@ test('an expired routed letter updates the initiating sender copy', async () => 
   const sent = await source.call('collaboration.send', { threadId: 't-trace', to: { coreId: 'core-outside', threadId: 't-trace' }, text: 'Deliver before expiry', requestId: 'routed-expiry' });
   expect(sent.status).toBe('received');
   const changed: string[] = [];
+  // The core sends a thread's team changes to the clients subscribed to it.
+  await source.call('threads.subscribe', { threadId: 't-trace' });
   source.on('collaboration.changed', event => { changed.push(event.threadId); });
   const clock = vi.spyOn(fakeCore('core-outside')!, 'now').mockReturnValue(sent.expiresAt + 1);
   try {

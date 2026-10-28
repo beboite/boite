@@ -438,6 +438,9 @@ export function mayHearEvent(name: RpcEventName, principal: Principal): boolean 
   return principal === 'owner' || (principal === 'agent' ? AGENT_EVENTS : DEVICE_EVENTS).has(name);
 }
 
+/** Events any socket hears only while it is subscribed to the thread they name. */
+export const SUBSCRIBED_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>(['collaboration.changed', 'delegation.changed', 'workflows.changed']);
+
 /** The thread an event is about, when its payload names one. */
 export function eventThreadId(payload: unknown): string | null {
   if (typeof payload !== 'object' || payload === null) return null;
