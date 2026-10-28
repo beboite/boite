@@ -1,5 +1,6 @@
 import type { Attachment, PreviewReference } from '@boite/contracts';
 import type { ComposerState } from './composer-queue';
+import { settleIn } from './composer-images';
 
 /**
  * The composer's own undo. The textarea's native stack dies on every value the
@@ -125,6 +126,19 @@ export function settled(state: ComposerState): void {
 /** A sent prompt is gone from the box for good: undo cannot bring it back. */
 export function resetHistory(state: ComposerState): void {
   histories.delete(state);
+}
+
+/**
+ * A file still being read became `ready`, or was refused: every step that
+ * held its placeholder holds the file instead, or loses it and its
+ * `[Image N]` as the box did, so an undo after it arrived never brings back
+ * a tile that waits forever, nor a reference naming another picture. What
+ * was typed meanwhile keeps its steps.
+ */
+export function replaceInHistory(state: ComposerState, placeholder: Attachment, ready: Attachment | null): void {
+  const history = histories.get(state);
+  if (!history) return;
+  for (const step of [...history.undo, ...history.redo]) settleIn(step, placeholder, ready);
 }
 
 function travel(state: ComposerState, from: 'undo' | 'redo', selection?: { start: number; end: number }): ComposerSnapshot | null {

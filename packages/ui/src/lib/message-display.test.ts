@@ -35,7 +35,8 @@ test('marker examples remain visible before more text and inside code fences', (
     '~~~\n[BOITE_GOAL_BLOCKED]\n',
   ]) expect(visibleAnswer(text)).toBe(text);
 });
-import { paragraphBlocks, answerText, promptText } from './message-display';
+import { ParagraphScan, paragraphBlocks, answerText, promptText } from './message-display';
+import { renderMarkdown } from './markdown';
 
 test('paragraphs wait for a boundary, and completion or cancellation flushes the tail', () => {
   expect(paragraphBlocks('First sentence', true)).toEqual([]);
@@ -46,6 +47,52 @@ test('paragraphs wait for a boundary, and completion or cancellation flushes the
 test('blank lines inside fenced code do not expose an incomplete block', () => {
   expect(paragraphBlocks('Intro\n\n```ts\nconst a = 1;\n\npartial', true)).toEqual(['Intro']);
   expect(paragraphBlocks('```ts\nconst a = 1;\n\n```\n\nTail', true)).toEqual(['```ts\nconst a = 1;\n\n```']);
+});
+test('streamed blocks and the final render read fences with one grammar', () => {
+  // `a``` b` is inline code, not a fence: the paragraph after it must not wait for a close.
+  expect(paragraphBlocks('```a``` b\n\nNext\n\n', true)).toEqual(['```a``` b', 'Next']);
+  for (const text of ['~~~~ts\nconst x = 1;\n\n~~~\nconst y = 2;\n~~~~\n\nAfter', '````\n```\n\n```\n````\n\nAfter', '```\na\n\n``` x\nb\n```\n\nAfter']) {
+    const scan = new ParagraphScan();
+    for (let end = 1; end <= text.length; end += 3) scan.blocks(text.slice(0, end), true);
+    const blocks = scan.blocks(text, false);
+    expect(blocks).toHaveLength(2);
+    expect(renderMarkdown(blocks[0]!)).toMatch(/^<pre[^>]*><code>[\s\S]*<\/code><\/pre>$/);
+    expect(blocks.map(block => renderMarkdown(block)).join('')).toBe(renderMarkdown(text));
+  }
+});
+test('an indented fence keeps its indent through the stream, so its code outdents as in the final render', () => {
+  const code = (html: string) => {
+    const box = document.createElement('div');
+    box.innerHTML = html;
+    return [...box.querySelectorAll('pre code')].map(node => node.textContent);
+  };
+  for (const [text, expected] of [
+    ['  ~~~py\n  x = 1\n   y = 2\n  ~~~\n\nAfter', 'x = 1\n y = 2'],
+    ['Intro\n\n   ```py\n   x = 1\n    y = 2\n   ```\n\nAfter', 'x = 1\n y = 2'],
+    [' ````\n x = 1\n\n  y = 2\n ````', 'x = 1\n\n y = 2']
+  ] as const) {
+    const scan = new ParagraphScan();
+    for (let end = 1; end <= text.length; end += 3) scan.blocks(text.slice(0, end), true);
+    const blocks = scan.blocks(text, false);
+    expect(code(renderMarkdown(text))).toEqual([expected]);
+    expect(code(blocks.map(block => renderMarkdown(block)).join(''))).toEqual([expected]);
+  }
+});
+test('an indented heading stays a heading, in a completed block and in the final tail', () => {
+  const heading = /^<h[1-6][^>]*>Heading<\/h[1-6]>$/;
+  expect(paragraphBlocks('  # Heading', false).map(block => renderMarkdown(block))).toEqual([expect.stringMatching(heading)]);
+  const text = 'Intro\n\n   ## Heading\n\nAfter';
+  const scan = new ParagraphScan();
+  for (let end = 1; end <= text.length; end += 3) scan.blocks(text.slice(0, end), true);
+  expect(renderMarkdown(scan.blocks(text, true)[1]!)).toMatch(heading);
+  expect(renderMarkdown(scan.blocks(text, false)[1]!)).toMatch(heading);
+});
+test('a marker indented past a fence stays text in the stream, as the scanner and the full render read it', () => {
+  const text = '    ```\nx = 1\n\ny = 2';
+  expect(renderMarkdown(text)).not.toContain('<pre');
+  for (const live of [false, true]) {
+    expect(paragraphBlocks(text, live).map(block => renderMarkdown(block)).join('')).not.toContain('<pre');
+  }
 });
 test('internal goal markers stay out of prose, even during partial arrival', () => {
   expect(answerText('Done\n\n[BOITE_GOAL_COMPLETE]', false)).toBe('Done\n\n');

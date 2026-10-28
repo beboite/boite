@@ -42,8 +42,11 @@ The page also has three owner-only core settings, separate from those client
 switches: [Keep the prompt cache warm](prompt-cache.md#keeping-the-cache-warm)
 (`cacheKeepalive`), [Background compaction](context.md#background-compaction)
 (`backgroundCompaction`) and [Device live stream](devices.md#live-stream)
-(`deviceStream`). They change execution on the selected core and affect its
-clients; none follows the desktop's experiment preferences.
+(`deviceStream`). They change execution on the machine picked in the bar
+above them, which starts on the window's machine, and affect its clients;
+none follows the desktop's experiment preferences. A thread takes the switch
+of the machine it runs on: flipped for the desktop's own core, background
+compaction does nothing for a thread on a server.
 
 ## Whip
 

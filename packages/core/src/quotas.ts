@@ -1,8 +1,5 @@
 import { isOpenCode, OPENCODE_V2 } from './providers/opencode.ts';
 import { readFile } from 'node:fs/promises';
-import { mkdtempSync } from 'node:fs';
-import { removeDir } from './fs-retry.ts';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Account, AccountQuota, QuotaAlertPeriod, QuotaReading, QuotaWindow } from '@boite/contracts';
 import type { Core } from './core.ts';
@@ -104,24 +101,21 @@ async function readCodex(core: Core, account: Account): Promise<QuotaReading> {
   return { windows: codexQuotaWindows(raw), ...codexQuotaDetails(raw) };
 }
 
-/** A CLI started for one quota read, in a scratch directory, traced and stopped whatever happens. */
-async function withQuotaProbe<T>(core: Core, account: Account, name: string, read: (ctx: ProbeContext) => Promise<T>, reset = false): Promise<T> {
+/** A CLI started for one quota read or reset, in a scratch directory, traced and stopped whatever happens. Exported for tests. */
+export async function withQuotaProbe<T>(core: Core, account: Account, name: string, read: (ctx: ProbeContext) => Promise<T>, reset = false): Promise<T> {
   const provider = core.providers.require(account.providerId);
-  const cwd = mkdtempSync(join(tmpdir(), 'boite-quota-'));
-  const threadId = `${reset ? 'quota-reset' : 'quota'}:${account.id}`;
-  const exits: Promise<void>[] = [];
+  const label = `${name}${reset ? '' : ' quota'}`;
+  const log = (message: string): void => core.log('warn', `${label}: ${message}`, { source: 'quotas', event: 'quota.read' });
+  // The account owns the read: removing it stops this process and waits for it before deleting the directory.
+  const operation = core.accounts.operations.open(account.id, provider.id, `${reset ? 'quota-reset' : 'quota'}:${account.id}`, log);
   const at = performance.now();
   try {
     return await read({
-      provider, accountId: account.id, cwd,
+      provider, accountId: account.id, cwd: operation.scratch('boite-quota-'),
       accountEnv: core.accounts.accountEnv(account, provider),
-      spawnChild: (cmd, args, opts) => {
-        const child = core.procs.spawnChild(threadId, cmd, args, opts);
-        exits.push(new Promise<void>((resolve) => { child.once('close', () => resolve()); child.once('error', () => resolve()); }));
-        return child;
-      },
-      killTree: () => core.procs.killTree(threadId),
-      log: (level, message) => core.log(level, `${name}${reset ? '' : ' quota'}: ${message}`, { source: 'quotas', event: 'quota.read' }),
+      spawnChild: operation.spawnChild,
+      killTree: operation.killTree,
+      log: (level, message) => core.log(level, `${label}: ${message}`, { source: 'quotas', event: 'quota.read' }),
     });
   } catch (error) {
     core.logs.warn(`${reset ? `The ${name}` : `Reading the ${name} quota`} of account ${account.id} failed after ${Math.round(performance.now() - at)} ms: ${error instanceof Error ? error.message : String(error)}`, {
@@ -129,12 +123,9 @@ async function withQuotaProbe<T>(core: Core, account: Account, name: string, rea
     });
     throw error;
   } finally {
-    core.procs.killTree(threadId);
-    await Promise.all(exits);
     // A descendant can hold the directory after the direct child closed. Neither
     // waiting for it nor removing the directory may replace the windows just read.
-    await core.procs.stopAndWait(threadId).catch((error: unknown) => core.log('warn', `${name}${reset ? '' : ' quota'}: ${error instanceof Error ? error.message : String(error)}`, { source: 'quotas', event: 'quota.read' }));
-    await removeDir(cwd, (message) => core.log('warn', `${name}${reset ? '' : ' quota'}: ${message}`, { source: 'quotas', event: 'quota.read' }));
+    await operation.close();
   }
 }
 

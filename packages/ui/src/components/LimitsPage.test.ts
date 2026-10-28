@@ -6,6 +6,7 @@ import { SvelteMap } from 'svelte/reactivity';
 import { Store } from '../lib/store.svelte';
 import { strings } from '../lib/strings';
 import LimitsPage from './LimitsPage.svelte';
+import { phoneWidth } from '../test/phone-width';
 import { FakeClient } from '../lib/fake-client';
 import { quotaReader, REFRESH_SHOWN_MS } from '../lib/quota-reader.svelte';
 
@@ -86,6 +87,21 @@ test('a paired device draws the limit bars the core holds, with no refresh, swit
   expect(document.querySelector('[data-testid="limits-refresh"]')).toBeNull();
   expect(document.querySelector('[data-testid="limits-tracked"]')).toBeNull();
   expect(call).toHaveBeenCalledWith('quotas.list', expect.objectContaining({ refresh: false }));
+});
+
+test('on a phone, which leaves Providers to the desktop, no provider read says so with no way to Providers', async () => {
+  const restore = phoneWidth();
+  try {
+    const call = vi.fn(async () => []);
+    mounted = mount(LimitsPage, { target: document.body, props: {
+      store: { client: { call, on: () => () => {} }, connection: 'ready', owner: true, endpointUrl: 'phone-empty-core', accounts: [] } as unknown as Store,
+    } });
+    await settle();
+    expect(document.querySelector('[data-testid="limits-empty"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="limits-empty"] button')).toBeNull();
+  } finally {
+    restore();
+  }
 });
 
 test('a core that refuses a paired device its limits asks for an update instead of an error', async () => {

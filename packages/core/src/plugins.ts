@@ -17,9 +17,9 @@
 
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
-import { chmod, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { PLUGIN_MANIFEST_FILE } from '@boite/contracts';
+import { threadActive, PLUGIN_MANIFEST_FILE } from '@boite/contracts';
 import type { PluginArtifact, PluginManifest, PluginPool, PluginPreview, PluginRejected, PluginSource, PluginState, RpcParams } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
@@ -41,6 +41,8 @@ import {
 } from './plugins/manifest.ts';
 import { PluginApps } from './plugins/apps.ts';
 import { DOUANE_PLUGIN, PluginGateways } from './plugins/gateway.ts';
+import { recoverActivation, switchRelease, type Activation } from './plugins/activation.ts';
+import { PluginLanes } from './plugins/lanes.ts';
 import { checkRef, fetchManifest, normalizeSourceUrl } from './plugins/source.ts';
 import { PluginUpdateChecks, compareVersions, parseRecommendedEntry, type UpdateSource } from './plugins/updates.ts';
 import recommendedList from './plugins/recommended.json';
@@ -191,6 +193,8 @@ export class PluginStore {
   private shutdown = new AbortController();
   private sequence = 0;
   private closing = false;
+  /** Install and uninstall hold a plugin alone; its commands share it. */
+  private lanes = new PluginLanes();
 
   /** Test seam: how long a download may receive nothing. */
   downloadIdleMs = DOWNLOAD_IDLE_MS;
@@ -297,6 +301,14 @@ export class PluginStore {
    */
   private onDisk(id: string): OnDisk {
     const dir = this.directory(id);
+    // An activation a stopped core left half done settles first, unless it is this core's own, still running.
+    if (this.lanes.rewrite(id) === null) {
+      try {
+        if (recoverActivation(dir) === 'restored') this.core.log('warn', `plugin ${id}: an update that did not finish was rolled back`);
+      } catch (error) {
+        return { kind: 'error', message: `${dir} holds an update that did not finish and could not be rolled back (${messageOf(error)}). Reinstall ${id}.` };
+      }
+    }
     const file = join(dir, INSTALLED_FILE);
     if (!existsSync(file)) return { kind: 'none' };
     let data: unknown;
@@ -379,10 +391,6 @@ export class PluginStore {
     }
   }
 
-  private busy(id: string): boolean {
-    return this.jobs.has(id) || [...this.running.values()].includes(id) || this.action?.id === id || this.listings.has(id);
-  }
-
   /** Installs a recommended plugin, or reinstalls a URL one from the manifest it recorded. */
   install(id: string): PluginState {
     this.known(id);
@@ -414,7 +422,7 @@ export class PluginStore {
   /** `latest`, when given, may swap `manifest` for a newer one before the download starts. */
   private start(id: string, manifest: PluginManifest, source: PluginSource | null, origin: Origin, latest?: (signal: AbortSignal) => Promise<PluginManifest>): PluginState {
     if (this.closing) throw refused('Boite is shutting down.');
-    if (this.busy(id)) throw refused('Wait for the current plugin operation before installing.');
+    if (this.lanes.busy(id)) throw refused('Wait for the current plugin operation before installing.');
     const artifact = artifactFor(manifest);
     if (artifact === null) throw refused(`${id} has no binary for ${platformKey()}`);
     this.failures.delete(id);
@@ -423,7 +431,7 @@ export class PluginStore {
     const controller = new AbortController();
     const job: Job = { controller, progress: 0, promise: Promise.resolve(), relaunch: false };
     this.jobs.set(id, job);
-    job.promise = (latest === undefined ? Promise.resolve(manifest) : latest(controller.signal))
+    job.promise = this.lanes.alone(id, 'install', () => (latest === undefined ? Promise.resolve(manifest) : latest(controller.signal))
       .then((target) => {
         const found = target === manifest ? artifact : artifactFor(target);
         if (found === null) throw new Error(`${id} ${target.version} has no binary for ${platformKey()}`);
@@ -440,7 +448,7 @@ export class PluginStore {
         this.cache.delete(id);
         this.emit(id);
         if (job.relaunch) this.resumeApp(id);
-      });
+      }), 'Wait for the current plugin operation before installing.');
     this.emit(id);
     return this.state(id);
   }
@@ -450,7 +458,6 @@ export class PluginStore {
     const dir = this.directory(id);
     mkdirSync(dir, { recursive: true });
     const temporary = join(dir, 'download.part');
-    const record = join(dir, `${INSTALLED_FILE}.part`);
     // An idle timer rather than a deadline on the whole transfer: a slow link that
     // keeps sending finishes, a silent one stops with words saying so.
     let size = 0;
@@ -496,58 +503,53 @@ export class PluginStore {
       if (process.platform !== 'win32') await chmod(temporary, 0o700);
       signal.throwIfAborted();
       const previous = this.onDisk(id);
-      const binary = this.binaryPath(dir, manifest);
+      const installed = previous.kind === 'installed' ? previous.installed : null;
       // Windows locks a running executable: the app stops before its binary is replaced.
-      if (previous.kind === 'installed' && providesApp(previous.installed.manifest)) {
+      if (installed !== null && providesApp(installed.manifest)) {
         job.relaunch = true;
         await this.apps.kill(id);
       }
-      if (previous.kind === 'installed' && providesGateway(previous.installed.manifest) && providesGateway(manifest)) {
-        await this.swapGateway(id, previous.installed, manifest, temporary, binary);
-      } else {
-        // A gateway still serving would be cut off: it waits for its requests like an update, then stops.
-        if (previous.kind === 'installed' && providesGateway(previous.installed.manifest)) await this.gateways.drainForUpdate(id, manifest.version);
-        await rename(temporary, binary);
-      }
-      if (previous.kind === 'installed' && previous.installed.binary !== binary) await rm(previous.installed.binary, { force: true });
-      await writeFile(record, JSON.stringify({ schema: 1, origin, source, installedAt: Date.now(), manifest }, null, 2), 'utf8');
-      await rename(record, join(dir, INSTALLED_FILE));
+      // A gateway still serving would be cut off: it waits for its requests like an update, then stops.
+      const ran = installed !== null && providesGateway(installed.manifest) && await this.gateways.drainForUpdate(id, manifest.version);
+      await this.activate(id, dir, installed, manifest, temporary, ran, JSON.stringify({ schema: 1, origin, source, installedAt: Date.now(), manifest }, null, 2));
       job.progress = 100;
     } finally {
       clearTimeout(timer);
       clearTimeout(ceiling);
       await rm(temporary, { force: true });
-      await rm(record, { force: true });
     }
   }
 
   /**
-   * A gateway's update: the running release serves its requests in flight
-   * (bounded), stops, and the new executable takes its place. The previous one
-   * stays beside it until the new one answers `/health`; when it does not, the
-   * previous one goes back and starts again, and the update fails with the
+   * The new binary and its record replace the previous ones together
+   * (`plugins/activation.ts`). A gateway that ran before starts from the new
+   * binary and must answer `/health` before the record commits; when it does
+   * not, or the record cannot be written, the previous binary and record go
+   * back, the previous gateway starts again, and the update fails with the
    * reason, keeping the version that worked.
    */
-  private async swapGateway(id: string, previous: Installed, manifest: PluginManifest, temporary: string, binary: string): Promise<void> {
-    const ran = await this.gateways.drainForUpdate(id, manifest.version);
-    const kept = `${previous.binary}.previous`;
-    await rm(kept, { force: true });
-    await rename(previous.binary, kept);
-    await rename(temporary, binary);
-    if (!ran) {
-      await rm(kept, { force: true });
-      return;
+  private async activate(id: string, dir: string, previous: Installed | null, manifest: PluginManifest, temporary: string, ran: boolean, record: string): Promise<void> {
+    const binary = this.binaryPath(dir, manifest);
+    let activation: Activation | null = null;
+    let why: string | null = null;
+    try {
+      activation = switchRelease(dir, { previous: previous?.binary ?? null, binary, temporary, record });
+      // The record names the previous release until the commit: the gateway is handed the new binary.
+      if (ran && providesGateway(manifest) && !await this.gateways.launch(id, false, { binary, executable: manifest.executable, replaces: previous?.manifest.executable ?? null })) {
+        why = this.gateways.state(id, dir).error ?? `${id} ${manifest.version} did not start`;
+        throw new Error(why);
+      }
+      activation.commit();
+    } catch (error) {
+      if (ran) await this.gateways.kill(id);
+      activation?.rollback();
+      if (!ran || previous === null) throw error;
+      const restarted = await this.gateways.launch(id);
+      if (!restarted) {
+        throw new Error(`${why ?? messageOf(error)}. ${previous.version} did not start again: ${this.gateways.state(id, dir).error ?? 'the gateway is not running'}.`);
+      }
+      throw new Error(`${why ?? messageOf(error)}. ${previous.version} runs again.`);
     }
-    if (await this.gateways.launch(id, false)) {
-      await rm(kept, { force: true });
-      return;
-    }
-    const why = this.gateways.state(id, this.directory(id)).error ?? `${id} ${manifest.version} did not start`;
-    await this.gateways.kill(id);
-    await rm(binary, { force: true });
-    await rename(kept, previous.binary);
-    await this.gateways.launch(id);
-    throw new Error(`${why}. ${previous.version} runs again.`);
   }
 
   /**
@@ -637,7 +639,7 @@ export class PluginStore {
     const { manifest, source } = preview;
     const conflict = this.conflict(manifest, source.url);
     if (conflict !== null) throw refused(conflict.message, conflict);
-    if (this.busy(manifest.id)) throw refused('Wait for the current plugin operation before installing.');
+    if (this.lanes.busy(manifest.id)) throw refused('Wait for the current plugin operation before installing.');
     const before = this.pending.get(manifest.id);
     this.pending.set(manifest.id, { manifest, source });
     try {
@@ -662,26 +664,29 @@ export class PluginStore {
   /** Deletes the plugin's directory, the whole of what its install wrote. */
   async uninstall(id: string): Promise<PluginState> {
     this.known(id);
-    if (this.busy(id)) throw refused('Wait for the current plugin operation before uninstalling.');
-    await this.apps.forget(id);
-    // Its data directory stays: a gateway's sign-ins outlive its program.
-    await this.gateways.forget(id);
-    await removeTree(this.directory(id));
-    this.pending.delete(id);
-    this.failures.delete(id);
-    this.cache.delete(id);
-    const state = this.state(id);
-    this.core.bus.emit('plugins.updated', state);
-    return state;
+    // Held before the first await: an install or a start asked for meanwhile is refused, not erased.
+    return this.lanes.alone(id, 'uninstall', async () => {
+      await this.apps.forget(id);
+      // Its data directory stays: a gateway's sign-ins outlive its program.
+      await this.gateways.forget(id);
+      await removeTree(this.directory(id));
+      this.pending.delete(id);
+      this.failures.delete(id);
+      this.cache.delete(id);
+      return this.state(id);
+    }, 'Wait for the current plugin operation before uninstalling.').then((state) => {
+      this.core.bus.emit('plugins.updated', state);
+      return state;
+    });
   }
 
   /** The installed plugin an account call runs, or the reason there is none. */
   private usable(id: string): Installed {
     if (this.closing) throw refused('Boite is shutting down.');
+    this.lanes.assertUsable(id);
     const disk = this.onDisk(id);
     if (disk.kind === 'rejected') throw refused(`${id} was refused: ${disk.rejected.message}`, disk.rejected);
     if (disk.kind !== 'installed') throw refused(`Install ${id} first.`);
-    if (this.jobs.has(id)) throw refused(`Wait for ${id} installation to finish.`);
     return disk.installed;
   }
 
@@ -725,14 +730,14 @@ export class PluginStore {
     if (listing !== undefined) return listing;
     const cached = this.cache.get(id);
     if (cached !== undefined && Date.now() - cached.at < (refresh ? 10_000 : 60_000)) return cached.pools;
-    const promise = (async () => {
+    const promise = this.lanes.shared(id, async () => {
       const pools: PluginPool[] = [];
       for (const provider of poolsOf(installed.manifest)) {
         pools.push(parsePluginPool(provider, await this.run(id, installed, [...POOL_COMMANDS.list(provider, refresh)]), installed.manifest.executable));
       }
       this.cache.set(id, { pools, at: Date.now() });
       return pools;
-    })();
+    });
     this.listings.set(id, promise);
     try { return await promise; } finally { this.listings.delete(id); }
   }
@@ -751,12 +756,16 @@ export class PluginStore {
     if (!['add', 'switch', 'remove'].includes(params.action)) throw invalidParams('plugin action must be add, switch or remove', { field: 'action' });
     if (params.action !== 'add' && (typeof params.email !== 'string' || !/^[^\s@]+@[^\s@]+$/.test(params.email))) throw invalidParams('plugin email must be an email address', { field: 'email' });
     // One login change at a time across plugins: `blocksAccount` holds the scheduler for one provider.
-    if (this.action !== null || this.listings.has(id) || this.jobs.has(id)) throw refused('Wait for the current plugin operation to finish.');
+    if (this.action !== null || this.listings.has(id)) throw refused('Wait for the current plugin operation to finish.');
+    return this.lanes.shared(id, () => this.changeLogin(id, installed, params));
+  }
+
+  private async changeLogin(id: string, installed: Installed, params: RpcParams<'plugins.accountAction'>): Promise<PluginPool[]> {
     this.action = { id, provider: params.provider };
     try {
       const affected = this.core.journal.listThreads().filter((thread) => this.blocksAccount(thread.accountId));
       if (this.core.scheduler.activeAccountIds().some((accountId) => this.blocksAccount(accountId))) throw refused('Stop this provider\'s default-account turns before changing its saved login.');
-      if (affected.some((thread) => ['running', 'queued', 'waiting'].includes(thread.status))) throw refused('Stop this provider\'s default-account turns before changing its saved login.');
+      if (affected.some((thread) => threadActive(thread.status))) throw refused('Stop this provider\'s default-account turns before changing its saved login.');
       for (const thread of affected) this.core.threads.releaseAgent(thread.id);
       const args = params.action === 'add' ? POOL_COMMANDS.add(params.provider)
         : params.action === 'switch' ? POOL_COMMANDS.switch(params.provider, params.email!)
@@ -813,8 +822,10 @@ export class PluginStore {
     const app = providesApp(installed.manifest);
     const gateway = providesGateway(installed.manifest);
     if (!app && !gateway) throw refused(`${id} provides no desktop app or gateway to start with Boite.`);
-    if (app) await this.apps.setAutostart(id, this.directory(id), params.autostart);
-    if (gateway) await this.gateways.setAutostart(id, this.directory(id), params.autostart);
+    await this.lanes.shared(id, async () => {
+      if (app) await this.apps.setAutostart(id, this.directory(id), params.autostart);
+      if (gateway) await this.gateways.setAutostart(id, this.directory(id), params.autostart);
+    });
     return this.state(id);
   }
 
@@ -826,7 +837,7 @@ export class PluginStore {
     }
     const installed = this.usable(id);
     if (!providesApp(installed.manifest)) throw refused(`${id} provides no desktop app.`);
-    await this.apps.control(id, this.directory(id), params.action);
+    await this.lanes.shared(id, () => this.apps.control(id, this.directory(id), params.action));
     return this.state(id);
   }
 
@@ -838,7 +849,7 @@ export class PluginStore {
     }
     const installed = this.usable(id);
     if (!providesGateway(installed.manifest)) throw refused(`${id} provides no gateway.`);
-    await this.gateways.control(id, this.directory(id), params.action);
+    await this.lanes.shared(id, () => this.gateways.control(id, this.directory(id), params.action));
     return this.state(id);
   }
 
@@ -869,7 +880,7 @@ export class PluginStore {
     const checks = this.updates.close();
     const jobs = [...this.jobs.values()];
     for (const job of jobs) job.controller.abort();
-    await Promise.all(jobs.map((job) => job.promise));
+    await Promise.all([...jobs.map((job) => job.promise), ...this.lanes.rewrites()]);
     for (const threadId of this.running.keys()) this.core.procs.killTree(threadId);
     await Promise.all(this.exits);
     await Promise.all([...this.listings.values(), ...this.inspecting].map((pending) => pending.catch(() => undefined)));

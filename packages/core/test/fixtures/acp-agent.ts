@@ -14,8 +14,14 @@
  * `ACP_FAKE_LATE_MODEL=<n>` makes it refuse a `gateway/` model n times before
  * taking it: the model of a provider injected into its configuration, which it
  * never lists.
+ * `ACP_FAKE_REFUSE_SMART=<n>` makes it refuse the listed `fake-smart` model n
+ * times before taking it, like an agent whose route to that model is down.
+ * `ACP_FAKE_HANG_SMART=1` never answers a switch to `fake-smart`.
  * `ACP_FAKE_NO_MODES=1` makes it answer no `modes` at all, which is the agent
  * the mode mapping has to survive without sending anything.
+ *
+ * `ACP_FAKE_ARGV=1` logs `argv <json>` with the arguments after the script at
+ * `initialize`, so a test sees what reached the program, one entry each.
  *
  * `ACP_FAKE_NO_IMAGES=1` makes `initialize` answer with no
  * `promptCapabilities.image`, which is the agent a driver must refuse to send
@@ -179,6 +185,10 @@ if (modeOption) {
 /** How many times a `gateway/` model is refused before it is taken, like an agent still loading an injected provider. */
 const lateModelRefusals = Number(process.env['ACP_FAKE_LATE_MODEL'] ?? '0');
 let lateModelCalls = 0;
+/** How many times the listed `fake-smart` is refused before it is taken. */
+const smartRefusals = Number(process.env['ACP_FAKE_REFUSE_SMART'] ?? '0');
+let smartCalls = 0;
+const hangSmart = process.env['ACP_FAKE_HANG_SMART'] === '1';
 
 /** An agent with no modes at all, so the driver's warning path has a subject. */
 const noModes = process.env['ACP_FAKE_NO_MODES'] === '1' || modeOption;
@@ -262,6 +272,7 @@ function chunksOf(text: string): string[] {
 const app = agent({ name: 'acp-fake' })
   .onRequest('initialize', async () => {
     log('initialize');
+    if (process.env['ACP_FAKE_ARGV'] === '1') log(`argv ${JSON.stringify(process.argv.slice(2))}`);
     if (process.env['ACP_FAKE_HANG_INIT'] === '1') await new Promise<void>(() => undefined);
     return {
       protocolVersion: PROTOCOL_VERSION,
@@ -333,6 +344,9 @@ const app = agent({ name: 'acp-fake' })
     }
     // Like OpenCode, the smart model names its own scale once a session is on it.
     if (params.configId === 'model' && params.value === 'fake-smart') {
+      smartCalls += 1;
+      if (hangSmart) return new Promise<never>(() => {});
+      if (smartCalls <= smartRefusals) throw RequestError.internalError({ modelId: params.value }, 'route to fake-smart is down');
       return {
         configOptions: configOptions.map((option) =>
           option.id === 'model'

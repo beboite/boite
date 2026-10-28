@@ -20,6 +20,7 @@
 import type { TailscaleStatus } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { processPlatform } from './platform/index.ts';
+import { runCommand } from './run-command.ts';
 
 const STATUS_TIMEOUT_MS = 5_000;
 const SERVE_TIMEOUT_MS = 15_000;
@@ -210,26 +211,11 @@ export class TailscaleAccess {
   }
 }
 
-/** One tailscale command, killed after `timeoutMs`. Its output stays on the core. */
+/** One tailscale command, stopped with what it started after `timeoutMs`. Its output stays on the core. */
 export async function runCli(core: Core, cli: string[], args: string[], timeoutMs: number): Promise<Run> {
   const [command, ...prefix] = cli;
-  let child: ReturnType<Core['procs']['spawn']>;
-  try {
-    child = core.procs.spawn('system:tailscale', command!, [...prefix, ...args], { agentRoot: false });
-  } catch (error) {
-    return { code: null, stdout: '', stderr: error instanceof Error ? error.message : String(error), timedOut: false };
-  }
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    child.proc.kill();
-  }, timeoutMs);
-  try {
-    const [stdout, stderr, code] = await Promise.all([new Response(child.proc.stdout).text(), new Response(child.proc.stderr).text(), child.exited]);
-    return { code, stdout, stderr, timedOut };
-  } finally {
-    clearTimeout(timer);
-  }
+  const run = await runCommand(core.procs, 'system:tailscale', command!, [...prefix, ...args], timeoutMs);
+  return { ...run, stdout: new TextDecoder().decode(run.stdout) };
 }
 
 /**

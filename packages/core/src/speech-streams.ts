@@ -2,9 +2,10 @@ import { dirname } from 'node:path';
 import { SPEECH_MAX_BYTES, type SpeechConfig, type SpeechStatus } from '@boite/contracts';
 import type { SpeechLocal } from './speech-local.ts';
 import { invalidParams, refused } from './errors.ts';
+import type { NativeEngine } from './speech-native.ts';
 
 export interface SpeechJob { id: string; controller: AbortController }
-interface Session extends SpeechJob { sequence: number; samples: number; busy: boolean; timer: ReturnType<typeof setTimeout> }
+interface Session extends SpeechJob { sequence: number; samples: number; busy: boolean; timer: ReturnType<typeof setTimeout>; engine: NativeEngine | null }
 type SessionParams = { requestId: string; revision: string };
 type AudioParams = SessionParams & { sequence: number; audio?: string };
 
@@ -31,7 +32,7 @@ export class SpeechStreams {
     this.validate(params);
     if (this.jobs.size) throw refused('speech: another transcription is running; try again shortly');
     const controller = new AbortController();
-    const session: Session = { id: params.requestId, controller, sequence: 0, samples: 0, busy: true, timer: setTimeout(() => controller.abort(), this.expiresMs) };
+    const session: Session = { id: params.requestId, controller, sequence: 0, samples: 0, busy: true, timer: setTimeout(() => controller.abort(), this.expiresMs), engine: null };
     this.jobs.set(connection, session); this.sessions.set(connection, session);
     controller.signal.addEventListener('abort', () => {
       clearTimeout(session.timer);
@@ -40,9 +41,9 @@ export class SpeechStreams {
     }, { once: true });
     const config = this.config();
     try {
-      await this.local.native.ensure(this.local.nativeRuntime, dirname(this.local.modelFile(config)), controller.signal);
+      session.engine = await this.local.native.ensure(this.local.nativeRuntime, dirname(this.local.modelFile(config)), controller.signal);
       controller.signal.throwIfAborted();
-      await this.local.native.request('start', { language: config.language }, controller.signal);
+      await this.local.native.request('start', { language: config.language }, controller.signal, session.engine);
       controller.signal.throwIfAborted();
       session.busy = false;
       return { ok: true };
@@ -62,7 +63,7 @@ export class SpeechStreams {
     if (44 + samples * 2 > SPEECH_MAX_BYTES) throw invalidParams('speech.audio stream must be at most 120 seconds in total');
     session.busy = true;
     try {
-      const result = await this.local.native.request(finish ? 'finish' : 'chunk', { ...(wav ? { audio: params.audio } : {}) }, session.controller.signal);
+      const result = await this.local.native.request(finish ? 'finish' : 'chunk', { ...(wav ? { audio: params.audio } : {}) }, session.controller.signal, session.engine);
       session.controller.signal.throwIfAborted();
       if (!result || typeof result.text !== 'string' || result.text.length > 32_000) throw refused('speech: native decoder returned an invalid transcript');
       session.samples = samples; session.sequence++;

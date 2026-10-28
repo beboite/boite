@@ -170,7 +170,10 @@ runs, symlinked installs and containers keep their own installation method.
 When a release is available, a Docker core's row has a tip with the Compose
 update command and another unmanaged core's tip points to this guide. A core predating this feature needs one manual update first.
 
-The server checks eight seconds after startup, then every six hours. It follows
+The server checks eight seconds after startup, then every six hours. An owner
+client that connects, or whose window is shown again, asks it to check at once
+when its last check is more than 15 minutes old; a download, a wait or a
+failure is left as it is. It follows
 its installed stable or nightly channel, downloads an immutable release's
 signed server archive, and verifies the publisher signature and embedded
 version before staging the complete core, CLI and UI. The archive is hashed as
@@ -254,11 +257,18 @@ the service starts the previous version at boot. A start that finds the record
 takes `<data>.maintenance.lock`, a kernel `flock` the job and its recovery hold
 while they restore, so neither moves the data under the other. The restore
 starts no process while it holds it, so the kernel drops it with a killed
-holder. Whoever restores also holds the data directory's `core.lock` from its
-first look until that data moves aside, and refuses while a live core holds it.
-It puts its own `core.lock` in the restored copy before that copy takes the
-data directory's name, so a core starting meanwhile finds the data taken or
-the record still there, never a directory about to move away. It finishes that
+holder. Whoever restores takes the data directory's `core.lock` and refuses
+while a live core holds it. It also locks the restored copy before the swap.
+Windows cannot rename these directories with the lock handles open, so the
+restorer publishes PID records without `osLock` from its first acquisition in
+both directories, closes their handles without rewriting those records, then
+takes the native lock again under the final data name. Rewriting a published
+record would expose an empty file during truncation to an older PID-only core,
+which could replace it and enter. The maintenance lock stays held throughout.
+Both older cores and current cores honor these
+live PID records, including a start that checked for a rollback before its
+record was published. If the restorer dies mid-swap, its PID records no longer
+block the next restore. It finishes that
 operation's restore before anything opens the data: it uses the
 `<data>.restore-<id>` the record names, never the newest one on disk, keeps
 the rejected data as `<data>.failed-<id>` (or `<data>.unused-data` when that

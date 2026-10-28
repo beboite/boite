@@ -91,6 +91,20 @@ handshake does not finish within twelve seconds can be retried from Machines.
 Once the machine has said hello, loading its lists is waited for however long
 it takes on a slow link; the connection is never dropped for it.
 
+Each machine keeps its own clock. The hello's answer carries the core's
+(`CoreInfo.now`), and the client takes the difference from the middle of the
+round trip as that machine's `clockOffset`. A running turn's counters (working
+for, compaction elapsed) count the core's timestamps against the device's
+clock plus that offset, so a desktop 11 seconds behind its server no longer
+shows "Elapsed: 0s" for the first 11 seconds. Each liveness probe's `hello`
+measures it again, so a device that sets its clock right on a live socket,
+back from sleep, follows within one probe; a change under a second is
+round-trip noise and is ignored. The middle of a trip is off by at most half
+of it: a sample no more precise than the current offset replaces it only when
+their two ranges cannot meet, so slow probes held behind an upload never swap
+one guess for another, while a clock set right still shows. An older core
+sends no clock and the offset stays zero.
+
 The client detects silent remote sockets (`packages/ui/src/lib/ws-client.ts`).
 On a remote host, 25 seconds without any frame sends a `hello`, which the core
 answers on an open connection with its info and nothing else. That `hello`
@@ -346,13 +360,19 @@ a green underlined number. A card that has that row also names the thread's
 worktree branch there; a branch alone does not add the row. The phone list
 always has a second line and appends the branch to it. Connecting another machine leaves cards without project or PR metadata
 at their single-machine height. No placeholder appears when there is no PR. PR
-metadata comes from the execution machine's `gh pr list`, using the branch
+metadata comes from the execution machine's `gh`, using the branch
 associated with the thread. A shared checkout's current branch alone does not
 identify a thread's PR. Non-repositories and detached checkouts have no PR.
 Lookups share the common Git directory across worktrees: `git remote -v` is
-cached for five minutes and the newest 200 PRs for 15 seconds; a failed read is
-kept 15 seconds. The merged-PR archive reads the same two caches.
-A missing branch gets its own lookup only when that list was full. At most two
+cached for five minutes. Each GitHub repository has one page, the 100 PRs
+updated last (`gh api graphql`, one rate-limit point), kept 15 seconds; a
+failed read is kept 15 seconds. The merged-PR archive reads the same two caches.
+Badges and linked PRs answer from the pages: a branch or a link the pages never
+showed gets its own `gh pr list --head` or `gh pr view` once, then the pages
+carry its changes. That holds while each page reaches back past the newest
+change of the previous one, with five minutes of overlap; after a gap, or on
+Refresh PR, the branch is read alone again. Rounds cost one `gh` per
+repository, whatever the number of threads. At most two
 commands run at once, each with a ten-second deadline through `procs` as
 `pull-request:<threadId>`. Folded projects defer lookups until opened. A client
 asks again every 15 seconds while the thread works and once a minute at rest,

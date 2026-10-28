@@ -35,6 +35,7 @@
 <TurnSummary
   {turn}
   {requestStartedAt}
+  clockOffset={store.clockOffset}
   progress={store.openThread?.id === threadId ? store.openThread.progress : undefined}
   activeTool={active.some(current => current.parts.some(part => part.type === 'tool' && part.status === 'running'))}
   {activeContent}

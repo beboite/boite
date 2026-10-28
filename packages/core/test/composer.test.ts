@@ -450,6 +450,26 @@ test('archived and deleted targets cannot execute queued input', async () => {
   expect(h.core.composer.storage.queued.has(JSON.stringify(['inputs', threadId]))).toBe(false);
 });
 
+test('the outbox and a direct start refuse an unusable queued selection with the same text', async () => {
+  h = await startTestCore();
+  const a = await h.connect();
+  const { threadId, accountId } = await echoThread(h, a);
+  const signedOut = await a.call('accounts.add', { providerId: 'echo', label: 'Signed out' });
+  h.core.journal.putAccount({ ...h.core.accounts.require(signedOut.id), status: 'unauthenticated' });
+  const other = h.core.providers.list().loaded.find(provider => provider.id !== 'echo')!;
+  for (const [index, selection] of [{ providerId: 'echo', accountId: signedOut.id }, { providerId: other.id, accountId }].entries()) {
+    const choice = { ...selection, model: null, effort: null, permissionMode: 'default' as const };
+    let direct = '';
+    try { h.core.threads.startTurn(threadId, 'direct', undefined, { choice }); } catch (error) { direct = (error as Error).message; }
+    const current = h.core.composer.storage.get('inputs', threadId);
+    await a.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: current.revision, value: { input: { ...value().input, queued: [{ id: `refused-${index}`, text: 'queued', attachments: [], choice }] } } });
+    await waitFor(() => h.core.composer.storage.get('inputs', threadId).value?.input.paused === true);
+    expect(h.core.composer.storage.get('inputs', threadId).value?.input.queued[0]?.request?.failed).toBe(direct);
+    expect(direct).toContain('account is unavailable');
+  }
+  expect(h.core.journal.listTurns(threadId)).toHaveLength(0);
+});
+
 test('queued input reaches a projectless persistent agent thread', async () => {
   h = await startTestCore();
   const a = await h.connect();

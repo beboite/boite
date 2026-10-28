@@ -7,6 +7,7 @@ import { store } from '../lib/store.svelte';
 import { closeTour } from '../lib/onboarding.svelte';
 import { FIRST_MODELS } from '../lib/model-list';
 import { FakeClient } from '../lib/fake-client';
+import { phoneWidth } from '../test/phone-width';
 
 /** A provider with hundreds of models opens on its first rows; a query or the show-all row reaches the rest. */
 
@@ -344,6 +345,18 @@ test('a thread whose provider is turned off says so beside the picker, and the c
   store.showChat();
   expect(await store.setProviderEnabled(provider.id, true)).toBe(true);
   await waitFor(() => chip() === null);
+});
+
+test('a phone, which leaves provider administration to the desktop, offers no way to a Providers page it lacks', async () => {
+  const restore = phoneWidth();
+  try {
+    await mountAt('landing');
+    document.querySelector<HTMLButtonElement>('[data-testid=composer-picker]')!.click();
+    await waitFor(() => document.querySelectorAll('[data-testid=composer-picker-menu] .tile[data-provider]').length > 1);
+    expect(document.querySelector('[data-testid=picker-more-providers]')).toBeNull();
+  } finally {
+    restore();
+  }
 });
 
 test('a model the core already listed is picked at once, even while its list is read again', async () => {

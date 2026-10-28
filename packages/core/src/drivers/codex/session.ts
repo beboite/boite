@@ -47,6 +47,7 @@ import { CodexTurn } from './turn.ts';
 import { CodexRateLimits } from './rate-limits.ts';
 import { SpentWindows, turnError } from './availability.ts';
 import { SessionRetention } from '../session-retention.ts';
+import { endOnClose, releaseChild } from '../session-close.ts';
 import { noteReady } from '../driver-log.ts';
 import {PROTECTED_CODEX_ARGS, protectedCodexConfig, protectedCodexThread} from './protected.ts';
 import {PROTECTED_TOOL, protectedTool, PROTECTED_COMMIT, protectedCommit} from '../protected.ts';
@@ -525,28 +526,22 @@ export class CodexSession {
     return diagnostic || this.lastStderr.length === 0 ? head : `${head}: ${this.lastStderr}`;
   }
 
-  /** The one teardown: the pipes go, then the child, through the registry. */
+  /**
+   * The one teardown: an accepted turn ends here, then the pipes go, then the
+   * child, through the registry. The child's own close is ignored once it is
+   * let go, so it can no longer bring that turn its `turn/completed`.
+   */
   private drop(): void {
     if (this.ended) return;
     this.ended = true;
     this.closing = true;
     this.clearIdle();
+    endOnClose(this.current, 'the codex session was closed');
     this.rpc?.fail('the codex session was closed');
     this.rpc = null;
     const child = this.child;
     this.child = null;
-    if (child !== null) {
-      try {
-        child.stdin.end();
-      } catch {
-        // the pipe is already gone
-      }
-      try {
-        child.kill();
-      } catch {
-        // already exited
-      }
-    }
+    releaseChild(child);
     this.onEnded(this);
   }
 

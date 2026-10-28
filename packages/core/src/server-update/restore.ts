@@ -31,6 +31,10 @@ export const realMoves: RestoreMoves = {
  */
 export type FileLock = (file: string) => () => void;
 
+/** Restorers publish a PID record before releasing the native handles needed for their directory swap. */
+type DataLock = (dataDir: string, record?: 'pid') => () => void;
+const lockDirectory: DataLock = (dataDir, record) => lockDataDir(dataDir, undefined, undefined, undefined, record);
+
 /**
  * Beside the data directory, outside every directory a restore renames: the
  * restore a rollback needs, written before the previous version can boot and
@@ -142,7 +146,6 @@ function swapRestored(dataDir: string, id: string, moves: RestoreMoves): void {
     for (const name of UNSAVED_DATA) if (existsSync(join(dataDir, name)) && !existsSync(join(restored, name))) moves.rename(join(dataDir, name), join(restored, name));
     // The name is taken, by rejected data moved aside earlier or by an older folder: this one goes aside under its own.
     if (existsSync(failed)) {
-      releaseOwnLock(dataDir);
       setAside(dataDir, dataDir, moves);
     }
     else moves.rename(dataDir, failed);
@@ -157,18 +160,19 @@ function swapRestored(dataDir: string, id: string, moves: RestoreMoves): void {
  * what the disk shows and throws, record kept, when it cannot finish; the
  * data in place is then the rejected version's and nothing may open it.
  *
- * It holds the data directory's core lock from its first look to its last
- * move, and puts its lock in the restored copy before that copy takes the
- * name, so no core starting meanwhile locks a directory that then moves away.
+ * It takes both directories' core locks with live PID records from the start,
+ * then closes their handles without rewriting for the swap, which Windows
+ * requires for a directory rename. Both old and current cores honor those
+ * records. The maintenance lock excludes other restorers, and the final data lock is taken again.
  * The lock left on the data directory is this process's; the caller keeps it
  * or calls `releaseOwnLock`.
  */
-function restoreRecorded(dataDir: string, record: RestoreRecord, moves: RestoreMoves, lockData: (dataDir: string) => () => void): void {
+function restoreRecorded(dataDir: string, record: RestoreRecord, moves: RestoreMoves, lockData: DataLock): void {
   const restored = `${dataDir}.restore-${record.id}`;
   const failed = `${dataDir}.failed-${record.id}`;
   try {
     // Throws while a live core holds the data, which must not move under it.
-    if (existsSync(dataDir)) lockData(dataDir);
+    if (existsSync(dataDir)) lockData(dataDir, 'pid');
     if (restoredBy(dataDir) !== record.id) {
       // A file in its place is no restore: set aside, and the snapshot is moved again.
       if (existsSync(restored) && !statSync(restored).isDirectory()) setAside(dataDir, restored, moves);
@@ -180,9 +184,11 @@ function restoreRecorded(dataDir: string, record: RestoreRecord, moves: RestoreM
       // The mark's entry must be on disk before the swap makes this copy the data: a power cut that kept
       // the swap and lost the mark would leave a finished restore with no snapshot to redo it from.
       (moves.sync ?? ((directory: string) => syncDirectory(directory, true)))(restored);
-      lockData(restored);
+      lockData(restored, 'pid');
+      releaseOwnLock(dataDir, true);
+      releaseOwnLock(restored, true);
       swapRestored(dataDir, record.id, moves);
-      releaseOwnLock(failed);
+      lockData(dataDir);
     }
   } catch (error) {
     for (const directory of [dataDir, restored, failed]) releaseOwnLock(directory);
@@ -209,7 +215,7 @@ export function recordRestore(dataDir: string, record: RestoreRecord, lock: File
  * live core holds the data. The used snapshot is discarded last; a failure
  * there leaves the restore complete.
  */
-export function restoreSnapshot(dataDir: string, record: RestoreRecord, moves: RestoreMoves, lock: FileLock, lockData: (dataDir: string) => () => void = lockDataDir): void {
+export function restoreSnapshot(dataDir: string, record: RestoreRecord, moves: RestoreMoves, lock: FileLock, lockData: DataLock = lockDirectory): void {
   withMaintenance(dataDir, lock, () => {
     const current = readRecord(dataDir);
     // The record goes only once the swap is complete.
@@ -234,7 +240,7 @@ const writeNote = (dataDir: string, error: string) =>
  * read, refuses the start with the record kept, so the next start retries.
  */
 export function openDataDir(dataDir: string, prepare: (dataDir: string) => void, lock: FileLock,
-  lockData: (dataDir: string) => () => void = lockDataDir, moves: RestoreMoves = realMoves): () => void {
+  lockData: DataLock = lockDirectory, moves: RestoreMoves = realMoves): () => void {
   const file = rollbackRecord(dataDir);
   for (let attempt = 0; attempt < 3 && !existsSync(file); attempt++) {
     prepare(dataDir);

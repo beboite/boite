@@ -1,6 +1,6 @@
 import { ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, RpcErrorCode, type Attachment, type ComposerAttachment, type ComposerQueuedPrompt, type ComposerRecord, type ComposerValue, type PreviewReference } from '@boite/contracts';
 import { RpcFailure, type Client } from '../client';
-import { unresolvedAssetId, type DraftAttachment } from '../draft-attachments';
+import { isLoading, unresolvedAssetId, type DraftAttachment } from '../draft-attachments';
 import { bytes } from '../format';
 import { secureId } from '../secure-id';
 import { fill, strings } from '../strings';
@@ -595,6 +595,8 @@ export class ComposerSync {
     const files = local ? [...local.input.attachments, ...local.input.queued.flatMap(entry => entry.attachments)] : [];
     // A file still waiting for the journal's bytes has nothing to upload yet: the record waits with it.
     if (files.some(file => unresolvedAssetId(file) !== undefined && !this.#remote(unresolvedAssetId(file)!))) return;
+    // Nor does a file this device is still reading: the record goes once it took its place.
+    if (files.some(isLoading)) return;
     const sendNow = this.#forced.has(key);
     let value = this.#shape(local);
     if (!sendNow && this.#parts(value).hash === (known?.hash ?? EMPTY.hash)) { this.#dirty.delete(key); this.#fits(key); return; }

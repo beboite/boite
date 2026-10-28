@@ -2,6 +2,7 @@
 import { defaultCoordinationConfig, RpcErrorCode, type AgentAddress, type AgentContact, type AgentLetter, type AgentMatch, type AgentRelation, type Contact, type ContactRequest, type ContactsState, type CoordinationConfig, type CoordinationPeer, type CoordinationView, type Thread, type ThreadId } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { archiveProject } from './project-archive';
+import { holdContactMail } from './contact-hold';
 import type { FakeContext, FakeMethods } from './context';
 
 /** Every fake core of this page by id, what a remote letter or directory reaches. */
@@ -220,6 +221,11 @@ function reachable(ctx: FakeContext, threadId: ThreadId): { contact: AgentContac
 }
 
 /** Fake delivery is immediate, but it still respects pauses and restores the owning project. A failed thread receives, as on the core. */
+/** As the core's letter scopes: contact mail outside a shared project holds the thread before it is delivered. */
+function holdUnassociated(ctx: FakeContext, threadId: ThreadId, letter: AgentLetter): void {
+  if (letter.contact && !letter.sharedProjectId) holdContactMail(ctx, threadId, [letter.contact.name]);
+}
+
 function deliverPending(ctx: FakeContext, threadId: ThreadId): void {
   const thread = ctx.thread(threadId);
   const config = coordinationConfig(ctx, threadId);
@@ -235,7 +241,7 @@ function deliverPending(ctx: FakeContext, threadId: ThreadId): void {
       }
       continue;
     }
-    if (letter.origin === 'contact') { letter.status = 'delivered'; ctx.emit('collaboration.changed', { threadId }); continue; }
+    if (letter.origin === 'contact') { holdUnassociated(ctx, threadId, letter); letter.status = 'delivered'; ctx.emit('collaboration.changed', { threadId }); continue; }
     const sender = forwarding?.source ?? cores.get(letter.from.coreId);
     const source = forwarding?.thread ?? sender?.threads.get(letter.from.threadId);
     if (!sender || !source) continue;
@@ -245,6 +251,7 @@ function deliverPending(ctx: FakeContext, threadId: ThreadId): void {
     if (!sameProject && !(config.remote && sourceConfig.remote)) continue;
     if (forwarding ? !forwarding.allowed() : sender !== ctx && !(trusts(ctx, sender.identity.coreId) && trusts(sender, ctx.identity.coreId))) continue;
     if (thread.projectId !== null && ctx.projects.find(project => project.id === thread.projectId)?.archived) archiveProject(ctx, thread.projectId, false);
+    holdUnassociated(ctx, threadId, letter);
     letter.status = 'delivered';
     if (forwarding) forwarding.canonical.status = 'delivered';
     sender.emit('collaboration.changed', { threadId: source.id });

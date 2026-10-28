@@ -4,6 +4,7 @@ import type { FakeContext, FakeMethods } from './context';
 import { coordinationConfig, fakeAgentContact, fakeCore } from './coordination';
 import { contactState, modelTier, fakeNoteSent, fakeMayReach } from './contacts';
 import { secureId } from '../secure-id';
+import { holdContactMail } from './contact-hold';
 import { assertSharedActive, cloneShared, endpoints, onceShared, projectAddress, reconcileShared, requireShared, refusedShared, remoteShared, sharedContact, sharedScope, sharedState, sharedText } from './shared-state';
 
 const mailCores=new Set<FakeContext>();
@@ -33,6 +34,8 @@ function flushContactMail():void {
     const messages=target.letters.get(recipient?.id ?? letter.to.threadId)??[],received=messages.find(l=>l.id===letter.id);
     if(received){received.status=letter.status;received.error=letter.error;}
     else if(allowed)target.letters.set(recipient!.id,[...messages,{...cloneShared(letter),toTitle:recipient!.title,contact:{coreId:refs?.local.ownerCoreId ?? source.identity.coreId,name:inbound!.name}}]);
+    // As the core's letter scopes: delivered mail outside a shared project holds the thread.
+    if(letter.status==='delivered'&&before!=='delivered'&&!letter.sharedProjectId)holdContactMail(target,recipient!.id,[inbound!.name]);
     if(before!==letter.status){source.emit('collaboration.changed',{threadId});target.emit('collaboration.changed',{threadId:recipient?.id ?? letter.to.threadId});}
   }
 }
@@ -40,7 +43,7 @@ function flushContactMail():void {
 export function sharedLetterMethods(ctx:FakeContext,ordinary:Pick<FakeMethods,'collaboration.send'|'collaboration.configure'|'collaboration.get'>){
   mailCores.add(ctx);
   ctx.bus.onState(state=>{if(state==='closed')mailCores.delete(ctx);});
-  ctx.bus.on('contacts.updated',flushContactMail);
+  ctx.bus.observe('contacts.updated',flushContactMail);
   sharedState(ctx).listeners.add(flushContactMail);
   async function send(p:RpcParams<'contacts.sendHuman'>,human:boolean):Promise<AgentLetter>{
     const contact=sharedContact(ctx,p.to?.coreId);

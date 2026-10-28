@@ -12,6 +12,8 @@
   import { gatewayReader, namedQuotas, quotaProviderOff, quotaReader, shownQuotas } from '../lib/quota-reader.svelte';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
+  import { MediaQuery } from 'svelte/reactivity';
+  import { desktopSettings } from '../lib/settings-tabs';
   import SubscriptionProxyDashboard from './SubscriptionProxyDashboard.svelte';
   import GatewayOpenButton from './GatewayOpenButton.svelte';
   import SubscriptionProxySettings from './SubscriptionProxySettings.svelte';
@@ -26,6 +28,9 @@
    */
   let { store, showTitle = true }: { store: Store; showTitle?: boolean } = $props();
   const uid = $props.id();
+  /** Providers is a desktop settings page and the owner's: a phone is offered no way to it. */
+  const phoneWidth = new MediaQuery('(max-width: 720px)');
+  let providersReachable = $derived(store.owner && desktopSettings(phoneWidth.current));
   let native = $state(false);
   const proxy = $derived(store.settings?.subscriptionProxy);
   const proxyEnabled = $derived(proxy?.enabled === true);
@@ -161,7 +166,7 @@
     <!-- A failed read never passes for "no provider connected". -->
     {#if !reader.error}<div class="card empty" data-testid="limits-empty">
       <p>{strings.quotas.empty}</p>
-      {#if store.owner}<button type="button" onclick={() => workspace.active.showSettings('accounts')}><span class="ui-label">{strings.settings.connectProvider}</span></button>{/if}
+      {#if providersReachable}<button type="button" onclick={() => workspace.active.showSettings('accounts')}><span class="ui-label">{strings.settings.connectProvider}</span></button>{/if}
     </div>{/if}
   {:else}
     {#if rows.length > 0}<UsageLimits {rows} {store} loading={reader.busy} completed={reader.landed} onalert={alert} />{/if}

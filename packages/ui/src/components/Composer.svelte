@@ -6,15 +6,15 @@
   import { agentSlashItems, boiteSlashItems, skillSlashItems, slashCompletion, listKey, mentionQueryOf, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
   import { AgentsView, agentOfThread } from '../lib/agents.svelte';
   import { composerPlaceholder } from '../lib/composer-placeholder';
-  import { attachFiles, receiveDroppedFiles } from '../lib/composer-attachments';
+  import { receiveDroppedFiles, takeFiles } from '../lib/composer-attachments';
   import { rewindComposerEdit } from '../lib/composer-edit';
   import { editWhole } from '../lib/reading-window';
   import { fitHeight, selfSizing } from '../lib/composer-size';
-  import { editComposerInput, insertImageReference, removeImageReferences, touchesImageReference, trackImageSend } from '../lib/composer-images';
+  import { editComposerInput, insertImageReference, removeImageReferences, sameSend, sendShape, touchesImageReference, trackImageSend, type SendShape } from '../lib/composer-images';
   import { checkpoint, editKind, recordEdit, resetHistory, settled } from '../lib/composer-history';
   import { boxSelection, closeDraftUndo, copySelection, offerDraftUndo, pasteImages, travel, type EditingHost } from '../lib/composer-editing';
   import { ComposerMentions } from '../lib/composer-mentions.svelte';
-  import { unresolvedAssetId } from '../lib/draft-attachments';
+  import { isLoading, unresolvedAssetId } from '../lib/draft-attachments';
   import { focusInitial, focusWithin } from '../lib/focus';
   import { touchScreen } from '../lib/device';
   import { ignoreQuestions, noteTyping, repliesOf, replyTarget, sendAnswer } from '../lib/question-reply.svelte';
@@ -58,7 +58,11 @@
   let attachments = $derived<Attachment[]>(composer?.attachments ?? []);
   let previewReferences = $derived(composer?.previewReferences ?? []);
   let choice = $state<Choice | null>(null);
-  let picking = $state(false), readingFiles = $state(0);
+  let picking = $state(false);
+  /** Files still being read into this prompt: their tiles show, Send waits for them. */
+  let loadingFiles = $derived(attachments.some(isLoading));
+  /** Send pressed while files were still being read: it goes once they are ready, unless the user types on. */
+  let sendWhenLoaded = $state.raw<{ store: Store; key: string; state: ComposerState; shape: SendShape; nextDraft: boolean } | null>(null);
   let dictating = $state(false);
   let speechPreview = $state(''), speechStatus = $state(''), speechError = $state(false);
   let box = $state<HTMLTextAreaElement | undefined>(undefined);
@@ -136,9 +140,9 @@
    */
   let reply = $derived(target ? null : replyTarget(store));
   // An answer counts the card's picks, needs no model and cannot wait in the outbox.
-  let canSend = $derived(
+  let sendable = $derived(
     (text.trim().length > 0 || attachments.length > 0 || (reply ? !!repliesOf(store).picks[reply.id]?.length : previewReferences.length > 0)) &&
-      readingFiles === 0 && recallRead === null &&
+      recallRead === null &&
       !attachments.some(unresolvedAssetId) &&
       (reply !== null || choice !== null || target !== null) &&
       (store.connection === 'ready' || (offline && !reply)) &&
@@ -147,6 +151,13 @@
       // A prompt on its way holds back an edit, an answer and a draft's second prompt; on a thread the next one queues.
       !(composer?.sending && (composer.editing || reply !== null || !thread))
   );
+  let canSend = $derived(sendable && !loadingFiles);
+  $effect(() => {
+    const waiting = sendWhenLoaded;
+    if (waiting && !loadingFiles) untrack(() => { sendWhenLoaded = null; if (waiting.store === store && waiting.key === key && waiting.state === store.composerStates[key] && sameSend(waiting.shape, sendShape(text, attachments))) void submit(waiting.nextDraft); });
+  });
+  // Another conversation or machine on screen: the waiting send stays with the box it was pressed in, unsent.
+  $effect(() => { void key; void store; untrack(() => { sendWhenLoaded = null; }); });
 
   /** A persistent agent's own thread: the box is addressed to it by name, and its model, effort and mode live in its settings, not on chips. */
   const bot = $derived(thread?.agentSessionId ? agentOfThread(AgentsView.of(store).snapshot, thread.id)?.name ?? null : null);
@@ -283,6 +294,8 @@
     const state = stateForInput(); noteTyping(store, key);
     closeDraftUndo();
     const prior = { text: state.text, attachments: state.attachments.length };
+    // Still writing: a send pressed while files were loading waits for the next Send.
+    sendWhenLoaded = null;
     // The state still holds the text before this edit: that is the step undo returns to.
     const kind = nativeUndo ? null : touchesImageReference(state.text, state.attachments, pendingEdit) ? 'big' : editKind(input.inputType, pendingEdit);
     if (kind) recordEdit(state, kind, before, input.data ?? null);
@@ -346,6 +359,7 @@
 
   async function submit(nextDraft = false) {
     if (attachments.some(unresolvedAssetId)) { store.error = strings.errors.draftAttachment; return; }
+    if (loadingFiles) { if (sendable) sendWhenLoaded = { store, key, state: stateForInput(), shape: sendShape(text, attachments), nextDraft }; return; }
     const prompt = text;
     const images = attachments;
     const references = previewReferences;
@@ -417,25 +431,13 @@
   // Three ways in, one path: the attach button, pasted files,
   // and files dropped on the box. `lib/attachments.ts` owns the caps.
 
-  /** Reads files one at a time into this input's attachments (`lib/composer-attachments.ts`). */
-  async function take(files: File[]) {
+  /** Each file shows at once as a loading tile, its `[Image N]` at the caret, and is read behind the box. */
+  function take(files: File[]) {
     if (files.length === 0) return;
-    const state = stateForInput();
+    track();
     // An answer's files reach the agent as paths, so it takes images whatever the provider reads.
-    const attachmentProvider = reply ? null : provider;
-    const inputKey = key;
-    const inputStore = store;
-    readingFiles += 1;
-    try {
-      // Each picture that arrives is one undo step, its reference in the text included.
-      const holder = {
-        get attachments() { return state.attachments; },
-        set attachments(value: Attachment[]) { closeDraftUndo(inputKey, state); checkpoint(state); state.attachments = value; }
-      };
-      await attachFiles(inputStore, files, holder, attachmentProvider, () => {
-        if (inputStore.composerStates[inputKey] === state) insertImageReference(inputStore, inputKey);
-      });
-    } finally { readingFiles -= 1; }
+    const taken = stateForInput();
+    void takeFiles(store, taken, files, reply ? null : provider, () => { if (sendWhenLoaded?.state === taken) sendWhenLoaded = null; });
   }
 
   function onpaste(event: ClipboardEvent) {
@@ -485,8 +487,7 @@
   }
 
   /** Nothing in the box and nothing on its way into it: what a second Enter needs. */
-  let boxEmpty = $derived(text.trim().length === 0 && attachments.length === 0 && previewReferences.length === 0 &&
-    readingFiles === 0 && !dictating);
+  let boxEmpty = $derived(text.trim().length === 0 && attachments.length === 0 && previewReferences.length === 0 && !dictating);
 
   /**
    * What Send now does to the queue: steer the running turn, resume it
@@ -803,7 +804,7 @@
 
     <ComposerSpeechPreview status={speechStatus} preview={speechPreview} error={speechError} />
 
-    <ComposerBar bind:this={toolbar} {store} {key} {target} {bot} {provider} {canSend} answering={!!reply} sendLabel={reply ? strings.composer.replySend : undefined} bind:choice bind:picking bind:dictating
+    <ComposerBar bind:this={toolbar} {store} {key} {target} {bot} {provider} canSend={sendable} waiting={sendWhenLoaded !== null} answering={!!reply} sendLabel={reply ? strings.composer.replySend : undefined} bind:choice bind:picking bind:dictating
       onsubmit={() => void submit()}
       onfiles={(files) => void take(files)}
       onpreview={(text, status, error) => { speechPreview = text; speechStatus = status; speechError = error; }}

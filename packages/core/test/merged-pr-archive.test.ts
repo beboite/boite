@@ -127,6 +127,12 @@ test.each(['badge', 'linked PR'] as const)('a merge detected by the %s moves dir
     else await f.client.call('threads.linkPullRequest', { threadId: f.threadId, url: f.candidates[0]!.url });
     await waitFor(() => core.threads.require(f.threadId).doneAt != null, 1500);
     expect(core.threads.require(f.threadId)).toMatchObject({ archived: true, status: 'running' });
+    // Done only hides the row: what the finishing prompt still runs in the background stays on it.
+    const running = core.threads.require(f.threadId);
+    const owner = { providerId: running.providerId, sessionGeneration: running.sessionGeneration ?? 0, parentTurnId: turn.id };
+    core.threads.agentState.noteBackground(f.threadId, [{ id: 'merged-task', kind: 'shell', description: 'Native work', toolId: null, startedAt: Date.now() }], owner);
+    expect(await f.client.call('threads.get', { threadId: f.threadId })).toMatchObject({ archived: true, backgroundWork: { kinds: ['shell'] } });
+    core.threads.agentState.noteBackground(f.threadId, [], owner);
     expect(stops).toBe(0);
     expect(core.procs.liveCount(f.threadId)).toBe(1);
     expect(await agent.call('agent.where', { threadId: f.threadId })).toMatchObject({ threadId: f.threadId });
@@ -157,8 +163,8 @@ test.each(['before Done', 'after Done', 'scheduled turn'] as const)('Done stops 
       done: gate.then(() => ({ status: 'stopped' as const, sessionId: null, usage: null })),
     };
   } });
-  const turn = core.threads.startTurn(f.threadId, 'Finish reporting the merged change.', [], undefined,
-    timing === 'scheduled turn' ? 'compact' : undefined);
+  const turn = core.threads.startTurn(f.threadId, 'Finish reporting the merged change.',
+    timing === 'scheduled turn' ? { kind: 'compact', automatic: false } : undefined);
   try {
     await waitFor(() => core.threads.runner.handles.has(f.threadId));
     if (timing === 'before Done') report();
@@ -358,7 +364,7 @@ test('unmerged worktree threads share repository reads and check again once a mi
   };
   try {
     // Four open pull requests: one remote read and one list for the repository, no status walk.
-    expect(await sweep()).toEqual({ proofs: 4, spawned: ['git remote', 'gh pr'] });
+    expect(await sweep()).toEqual({ proofs: 4, spawned: ['git remote', 'gh api'] });
     expect(await sweep()).toEqual({ proofs: 0, spawned: [] });
     expect(await sweep()).toEqual({ proofs: 0, spawned: [] });
     // An updated thread is proved again at once, from what the repository reads kept.
@@ -368,7 +374,7 @@ test('unmerged worktree threads share repository reads and check again once a mi
     expect(updated.spawned).not.toContain('git status');
     // Each minute asks again, sharing the cached remotes and one fresh repository list.
     elapsed = 60_001;
-    expect(await sweep()).toEqual({ proofs: 4, spawned: ['gh pr'] });
+    expect(await sweep()).toEqual({ proofs: 4, spawned: ['gh api'] });
     elapsed += 30_000;
     expect((await sweep()).proofs).toBe(0);
     elapsed += 30_001;
@@ -380,7 +386,7 @@ test('unmerged worktree threads share repository reads and check again once a mi
     const merged = await sweep(1);
     expect(merged.proofs).toBe(1);
     expect(merged.spawned.filter(command => command === 'git status')).toHaveLength(2);
-    expect(merged.spawned.filter(command => command === 'gh pr')).toHaveLength(1);
+    expect(merged.spawned.filter(command => command === 'gh api')).toHaveLength(1);
     console.log('archive-spawn-measurement', JSON.stringify({ threads: 4, passes }));
   } finally { proved.mockRestore(); clock.mockRestore(); }
 });

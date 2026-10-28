@@ -1,6 +1,7 @@
-import { accessSync, chmodSync, closeSync, constants, copyFileSync, existsSync, linkSync, lstatSync, openSync, realpathSync, rmSync } from 'node:fs';
+import { accessSync, chmodSync, constants, copyFileSync, existsSync, linkSync, lstatSync, realpathSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import type { FileLock } from '../server-update/restore.ts';
+import { posixLockFile } from './posix-file-lock.ts';
 import { recoveryLink, type ServerUpdatePlatform, type UpdateCommand } from '../server-update/types.ts';
 
 /** One quoted word of a unit command line. systemd would expand `$` and `%` inside it, so those are refused. */
@@ -9,29 +10,13 @@ export function unitWord(path: string): string {
   return `"${path.replace(/[\\"]/g, char => `\\${char}`)}"`;
 }
 
-const LOCK_EX = 2;
-const LOCK_NB = 4;
-let flock: ((handle: number, operation: number) => number) | undefined;
+const flock = posixLockFile('linux');
 
-/**
- * `flock(2)` on an open descriptor. The kernel holds it for the descriptor and
- * drops it when the holder exits, killed included, so it is never stale and no
- * second holder can read it half-written, as one did a lock file the holder
- * created and had not written yet.
- */
+/** The maintenance lock: `flock(2)`, never stale and never read half-written (`posix-file-lock.ts`). */
 export const linuxFileLock: FileLock = (file) => {
-  // Loaded on first use: only a server rollback takes this lock, and Linux loads no bun:ffi at startup.
-  if (!flock) {
-    const { dlopen, FFIType } = import.meta.require('bun:ffi') as typeof import('bun:ffi');
-    const symbols = dlopen('libc.so.6', { flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 } }).symbols;
-    flock = (handle, operation) => symbols.flock(handle, operation);
-  }
-  const handle = openSync(file, 'a', 0o600);
-  if (flock(handle, LOCK_EX | LOCK_NB) !== 0) {
-    closeSync(handle);
-    throw new Error(`a server update holds ${file} while it restores the data beside it; start the server again once it is done`);
-  }
-  return () => closeSync(handle);
+  const held = flock(file);
+  if (!held) throw new Error(`a server update holds ${file} while it restores the data beside it; start the server again once it is done`);
+  return () => held.release();
 };
 
 /** Only the user service whose main process is this standalone core may replace its installation. */
