@@ -229,12 +229,14 @@ test('a Codex bot\'s budget prices turns that report no cost at the model\'s rat
   expect(lines(threadId).filter(text => text.startsWith('Skipped Routine') && text.includes("today's turns cost $1.20, past the daily budget of $1.00"))).toHaveLength(1);
   expect((await client.call('agents.snapshot', {})).status[0]!.today.costUsd).toBeCloseTo(1.2, 6);
   // A subagent's finished turn tells clients the bot's status changed, with the new total.
-  await Bun.sleep(1100);
+  // The skip's throttled agents.changed goes out first, so the subagent's turn emits at once and alone.
+  const throttle = h.core.workforce as unknown as { timer: unknown; last: number };
+  await waitFor(() => throttle.timer === null && Date.now() >= throttle.last + 1_000, 3000);
   let changes = 0;
   const off = h.core.bus.onAny(name => { if (name === 'agents.changed') changes += 1; });
   h.core.bus.emit('turn.finished', spend('trn_budget_child_2', child));
-  await waitFor(() => changes > 0, 3000);
   off();
+  expect(changes).toBe(1);
   expect((await client.call('agents.snapshot', {})).status[0]!.today.costUsd).toBeCloseTo(1.8, 6);
 });
 
