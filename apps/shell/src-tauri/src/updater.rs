@@ -236,9 +236,50 @@ pub fn app_update_status(webview: Webview, state: State<'_, AppUpdater>) -> Resu
     Ok(state.snapshot.lock().unwrap().clone())
 }
 
+/// The machine's admin policy file (docs/enterprise.md), as the core finds it:
+/// the platform's location, else `BOITE_POLICY_FILE` when that one is absent.
+fn policy_file() -> PathBuf {
+    let machine = if cfg!(windows) {
+        PathBuf::from(std::env::var_os("ProgramData").unwrap_or_else(|| "C:\\ProgramData".into())).join("Boite").join("policy.json")
+    } else if cfg!(target_os = "macos") {
+        PathBuf::from("/Library/Application Support/Boite/policy.json")
+    } else {
+        PathBuf::from("/etc/boite/policy.json")
+    };
+    if machine.exists() { return machine; }
+    match std::env::var_os("BOITE_POLICY_FILE") { Some(named) if !named.is_empty() => PathBuf::from(named), _ => machine }
+}
+
+/// The refusal the policy's `updates.app` gives the app's updater, if any. A file
+/// that does not parse, or a value that is not off, check or auto, is the
+/// strictest value: off. The core enforces the same key for everything else.
+fn app_updates_refusal(text: Option<&str>, file: &str) -> Option<String> {
+    let text = text?;
+    let refusal = || Some(format!("Desktop app updates: blocked by your organization's policy, key updates.app in {file}"));
+    let Ok(policy) = serde_json::from_str::<serde_json::Value>(text.trim_start_matches('\u{feff}')) else { return refusal() };
+    let Some(policy) = policy.as_object() else { return refusal() };
+    let Some(updates) = policy.get("updates")?.as_object() else { return refusal() };
+    match updates.get("app").map(|value| value.as_str()) {
+        None | Some(Some("check")) | Some(Some("auto")) => None,
+        _ => refusal(),
+    }
+}
+
+fn app_updates_blocked() -> Result<(), String> {
+    let file = policy_file();
+    let text = match std::fs::read_to_string(&file) {
+        Ok(text) => Some(text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        // A file that exists and cannot be read fails closed, as in the core.
+        Err(_) => Some(String::new()),
+    };
+    match app_updates_refusal(text.as_deref(), &file.display().to_string()) { Some(message) => Err(message), None => Ok(()) }
+}
+
 #[tauri::command]
 pub async fn app_update_check(webview: Webview, app: AppHandle, state: State<'_, AppUpdater>, channel: Track) -> Result<Snapshot, String> {
     crate::browser::only_main(&webview)?;
+    app_updates_blocked()?;
     let _operation = state.begin()?;
     state.pending.lock().unwrap().take();
     state.change(&app, |s| { s.phase = "checking".into(); s.channel = channel; s.error = None;
@@ -269,6 +310,7 @@ pub async fn app_update_check(webview: Webview, app: AppHandle, state: State<'_,
 #[tauri::command]
 pub async fn app_update_download(webview: Webview, app: AppHandle, state: State<'_, AppUpdater>) -> Result<Snapshot, String> {
     crate::browser::only_main(&webview)?;
+    app_updates_blocked()?;
     let _operation = state.begin()?;
     if state.snapshot.lock().unwrap().phase != "available" { return Err("Check for an available update before downloading".into()); }
     let update = state.pending.lock().unwrap().as_ref().ok_or("No update to download")?.update.clone();
@@ -399,6 +441,15 @@ async fn install(app: AppHandle, state: State<'_, AppUpdater>, quiet: bool) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn admin_policy_turns_app_updates_off_and_fails_closed() {
+        assert_eq!(app_updates_refusal(None, "p.json"), None);
+        assert_eq!(app_updates_refusal(Some("{}"), "p.json"), None);
+        assert_eq!(app_updates_refusal(Some(r#"{"updates":{"app":"check"}}"#), "p.json"), None);
+        assert!(app_updates_refusal(Some(r#"{"updates":{"app":"off"}}"#), "p.json").unwrap().contains("updates.app in p.json"));
+        assert!(app_updates_refusal(Some(r#"{"updates":{"app":"never"}}"#), "p.json").is_some());
+        assert!(app_updates_refusal(Some("{not json"), "p.json").is_some());
+    }
     fn release(tag: &str, draft: bool, signed: bool) -> Release {
         Release { tag_name: tag.into(), draft, published_at: None, body: None,
             assets: if signed { vec![Asset { name: "latest.json".into(), browser_download_url: format!("{}{tag}/latest.json", DOWNLOADS[0]) }] } else { vec![] } }
