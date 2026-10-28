@@ -57,3 +57,38 @@ test('thread new --model picks from this machine\'s models, or with --machine fr
   });
   await expect(spawn({ requestId: 'remote-2', machine: 'pc', model: label(there.choices[0]!) })).rejects.toThrow('the in-memory client does not start threads on another machine');
 });
+
+test('delegate spawn --machine starts the subagent on that machine, and its parent sees it there with its result', async () => {
+  const desk = await machine('desk'), pc = await machine('pc');
+  await desk.call('group.create', { name: 'Home' });
+  await pc.call('group.join', { invite: (await desk.call('group.invite', {})).invite });
+  const spawn = (params: { requestId: string; task?: string; model?: string; project?: string }) => desk.call('delegation.spawn', { threadId: 't-trace', task: 'Read the notes', machine: 'pc', ...params });
+
+  await expect(spawn({ requestId: 'sub-1' })).rejects.toThrow('boite settings request groupThreads true --machine pc --why');
+  await pc.call('settings.set', { groupThreads: true });
+  await expect(spawn({ requestId: 'sub-1', project: 'nothing' })).rejects.toMatchObject({ message: expect.stringContaining('pc has no project named nothing; name one of its projects with --project'), data: { field: 'project' } });
+  await expect(spawn({ requestId: 'sub-1', model: 'nothing-like-it' })).rejects.toThrow('model: no installed model matches "nothing-like-it"; run boite delegate models --machine pc');
+
+  // Without --project it works there in the project named like the parent's.
+  const child = await spawn({ requestId: 'sub-1' });
+  expect(child.machine).toEqual({ coreId: 'pc', name: 'pc' });
+  expect(child.thread.parentThreadId).toBe('t-trace');
+  const there = await pc.call('threads.get', { threadId: child.thread.id });
+  expect(there).toMatchObject({ projectId: 'p-boite', parentThreadId: undefined });
+  expect((await spawn({ requestId: 'sub-1' })).thread.id).toBe(child.thread.id);
+  await expect(spawn({ requestId: 'sub-1', task: 'Read other notes' })).rejects.toThrow('requestId already used for different content');
+
+  const waited = await desk.call('delegation.wait', { threadId: 't-trace', agentId: child.thread.id, timeoutMs: 5000 });
+  expect(waited.state).toBe('result_available');
+  const view = await desk.call('delegation.get', { threadId: 't-trace' });
+  const agent = view.agents.find(entry => entry.thread.id === child.thread.id)!;
+  expect(agent).toMatchObject({ machine: { coreId: 'pc', name: 'pc' }, task: 'Read the notes' });
+  expect(agent.result).not.toBeNull();
+  expect(view.messages.filter(letter => letter.origin === 'result' && letter.from.coreId === 'pc' && letter.from.threadId === child.thread.id)).toHaveLength(1);
+  const page = await desk.call('delegation.result', { threadId: 't-trace', agentId: child.thread.id, turnId: agent.resultRef!.turnId });
+  expect(page.text).toBe(agent.result);
+
+  // Out of reach, its parent keeps what it last saw.
+  pc.close();
+  expect((await desk.call('delegation.get', { threadId: 't-trace' })).agents.find(entry => entry.thread.id === child.thread.id)).toMatchObject({ machine: { coreId: 'pc' }, result: agent.result });
+});

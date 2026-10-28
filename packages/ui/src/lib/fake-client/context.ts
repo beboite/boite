@@ -85,6 +85,7 @@ import { initialDesktopUpdate, initialServerUpdate } from './server-update';
 import { observeLog } from './logs';
 import { followGoal } from './todos';
 import type { FakeWorktree } from './worktrees';
+import type { DelegationRow } from './delegation-machine';
 
 /**
  * One handler per contract method; plugins, agents and workflows answer from
@@ -229,10 +230,11 @@ export class FakeContext {
   readonly deletedThreads = new Map<ThreadId, { threads: Thread[]; archived: boolean[]; deletedAt: number }>();
   readonly coordination = new Map<ThreadId, CoordinationConfig>();
   readonly delegationConfigs = new Map<ThreadId, DelegationConfig>();
-  readonly delegationAgents = new Map<ThreadId, { threadId: ThreadId; profileId: string; task: string }[]>();
+  readonly delegationAgents = new Map<ThreadId, DelegationRow[]>();
   readonly delegationLetters = new Map<ThreadId, AgentLetter[]>();
   readonly delegationTurns = new Map<ThreadId, number>();
-  readonly delegationRequests = new Map<string, { fingerprint: string; threadId: ThreadId }>();
+  /** `coreId` names the member a child on another machine runs on. */
+  readonly delegationRequests = new Map<string, { fingerprint: string; threadId: ThreadId; coreId?: string }>();
   /** A child's own worktree, as `delegation.spawn` with `worktree` records it. */
   readonly delegationWorktrees = new Map<ThreadId, DelegationWorktree>();
   readonly delegationSendRequests = new Map<string, { fingerprint: string; letter: AgentLetter }>();
