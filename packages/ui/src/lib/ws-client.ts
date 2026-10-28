@@ -44,10 +44,14 @@ export class WsClient implements ObservableClient {
   #socket: SocketLike | null = null;
   #state: ClientState = 'idle';
   #core: CoreInfo | null = null;
+  #clockOffset = 0;
+  /** How far `#clockOffset` can be off: half the round trip that measured it, rounded up to cover the offset's own rounding. */
+  #clockError = 0;
   #nextId = 1;
   #pending = new Map<number, Pending>();
   #handlers = new Map<string, Set<(payload: unknown) => void>>();
   #stateHandlers = new Set<(state: ClientState) => void>();
+  #clockHandlers = new Set<(offset: number) => void>();
   #subscribed = new Set<ThreadId>();
   #attempt = 0;
   #retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -113,9 +117,18 @@ export class WsClient implements ObservableClient {
     return this.#core;
   }
 
+  get clockOffset(): number {
+    return this.#clockOffset;
+  }
+
   onState(handler: (state: ClientState) => void): () => void {
     this.#stateHandlers.add(handler);
     return () => this.#stateHandlers.delete(handler);
+  }
+
+  onClockOffset(handler: (offset: number) => void): () => void {
+    this.#clockHandlers.add(handler);
+    return () => this.#clockHandlers.delete(handler);
   }
 
   on<E extends RpcEventName>(event: E, handler: EventHandler<E>): () => void {
@@ -339,6 +352,7 @@ export class WsClient implements ObservableClient {
         const hello = this.#helloParams();
         // The machine this hello is signed for, and its nonce: what a refusal saying it is in no group must be signed over.
         const meant = hello.device !== undefined && 'nonce' in hello.device ? { coreId: signer?.coreId ?? null, nonce: hello.device.nonce } : null;
+        const sentAt = Date.now();
         this.#send(socket, 'hello', { ...hello, ...(relay === null ? {} : { relay }) }).then(
           (result) => {
             if (result.core.protocolVersion !== PROTOCOL_VERSION) {
@@ -379,6 +393,9 @@ export class WsClient implements ObservableClient {
             this.#attempt = 0;
             this.#core = result.core;
             this.#lastFrameAt = Date.now();
+            // The core read its clock halfway through the round trip, as far as this side can tell.
+            this.#clockOffset = typeof result.core.now === 'number' ? Math.round(result.core.now - (sentAt + this.#lastFrameAt) / 2) : 0;
+            this.#clockError = Math.ceil((this.#lastFrameAt - sentAt) / 2);
             this.#setState('ready');
             this.#armLiveness(IDLE_PROBE_MS);
             this.#resubscribe(socket);
@@ -469,8 +486,31 @@ export class WsClient implements ObservableClient {
       };
     });
     this.#probe = { socket, result, settle };
-    void this.#send(socket, 'hello', { protocolVersion: PROTOCOL_VERSION, client: { name: this.#options.clientName, version: this.#options.version } }).catch(() => undefined);
+    const sentAt = Date.now();
+    void this.#send(socket, 'hello', { protocolVersion: PROTOCOL_VERSION, client: { name: this.#options.clientName, version: this.#options.version } })
+      .then((answer) => this.#retime(answer.core.now, sentAt), () => undefined);
     return result;
+  }
+
+  /**
+   * A probe's hello measures the clocks again, for a device that corrected
+   * its own on a live socket, back from sleep. Less than a second apart is
+   * round-trip noise, which would only make a counter skip. The middle of a
+   * trip is off by at most half of it: a sample no more precise than the
+   * offset it would replace counts only when the two ranges cannot meet, so
+   * slow hellos held behind an upload never swap one guess for another, while
+   * a clock set right still shows.
+   */
+  #retime(now: number | undefined, sentAt: number): void {
+    if (typeof now !== 'number') return;
+    const back = Date.now();
+    const offset = Math.round(now - (sentAt + back) / 2);
+    const error = Math.ceil((back - sentAt) / 2);
+    const shift = Math.abs(offset - this.#clockOffset);
+    if (shift < 1000 || (error >= this.#clockError && shift <= error + this.#clockError)) return;
+    this.#clockOffset = offset;
+    this.#clockError = error;
+    for (const handler of this.#clockHandlers) handler(offset);
   }
 
   #suspect(socket: SocketLike): void {

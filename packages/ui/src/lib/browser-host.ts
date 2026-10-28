@@ -43,25 +43,46 @@ export interface HostClient {
 export const HOST_PAGE_EVENTS = [
   'Page.frameNavigated', 'Page.javascriptDialogOpening', 'Page.loadEventFired', 'Page.domContentEventFired', 'Page.screencastFrame',
   'Runtime.consoleAPICalled', 'Runtime.exceptionThrown', 'Runtime.executionContextCreated', 'Runtime.executionContextsCleared',
-  'Network.requestWillBeSent', 'Network.responseReceived', 'Network.loadingFailed', 'Log.entryAdded',
+  'Network.requestWillBeSent', 'Network.responseReceived', 'Network.loadingFinished', 'Network.loadingFailed', 'Log.entryAdded',
 ] as const;
+
+/** The calls `browser network` captures (`packages/core/src/browser/network.ts`): what a page fetches rather than draws. */
+const CALL_TYPES = new Set(['Fetch', 'XHR', 'Document', 'EventSource']);
+/** The calls of one webview still loading: only their end is relayed, not each image's or script's. */
+const OPEN_CALLS_MAX = 1000;
 
 /**
  * A page's network events, cut to what the core reads of them
- * (`packages/core/src/browser/page-events.ts`): a request's address, and a
- * response only when it failed. Headers and initiator stacks never cross the
- * loopback link. `null` drops the event. Read another field there, keep it here.
+ * (`packages/core/src/browser/page-events.ts` and `network.ts`): a request's
+ * address, a response only when it failed, and for a call a page makes to its
+ * servers (`CALL_TYPES`), its method, headers and status, which `browser
+ * network` shows, and its end. Bodies stay in the webview until the core asks
+ * for one, and initiator stacks never cross the loopback link. `calls` holds
+ * the webview's calls still loading. `null` drops the event. Read another
+ * field there, keep it here.
  */
-export function compactPageEvent(method: string, params: Record<string, unknown>): Record<string, unknown> | null {
+export function compactPageEvent(method: string, params: Record<string, unknown>, calls: Set<unknown>): Record<string, unknown> | null {
+  const call = CALL_TYPES.has(String(params.type));
   if (method === 'Network.requestWillBeSent') {
-    const request = params.request as { url?: unknown } | undefined;
-    return { requestId: params.requestId, request: { url: request?.url } };
+    const request = params.request as { url?: unknown; method?: unknown; headers?: unknown; hasPostData?: unknown; postData?: unknown } | undefined;
+    if (!call) return { requestId: params.requestId, request: { url: request?.url } };
+    calls.add(params.requestId);
+    if (calls.size > OPEN_CALLS_MAX) calls.delete(calls.values().next().value);
+    const redirect = params.redirectResponse as { status?: unknown; headers?: unknown; mimeType?: unknown } | undefined;
+    return {
+      requestId: params.requestId, type: params.type, documentURL: params.documentURL,
+      request: { url: request?.url, method: request?.method, headers: request?.headers, hasPostData: request?.hasPostData === true || request?.postData !== undefined },
+      ...(redirect ? { redirectResponse: { status: redirect.status, headers: redirect.headers, mimeType: redirect.mimeType } } : {}),
+    };
   }
   if (method === 'Network.responseReceived') {
-    const response = params.response as { status?: unknown; statusText?: unknown; url?: unknown } | undefined;
+    const response = params.response as { status?: unknown; statusText?: unknown; url?: unknown; mimeType?: unknown; headers?: unknown } | undefined;
+    if (call) return { requestId: params.requestId, type: params.type, response: { status: response?.status, statusText: response?.statusText, url: response?.url, mimeType: response?.mimeType, headers: response?.headers } };
     if (typeof response?.status !== 'number' || response.status < 400) return null;
     return { requestId: params.requestId, response: { status: response.status, statusText: response.statusText, url: response.url } };
   }
+  if (method === 'Network.loadingFinished') return calls.delete(params.requestId) ? { requestId: params.requestId, encodedDataLength: params.encodedDataLength } : null;
+  if (method === 'Network.loadingFailed') calls.delete(params.requestId);
   return params;
 }
 
@@ -69,7 +90,7 @@ export function compactPageEvent(method: string, params: Record<string, unknown>
 export const AGENT_VIEW_PREFIX = 'agent-';
 
 /** `relay` is the core's connection the webview answers on; `profile` the one its pages run in. */
-interface Target { id: string; relay: string; profile: string; context: string | null; url: string; title: string; off: (() => void) | null }
+interface Target { id: string; relay: string; profile: string; context: string | null; url: string; title: string; off: (() => void) | null; calls: Set<unknown> }
 interface Message { id?: number; method?: string; params?: Record<string, unknown>; sessionId?: string }
 
 export class BrowserHostRelay {
@@ -185,7 +206,7 @@ export class BrowserHostRelay {
   }
 
   async #open(relay: string, profile: string, url: string, context: string | null): Promise<Target> {
-    const target: Target = { id: `${AGENT_VIEW_PREFIX}${crypto.randomUUID()}`, relay, profile, context, url, title: '', off: null };
+    const target: Target = { id: `${AGENT_VIEW_PREFIX}${crypto.randomUUID()}`, relay, profile, context, url, title: '', off: null, calls: new Set() };
     this.#targets.set(target.id, target);
     this.bridge.create(target.id, url, profile === DEFAULT_BROWSER_PROFILE ? undefined : profile);
     return this.#track(target);
@@ -196,7 +217,7 @@ export class BrowserHostRelay {
     this.#targets.set(target.id, target);
     try {
       const off = await this.bridge.events(target.id, HOST_PAGE_EVENTS, (method, params) => {
-        const compact = this.#targets.has(target.id) ? compactPageEvent(method, params) : null;
+        const compact = this.#targets.has(target.id) ? compactPageEvent(method, params, target.calls) : null;
         if (compact) this.#send(target.relay, { method, params: compact, sessionId: target.id });
       });
       if (this.#targets.has(target.id)) target.off = off; else off();
@@ -239,7 +260,7 @@ export class BrowserHostRelay {
       }, () => {});
     } else if (event.type === 'popup') {
       // A popup the shell already made, its `window.opener` the page that asked: adopted the same way.
-      const popup: Target = { id: event.popup, relay: target.relay, profile: target.profile, context: target.context, url: event.url, title: '', off: null };
+      const popup: Target = { id: event.popup, relay: target.relay, profile: target.profile, context: target.context, url: event.url, title: '', off: null, calls: new Set() };
       void this.#track(popup).then(() => {
         // A sign-in that closes itself at once may be destroyed before it is announced.
         if (this.#targets.has(popup.id)) this.#send(target.relay, { method: 'Target.targetCreated', params: { targetInfo: this.#info(popup, target.id) } });
