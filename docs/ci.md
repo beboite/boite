@@ -364,8 +364,8 @@ draft flag, `Bundle size` and `Ruleset check names` aside
 shows first in the queue, which removes the pull request.
 
 Marking a draft ready starts no run, nor does a conversion to draft: a draft's
-run already reports what a ready one would. CodeRabbit reviews drafts
-(`.coderabbit.yaml`).
+run already reports what a ready one would. mtsu-patrol reviews once the pull
+request is ready.
 
 Until 2026-10-28 a ready pull request ran the full matrix, then its merge group
 ran it again. GitHub Free allows the organization 20 concurrent jobs: with 20 or
@@ -380,9 +380,11 @@ they tested: the time a review bot takes to answer.
 An agent's pull request flow:
 
 1. `gh pr create --draft`.
-2. Fix CI failures and review findings, batching pushes.
-3. `gh pr ready <number>` once the checks pass and the threads are answered.
-4. `gh pr merge <number> --squash --match-head-commit <sha>`. A failure the
+2. Fix the draft's CI failures in one push.
+3. `gh pr ready <number>` once the draft's checks pass.
+4. After that, one push per round: wait for the head's CI run and
+   mtsu-patrol's review, then fix everything they found together.
+5. `gh pr merge <number> --squash --match-head-commit <sha>`. A failure the
    queue finds removes the pull request: fix it, push, and merge again.
 
 ## Build cost
@@ -668,10 +670,14 @@ domain's DNS names `mtsu-dev.github.io`.
 
 ## Pull request reviews
 
-`.coderabbit.yaml` enables advisory reviews and chat replies, drafts included
-(`auto_review.drafts`), and skips generated artifacts. CodeRabbit is not a
-required check. Its installed App, plan eligibility and quotas are external
-prerequisites.
+mtsu-patrol reviews each ready head; it is not a required check.
+`.coderabbit.yaml` turns CodeRabbit's automatic reviews and chat replies off:
+its free quota left most pull requests with a limit notice instead of a review.
+
+A review with no critical or major finding is the last one: the push that
+only answers it needs no second review. mtsu-patrol skips a push of at most
+150 changed lines after such a review (a setting in its panel) and says so in
+its summary.
 
 Follow the [PR rules](../AGENTS.md#follow-through-on-pull-requests): inspect CI
 and review findings together, verify and group fixes before pushing, and report
