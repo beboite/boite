@@ -49,6 +49,8 @@ export interface Session {
 export interface ObservableClient extends Client {
   readonly core: CoreInfo | null;
   onState(handler: (state: ClientState) => void): () => void;
+  /** A later measure of `clockOffset` that moved by a second or more, on the same connection. */
+  onClockOffset?(handler: (offset: number) => void): () => void;
 }
 
 /** The slice of the browser WebSocket this client uses. A test supplies its own. */

@@ -377,7 +377,7 @@
       {:else if tab === 'plugins'}
         <PluginsPage store={target} />
       {:else if tab === 'experiments'}
-        <ExperimentsPage store={target} bar={bar ? machineBar : undefined} />
+        <ExperimentsPage {store} {target} bar={bar ? machineBar : undefined} />
       {:else if tab === 'diagnostics'}
         <DiagnosticsPage store={target} {onopenthread} />
       {:else}

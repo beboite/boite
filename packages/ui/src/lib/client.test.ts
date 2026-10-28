@@ -173,6 +173,17 @@ describe('WsClient', () => {
       socket.receive({ id: socket.frame(0).id, result: { core: { ...CORE, now: sent + 200 + 11_000 }, principal: 'owner' } });
       await client.connect();
       expect(client.clockOffset).toBe(11_000);
+      // Back from sleep the device set its clock right on the same socket: the probe's hello measures again.
+      const heard: number[] = [];
+      client.onClockOffset((offset) => heard.push(offset));
+      vi.setSystemTime(Date.now() + 11_000);
+      const resumed = client.resume();
+      await vi.advanceTimersByTimeAsync(0);
+      socket.receive({ id: socket.frame(1).id, result: { core: { ...CORE, now: Date.now() + 300 }, principal: 'owner' } });
+      await resumed;
+      expect(socket.closed).toBe(false);
+      expect(client.clockOffset).toBe(300);
+      expect(heard).toEqual([300]);
     } finally { client.close(); vi.useRealTimers(); }
     const old = connected();
     try {

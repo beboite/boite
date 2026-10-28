@@ -49,6 +49,7 @@ export class WsClient implements ObservableClient {
   #pending = new Map<number, Pending>();
   #handlers = new Map<string, Set<(payload: unknown) => void>>();
   #stateHandlers = new Set<(state: ClientState) => void>();
+  #clockHandlers = new Set<(offset: number) => void>();
   #subscribed = new Set<ThreadId>();
   #attempt = 0;
   #retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -121,6 +122,11 @@ export class WsClient implements ObservableClient {
   onState(handler: (state: ClientState) => void): () => void {
     this.#stateHandlers.add(handler);
     return () => this.#stateHandlers.delete(handler);
+  }
+
+  onClockOffset(handler: (offset: number) => void): () => void {
+    this.#clockHandlers.add(handler);
+    return () => this.#clockHandlers.delete(handler);
   }
 
   on<E extends RpcEventName>(event: E, handler: EventHandler<E>): () => void {
@@ -477,8 +483,23 @@ export class WsClient implements ObservableClient {
       };
     });
     this.#probe = { socket, result, settle };
-    void this.#send(socket, 'hello', { protocolVersion: PROTOCOL_VERSION, client: { name: this.#options.clientName, version: this.#options.version } }).catch(() => undefined);
+    const sentAt = Date.now();
+    void this.#send(socket, 'hello', { protocolVersion: PROTOCOL_VERSION, client: { name: this.#options.clientName, version: this.#options.version } })
+      .then((answer) => this.#retime(answer.core.now, sentAt), () => undefined);
     return result;
+  }
+
+  /**
+   * A probe's hello measures the clocks again, for a device that corrected
+   * its own on a live socket, back from sleep. Less than a second apart is
+   * round-trip noise, which would only make a counter skip.
+   */
+  #retime(now: number | undefined, sentAt: number): void {
+    if (typeof now !== 'number') return;
+    const offset = Math.round(now - (sentAt + Date.now()) / 2);
+    if (Math.abs(offset - this.#clockOffset) < 1000) return;
+    this.#clockOffset = offset;
+    for (const handler of this.#clockHandlers) handler(offset);
   }
 
   #suspect(socket: SocketLike): void {

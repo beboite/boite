@@ -217,7 +217,7 @@
       {:else if shown === 'resources' && target.owner}
         <ResourcesPage store={target} />
       {:else if shown === 'experiments'}
-        <ExperimentsPage store={target} {bar} />
+        <ExperimentsPage {store} {target} {bar} />
       {:else if shown === 'diagnostics' && target.owner}
         <DiagnosticsPage store={target} {onopenthread} />
       {:else if shown === 'worktrees'}

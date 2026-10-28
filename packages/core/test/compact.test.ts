@@ -194,6 +194,22 @@ describe('automatic compaction', () => {
     client.close();
   });
 
+  test('a shown thread whose last turn was stopped is left to the user, over its limit or not', async () => {
+    const client = await h.connect();
+    const { threadId } = await quiet(client);
+    await turn(client, threadId, 'x'.repeat(950));
+    const stopped = client.next('turn.finished', t => t.threadId === threadId);
+    await client.call('turns.start', { threadId, prompt: `[sleep:5000] ${'x'.repeat(950)}` });
+    await client.call('turns.stop', { threadId });
+    expect((await stopped).status).toBe('stopped');
+    await client.call('settings.set', { autoCompact: { tokens: 1000, moments: [] } });
+    expect((await client.call('threads.get', { threadId })).context?.tokens ?? 0).toBeGreaterThanOrEqual(1000);
+    await client.call('threads.focus', { threadId });
+    await pause(150);
+    expect(await compactions(client, threadId)).toEqual([]);
+    client.close();
+  });
+
   test('a compaction that keeps more than the limit is not chained by the next looks', async () => {
     // Each look brings a new context reading; without a guard every one compacted again, with no prompt between.
     const restore = setDriver('echo', { ...echoDriver, startTurn(ctx) {

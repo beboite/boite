@@ -11,10 +11,10 @@
   import type { Store } from '../lib/store.svelte';
 
   /**
-   * The switches of this device; with a store, the experiments of that
-   * store's machine below them, under `bar`, which picks the machine.
+   * The switches of this device, with the checklist model of `store`, this
+   * window's machine; then the experiments of `target`, the machine `bar` picks.
    */
-  let { store, bar }: { store?: Store; bar?: Snippet } = $props();
+  let { store, target = store, bar }: { store?: Store; target?: Store; bar?: Snippet } = $props();
   const uid = $props.id();
 
   let copy = $derived(experimentCopy());
@@ -76,6 +76,6 @@
     {/each}
   </section>
 
-  {#if store && bar}{@render bar()}{/if}
-  {#if store}<CacheKeepaliveSettings {store} /><CompactionSettings {store} backgroundOnly /><DeviceStreamSettings {store} />{/if}
+  {#if target && bar}{@render bar()}{/if}
+  {#if target}<CacheKeepaliveSettings store={target} /><CompactionSettings store={target} backgroundOnly /><DeviceStreamSettings store={target} />{/if}
 </div>

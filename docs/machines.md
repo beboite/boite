@@ -96,8 +96,11 @@ Each machine keeps its own clock. The hello's answer carries the core's
 round trip as that machine's `clockOffset`. A running turn's counters (working
 for, compaction elapsed) count the core's timestamps against the device's
 clock plus that offset, so a desktop 11 seconds behind its server no longer
-shows "Elapsed: 0s" for the first 11 seconds. An older core sends no clock and
-the offset stays zero.
+shows "Elapsed: 0s" for the first 11 seconds. Each liveness probe's `hello`
+measures it again, so a device that sets its clock right on a live socket,
+back from sleep, follows within one probe; a change under a second is
+round-trip noise and is ignored. An older core sends no clock and the offset
+stays zero.
 
 The client detects silent remote sockets (`packages/ui/src/lib/ws-client.ts`).
 On a remote host, 25 seconds without any frame sends a `hello`, which the core

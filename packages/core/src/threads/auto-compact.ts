@@ -87,8 +87,9 @@ export class AutoCompaction {
    * quiet before the limit was lowered, or whose timer a restart dropped. A
    * copy compacted in the background starts only below the limit, and its next
    * prompt would wait for the agent to compact first, so it compacts now, while
-   * the user reads and types. A compaction never chains into another, even
-   * one that kept more than the limit or failed: the last turn decides.
+   * the user reads and types. As after a turn, a stop or a failure is the
+   * user's to look at, and a compaction never chains into another, even one
+   * that kept more than the limit: the last turn decides.
    */
   shown(threadId: ThreadId): void {
     if (this.core.stopping || this.core.journal.isClosed()) return;
@@ -97,7 +98,8 @@ export class AutoCompaction {
     if (thread === null || reading === null || this.timers.has(threadId)) return;
     const limit = effectiveCompaction(this.core.settings.get(), thread).autoCompact?.tokens ?? null;
     if (limit === null || reading.tokens < limit) return;
-    if (this.core.journal.lastTurn(threadId)?.execution?.operation === 'compact') return;
+    const last = this.core.journal.lastTurn(threadId);
+    if (last !== null && (last.status !== 'done' || last.execution?.operation === 'compact')) return;
     this.fire(threadId);
   }
 

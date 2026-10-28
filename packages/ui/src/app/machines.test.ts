@@ -99,6 +99,15 @@ test('background compaction turns on for the machine picked above it, not the wi
   query<HTMLInputElement>('[data-testid=background-compaction-on]').click();
   await waitFor(() => remote.store.settings?.backgroundCompaction === true);
   expect(store.settings?.backgroundCompaction ?? false).toBe(false);
+  // The checklist model sits among this device's switches, above the bar: it stays this window's machine's.
+  query<HTMLInputElement>('[data-testid=experiment-goal2]').click();
+  await waitFor(() => document.querySelector('[data-testid=goal2-tracker-model]') !== null);
+  query<HTMLButtonElement>('[data-testid=goal2-tracker-model]').click();
+  flushSync();
+  const picked = [...document.querySelectorAll<HTMLElement>('[data-testid=goal2-tracker-model-menu] [data-value]')].find(row => row.dataset.value !== 'auto')!;
+  picked.click();
+  await waitFor(() => store.settings?.goalTracker != null);
+  expect(remote.store.settings?.goalTracker ?? null).toBe(null);
   expect(workspace.active).toBe(store);
 });
 
