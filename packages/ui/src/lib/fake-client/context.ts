@@ -336,7 +336,7 @@ export class FakeContext {
     this.quotaExtras = options.quotaExtras ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('quotaExtras') === '1');
     this.brainLinkPermission = options.brainLinkPermission ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('brainLinkPermission') === '1');
     this.plainLink = options.plainLink ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('plainLink') === '1');
-    this.bus = new FakeBus(options.principal ?? 'owner');
+    this.bus = new FakeBus(options.principal ?? 'owner', { threadId: () => this.agentThreadId, projectOf: id => this.threads.get(id)?.projectId ?? null });
     this.agents = new FakeAgents(revision => {
       this.emit('agents.changed', { revision });
       // As the core: a change to any agent may answer a card, settled once per burst after it commits.

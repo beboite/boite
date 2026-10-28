@@ -433,7 +433,25 @@ export function accessRefusal(method: RpcMethodName, caller: Caller, params?: un
   return { message: `${method} is for the owner only`, data: { method, principal: caller.principal } };
 }
 
-/** Whether a connection of `principal` hears `name` at all; the server checks an agent event's thread or project too. */
+/** Whether a connection of `principal` hears `name` at all; `agentHearsEvent` narrows an agent's to its thread. */
 export function mayHearEvent(name: RpcEventName, principal: Principal): boolean {
   return principal === 'owner' || (principal === 'agent' ? AGENT_EVENTS : DEVICE_EVENTS).has(name);
+}
+
+/** The thread an event is about, when its payload names one. */
+export function eventThreadId(payload: unknown): string | null {
+  if (typeof payload !== 'object' || payload === null) return null;
+  const value = (payload as { threadId?: unknown }).threadId;
+  return typeof value === 'string' ? value : null;
+}
+
+/**
+ * Of the events `mayHearEvent` lets an agent hear, those about the thread its
+ * token names (`threadId`, null when unbound), and the board of that thread's
+ * project, which `projectOf` reads.
+ */
+export function agentHearsEvent(name: RpcEventName, payload: unknown, threadId: string | null, projectOf: (threadId: string) => string | null): boolean {
+  if (!AGENT_EVENTS.has(name)) return false;
+  if (name !== 'todos.updated') return eventThreadId(payload) === threadId;
+  return threadId !== null && projectOf(threadId) === (payload as { projectId?: unknown }).projectId;
 }

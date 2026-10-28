@@ -167,8 +167,4 @@ export class Bus {
   }
 }
 
-export function eventThreadId(payload: EventPayload): string | null {
-  if (typeof payload !== 'object' || payload === null) return null;
-  const value = (payload as { threadId?: unknown }).threadId;
-  return typeof value === 'string' ? value : null;
-}
+export { eventThreadId } from '@boite/contracts';

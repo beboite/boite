@@ -1,5 +1,5 @@
 /** The socket's side of the fake: its state, the event handlers, thread subscriptions and the calls it holds. */
-import { RpcErrorCode, mayHearEvent, previewToolPart, type Principal, type RpcEventName, type RpcEvents, type ThreadId, type TransportOptions } from '@boite/contracts';
+import { RpcErrorCode, agentHearsEvent, mayHearEvent, previewToolPart, type Principal, type RpcEventName, type RpcEvents, type ThreadId, type TransportOptions } from '@boite/contracts';
 import { RpcFailure, droppedFailure, type ClientState, type EventHandler } from '../client';
 
 export class FakeBus {
@@ -19,7 +19,11 @@ export class FakeBus {
   /** The calls the socket is holding, so `drop()` can reject them from underneath. */
   readonly pending = new Set<{ reject: (error: RpcFailure) => void }>();
 
-  constructor(public principal: Principal) {}
+  /**
+   * `agent` is the thread an agent's token names and how to read a thread's
+   * project: what the core's broadcast narrows an agent socket's events to.
+   */
+  constructor(public principal: Principal, private readonly agent: { threadId(): ThreadId | null; projectOf(threadId: ThreadId): string | null } = { threadId: () => null, projectOf: () => null }) {}
 
   onState(handler: (state: ClientState) => void): () => void {
     this.stateHandlers.add(handler);
@@ -60,6 +64,7 @@ export class FakeBus {
     if (event === 'core.log' && this.principal !== 'owner') return;
     // The core's `mayReceiveEvent`: a paired device hears only the device events, an agent only its own.
     if (!mayHearEvent(event, this.principal)) return;
+    if (this.principal === 'agent' && !agentHearsEvent(event, payload, this.agent.threadId(), this.agent.projectOf)) return;
     if (event === 'message.part' && (this.transport.compactTools || this.transport.compactToolParts)) {
       const live = payload as RpcEvents['message.part'];
       if (live.part.type === 'tool') payload = { ...live, part: previewToolPart(live.part, { inputs: !!this.transport.compactToolParts }) } as RpcEvents[E];

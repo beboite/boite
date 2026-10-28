@@ -143,6 +143,24 @@ test('an agent reaches only its own methods on its own thread and hears only its
   expect((await client.call('settings.get', {})).muteAgents).toBe(before.muteAgents);
 });
 
+test('an agent hears its own thread and its project\'s board only, as server.ts broadcast', async () => {
+  const { FakeContext } = await import('./fake-client/context');
+  const { seed } = await import('./fake-client/seed');
+  const ctx = new FakeContext({ delayMs: 0, principal: 'agent', agentThreadId: 't-trace' });
+  seed(ctx);
+  ctx.bus.setState('ready');
+  const own = ctx.thread('t-trace');
+  const foreign = [...ctx.threads.values()].find(thread => thread.projectId !== own.projectId)!;
+  const lines: string[] = [];
+  ctx.bus.on('thread.activity', payload => lines.push(`activity ${payload.threadId}`));
+  ctx.bus.on('todos.updated', payload => lines.push(`todos ${payload.projectId}`));
+  for (const thread of [own, foreign]) {
+    ctx.bus.deliver('thread.activity', { threadId: thread.id } as never);
+    ctx.bus.deliver('todos.updated', { projectId: thread.projectId!, todos: [] });
+  }
+  expect(lines).toEqual([`activity ${own.id}`, `todos ${own.projectId}`]);
+});
+
 test('settings.set refuses what is not a setting before applying any of it, as router.ts checkRpcParams', async () => {
   const client = await fake();
   const before = await client.call('settings.get', {});
