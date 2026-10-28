@@ -55,6 +55,7 @@ import {
   type DesktopUpdateStatus,
   type SpeechConfig,
   type SpeechStatus,
+  type PolicyState,
   type TelemetryState,
   type Thread,
   type ThreadId,
@@ -206,6 +207,8 @@ export class FakeContext {
   /** Each agent's own hooks and the runs that did not pass (`hooks.ts`). */
   hooks: HooksStatus = seedHooks();
   telemetry: TelemetryState = { mode: 'basic', configured: true, pendingDeletion: false };
+  /** The admin policy, as `policy.get` answers it: none, as on most machines. */
+  policy: PolicyState = { file: '/etc/boite/policy.json', present: false, values: {}, locked: [], problems: [], failedClosed: false, readAt: 0 };
   projects: Project[] = [];
   /** The image of each project whose icon is one, as `projects.icon` answers it. */
   projectImages = new Map<string, { version: string; dataUrl: string }>();

@@ -1,4 +1,4 @@
-import { checkSettingsPatch, followedPatch, keepLaterFavorites, readSettings, MACHINE_SETTINGS, DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, subscriptionProxyOf, type Settings, type SubscriptionProxy } from '@boite/contracts';
+import { checkSettingsPatch, followedPatch, keepLaterFavorites, readSettings, MACHINE_SETTINGS, DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, subscriptionProxyOf, type AdminPolicy, type Settings, type SubscriptionProxy } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { writesTitles } from './drivers/index.ts';
 import { invalidParams } from './errors.ts';
@@ -26,13 +26,24 @@ export const DEFAULT_SETTINGS: Settings = {
 export class SettingsStore {
   constructor(private readonly core: Core) {}
 
+  /** The settings in force: the user's, with what the admin policy locks read over them. */
   get(): Settings {
+    return this.overlay(this.stored());
+  }
+
+  /** The user's own choices as saved; a policy that goes away gives them back untouched. */
+  stored(): Settings {
     const stored = this.core.journal.getSetting('settings');
     if (typeof stored !== 'object' || stored === null) return { ...DEFAULT_SETTINGS };
     const patch = { ...stored } as Partial<Settings>;
     Reflect.deleteProperty(patch, 'maxConcurrentTurns');
     Reflect.deleteProperty(patch, 'perAccountConcurrency');
     return { ...DEFAULT_SETTINGS, ...patch };
+  }
+
+  private overlay(settings: Settings): Settings {
+    const locked = this.core.policy.lockedSettings(settings);
+    return Object.keys(locked).length === 0 ? settings : { ...settings, ...locked };
   }
 
   /**
@@ -43,6 +54,8 @@ export class SettingsStore {
     // Shared with the in-memory client: a pasted address is stored as its bare origin.
     const checked = checkSettingsPatch(patch);
     if (!checked.ok) throw invalidParams(checked.message, { field: checked.field });
+    const locked = this.core.policy.settingsRefusal(checked.patch, this.get());
+    if (locked !== null) throw locked;
     const storage = checked.patch.worktreeStorage;
     if (storage?.directory) {
       if (!isAbsolute(storage.directory) || (process.platform === 'win32' && !/^(?:[a-z]:[\\/]|\\\\)/i.test(storage.directory))) {
@@ -79,13 +92,15 @@ export class SettingsStore {
   }
 
   set(patch: Partial<Settings>, persistPrivate?: () => void): Settings {
-    const previous = this.get();
+    const saved = this.stored();
+    const previous = this.overlay(saved);
     const checked = keepLaterFavorites(previous, this.normalize(patch));
-    const next: Settings = { ...previous, ...checked };
+    const kept: Settings = { ...saved, ...checked };
+    const next = this.overlay(kept);
     this.core.journal.append({ type: 'settings.changed', threadId: null, version: 1, payload: next }, () => {
       // Private credentials share the transaction, never its public event payload.
       persistPrivate?.();
-      this.core.journal.setSetting('settings', next);
+      this.core.journal.setSetting('settings', kept);
     });
     logSettingsChange(this.core, previous, next);
     this.core.scheduler.onSettingsChanged();
@@ -112,6 +127,23 @@ export class SettingsStore {
     }
     this.core.group.settingsChanged();
     return next;
+  }
+
+  /** The admin policy changed what it locks: everything that follows a setting hears of the new value. */
+  policyChanged(before: AdminPolicy): void {
+    const saved = this.stored();
+    const previous = { ...saved, ...this.core.policy.lockedSettings(saved, before) };
+    const next = this.get();
+    if (JSON.stringify(previous) === JSON.stringify(next)) return;
+    this.core.scheduler.onSettingsChanged();
+    this.core.procs.applySettings(next);
+    this.core.bus.emit('settings.updated', next);
+    for (const key of MACHINE_SETTINGS) {
+      if ((previous[key] === true) === (next[key] === true)) continue;
+      if (key === 'groupBots') this.core.workforce.groupHost.allowedChanged(next[key] === true);
+      announceMachineSetting(this.core, key, next[key] === true);
+    }
+    this.core.group.settingsChanged();
   }
 }
 

@@ -705,7 +705,8 @@ export function startServer(options: ServerOptions): RunningServer {
   core.network = {
     also(address: string | null): boolean {
       if (stopping) return false;
-      if (address === null || everywhere || address === host || options.tailnet !== true) {
+      // An admin policy without groups leaves nothing for the group to reach.
+      if (address === null || everywhere || address === host || options.tailnet !== true || core.policy.networkOff('groups')) {
         closeExtra();
         return address !== null && (everywhere || address === host);
       }

@@ -3,6 +3,7 @@ import { join, relative, resolve } from 'node:path';
 import { forgetWhich } from './which.ts';
 import {
   threadActive,
+  type PolicyRefusalData,
   type ProviderDescriptor,
   type ProviderId,
   type ProviderInstall,
@@ -84,6 +85,7 @@ export function summarize(
   dataDir: string,
   enabled = true,
   install: ProviderInstall | undefined = profileFor(entry.descriptor)?.install,
+  policy?: PolicyRefusalData,
 ): ProviderSummary {
   const profile = profileFor(entry.descriptor);
   // A provider that is turned off is listed from what is already known: asking its program its version would start it.
@@ -107,6 +109,7 @@ export function summarize(
     install: installs.stateOf(entry.descriptor.id, install),
     titles: writesTitles(entry.descriptor.protocol),
     enabled,
+    ...(policy !== undefined ? { policy } : {}),
     ...(entry.descriptor.experimental === true ? { experimental: true } : {}),
   };
 }
@@ -316,7 +319,7 @@ export class ProviderRegistry {
   list(): ProviderLoadResult {
     return {
       loaded: [...this.entries.values()].map((entry) =>
-        summarize(entry, this.installs, this.dataDir, this.enabledEntry(entry), this.installBlock(entry.descriptor.id))),
+        summarize(entry, this.installs, this.dataDir, this.enabledEntry(entry), this.installBlock(entry.descriptor.id), this.policyOf(entry.descriptor.id))),
       rejected: [...this.rejected],
     };
   }
@@ -368,7 +371,15 @@ export class ProviderRegistry {
   }
 
   private enabledEntry(entry: LoadedProvider): boolean {
+    if (this.policyOf(entry.descriptor.id) !== undefined) return false;
     return this.switches.get(entry.descriptor.id) ?? entry.descriptor.experimental !== true;
+  }
+
+  /** The admin policy's verdict on a provider; the core sets it once its policy is read. */
+  policyBlock: (id: ProviderId) => PolicyRefusalData | null = () => null;
+
+  private policyOf(id: ProviderId): PolicyRefusalData | undefined {
+    return this.policyBlock(id) ?? undefined;
   }
 
   get(id: ProviderId): ProviderDescriptor | undefined {
@@ -383,7 +394,7 @@ export class ProviderRegistry {
 
   summary(id: ProviderId): ProviderSummary | undefined {
     const entry = this.entries.get(id);
-    return entry === undefined ? undefined : summarize(entry, this.installs, this.dataDir, this.enabledEntry(entry), this.installBlock(id));
+    return entry === undefined ? undefined : summarize(entry, this.installs, this.dataDir, this.enabledEntry(entry), this.installBlock(id), this.policyOf(id));
   }
 
   /** The launcher script on PATH that stands where this provider's program should be, if that is why it is missing. */

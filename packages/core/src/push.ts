@@ -401,6 +401,8 @@ export class PushStore {
   };
 
   private async deliver(sessionId: string, payload: PushPayload): Promise<void> {
+    // Subscriptions made before the admin policy turned push off are kept and sent nothing.
+    if (this.core.policy.networkOff('push')) return;
     let keys: Awaited<ReturnType<typeof this.keys>>;
     try { keys = await this.keys(); }
     catch (error) {

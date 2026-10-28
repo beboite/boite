@@ -119,7 +119,7 @@ export class ContactStore implements LinkedContacts {
   private closed = false;
 
   constructor(private readonly core: Core) {
-    this.tailscale = new TailscaleClient(core.dataDir);
+    this.tailscale = new TailscaleClient(core.dataDir, core.policy.fetchUnless(() => core.policy.networkOff('contacts'), 'network.contacts', 'the Tailscale API'));
     this.concierge = new Concierge(core);
     this.funnel = new ContactFunnel(core, [CONTACT_JOIN_ROUTE, CONTACT_LINK_ROUTE, ROUTE]);
     this.funnel.changed = () => this.changed();
@@ -771,7 +771,7 @@ export class ContactStore implements LinkedContacts {
   // -- The link: the guest's side.
 
   dial(contact: StoredContact): void {
-    if (this.closed || !this.started || contact.role !== 'guest' || contact.url === undefined || this.dialed.has(contact.coreId)) return;
+    if (this.closed || !this.started || contact.role !== 'guest' || contact.url === undefined || this.dialed.has(contact.coreId) || this.core.policy.networkOff('contacts')) return;
     const self = this.core.coordination.card();
     const hello = JSON.stringify({ v: 1, from: self.coreId, to: contact.coreId, at: Date.now(), nonce: randomUUID() });
     const headers = {
@@ -836,7 +836,7 @@ export class ContactStore implements LinkedContacts {
     if (this.closed) return;
     this.started = true;
     this.listening = this.wantsTailnet();
-    this.funnel.start(this.listening);
+    this.funnel.start(this.listening && !this.core.policy.networkOff('contacts'));
     if (this.list().length > 0 || this.liveInvites().length > 0 || this.members.behind()) this.arm();
     this.members.push();
   }

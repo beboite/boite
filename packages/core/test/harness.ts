@@ -35,6 +35,8 @@ export interface TestCoreOptions {
   dataDir?: string;
   /** The secret vault; a memory vault by default, so no test reaches the system's. */
   secretVault?: CoreOptions['secretVault'];
+  /** The admin policy file; a missing file inside the data directory by default, so the machine's never applies. */
+  policyFile?: string;
 }
 
 const HOST_AGENT_OPT_INS = [
@@ -87,7 +89,7 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
   process.env.BOITE_TERMINAL_SHELL = process.platform === 'win32' ? (process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe') : '/bin/sh';
 
   const token = newToken();
-  const core = new Core({ dataDir, token, onShutdown: options.onShutdown, bundleHash: options.bundleHash, serverUpdates: options.serverUpdates, retentionPassMs: options.retentionPassMs, pullRequestWatches: options.pullRequestWatches, secretVault: options.secretVault ?? (() => Promise.resolve(new MemoryVault())) });
+  const core = new Core({ dataDir, token, onShutdown: options.onShutdown, bundleHash: options.bundleHash, serverUpdates: options.serverUpdates, retentionPassMs: options.retentionPassMs, pullRequestWatches: options.pullRequestWatches, secretVault: options.secretVault ?? (() => Promise.resolve(new MemoryVault())), policyFile: options.policyFile ?? join(dataDir, 'no-policy.json') });
   // The scripted agents echo their prompt, and the line that teaches `boite ask`
   // would ride along in every reply: a test that wants it turns it back on.
   core.settings.set({ asyncQuestions: false, shortAnswers: false, ...options.settings });

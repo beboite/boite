@@ -44,6 +44,7 @@ export function settingsMethods(ctx: FakeContext) {
       return structuredClone(ctx.scheduler);
     },
     'telemetry.state': async () => ({ ...ctx.telemetry }),
+    'policy.get': async () => structuredClone(ctx.policy),
     'telemetry.configure': async ({ mode, countChoice }) => {
       if (!['off', 'basic', 'enhanced'].includes(mode)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'mode: expected off, basic or enhanced' });
       if (countChoice !== undefined && typeof countChoice !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'countChoice: expected a boolean' });

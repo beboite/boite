@@ -833,6 +833,7 @@ export class Coordination {
     this.identityKey();
     // A contact another member of the group holds is asked through that member.
     if (this.core.contacts.isRelayPeer(peer)) {
+      this.core.policy.assert(this.core.policy.networkOff('contacts'), 'network.contacts', peer.name);
       const via = this.core.contacts.members.via(peer.coreId);
       if (!via) throw unavailable(`${peer.name} is linked to a machine that left this group`);
       return this.core.contacts.members.send(via, peer.coreId, operation, payload);
@@ -840,8 +841,10 @@ export class Coordination {
     // Signed and sealed anew for every address tried, the owner's app included: the same request sent twice
     // is a replay at a machine both addresses lead to, refused there, and every operation bears being asked twice.
     const routes = this.core.group.routes(peer.coreId);
+    this.core.policy.assert(routes !== null && this.core.policy.networkOff('groups'), 'network.groups', peer.name);
     // A contact this core hosts is reached only down the link its core keeps open.
     const contact = routes === null && this.core.contacts.has(peer.coreId);
+    this.core.policy.assert(contact && this.core.policy.networkOff('contacts'), 'network.contacts', peer.name);
     if (contact && !this.core.contacts.linked(peer.coreId)) throw unavailable(`${peer.name} is not linked right now; its core dials this one again by itself`);
     const attempt = async (url: string | null): Promise<Answer> => {
       const nonce = randomUUID();

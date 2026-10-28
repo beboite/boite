@@ -204,8 +204,9 @@ export class PluginStore {
 
   constructor(private core: Core) {
     this.updates = new PluginUpdateChecks({
-      source: (id) => (this.recommendedManifest(id) === null ? null : this.updateSources[id] ?? null),
-      ids: () => this.recommended.map((manifest) => manifest.id).filter((id) => this.updateSources[id] !== undefined),
+      // The admin policy's `plugins.recommended: false` leaves every source unread.
+      source: (id) => (core.policy.recommendedPluginsOff() || this.recommendedManifest(id) === null ? null : this.updateSources[id] ?? null),
+      ids: () => core.policy.recommendedPluginsOff() ? [] : this.recommended.map((manifest) => manifest.id).filter((id) => this.updateSources[id] !== undefined),
       pinned: (id) => this.recommendedManifest(id),
       installed: (id) => {
         try {
@@ -385,6 +386,7 @@ export class PluginStore {
 
   /** Installs a recommended plugin, or reinstalls a URL one from the manifest it recorded. */
   install(id: string): PluginState {
+    this.core.policy.assert(this.core.policy.pluginInstallsOff(), 'plugins.install', id);
     this.known(id);
     if (this.jobs.has(id)) return this.state(id);
     const recommended = this.recommendedManifest(id);

@@ -549,6 +549,8 @@ export class PullRequests {
   }
 
   async #run(thread: Pick<ThreadSummary, 'id'>, cwd: string, command: string, args: string[], signal?: AbortSignal): Promise<string> {
+    // Every read of a forge goes through `gh` here: discovery, links, watches, reviews and the merged-PR archive.
+    this.core.policy.assert(command === 'gh' && this.core.policy.pullRequestsOff(), 'pullRequests');
     const release = await this.#acquire(signal);
     const scope = `pull-request:${thread.id}:${++this.#sequence}`;
     try {

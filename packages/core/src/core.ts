@@ -1,3 +1,4 @@
+import { PolicyStore, policyFileFor } from './policy.ts';
 import { MergedPrArchive } from './merged-pr-archive.ts';
 import { PullRequests } from './pull-requests.ts';
 import { LinkedPullRequests } from './linked-pull-requests.ts';
@@ -108,6 +109,8 @@ export interface CoreOptions {
   retentionPassMs?: number;
   /** Legacy vault cleanup only; tests substitute it so no system store is touched. */
   secretVault?: (dir: string) => Promise<SecretVault>;
+  /** The admin policy file this core reads instead of the machine's (`policy.ts`); tests point it inside their data directory. */
+  policyFile?: string;
 }
 
 /**
@@ -152,6 +155,8 @@ export class Core {
 
   readonly bus: Bus;
   readonly logs: DiagnosticLogs;
+  /** The administrator's policy file, read before anything it locks starts. */
+  readonly policy: PolicyStore;
   readonly diagnostics: Diagnostics;
   readonly pullRequests: PullRequests;
   readonly linkedPullRequests: LinkedPullRequests;
@@ -340,6 +345,10 @@ export class Core {
     this.logs = new DiagnosticLogs(this.dataDir, [this.token]);
     this.logs.attach(this.bus);
     this.bus.onError = (message) => this.log('error', message);
+    this.policy = new PolicyStore(policyFileFor(options.policyFile), {
+      log: (level, message, data) => this.logs[level](message, { source: 'policy', event: 'policy.read', data }),
+      changed: (state) => this.bus.emit('policy.changed', state),
+    });
     let phaseAt = performance.now();
     const phase = (event: string, message: string, data?: Record<string, string | number | boolean | null>): void => {
       const now = performance.now();
@@ -365,6 +374,10 @@ export class Core {
     );
     this.providers = new ProviderRegistry(this.dataDir);
     this.providers.loadSwitches(this.journal.getSetting(PROVIDER_SWITCHES));
+    this.providers.policyBlock = (id) => {
+      const key = this.policy.providerBlock(id);
+      return key === null ? null : { policy: key, file: this.policy.file };
+    };
     this.accounts = new AccountStore(this);
     this.projects = new ProjectStore(this);
     this.procs = new ProcRegistry(this.journal, this.bus, undefined, {
@@ -599,6 +612,7 @@ export class Core {
     this.providers.close();
     this.serverUpdates.close();
     this.desktopUpdates.close();
+    this.policy.close();
     await this.drain();
     await this.delegation.close();
     await this.workflows.close();

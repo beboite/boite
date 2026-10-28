@@ -97,7 +97,7 @@ export class ArtifactPreviews {
             'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer',
             'cross-origin-resource-policy': 'same-origin',
             // Preview HTML can run its scripts, but cannot navigate a parent or create popups.
-            'content-security-policy': "sandbox allow-scripts allow-same-origin; object-src 'none'; frame-src 'none'; base-uri 'self'",
+            'content-security-policy': previewContentPolicy(this.core.policy.remotePreviewResourcesOff()),
           }, request.method === 'HEAD');
         } catch { return notFound(); }
       },
@@ -122,4 +122,16 @@ export class ArtifactPreviews {
     for (const preview of this.previews.values()) preview.server.stop(true);
     this.previews.clear();
   }
+}
+
+/**
+ * Preview HTML can run its scripts, but cannot navigate a parent or create
+ * popups. With the admin policy's `previews.remoteResources: false` it loads
+ * nothing from outside the preview's own origin either: no script, image,
+ * font or request reaches another host.
+ */
+export function previewContentPolicy(localOnly: boolean): string {
+  const base = "sandbox allow-scripts allow-same-origin; object-src 'none'; frame-src 'none'; base-uri 'self'";
+  if (!localOnly) return base;
+  return `${base}; default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; style-src 'self' 'unsafe-inline' data:; connect-src 'self'; form-action 'none'`;
 }

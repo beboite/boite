@@ -44,6 +44,8 @@ type ErasedHandler = (params: never, ctx: RpcContext) => unknown;
 export class Router {
   /** Host execution policy, in addition to the static caller-role map. Local sessions have no shared binding. */
   guard?: (method: RpcMethodName, params: unknown, ctx: RpcContext) => void;
+  /** The admin policy's refusals (`policy-gate.ts`), for every caller the owner included. */
+  policy?: (method: RpcMethodName, params: unknown) => void;
   private readonly handlers = new Map<RpcMethodName, ErasedHandler>();
   private accepting = true;
   private active = 0;
@@ -82,6 +84,7 @@ export class Router {
     // until `DEVICE_METHODS` or `AGENT_METHODS` says otherwise. The params go
     // with it: an agent is held to the thread its token was minted for.
     assertAllowed(method as RpcMethodName, ctx.connection, params);
+    this.policy?.(method as RpcMethodName, params);
     this.guard?.(method as RpcMethodName, params, ctx);
     return await this.trackRequest(() => handler(params as never, ctx));
   }

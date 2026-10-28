@@ -284,6 +284,7 @@ export class Diagnostics {
   async issue(params: DiagnosticsIssueParams, connection?: Connection): Promise<DiagnosticsIssue> {
     try { validateDiagnosticsParams(params, 'diagnostics.issue'); } catch (error) { throw invalidParams((error as Error).message); }
     this.gate(connection, params.threadId);
+    this.core.policy.assert(this.core.policy.issueReportsOff(), 'issueReports');
     const title = typeof params.title === 'string' ? params.title.trim() : '';
     if (title.length < 4 || title.length > 200 || /[\x00-\x1f\x7f]/.test(title)) throw invalidParams('diagnostics.issue title: expected 4 to 200 characters on one line');
     const description = typeof params.description === 'string' ? params.description.trim() : '';

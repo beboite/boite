@@ -1,3 +1,4 @@
+import { providerOffFailure } from './policy.ts';
 import { chmodSync, existsSync, lstatSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { effectiveCompaction } from '@boite/contracts';
@@ -5,7 +6,7 @@ import type { Account, AccountId, ProviderDescriptor, ProviderId, RpcEvents, Ter
 import type { Core } from './core.ts';
 import { newId } from './ids.ts';
 import { stripAnsi } from './ansi.ts';
-import { invalidParams, messageOf, notFound, refused, unavailable } from './errors.ts';
+import { invalidParams, messageOf, notFound, refused } from './errors.ts';
 import { runAcpLogin, type AcpLoginRun } from './drivers/acp/login.ts';
 import { antigravityCertificates } from './drivers/antigravity.ts';
 import { loginFolders, publishLoginCatalog } from './account-login.ts';
@@ -389,11 +390,7 @@ export class AccountStore {
   /** A sign-in starts the provider's program, which a provider turned off never does. */
   private assertOn(provider: ProviderDescriptor, accountId: AccountId): void {
     if (this.core.providers.enabled(provider.id)) return;
-    throw unavailable(`${provider.name} is turned off on this machine. Turn it on in Settings > Providers to use it`, {
-      accountId,
-      providerId: provider.id,
-      disabled: true,
-    });
+    throw providerOffFailure(provider.name, this.core.providers.policyBlock(provider.id), { accountId, providerId: provider.id });
   }
 
   /** Adopt existing CLI logins; guided sign-in creates its own isolated account. */

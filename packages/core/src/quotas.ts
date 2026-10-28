@@ -227,8 +227,11 @@ export class QuotaStore {
     const supported = !proxied && summary?.enabled !== false && (this.isMuse(account) || ['claude', 'codex', 'grok', 'opencode', OPENCODE_V2].includes(account.providerId) || readsAntigravitySignIn(provider));
     const stored = preferences[account.id];
     const enabled = typeof stored === 'boolean' ? stored : true;
+    // The admin policy stops every read that sends the account's token: the row says why.
+    const blocked = supported && enabled && this.core.policy.quotaReadsOff();
     return { accountId: account.id, providerId: account.providerId, providerName: isOpenCode(account.providerId) ? 'OpenCode Go' : this.core.providers.get(account.providerId)?.name ?? account.providerId,
-      label: account.label, enabled, status: !supported ? 'unsupported' : !enabled ? 'disabled' : 'unavailable', windows: [], checkedAt: null, error: null };
+      label: account.label, enabled, status: !supported ? 'unsupported' : !enabled || blocked ? 'disabled' : 'unavailable', windows: [], checkedAt: null,
+      error: blocked ? this.core.policy.refusal('quotaReads').message : null };
   }
   private isMuse(account: Account): boolean { return this.core.providers.get(account.providerId)?.protocol === 'muse'; }
   /**

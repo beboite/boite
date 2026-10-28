@@ -93,6 +93,9 @@ export class SpeechStore {
   private catalogueIds(): string { return this.local.models.list().filter(model => model.kind === 'catalogue').map(model => model.id).join(', '); }
   configure(p: Omit<SpeechConfig, 'model'> & { model?: string } & Partial<Credentials>): SpeechStatus {
     this.validate(p);
+    const dictation = this.core.policy.dictation();
+    this.core.policy.assert(dictation === 'off', 'dictation');
+    this.core.policy.assert(dictation === 'local' && p.engine === 'api', 'dictation', 'cloud engines; only local is allowed');
     const model = p?.model ?? this.config.model;
     if (model !== this.config.model && !catalogueEntry(model) && !this.local.models.custom(model)) throw invalidParams(`speech.model: ${model} is not a model on this core; add it from a link first`);
     return this.save({ ...this.publicConfig({ ...p, model }) }, { groqKey: p.groqKey ?? this.keys.groqKey, openrouterKey: p.openrouterKey ?? this.keys.openrouterKey });
@@ -177,6 +180,7 @@ export class SpeechStore {
     await this.local.native.stop();
   }
   async transcribe(connection: string, p: TranscribeParams): Promise<{ text: string; language?: string }> {
+    this.core.policy.assert(this.core.policy.dictation() === 'off', 'dictation');
     if (!p || typeof p.requestId !== 'string' || !/^[a-zA-Z0-9-]{1,64}$/.test(p.requestId)) throw invalidParams('speech.requestId must be 1 to 64 letters, digits or hyphens');
     if (p.preview !== undefined && typeof p.preview !== 'boolean') throw invalidParams('speech.preview must be a boolean');
     if (p.language !== undefined && (typeof p.language !== 'string' || p.language.length > 24 || !/^[a-z]+( [a-z]+)*$/.test(p.language))) throw invalidParams('speech.language must be the language a preview returned, in lowercase letters');
@@ -224,6 +228,8 @@ export class SpeechStore {
     } finally { this.running.delete(connection); }
   }
   private async api(provider: 'groq' | 'openrouter', audio: Uint8Array, config: SpeechConfig, keys: Credentials, signal: AbortSignal): Promise<string> {
+    // The only call that sends audio off the machine; a saved cloud engine stops here too.
+    this.core.policy.assert(this.core.policy.dictation() !== null, 'dictation', `the ${provider} cloud engine; only local is allowed`);
     const target = ENDPOINTS[provider];
     const headers: Record<string, string> = { Authorization: `Bearer ${provider === 'groq' ? keys.groqKey : keys.openrouterKey}` };
     let body: FormData | string;

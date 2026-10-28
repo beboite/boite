@@ -17,6 +17,7 @@ import { registerSessionMethods } from './sessions.ts';
 import { registerTailscaleMethods } from './tailscale.ts';
 import { registerFirewallMethods } from './firewall.ts';
 import { registerSettingsMethods } from './settings.ts';
+import { registerPolicy } from './policy-gate.ts';
 import { registerSubscriptionProxy } from './subscription-proxy.ts';
 import { registerGatewayMove } from './gateway-move.ts';
 import { registerThreadMethods } from './threads/rpc.ts';
@@ -38,6 +39,7 @@ import { updateEverything } from './update-everything.ts';
 
 /** Adding a module is one file plus one line here. `hello` is the server's own. */
 export function registerModules(core: Core): void {
+  registerPolicy(core);
   registerSharedComputeMethods(core);
   registerJournalInspection(core);
   core.router.register('core.logs', async params => {

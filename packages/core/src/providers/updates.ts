@@ -254,6 +254,7 @@ export class HarnessUpdates {
 
   check(): Promise<HarnessUpdate[]> {
     if (this.closed || this.core.stopping) return Promise.reject(refused('the core is stopping; agent updates are closed'));
+    if (this.core.policy.update('agents') === 'off') return Promise.reject(this.core.policy.refusal('updates.agents', 'the version check'));
     this.checking ??= this.runCheck().finally(() => {
       this.checking = null;
     });
@@ -267,6 +268,7 @@ export class HarnessUpdates {
    */
   async update(providerId: ProviderId, automatic = false): Promise<HarnessUpdate> {
     this.assertOpen();
+    this.core.policy.assert(this.core.policy.update('agents') === 'off', 'updates.agents', providerId);
     const target = this.targetOf(providerId);
     if (target === null) throw refused(`${providerId} has no update Boite can run on this machine`, { providerId });
     // A check in flight writes its reading when it lands: an update started under it
@@ -381,6 +383,8 @@ export class HarnessUpdates {
 
   private async tick(): Promise<void> {
     try {
+      // Checks turned off by the admin policy: the timer keeps its pace and reads nothing.
+      if (this.core.policy.update('agents') === 'off') { this.schedule(CHECK_EVERY_MS); return; }
       // A check started by hand since the timer was armed already counts.
       const recent = this.lastCheckAt !== null && Date.now() - this.lastCheckAt < CHECK_EVERY_MS - BUSY_RETRY_MS;
       if (!recent) {

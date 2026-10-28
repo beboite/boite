@@ -166,7 +166,7 @@ export class Telemetry {
     this.unsubscribe = core.bus.onAny((name, payload) => {
       if (name === 'project.added') this.track('project_added');
       if (name === 'thread.created') this.track('thread_spawned', { provider: (payload as { providerId: string }).providerId });
-      if (name === 'turn.started' && this.consent.mode === 'enhanced') {
+      if (name === 'turn.started' && this.mode === 'enhanced') {
         const turn = payload as Turn;
         const execution = turn.execution;
         if (execution && execution.operation !== 'compact' && execution.operation !== 'keepalive' && core.journal.getThread(turn.threadId)?.parentThreadId) {
@@ -190,8 +190,28 @@ export class Telemetry {
     this.schedule(20_000);
   }
 
+  /** The user's choice under the admin policy's ceiling (`analytics`): what is actually sent. */
+  private get mode(): TelemetryState['mode'] {
+    const ceiling = this.ceiling();
+    if (ceiling === 'off') return 'off';
+    if (ceiling === 'basic' && this.consent.mode === 'enhanced') return 'basic';
+    return this.consent.mode;
+  }
+
+  /** A host without a policy store (the unit tests' stand-in core) has no ceiling. */
+  private ceiling(): 'off' | 'basic' | null { return this.core.policy?.analyticsCeiling() ?? null; }
+
+  /** The ceiling moved: what was queued under the old one is dropped and the launch counts again. */
+  policyChanged(): void {
+    this.revision++;
+    this.queue = [];
+    this.controller?.abort();
+    this.launch();
+    this.schedule(20_000);
+  }
+
   state(): TelemetryState {
-    return { mode: this.consent.mode, configured: !!this.endpoint, pendingDeletion: this.consent.forget.length > 0 };
+    return { mode: this.mode, configured: !!this.endpoint, pendingDeletion: this.consent.forget.length > 0 };
   }
 
   configure(mode: TelemetryState['mode'], countChoice = false): Promise<TelemetryState> {
@@ -238,7 +258,7 @@ export class Telemetry {
 
   private launch(): void {
     this.launchPending = false;
-    if (!this.endpoint || this.consent.mode === 'off') return;
+    if (!this.endpoint || this.mode === 'off') return;
     if (this.inFlight && this.uploadRevision !== this.revision) {
       this.launchPending = true;
       return;
@@ -251,19 +271,19 @@ export class Telemetry {
 
   private ping(): void {
     const day = new Date().toISOString().slice(0, 10);
-    if (this.consent.mode === 'off' || this.consent.pingDay === day) return;
+    if (this.mode === 'off' || this.consent.pingDay === day) return;
     this.track('ping');
     this.consent.pingDay = day;
     this.save();
   }
 
   track(name: EventName, fields: Record<string, unknown> = {}): void {
-    if (this.closed || !this.endpoint || this.consent.mode === 'off' || !EVENTS.includes(name)) return;
+    if (this.closed || !this.endpoint || this.mode === 'off' || !EVENTS.includes(name)) return;
     // An aborted upload may ignore its signal; discard events until it settles.
     if (this.inFlight && this.uploadRevision !== this.revision) return;
-    if (name === 'subagent_started' && this.consent.mode !== 'enhanced') return;
+    if (name === 'subagent_started' && this.mode !== 'enhanced') return;
     const event = telemetryEvent(name, this.core.version, fields);
-    if (this.consent.mode === 'enhanced' && name === 'turn_finished') Object.assign(event, enhancedDetails(fields));
+    if (this.mode === 'enhanced' && name === 'turn_finished') Object.assign(event, enhancedDetails(fields));
     if (name === 'subagent_started') Object.assign(event, subagentDetails(fields));
     this.queue.push(event);
     if (this.queue.length > 200) this.queue.shift();
@@ -278,6 +298,8 @@ export class Telemetry {
 
   private async post(path: string, body: unknown): Promise<unknown> {
     if (!this.endpoint) throw new Error('telemetry: no relay configured');
+    // Consent receipts and deletions included: with analytics off by policy, the relay is never contacted.
+    if (this.ceiling() === 'off') throw this.core.policy.refusal('analytics', path);
     const response = await this.send(`${this.endpoint}/${path}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': `Boite/${this.core.version} (telemetry)` },
       body: JSON.stringify(body), redirect: 'error',
@@ -299,7 +321,7 @@ export class Telemetry {
         let choiceFailed = false;
         try { await this.reportChoice(); } catch { choiceFailed = true; }
         await this.forgetPending();
-        if (this.consent.mode === 'off' || revision !== this.revision) {
+        if (this.mode === 'off' || revision !== this.revision) {
           if (choiceFailed) throw new Error('telemetry: choice is still pending');
           this.failures = 0;
           return;
@@ -308,7 +330,7 @@ export class Telemetry {
         const events = this.queue.splice(0);
         if (events.length) {
           try {
-            await this.post('track', this.consent.mode === 'enhanced'
+            await this.post('track', this.mode === 'enhanced'
               ? { mode: 'B', install_id: this.consent.installId, events }
               : { mode: 'A', anonymous_id: this.consent.anonymousId, events });
           } catch (error) {
@@ -360,7 +382,7 @@ export class Telemetry {
 
   async export(): Promise<Record<string, unknown>> {
     await this.mutation;
-    if (this.consent.mode !== 'enhanced' || !this.consent.installId) throw invalid('telemetry export: expected enhanced mode');
+    if (this.mode !== 'enhanced' || !this.consent.installId) throw invalid('telemetry export: expected enhanced mode');
     await this.flush();
     const value = await this.post('export', { install_id: this.consent.installId });
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('telemetry export: invalid relay response');
