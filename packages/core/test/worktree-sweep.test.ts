@@ -360,11 +360,13 @@ describe('worktrees.remove', () => {
       // Undoing the deletion would bring it back live, and its next turn would start in the folder git deletes.
       expect(await thrown(client.call('threads.restore', { threadId: thread.id }))).toThrow('is being removed');
       expect(harness.core.journal.listDeletedThreads().map((one) => one.id)).toContain(thread.id);
-      for (const cwd of [alias, join(alias, 'sub')]) {
+      for (const cwd of [alias, join(alias, 'sub'), inner]) {
         expect(await thrown(client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Through a link', cwd }))).toThrow('is being removed');
       }
-      // `inner/..` names the project by its letters, yet the system would follow the link first and land in the checkout.
+      // Admission and spawn both normalize `inner/..` lexically to the project before following links.
       const climb = `${inner}${sep}..`;
+      const admitted = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Lexical parent', cwd: climb });
+      expect(admitted.cwd).toBe(resolve(project.path));
       const started = harness.core.procs.spawn('thr_climb' as never, process.execPath, ['-e', 'console.log(process.cwd())'], { cwd: climb });
       const [ran] = await Promise.all([new Response(started.proc.stdout).text(), started.exited]);
       expect(realpathSync(ran.trim())).toBe(realpathSync(project.path));
@@ -477,6 +479,10 @@ describe('worktrees.remove', () => {
     expect(reusing).not.toBeNull();
     // A checkout that came back still has its branch; one that could not keeps nothing pointing at a deleted ref.
     if (existsSync(fresh)) expect(git(project.path, 'rev-parse', '--verify', '--quiet', 'refs/heads/boite/reused').trim()).toBe(sha);
+    else {
+      const ref = Bun.spawnSync({ cmd: ['git', 'rev-parse', '--verify', '--quiet', 'refs/heads/boite/reused'], cwd: project.path, env: FIXTURE_GIT_ENV, stdout: 'pipe', stderr: 'pipe' });
+      expect(ref.exitCode).toBe(1);
+    }
   });
 
   test('the list and a removal wait for a registration in progress in the same repository', async () => {

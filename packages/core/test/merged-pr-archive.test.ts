@@ -9,7 +9,7 @@ import { setDriver } from '../src/drivers/index.ts';
 import { echoDriver } from '../src/drivers/echo.ts';
 import { MergedPrArchive } from '../src/merged-pr-archive.ts';
 import { archiveState } from '../src/merged-pr-archive-state.ts';
-import { githubRepository, parseMergedPrProof } from '../src/pull-requests.ts';
+import { fetchedRepositories, githubRepository, parseMergedPrProof } from '../src/pull-requests.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { rejection, thrown } from './settle.ts';
 
@@ -584,6 +584,14 @@ test('a child turn admitted during final Git validation keeps its merged parent 
     expect(harness.core.threads.require(childId).status).toBe('running');
     expect(harness.core.threads.require(f.threadId).archived).toBe(false);
   } finally { held.mockRestore(); harness.core.threads.stopTurn(childId); }
+});
+
+test('repository identities strip trailing slashes before the git suffix', () => {
+  for (const remote of ['https://github.com/example/repo.git/', 'git@github.com:example/repo.git//']) {
+    const remotes = `origin ${remote} (fetch)`;
+    expect(githubRepository(remotes)).toBe('github.com/example/repo');
+    expect([...fetchedRepositories(remotes)]).toEqual(['github.com/example/repo']);
+  }
 });
 
 test('strict action proof rejects forks, reused branch, wrong tip and repository ambiguity', () => {

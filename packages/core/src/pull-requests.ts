@@ -156,7 +156,7 @@ function remoteIdentity(raw: string): { host: string; path: string } | null {
   try { const url = new URL(raw); hostname = url.hostname; path = url.pathname; }
   catch { const match = /^(?:[^@/\s]+@)?([^:/\s]+):(.+)$/.exec(raw); if (match) { hostname = match[1]!; path = match[2]!; } }
   if (!hostname) return null;
-  return { host: hostname.toLowerCase(), path: path.replace(/^\//, '').replace(/\.git$/, '').replace(/\/$/, '') };
+  return { host: hostname.toLowerCase(), path: path.replace(/^\//, '').replace(/\/+$/, '').replace(/\.git$/, '') };
 }
 
 export function githubRepository(remotes: string, host = process.env.GH_HOST ?? 'github.com'): string | null {
