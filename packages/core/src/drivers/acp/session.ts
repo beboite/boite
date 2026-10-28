@@ -29,6 +29,7 @@ import { commandsOf, imageBlocksOf, usdCostOf, type AcpTurn } from './turn.ts';
 import { answerPermission, drawUpdate, sessionNotificationOf } from './updates.ts';
 import { errorCodeOf, noteReady } from '../driver-log.ts';
 import { SessionRetention } from '../session-retention.ts';
+import { releaseChild } from '../session-close.ts';
 import { OpenCodeConnection } from './opencode-connection.ts';
 import {protectedAcp} from './protected.ts';
 
@@ -675,19 +676,7 @@ export class AcpSession {
     }
     const child = this.child;
     this.child = null;
-    if (child !== null) {
-      try {
-        child.stdin.end();
-      } catch {
-        // the pipe is already gone
-      }
-      try {
-        if (this.killTree !== null) this.killTree();
-        else child.kill();
-      } catch {
-        // already exited
-      }
-    }
+    releaseChild(child, this.killTree);
     this.onEnded(this);
   }
 

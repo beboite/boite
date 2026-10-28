@@ -1244,6 +1244,33 @@ describe('codex driver', () => {
     await runTurn(client, threadId, 'still here');
   });
 
+  test('core shutdown during an accepted turn Codex never completes ends it once, before the journal closes', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_DEAF'] = '1';
+    const finished: { status: string; error: string | null }[] = [];
+    const logs: string[] = [];
+    harness!.core.bus.onAny((name, payload) => {
+      if (name === 'core.log') logs.push((payload as RpcEvents['core.log']).message);
+      if (name !== 'turn.finished') return;
+      const turn = payload as RpcEvents['turn.finished'];
+      if (turn.threadId === threadId) finished.push({ status: turn.status, error: turn.error });
+    });
+    await client.call('turns.start', { threadId, prompt: '[slow]' });
+    await waitFor(() => fakeLog().includes('waiting for interrupt'));
+    const stoppingAt = Date.now();
+    // A drain shorter than the stop grace: the driver shutdown is what closes Codex.
+    void harness!.core.drain(200);
+    await stopCore();
+    const stoppedIn = Date.now() - stoppingAt;
+    await new Promise((resolve) => setTimeout(resolve, 3_500));
+    // The drain stops the turn, Codex ignores the interrupt, and closing the
+    // session ends it at once: never the stop grace after the journal closed.
+    expect(finished).toEqual([{ status: 'stopped', error: null }]);
+    expect(stoppedIn).toBeLessThan(2_500);
+    expect(logs.filter((line) => /closed database|database is closed/i.test(line))).toEqual([]);
+  }, 20000);
+
   test('a stop that lands while the thread opens sends no prompt', async () => {
     const client = await startCore();
     const threadId = await codexThread(client);

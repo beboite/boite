@@ -106,6 +106,11 @@ export class PiTurn {
     this.decide();
   }
 
+  /** A stopped turn whose run never settled: it ends as one that did. */
+  endStopped(): void {
+    this.settleRun();
+  }
+
   /** The turn cannot go on: a dead child, a refused command. */
   fail(reason: string, diagnostic?: string): void {
     if (this.decided) return;
