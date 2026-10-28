@@ -1,6 +1,6 @@
 import type { SessionConfigOption } from '@agentclientprotocol/sdk';
 import type { AccountId, ModelInfo, ProviderDescriptor, ProviderId, ThreadId } from '@boite/contracts';
-import { agentModelsOf, modelsFrom, plainObject } from './acp/models.ts';
+import { AGENT_OWN_MODEL, agentModelsOf, modelsFrom, plainObject } from './acp/models.ts';
 import { AcpSession, sessionKey, type AcpMemory } from './acp/session.ts';
 import { readModels, withModelEffort, type ProbeEntry } from './acp/probe.ts';
 import { isGrok, MINUTE_MS, type AcpDeps } from './acp/protocol.ts';
@@ -69,7 +69,9 @@ export function createAcpDriver(deps: AcpDeps): Driver {
     }
     const running = session;
     if (viewed.has(threadId)) running.setViewed(true);
-    running.seedConfig(probes.get(probeKey)?.options ?? []);
+    const probed = probes.get(probeKey);
+    const ownModel = probed?.result?.models.find((model) => model.default === true && model.id !== AGENT_OWN_MODEL)?.id ?? null;
+    running.seedConfig(probed?.options ?? [], ownModel);
     return running;
   }
 

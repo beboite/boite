@@ -124,7 +124,7 @@ test('protected ACP rejects absent, refused and falsely acknowledged native mode
     return {type: 'select', id: 'mode', name: 'Mode', category: 'mode', currentValue, options: [{value: 'build', name: 'Build'}, {value: 'plan', name: 'Plan'}]};
   }
   expect(await thrown(controls.applyMode(ctx))).toThrow('offers no exact mode');
-  controls.noteSession(null, [option('build')], {}); refused = true;
+  controls.noteSession(null, [option('build')], {}, true); refused = true;
   expect(await thrown(controls.applyMode(ctx))).toThrow('native agent refused');
   refused = false;
   expect(await thrown(controls.applyMode(ctx))).toThrow('did not confirm plan');
@@ -141,7 +141,7 @@ test('protected ACP confirms the selected model before fresh and warm prompts', 
     return answer;
   }} as unknown as ClientContext}));
   expect(await thrown(controls.applyConfig(ctx))).toThrow('execution.acp.model');
-  controls.noteSession(null, [option('fixture/default')], {});
+  controls.noteSession(null, [option('fixture/default')], {}, true);
   controls.noteOwnModel([option('fixture/default')]);
   ctx.thread.model = 'fixture/missing';
   expect(await thrown(controls.applyConfig(ctx))).toThrow('execution.acp.model');
@@ -170,6 +170,6 @@ test('native-default selection stays explicit and ordinary ACP model preferences
   await controls.applyConfig(ctx);
   ctx.protectedExecution = undefined; ctx.thread.model = 'fixture/unavailable';
   controls.noteSession(null, [{type: 'select', id: 'model', name: 'Model', category: 'model', currentValue: 'fixture/default',
-    options: [{value: 'fixture/unavailable', name: 'Unavailable'}]}], {});
+    options: [{value: 'fixture/unavailable', name: 'Unavailable'}]}], {}, true);
   await controls.applyConfig(ctx);
 });

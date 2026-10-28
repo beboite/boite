@@ -251,6 +251,18 @@ describe('hermes', () => {
     expect(JSON.stringify(thread.messages)).not.toContain('replayed question');
   });
 
+  test('a cold turn back on the agent own model asks for the configured default, not the model the session was left on', async () => {
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const { threadId } = await hermesThread(client, LLAMA);
+    await runTurn(client, threadId, 'first');
+    await waitFor(() => harness?.core.procs.liveCount(threadId) === 0);
+
+    await client.call('threads.update', { threadId, model: 'default' });
+    await runTurn(client, threadId, 'second');
+    expect(loggedLines('set_model ')).toEqual([LLAMA, QWEN]);
+    expect(loggedLines('prompt ').at(-1)?.split(' ')[1]).toBe(QWEN);
+  });
+
   test('a load Hermes answers with no session is replaced in the same turn, carrying the history', async () => {
     const client = await startCore({ warmProcessMinutes: 0 });
     const { threadId } = await hermesThread(client);

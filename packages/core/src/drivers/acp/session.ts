@@ -164,8 +164,9 @@ export class AcpSession {
     this.catalogValid = false;
   }
 
-  seedConfig(options: SessionConfigOption[]): void {
+  seedConfig(options: SessionConfigOption[], ownModel: string | null = null): void {
     this.controls.seed(options);
+    this.controls.seedOwnListedModel(ownModel);
   }
 
   /**
@@ -608,7 +609,7 @@ export class AcpSession {
       this.memory.refusedLoads.delete(refusedKey);
       this.sessionId = ctx.sessionId;
       this.loaded = true;
-      this.controls.noteSession(loaded.modes, loaded.configOptions ?? null, loaded);
+      this.controls.noteSession(loaded.modes, loaded.configOptions ?? null, loaded, false);
       // A load may omit its controls; both OpenCode majors answer them, so no
       // empty session is opened for nothing. With no probe cache either, a
       // throwaway session reads them once for the account, and the next cold
@@ -637,7 +638,7 @@ export class AcpSession {
       mcpServers: [],
     });
     this.sessionId = created.sessionId;
-    this.controls.noteSession(created.modes, created.configOptions ?? null, created);
+    this.controls.noteSession(created.modes, created.configOptions ?? null, created, true);
     this.controls.noteOwnModel(created.configOptions ?? null);
     this.onOptions(created.configOptions ?? []);
   }

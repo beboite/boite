@@ -108,7 +108,11 @@ export class SessionControls {
    * model" is when a thread goes back to it on a session that was moved off it.
    */
   private ownModel: string | null = null;
-  /** The same for an agent that lists its models in the session answer: its first `currentModelId`. */
+  /**
+   * The same for an agent that lists its models in the session answer: the
+   * `currentModelId` of a `session/new`, or the account's probed default. A
+   * loaded session reports the model it was left on, which is not the agent's own.
+   */
   private ownListedModel: string | null = null;
   /**
    * The options came from this session's own answers, not from another
@@ -128,6 +132,11 @@ export class SessionControls {
   seed(options: SessionConfigOption[]): void {
     if (this.configOptions.length === 0) this.configOptions = structuredClone(options);
     this.noteOwnModel(options);
+  }
+
+  /** The account's probed default, for a process whose first session is a load. */
+  seedOwnListedModel(modelId: string | null): void {
+    if (this.ownListedModel === null && modelId !== null) this.ownListedModel = modelId;
   }
 
   /** The model option's value in a `session/new` answer, the first one kept. */
@@ -181,6 +190,7 @@ export class SessionControls {
     modes: SessionModeState | null | undefined,
     options: SessionConfigOption[] | null,
     answer: unknown,
+    fresh: boolean,
   ): void {
     this.noteModes(modes);
     if (options !== null && options.length > 0) {
@@ -189,7 +199,7 @@ export class SessionControls {
     }
     const listed = agentModelsOf(answer);
     if (listed !== null) this.agentModels = listed;
-    if (this.ownListedModel === null && listed !== null) this.ownListedModel = listed.currentModelId;
+    if (fresh && listed !== null) this.ownListedModel = listed.currentModelId;
   }
 
   /**
@@ -216,8 +226,10 @@ export class SessionControls {
     const wanted = ctx.thread.model === AGENT_OWN_MODEL ? null : ctx.thread.model;
     // Only Grok's `set_model` carries an effort; the others have no field for it.
     const effort = grok && ctx.thread.effort !== null && ctx.thread.effort.length > 0 ? ctx.thread.effort : null;
-    // Back to the agent's own model on a session moved off it: it has to be asked for.
-    const restore = !grok && wanted === null && this.appliedModel !== undefined ? this.ownListedModel : null;
+    // Back to the agent's own model on a session moved off it, by this process
+    // or by the one that left a loaded session: it has to be asked for. A
+    // session already on it sends nothing below.
+    const restore = !grok && wanted === null ? this.ownListedModel : null;
     if (wanted === null && effort === null && restore === null) return;
 
     const listed = this.agentModels;
