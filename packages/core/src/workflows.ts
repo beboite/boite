@@ -88,8 +88,7 @@ export class Workflows {
       if (run.status === 'running' && !handedOver) this.save({ ...run, status: 'paused', error: 'The core restarted. Resume to continue.', pausedBy: 'restart', pausedAt: Date.now() });
       else if (interrupted) this.save(run);
     }
-    // Committed events only: an archive that rolls back stops no run, and a removal that rolls back forgets no step.
-    this.off = core.bus.onCommitted((name, payload) => {
+    this.off = core.bus.onCommitted((name, payload) => { // An archive or removal that rolls back stops and forgets nothing.
       if (this.closed) return;
       if (name === 'turn.finished') this.turnFinished(payload as Turn);
       else if (name === 'turn.started') this.adopt(payload as Turn);

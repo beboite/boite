@@ -1,7 +1,7 @@
-import { RpcErrorCode } from '@boite/contracts';
+import { checkRpcParams, RpcErrorCode } from '@boite/contracts';
 import type { RpcEventName, RpcEvents, RpcMethodName, RpcMethods, SentFrom, ThreadId, TransportOptions } from '@boite/contracts';
 import { assertAllowed } from './access.ts';
-import { RpcFailure } from './errors.ts';
+import { invalidParams, RpcFailure } from './errors.ts';
 import type { Identity } from './sessions.ts';
 
 /** What a handler is allowed to know about the socket it was called on. */
@@ -82,7 +82,10 @@ export class Router {
     // until `DEVICE_METHODS` or `AGENT_METHODS` says otherwise. The params go
     // with it: an agent is held to the thread its token was minted for.
     assertAllowed(method as RpcMethodName, ctx.connection, params);
-    this.guard?.(method as RpcMethodName, params, ctx);
-    return await this.trackRequest(() => handler(params as never, ctx));
+    // A method with rules in contracts gets only params they accepted, as they normalized them.
+    const checked = checkRpcParams(method, params);
+    if (!checked.ok) throw invalidParams(checked.message, { field: checked.field });
+    this.guard?.(method as RpcMethodName, checked.params, ctx);
+    return await this.trackRequest(() => handler(checked.params as never, ctx));
   }
 }

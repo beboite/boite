@@ -331,7 +331,7 @@ three variables and one PATH entry, put there by
 | `PATH`             | the directory holding `boite` and `boite.cmd` (and `boite.exe` in an installed Windows app), first |
 
 The CLI says hello with that token and becomes the `agent` principal of that
-one thread. `AGENT_METHODS` in `packages/core/src/access.ts` lists its allowed
+one thread. `AGENT_METHODS` in `packages/contracts/src/access.ts` lists its allowed
 calls and reasons. Each call is bound to that authenticated thread; delegation
 and coordination additionally check relationships and authorized contacts.
 An owner-only method such as `files.write`, `trace.get` or `core.logs` is refused;

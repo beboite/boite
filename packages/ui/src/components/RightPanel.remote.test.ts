@@ -38,9 +38,13 @@ async function phone(open = true): Promise<FakeClient> {
   return client;
 }
 
-/** The conversation's agent, on the machine the phone watches. */
+/**
+ * The conversation's agent, on the machine the phone watches. One socket plays
+ * both: an agent's socket never hears `browser.remoteChanged`, so the command
+ * goes out as the owner, which the browser answers the same way.
+ */
 async function agent(client: FakeClient, url: string): Promise<string> {
-  client.becomes('agent');
+  client.becomes('owner');
   try { return (await client.call('browser.command', { threadId: 't-trace', action: { kind: 'open', url } })).tabId!; }
   finally { client.becomes('session'); }
 }

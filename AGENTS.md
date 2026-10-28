@@ -43,10 +43,9 @@ prerequisites, adjacent runtime files and shell E2E coverage.
 - Reject bad descriptors, paths, origins and tokens with the file or field and
   the expected value. Rejected providers remain visible to the client.
 - Keep SDKs and Workers lazy. Nothing heavy loads at core startup.
-- New RPC methods are owner-only unless `DEVICE_METHODS` in
-  `packages/contracts/src/access.ts` permits paired devices or `AGENT_METHODS`
-  in `packages/core/src/access.ts` permits agents. Record the reason beside
-  the permission.
+- New RPC methods are owner-only unless `DEVICE_METHODS` permits paired
+  devices or `AGENT_METHODS` permits agents, both in
+  `packages/contracts/src/access.ts`. Record the reason beside the permission.
 - The shell owns windows, the tray, native dialogs and core startup. Execution
   and application logic belong in the core.
 - Reach the main window through `window::main_window`. Tauri's

@@ -137,7 +137,7 @@ export interface FakeClientOptions {
   windowsDemo?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
-  /** Explicit thread-bound token fixture; agent methods otherwise fail closed. */
+  /** The thread an agent's token names; with none, every agent call fails closed, as on the core. */
   agentThreadId?: ThreadId;
   /** A link nobody encrypts (plain HTTP from another machine): no secret value travels on it; `?fake=1&plainLink=1` sets it. */
   plainLink?: boolean;
@@ -183,7 +183,8 @@ export class FakeContext {
   hasProtectedInput(threadId: ThreadId): boolean {
     return this.bus.protectAllThreads || this.bus.protectedThreadIds.has(threadId);
   }
-  readonly agentThreadId: ThreadId | null;
+  /** The thread an agent's token names; `becomes('agent', id)` moves it. */
+  agentThreadId: ThreadId | null;
   readonly logs: CoreLogRecord[] = [];
   readonly logRunId = secureId();
   logSequence = 0;

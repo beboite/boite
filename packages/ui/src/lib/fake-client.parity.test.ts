@@ -125,6 +125,33 @@ test('a paired device hears only the device events, as access.ts mayReceiveEvent
   expect(phoneLog.map((line) => line.split(' ')[0])).toEqual(['thread.load']);
 });
 
+test('an agent reaches only its own methods on its own thread and hears only its events, as access.ts assertAllowed', async () => {
+  const client = await fake();
+  const before = await client.call('settings.get', {});
+  client.becomes('agent', 't-trace');
+  const log = heard(client, ['thread.load']);
+  // The owner's methods, which the fake once let an agent call.
+  await expect(client.call('settings.set', { muteAgents: !before.muteAgents })).rejects.toMatchObject({ code: RpcErrorCode.Refused, message: "settings.set is not one of the agent's methods" });
+  await expect(client.call('projects.list', {})).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+  // An agent method on another thread, or with no thread at all.
+  await expect(client.call('todos.list', { threadId: 't-other' })).rejects.toMatchObject({ code: RpcErrorCode.Refused, message: 'todos.list is for thread t-trace, not thread t-other' });
+  await expect(client.call('git.status', {} as never)).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+  await expect(client.call('todos.list', { threadId: 't-trace' })).resolves.toBeDefined();
+  client.sampleLoad('t-trace');
+  expect(log).toEqual([]);
+  client.becomes('owner');
+  expect((await client.call('settings.get', {})).muteAgents).toBe(before.muteAgents);
+});
+
+test('settings.set refuses what is not a setting before applying any of it, as router.ts checkRpcParams', async () => {
+  const client = await fake();
+  const before = await client.call('settings.get', {});
+  for (const [params, field] of [[null, 'params'], [{ unknownTypo: true, muteAgents: !before.muteAgents }, 'unknownTypo']] as const) {
+    await expect(client.call('settings.set', params as never)).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams, data: { field } });
+  }
+  expect((await client.call('settings.get', {})).muteAgents).toBe(before.muteAgents);
+});
+
 
 test('a bot on another provider account refuses a turn before journalling it, as threads.ts', async () => {
   const { FakeContext } = await import('./fake-client/context');

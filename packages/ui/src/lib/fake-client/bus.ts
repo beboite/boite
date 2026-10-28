@@ -1,5 +1,5 @@
 /** The socket's side of the fake: its state, the event handlers, thread subscriptions and the calls it holds. */
-import { DEVICE_EVENTS, RpcErrorCode, previewToolPart, type Principal, type RpcEventName, type RpcEvents, type ThreadId, type TransportOptions } from '@boite/contracts';
+import { RpcErrorCode, mayHearEvent, previewToolPart, type Principal, type RpcEventName, type RpcEvents, type ThreadId, type TransportOptions } from '@boite/contracts';
 import { RpcFailure, droppedFailure, type ClientState, type EventHandler } from '../client';
 
 export class FakeBus {
@@ -58,8 +58,8 @@ export class FakeBus {
     if (this.state !== 'ready') return;
     // Provider output and other live diagnostics belong only to the owner.
     if (event === 'core.log' && this.principal !== 'owner') return;
-    // The core's `mayReceiveEvent`: a paired device hears only the device events.
-    if (this.principal === 'session' && !DEVICE_EVENTS.has(event)) return;
+    // The core's `mayReceiveEvent`: a paired device hears only the device events, an agent only its own.
+    if (!mayHearEvent(event, this.principal)) return;
     if (event === 'message.part' && (this.transport.compactTools || this.transport.compactToolParts)) {
       const live = payload as RpcEvents['message.part'];
       if (live.part.type === 'tool') payload = { ...live, part: previewToolPart(live.part, { inputs: !!this.transport.compactToolParts }) } as RpcEvents[E];
