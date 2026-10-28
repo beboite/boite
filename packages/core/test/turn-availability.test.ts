@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Message, ThreadRetry } from '@boite/contracts';
 import { Core } from '../src/core.ts';
 import { setDriver } from '../src/drivers/index.ts';
@@ -225,22 +228,24 @@ test('a resume refuses a thread whose model changed since the limit', async () =
 });
 
 test('an archived thread keeps the usage window it resumed after across a restart', async () => {
-  const h = await startTestCore({ settings: { autoResumeLimitedThreads: true } });
-  const client = await h.connect();
-  const { threadId } = await echoThread(h, client);
-  await client.call('threads.archive', { threadId });
-  // Unarchived later, a failure in the same window must not resume a second time.
-  h.core.journal.setSetting('resumes', { [threadId]: { handled: 'trn_old', resumedWindow: 1_234 } });
-  client.close();
-  await h.server.stop();
-  await h.core.close();
-
-  const next = new Core({ dataDir: h.dataDir, token: h.token });
+  // The test owns the directory, so it outlives the first core's stop.
+  const dataDir = mkdtempSync(join(tmpdir(), 'boite-resume-archived-'));
+  let h: TestCore | undefined, next: Core | undefined;
   try {
+    h = await startTestCore({ dataDir, settings: { autoResumeLimitedThreads: true } });
+    const client = await h.connect();
+    const { threadId } = await echoThread(h, client);
+    await client.call('threads.archive', { threadId });
+    // Unarchived later, a failure in the same window must not resume a second time.
+    h.core.journal.setSetting('resumes', { [threadId]: { handled: 'trn_old', resumedWindow: 1_234 } });
+    await h.stop();
+
+    next = new Core({ dataDir, token: h.token });
     expect((next.journal.getSetting('resumes') as Record<string, unknown>)[threadId]).toEqual({ resumedWindow: 1_234 });
   } finally {
-    await next.close();
-    await removeDir(h.dataDir);
+    await next?.close();
+    await h?.stop();
+    await removeDir(dataDir);
   }
 });
 
