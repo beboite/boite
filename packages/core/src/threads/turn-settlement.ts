@@ -25,10 +25,10 @@ export function markQueuedStopped(core: Core, turnId: TurnId): void {
     core.journal.append({ type: 'turn.stopped', threadId: turn.threadId, version: 1, payload: next }, () => {
       core.journal.putTurn(next);
     });
+    if (turn.execution?.operation === 'coordination') core.coordination.queuedCancelled(turn.threadId, turn.id);
     core.bus.emit('turn.finished', next);
     setThreadStatus(core, turn.threadId, 'idle');
   })());
-  if (turn.execution?.operation === 'coordination') core.coordination.queuedCancelled(turn.threadId, turn.id);
 }
 
 /**

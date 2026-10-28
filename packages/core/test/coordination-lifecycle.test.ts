@@ -16,7 +16,7 @@ afterEach(async () => {
 
 const brief: CoordinationConfig = { mode: 'brief', resources: '', remote: false, paused: false };
 
-async function setupQueued() {
+async function setupQueued(texts = ['Coordinate later']) {
   const h = await startTestCore();
   cores.push(h);
   const owner = await h.connect();
@@ -24,7 +24,7 @@ async function setupQueued() {
   const to = (await echoThread(h, owner, 'Recipient')).threadId;
   const blocker = (await echoThread(h, owner, 'Blocker')).threadId;
   h.core.coordination.configure(from, brief);
-  h.core.coordination.configure(to, brief);
+  h.core.coordination.configure(to, { ...brief, paused: true });
   let stopBlocker!: () => void;
   restores.push(setDriver('echo', { protocol: 'echo', startTurn(ctx) {
     if (ctx.thread.id !== blocker) throw new Error('only the blocker may start in this test');
@@ -39,9 +39,12 @@ async function setupQueued() {
   const releaseAdmission = holdAccountTurns(h);
   await waitFor(() => h.core.threads.require(blocker).status === 'running');
   const destination = h.core.coordination.get(to).self;
-  const letter = await h.core.coordination.send({ threadId: from, to: destination, text: 'Coordinate later', requestId: crypto.randomUUID() });
+  const letters: AgentLetter[] = [];
+  for (const text of texts) letters.push(await h.core.coordination.send({ threadId: from, to: destination, text, requestId: crypto.randomUUID() }));
+  const letter = letters[0]!;
+  h.core.coordination.configure(to, brief);
   await waitFor(() => h.core.coordination.get(to).messages.find(message => message.id === letter.id)?.error === 'Queued for provider delivery', 8000);
-  return { h, owner, from, to, blocker, letter, stopBlocker, releaseAdmission };
+  return { h, owner, from, to, blocker, letter, letters, stopBlocker, releaseAdmission };
 }
 
 test('stopping or archiving a queued coordination turn restores messages that never reached a provider', async () => {
@@ -57,6 +60,59 @@ test('stopping or archiving a queued coordination turn restores messages that ne
   expect(second.h.core.coordination.get(second.to).messages[0]?.error).toBeNull();
   second.stopBlocker();
 }, 20000);
+
+for (const phase of ['queued', 'claimed'] as const) test(`stopping a ${phase} wake commits its terminal state and entire inbox batch together`, async () => {
+  const { h, to, letters } = await setupQueued(['First letter', 'Second letter']);
+  const turn = h.core.journal.listTurns(to)[0]!;
+  if (phase === 'claimed') expect(h.core.coordination.prepareWake(to, turn.id)).toBe(true);
+  h.core.coordination.beginClose();
+  const marker = phase === 'queued' ? 'Queued for provider delivery' : `Awaiting provider turn ${turn.id}`;
+  const inbox = () => h.core.coordination.get(to).messages.filter(entry => letters.some(letter => letter.id === entry.id));
+  expect(inbox().map(entry => entry.error)).toEqual([marker, marker]);
+
+  const events: string[] = [];
+  const finishedInboxes: string[][] = [];
+  restores.push(h.core.bus.onCommitted((name, payload) => {
+    if (!('threadId' in payload) || payload.threadId !== to) return;
+    if (name === 'turn.finished' || name === 'thread.updated' || name === 'collaboration.changed') events.push(name);
+    if (name === 'turn.finished') finishedInboxes.push(inbox().map(entry => entry.status));
+  }));
+  const desk = h.core.coordination as unknown as { update(letter: AgentLetter, status: string, error?: string): void };
+  const original = desk.update.bind(desk);
+  let returned = 0;
+  const update = spyOn(desk, 'update').mockImplementation((entry, status, error) => {
+    original(entry, status, error);
+    if (status === 'received' && ++returned === 2) throw new Error('second inbox write failed');
+  });
+  restores.push(() => update.mockRestore());
+
+  expect(() => h.core.scheduler.stop(to)).toThrow('second inbox write failed');
+  expect(returned).toBe(2);
+  expect(h.core.journal.getTurn(turn.id)).toMatchObject({ status: 'queued', startedAt: null, finishedAt: null });
+  expect(h.core.threads.require(to).status).toBe('queued');
+  expect(inbox().map(entry => ({ status: entry.status, error: entry.error }))).toEqual([
+    { status: 'uncertain', error: marker }, { status: 'uncertain', error: marker },
+  ]);
+  expect(events).toEqual([]);
+
+  update.mockRestore();
+  expect(h.core.scheduler.stop(to)).toBe(true);
+  expect(h.core.journal.getTurn(turn.id)).toMatchObject({ status: 'stopped', startedAt: null });
+  expect(h.core.threads.require(to).status).toBe('idle');
+  expect(inbox().map(entry => ({ status: entry.status, error: entry.error }))).toEqual([
+    { status: 'received', error: null }, { status: 'received', error: null },
+  ]);
+  expect(finishedInboxes).toEqual([['received', 'received']]);
+  await h.server.stop();
+  await h.core.close();
+  const reopened = new Core({ dataDir: h.dataDir, token: h.token });
+  try {
+    expect(reopened.journal.getTurn(turn.id)).toMatchObject({ status: 'stopped', startedAt: null });
+    expect(reopened.coordination.get(to).messages.map(entry => ({ status: entry.status, error: entry.error }))).toEqual([
+      { status: 'received', error: null }, { status: 'received', error: null },
+    ]);
+  } finally { await reopened.close(); }
+}, 12000);
 
 test('turning coordination off cancels a queued wake before rejecting its message', async () => {
   const { h, to, letter, stopBlocker } = await setupQueued();
@@ -210,11 +266,13 @@ test('a graceful restart leaves a never-submitted queued message received and pa
   } finally { await reopened.close(); }
 }, 12000);
 
-test('crash recovery restores a coordination message whose turn never left the queue', async () => {
-  const { h, to, letter } = await setupQueued();
+for (const phase of ['queued', 'claimed'] as const) test(`crash recovery restores the batch of a ${phase} coordination wake that never reached its provider`, async () => {
+  const { h, to, letters } = await setupQueued(['First letter', 'Second letter']);
+  const turn = h.core.journal.listTurns(to)[0]!;
+  if (phase === 'claimed') expect(h.core.coordination.prepareWake(to, turn.id)).toBe(true);
   h.core.coordination.beginClose();
   h.core.threads.recoverStuckTurns();
-  expect(h.core.coordination.get(to).messages.find(message => message.id === letter.id)).toMatchObject({ status: 'received', error: null });
+  for (const letter of letters) expect(h.core.coordination.get(to).messages.find(message => message.id === letter.id)).toMatchObject({ status: 'received', error: null });
 }, 12000);
 
 test('pausing in settings cancels an already queued wake', async () => {
