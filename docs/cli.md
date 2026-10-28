@@ -10,8 +10,10 @@ The global flags (`--json`, `--thread`, `--data-dir`, `--core`, `--channel`)
 are read anywhere until a command's own text begins. The table `OWNED` in
 `packages/core/src/cli-args.ts` names the commands that parse their own flags
 and where their text starts: after `boite browser fill <target>`,
-`browser run <script>`, `browser eval` or `secret ... --`, every word is the
-command's, so `boite browser fill '#q' --json` types `--json`.
+`browser run <script>` (`-` for stdin), `browser eval` or `secret ... --`,
+every word is the command's, so `boite browser fill '#q' --json` types
+`--json`. Any other command ends its flags at `--`: `boite task add -- --json`
+adds the task `--json`.
 
 Every new native agent session receives a compact CLI guide before its first
 request, even without a connected brain. Enabled coordination and delegation

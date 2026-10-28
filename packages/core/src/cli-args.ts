@@ -82,9 +82,12 @@ const OWNED: { owns: (positional: string[]) => boolean; help: boolean; text?: (p
  */
 const BROWSER_TEXT: Record<string, number> = { fill: 1, type: 1, select: 1, dialog: 1, eval: 0, evaluate: 0, run: 1 };
 
+/** A flag of the command's own; `-` alone is an operand, the stdin of `run -`. */
+const isFlag = (word: string): boolean => word.length > 1 && word.startsWith('-');
+
 function browserText(words: string[]): boolean {
   const [action = '', ...rest] = words;
-  const plain = rest.filter((word, index) => !word.startsWith('-') && rest[index - 1] !== '--tab');
+  const plain = rest.filter((word, index) => !isFlag(word) && rest[index - 1] !== '--tab');
   if (action === 'profiles') return plain[0] === 'add';
   const before = BROWSER_TEXT[action];
   return before !== undefined && plain.length >= before;
@@ -109,6 +112,11 @@ export function parse(argv: string[]): Parsed {
     if (owner && (owner.text?.(parsed.positional) || (!GLOBAL_FLAGS.includes(arg) && !(owner.help && (arg === '--help' || arg === '-h'))))) {
       parsed.positional.push(arg);
       continue;
+    }
+    // `--` ends the flags: every word after it is the command's text, `task add -- --json` included.
+    if (arg === '--') {
+      parsed.positional.push(...argv.slice(index + 1));
+      break;
     }
     const boolean = BOOLEAN_OPTIONS.find(key => arg === `--${key}`);
     const numeric = NUMBER_OPTIONS.find(key => arg === `--${key}`);

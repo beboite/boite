@@ -147,6 +147,12 @@ test('the browser CLI reads agent-browser command lines into actions', () => {
   expect(run).toMatchObject({ positional: ['browser', 'run', '--tab', 'browser:a', 'batch.js', '--tab', 'browser:b', '--core', 'arg', '--json'], json: false });
   expect(run.core).toBeUndefined();
   expect(parse(['browser', 'run', '--json', 'batch.js'])).toMatchObject({ positional: ['browser', 'run', 'batch.js'], json: true });
+  // `-` is the script read from stdin, an operand like a file name.
+  const stdin = parse(['browser', 'run', '-', '--core', 'script-argument', '--json']);
+  expect(stdin).toMatchObject({ positional: ['browser', 'run', '-', '--core', 'script-argument', '--json'], json: false });
+  expect(stdin.core).toBeUndefined();
+  // Any other command's text takes a global flag's spelling after `--`.
+  expect(parse(['task', 'add', '--json', '--', '--json', '--core'])).toMatchObject({ positional: ['task', 'add', '--json', '--core'], json: true });
   expect(parse(['browser', 'profiles', 'add', '--channel', 'dev']).positional).toEqual(['browser', 'profiles', 'add', '--channel', 'dev']);
   expect(parse(['browser', 'profiles', '--json'])).toMatchObject({ positional: ['browser', 'profiles'], json: true });
 });
