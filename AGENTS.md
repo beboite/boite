@@ -93,6 +93,13 @@ a bot only when a question needs its answer; do not request another review of
 a head it is already reviewing. Diagnose a failed job before retrying it and
 rerun only the failed jobs when the head is unchanged.
 
+A pull request runs the Linux checks, plus the Windows core suite for
+protection and shared toolchain inputs; the full Windows, macOS, desktop and
+E2E checks run in the merge queue
+([pull request runs](docs/ci.md#pull-request-runs)). A
+failure there removes the pull request: fix it like any CI failure, then merge
+again.
+
 Check CI and new review findings after a push. Track CI and reviews together;
 do not wait for one to finish before inspecting the other. A paused,
 quota-limited or delayed review is an explicit status to report.

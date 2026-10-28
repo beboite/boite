@@ -20,10 +20,12 @@ it, two pull requests green on their own can break `main` together: the ruleset
 does not require an up-to-date branch, and requiring one would rerun every open
 pull request's CI after each merge.
 
-`ci` and `PR title` also run on `merge_group`. A group runs `ci` in `pr` mode
-against its `main` base: the same path rules, skips and platforms as a pull
-request, with the diff covering every pull request ahead of it. `Bundle size`
-skips there, since it compares a pull request with its base. A group's `PR
+`ci` and `PR title` also run on `merge_group`. A group runs `ci` in `queue`
+mode against its `main` base: the same path rules as a pull request, with the
+diff covering every pull request ahead of it, and the Windows, macOS, desktop,
+E2E, stress, Docker and APK jobs a pull request run leaves out
+([pull request runs](#pull-request-runs)). `Bundle size` skips there, since it
+compares a pull request with its base. A group's `PR
 title` checks the squash title of its last commit, the one `main` receives.
 The queue builds up to five groups at once, each on top of the ones ahead of
 it, without waiting to fill a group. Pull requests land in queue order: one
@@ -120,9 +122,9 @@ reports its own name (`Desktop`), never the inner ones. So:
   the ruleset requires every job of each needs chain (`Plan and repository
   checks`, `Build UI`).
 
-`bun scripts/ci/required-checks.ts` prints the names a ready pull request
-reports. Its tests pin all of them, refuse a matrix or an expression in a name
-(the draft expression aside, see [draft pull requests](#draft-pull-requests)), and check each written-out job against
+`bun scripts/ci/required-checks.ts` prints the names a pull request
+reports. Its tests pin all of them, refuse a matrix or an expression in a name,
+and check each written-out job against
 `CORE_ALL` and `PORTABLE_ALL`. On main and in a release, the `Ruleset check
 names` job runs it with `--live`, which reads the rules for `main`
 (`repos/mtsu-dev/boite/rules/branches/main`, public) and fails on a check the
@@ -140,8 +142,8 @@ compares with saved `gh api` output instead.
 
 ### Run modes and platforms
 
-PRs against any branch use `pr` mode and compare with their base; so do merge
-queue groups, against their `main` base. Main pushes
+PRs against any branch use `pr` mode and compare with their base; merge queue
+groups use `queue` mode against their `main` base. Main pushes
 use `warm`: they run affected core and E2E suites too, add Linux ARM64 and macOS
 Intel desktop legs, and save caches. A push event does not prove that an
 equivalent PR tree passed. A main push compares with the last main commit whose
@@ -149,10 +151,10 @@ CI passed, not with the previous push, so the changes of a cancelled or failed
 run are tested again. A green main commit therefore has every suite passing on
 a tree no later change affected, as far as the path rules above hold; the
 nightly publishes on that. Without an answer from the API, the run selects every
-check. Tags, reusable full calls and manual runs use `full`. PR portable
+check. Tags, reusable full calls and manual runs use `full`. Queue portable
 desktop legs are Linux x64 and macOS ARM64; warm/full runs use both
 architectures of each OS. The core suite follows the same rule for its Intel
-Mac: a PR runs it on Linux x64/ARM64, Windows and macOS ARM64, and warm/full
+Mac: a group runs it on Linux x64/ARM64, Windows and macOS ARM64, and warm/full
 runs add `Core tests (macOS x64)` on `macos-15-intel` (`coreRunners` in
 `changes.ts`). That job took 322 to 409 s a PR on a scarce runner (2026-10-17);
 an Intel-only core failure now shows on the main push.
@@ -178,7 +180,9 @@ desktop leg took 14.0 minutes and the Apple Silicon one 8.1 (nightly run
 37234148865, the longest job of that run).
 
 Core changes run the full core suite on Windows, Linux x64/ARM64 and macOS
-ARM64 in every mode, and on Intel macOS outside PRs. The two Linux core jobs
+ARM64 in the queue, on main and in full runs, and on Intel macOS outside the
+queue; a pull request runs it on Linux x64, plus Windows for protection
+inputs ([pull request runs](#pull-request-runs)). The two Linux core jobs
 then install `xvfb` and `libxcomposite1` with apt and run
 `packages/core/test/window-capture-x11.test.ts` alone under `xvfb-run` at
 1280x1024x24: the X11 backend of `boite window` lists, captures and fails on
@@ -253,16 +257,18 @@ the summary with its time, and the tests listed are those seen before. Bun
 gives no list of open handles and no stack of a test that awaits: its
 inspector answers only when the JavaScript thread is free.
 
-### Draft pull requests
+### Pull request runs
 
-A draft pull request runs `draft` mode: the changes job, the Linux x64 core
-suite, type checks and UI tests, and the focused telemetry and E2E type checks,
-each only when its paths changed. Protection code, protected fixtures and shared
-toolchain inputs also select the existing `Core tests (Windows x64)` job.
+A pull request, draft or ready, runs `pr` mode: the changes job, the Linux x64
+core suite, type checks and UI tests, `Bundle size`, and the focused telemetry
+and E2E type checks, each only when its paths changed. Protection code,
+protected fixtures and shared toolchain inputs also select the existing
+`Core tests (Windows x64)` job.
 It builds the userspace sandbox helper, runs the opt-in native protection fixture
 and keeps the ordinary Windows core suite. No extra required check name is added.
-Other drafts leave Windows out. macOS, desktop packages, E2E, stress, Docker and
-the APKs wait: their checks skip.
+Other pull requests leave Windows out. macOS, desktop packages, E2E, stress,
+Docker and the APKs skip: the [merge queue](#merge-queue) runs them on top of
+`main`.
 
 The Windows job also archives `windows-null-access-matrix`: a standalone,
 opt-in comparison of host and LPAC NUL opens with four requested access masks.
@@ -348,47 +354,38 @@ Successful sibling suspensions remain held until the trap is rearmed. A failed
 park, an unexpected status or a missing exit/replay still drains the job within
 the existing deadline. Failed suspensions never count as held or retired threads.
 
-A skip passes in a ruleset, so a draft must not satisfy it:
+A skip passes in a ruleset, so a pull request's run satisfies every required
+name and the pull request can enter the queue. The group's run reports the same
+names on its own commit, and gates the merge on them. There only the path rules
+skip a job: `changes.ts` gives a group the `queue` plan whatever its pull
+requests' draft flags, and no job condition in `ci.yml` reads the event or the
+draft flag, `Bundle size` and `Ruleset check names` aside
+(`required-checks.test.ts`). A Windows, macOS, desktop or E2E failure therefore
+shows first in the queue, which removes the pull request.
 
-- The planning job reports `Plan and repository checks (draft)` and the
-  reusable workflows `Desktop (draft) / Linux x64` and so on. Only a job that
-  runs or a caller evaluates its name: a skipped job reports the expression
-  itself, so the other jobs keep their fixed names.
-- After `ready_for_review`, the required planning name stays expected until
-  the `pr` run creates it, then pending until it ends.
-- A rerun keeps its event, so an old draft run rerun once the pull request is
-  ready, or a fork's draft run approved after it, would put skips back under
-  the required names. The planning job's first step reads the pull request's
-  draft flag. Still a draft: the other jobs skip as usual, even when the
-  repository checks fail. No longer a draft, no answer from GitHub, or
-  planning failed before that step: every other job runs only to fail with
-  "rerun the latest ready run instead". A cancelled run reports its pending
-  jobs `cancelled`, not skipped, which blocks as well.
-- `converted_to_draft` cancels a full run in progress and fails `Plan and
-  repository checks` at once, so that run's earlier planning success cannot
-  merge next to skips; the next push runs the draft checks.
-- A pull request reopened as a draft over a partial full run is the one case
-  left: its draft run puts skips back next to that run's planning success. A
-  draft cannot merge, and marking it ready runs a full run whose planning
-  replaces that success before anything else.
+Marking a draft ready starts no run, nor does a conversion to draft: a draft's
+run already reports what a ready one would. mtsu-patrol reviews once the pull
+request is ready.
 
-`PR title` reports the same name in both modes. mtsu-patrol reviews once the
-pull request is ready.
-
-Of the 5,632 runner minutes spent by the 86 pull request runs started on
-2026-10-18 between 12:34 and 21:35 UTC, 2,476 went to runs a newer push
-cancelled, a median 9.8 minutes after the push they tested: the time a review
-bot takes to answer. A green full run
-cost 86 runner minutes; a draft run of the same core change costs about 11,
-all on Linux.
+Until 2026-10-28 a ready pull request ran the full matrix, then its merge group
+ran it again. GitHub Free allows the organization 20 concurrent jobs: with 20 or
+more ready pull requests open, jobs waited up to 47 minutes for a runner. On
+2026-10-28 a pull request run cost 12 to 16 runner minutes, all on Linux, and a
+full run 91 to 108 (9 runs of that day). Each pull request now pays the full
+matrix once, in the queue, instead of twice. Of the 5,632 runner minutes spent
+by the 86 pull request runs started on 2026-10-18 between 12:34 and 21:35 UTC,
+2,476 went to runs a newer push cancelled, a median 9.8 minutes after the push
+they tested: the time a review bot takes to answer.
 
 An agent's pull request flow:
 
 1. `gh pr create --draft`.
 2. Fix the draft's CI failures in one push.
 3. `gh pr ready <number>` once the draft's checks pass.
-4. After that, one push per round: wait for the full run and mtsu-patrol's
-   review of the head, then fix everything they found together.
+4. After that, one push per round: wait for the head's CI run and
+   mtsu-patrol's review, then fix everything they found together.
+5. `gh pr merge <number> --squash --match-head-commit <sha>`. A failure the
+   queue finds removes the pull request: fix it, push, and merge again.
 
 ## Build cost
 
