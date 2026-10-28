@@ -100,9 +100,10 @@ shows "Elapsed: 0s" for the first 11 seconds. Each liveness probe's `hello`
 measures it again, so a device that sets its clock right on a live socket,
 back from sleep, follows within one probe; a change under a second is
 round-trip noise and is ignored. The middle of a trip is off by at most half
-of it, so a slow probe, a hello held behind an upload, moves the offset only
-by more than that half. An older core sends no clock
-and the offset stays zero.
+of it: a sample no more precise than the current offset replaces it only when
+their two ranges cannot meet, so slow probes held behind an upload never swap
+one guess for another, while a clock set right still shows. An older core
+sends no clock and the offset stays zero.
 
 The client detects silent remote sockets (`packages/ui/src/lib/ws-client.ts`).
 On a remote host, 25 seconds without any frame sends a `hello`, which the core

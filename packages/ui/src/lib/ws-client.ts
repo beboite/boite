@@ -45,6 +45,8 @@ export class WsClient implements ObservableClient {
   #state: ClientState = 'idle';
   #core: CoreInfo | null = null;
   #clockOffset = 0;
+  /** How far `#clockOffset` can be off: half the round trip that measured it. */
+  #clockError = 0;
   #nextId = 1;
   #pending = new Map<number, Pending>();
   #handlers = new Map<string, Set<(payload: unknown) => void>>();
@@ -393,6 +395,7 @@ export class WsClient implements ObservableClient {
             this.#lastFrameAt = Date.now();
             // The core read its clock halfway through the round trip, as far as this side can tell.
             this.#clockOffset = typeof result.core.now === 'number' ? Math.round(result.core.now - (sentAt + this.#lastFrameAt) / 2) : 0;
+            this.#clockError = (this.#lastFrameAt - sentAt) / 2;
             this.#setState('ready');
             this.#armLiveness(IDLE_PROBE_MS);
             this.#resubscribe(socket);
@@ -492,16 +495,21 @@ export class WsClient implements ObservableClient {
   /**
    * A probe's hello measures the clocks again, for a device that corrected
    * its own on a live socket, back from sleep. Less than a second apart is
-   * round-trip noise, which would only make a counter skip. The middle of the
-   * trip is off by at most half of it, so a slow hello, held behind an upload,
-   * moves the offset only by more than that half: a clock set right still shows.
+   * round-trip noise, which would only make a counter skip. The middle of a
+   * trip is off by at most half of it: a sample no more precise than the
+   * offset it would replace counts only when the two ranges cannot meet, so
+   * slow hellos held behind an upload never swap one guess for another, while
+   * a clock set right still shows.
    */
   #retime(now: number | undefined, sentAt: number): void {
     if (typeof now !== 'number') return;
     const back = Date.now();
     const offset = Math.round(now - (sentAt + back) / 2);
-    if (Math.abs(offset - this.#clockOffset) < Math.max(1000, (back - sentAt) / 2)) return;
+    const error = (back - sentAt) / 2;
+    const shift = Math.abs(offset - this.#clockOffset);
+    if (shift < 1000 || (error >= this.#clockError && shift <= error + this.#clockError)) return;
     this.#clockOffset = offset;
+    this.#clockError = error;
     for (const handler of this.#clockHandlers) handler(offset);
   }
 

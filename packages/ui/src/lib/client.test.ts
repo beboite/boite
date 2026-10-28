@@ -189,7 +189,7 @@ describe('WsClient', () => {
       await vi.advanceTimersByTimeAsync(0);
       const probed = Date.now();
       await vi.advanceTimersByTimeAsync(3_000);
-      socket.receive({ id: socket.frame(2).id, result: { core: { ...CORE, now: probed + 2_900 + 300 }, principal: 'owner' } });
+      socket.receive({ id: socket.frame(2).id, result: { core: { ...CORE, now: probed + 3_000 + 300 }, principal: 'owner' } });
       await late;
       expect(client.clockOffset).toBe(300);
       expect(heard).toEqual([300]);
@@ -201,6 +201,15 @@ describe('WsClient', () => {
       await vi.advanceTimersByTimeAsync(3_000);
       socket.receive({ id: socket.frame(3).id, result: { core: { ...CORE, now: again + 2_900 + 8_300 }, principal: 'owner' } });
       await behind;
+      expect(client.clockOffset).toBe(9_700);
+      expect(heard).toEqual([300, 9_700]);
+      // Another slow trip, held on the way back this time, reads 6900: both guesses are 1.5 s wide, so neither replaces the other.
+      const back = client.resume();
+      await vi.advanceTimersByTimeAsync(0);
+      const third = Date.now();
+      await vi.advanceTimersByTimeAsync(3_000);
+      socket.receive({ id: socket.frame(4).id, result: { core: { ...CORE, now: third + 100 + 8_300 }, principal: 'owner' } });
+      await back;
       expect(client.clockOffset).toBe(9_700);
       expect(heard).toEqual([300, 9_700]);
     } finally { client.close(); vi.useRealTimers(); }
