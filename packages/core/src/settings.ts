@@ -115,20 +115,22 @@ export class SettingsStore {
       if (key === 'groupBots') this.core.workforce.groupHost.allowedChanged(next[key] === true);
       announceMachineSetting(this.core, key, next[key] === true);
     }
-    if (checked.subscriptionProxy !== undefined) {
-      for (const account of this.core.accounts.list()) {
-        const provider = this.core.providers.get(account.providerId);
-        // Only an account the gateway answered for before or answers for now: a
-        // refusal kept on any other one came from its own sign-in, and a proxy
-        // that never served it has nothing to say about it.
-        if (subscriptionProxyOf(previous, provider) !== null || subscriptionProxyOf(next, provider) !== null) {
-          this.core.journal.deleteSetting(`account-auth-rejected:${account.id}`);
-          this.core.accounts.check(account.id, true);
-        }
-      }
-    }
+    if (checked.subscriptionProxy !== undefined) this.recheckProxied(previous, next);
     this.core.group.settingsChanged();
     return next;
+  }
+
+  private recheckProxied(previous: Settings, next: Settings): void {
+    for (const account of this.core.accounts.list()) {
+      const provider = this.core.providers.get(account.providerId);
+      // Only an account the gateway answered for before or answers for now: a
+      // refusal kept on any other one came from its own sign-in, and a proxy
+      // that never served it has nothing to say about it.
+      if (subscriptionProxyOf(previous, provider) !== null || subscriptionProxyOf(next, provider) !== null) {
+        this.core.journal.deleteSetting(`account-auth-rejected:${account.id}`);
+        this.core.accounts.check(account.id, true);
+      }
+    }
   }
 
   /** A value the policy holds anyway is not the user's choice: the saved one stays for when the policy lifts. */
@@ -161,6 +163,7 @@ export class SettingsStore {
       if (key === 'groupBots') this.core.workforce.groupHost.allowedChanged(next[key] === true);
       announceMachineSetting(this.core, key, next[key] === true);
     }
+    if (JSON.stringify(previous.subscriptionProxy) !== JSON.stringify(next.subscriptionProxy)) this.recheckProxied(previous, next);
     this.core.group.settingsChanged();
   }
 }

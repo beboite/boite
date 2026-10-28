@@ -291,12 +291,16 @@ const PROXY = { enabled: true, kind: 'douane', baseUrl: 'https://douane.example/
 test('gateway: false refuses the gateway and turns a saved one off without forgetting it', async () => {
   const { harness, client, policy } = await core();
   await client.call('settings.set', { subscriptionProxy: PROXY });
+  // A refusal the gateway gave stops counting once the policy takes the gateway away.
+  const account = await client.call('accounts.add', { providerId: 'claude', label: 'Gateway' });
+  harness.core.accounts.authenticationFailed(account.id);
   // An open settings card hears the value the policy now holds, as it hears a change from the page.
   const settle = spyOn(harness.core.threads.cards, 'settleSettings');
   cleanups.push(() => settle.mockRestore());
   policy.write({ gateway: false });
   await client.call('policy.get', {});
   expect((await client.call('settings.get', {})).subscriptionProxy?.enabled).toBe(false);
+  expect(harness.core.journal.getSetting(`account-auth-rejected:${account.id}`)).toBeUndefined();
   expect(settle).toHaveBeenCalledWith(expect.objectContaining({ subscriptionProxy: expect.objectContaining({ enabled: false }) }));
   await refusedBy(client.call('subscriptionProxy.setEnabled', { enabled: true }), 'gateway');
   await refusedBy(client.call('subscriptionProxy.configure', { subscriptionProxy: PROXY }), 'gateway');
