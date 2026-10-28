@@ -386,7 +386,9 @@ attachment IDs; the journal supplies the bytes, and missing ones restore as
 placeholders. A prompt that left the box but has no core answer yet stays in
 the journal: a thread's prompt as an outbox entry under its `turns.start`
 request ID, a new conversation's as its draft. A crash before the answer
-brings it back without a duplicate turn.
+brings it back without a duplicate turn: the owning core reads the receipt of
+that request ID, drops the entry when it already took it and starts it once
+when it never did.
 
 Accepted queues run on the core without an open client, including after restart
 when delivery is known to be safe. Unconfirmed provider submissions stay held.

@@ -170,7 +170,13 @@ export class Composer {
       const item = value.input.queued[0]!;
       const delivery = this.storage.delivery(item.id);
       if (delivery?.status === 'delivered') { this.complete(section, id, item.id); continue; }
-      if (delivery?.status === 'uncertain' || item.request?.failed || item.request?.sent) {
+      // An app that sent this prompt itself and died before the answer queues it
+      // again under the same request id: the receipt says whether it arrived.
+      // None means it never did, and its start goes once, as the receipt dedups
+      // a late copy of the first request; a pending one stays held.
+      const receipt = section === 'inputs' && item.request?.sent && !item.request.failed ? this.core.journal.turnRequest(id, item.request.id) : null;
+      if (receipt && !/^(start|steer):pending:/.test(receipt.fingerprint)) { this.complete(section, id, item.id); continue; }
+      if (delivery?.status === 'uncertain' || item.request?.failed || (item.request?.sent && (section !== 'inputs' || receipt))) {
         this.hold(section, id, item.id, item.request?.failed ?? 'Delivery is unconfirmed; review before sending a new request.'); return;
       }
       this.captured.set(key, section === 'drafts' ? value.input.queued : [item]);

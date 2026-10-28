@@ -365,6 +365,30 @@ test('an uncertain native steering acknowledgement is held through a restart', a
   expect(h.core.journal.listTurns(threadId)).toHaveLength(1);
 });
 
+test.each([['took it', true], ['never got it', false]] as const)('a prompt an app sent before it died and queues again on restart reaches the thread once when the core %s', async (_case, took) => {
+  h = await startTestCore();
+  const a = await h.connect();
+  const { threadId } = await echoThread(h, a);
+  const image = { kind: 'image' as const, mimeType: 'image/png' as const, name: 'shot.png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' };
+  const prompt = 'every problem at once, with its screenshot';
+  const requestId = `resume-${took ? 'taken' : 'lost'}-request`;
+  if (took) {
+    await a.call('turns.start', { threadId, prompt, attachments: [image], clientRequestId: requestId });
+    await waitFor(() => h.core.journal.listTurns(threadId).some(turn => turn.status === 'done'));
+  }
+  // The restarted app's journal: the prompt as it left, under the request id it went out with.
+  const asset = await a.call('composer.asset.put', { attachment: image });
+  await a.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: 0, value: { input: { ...value().input, text: '', queued: [{ id: requestId, text: prompt, attachments: [{ kind: image.kind, mimeType: image.mimeType, name: image.name, assetId: asset.assetId }], request: { id: requestId, choice: null, queuedAt: Date.now(), sent: true } }] } } });
+  await waitFor(() => h.core.composer.storage.get('inputs', threadId).value?.input.queued.length !== 1 || h.core.composer.storage.get('inputs', threadId).value?.input.paused === true);
+  await waitFor(() => h.core.journal.listTurns(threadId).length > 0 && h.core.journal.listTurns(threadId).every(turn => turn.status === 'done') || h.core.composer.storage.get('inputs', threadId).value?.input.paused === true);
+  expect(h.core.composer.storage.get('inputs', threadId).value?.input.paused ?? false).toBe(false);
+  expect(h.core.composer.storage.get('inputs', threadId).value?.input.queued ?? []).toEqual([]);
+  const sent = h.core.journal.listMessages(threadId).filter(message => message.role === 'user');
+  expect(sent).toHaveLength(1);
+  expect(sent[0]!.parts.filter(part => part.type === 'image')).toHaveLength(1);
+  expect(h.core.journal.listTurns(threadId)).toHaveLength(1);
+});
+
 test('a non-steering provider leaves waiting queues active after restart and delivers them in order once', async () => {
   restartDir = mkdtempSync(join(tmpdir(), 'composer-order-'));
   h = await startTestCore({ dataDir: restartDir });
