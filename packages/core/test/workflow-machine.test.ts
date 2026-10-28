@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { WorkflowPlan, WorkflowRun } from '@boite/contracts';
 import { setDriver } from '../src/drivers/index.ts';
@@ -14,13 +15,13 @@ const restores: (() => void)[] = [];
 afterEach(async () => { for (const h of cores.splice(0)) await h.stop(); for (const restore of restores.splice(0)) restore(); });
 
 /** Each turn answers `reply(prompt)`; null holds it until stopped. Every prompt is kept by thread. */
-function scripted(reply: (prompt: string) => string | null) {
+function scripted(reply: (prompt: string, ctx: TurnContext) => string | null) {
   const prompts = new Map<string, string[]>();
   const held = new Set<string>();
   restores.push(setDriver('echo', { protocol: 'echo', startTurn(ctx: TurnContext) {
     prompts.set(ctx.thread.id, [...(prompts.get(ctx.thread.id) ?? []), ctx.prompt]);
     const done: TurnResult = { status: 'done', sessionId: `session:${ctx.thread.id}`, usage: null };
-    const text = reply(ctx.prompt);
+    const text = reply(ctx.prompt, ctx);
     if (text !== null) {
       const id = ctx.emit.startMessage('assistant');
       ctx.emit.part(id, 0, { type: 'text', text });
@@ -34,10 +35,10 @@ function scripted(reply: (prompt: string) => string | null) {
   return { prompts, held };
 }
 
-/** A conversation on `desk`, and `pc` in the same group with a project Notes. */
-async function setup(allow = true) {
-  const desk = await startTestCore();
-  const pc = await startTestCore();
+/** A conversation on `desk`, and `pc` in the same group with a project Notes. A data directory given is kept for a restart. */
+async function setup(allow = true, dirs: { desk?: string; pc?: string } = {}) {
+  const desk = await startTestCore(dirs.desk === undefined ? {} : { dataDir: dirs.desk });
+  const pc = await startTestCore(dirs.pc === undefined ? {} : { dataDir: dirs.pc });
   cores.push(desk, pc);
   const owner = await desk.connect();
   const pcOwner = await pc.connect();
@@ -52,7 +53,14 @@ async function setup(allow = true) {
   if (allow) await pc.core.settings.set({ groupThreads: true });
   const onPc = () => pc.core.journal.listThreads().filter(thread => thread.projectId === notes.id);
   const run = (runId: string): WorkflowRun => desk.core.workflows.get(threadId, runId);
-  return { desk, pc, owner, threadId, pcId, deskId, machine: pcId.slice(0, 8), onPc, run };
+  return { desk, pc, owner, threadId, pcId, deskId, machine: pcId.slice(0, 8), notesPath, onPc, run };
+}
+
+/** A data directory a core restarts on, removed after the test. */
+function restartable(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'boite-workflow-machine-'));
+  restores.push(() => rmSync(dir, { recursive: true, force: true }));
+  return dir;
 }
 
 const JSON_BLOCK = (value: unknown) => `Here it is.\n\`\`\`json\n${JSON.stringify(value)}\n\`\`\``;
@@ -61,7 +69,8 @@ test('a step on another machine runs there after a step here, and its JSON outpu
   const { prompts } = scripted(prompt => {
     if (prompt.includes('step scan')) return JSON_BLOCK({ files: ['a.ts', 'b.ts'] });
     // The first answer there has no JSON: the run asks that subagent once more, as it asks a step here.
-    if (prompt.includes('does not match this workflow step')) return JSON_BLOCK({ count: 2 });
+    // The second puts it past the first page, after characters of two UTF-16 units: pages count code points.
+    if (prompt.includes('does not match this workflow step')) return `${'🦊'.repeat(1_000)}${'x'.repeat(13_990)}\n${JSON_BLOCK({ count: 2 })}`;
     if (prompt.includes('step count')) return 'Two files.';
     return 'Summary read.';
   });
@@ -120,6 +129,105 @@ test('stopping the run stops its step on the other machine', async () => {
   await desk.core.delegation.remote.flush(pcId);
   await waitFor(() => !held.has(childId) && pc.core.threads.require(childId).status !== 'running');
   expect(pc.core.journal.listTurns(childId).at(-1)?.status).toBe('stopped');
+});
+
+test('a run stopped before the start answer came stops its subagent there once a report names it', async () => {
+  const { held } = scripted(prompt => (prompt.includes('step slow') ? null : 'ok'));
+  const { desk, pc, owner, threadId, pcId, deskId, machine, onPc, run } = await setup();
+  // The start reaches that machine and its answer is lost; that machine's reports do not come through yet either.
+  const arrived = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  const request = desk.core.coordination.request.bind(desk.core.coordination);
+  desk.core.coordination.request = (async (peer, operation, payload) => {
+    const answer = await request(peer, operation, payload);
+    if (operation === 'delegation.start') { arrived.resolve(); await release.promise; throw new Error('the answer was lost'); }
+    return answer;
+  }) as typeof desk.core.coordination.request;
+  let away = true;
+  const report = pc.core.coordination.request.bind(pc.core.coordination);
+  pc.core.coordination.request = ((peer, operation, payload) => (operation === 'delegation.report' && away
+    ? Promise.reject(new Error('offline')) : report(peer, operation, payload))) as typeof pc.core.coordination.request;
+  const started = await owner.call('workflows.start', { threadId, requestId: 'lost-1', plan: { name: 'Lost', steps: [{ id: 'slow', machine, project: 'notes', task: 'Read.' }] } });
+  await arrived.promise;
+  const childId = onPc()[0]!.id;
+  await waitFor(() => held.has(childId));
+  expect(run(started.id).nodes[0]!.instances[0]!.machine?.childId).toBeNull();
+
+  await owner.call('workflows.control', { threadId, runId: started.id, action: 'stop' });
+  release.resolve();
+  away = false;
+  await pc.core.delegation.remote.flush(deskId);
+  await desk.core.delegation.remote.flush(pcId);
+  // Before, nothing knew that subagent here when the run stopped, and it worked on there.
+  await waitFor(() => !held.has(childId) && pc.core.journal.listTurns(childId).at(-1)?.status === 'stopped');
+  expect(run(started.id).status).toBe('stopped');
+});
+
+test('a restart of the other machine keeps its step at work, and the turn it resumes settles the step', async () => {
+  const { held, prompts } = scripted(prompt => (prompt.startsWith('Boite restarted') ? 'Read after the restart.' : prompt.includes('step slow') ? null : 'ok'));
+  const pcDir = restartable();
+  const { desk, pc, owner, threadId, deskId, machine, onPc, run } = await setup(true, { pc: pcDir });
+  const started = await owner.call('workflows.start', { threadId, requestId: 'member-restart-1', plan: { name: 'Restart', steps: [{ id: 'slow', machine, project: 'notes', task: 'Read.' }] } });
+  await waitFor(() => onPc().length === 1 && held.has(onPc()[0]!.id));
+  const childId = onPc()[0]!.id;
+  await waitFor(() => run(started.id).nodes[0]!.instances[0]!.machine?.childId === childId);
+
+  await pc.core.threads.handoff.begin(0);
+  await pc.core.delegation.remote.flush(deskId);
+  // Its cut turn is reported stopped, with the restart that resumes it: the step is not over.
+  expect(desk.core.delegation.remote.record(threadId, run(started.id).nodes[0]!.instances[0]!.machine!.requestId)?.state).toMatchObject({ lastTurn: { status: 'stopped' }, restarting: true });
+  expect(run(started.id)).toMatchObject({ status: 'running', nodes: [{ instances: [{ status: 'running' }] }] });
+  const port = Number(new URL(pc.url).port);
+  await pc.stop();
+  cores.push(await startTestCore({ dataDir: pcDir, port }));
+
+  await waitFor(() => run(started.id).status === 'done', 10_000);
+  expect(prompts.get(childId)!.at(-1)).toStartWith('Boite restarted');
+  expect(run(started.id).nodes[0]!.instances[0]).toMatchObject({ status: 'done', result: 'Read after the restart.' });
+});
+
+test('a restart here sends again an output correction decided before that machine took it, and its answer settles the step once', async () => {
+  const { prompts } = scripted(prompt => (prompt.includes('does not match this workflow step') ? JSON_BLOCK({ count: 2 }) : prompt.includes('step count') ? 'Two files.' : 'ok'));
+  const deskDir = restartable();
+  const { desk, owner, threadId, machine, onPc, run } = await setup(true, { desk: deskDir });
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  desk.core.delegation.remote.send = (async () => { entered.resolve(); await release.promise; throw new Error('the core stopped before sending'); }) as typeof desk.core.delegation.remote.send;
+  const started = await owner.call('workflows.start', { threadId, requestId: 'correction-1', plan: { name: 'Correction', steps: [{ id: 'count', machine, project: 'notes', task: 'Count.', output: { count: 'number' } }] } });
+  await entered.promise;
+  const childId = onPc()[0]!.id;
+  expect(run(started.id).nodes[0]!.instances[0]!.machine).toMatchObject({ corrections: 1, correction: { requestId: expect.stringContaining(':output-1') } });
+  desk.core.workflows.beginClose();
+  release.resolve();
+  const port = Number(new URL(desk.url).port);
+  await desk.stop();
+
+  const next = await startTestCore({ dataDir: deskDir, port });
+  cores.push(next);
+  await (await next.connect()).call('workflows.control', { threadId, runId: started.id, action: 'resume' });
+  const settled = () => next.core.workflows.get(threadId, started.id);
+  // Before, the judged turn was all the step had, and nothing asked that subagent again.
+  await waitFor(() => settled().status === 'done', 10_000);
+  expect(settled().nodes[0]!.instances[0]).toMatchObject({ status: 'done', output: { count: 2 }, machine: { corrections: 1 } });
+  expect(settled().nodes[0]!.instances[0]!.machine!.correction).toBeUndefined();
+  expect(prompts.get(childId)).toHaveLength(2);
+});
+
+test('a step on another machine in a worktree of its own ends once that worktree is kept there, and the summary names its branch', async () => {
+  const { prompts } = scripted((prompt, ctx) => {
+    if (!prompt.includes('step edit')) return 'ok';
+    writeFileSync(join(ctx.thread.cwd, 'fix.txt'), 'the change\n');
+    return 'Changed fix.txt.';
+  });
+  const { pc, owner, threadId, machine, notesPath, onPc, run } = await setup();
+  for (const args of [['init', '-q'], ['commit', '-q', '--allow-empty', '-m', 'fixture init']]) {
+    const done = Bun.spawnSync({ cmd: ['git', ...args], cwd: notesPath, stdout: 'pipe', stderr: 'pipe' });
+    if (!done.success) throw new Error(done.stderr.toString());
+  }
+  const started = await owner.call('workflows.start', { threadId, requestId: 'worktree-1', plan: { name: 'Worktree', steps: [{ id: 'edit', machine, project: 'notes', task: 'Edit one file.', worktree: true }] } });
+  await waitFor(() => run(started.id).status === 'done', 10_000);
+  const kept = pc.core.delegation.worktrees.get(onPc()[0]!.id)!;
+  // Before, the step ended on the turn, with no worktree, so the summary had no branch to merge.
+  expect(run(started.id).nodes[0]!.instances[0]!.worktree).toMatchObject({ branch: kept.branch, state: 'kept' });
+  await waitFor(() => (prompts.get(threadId) ?? []).some(prompt => prompt.includes('Boite workflow done') && prompt.includes(kept.branch)));
 });
 
 test('a step with both machine and compute is invalid', async () => {

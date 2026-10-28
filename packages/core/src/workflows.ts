@@ -76,7 +76,7 @@ export class Workflows {
 
   constructor(private readonly core: Core) {
     this.log = new WorkflowLog(core);
-    const hooks = {load: (id: string) => this.load(id), save: (run: WorkflowRun) => this.save(run), advance: (id: string) => this.advance(id), runs: () => this.runsWhere("status IN ('running', 'paused')")};
+    const hooks = {load: (id: string) => this.load(id), save: (run: WorkflowRun) => this.save(run), advance: (id: string) => this.advance(id), runs: () => this.runsWhere("status IN ('running', 'paused')"), rooted: (rootId: string) => this.runsWhere("root_id = ? AND instr(data, '\"machine\":{') > 0", rootId)};
     this.compute = new SharedWorkflowCompute(core, hooks);
     this.machines = new MachineWorkflowSteps(core, hooks);
     for (const row of core.journal.db.query('SELECT * FROM workflow_steps').all() as StepRow[]) this.stepOf.set(row.thread_id, { runId: row.run_id, key: row.step_key });
