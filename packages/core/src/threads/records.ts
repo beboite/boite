@@ -68,7 +68,9 @@ export function withLoad(core: Core, thread: ThreadSummary): ThreadSummary {
     progress: busy ? core.threads?.progress?.get(thread.id) ?? null : null,
     backgroundWork: tasks.length === 0 ? null : { kinds: tasks.map(task => task.kind), since: Math.min(...tasks.map(task => task.startedAt)) },
     backgroundWait: thread.parentThreadId ? backgroundWaitOf(core, thread, tasks) : null,
-    pendingMove: core.threads?.moves?.pendingOf(thread.id) ?? null,
+    // Archive summaries are built before commit; the in-memory move stays until
+    // commit so a rollback preserves it, but an archived row has no move to apply.
+    pendingMove: thread.archived ? null : core.threads?.moves?.pendingOf(thread.id) ?? null,
     moveNote: thread.agentSessionId ? null : pendingMoveNote(core, thread.id),
     pendingAnswers: [...(core.threads?.deferred?.deferredAnswers.get(thread.id) ?? [])],
     openQuestions: core.threads?.cards?.openAsyncCount(thread.id) ?? 0,

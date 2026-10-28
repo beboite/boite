@@ -9,7 +9,7 @@ import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { newId } from '../src/ids.ts';
 import { keepsSessionAcrossFolders, MOVE_NOTE_PREFIX } from '../src/threads/move.ts';
-import { startTestCore, waitFor, type TestCore } from './harness.ts';
+import { rolledBackArchive, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 let h: TestCore;
 let client: CoreClient;
@@ -427,9 +427,19 @@ describe('threads.move', () => {
     await waitFor(() => h.core.threads.require(moving.id).projectId === alpha.id);
 
     turnId = await holdTurn(moving.id);
-    await client.call('threads.move', { threadId: moving.id, projectId: beta.id });
+    const pending = await client.call('threads.move', { threadId: moving.id, projectId: beta.id });
+    expect(rolledBackArchive(h, moving.id)).toBeInstanceOf(Error);
+    expect(await client.call('threads.get', { threadId: moving.id })).toMatchObject({ archived: false, pendingMove: pending.pendingMove });
+    expect(h.core.journal.getTurn(turnId)?.finishedAt).toBeNull();
+    const updates: ThreadSummary[] = [];
+    const off = h.core.bus.onCommitted((name, payload) => {
+      if (name === 'thread.updated' && (payload as ThreadSummary).id === moving.id) updates.push(payload as ThreadSummary);
+    });
     const archived = await client.call('threads.archive', { threadId: moving.id });
+    off();
+    expect(updates.find(summary => summary.archived)?.pendingMove).toBeNull();
     expect(archived.pendingMove ?? null).toBeNull();
+    expect(h.core.threads.moves.pendingOf(moving.id)).toBeNull();
     await waitFor(() => h.core.journal.getTurn(turnId)?.finishedAt != null);
     await waitFor(() => !h.core.threads.runner.handles.has(moving.id));
     expect(h.core.threads.require(moving.id).projectId).toBe(alpha.id);
