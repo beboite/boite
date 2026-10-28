@@ -84,7 +84,9 @@ export class ChildWorktrees {
     if (!record) return;
     const thread = this.core.threads.require(threadId);
     const parent = thread.parentThreadId ? this.core.journal.getThread(thread.parentThreadId) : null;
-    if (!parent || thread.projectId === null) throw refused(`the subagent's worktree ${record.path} has no parent conversation to branch from`);
+    // A subagent whose parent is on another machine branches from its project's HEAD here.
+    const elsewhere = !thread.parentThreadId && this.core.delegation.remote.parentOf(threadId) !== undefined;
+    if ((!parent && !elsewhere) || thread.projectId === null) throw refused(`the subagent's worktree ${record.path} has no parent conversation to branch from`);
     const project = this.core.projects.require(thread.projectId);
     try {
       if ((record.state === 'active' || record.state === 'kept') && existsSync(record.path)) return this.mark(threadId, { ...record, state: 'active' });
@@ -97,7 +99,7 @@ export class ChildWorktrees {
         await this.core.worktrees.resumePreparation(threadId, project, record.branch, record.path, record.base, assertActive);
         return this.mark(threadId, { ...record, state: 'active' });
       }
-      const base = this.core.sharedCompute?.journal.worker(threadId)?.input.baseCommit ?? await this.core.worktrees.head(threadId, parent.projectId === thread.projectId ? parent.cwd : project.path);
+      const base = this.core.sharedCompute?.journal.worker(threadId)?.input.baseCommit ?? await this.core.worktrees.head(threadId, parent && parent.projectId === thread.projectId ? parent.cwd : project.path);
       await this.core.worktrees.add(threadId, project, record.branch, record.path, {
         assertActive,
         beforeMutation: () => {

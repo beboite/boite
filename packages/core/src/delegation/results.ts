@@ -1,4 +1,4 @@
-import type { DelegatedAgent, DelegationResultPage, DelegationWaitResult, RpcParams, ThreadId } from '@boite/contracts';
+import type { DelegatedAgent, DelegationResultPage, DelegationWaitResult, RpcParams, ThreadId, Turn, Usage } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import type { Connection } from '../router.ts';
 import { invalidParams, refused } from '../errors.ts';
@@ -19,25 +19,57 @@ export function directChildren(core: Core, threadId: ThreadId, agentId?: ThreadI
   const parent = core.threads.require(threadId);
   if (parent.parentThreadId) throw refused('threadId: expected the parent of direct delegated children');
   const rows = core.journal.db.query('SELECT thread_id FROM delegated_agents WHERE root_id = ? ORDER BY rowid').all(threadId) as { thread_id: string }[];
-  if (agentId !== undefined && !rows.some(row => row.thread_id === agentId && core.journal.getThread(agentId)?.parentThreadId === threadId)) throw refused('agentId: expected a direct delegated child of threadId');
-  return (agentId === undefined ? rows : rows.filter(row => row.thread_id === agentId)).map(row => row.thread_id);
+  // A child on another machine of the group, as that machine last reported it.
+  const elsewhere = core.delegation.remote.childIds(threadId);
+  if (agentId !== undefined && !rows.some(row => row.thread_id === agentId && core.journal.getThread(agentId)?.parentThreadId === threadId) && !elsewhere.includes(agentId)) throw refused('agentId: expected a direct delegated child of threadId');
+  const ids = [...rows.map(row => row.thread_id), ...elsewhere];
+  return agentId === undefined ? ids : ids.filter(id => id === agentId);
 }
 
 export function delegatedResultPage(core: Core, params: RpcParams<'delegation.result'>): DelegationResultPage {
   directChildren(core, params.threadId, params.agentId);
-  if (typeof params.turnId !== 'string' || !params.turnId) throw invalidParams('turnId: expected a nonempty string');
-  const turn = core.journal.getTurn(params.turnId);
-  if (!turn || turn.threadId !== params.agentId || turn.status === 'queued' || turn.status === 'running') throw refused('turnId: expected a terminal turn of the named direct child');
-  const offset = params.offset === undefined ? 0 : params.offset;
-  const limit = params.limit === undefined ? PAGE_CHARS : params.limit;
-  if (!Number.isInteger(offset) || offset < 0) throw invalidParams('offset: expected a nonnegative integer');
-  if (!Number.isInteger(limit) || limit < 1 || limit > PAGE_CHARS) throw invalidParams('limit: expected an integer from 1 to 16000');
+  return resultPageOf(core, params.agentId, params.turnId, params.offset, params.limit);
+}
+
+/** The bounded final answer of a finished turn, or its error. */
+export function turnResult(core: Core, turn: Turn | null): string | null {
+  if (!turn || turn.status === 'queued' || turn.status === 'running') return null;
+  const rows = core.journal.db.query(`SELECT substr((SELECT group_concat(substr(json_extract(value, '$.text'), 1, 4001), char(10))
+    FROM json_each(messages.parts) WHERE json_extract(value, '$.type') = 'text'), 1, 4001) AS answer
+    FROM messages WHERE thread_id = ? AND turn_id = ? AND role = 'assistant' ORDER BY rowid DESC LIMIT 8`).all(turn.threadId, turn.id) as { answer: string | null }[];
+  for (const row of rows) {
+    const answer = row.answer?.trim();
+    if (answer) return answer.length > 4000 ? `${answer.slice(0, 3900)}\n[Truncated. Open the agent conversation for the complete answer.]` : answer;
+  }
+  return turn.error ?? null;
+}
+
+/** What a team's children and the parent's delegation turns spent on this machine. */
+export function teamUsage(core: Core, rootId: string): Usage {
+  const totals = core.journal.db.query(`SELECT
+    SUM(json_extract(usage, '$.inputTokens')) AS inputTokens, SUM(json_extract(usage, '$.outputTokens')) AS outputTokens,
+    SUM(json_extract(usage, '$.cacheReadTokens')) AS cacheReadTokens, SUM(json_extract(usage, '$.cacheWriteTokens')) AS cacheWriteTokens,
+    SUM(json_extract(usage, '$.costUsdEquivalent')) AS costUsdEquivalent
+    FROM turns WHERE thread_id IN (SELECT thread_id FROM delegated_agents WHERE root_id = ?)
+    OR (thread_id = ? AND json_extract(execution, '$.operation') = 'delegation')` ).get(rootId, rootId) as Usage;
+  return { inputTokens: totals.inputTokens ?? 0, outputTokens: totals.outputTokens ?? 0, cacheReadTokens: totals.cacheReadTokens ?? 0, cacheWriteTokens: totals.cacheWriteTokens ?? 0, costUsdEquivalent: totals.costUsdEquivalent ?? null };
+}
+
+/** A page of a child's answer to one turn: read here for a parent here, or for its parent on another machine. */
+export function resultPageOf(core: Core, agentId: ThreadId, turnId: unknown, offsetParam?: unknown, limitParam?: unknown): DelegationResultPage {
+  if (typeof turnId !== 'string' || !turnId) throw invalidParams('turnId: expected a nonempty string');
+  const turn = core.journal.getTurn(turnId);
+  if (!turn || turn.threadId !== agentId || turn.status === 'queued' || turn.status === 'running') throw refused('turnId: expected a terminal turn of the named direct child');
+  const offset = offsetParam === undefined ? 0 : offsetParam;
+  const limit = limitParam === undefined ? PAGE_CHARS : limitParam;
+  if (typeof offset !== 'number' || !Number.isInteger(offset) || offset < 0) throw invalidParams('offset: expected a nonnegative integer');
+  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > PAGE_CHARS) throw invalidParams('limit: expected an integer from 1 to 16000');
   // Slice in SQLite before crossing into JS: tool payloads and the unbounded
   // complete answer never become RPC response or process-memory strings.
   const parts = `SELECT m.rowid AS message_order, CAST(p.key AS INTEGER) AS part_order, json_extract(p.value, '$.text') AS text
     FROM messages m, json_each(m.parts) p WHERE m.thread_id = ?1 AND m.turn_id = ?2
     AND m.role = 'assistant' AND json_extract(p.value, '$.type') = 'text'`;
-  const count = core.journal.db.query(`WITH parts AS (${parts}) SELECT COALESCE(SUM(length(text)), 0) + MAX(COUNT(*) - 1, 0) AS total FROM parts`).get(params.agentId, params.turnId) as { total: number };
+  const count = core.journal.db.query(`WITH parts AS (${parts}) SELECT COALESCE(SUM(length(text)), 0) + MAX(COUNT(*) - 1, 0) AS total FROM parts`).get(agentId, turnId) as { total: number };
   if (offset > count.total) throw invalidParams(`offset: expected an integer from 0 to ${count.total}`);
   const row = core.journal.db.query(`WITH parts AS (${parts}), segments AS (
     SELECT message_order, part_order, CASE WHEN ROW_NUMBER() OVER (ORDER BY message_order, part_order) = 1 THEN text ELSE char(10) || text END AS text FROM parts
@@ -46,13 +78,13 @@ export function delegatedResultPage(core: Core, params: RpcParams<'delegation.re
   ) SELECT COALESCE(group_concat(piece, ''), '') AS text FROM (
     SELECT substr(text, MAX(1, ?3 - start + 1), MIN(?4 - MAX(0, start - ?3), length(text) - MAX(0, ?3 - start))) AS piece
     FROM positions WHERE start < ?3 + ?4 AND start + length(text) > ?3 ORDER BY message_order, part_order
-  )`).get(params.agentId, params.turnId, offset, limit) as { text: string };
+  )`).get(agentId, turnId, offset, limit) as { text: string };
   let text = row.text.slice(0, PAGE_CHARS);
   // Never end a bounded page halfway through a surrogate pair.
   const last = text.charCodeAt(text.length - 1);
   if (last >= 0xd800 && last <= 0xdbff) text = text.slice(0, -1);
   const next = offset + Array.from(text).length;
-  return { resultRef: { agentId: params.agentId, turnId: params.turnId }, text, offset, nextOffset: next < count.total ? next : null, total: count.total };
+  return { resultRef: { agentId, turnId }, text, offset, nextOffset: next < count.total ? next : null, total: count.total };
 }
 
 /** Event-driven waits own no provider input and have no effect on automatic mail. */

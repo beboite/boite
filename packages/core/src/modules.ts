@@ -97,12 +97,15 @@ export function registerModules(core: Core): void {
   const probe = registerProbeMethods(core);
   core.activity.useProbe(probe);
   core.threads.spawns.useProbe(probe);
-  core.router.register('delegation.result', params => core.delegation.resultPage(params));
+  core.delegation.remote.useProbe(probe);
+  // A child on another machine of the group is read and steered there.
+  core.router.register('delegation.result', params => (core.delegation.remote.child(params.threadId, params.agentId) ? core.delegation.remote.read(params) : core.delegation.resultPage(params)));
   core.router.register('delegation.wait', (params, ctx) => core.delegation.wait(params, ctx.connection));
   core.router.register('delegation.get', params => core.delegation.get(params.threadId));
   core.router.register('delegation.configure', params => core.delegation.configure(params.threadId, params.config));
   core.router.register('delegation.models', params => core.delegation.models(params.threadId, probe, params.machine));
   core.router.register('delegation.spawn', async params => {
+    if (params.machine !== undefined) return core.delegation.remote.spawn(params);
     await core.delegation.prepareRoutes(params.threadId, probe, [typeof params.model === 'string' ? params.model : undefined]);
     return core.delegation.spawn(params);
   });
@@ -111,7 +114,10 @@ export function registerModules(core: Core): void {
     await core.delegation.prepareRoutes(params.threadId, probe, [typeof params.model === 'string' ? params.model : undefined]);
     return createAgent(core, core.workforce, params);
   });
-  core.router.register('delegation.send', (params, ctx) => core.delegation.send(params, ctx.connection.identity.principal === 'agent' ? 'agent' : 'user'));
+  core.router.register('delegation.send', (params, ctx) => {
+    const origin = ctx.connection.identity.principal === 'agent' ? 'agent' : 'user';
+    return core.delegation.remote.child(params.threadId, params.toThreadId) ? core.delegation.remote.send(params, origin) : core.delegation.send(params, origin);
+  });
   // The agent's own stop leaves a pause it may lift; the owner's, one only the owner's next message releases.
   core.router.register('delegation.stop', (params, ctx) => ({ stopped: core.delegation.stop(params.threadId, params.agentId, ctx.connection.identity.principal === 'agent' ? 'agent' : 'stop') }));
   core.router.register('delegation.resume', (params, ctx) => core.delegation.resume(params.threadId, params.agentId, ctx.connection.identity.principal));

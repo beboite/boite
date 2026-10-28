@@ -42,7 +42,7 @@ export interface GroupStart {
 /** How long a member reads the model lists nobody asked for yet before it answers `delegation.catalog`, under the caller's 5 s per request. */
 const CATALOG_READ_MS = 3000;
 
-const PERMISSION_MODES: readonly PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions', 'yolo', 'plan', 'dontAsk'];
+export const PERMISSION_MODES: readonly PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions', 'yolo', 'plan', 'dontAsk'];
 const fold = (name: string): string => name.trim().replace(/\s+/g, '-').toLowerCase();
 const optional = (value: unknown, field: string, max: number): string | null => (value === null || value === undefined ? null : requiredText(value, `thread.start.${field}`, max));
 

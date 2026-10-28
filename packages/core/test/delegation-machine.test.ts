@@ -1,0 +1,304 @@
+import { afterEach, expect, test } from 'bun:test';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
+import type { DelegatedAgent, ModelInfo } from '@boite/contracts';
+import { runCli } from '../src/cli.ts';
+import type { CoreClient } from '../src/client.ts';
+import { setDriver } from '../src/drivers/index.ts';
+import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
+import { invalidParams } from '../src/errors.ts';
+import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
+
+/* `boite delegate spawn --machine`: a parent here, its subagent on another machine of the group. */
+
+const cores: TestCore[] = [];
+const restores: (() => void)[] = [];
+afterEach(async () => { for (const h of cores.splice(0)) await h.stop(); for (const restore of restores.splice(0)) restore(); });
+
+/** An echo driver that records every prompt and answers with its folder's name; a prompt with HOLD-ON waits until released or stopped. */
+function answering() {
+  const prompts = new Map<string, string[]>();
+  const held = new Map<string, () => void>();
+  restores.push(setDriver('echo', { protocol: 'echo', startTurn(ctx: TurnContext) {
+    prompts.set(ctx.thread.id, [...(prompts.get(ctx.thread.id) ?? []), ctx.prompt]);
+    const answer = () => {
+      const id = ctx.emit.startMessage('assistant');
+      ctx.emit.part(id, 0, { type: 'text', text: `Done in ${basename(ctx.thread.cwd)}` });
+      ctx.emit.complete(id, 'complete');
+    };
+    const done: TurnResult = { status: 'done', sessionId: `session:${ctx.thread.id}`, usage: null };
+    if (!ctx.prompt.includes('HOLD-ON')) {
+      answer();
+      return { done: Promise.resolve(done), stop() {} };
+    }
+    const finished = Promise.withResolvers<TurnResult>();
+    held.set(ctx.thread.id, () => { held.delete(ctx.thread.id); answer(); finished.resolve(done); });
+    return { done: finished.promise, stop() { held.delete(ctx.thread.id); finished.resolve({ status: 'stopped', sessionId: null, usage: null }); } };
+  } }));
+  const wakes = (threadId: string) => (prompts.get(threadId) ?? []).filter(prompt => prompt.includes('Boite delegation messages')).length;
+  return { prompts, held, wakes };
+}
+
+/** Two machines of one group: a parent thread on `desk` in project test, a project Notes on `pc`, which lets the group start work there. */
+async function setup(allow = true) {
+  const desk = await startTestCore();
+  const pc = await startTestCore();
+  cores.push(desk, pc);
+  const owner = await desk.connect();
+  const pcOwner = await pc.connect();
+  await desk.core.group.create('Home');
+  await pc.core.group.join((await desk.core.group.invite()).invite);
+  const pcId = pc.core.coordination.card().coreId, deskId = desk.core.coordination.card().coreId;
+  await waitFor(() => desk.core.group.peers().some(peer => peer.coreId === pcId) && pc.core.group.peers().some(peer => peer.coreId === deskId));
+  const { threadId } = await echoThread(desk, owner, 'Family helper');
+  const notesPath = join(pc.dataDir, 'notes');
+  mkdirSync(notesPath, { recursive: true });
+  const notes = await pcOwner.call('projects.add', { path: notesPath, name: 'Notes' });
+  if (allow) await pc.core.settings.set({ groupThreads: true });
+  const cli = async (args: string[], on: TestCore = desk, as = threadId) => {
+    let out = '', err = '';
+    const code = await runCli(args, { out: s => { out += s; }, err: s => { err += s; }, env: { BOITE_THREAD_ID: as, BOITE_CORE_URL: on.url, BOITE_AGENT_TOKEN: on.core.agents.tokenFor(as) }, cwd: on.dataDir });
+    return { code, out, err };
+  };
+  const spawn = async (brief: string, ...rest: string[]) => {
+    const started = await cli(['delegate', 'spawn', brief, '--machine', pcId.slice(0, 8), ...rest, '--json']);
+    expect(started.err).toBe('');
+    return JSON.parse(started.out) as DelegatedAgent;
+  };
+  const childrenOnPc = () => pc.core.journal.listThreads().filter(thread => thread.projectId === notes.id);
+  return { desk, pc, owner, pcOwner, threadId, notes, notesPath, pcId, deskId, machine: pcId.slice(0, 8), pcName: pc.core.coordination.identity().name, cli, spawn, childrenOnPc };
+}
+
+const TWIN_MODELS: ModelInfo[] = [
+  { id: 'twin-a', name: 'Twin A', default: true, effort: { levels: [{ id: 'low', label: 'Low' }, { id: 'high', label: 'High' }], default: 'high' } },
+  { id: 'twin-b', name: 'Twin B', effort: { levels: [{ id: 'low', label: 'Low' }, { id: 'max', label: 'Max' }], default: 'max' } },
+];
+
+/** A second provider on the echo driver, signed in, that the parent does not run on. */
+async function twinProvider(h: TestCore, owner: CoreClient): Promise<void> {
+  const shipped = JSON.parse(readFileSync(join(import.meta.dir, '../src/providers/shipped/echo.json'), 'utf8')) as Record<string, unknown>;
+  mkdirSync(join(h.dataDir, 'providers'), { recursive: true });
+  writeFileSync(join(h.dataDir, 'providers', 'twin.json'), JSON.stringify({ ...shipped, id: 'twin', name: 'Twin', shortName: 'Twin', models: TWIN_MODELS }));
+  expect((await owner.call('providers.reload', {})).rejected).toEqual([]);
+  h.core.accounts.ensureDefaults();
+}
+
+test('a subagent on another machine runs on the parent\'s model there, or on the one named from that machine\'s list, in the project named like the parent\'s', async () => {
+  const { prompts } = answering();
+  const { desk, pc, pcOwner, threadId, notes, notesPath, machine, cli, spawn, childrenOnPc } = await setup();
+  await twinProvider(pc, pcOwner);
+  const parent = desk.core.threads.require(threadId);
+
+  // Without --project it takes the project of that machine named like the parent's; the PC has none.
+  const unnamed = await cli(['delegate', 'spawn', 'Read the notes', '--machine', machine, '--request-id', 'model-0']);
+  expect(unnamed.err).toContain('has no project named test; name one of its projects with --project: Notes');
+  expect(desk.core.delegation.remote.holds(threadId, 'model-0')).toBe(false);
+  const testPath = join(pc.dataDir, 'test');
+  mkdirSync(testPath, { recursive: true });
+  const sameName = await pcOwner.call('projects.add', { path: testPath, name: 'test' });
+  const plain = await spawn('Read the notes', '--request-id', 'model-1');
+  expect(plain.machine).toEqual({ coreId: pc.core.coordination.card().coreId, name: pc.core.coordination.identity().name });
+  expect(pc.core.threads.require(plain.thread.id)).toMatchObject({ projectId: sameName.id, cwd: testPath, providerId: parent.providerId, model: parent.model });
+  expect(desk.core.journal.getThread(plain.thread.id)).toBeNull();
+  await waitFor(() => prompts.has(plain.thread.id));
+  const first = prompts.get(plain.thread.id)![0]!;
+  expect(first).toContain(`for parent agent ${threadId} on ${desk.core.coordination.identity().name}, another machine of the user's`);
+  expect(first).toContain('You cannot start subagents or threads.');
+
+  const named = await spawn('Read the notes', '--project', 'notes', '--model', 'twin-b', '--effort', 'low', '--request-id', 'model-2');
+  expect(pc.core.threads.require(named.thread.id)).toMatchObject({ projectId: notes.id, cwd: notesPath, providerId: 'twin', model: 'twin-b', effort: 'low' });
+  expect(named.profileId).toBe('twin/twin-b');
+
+  // A model the PC lacks: refused with the PC's list, and no delegation.start is sent.
+  const asked: string[] = [];
+  const request = desk.core.coordination.request.bind(desk.core.coordination);
+  desk.core.coordination.request = ((peer, operation, payload) => { asked.push(operation); return request(peer, operation, payload); }) as typeof desk.core.coordination.request;
+  const before = pc.core.journal.listThreads().length;
+  const missing = await cli(['delegate', 'spawn', 'Read the notes', '--machine', machine, '--project', 'notes', '--model', 'echo/missing', '--request-id', 'model-3']);
+  expect(missing.err).toContain(`model: no installed model matches "echo/missing"; run boite delegate models --machine ${machine}`);
+  const refusal = await desk.core.delegation.remote.spawn({ threadId, task: 'Read', machine, project: 'notes', model: 'echo/missing', requestId: 'model-4' }).catch((error: unknown) => error);
+  expect(refusal).toMatchObject({ data: { field: 'model', expected: expect.arrayContaining(['echo/echo', 'twin/twin-a', 'twin/twin-b']) } });
+  expect(asked).toEqual(['delegation.catalog', 'delegation.catalog']);
+  expect(pc.core.journal.listThreads()).toHaveLength(before);
+  expect(desk.core.delegation.remote.holds(threadId, 'model-3')).toBe(false);
+  expect(childrenOnPc()).toHaveLength(1);
+});
+
+test('a machine whose owner did not let the group start work there refuses, with the setting to propose', async () => {
+  answering();
+  const { desk, pc, owner, threadId, machine, cli, childrenOnPc } = await setup(false);
+  const refused = await cli(['delegate', 'spawn', 'Read the notes', '--machine', machine, '--project', 'notes', '--request-id', 'off-1']);
+  expect(refused.err).toContain(`boite settings request groupThreads true --machine ${machine} --why`);
+  expect(childrenOnPc()).toHaveLength(0);
+  expect(pc.core.journal.listThreads().filter(thread => thread.title === 'Read the notes')).toHaveLength(0);
+  expect((await owner.call('delegation.get', { threadId })).agents).toHaveLength(0);
+  // Nothing is kept of it: the same request id asks again once the owner allows it.
+  expect(desk.core.delegation.remote.holds(threadId, 'off-1')).toBe(false);
+  await pc.core.settings.set({ groupThreads: true });
+  expect((await cli(['delegate', 'spawn', 'Read the notes', '--machine', machine, '--project', 'notes', '--request-id', 'off-1'])).err).toBe('');
+  expect(childrenOnPc()).toHaveLength(1);
+});
+
+test('the result wakes the parent once, as a result letter from that machine, and delegate wait settles on it', async () => {
+  const { held, wakes } = answering();
+  const { desk, pc, owner, threadId, pcId, deskId, pcName, cli, spawn } = await setup();
+  const reports: unknown[] = [];
+  const report = pc.core.coordination.request.bind(pc.core.coordination);
+  pc.core.coordination.request = ((peer, operation, payload) => {
+    if (operation === 'delegation.report') reports.push(payload);
+    return report(peer, operation, payload);
+  }) as typeof pc.core.coordination.request;
+
+  const child = await spawn('Read the notes HOLD-ON', '--project', 'notes', '--title', 'Read the notes', '--request-id', 'result-1');
+  await waitFor(() => held.has(child.thread.id));
+  // A wait taken while it runs ends when its result crosses back.
+  const waited = cli(['delegate', 'wait', child.thread.id, '--timeout', '10']);
+  held.get(child.thread.id)!();
+  const settled = await waited;
+  expect(settled.err).toBe('');
+  expect(settled.out).toContain('state: result_available');
+  expect(settled.out).toContain('result: Done in notes');
+
+  await waitFor(() => wakes(threadId) === 1 && desk.core.threads.require(threadId).status === 'idle');
+  const [result] = (await owner.call('delegation.get', { threadId })).messages.filter(letter => letter.origin === 'result');
+  expect(result).toMatchObject({ from: { coreId: pcId, threadId: child.thread.id, machine: pcName }, status: 'delivered' });
+  expect(result!.text).toBe('Read the notes: done\nDone in notes');
+
+  // That machine sends the same reports again, as after an answer it did not hear: nothing new is filed or woken.
+  const deskPeer = pc.core.group.peers().find(peer => peer.coreId === deskId)!;
+  for (const payload of reports) await report(deskPeer, 'delegation.report', payload);
+  const filed = desk.core.journal.db.query("SELECT count(*) AS n FROM delegation_messages WHERE sender_id = ? AND request_id GLOB 'result:*'").get(`${pcId}:${child.thread.id}`) as { n: number };
+  expect(filed.n).toBe(1);
+  expect(desk.core.journal.db.query("SELECT count(*) AS n FROM delegation_messages WHERE root_id = ? AND status = 'received'").get(threadId)).toEqual({ n: 0 });
+  await waitFor(() => desk.core.threads.require(threadId).status === 'idle');
+  expect(wakes(threadId)).toBe(1);
+});
+
+test('a result the member could not send waits there, and arrives once the caller can be reached', async () => {
+  const { wakes } = answering();
+  const { desk, pc, owner, threadId, deskId, spawn } = await setup();
+  let away = true, failures = 0;
+  const report = pc.core.coordination.request.bind(pc.core.coordination);
+  pc.core.coordination.request = ((peer, operation, payload) => {
+    if (operation === 'delegation.report' && away) { failures++; return Promise.reject(new Error('connect ECONNREFUSED')); }
+    return report(peer, operation, payload);
+  }) as typeof pc.core.coordination.request;
+
+  const child = await spawn('Read the notes', '--project', 'notes', '--request-id', 'away-1');
+  await waitFor(() => failures > 0 && pc.core.threads.require(child.thread.id).status === 'idle' && pc.core.delegation.remote.waiting(deskId).reports > 0);
+  expect(wakes(threadId)).toBe(0);
+  expect((await owner.call('delegation.get', { threadId })).agents[0]?.result ?? null).toBeNull();
+
+  away = false;
+  await pc.core.delegation.remote.flush(deskId);
+  expect(pc.core.delegation.remote.waiting(deskId).reports).toBe(0);
+  await waitFor(() => wakes(threadId) === 1);
+  expect(desk.core.delegation.remote.child(threadId, child.thread.id)?.state?.result).toBe('Done in notes');
+});
+
+test('delegation.get and delegate list show the child on the other machine with that machine and its last result', async () => {
+  answering();
+  const { desk, owner, threadId, pcId, pcName, cli, spawn } = await setup();
+  const child = await spawn('Read the notes', '--project', 'notes', '--request-id', 'list-1');
+  await waitFor(() => desk.core.delegation.remote.child(threadId, child.thread.id)?.state?.result === 'Done in notes');
+  const { agents } = await owner.call('delegation.get', { threadId });
+  expect(agents).toHaveLength(1);
+  expect(agents[0]).toMatchObject({ thread: { id: child.thread.id, parentThreadId: threadId, title: 'Read the notes' }, machine: { coreId: pcId, name: pcName }, result: 'Done in notes', task: 'Read the notes' });
+  expect(agents[0]!.resultRef?.agentId).toBe(child.thread.id);
+  const list = (await cli(['delegate', 'list'])).out;
+  expect(list).toContain(`${child.thread.id} `);
+  expect(list).toContain(` on ${pcName} "Read the notes"`);
+  expect(list).toContain('  result: Done in notes');
+  // Its full result is read from that machine.
+  const page = await cli(['delegate', 'result', child.thread.id, agents[0]!.resultRef!.turnId]);
+  expect(page.out).toContain('Done in notes');
+});
+
+test('delegate send reaches the child there and starts a turn, delegate stop stops it, and archiving the parent archives it there', async () => {
+  const { prompts, held } = answering();
+  const { desk, pc, owner, threadId, cli, spawn } = await setup();
+  const idle = await spawn('Read the notes', '--project', 'notes', '--request-id', 'steer-1');
+  await waitFor(() => desk.core.delegation.remote.child(threadId, idle.thread.id)?.state?.result === 'Done in notes');
+
+  const sent = await cli(['delegate', 'send', idle.thread.id, 'Now read the second page', '--request-id', 'steer-letter-1']);
+  expect(sent.err).toBe('');
+  await waitFor(() => (prompts.get(idle.thread.id) ?? []).some(prompt => prompt.includes('Boite delegation messages') && prompt.includes('Now read the second page')));
+  expect(desk.core.journal.db.query('SELECT status FROM delegation_messages WHERE sender_id = ? AND request_id = ?').get(threadId, 'steer-letter-1')).toEqual({ status: 'delivered' });
+
+  const busy = await spawn('Read every page HOLD-ON', '--project', 'notes', '--title', 'Read every page', '--request-id', 'steer-2');
+  await waitFor(() => held.has(busy.thread.id));
+  await waitFor(() => ['queued', 'running'].includes(desk.core.delegation.remote.child(threadId, busy.thread.id)?.state?.lastTurn?.status ?? ''));
+  const stopped = await cli(['delegate', 'stop', busy.thread.id]);
+  expect(stopped.out).toContain('stopped: 1');
+  await waitFor(() => !held.has(busy.thread.id) && pc.core.threads.require(busy.thread.id).status !== 'running');
+  await waitFor(() => desk.core.delegation.remote.child(threadId, busy.thread.id)?.state?.lastTurn?.status === 'stopped');
+
+  await waitFor(() => desk.core.threads.require(threadId).status === 'idle');
+  await owner.call('threads.archive', { threadId });
+  await waitFor(() => pc.core.threads.require(idle.thread.id).archived && pc.core.threads.require(busy.thread.id).archived);
+});
+
+test('the same request id answers the same child there, even when the first answer was lost; other content is refused', async () => {
+  answering();
+  const { desk, pc, owner, threadId, deskId, machine, cli, childrenOnPc } = await setup();
+  const starts: unknown[] = [];
+  let lose = true;
+  const request = desk.core.coordination.request.bind(desk.core.coordination);
+  desk.core.coordination.request = (async (peer, operation, payload) => {
+    const answer = await request(peer, operation, payload);
+    if (operation === 'delegation.start') {
+      starts.push(payload);
+      if (lose) { lose = false; throw new Error('socket hang up'); }
+    }
+    return answer;
+  }) as typeof desk.core.coordination.request;
+  const brief = ['delegate', 'spawn', 'Read the notes', '--machine', machine, '--project', 'notes', '--request-id', 'same-1'];
+  const lost = await cli(brief);
+  expect(lost.err).toContain('did not answer: socket hang up');
+  expect(lost.err).toContain('the same --request-id answers it');
+  expect(childrenOnPc()).toHaveLength(1);
+  const [there] = childrenOnPc();
+
+  const again = await cli([...brief, '--json']);
+  expect(again.err).toBe('');
+  expect((JSON.parse(again.out) as DelegatedAgent).thread.id).toBe(there!.id);
+  const once = await cli([...brief, '--json']);
+  expect((JSON.parse(once.out) as DelegatedAgent).thread.id).toBe(there!.id);
+  expect(childrenOnPc()).toHaveLength(1);
+  expect((await owner.call('delegation.get', { threadId })).agents.map(agent => agent.thread.id)).toEqual([there!.id]);
+
+  expect((await cli(['delegate', 'spawn', 'Read other notes', '--machine', machine, '--project', 'notes', '--request-id', 'same-1'])).err).toContain('requestId already used for different content');
+  // The member keeps the request too: the same start answers its child, another under that id is refused.
+  const peer = desk.core.group.peers().find(member => member.coreId === pc.core.coordination.card().coreId)!;
+  const start = starts[0] as Record<string, unknown>;
+  expect(await request(peer, 'delegation.start', start)).toMatchObject({ childId: there!.id });
+  expect(await thrown(request(peer, 'delegation.start', { ...start, task: 'Read other notes', fingerprint: 'another' }))).toThrow('delegation.start.requestId was already used for different content');
+  expect(childrenOnPc()).toHaveLength(1);
+  expect(pc.core.delegation.remote.parentOf(there!.id)).toMatchObject({ coreId: deskId, parentId: threadId, requestId: 'same-1' });
+});
+
+test('a subagent working for another machine cannot start subagents or threads', async () => {
+  answering();
+  const { desk, pc, cli, spawn } = await setup();
+  await desk.core.settings.set({ groupThreads: true });
+  const child = await spawn('Read the notes', '--project', 'notes', '--request-id', 'nested-1');
+  const childId = child.thread.id;
+  const before = pc.core.journal.listThreads().length;
+  expect((await cli(['delegate', 'spawn', 'Read more', '--request-id', 'nested-2'], pc, childId)).err).toContain('delegation supports one level');
+  expect((await cli(['delegate', 'spawn', 'Read more', '--machine', desk.core.coordination.card().coreId.slice(0, 8), '--request-id', 'nested-3'], pc, childId)).err).toContain('delegation supports one level');
+  expect((await cli(['thread', 'new', 'notes', 'Read more', '--request-id', 'nested-4'], pc, childId)).err).toContain('a delegated agent or workflow step cannot start threads');
+  expect((await cli(['thread', 'new', 'test', 'Read more', '--machine', desk.core.coordination.card().coreId.slice(0, 8), '--request-id', 'nested-5'], pc, childId)).err).toContain('a delegated agent or workflow step cannot start threads');
+  expect(pc.core.journal.listThreads()).toHaveLength(before);
+});
+
+test('a member whose Boite does not know these operations is reported too old, and nothing starts', async () => {
+  answering();
+  const { desk, threadId, machine, cli, childrenOnPc, pc } = await setup();
+  // As an older core answers an operation it does not know.
+  pc.core.delegation.remote.peer = async () => { throw invalidParams('operation: expected directory, deliver, receipt, search, read, group.sync, group.push, relay.*, thread.start, delegation.catalog, setting.* or bot.*'); };
+  const spawned = await cli(['delegate', 'spawn', 'Read the notes', '--machine', machine, '--project', 'notes', '--request-id', 'old-1']);
+  expect(spawned.err).toContain('is too old to run subagents for another machine; the owner updates it in Settings, Machines and updates');
+  expect(childrenOnPc()).toHaveLength(0);
+  expect(desk.core.delegation.remote.holds(threadId, 'old-1')).toBe(false);
+});

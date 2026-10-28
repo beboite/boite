@@ -58,7 +58,7 @@ export class ThreadSpawns {
   async spawn(params: RpcParams<'agent.spawn'>): Promise<AgentSpawn> {
     const caller = this.threads.require(params.threadId);
     const threadId = caller.id;
-    if (caller.parentThreadId) {
+    if (caller.parentThreadId || this.core.delegation.remote.parentOf(caller.id)) {
       throw refused('a delegated agent or workflow step cannot start threads; ask its parent', { threadId, field: 'threadId', expected: 'a top-level thread' });
     }
     // A bot starts threads in any project from its own thread, and drives what it started.
@@ -298,7 +298,7 @@ export class ThreadSpawns {
     if (caller.agentSessionId || caller.projectId === null) {
       throw refused('a bot works in the projects the owner entrusts to it and cannot add projects', { threadId, field: 'threadId', expected: 'a conversation thread' });
     }
-    if (caller.parentThreadId) {
+    if (caller.parentThreadId || this.core.delegation.remote.parentOf(caller.id)) {
       throw refused('a delegated agent or workflow step cannot add projects; ask its parent', { threadId, field: 'threadId', expected: 'a top-level thread' });
     }
     if (caller.archived) throw refused('an archived thread cannot add projects', { threadId, field: 'threadId', expected: 'a thread that is not archived' });

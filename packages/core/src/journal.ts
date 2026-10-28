@@ -377,7 +377,7 @@ export class Journal {
         this.db.query('DELETE FROM workflow_requests WHERE run_id IN (SELECT id FROM workflow_runs WHERE root_id = ?)').run(id);
         this.db.query('DELETE FROM workflow_runs WHERE root_id = ?').run(id);
         deleteComposerInput(this.db, id, this.collectComposerAssets);
-        for (const prefix of ['merged-pr-archive:', 'linked-pull-requests:', 'pr-watches:', 'activity:', 'activity-input:', 'activity-choice:', 'move-note:', 'compaction-tail:', 'memory-notices:', 'coordination:', 'coordination-autopause:', 'delegation:', 'delegation-turns:', 'delegation-episode:', 'delegation-worktree:', 'spawn-origin:', 'spawns:', 'worktree-removed:']) this.deleteSetting(`${prefix}${id}`);
+        for (const prefix of ['merged-pr-archive:', 'linked-pull-requests:', 'pr-watches:', 'activity:', 'activity-input:', 'activity-choice:', 'move-note:', 'compaction-tail:', 'memory-notices:', 'coordination:', 'coordination-autopause:', 'delegation:', 'delegation-turns:', 'delegation-episode:', 'delegation-worktree:', 'spawn-origin:', 'spawns:', 'worktree-removed:', 'remote-parent:']) this.deleteSetting(`${prefix}${id}`);
         this.db.query('DELETE FROM threads WHERE id = ?').run(id);
         this.db.query('DELETE FROM thread_deletions WHERE thread_id = ?').run(id);
       }

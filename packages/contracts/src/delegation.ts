@@ -141,6 +141,12 @@ export interface DelegatedAgent {
   needsInput?: DelegationInput[];
   /** The child's own git worktree, for a child spawned with `worktree`. Missing for a child in the shared checkout. */
   worktree?: DelegationWorktree;
+  /**
+   * The member of this core's group the child runs on, for a child spawned
+   * with `machine`; missing for a child here. Its thread, last turn and result
+   * are the last ones that machine reported.
+   */
+  machine?: { coreId: string; name: string };
 }
 /**
  * A card a delegated child waits on. A question's free text or one of its
@@ -219,8 +225,15 @@ export interface DelegationRpcMethods {
    * A bot can name an entrusted `project` by id, name or path. Without it,
    * its sole entrusted project is used; otherwise the child stays personal.
    * Project children of bots appear in that project's conversation list.
+   *
+   * `machine` (a member's name or core id prefix) starts the child on that
+   * member of the group while its owner keeps `groupThreads` on, in its
+   * `project` or else its project named like the parent's. The model is
+   * matched against that machine's list; left out, the child runs on the
+   * parent's model there or is refused, never another model. Refused for a
+   * bot's thread.
    */
-  'delegation.spawn': { params: { threadId: ThreadId; project?: string; profileId?: string; model?: string; effort?: string; speed?: string; context?: ContextRequest | ContextPreset; task: string; title?: string; worktree?: boolean; requestId: string }; result: DelegatedAgent };
+  'delegation.spawn': { params: { threadId: ThreadId; project?: string; profileId?: string; model?: string; effort?: string; speed?: string; context?: ContextRequest | ContextPreset; task: string; title?: string; worktree?: boolean; machine?: string; requestId: string }; result: DelegatedAgent };
   /**
    * With `machine` (a member's name or core id prefix), that machine's
    * models, read from it now while its owner keeps `groupThreads` on; `current`
