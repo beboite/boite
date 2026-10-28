@@ -353,7 +353,7 @@
       }
       return;
     }
-    const ready = sendable(store, stateForInput(), stateForInput); if (!(typeof ready === 'boolean' ? ready : await ready)) return; // Pictures being fitted go once they fit, in the same box (`lib/composer-attachments.ts`); an answer waits in `sendAnswer`.
+    const ready = sendable(store, stateForInput(), stateForInput, () => [text, previewReferences, choice]); if (!(typeof ready === 'boolean' ? ready : await ready)) return; // Pictures being fitted go once they fit, in the same box (`lib/composer-attachments.ts`); an answer waits in `sendAnswer`.
     const prompt = text;
     const images = attachments;
     const references = previewReferences;

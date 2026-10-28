@@ -114,20 +114,21 @@ export function replyOf(store: Store, questionId: string): { replying: boolean; 
 
 /**
  * Sends the card's picks with what the composer holds when the composer answers
- * this question. Pictures still being fitted go once they fit; when the
- * composer answers another question by then, or stays over the byte total,
- * nothing goes. Only what went out leaves the composer: text typed while the
- * call was on its way stays. False gives the card back.
+ * this question, both as they were when Send was pressed. Pictures still being
+ * fitted go once they fit; when the composer answers another question by then,
+ * or stays over the byte total, nothing goes. Only what went out leaves the
+ * composer: text typed or picks changed while the answer waited, or while the
+ * call was on its way, stay. False gives the card back.
  */
 export async function sendAnswer(store: Store, question: QuestionRequest): Promise<boolean> {
   const held = repliesOf(store);
   const state = replyTarget(store)?.id === question.id ? store.composerStates[question.threadId] : undefined;
+  const optionIds = held.picks[question.id] ?? [];
+  const text = state?.text ?? '';
   if (state) {
     const ready = sendable(store, state, () => store.composerStates[question.threadId]!);
     if (!(typeof ready === 'boolean' ? ready : await ready) || replyTarget(store)?.id !== question.id) return false;
   }
-  const optionIds = held.picks[question.id] ?? [];
-  const text = state?.text ?? '';
   const attachments = state?.attachments ?? [];
   if (attachments.some(unresolvedAssetId)) { store.error = strings.errors.draftAttachment; return false; }
   if (state) state.sending = true;
@@ -138,7 +139,7 @@ export async function sendAnswer(store: Store, question: QuestionRequest): Promi
   }
   if (state?.text === text) state.text = '';
   if (state?.attachments === attachments) state.attachments = [];
-  delete held.picks[question.id];
+  if ((held.picks[question.id] ?? []) === optionIds) delete held.picks[question.id];
   if (held.chosen === question.id) held.chosen = null;
   return true;
 }

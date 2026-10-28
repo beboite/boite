@@ -2119,12 +2119,22 @@ test('a pasted copy over the byte total holds Send until its pictures are fitted
     input().focus();
     input().setSelectionRange(5, 5);
     expect(clipboardEvent('paste', copied).defaultPrevented).toBe(true);
-    // Enter at once, while the box still weighs 12 MB: that one Enter sends once the pictures fit.
+    // Enter at once, while the box still weighs 12 MB, then a few more words while it waits: those were not in what Enter sent.
+    press('Enter');
+    const pressed = input().value;
+    await type(`${pressed} and more`);
+    const fitted = () => store.composerStates['t-trace']!.attachments.reduce((sum, one) => sum + decodedBytes(one.data), 0) <= ATTACHMENTS_TOTAL_MAX_BYTES;
+    await waitFor(fitted, 4000);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(store.openThread!.messages).toHaveLength(before);
+    expect(input().value).toBe(`${pressed} and more`);
+    // The box kept all of it; the next Enter sends all of it.
     press('Enter');
     await waitFor(() => (store.openThread?.messages.length ?? 0) > before, 4000);
     const sent = store.openThread!.messages.filter((message) => message.role === 'user').at(-1)!.parts.filter((part) => part.type === 'image');
     expect(sent).toHaveLength(30);
     expect(sent.reduce((sum, part) => sum + decodedBytes(part.type === 'image' ? part.data : ''), 0)).toBeLessThanOrEqual(ATTACHMENTS_TOTAL_MAX_BYTES);
+    expect(store.openThread!.messages.filter((message) => message.role === 'user').at(-1)!.parts.find((part) => part.type === 'text')).toMatchObject({ text: expect.stringContaining('and more') });
   } finally { decode.mockRestore(); }
 });
 
@@ -2221,10 +2231,10 @@ async function answerWhileFitting() {
   const question = store.pendingQuestions.find(item => item.threadId === 't-trace')!;
   store.pendingQuestions = [...store.pendingQuestions, { ...question, id: `${question.id}-other` }];
   writeAnswer(store, question.id);
-  const answers: { id: string; bytes: number }[] = [];
+  const answers: { id: string; bytes: number; text: string }[] = [];
   const { decodedBytes } = await import('@boite/contracts');
-  vi.spyOn(store, 'answerQuestion').mockImplementation(async (_thread, id, _options, _text, attachments) => {
-    answers.push({ id, bytes: (attachments ?? []).reduce((sum, one) => sum + decodedBytes(one.data), 0) });
+  vi.spyOn(store, 'answerQuestion').mockImplementation(async (_thread, id, _options, text, attachments) => {
+    answers.push({ id, bytes: (attachments ?? []).reduce((sum, one) => sum + decodedBytes(one.data), 0), text: text ?? '' });
     return true;
   });
   const from = { text: heavy.map((_, at) => `[Image ${at + 1}]`).join(' '), attachments: heavy, queued: [], sending: false, paused: false };
@@ -2246,6 +2256,18 @@ test('a card answered while its pictures are fitted sends them once they fit', a
   expect(answers).toHaveLength(1);
   expect(answers[0]!.id).toBe(question.id);
   expect(answers[0]!.bytes).toBeLessThanOrEqual(10 * 1024 * 1024);
+});
+
+test('words typed while an answer waits for its pictures stay in the box, out of the answer', async ({ app: _app }) => {
+  const { sendAnswer } = await import('../lib/question-reply.svelte');
+  const { question, answers } = await answerWhileFitting();
+  const written = input().value;
+  const sending = sendAnswer(store, question);
+  await type(`${written} and later`);
+  expect(await sending).toBe(true);
+  expect(answers).toHaveLength(1);
+  expect(answers[0]!.text).toBe(written.trim());
+  expect(input().value).toBe(`${written} and later`);
 });
 
 test('another question chosen while the answer waits for its pictures does not take the draft', async ({ app: _app }) => {

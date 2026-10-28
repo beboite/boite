@@ -115,17 +115,21 @@ function same(one: Attachment[], other: Attachment[]): boolean {
 
 /**
  * Whether a send from `box` may go: once what runs on it ended, still the box
- * the composer shows (`current`) and within the byte total, said in
- * `store.error` when not, the box kept as it is. Waits only while a fit runs.
+ * the composer shows (`current`), with what was `typed` when Send was pressed
+ * (text, references, chips) unchanged, and within the byte total, said in
+ * `store.error` when not. A send that may not go leaves the box as it is, the
+ * words written while it waited included. Waits only while a fit runs.
  */
-export function sendable(store: Store, box: { attachments: Attachment[] }, current: () => object): boolean | Promise<boolean> {
+export function sendable(store: Store, box: { attachments: Attachment[] }, current: () => object, typed: () => unknown = () => null): boolean | Promise<boolean> {
   const within = (): boolean => {
     if (attachedBytes(box.attachments) <= ATTACHMENTS_TOTAL_MAX_BYTES) return true;
     store.error = fill(strings.composer.attachTotalOver, { max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) });
     return false;
   };
   const fit = fitting(box);
-  return fit ? fit.then(() => current() === box && within()) : within();
+  if (!fit) return within();
+  const pressed = JSON.stringify(typed());
+  return fit.then(() => current() === box && JSON.stringify(typed()) === pressed && within());
 }
 
 /** The composer's way in: `gatherAttachments` on its state, a refusal in `store.error`. */
