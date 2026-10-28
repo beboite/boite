@@ -129,9 +129,11 @@ test('a step that cannot be asked for its final answer fails with a reason a ret
   expect(step().result).toBeNull();
 });
 
-test('a paused run asks nothing of a step whose work completed, and its resume asks for the final answer', async () => {
+test.each(['run', 'team'] as const)('a paused %s asks nothing of a step whose work completed, and its resume asks for the final answer', async paused => {
   const { h, owner, threadId, run, step, childId, first, runs, prompts } = await setup();
-  await owner.call('workflows.control', { threadId, runId: run.id, action: 'pause' });
+  // The team's pause reaches the run only on its next advance, after the work completed.
+  if (paused === 'run') await owner.call('workflows.control', { threadId, runId: run.id, action: 'pause' });
+  else await owner.call('delegation.configure', { threadId, config: { ...h.core.delegation.config(threadId), paused: true } });
   const asked = spyOn(h.core.workflows, 'unwoken');
   restores.push(() => asked.mockRestore());
   first.ctx.backgroundFinished!('ci-1', 'completed');
@@ -139,7 +141,9 @@ test('a paused run asks nothing of a step whose work completed, and its resume a
   await waitFor(() => asked.mock.calls.length > 0, 5000);
   expect(runs.get(childId)).toBe(first);
   expect(step()).toMatchObject({ status: 'running', result: null });
-  await owner.call('workflows.control', { threadId, runId: run.id, action: 'resume' });
+  if (paused === 'run') await owner.call('workflows.control', { threadId, runId: run.id, action: 'resume' });
+  // The run asks its step; the team sends it no second continuation.
+  else expect(await owner.call('delegation.resume', { threadId })).toMatchObject({ unpaused: true, agents: [], runs: [run.id] });
   await waitFor(() => runs.get(childId) !== first, 5000);
   clock.mockRestore();
   expect(prompts.filter(entry => entry.threadId === childId).at(-1)!.prompt).toContain('Your background work (Pending CI) completed');

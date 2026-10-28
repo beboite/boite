@@ -585,6 +585,9 @@ export class Workflows {
     const run = entry && !this.closed ? this.load(entry.runId) : null;
     const inst = run?.status === 'running' ? this.instance(run, entry!.key) : undefined;
     if (inst?.status !== 'running' || inst.threadId !== threadId) return;
+    // A team paused since the checkpoint has not reached the run yet: the run takes that pause, and its resume asks.
+    const config = this.core.delegation.config(run!.rootThreadId);
+    if (config.enabled && config.paused) return this.advance(run!.id);
     const error = askFinal(this.core, threadId, tasks);
     if (error !== null) this.waitLost(threadId, `completed without waking it, and asking for its final result failed: ${error}`, tasks);
   }
