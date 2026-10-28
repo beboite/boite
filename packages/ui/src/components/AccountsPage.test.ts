@@ -231,7 +231,10 @@ test('a local ACP command is added from its form, a refused field is marked, and
   type(document.querySelectorAll<HTMLInputElement>('[data-testid="local-acp-env-value"]')[1]!, 'orphan');
   field('local-acp-save').click();
   await vi.waitFor(() => expect(unnamed().getAttribute('aria-invalid')).toBe('true'));
+  // The marked input points at the refusal, so a screen reader reads why when the row is focused again.
+  expect(unnamed().getAttribute('aria-describedby')).toBe(field('local-acp-error').id);
   expect(field('local-acp-env-key').getAttribute('aria-invalid')).toBe('false');
+  expect(field('local-acp-env-key').hasAttribute('aria-describedby')).toBe(false);
   expect(row('my-agent')).toBeNull();
 
   type(unnamed(), 'EXTRA');
