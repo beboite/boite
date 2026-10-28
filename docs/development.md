@@ -895,18 +895,30 @@ quoting a performance figure and include its command and date.
 
 ## Architecture checks
 
-`bun run check` includes `bun run check:architecture`; the latter uses Bun's
-parser without workspace dependencies. `bun test scripts/architecture` covers
-cycle detection, resolution, boundaries and source sizes. Runtime-import scope
+`bun run check` includes `bun run check:architecture`; it reads imports with
+Bun's transpiler and the `<script>` blocks of Svelte components with the UI's
+own `svelte/compiler`, so a component's imports are edges of the graph and a
+cycle through a component fails. `bun test scripts/architecture` covers
+cycle detection, resolution, boundaries and source sizes. The roots it reads
+are `ROOTS` in `scripts/architecture/inventory.ts`; a missing root fails rather
+than narrowing the check. Runtime-import scope
 and exclusions are documented in
 [architecture](architecture.md#module-boundaries-and-complexity).
 
-Production TypeScript, JavaScript and Svelte files have a 900-line ceiling.
-Existing exceptions in `scripts/architecture/size-budget.json` may shrink.
+Production TypeScript, JavaScript, Svelte, Rust, Kotlin and Java files have a
+900-line ceiling; tests, declarations and a Rust module's `tests.rs` do not
+count. Two files above it have an allowance in
+`scripts/architecture/size-budget.json` that may only shrink:
+
+- `apps/android-server/termux/boite-server.ts`: the Termux controller ships as
+  one file, which `install.sh` fetches alone and an update copies alone. It
+  splits once the bootstrap carries a directory.
+- `apps/shell/src-tauri/src/browser.rs`: the shell's browser surfaces, above
+  the ceiling before Rust entered the check.
+
 `--write-size-budget` lowers or removes allowances; it never raises them.
 `--rebaseline-size-budget` can raise them for a reviewed integration of branches
-written before the limits existed. Exempt contract, client and string tables
-have an explicit reason in that file.
+written before the limits existed. Nothing is exempt.
 
 `bun run audit:complexity --json` produces an advisory comparison for TypeScript,
 JavaScript and Svelte scripts, excluding Rust. A high score requires review of

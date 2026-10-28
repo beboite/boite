@@ -82,10 +82,12 @@ rule (`bun run check:copy`). Changes to workflows,
 composite actions or `scripts/ci/` also run checksum-verified actionlint 1.7.12.
 
 Architecture checks reject runtime dependency cycles, forbidden package imports
-and production files above 900 lines. Existing oversized files have ratcheting
-limits in `scripts/architecture/size-budget.json` from 2026-09-25. Contracts,
-the in-memory client and UI string tables are exempt. Complexity reporting is
-advisory. Missing translations warn on PRs and nightlies; the release version
+and production files above 900 lines. The graph reads TypeScript, JavaScript and
+the scripts of Svelte components; the size check also reads the Rust of the
+shell and the launcher and the Kotlin and Java of both Android apps
+([development](development.md#architecture-checks)). Two files have a
+ratcheting allowance in `scripts/architecture/size-budget.json`: no file is
+exempt. Complexity reporting is advisory. Missing translations warn on PRs and nightlies; the release version
 job requires every sentence ([language](language.md)).
 
 The focused telemetry job runs `bun test packages/core/test/telemetry.test.ts`
@@ -488,7 +490,12 @@ A pull request is checked twice:
   editing it, rerun the failed jobs (`gh run rerun <run-id> --failed`).
 - Against a ceiling: the sizes `bundle-size.yml` kept for the newest published
   nightly or release, plus 2 %. A reason does not lift it; only publishing
-  does, so a pull request over it waits for the next nightly or shrinks.
+  does. A pull request fails it only for what it adds: when its base is
+  already above the ceiling, the measure fails only if the pull request grows
+  it, and otherwise the job summary lists it under "Above the ceiling before
+  this pull request". That debt is main's: after measuring each main commit,
+  `bundle-size.yml` runs `budgets.ts ceiling` and fails while main is above
+  the ceiling, until the next nightly publishes or a change shrinks it.
 
 The job summary shows each measure, its base, the growth and the ceiling.
 Reproduce a measurement with `bun run build:ui && bun run build:core &&

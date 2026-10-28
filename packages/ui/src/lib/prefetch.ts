@@ -27,20 +27,6 @@ export function prefetchNames<Name extends string>(names: Name[], device: { tour
 }
 
 /**
- * Runs `task` once the page is idle, after the first paint, or after `timeout`
- * ms at the latest. Safari has no requestIdleCallback: it waits `fallback` ms
- * instead. Returns the cancel.
- */
-export function whenIdle(task: () => void, { timeout = 1500, fallback = 300 } = {}): () => void {
-  if (typeof requestIdleCallback === 'function') {
-    const id = requestIdleCallback(task, { timeout });
-    return () => cancelIdleCallback(id);
-  }
-  const id = setTimeout(task, fallback);
-  return () => clearTimeout(id);
-}
-
-/**
  * The pages beside the chat and the terminal's code, fetched in the same idle
  * pass: Settings, the Agents page with its first snapshot when its experiment
  * is on, and xterm for the owner. A first visit then draws its content instead
