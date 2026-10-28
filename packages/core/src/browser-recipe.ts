@@ -98,12 +98,13 @@ async function save(words: string[], io: CliIo, client: CoreClient, threadId: st
     if (!(error instanceof BrowserScriptFailure)) throw error;
     throw new Error(`recipe ${name} not saved: its run stopped at ${error.where}; fix the script and save it again`);
   }
-  const sites = ran.sites.length ? ran.sites : await endSite(client, threadId, tab);
+  // The page it ended on too: a script that only fetched an API was still run from that site.
+  const sites = [...new Set([...ran.sites, ...await endSite(client, threadId, tab)])];
   const saved = await client.call('browser.command', { threadId, action: { ...draft, sites: sites.slice(0, RECIPE_SITES_MAX) } }).then(reply => reply.value as BrowserRecipe);
   return { lines: [...ran.lines, `✓ Kept recipe ${name}`, ...recipeLines(saved).slice(1)], value: { recipe: saved, run: ran.value } };
 }
 
-/** The site a script that opened nothing ended on: the one it worked in. */
+/** The site the script ended on: the one it worked in. */
 async function endSite(client: CoreClient, threadId: string, tab: string | undefined): Promise<string[]> {
   const status = await client.call('browser.command', { threadId, action: { kind: 'status' } }).catch(() => null);
   const tabs = (status?.value as { tabs?: Array<{ tabId: string; url: string; active: boolean }> } | undefined)?.tabs ?? [];

@@ -379,8 +379,12 @@ and the `page.fetch` line that sends it again from the page. A binary
 response is described, never sent. Credentials are hidden before anything
 leaves the core: a header, a query parameter or a JSON or form field named
 like a cookie, an authorization, a password, a secret, a key, a session, a
-signature or a token reads `<hidden, N characters>`. A page or cursor token
-stays readable, since an agent pages through results with it. The note under
+signature or a token reads `<hidden, N characters>`. A body is masked whole,
+then cut. One that does not parse as JSON (a guard prefix, a stream of values,
+a page's inline script) has each `"name": value` pair masked on its own. Only
+pagination tokens stay readable (`page_token`, `next_page_token`,
+`continuation_token`, `next_token` and the like), since an agent pages through
+results with them; `page_access_token` is hidden. The note under
 a call with hidden values tells the agent to read them from the page each
 time. `browser network stop` forgets the calls and gives Chromium's buffers
 back.
@@ -388,9 +392,11 @@ back.
 `page.fetch(url, { method, headers, body })` in a script runs `fetch` in the
 page, so the request carries the page's cookies and passes its CORS rules as
 the site's own code would. It returns the status, final address, headers and
-the body as `json` when it parses, as `text` otherwise, cut at 2,000,000
-characters with `truncated: true`. A status of 400 or more fails the step with
-the start of the body. The step's label leaves the query and the body out.
+the body as `json` when it parses, as `text` otherwise. It reads no further
+than 2,000,000 characters and returns them with `truncated: true`. A status of 400 or more fails the step with
+the start of the body. The step's label leaves the query and the body out. The
+request travels as one page expression, so address, headers and body fit in
+32,000 characters; a longer body is built in the page and sent from `page.eval`.
 
 ## Recipes
 
@@ -399,8 +405,8 @@ next agent with the same task on the same site runs it in one call instead of
 driving the pages again (`packages/core/src/browser-recipe.ts`).
 `boite browser recipe save <name> <file|-> --about "<what it does>"
 [--usage "<its args>"] [args...]` runs the script with those words first and
-keeps it only if the run passes, under the sites it opened or fetched, or the
-site its tab ended on. Saving a name again replaces the script and keeps its
+keeps it only if the run passes, under the sites it asked for, reached after
+redirects or fetched, and the site its tab ended on. Saving a name again replaces the script and keeps its
 `--about` and `--usage` unless new ones are given. `recipe list` shows each
 recipe's command, sites, runs and last result; `recipe show <name>` adds its
 script; `recipe delete <name>` removes it. `browser open` and `navigate` name

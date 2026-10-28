@@ -33,15 +33,18 @@ export const networkCapture = (): NetworkCapture => ({ seq: 0, calls: [], byRequ
 
 /**
  * A name that carries a credential: a cookie, an authorization, a password, a
- * secret, a key, a session or a token, but not a page or cursor token, which
- * an agent needs to page through results. Compared in snake case.
+ * secret, a key, a session or a token, but not a pagination token, which an
+ * agent needs to page through results. Compared in snake case.
  */
-const SECRET_NAME = /(^|_)(cookie|set_cookie|authorization|auth|pass|passwd|password|pwd|secret|api_?key|access_?key|private_?key|session|session_?id|sess_?id|otp|totp|pin|cvc|cvv|csrf|xsrf|credentials?|signature|token)$/;
+const SECRET_NAME = /(^|_)(cookie|set_cookie|authorization|auth|pass|passwd|password|pwd|secret|api_?key|access_?key|private_?key|secret_?key|signing_?key|client_?key|encryption_?key|session|session_?id|sess_?id|otp|totp|pin|cvc|cvv|csrf|xsrf|credentials?|signature|token)$/;
+/** Only these exact names: `page_access_token` is a credential that merely mentions a page. */
+const PAGING_TOKEN = /^((next|prev|previous)_)?(page|continuation|pagination|cursor)_token$|^(next|prev|previous)_token$/;
 function secretName(name: string): boolean {
   const snake = name.replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/[-\s.]+/g, '_').toLowerCase();
-  return SECRET_NAME.test(snake) && !/page|cursor|continuation/.test(snake);
+  return SECRET_NAME.test(snake) && !PAGING_TOKEN.test(snake);
 }
 const hidden = (value: string) => `<hidden, ${value.length} characters>`;
+const quote = (text: string) => JSON.stringify(text);
 
 function maskHeaders(headers: unknown): Record<string, string> {
   const masked: Record<string, string> = {};
@@ -59,19 +62,24 @@ function maskJson(value: unknown, depth = 0): unknown {
   return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, secretName(key) && (typeof inner === 'string' || typeof inner === 'number') ? hidden(String(inner)) : maskJson(inner, depth + 1)]));
 }
 
+/** A `"name": value` pair, its string value possibly cut short at the end of the text. */
+const JSON_PAIR = /"((?:[^"\\]|\\.){1,200})"(\s*:\s*)("(?:[^"\\]|\\.)*"?|-?\d[\d.eE+-]*)/g;
+
 /** Hides the credential fields of a JSON or form body, and of a query string. */
 export function maskBody(body: string, mimeType = ''): string {
   const trimmed = body.trimStart();
   if (/json/i.test(mimeType) || trimmed.startsWith('{') || trimmed.startsWith('[')) {
-    try { return JSON.stringify(maskJson(JSON.parse(body))); } catch { /* not JSON after all */ }
+    try { return JSON.stringify(maskJson(JSON.parse(body))); } catch { /* cut short, several values or a guard prefix */ }
   }
   if (/x-www-form-urlencoded/i.test(mimeType) || (/^[^\s{[<]+=/.test(trimmed) && !trimmed.includes('\n'))) {
     const form = new URLSearchParams(body);
     let changed = false;
     for (const [key, value] of [...form]) if (secretName(key)) { form.set(key, hidden(value)); changed = true; }
-    return changed ? form.toString() : body;
+    if (changed) return form.toString();
   }
-  return body;
+  // JSON that does not parse whole, or sits inside a page's script: each pair is masked on its own.
+  return body.replace(JSON_PAIR, (pair, name: string, colon: string, value: string) =>
+    secretName(name) ? `"${name}"${colon}${quote(hidden(value.replace(/^"|"$/g, '')))}` : pair);
 }
 
 const decoded = (text: string) => { try { return decodeURIComponent(text.replace(/\+/g, ' ')); } catch { return text; } };
@@ -114,7 +122,8 @@ export function watchNetwork(capture: () => NetworkCapture | null, on: (method: 
     const captured: Captured = {
       call: { id: `n${++into.seq}`, at: Date.now(), method: String(request?.method ?? 'GET'), url: maskUrl(url), type },
       requestId, started: Date.now(), requestHeaders: maskHeaders(request?.headers),
-      ...(typeof request?.postData === 'string' ? { postData: request.postData.slice(0, BROWSER_NETWORK_BODY_MAX) } : {}),
+      // Kept whole, which `maxPostDataSize` bounds: it is masked before it is cut.
+      ...(typeof request?.postData === 'string' ? { postData: request.postData } : {}),
       hasPostData: request?.hasPostData === true || typeof request?.postData === 'string',
       ...(typeof params.documentURL === 'string' ? { documentUrl: params.documentURL } : {}),
       redirected: false, finished: false,
@@ -161,8 +170,6 @@ const TEXT_TYPE = /^(text\/|application\/(json|[\w.+-]*\+json|javascript|ecmascr
 /** Headers the browser sets itself: a `page.fetch` call leaves them out. */
 export const BROWSER_HEADERS = /^(cookie|host|origin|referer|user-agent|content-length|connection|accept-encoding|accept-language|sec-.*|priority|upgrade-insecure-requests|cache-control|pragma)$/i;
 
-const quote = (text: string) => JSON.stringify(text);
-
 /** A JSON body is written as the value it sends, which reads and edits better than an escaped string. */
 function bodyCode(body: string): string {
   try { return `JSON.stringify(${JSON.stringify(JSON.parse(body))})`; } catch { return quote(body); }
@@ -201,11 +208,13 @@ export async function networkDetail(capture: NetworkCapture, callId: string, sen
     if (typeof read?.postData === 'string') requestBody = read.postData;
     else notes.push('the browser no longer holds the request body');
   }
-  const requestType = captured.requestHeaders['content-type'] ?? '';
-  if (requestBody !== undefined) {
-    if (requestBody.length >= BROWSER_NETWORK_BODY_MAX) notes.push(`the request body is cut at ${BROWSER_NETWORK_BODY_MAX} characters`);
-    requestBody = maskBody(requestBody.slice(0, BROWSER_NETWORK_BODY_MAX), requestType);
-  }
+  // Masked whole, then cut: a JSON body cut first no longer parses.
+  const shown = (body: string, mimeType: string, which: string) => {
+    const masked = maskBody(body, mimeType);
+    if (masked.length > BROWSER_NETWORK_BODY_MAX) notes.push(`the ${which} body is cut at ${BROWSER_NETWORK_BODY_MAX} of its ${masked.length} characters`);
+    return masked.slice(0, BROWSER_NETWORK_BODY_MAX);
+  };
+  if (requestBody !== undefined) requestBody = shown(requestBody, captured.requestHeaders['content-type'] ?? '', 'request');
   let responseBody: string | undefined;
   if (captured.redirected) notes.push('a redirect: the next call holds the page it led to');
   else if (captured.call.failed) notes.push(`the call failed (${captured.call.failed}) and has no body`);
@@ -217,9 +226,7 @@ export async function networkDetail(capture: NetworkCapture, callId: string, sen
     if (typeof read?.body !== 'string') notes.push('the browser no longer holds the response body: repeat the call, then read it sooner');
     else if (read.base64Encoded && !TEXT_TYPE.test(mime)) notes.push(`a binary body (${mime || 'no type'}, ${Math.floor(read.body.length * 3 / 4)} bytes), not shown`);
     else {
-      const text = read.base64Encoded ? Buffer.from(read.body, 'base64').toString('utf8') : read.body;
-      if (text.length > BROWSER_NETWORK_BODY_MAX) notes.push(`the response body is cut at ${BROWSER_NETWORK_BODY_MAX} of its ${text.length} characters`);
-      responseBody = maskBody(text.slice(0, BROWSER_NETWORK_BODY_MAX), mime);
+      responseBody = shown(read.base64Encoded ? Buffer.from(read.body, 'base64').toString('utf8') : read.body, mime, 'response');
     }
   }
   const fetch = fetchLine(captured, requestBody);

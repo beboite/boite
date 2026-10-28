@@ -38,16 +38,26 @@ export interface BrowserScript { source: string; name: string; args: string[]; t
 
 /** The longest text `page.fetch` returns: the reply crosses one RPC frame. */
 const FETCH_TEXT_MAX = 2_000_000;
+/** The longest `evaluate` expression the contract accepts, which `page.fetch` sends its request in. */
+const FETCH_SEND_MAX = 32_000;
 /**
  * Runs in the page, so the request carries the page's cookies and passes its
- * CORS rules as the site's own code does.
+ * CORS rules as the site's own code does. It reads the body no further than
+ * `max`: a large download would otherwise sit whole in the page's memory.
  */
 const PAGE_FETCH = `async (url, init, max) => {
   const response = await fetch(url, init);
-  const text = await response.text();
   const out = { status: response.status, ok: response.ok, url: response.url, headers: Object.fromEntries(response.headers) };
-  if (text.length > max) return { ...out, text: text.slice(0, max), truncated: true };
-  if (/json/i.test(response.headers.get('content-type') || '') || /^\s*[[{]/.test(text)) { try { return { ...out, json: JSON.parse(text) }; } catch {} }
+  const reader = response.body ? response.body.getReader() : null;
+  const decoder = new TextDecoder();
+  let text = '';
+  while (reader && text.length <= max) {
+    const { done, value } = await reader.read();
+    text += decoder.decode(value, { stream: !done });
+    if (done) break;
+  }
+  if (text.length > max) { await reader.cancel().catch(() => {}); return { ...out, text: text.slice(0, max), truncated: true }; }
+  if (/json/i.test(response.headers.get('content-type') || '') || /^\\s*[[{]/.test(text)) { try { return { ...out, json: JSON.parse(text) }; } catch {} }
   return { ...out, text };
 }`;
 
@@ -153,7 +163,8 @@ export async function runBrowserScript(script: BrowserScript, io: CliIo, client:
       const problem = browserActionError(action);
       if (problem) throw new Error(problem);
       const { lines, value } = await browserStep(action, tab, output, io, client, threadId);
-      if (action.kind === 'open' || action.kind === 'navigate') visit(action.url);
+      // Both the address asked for and the one reached: a redirect can lead to another site.
+      if (action.kind === 'open' || action.kind === 'navigate') { visit(action.url); visit(String((value as BrowserReply).url ?? '')); }
       // A tab the run was aimed at stays its own; a new one it opens becomes the run's.
       const opened = (value as BrowserReply).tabId;
       if (action.kind === 'open' && current !== undefined && opened) current = opened;
@@ -208,7 +219,10 @@ export async function runBrowserScript(script: BrowserScript, io: CliIo, client:
       const label = `fetch ${method} ${String(url).split(/[?#]/)[0]}`;
       const reply = await valueOf(label, () => {
         if (init.body !== undefined && typeof init.body !== 'string') throw new Error('page.fetch takes a string body: JSON.stringify(value) for JSON');
-        return { kind: 'evaluate', expression: `(${PAGE_FETCH})(${JSON.stringify(String(url))}, ${JSON.stringify(init)}, ${FETCH_TEXT_MAX})` };
+        const expression = `(${PAGE_FETCH})(${JSON.stringify(String(url))}, ${JSON.stringify(init)}, ${FETCH_TEXT_MAX})`;
+        // The request travels as one page expression, under the same cap as page.eval.
+        if (expression.length > FETCH_SEND_MAX) throw new Error(`page.fetch sends at most ${FETCH_SEND_MAX} characters of address, headers and body, this one ${expression.length}: build a longer body in the page and send it from page.eval`);
+        return { kind: 'evaluate', expression };
       }) as { status: number; ok: boolean; url: string; json?: unknown; text?: string };
       if (reply && typeof reply.url === 'string') visit(reply.url);
       if (!reply || reply.status >= 400) {

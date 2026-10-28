@@ -61,6 +61,9 @@ export function createBrowserFixture() {
       if (path === '/api/items') return (request.method === 'POST' ? request.json() as Promise<{ query?: string }> : Promise.resolve({ query: undefined }))
         .then(body => Response.json({ items: ['red', 'blue'], query: body.query ?? null, next: 'cursor-2', sessionToken: 'tok-999' }));
       if (path === '/api/fail') return Response.json({ error: 'the shelf is empty' }, { status: 500 });
+      // A reply longer than network detail shows, sent as text after a space.
+      if (path === '/api/huge') return new Response('z'.repeat(3_000_000), { headers: { 'content-type': 'text/plain' } });
+      if (path === '/api/big') return new Response(` ${JSON.stringify({ sessionToken: 'tok-big', rows: 'y'.repeat(60_000) })}`, { headers: { 'content-type': 'text/plain' } });
       if (path === '/later') return later.response.then(() => new Response('released'));
       if (path === '/later/done') { later.complete(); return new Response('done'); }
       if (path === '/sent') return new Response(`<title>Sent</title><h1>Thanks ${new URL(request.url).searchParams.get('name')}</h1>`, { headers: { 'content-type': 'text/html' } });
