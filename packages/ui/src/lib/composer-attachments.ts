@@ -116,13 +116,13 @@ export function receiveFiles(
     store.error = message;
   };
   const waiting: [File, Attachment][] = [];
-  for (const file of files) {
+  // Past the cap a file waits instead: an earlier one of these refused once it is read leaves it a slot.
+  const over: File[] = [];
+  /** False while the box is full. */
+  const admit = (file: File): boolean => {
     const denied = admission(file, receiver.attachments, noImages);
-    if (denied) {
-      refuse(denied.refused);
-      if (denied.stop) break;
-      continue;
-    }
+    if (denied?.stop) return false;
+    if (denied) { refuse(denied.refused); return true; }
     const image = noImages === null && (isImageMimeType(file.type) || isReducible(file));
     // A HEIC shows as a picture before it is one: the type is the source's until the read replaces it.
     const placeholder = { kind: image ? 'image' : 'file', mimeType: file.type || 'application/octet-stream', name: file.name || null, data: '', loading: true } as DraftAttachment;
@@ -131,16 +131,26 @@ export function receiveFiles(
     const held = receiver.attachments.at(-1)!;
     receiver.placed(held);
     waiting.push([file, held]);
-  }
-  if (waiting.length === 0) return Promise.resolve();
+    return true;
+  };
+  const admitWaiting = () => { while (over.length > 0 && admit(over[0]!)) over.shift(); };
+  const refuseOver = () => {
+    const [first] = over;
+    if (first) refuse(fill(strings.composer.attachTooMany, { name: first.name, max: String(ATTACHMENTS_PER_TURN) }));
+  };
+  for (const file of files) if (over.length > 0 || !admit(file)) over.push(file);
+  if (waiting.length === 0) { refuseOver(); return Promise.resolve(); }
   const run = (reads.get(receiver.input) ?? Promise.resolve()).then(async () => {
-    for (const [file, placeholder] of waiting) {
+    for (let next = 0; next < waiting.length; next++) {
+      const [file, placeholder] = waiting[next]!;
       // A read that throws still settles its placeholder: no tile waits forever.
       const result = await readFile(file, () => receiver.attachments.filter(item => item !== placeholder), noImages, codec)
         .catch(() => ({ refused: fill(strings.composer.attachReadError, { name: file.name }) }));
       if ('refused' in result) refuse(result.refused);
       receiver.settle(placeholder, 'attachment' in result ? result.attachment : null);
+      admitWaiting();
     }
+    refuseOver();
   });
   reads.set(receiver.input, run.catch(() => {}));
   return run;

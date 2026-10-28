@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, type Attachment } from '@boite/contracts';
-import { gatherAttachments } from './composer-attachments';
+import { gatherAttachments, receiveFiles } from './composer-attachments';
+import type { Store } from './store.svelte';
 import {
   IMAGE_MAX_EDGE,
   IMAGE_SOURCE_MAX_BYTES,
@@ -198,5 +199,20 @@ describe('gatherAttachments', () => {
     const target = holder([], null, codec(null).codec);
     await gatherAttachments([file('IMG_0042.HEIC', 'image/heic', 1000)], target.holder);
     expect(target.list).toMatchObject([{ kind: 'file', mimeType: 'image/heic', name: 'IMG_0042.HEIC' }]);
+  });
+});
+
+describe('receiveFiles', () => {
+  test('a file refused once read leaves its slot to the next one past the cap', async () => {
+    const store = { error: null } as unknown as Store;
+    const box = { input: {}, attachments: [] as Attachment[], placed() {}, settle(placeholder: Attachment, ready: Attachment | null) {
+      box.attachments = ready ? box.attachments.map(item => item === placeholder ? ready : item) : box.attachments.filter(item => item !== placeholder);
+    } };
+    const notes = Array.from({ length: ATTACHMENTS_PER_TURN }, (_, at) => file(`note-${at}.txt`, 'text/plain', 10));
+    // The heavy one shows as a tile like the rest: only its read says it is too big.
+    notes.splice(1, 0, file('heavy.bin', 'application/octet-stream', ATTACHMENT_MAX_BYTES + 1));
+    await receiveFiles(store, notes, box, null);
+    expect(box.attachments.map(one => one.name)).toEqual(notes.filter(one => one.name !== 'heavy.bin').map(one => one.name));
+    expect(store.error).toContain('heavy.bin');
   });
 });

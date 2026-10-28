@@ -2182,6 +2182,30 @@ test('a picture refused while it loads leaves no undo step naming it, and keeps 
   expect(seen.slice(0, 2)).toEqual(['Look at  ', 'Look at ']);
 });
 
+test('a loading tile removed before its read ends stays gone once the read lands', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  await type('Look at ');
+  const original = FileReader.prototype.readAsDataURL;
+  let release: (() => void) | undefined;
+  vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (this: FileReader, blob: Blob) {
+    release = () => original.call(this, blob);
+  });
+  paste(pngFile('gone.png'));
+  await waitFor(() => input().value === 'Look at [Image 1] ' && release !== undefined);
+  query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').click();
+  await waitFor(() => chips().length === 0);
+  release!();
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(chips()).toEqual([]);
+  expect(input().value).toBe('Look at  ');
+  // Undo back past the removal brings the tile back as the read left it: loaded, its reference beside it.
+  press('z', { ctrlKey: true });
+  await waitFor(() => chips().length === 1);
+  expect(input().value).toBe('Look at [Image 1] ');
+  expect(loaded()).toBe(true);
+});
+
 test('copying an image reference carries its picture to another composer, and stays text in its own', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => !store.busy);
