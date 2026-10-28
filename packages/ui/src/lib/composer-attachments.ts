@@ -3,7 +3,7 @@ import { acceptAttachments, attachedBytes, decodedBytes, isImageMimeType, readAt
 import { bytes } from './format';
 import { IMAGE_SOURCE_MAX_BYTES, isReducible, prepareImage, type ImageCodec } from './image-prepare';
 import { fill, strings } from './strings';
-import { fitTurn, queued } from './turn-fit';
+import { fitTurn, queued, type Fitted } from './turn-fit';
 
 /** The composer reads the running fit of its box here, beside the other ways pictures come in. */
 export { fitting } from './turn-fit';
@@ -84,10 +84,17 @@ export async function gatherAttachments(files: File[], holder: Holder): Promise<
   return refused;
 }
 
-/** The files past the byte total, in once the whole turn is fitted, as many as it then holds. */
+/**
+ * The files past the byte total, in once the whole turn is fitted, as many as
+ * it then holds. A paste or a removal made while the turn was fitted changes
+ * what it weighs: the fit starts again from what the box holds then.
+ */
 async function admitFitted(waiting: { attachment: Attachment; name: string }[], holder: Holder, refuse: (message: string) => void): Promise<void> {
-  const held = holder.held();
-  const fitted = await fitTurn([...held, ...waiting.map(item => item.attachment)], holder.codec);
+  let held: Attachment[], fitted: Fitted;
+  do {
+    held = holder.held();
+    fitted = await fitTurn([...held, ...waiting.map(item => item.attachment)], holder.codec);
+  } while (!same(held, holder.held()));
   const lighter = new Map(held.flatMap((attachment, at) => fitted.attachments[at] === attachment ? [] : [[attachment, fitted.attachments[at]!] as const]));
   if (lighter.size > 0) holder.replace(lighter);
   waiting.forEach((item, at) => {
@@ -102,6 +109,10 @@ async function admitFitted(waiting: { attachment: Attachment; name: string }[], 
     }
     holder.add(attachment);
   });
+}
+
+function same(one: Attachment[], other: Attachment[]): boolean {
+  return one.length === other.length && one.every((attachment, at) => other[at] === attachment);
 }
 
 /** The composer's way in: `gatherAttachments` on its state, a refusal in `store.error`. */

@@ -116,6 +116,28 @@ describe('fitTurn', () => {
     expect(box.attachments.map(one => one.name)).toEqual(['shot-0.jpg', 'shot-1.jpg', 'shot-2.jpg', 'spec.pdf']);
     expect(box.attachments.reduce((sum, one) => sum + decodedBytes(one.data), 0)).toBeLessThanOrEqual(ATTACHMENTS_TOTAL_MAX_BYTES);
   });
+
+  test('a picture pasted while waiting files are fitted is fitted with them', async () => {
+    const box = { attachments: Array.from({ length: 2 }, (_, at) => jpeg(`shot-${at}.jpg`, 4 * 1024 * KB)) };
+    const weighing = weighingCodec(4 * 1024 * KB);
+    let pasted = false;
+    // A paste lands in the box as the first picture is encoded, outside the box's queue.
+    const codec: ImageCodec = {
+      async decode(file) {
+        const image = (await weighing.decode(file))!;
+        return { ...image, async encode(...args) {
+          if (!pasted) { pasted = true; box.attachments = [...box.attachments, jpeg('pasted.jpg', 4 * 1024 * KB)]; }
+          return image.encode(...args);
+        } };
+      }
+    };
+    const store = { error: null } as unknown as Store;
+    const pdf = new File([new Uint8Array(4 * 1024 * KB)], 'spec.pdf', { type: 'application/pdf' });
+    await attachFiles(store, [pdf], box, null, undefined, codec);
+    expect(store.error).toBeNull();
+    expect(box.attachments.map(one => one.name)).toEqual(['shot-0.jpg', 'shot-1.jpg', 'pasted.jpg', 'spec.pdf']);
+    expect(box.attachments.reduce((sum, one) => sum + decodedBytes(one.data), 0)).toBeLessThanOrEqual(ATTACHMENTS_TOTAL_MAX_BYTES);
+  });
 });
 
 /**
