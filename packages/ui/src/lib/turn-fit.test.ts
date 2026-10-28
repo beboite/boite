@@ -72,6 +72,19 @@ describe('fitTurn', () => {
     expect(Math.min(...encoded.map(one => Math.max(one.width, one.height)))).toBe(FIT_FLOOR_EDGE);
   });
 
+  test('two fits of one box at once end within the budget, and say so only when the box fits', async () => {
+    const box = { attachments: Array.from({ length: 15 }, (_, at) => jpeg(`first-${at}.jpg`, 900 * KB)) };
+    const first = fitHeld(box, weighingCodec(900 * KB));
+    // More pictures join while the first fit runs, and start their own.
+    box.attachments = [...box.attachments, ...Array.from({ length: 15 }, (_, at) => jpeg(`second-${at}.jpg`, 900 * KB))];
+    const second = fitHeld(box, weighingCodec(900 * KB));
+    const answers = await Promise.all([first, second]);
+    const total = box.attachments.reduce((sum, one) => sum + decodedBytes(one.data), 0);
+    expect(box.attachments).toHaveLength(30);
+    expect(total).toBeLessThanOrEqual(ATTACHMENTS_TOTAL_MAX_BYTES);
+    expect(answers).toEqual([true, true]);
+  });
+
   test('a picture removed while the box was fitted stays removed', async () => {
     const box = { attachments: Array.from({ length: 30 }, (_, at) => jpeg(`shot-${at}.jpg`, 520 * KB)) };
     const removed = box.attachments[0]!;

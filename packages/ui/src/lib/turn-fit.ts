@@ -15,7 +15,7 @@
  */
 import { ATTACHMENTS_TOTAL_MAX_BYTES, decodedBytes, type Attachment } from '@boite/contracts';
 import { decodeBase64 } from './attachment-save';
-import { readAttachmentFile } from './attachments';
+import { attachedBytes, readAttachmentFile } from './attachments';
 import { unresolvedAssetId } from './draft-attachments';
 import { browserCodec, fitWithin, renamed, type Decoded, type Encoded, type ImageCodec } from './image-prepare';
 
@@ -131,17 +131,41 @@ export async function fitTurn(attachments: Attachment[], codec: ImageCodec = bro
   return { attachments: next, fits: total() <= max };
 }
 
+/** The fit running on each box, so a second one waits for the first and a send for both. */
+const running = new WeakMap<object, Promise<boolean>>();
+
+/** The fit still running on `target`, or undefined: what a send waits for. */
+export function fitting(target: object): Promise<boolean> | undefined {
+  return running.get(target);
+}
+
 /**
  * What a box holds, fitted in place: for the ways in that join pictures
  * without reading files, a paste of copied pictures or queued prompts taken
- * back. A picture removed while the fitting ran stays removed. False when the
- * turn is still over budget.
+ * back. A picture removed while the fitting ran stays removed. Fits of one box
+ * run one after the other, so none swaps in copies another already replaced.
+ * True only when what the box holds at the end is within the budget.
  */
-export async function fitHeld(target: { attachments: Attachment[] }, codec?: ImageCodec): Promise<boolean> {
-  const before = target.attachments;
-  const fitted = await fitTurn(before, codec);
-  if (fitted.attachments === before) return fitted.fits;
-  const swaps = new Map(before.flatMap((attachment, at) => fitted.attachments[at] === attachment ? [] : [[attachment, fitted.attachments[at]!] as const]));
-  target.attachments = target.attachments.map(attachment => swaps.get(attachment) ?? attachment);
-  return fitted.fits;
+export function fitHeld(target: { attachments: Attachment[] }, codec?: ImageCodec): Promise<boolean> {
+  const previous = running.get(target);
+  const run = (previous ?? Promise.resolve(true)).then(() => fitNow(target, codec), () => fitNow(target, codec));
+  running.set(target, run);
+  const done = (): void => { if (running.get(target) === run) running.delete(target); };
+  run.then(done, done);
+  return run;
+}
+
+async function fitNow(target: { attachments: Attachment[] }, codec?: ImageCodec): Promise<boolean> {
+  for (;;) {
+    const before = target.attachments;
+    const fitted = await fitTurn(before, codec);
+    if (fitted.attachments !== before) {
+      const swaps = new Map(before.flatMap((attachment, at) => fitted.attachments[at] === attachment ? [] : [[attachment, fitted.attachments[at]!] as const]));
+      target.attachments = target.attachments.map(attachment => swaps.get(attachment) ?? attachment);
+    }
+    if (attachedBytes(target.attachments) <= ATTACHMENTS_TOTAL_MAX_BYTES) return true;
+    // Over budget: fit again only when pictures joined while this one ran.
+    const seen = new Set([...before, ...fitted.attachments]);
+    if (!fitted.fits || target.attachments.every(attachment => seen.has(attachment))) return false;
+  }
 }
