@@ -110,7 +110,8 @@ export class GroupBotHost {
   private startup: ReturnType<typeof setTimeout> | null;
 
   constructor(private readonly core: Core) {
-    this.off = core.bus.onAny((name, payload) => {
+    // Other machines hear only what committed.
+    this.off = core.bus.onCommitted((name, payload) => {
       if (this.closed || core.journal.isClosed()) return;
       try {
         if (name === 'turn.finished') this.onTurn(payload as Turn);

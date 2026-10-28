@@ -164,6 +164,19 @@ export async function echoThread(
 let stops = 0;
 
 /**
+ * Archives the thread through a write that fails after the thread row is
+ * saved, so the whole transaction rolls back. Returns the error it threw.
+ */
+export function rolledBackArchive(harness: TestCore, threadId: string): unknown {
+  const announce = harness.core.projects.announce;
+  harness.core.projects.announce = () => { throw new Error('injected failure after the thread was written'); };
+  try { harness.core.threads.archive(threadId, true); }
+  catch (error) { return error; }
+  finally { harness.core.projects.announce = announce; }
+  throw new Error('the archive did not fail');
+}
+
+/**
  * Polls until `predicate` holds. A predicate that throws rejects the wait. A wait
  * whose test core stopped while it polled goes quiet instead: bun fails the
  * running test on any late rejection, so a wait left behind by a failed test

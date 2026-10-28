@@ -5,7 +5,7 @@ import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext } from '../src/drivers/types.ts';
 import { CAPACITY_CONTINUE_PROMPT, CAPACITY_RETRY } from '../src/threads/turn-attempts.ts';
 import { LIMIT_RESUME, LIMIT_RESUME_LABEL } from '../src/threads/limit-resume.ts';
-import { echoThread, removeDir, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { echoThread, removeDir, rolledBackArchive, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 const delays = [...CAPACITY_RETRY.delaysMs];
 const limits = { ...LIMIT_RESUME };
@@ -206,6 +206,19 @@ test('a resume refuses a thread whose model changed since the limit', async () =
     await h.core.logs.flush();
     const cancelled = (await h.core.logs.query({ limit: 500 })).filter(record => record.threadId === threadId && record.event === 'limit-resume.cancelled');
     expect(cancelled[0]?.message).toContain('model changed');
+  } finally { await h.stop(); }
+});
+
+test('an archive that rolls back keeps the planned resume, which still fires', async () => {
+  const h = await startTestCore({ settings: { autoResumeLimitedThreads: true } });
+  try {
+    const client = await h.connect();
+    const { threadId } = await echoThread(h, client);
+    const turn = await client.call('turns.start', { threadId, prompt: '[usage-limit:800]' });
+    await waitFor(() => retryOf(h, threadId)?.turnId === turn.id);
+    rolledBackArchive(h, threadId);
+    expect([h.core.threads.require(threadId).archived, retryOf(h, threadId)?.turnId]).toEqual([false, turn.id]);
+    await waitFor(() => h.core.journal.listTurns(threadId)[1]?.execution?.operation === 'resume', 5000);
   } finally { await h.stop(); }
 });
 

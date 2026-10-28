@@ -60,7 +60,8 @@ export class LimitResumes {
   private cached: Record_ | null = null;
 
   constructor(private readonly core: Core, private readonly threads: ThreadStore) {
-    core.bus.onAny((name, payload) => {
+    // An archive or a setting that rolls back keeps the plan and its timer.
+    core.bus.onCommitted((name, payload) => {
       if (name === 'turn.started') this.turnStarted(payload as RpcEvents['turn.started']);
       else if (name === 'thread.updated' && (payload as ThreadSummary).archived) this.cancel((payload as ThreadSummary).id, 'the thread was archived');
       else if (name === 'settings.updated' && (payload as Settings).autoResumeLimitedThreads !== true) this.cancelAll('automatic resume was turned off');

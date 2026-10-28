@@ -75,7 +75,8 @@ export class SecretStore {
   }
 
   start(): void {
-    this.#stopBus = this.core.bus.onAny((name, payload) => this.#onEvent(name, payload));
+    // Cards and refs go only with a committed end: a rolled-back archive or removal keeps them.
+    this.#stopBus = this.core.bus.onCommitted((name, payload) => this.#onEvent(name, payload));
     if (!this.index.exists()) return;
     setTimeout(() => {
       if (this.#stopBus === null) return;

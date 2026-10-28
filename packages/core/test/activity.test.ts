@@ -4,7 +4,7 @@ import { Core } from '../src/core.ts';
 import { ActivityStore } from '../src/activity.ts';
 import { connect } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
-import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { echoThread, rolledBackArchive, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
 
 let h: TestCore;
@@ -204,6 +204,19 @@ test('loop repeats, Escape pauses it while idle, resume runs again, remove clear
   await waitFor(() => count > stoppedAt);
   await client.call('threads.activity.control', { threadId, kind: 'loop', action: 'remove' });
   expect(h.core.activity.get(threadId).loop).toBeNull();
+});
+
+test('an archive that rolls back keeps the loop running', async () => {
+  const client = await h.connect();
+  const { threadId } = await echoThread(h, client);
+  let count = 0;
+  restore = setDriver('echo', { protocol: 'echo', startTurn() { count++; return { stop() {}, done: Promise.resolve({ status: 'done', sessionId: null, usage: null }) }; } });
+  await client.call('threads.activity.set', { threadId, loop: { prompt: 'check', intervalMs: 1000 } });
+  await waitFor(() => count >= 1 && h.core.threads.get(threadId).status === 'idle' && h.core.activity.get(threadId).loop?.nextRunAt != null);
+  rolledBackArchive(h, threadId);
+  expect([h.core.threads.require(threadId).archived, h.core.activity.get(threadId).loop?.status]).toEqual([false, 'active']);
+  const before = count;
+  await waitFor(() => count > before, 3000);
 });
 
 test('errors pause both modes and preserve the reported error', async () => {

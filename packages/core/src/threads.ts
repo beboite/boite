@@ -409,28 +409,7 @@ export class ThreadStore {
   archive(threadId: ThreadId, archived: boolean, onlyIfIdle = false): ThreadSummary {
     this.require(threadId);
     if (archived && onlyIfIdle) assertIdleFamily(this.core, threadId, 'explicit');
-    if (archived) {
-      // Temporary inference belongs to the visible family, including retained descendants.
-      const family = this.core.journal.db.query('WITH RECURSIVE family(id) AS (SELECT ? UNION SELECT child.id FROM threads child JOIN family ON child.parent_thread_id = family.id) SELECT id FROM family').all(threadId) as { id: ThreadId }[];
-      for (const member of family) this.sideQuestions.cancel(member.id);
-    }
     if (!archived && this.removing.has(threadId)) throw refused('threadId: this conversation is being deleted', { threadId, field: 'threadId', expected: 'a conversation not being deleted' });
-    // An archived thread is not coming back this minute: its warm process goes
-    // now, and the commands that process listed go with it.
-    if (archived) {
-      this.moves.forget(threadId);
-      this.core.delegation.stop(threadId);
-      this.core.scheduler.stop(threadId);
-      this.releaseAgent(threadId);
-      this.agentState.commands.delete(threadId);
-      this.agentState.noteBackground(threadId, []);
-      // Nobody answers a card on a thread put away, and no turn should start from one.
-      this.cards.clearQuestionsOf(threadId, true, 'archive');
-      this.deferred.deferredAnswers.delete(threadId);
-      this.deferred.consumed.delete(threadId);
-      this.deferred.pendingWakes.delete(threadId);
-      void this.core.terminals.closeThread(threadId);
-    }
     const thread = this.require(threadId);
     // A subagent reopened by hand is not put away again for the work it already finished.
     if (!archived && thread.archived && thread.parentThreadId) this.core.delegation.retirements.keep(threadId);
@@ -450,12 +429,30 @@ export class ThreadStore {
       const saved = this.save({ ...thread, archived, doneAt, archivedAt }, 'thread.archived');
       const projectThread = !thread.parentThreadId || this.core.journal.getThread(thread.parentThreadId)?.agentSessionId;
       if ((thread.archived !== archived || (thread.doneAt ?? null) !== doneAt) && projectThread && thread.projectId !== null) this.core.projects.announce(thread.projectId);
+      if (archived) this.core.bus.whenCommitted(() => this.putAway(threadId, thread.cwd));
       return saved;
     })());
-    // A removal waits for the same stops itself before it hides the family.
-    if (archived && !this.removing.has(threadId)) void this.endArchivedWork(threadId);
-    if (archived) this.core.fileTickets.forgetUnder(thread.cwd);
     return saved;
+  }
+
+  /** What a committed archive stops: its warm process and what it listed go now. One that rolls back stops nothing. */
+  private putAway(threadId: ThreadId, cwd: string): void {
+    // Temporary inference belongs to the visible family, including retained descendants.
+    const family = this.core.journal.db.query('WITH RECURSIVE family(id) AS (SELECT ? UNION SELECT child.id FROM threads child JOIN family ON child.parent_thread_id = family.id) SELECT id FROM family').all(threadId) as { id: ThreadId }[];
+    for (const member of family) this.sideQuestions.cancel(member.id);
+    this.moves.forget(threadId);
+    this.core.delegation.stop(threadId);
+    this.core.scheduler.stop(threadId);
+    this.releaseAgent(threadId);
+    this.agentState.commands.delete(threadId);
+    this.agentState.noteBackground(threadId, []);
+    // Nobody answers a card on a thread put away, and no turn should start from one.
+    this.cards.clearQuestionsOf(threadId, true, 'archive');
+    for (const pending of [this.deferred.deferredAnswers, this.deferred.consumed, this.deferred.pendingWakes]) pending.delete(threadId);
+    void this.core.terminals.closeThread(threadId);
+    // A removal waits for the same stops itself before it hides the family.
+    if (!this.removing.has(threadId)) void this.endArchivedWork(threadId);
+    this.core.fileTickets.forgetUnder(cwd);
   }
 
   /**

@@ -12,7 +12,7 @@ import { startServer } from '../src/server.ts';
 import { assertIdleFamily } from '../src/threads/completion.ts';
 import { HANDOFF } from '../src/threads/handoff.ts';
 import { AGENT_ENV } from '@boite/contracts';
-import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { echoThread, rolledBackArchive, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
 
 const cores: TestCore[] = [];
@@ -740,15 +740,21 @@ test('an archive that rolls back leaves its run paused, and the committed one st
   const stopRoot = h.core.workflows.stopRoot.bind(h.core.workflows);
   let stops = 0;
   h.core.workflows.stopRoot = (rootId, reason) => { stops += 1; return stopRoot(rootId, reason); };
-  const announce = h.core.projects.announce;
-  h.core.projects.announce = () => { throw new Error('injected failure after the thread was written'); };
-  try { expect(() => h.core.threads.archive(threadId, true)).toThrow('injected failure'); }
-  finally { h.core.projects.announce = announce; }
+  // Nor do the archive's own stops: its children, its turn and its terminals.
+  const direct: string[] = [];
+  const delegationStop = h.core.delegation.stop.bind(h.core.delegation);
+  const schedulerStop = h.core.scheduler.stop.bind(h.core.scheduler);
+  const closeThread = h.core.terminals.closeThread.bind(h.core.terminals);
+  h.core.delegation.stop = (id, ...rest) => { direct.push('delegation'); return delegationStop(id, ...rest); };
+  h.core.scheduler.stop = (id, ...rest) => { direct.push('scheduler'); return schedulerStop(id, ...rest); };
+  h.core.terminals.closeThread = id => { direct.push('terminals'); return closeThread(id); };
+  rolledBackArchive(h, threadId);
   expect(h.core.threads.require(threadId).archived).toBe(false);
-  expect(stops).toBe(0);
+  expect([stops, direct]).toEqual([0, []]);
   expect(h.core.workflows.get(threadId, run.id).status).toBe('paused');
   h.core.threads.archive(threadId, true);
   expect(stops).toBe(1);
+  expect(new Set(direct)).toEqual(new Set(['delegation', 'scheduler', 'terminals']));
   expect(h.core.workflows.get(threadId, run.id)).toMatchObject({ status: 'stopped', error: 'The thread was archived.' });
 });
 

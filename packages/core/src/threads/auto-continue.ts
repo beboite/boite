@@ -85,7 +85,8 @@ export class AutoContinues {
   private heldTeams: Set<string> | undefined;
 
   constructor(private readonly core: Core, private readonly threads: ThreadStore) {
-    core.bus.onAny((name, payload) => {
+    // An archive that rolls back keeps the planned resume and its timer.
+    core.bus.onCommitted((name, payload) => {
       if (this.closed) return;
       if (name === 'turn.started') this.turnStarted(payload as RpcEvents['turn.started']);
       else if (name === 'thread.updated' && (payload as ThreadSummary).archived) this.cancel((payload as ThreadSummary).id, 'the thread was archived');
