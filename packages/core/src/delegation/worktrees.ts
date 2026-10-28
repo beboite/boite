@@ -145,7 +145,8 @@ export class ChildWorktrees {
       if (commits > 0 || dirty || this.core.sharedCompute?.journal.worker(threadId)) return this.save(threadId, { branch: record.branch, path: record.path, base: record.base, state: 'kept', commits, dirty });
       // A warm agent process keeps the folder as its working directory; Windows refuses to delete it then.
       this.core.threads.releaseAgent(threadId);
-      const removed = await this.core.worktrees.remove(threadId, project, { branch: record.branch, path: record.path });
+      await this.core.procs.stopAndWait(threadId);
+      const removed = await this.core.worktrees.remove(threadId, project, { branch: record.branch, path: record.path }, undefined, threadId);
       this.save(threadId, removed
         ? { branch: record.branch, path: record.path, base: record.base, state: 'removed', commits: 0, dirty: false }
         : { ...record, state: 'kept', commits: 0, dirty: false, error: 'git could not remove it; the log says why' });
