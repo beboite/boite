@@ -424,13 +424,14 @@ merged, non-fork PR from the same repository with the exact branch tip. The
 proof takes the checkout's current branch from `git status`, not the thread's
 recorded starting branch. The repository's cached fetch remotes identify origin,
 then explicitly linked URLs are read directly with `gh pr view`, even when they
-are absent from the repository list. Every linked PR is checked before accepting
+are absent from the repository's page. Every linked PR is checked before accepting
 a merge: another open linked PR keeps the conversation visible. A linked merge
 needs the exact tip but may have another head name, because agents often push
 `HEAD:fix/...`.
 
-Without a linked proof, the repository's newest 200 PRs are shared with sidebar
-discovery. Its branch needs exactly one local PR; unrelated fork branches do not
+Without a linked proof, the repository's page, its 100 PRs updated last, is
+shared with sidebar discovery; only that read counts as evidence, never what
+earlier pages taught. Its branch needs exactly one local PR; unrelated fork branches do not
 count. A full page requires a branch-specific query and a complete result before
 archiving. `git status` runs only when a merged PR could match. A negative proof
 retries after one minute even when the thread has not changed, so an external

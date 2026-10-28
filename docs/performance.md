@@ -232,7 +232,7 @@ history; selection yields every eight rows and shares a scheduler snapshot only
 within that synchronous group. Family, input, result and checkout guards remain
 fresh after asynchronous validation and immediately before the archive write.
 Large retained families and unindexed branch-holder checks can still cost more.
-Proofs share one `git remote -v` and one `gh pr list` per repository with the
+Proofs share one `git remote -v` and one page of PRs per repository with the
 sidebar badges, and a thread without a merged PR waits 5 minutes, then up to
 an hour, before its next proof. Four unmerged worktree threads cost 2 processes
 on the first pass and none on the next ones, against 12 and then 8 a minute

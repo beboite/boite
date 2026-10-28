@@ -358,7 +358,7 @@ test('unmerged worktree threads share repository reads and check again once a mi
   };
   try {
     // Four open pull requests: one remote read and one list for the repository, no status walk.
-    expect(await sweep()).toEqual({ proofs: 4, spawned: ['git remote', 'gh pr'] });
+    expect(await sweep()).toEqual({ proofs: 4, spawned: ['git remote', 'gh api'] });
     expect(await sweep()).toEqual({ proofs: 0, spawned: [] });
     expect(await sweep()).toEqual({ proofs: 0, spawned: [] });
     // An updated thread is proved again at once, from what the repository reads kept.
@@ -368,7 +368,7 @@ test('unmerged worktree threads share repository reads and check again once a mi
     expect(updated.spawned).not.toContain('git status');
     // Each minute asks again, sharing the cached remotes and one fresh repository list.
     elapsed = 60_001;
-    expect(await sweep()).toEqual({ proofs: 4, spawned: ['gh pr'] });
+    expect(await sweep()).toEqual({ proofs: 4, spawned: ['gh api'] });
     elapsed += 30_000;
     expect((await sweep()).proofs).toBe(0);
     elapsed += 30_001;
@@ -380,7 +380,7 @@ test('unmerged worktree threads share repository reads and check again once a mi
     const merged = await sweep(1);
     expect(merged.proofs).toBe(1);
     expect(merged.spawned.filter(command => command === 'git status')).toHaveLength(2);
-    expect(merged.spawned.filter(command => command === 'gh pr')).toHaveLength(1);
+    expect(merged.spawned.filter(command => command === 'gh api')).toHaveLength(1);
     console.log('archive-spawn-measurement', JSON.stringify({ threads: 4, passes }));
   } finally { proved.mockRestore(); clock.mockRestore(); }
 });
