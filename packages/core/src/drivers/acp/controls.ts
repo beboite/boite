@@ -79,6 +79,15 @@ function matchMode(wanted: PermissionMode, modes: SessionMode[]): string | null 
   return null;
 }
 
+/**
+ * The thread asked for a model the agent did not take. The prompt must not
+ * go out: it would run on whatever model the session was already on.
+ */
+export class ModelRefused extends Error {}
+
+/** Why a value is not what the agent is on: no such option, no such value, or an error answer. */
+type Unapplied = { kind: 'gone' | 'absent' | 'unlisted' | 'refused'; detail: string };
+
 /** The live connection and session the calls go out on, read at each call: null once the process is gone. */
 export interface ControlTarget {
   agent: ClientContext | null;
@@ -113,7 +122,7 @@ export class SessionControls {
    * session's seed: only then does a current value say what this one is on.
    */
   private ownOptions = false;
-  /** Values this process refused, by category: asked again, they cost the same wait and the same warning. */
+  /** Efforts this process refused: asked again, they cost the same wait and the same warning. */
   private readonly refused = new Set<string>();
   /** What the last `session/new` or `session/load` said the agent can be in. */
   private modes: SessionMode[] = [];
@@ -191,8 +200,8 @@ export class SessionControls {
    * the pair has not moved since the last one, so a warm session follows a
    * change instead of being dropped for it. A thread on the agent's own model
    * with no effort set says nothing, and neither does one the session answer
-   * already reports as current. A refusal is one warning: the turn runs on
-   * whatever the agent is already on.
+   * already reports as current. A refused model fails the turn before its
+   * prompt; a refused effort alone is one warning.
    */
   async applyModel(ctx: SessionContext): Promise<void> {
     if (!isGrok(ctx.provider)) return;
@@ -228,7 +237,8 @@ export class SessionControls {
       this.appliedModel = modelId;
       this.appliedEffort = effort;
     } catch (error) {
-      ctx.log('warn', `acp: the agent refused the model ${modelId}: ${messageOf(error)}`);
+      if (wanted !== null) throw new ModelRefused(`thread.model: ${ctx.provider.name} refused the model ${wanted}: ${messageOf(error)}`);
+      ctx.log('warn', `acp: the agent refused the effort ${effort} on ${modelId}: ${messageOf(error)}`);
     }
   }
 
@@ -326,7 +336,10 @@ export class SessionControls {
    * which is how ACP changes them in place. It runs at the start of every turn,
    * on a session that was loaded as well as on one that was created, and sends
    * only what moved since the last turn: a change of either follows the warm
-   * process instead of dropping it.
+   * process instead of dropping it. A model the thread names that the agent
+   * lists without that value, or refuses, fails the turn before its prompt;
+   * an agent with no model option at all keeps its own. Effort is a
+   * preference: a refusal is one warning.
    */
   async applyConfig(ctx: SessionContext): Promise<void> {
     // Grok took its model and its effort through `session/set_model` and
@@ -340,16 +353,19 @@ export class SessionControls {
       // Back to the agent's own model on a session moved off it: that model
       // has to be asked for, or the session stays on the last one.
       const wanted = model === AGENT_OWN_MODEL && this.appliedModel !== undefined && this.ownModel !== null ? this.ownModel : model;
-      if (await this.setOption(ctx, 'model', wanted)) {
+      const unapplied = await this.setOption(ctx, 'model', wanted);
+      if (unapplied === null) {
         // OpenCode 2 puts the effort back to its default with any other model:
         // what the answer now reports decides whether the effort goes again.
         if (this.appliedModel !== model) this.appliedEffort = undefined;
         this.appliedModel = model;
       } else if (ctx.protectedExecution) {
         throw new Error(`execution.acp.model: native agent offers no confirmed model ${wanted}`);
+      } else if (unapplied.kind === 'unlisted' || unapplied.kind === 'refused') {
+        throw new ModelRefused(`thread.model: ${ctx.provider.name} ${unapplied.detail}`);
       }
     }
-    if (effort !== this.appliedEffort && (await this.setOption(ctx, 'thought_level', effort))) {
+    if (effort !== this.appliedEffort && (await this.setOption(ctx, 'thought_level', effort)) === null) {
       this.appliedEffort = effort;
     }
   }
@@ -370,44 +386,51 @@ export class SessionControls {
   async applyEffort(ctx: SessionContext, effort: string): Promise<boolean> {
     if (isGrok(ctx.provider) || this.configOptions.length === 0) return false;
     if (effort === this.appliedEffort) return true;
-    if (!(await this.setOption(ctx, 'thought_level', effort))) return false;
+    if ((await this.setOption(ctx, 'thought_level', effort)) !== null) return false;
     this.appliedEffort = effort;
     return true;
   }
 
-  /** True once that value is what the agent is on, whether it was sent or never needed. */
+  /**
+   * Null once that value is what the agent is on, whether it was sent or never
+   * needed; otherwise why not. A refused effort is not asked again by this
+   * process; a refused model is, since it fails its turn instead of running.
+   */
   private async setOption(
     ctx: SessionContext,
     category: SessionConfigOptionCategory,
     wanted: string | null,
-  ): Promise<boolean> {
+  ): Promise<Unapplied | null> {
     const { agent, sessionId } = this.target();
     const strictModel = !!ctx.protectedExecution && category === 'model';
-    if (agent === null || sessionId === null) return false;
+    const gone: Unapplied = { kind: 'gone', detail: 'the agent process is gone' };
+    if (agent === null || sessionId === null) return gone;
     // No effort set: an agent that lists `default` among its levels (OpenCode
     // 2) is put back on it, since it keeps the last level it was asked for.
     if ((wanted === null || wanted.length === 0) && category === 'thought_level') {
       const option = categoryOption(this.configOptions, category);
-      if (option === null || !selectValues(option).includes(AGENT_DEFAULT_EFFORT)) return true;
+      if (option === null || !selectValues(option).includes(AGENT_DEFAULT_EFFORT)) return null;
       wanted = AGENT_DEFAULT_EFFORT;
     }
     // Nothing to ask for: the agent keeps whatever it is configured with.
-    if (wanted === null || wanted.length === 0) return true;
-    if (category === 'model' && wanted === AGENT_OWN_MODEL) return true;
+    if (wanted === null || wanted.length === 0) return null;
+    if (category === 'model' && wanted === AGENT_OWN_MODEL) return null;
     const listed = this.configOptions.find(
       (entry) => entry.category === category && selectValues(entry).includes(wanted),
     );
     // Already the value this session last reported: nothing to send.
-    if (this.ownOptions && listed?.type === 'select' && String(listed.currentValue) === wanted) return true;
+    if (this.ownOptions && listed?.type === 'select' && String(listed.currentValue) === wanted) return null;
     const refusal = `${category}\0${wanted}`;
-    if (!strictModel && this.refused.has(refusal)) return false;
+    if (category !== 'model' && this.refused.has(refusal)) return { kind: 'refused', detail: `refused the ${category} ${wanted}` };
     const option = listed ?? this.injectedModelOption(ctx, category, wanted);
     if (option === undefined) {
+      const offered = categoryOption(this.configOptions, category);
+      if (offered !== null && category === 'model') return { kind: 'unlisted', detail: `offers no model ${wanted}; it offers ${selectValues(offered).join(', ') || 'none'}` };
       if (!this.configWarned) {
         this.configWarned = true;
         ctx.log('warn', `acp: the agent offers no ${category} option with the value ${wanted}`);
       }
-      return false;
+      return { kind: offered === null ? 'absent' : 'unlisted', detail: `offers no ${category} ${wanted}` };
     }
     // OpenCode 2 answers `session/new` a moment before it has loaded a provider
     // injected into its configuration: asked at once, it does not know the
@@ -416,7 +439,7 @@ export class SessionControls {
     const waits = listed === undefined ? INJECTED_MODEL_RETRY_MS : [];
     for (let attempt = 0; ; attempt += 1) {
       const live = this.target();
-      if (live.agent === null || live.sessionId === null) return false;
+      if (live.agent === null || live.sessionId === null) return gone;
       try {
         const answer = await live.agent.request('session/set_config_option', {
           sessionId: live.sessionId,
@@ -435,14 +458,15 @@ export class SessionControls {
           this.configOptions = options;
           this.ownOptions = true;
         }
-        return true;
+        return null;
       } catch (error) {
         const wait = waits[attempt];
         if (wait === undefined) {
           if (strictModel) throw new Error(`execution.acp.model: native agent refused ${wanted}: ${messageOf(error)}`);
+          if (category === 'model') return { kind: 'refused', detail: `refused the model ${wanted}: ${messageOf(error)}` };
           ctx.log('warn', `acp: the agent refused the ${category} ${wanted}: ${messageOf(error)}`);
           this.refused.add(refusal);
-          return false;
+          return { kind: 'refused', detail: `refused the ${category} ${wanted}` };
         }
         await new Promise<void>((resolve) => { setTimeout(resolve, wait); });
       }

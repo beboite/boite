@@ -20,7 +20,7 @@ import { stderrLines } from '../lines.ts';
 import { exitWithin } from '../exit.ts';
 import type { LiveTurnSettings, ProbeContext, ProbeFilter, SessionContext } from '../types.ts';
 import { OpenCommands } from './commands.ts';
-import { SessionControls } from './controls.ts';
+import { ModelRefused, SessionControls } from './controls.ts';
 import { failureText, loadRefusal, LoadRefused, rpcReason, rpcRefusal } from './load.ts';
 import { AGENT_OWN_MODEL } from './models.ts';
 import { canDeleteSessions, CLIENT_NAME, discardSession, EXIT_GRACE_MS, isGrok, STDERR_MAX, type AcpDeps, type Timer } from './protocol.ts';
@@ -327,7 +327,7 @@ export class AcpSession {
         turn.stopNow();
       } else if (error instanceof LoadRefused && error.lost) {
         turn.loseSession(error.message);
-      } else if (error instanceof LoadRefused) {
+      } else if (error instanceof LoadRefused || error instanceof ModelRefused) {
         turn.fail(error.message);
       } else {
         // An agent that exits while it starts takes the connection with it,
@@ -377,10 +377,18 @@ export class AcpSession {
     // Every turn, not only the first: a warm session outlives a change to any
     // of the three, the agent may have switched on its own since the last
     // prompt, and a `session/load` reports none of them reliably. Each call
-    // sends nothing when what it carries has not moved.
-    await this.controls.applyModel(turn.ctx);
-    await this.controls.applyConfig(turn.ctx);
-    await this.controls.applyMode(turn.ctx);
+    // sends nothing when what it carries has not moved. A model the agent did
+    // not take ends the turn here: the prompt would run on the previous one.
+    try {
+      await this.controls.applyModel(turn.ctx);
+      await this.controls.applyConfig(turn.ctx);
+      await this.controls.applyMode(turn.ctx);
+    } catch (error) {
+      if (!(error instanceof ModelRefused)) throw error;
+      turn.fail(error.message);
+      this.endTurn(turn, false);
+      return;
+    }
     const judged = this.costBaseline(turn);
     this.current = turn;
     let response: PromptResponse;

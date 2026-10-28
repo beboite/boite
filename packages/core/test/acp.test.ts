@@ -84,6 +84,7 @@ afterEach(async () => {
   delete process.env['ACP_FAKE_NO_MODES'];
   delete process.env['ACP_FAKE_MODE_OPTION'];
   delete process.env['ACP_FAKE_LATE_MODEL'];
+  delete process.env['ACP_FAKE_REFUSE_SMART'];
   delete process.env['ACP_FAKE_NO_IMAGES'];
   delete process.env['ACP_FAKE_HANG_INIT'];
   delete process.env['ACP_FAKE_EXIT_AT_START'];
@@ -1359,14 +1360,18 @@ describe('acp driver', () => {
     expect(configCount('model gateway/kimi')).toBe(3);
     expect(logs.filter((line) => line.includes('gateway/kimi'))).toEqual([]);
 
-    // A model outside the injected prefix that the agent does not list is still never sent.
+    // A model outside the injected prefix that the agent does not list is never
+    // sent, and the prompt does not run on the previous model instead.
     await client.call('threads.update', { threadId: thread.id, model: 'elsewhere/kimi' });
-    await runTurn(client, thread.id, 'second');
+    const prompts = countLogLines(fakeLog(), 'session/prompt');
+    const refused = await finishTurn(client, thread.id, 'second');
+    expect(refused.status).toBe('error');
+    expect(refused.error).toStartWith('thread.model: Fake ACP agent offers no model elsewhere/kimi; it offers default, fake-fast, fake-smart');
     expect(configCount('model elsewhere/kimi')).toBe(0);
-    await waitFor(() => logs.some((line) => line === 'warn acp: the agent offers no model option with the value elsewhere/kimi'));
+    expect(countLogLines(fakeLog(), 'session/prompt')).toBe(prompts);
   });
 
-  test('an injected model the agent keeps refusing is asked for once per process, not on every turn', async () => {
+  test('an injected model the agent keeps refusing fails each turn before its prompt', async () => {
     const client = await startCore({ warmProcessMinutes: 5 });
     const { projectId, accountId, dataDir } = await acpAccount(client);
     const file = join(dataDir, 'providers', 'acp-fake.json');
@@ -1379,11 +1384,36 @@ describe('acp driver', () => {
     const logs = collectLogs(client);
 
     const thread = await client.call('threads.create', { projectId, providerId: 'acp-fake', accountId, title: 'gone', model: 'gateway/gone' });
-    await runTurn(client, thread.id, 'first');
-    await runTurn(client, thread.id, 'second');
-    // One call and its four retries while the agent might still be loading the provider, then nothing more.
-    expect(configCount('model gateway/gone')).toBe(5);
-    await waitFor(() => logs.filter((line) => line.startsWith('warn acp: the agent refused the model gateway/gone')).length === 1);
+    for (const prompt of ['first', 'second']) {
+      const refused = await finishTurn(client, thread.id, prompt);
+      expect(refused.status).toBe('error');
+      expect(refused.error).toStartWith('thread.model: Fake ACP agent refused the model gateway/gone: ');
+    }
+    // One call and its four retries while the agent might still be loading the
+    // provider, on each turn: a refusal is never remembered as an answer.
+    expect(configCount('model gateway/gone')).toBe(10);
+    expect(countLogLines(fakeLog(), 'session/prompt')).toBe(0);
+    // The turn's error says it; no warning claims the turn ran anyway.
+    expect(logs.filter((line) => line.startsWith('warn acp:'))).toEqual([]);
+  }, 20000);
+
+  test('a listed model the agent refuses on a warm session fails the turn, and the same model runs once it is taken', async () => {
+    process.env['ACP_FAKE_REFUSE_SMART'] = '1';
+    const client = await startCore({ warmProcessMinutes: 5 });
+    const threadId = await acpThread(client);
+    await runTurn(client, threadId, 'on the default');
+
+    await client.call('threads.update', { threadId, model: 'fake-smart' });
+    const prompts = countLogLines(fakeLog(), 'session/prompt');
+    const refused = await finishTurn(client, threadId, 'on the smart one');
+    expect(refused.status).toBe('error');
+    expect(refused.error).toBe('thread.model: Fake ACP agent refused the model fake-smart: Internal error: route to fake-smart is down');
+    expect(countLogLines(fakeLog(), 'session/prompt')).toBe(prompts);
+
+    // Asked again on the next turn, taken, and only then does a prompt go out.
+    await runTurn(client, threadId, 'again');
+    expect(configCount('model fake-smart')).toBe(2);
+    expect(countLogLines(fakeLog(), 'session/prompt')).toBe(prompts + 1);
   });
 
   test('an agent that lists its modes as a config option is moved through that option', async () => {
@@ -1473,6 +1503,12 @@ describe('acp driver', () => {
   /** One `initialize` per agent process, which is what the probe cache saves. */
   function initializeCount(): number {
     return countLogLines(fakeLog(), 'initialize');
+  }
+
+  async function finishTurn(client: CoreClient, threadId: string, prompt: string): Promise<RpcEvents['turn.finished']> {
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt });
+    return finished;
   }
 
   async function runTurn(client: CoreClient, threadId: string, prompt: string): Promise<void> {

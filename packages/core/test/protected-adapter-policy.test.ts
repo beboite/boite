@@ -164,12 +164,26 @@ test('protected ACP confirms the selected model before fresh and warm prompts', 
   await controls.applyConfig(ctx);
 });
 
-test('native-default selection stays explicit and ordinary ACP model preferences stay permissive', async () => {
+test('Grok refusing the selected model fails admission, while a refused effort alone stays a warning', async () => {
+  const ctx = context(); ctx.protectedExecution = undefined;
+  ctx.provider = {...ctx.provider, name: 'Grok', quirks: ['grok']} as TurnContext['provider'];
+  const logs: string[] = []; ctx.log = (_level, message) => { logs.push(message); };
+  const controls = new SessionControls(() => ({agent: {async request() {throw new Error('model unavailable');}} as unknown as ClientContext, sessionId: 'synthetic-session'}));
+  ctx.thread.model = 'grok-next'; ctx.thread.effort = null;
+  expect(await thrown(controls.applyModel(ctx))).toThrow('thread.model: Grok refused the model grok-next: model unavailable');
+  ctx.thread.model = 'default'; ctx.thread.effort = 'high';
+  controls.noteSession(null, null, {models: {currentModelId: 'grok-4.5', availableModels: [{modelId: 'grok-4.5', name: 'Grok 4.5'}]}});
+  await controls.applyModel(ctx);
+  expect(logs).toEqual(['acp: the agent refused the effort high on grok-4.5: model unavailable']);
+});
+
+test('native-default selection stays explicit and an ordinary ACP model the agent refuses fails admission', async () => {
   const ctx = context(); ctx.thread.model = 'default'; ctx.thread.effort = null;
   const controls = new SessionControls(() => ({agent: {async request() {throw new Error('native default must not select a model');}} as unknown as ClientContext, sessionId: 'synthetic-session'}));
   await controls.applyConfig(ctx);
   ctx.protectedExecution = undefined; ctx.thread.model = 'fixture/unavailable';
   controls.noteSession(null, [{type: 'select', id: 'model', name: 'Model', category: 'model', currentValue: 'fixture/default',
     options: [{value: 'fixture/unavailable', name: 'Unavailable'}]}], {});
-  await controls.applyConfig(ctx);
+  // Outside protected execution too: the prompt must not run on fixture/default.
+  expect(await thrown(controls.applyConfig(ctx))).toThrow(/^thread\.model: .* refused the model fixture\/unavailable: native default must not select a model$/);
 });
