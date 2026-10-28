@@ -1,7 +1,7 @@
 import { markStartFailed } from './threads/lifecycle.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, delegationAnswerable as answerable, delegationNeeds as needsOf, delegationReply, nativeAgentsOfTool, processAgentCommand, SPEED_NEEDS_MODEL, threadBusy, type RpcEvents } from '@boite/contracts';
-import type { AgentLetter, BackgroundWait, DelegatedAgent, DelegationConfig, DelegationModels, DelegationResumed, DelegationView, PauseOrigin, PermissionMode, PermissionRequest, Principal, QuestionRequest, RequestId, RpcParams, ThreadContextMode, ThreadSummary, Turn, Usage } from '@boite/contracts';
+import type { AgentLetter, DelegatedAgent, DelegationConfig, DelegationModels, DelegationResumed, DelegationView, PauseOrigin, PermissionMode, PermissionRequest, Principal, QuestionRequest, RequestId, RpcParams, ThreadContextMode, ThreadSummary, Turn, Usage } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, requiredText as text } from './errors.ts';
 import { isAgentHeld } from './agents/runtime.ts';
@@ -14,7 +14,8 @@ import { assertDriverRunnable } from './drivers/index.ts';
 import { withLoad } from './threads/records.ts';
 import { nativeAgents } from './native-agents.ts';
 import { delegatedResultPage, DelegationWaits } from './delegation/results.ts';
-import { INTERRUPTION_TEXT } from './delegation/interruption.ts';
+import { INTERRUPTION_TEXT, parentListens, tellInterrupted } from './delegation/interruption.ts';
+import { askFinal, childEnd, closeQuestions, taskTurn, unwoken } from './delegation/completion.ts';
 import { permissionWake, questionWake, worktreeLine } from './delegation/messages.ts';
 import { ChildWorktrees } from './delegation/worktrees.ts';
 import { childProject } from './delegation/projects.ts';
@@ -184,10 +185,7 @@ export class Delegation {
     return true;
   }
   private rows(rootId: string): AgentRow[] { return this.core.journal.db.query('SELECT * FROM delegated_agents WHERE root_id = ? ORDER BY rowid').all(rootId) as AgentRow[]; }
-  private lastTurn(threadId: string): Turn | null {
-    const row = this.core.journal.db.query("SELECT id FROM turns WHERE thread_id = ? AND COALESCE(json_extract(execution, '$.operation'), '') NOT IN ('compact', 'keepalive') ORDER BY rowid DESC LIMIT 1").get(threadId) as { id: string } | null;
-    return row ? this.core.journal.getTurn(row.id) : null;
-  }
+  private lastTurn(threadId: string): Turn | null { return taskTurn(this.core, threadId); }
   /** The bounded final answer of a finished turn, or its error. */
   result(turn: Turn | null): string | null {
     if (!turn || turn.status === 'queued' || turn.status === 'running') return null;
@@ -588,7 +586,8 @@ export class Delegation {
     } finally { this.delivering.delete(threadId); }
   }
   private finished(turn: Turn): void {
-    if (turn.execution?.operation === 'compact' || turn.execution?.operation === 'keepalive') return;
+    const end = childEnd(this.core, turn);
+    if (end.kind === 'maintenance') return;
     const thread = this.core.journal.getThread(turn.threadId);
     if (!thread) return;
     // A parent's own turn ending badly (a provider error, an agent update, a restart) is no
@@ -601,8 +600,7 @@ export class Delegation {
       recordRestartCut(this.core, turn);
       return;
     }
-    // Ended to wait on its own background work: it is not done, and its worktree is still in use.
-    const live = turn.status === 'done' ? this.core.threads.agentState.background.get(thread.id) ?? [] : [];
+    const live = end.kind === 'checkpoint' ? end.live : [];
     const settling = live.length > 0 ? null : this.worktrees.settle(thread.id);
     // A workflow step's answer goes to its run, and a goal reviewer's to its goal, never to the parent as mail.
     if (this.stepOwned(thread.id)) return;
@@ -617,7 +615,7 @@ export class Delegation {
     // Stopping a child is final until an explicit new instruction, and ends its pull request watches; no failure retry loop.
     if (turn.status !== 'done') { this.stopped.add(thread.id); this.core.pullRequestWatches.endThread(thread.id); }
     // A child that is over leaves no question behind for its parent to find.
-    if (live.length === 0) this.closeQuestions(thread.id, `the core, since the subagent's turn ended ${turn.status}`);
+    if (live.length === 0) closeQuestions(this.core, thread.id, `the core, since the subagent's turn ended ${turn.status}`);
     const config = this.config(root.id);
     if (!config.enabled || config.paused || root.archived) return;
     const result = this.result(turn);
@@ -638,9 +636,7 @@ export class Delegation {
     else deliver();
   }
   /** Is this thread a delegated agent the parent spawned, rather than a workflow step or a reviewer? */
-  delegated(threadId: string): boolean {
-    return this.core.journal.db.query('SELECT 1 FROM delegated_agents WHERE thread_id = ?').get(threadId) !== null;
-  }
+  delegated(threadId: string): boolean { return this.core.journal.db.query('SELECT 1 FROM delegated_agents WHERE thread_id = ?').get(threadId) !== null; }
   /** A delegated agent asked something: its parent learns at once. */
   private asked(request: QuestionRequest): void {
     const child = this.core.journal.getThread(request.threadId);
@@ -669,46 +665,34 @@ export class Delegation {
     const letter = JSON.parse(row.data) as AgentLetter;
     if (letter.status === 'received') this.update(letter, 'expired', 'The question closed before it was delivered');
   }
-  /** The open asynchronous questions of a delegated agent that is over or stopped. */
-  private closeQuestions(threadId: string, by: string): void {
-    for (const question of this.core.threads.listQuestions(threadId)) {
-      // A blocking one goes with its turn; only an asynchronous card outlives it.
-      if (!answerable(question) || question.async !== true) continue;
-      try { this.core.threads.skipQuestion({ threadId, questionId: question.id }, by); } catch { /* Already closed by a nested settle. */ }
-    }
-  }
   /**
-   * A delegated agent's background work changed. Once it ended, the agent gets
-   * a moment to wake; the tick looks again when that moment is over.
+   * A delegated agent's or a workflow step's background work changed. Once it
+   * ended, the agent gets a moment to wake; the tick looks again when that moment is over.
    */
   private backgroundChanged(threadId: string): void {
     const thread = this.core.journal.getThread(threadId);
-    if (!thread?.parentThreadId || this.stepOwned(threadId)) return;
+    if (!thread?.parentThreadId || (!this.core.workflows.owns(threadId) && this.stepOwned(threadId))) return;
     this.changed(thread.parentThreadId);
     this.settleWait(thread);
   }
-  /** Re-reads a child's wait: keeps watching it while a wake is expected, tells its parent once it is interrupted. */
+  /** Re-reads a child's wait: keeps watching it while a wake is expected, tells its parent or its run once it is interrupted. */
   private settleWait(thread: ThreadSummary): void {
     const wait = withLoad(this.core, thread).backgroundWait ?? null;
     if (wait?.state === 'waiting' && wait.until !== null) this.wakeDeadlines.set(thread.id, wait.until);
     else this.wakeDeadlines.delete(thread.id);
-    if (wait?.state === 'interrupted') this.interrupted(thread, wait);
-  }
-  /** The parent learns once per turn that the wait it was told about ended without a result. */
-  private interrupted(thread: ThreadSummary, wait: Extract<BackgroundWait, { state: 'interrupted' }>): void {
-    const root = this.core.journal.getThread(thread.parentThreadId!);
-    const turn = this.lastTurn(thread.id);
-    if (!root || !turn || this.stopped.has(thread.id)) return;
-    const config = this.config(root.id);
-    if (!config.enabled || config.paused || root.archived || thread.archived) return;
-    const requestId = `result:interrupted:${turn.id}`;
-    if (this.core.journal.db.query('SELECT 1 FROM delegation_messages WHERE sender_id = ? AND request_id = ?').get(thread.id, requestId)) return;
-    this.core.logs.warn(`Subagent ${thread.id} of ${root.id} was waiting on ${wait.for}; it ended without waking it: ${INTERRUPTION_TEXT[wait.reason]}`, {
-      source: 'delegation', event: 'delegation.interrupted', threadId: thread.id, turnId: turn.id, data: { parent: root.id, reason: wait.reason },
-    });
-    try {
-      this.send({ threadId: thread.id, toThreadId: root.id, requestId, text: `${thread.title}: interrupted\nIt was waiting on its background work (${wait.for}), which ended without waking it: ${INTERRUPTION_TEXT[wait.reason]}. Its last message was a checkpoint, not its final result. boite delegate resume ${thread.id} continues it; boite delegate send ${thread.id} "<instruction>" steers it.`.slice(0, 4000) }, 'result');
-    } catch (error) { this.core.log('warn', `delegation interruption ${thread.id}: ${messageOf(error)}`); }
+    const step = this.core.workflows.owns(thread.id);
+    // Its work completed with no turn after it: the checkpoint is still all it said, so it is asked for its result.
+    const quiet = wait === null && !this.stopped.has(thread.id) ? unwoken(this.core, thread.id) : null;
+    if (quiet !== null && step) this.core.workflows.unwoken(thread.id, quiet);
+    else if (quiet !== null && parentListens(this.core, thread)) {
+      const error = askFinal(this.core, thread.id, quiet);
+      if (error) tellInterrupted(this.core, thread, quiet, `completed without waking it, and asking for its final result failed: ${error}`, 'final-request');
+    }
+    if (wait?.state !== 'interrupted') return;
+    const how = `ended without waking it: ${INTERRUPTION_TEXT[wait.reason]}`;
+    if (step && this.stopped.has(thread.id)) this.core.workflows.stepStopped(thread.id);
+    else if (step) this.core.workflows.waitLost(thread.id, how, wait.for);
+    else if (!this.stopped.has(thread.id)) tellInterrupted(this.core, thread, wait.for, how, wait.reason);
   }
   /**
    * `by` is who asked, recorded on the pause it may leave: the owner's Stop
@@ -743,8 +727,10 @@ export class Delegation {
       this.core.activity.pauseAll(id);
       this.core.coordination.pause(id);
       if (this.core.scheduler.stop(id) || waiting) stopped++;
-      this.closeQuestions(id, 'the core, since the subagent was stopped');
+      closeQuestions(this.core, id, 'the core, since the subagent was stopped');
       this.core.threads.releaseAgent(id);
+      // A step at rest on its checkpoint has no turn whose end would settle it, even when its work already completed.
+      this.core.workflows.stepStopped(id);
       for (const letter of this.letters(id, 'received')) this.update(letter, 'rejected', 'Agent stopped');
       for (const letter of this.letters(id, 'uncertain')) {
         if (letter.error?.startsWith('Queued for provider turn ')) this.update(letter, 'rejected', 'Agent stopped before provider delivery');
@@ -777,7 +763,7 @@ export class Delegation {
       const child = this.core.journal.getThread(row.thread_id);
       const turn = this.lastTurn(row.thread_id);
       if (!child || child.archived || !turn || this.busy(child)) continue;
-      const lost = withLoad(this.core, child).backgroundWait?.state === 'interrupted';
+      const lost = withLoad(this.core, child).backgroundWait?.state === 'interrupted' || unwoken(this.core, child.id) !== null;
       if (turn.status === 'done' && !lost) continue;
       const why = turn.status === 'done' ? 'its background work ended without waking it' : `it ended ${turn.status}${turn.error ? `: ${turn.error}` : ''}`;
       // One continuation per stopped turn, whoever asks: a second resume finds it on its way; one a Stop rejected goes again.

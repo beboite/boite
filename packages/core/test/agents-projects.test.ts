@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { AgentLetter, AgentProfile, AgentWatch, ProjectThreadRow } from '@boite/contracts';
@@ -156,6 +156,35 @@ test('its messages reach a thread as the agent\'s whatever that thread\'s settin
   await waitFor(() => events().length === 2 && settled(h, self));
   expect(events().at(-1)!.quiet).toBe(true);
   expect(facts()).toEqual([]);
+});
+
+test('a held backlog never hides the bot\'s letter behind it, and revoking the project keeps that letter away', async () => {
+  const prompts = answering(); const { h, owner, self, worker, project, thread, entrust } = await setup();
+  const peer = (await thread('Peer', project)).id;
+  await owner.call('collaboration.configure', { threadId: worker, config: { ...h.core.coordination.config(worker), paused: true } });
+  const to = h.core.coordination.get(worker).self;
+  const status = (id: string) => h.core.coordination.get(worker).messages.find(letter => letter.id === id)?.status;
+  // More ordinary letters than one delivery batch, all held by the pause.
+  const held = [];
+  for (let n = 0; n < 5; n++) held.push(await h.core.coordination.send({ threadId: peer, to, text: `Ordinary letter ${n}`, requestId: `ordinary-${n}` }));
+  const resident = await h.core.coordination.send({ threadId: self, to, text: 'Entrusted bot instruction', requestId: 'resident' });
+  expect(resident.origin).toBe('resident');
+  await waitFor(() => (prompts.get(worker) ?? []).some(prompt => prompt.includes('Entrusted bot instruction')));
+  await waitFor(() => status(resident.id) === 'delivered');
+  expect(held.map(letter => status(letter.id))).toEqual(held.map(() => 'received'));
+  expect(prompts.get(worker)!.some(prompt => prompt.includes('Ordinary letter'))).toBe(false);
+  await waitFor(() => settled(h, worker));
+
+  // Received while nothing delivers, then the project leaves the bot's care: it never reaches the thread.
+  const deliver = spyOn(h.core.coordination as unknown as { deliver(threadId: string): Promise<void> }, 'deliver').mockResolvedValue(undefined);
+  const late = await h.core.coordination.send({ threadId: self, to, text: 'Instruction after revocation', requestId: 'late' }).finally(() => undefined);
+  await entrust(['Other']);
+  deliver.mockRestore();
+  await h.core.coordination.wait(worker, undefined, 0);
+  await Bun.sleep(100);
+  expect(status(late.id)).not.toBe('delivered');
+  expect(prompts.get(worker)!.some(prompt => prompt.includes('Instruction after revocation'))).toBe(false);
+  expect(held.map(letter => status(letter.id))).toEqual(held.map(() => 'received'));
 });
 
 test('events: failures and asks from any thread, finished turns only from followed ones, gathered for one turn', async () => {
