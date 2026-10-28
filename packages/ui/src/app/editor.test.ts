@@ -183,15 +183,25 @@ test('a key typed while a save is out stays unsaved and survives a tab switch', 
 });
 
 /** Holds every `files.write` until the returned release runs. */
-function holdWrites(): () => void {
+/** Holds every file write until `release`, which resolves once the held writes have answered their editors. */
+function holdWrites(): () => Promise<void> {
   const client = store.client!, real = client.call.bind(client);
-  let release!: () => void;
-  const held = new Promise<void>(resolve => { release = resolve; });
-  vi.spyOn(client, 'call').mockImplementation((async (method: string, params: unknown) => {
-    if (method === 'files.write') await held;
-    return real(method as never, params as never);
+  let open!: () => void;
+  const held = new Promise<void>(resolve => { open = resolve; });
+  const answers: Promise<unknown>[] = [];
+  vi.spyOn(client, 'call').mockImplementation(((method: string, params: unknown) => {
+    if (method !== 'files.write') return real(method as never, params as never);
+    const answer = held.then(() => real(method as never, params as never));
+    answers.push(answer);
+    return answer;
   }) as never);
-  return release;
+  return async () => {
+    open();
+    await Promise.allSettled(answers);
+    // The editor's own continuation after its awaited write.
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    flushSync();
+  };
 }
 
 async function edit(text: string): Promise<void> {
@@ -219,12 +229,9 @@ test('a save that answers after its editor closed keeps the edit a newer editor 
   await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value === sent);
   const newer = `${sent}Typed in the next editor.\n`;
   await edit(newer);
-  release();
-  await waitFor(async () => {
-    const disk = await store.client!.call('files.read', { threadId: 't-trace', path: 'docs/guide/tree.md' });
-    return disk.kind === 'text' && disk.text === sent;
-  });
-  await new Promise(resolve => setTimeout(resolve, 50));
+  await release();
+  const written = await store.client!.call('files.read', { threadId: 't-trace', path: 'docs/guide/tree.md' });
+  expect(written.kind === 'text' && written.text).toBe(sent);
   expect(store.panel.draft(file.id)).toBe(newer);
   store.panel.openTasks();
   await waitFor(() => document.querySelector('[data-testid=file-text]') === null);
@@ -256,8 +263,7 @@ test('the same path in two threads is two editors: a save in one never turns the
   await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value === disk);
   const other = `${disk}From the bench thread.\n`;
   await edit(other);
-  release();
-  await new Promise(resolve => setTimeout(resolve, 50));
+  await release();
   expect(store.panel.draft(file.id)).toBe(other);
   store.panel.keepDraft(file.id, null);
   store.panel.closeAll();

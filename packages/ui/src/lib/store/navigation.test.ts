@@ -13,7 +13,7 @@ test('a thread opened while the machine is away does not show the trace of the t
   await store.open('t-trace');
   store.trace = [{ pid: 41, name: 'node' } as unknown as ProcessRecord];
   const other = store.threads.find(thread => thread.id !== 't-trace' && !thread.archived)!;
-  store.connection = 'offline';
+  store.connection = 'closed';
   await store.open(other.id);
   expect(store.openThread?.id).toBe(other.id);
   expect(store.trace).toEqual([]);
