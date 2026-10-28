@@ -686,8 +686,11 @@ export class Threads {
     try {
       await client.call('threads.trustContactHistory', { threadId });
       if (!this.ctx.currentClient(client, clientGeneration)) return false;
+      // The core announces it to every client; this one shows it at once.
+      const row = this.rowOf(threadId);
+      if (row) row.contactHold = null;
       const open = this.openThread;
-      if (open && open.id === threadId) delete open.contactHold;
+      if (open && open.id === threadId) open.contactHold = null;
       return true;
     } catch (error) {
       if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);

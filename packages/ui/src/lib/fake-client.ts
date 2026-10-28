@@ -235,6 +235,7 @@ export class FakeClient implements ObservableClient {
     const thread = this.#ctx.threads.get(threadId);
     if (!thread) throw new Error(`no fake thread ${threadId}`);
     thread.contactHold = { contacts };
+    this.#ctx.touch(thread);
   }
 
   setMergedPrFixture(threadId: ThreadId, fixture: MergedPrFixture): void {

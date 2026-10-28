@@ -3,6 +3,7 @@ import {realpathSync} from 'node:fs';
 import type {AgentLetter} from '@boite/contracts';
 import type {Core} from '../core.ts';
 import {refused} from '../errors.ts';
+import {withLoad} from '../threads/records.ts';
 import type {AccessBinding} from './access-scopes.ts';
 import {incomingContact} from './human-letters.ts';
 
@@ -73,11 +74,19 @@ export function contactHold(core: Core, threadId: string): {contacts: string[]} 
  */
 export function trustLetters(core: Core, threadId: string): void {
   core.threads.require(threadId);
-  for (const id of history(core, threadId)) {
+  const ids = history(core, threadId);
+  for (const id of ids) {
     const scope = storedScope(core, id);
     if (scope?.legacy) core.journal.setSetting(`shared-file-letters:${id}`, {...scope, legacy: false, trustedAt: Date.now()});
   }
   core.sharedAccess.execution.reconcile();
+  for (const id of ids) announceHold(core, id);
+}
+
+/** Every client's row and open view take the thread's hold as it now stands. */
+function announceHold(core: Core, threadId: string): void {
+  const thread = core.journal.getThread(threadId);
+  if (thread) core.bus.emit('thread.updated', {...withLoad(core, thread), contactHold: contactHold(core, threadId)});
 }
 
 /** Called before wake, steer and hook delivery. Unsupported native sessions never see the letter. */
@@ -101,6 +110,7 @@ export function protectLetters(core: Core, threadId: string, letters: AgentLette
     core.threads.releaseAgent(threadId);
   }
   const scope = storedScope(core, threadId) ?? {bindings: [], legacy: false, peers: []};
+  const held = scope.legacy;
   for (const letter of external) {
     if (!scope.peers.includes(letter.contact!.coreId)) scope.peers.push(letter.contact!.coreId);
     if (!letter.sharedProjectId) {scope.legacy = true; continue;}
@@ -120,5 +130,6 @@ export function protectLetters(core: Core, threadId: string, letters: AgentLette
   }
   core.journal.setSetting(`shared-file-letters:${threadId}`, scope);
   core.sharedAccess.execution.reconcile();
+  if (scope.legacy && !held) announceHold(core, threadId);
   core.sharedAccess.assertTurn(threadId);
 }

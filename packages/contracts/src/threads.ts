@@ -153,6 +153,15 @@ export interface ForkOrigin {
 }
 
 export interface ThreadSummary {
+  /**
+   * The thread, or a conversation it continues, read contact mail sent
+   * outside a shared project. That mail has no captured file authority, so
+   * the core refuses every turn and tool until the owner trusts the history
+   * (`threads.trustContactHistory`). Names the contacts it came from. Every
+   * `threads.get` carries it, null when nothing holds the thread; a
+   * `thread.updated` carries it only when the hold changed. Absent on older cores.
+   */
+  contactHold?: { contacts: string[] } | null;
   /** Date marked done, or automatically archived after a PR merge. Cleared on restore or manual archive. */
   doneAt?: Timestamp | null;
   /**
@@ -504,14 +513,6 @@ export interface Thread extends ThreadSummary {
   messageOffset?: number;
   /** The turns `messages` refers to, plus any still queued or running; never the whole history. */
   turns: Turn[];
-  /**
-   * The thread, or a conversation it continues, read contact mail sent
-   * outside a shared project. That mail has no captured file authority, so
-   * the core refuses every turn and tool until the owner trusts the history
-   * (`threads.trustContactHistory`). Names the contacts it came from. Absent
-   * otherwise and on older cores.
-   */
-  contactHold?: { contacts: string[] };
 }
 
 export interface MessageSync {

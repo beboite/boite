@@ -703,8 +703,9 @@ history. That parent's old letter scopes do not replace the new job boundary.
 Legacy correspondence and pre-policy consumed history have no captured file
 authority: they use the no-tools route and deny file/tool/upload/publication
 RPCs. Such history cannot resume an unrestricted native session. `threads.get`
-reports that hold as `contactHold` with the contacts' names, and the chat shows
-it above the composer. Only the owner can lift it, with
+reports that hold as `contactHold` with the contacts' names (null when free),
+`thread.updated` carries it whenever it changes, and the chat shows it above
+the composer. Only the owner can lift it, with
 `threads.trustContactHistory`: the thread and the conversations it continues
 lose the hold, captured shared-project bindings stay, and a later letter
 outside a shared project holds the thread again. Agents and paired devices

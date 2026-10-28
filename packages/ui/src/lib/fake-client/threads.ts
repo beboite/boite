@@ -577,7 +577,9 @@ export function threadMethods(ctx: FakeContext) {
       return { ok: true };
     },
     'threads.trustContactHistory': async (params) => {
-      delete ctx.thread(params.threadId).contactHold;
+      const thread = ctx.thread(params.threadId);
+      thread.contactHold = null;
+      ctx.touch(thread);
       return { ok: true };
     },
     'threads.subscribe': async (params) => {
@@ -651,7 +653,8 @@ export function threadMethods(ctx: FakeContext) {
           data: { field: 'accountId', accountId: account.id, providerId: account.providerId, expected: provider.id } });
         checkRunnable(provider, account);
       }
-      if (thread.contactHold) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'shared file policy: this tool has no enforceable shared execution boundary' });
+      // As the core: echo in default mode keeps its tool-free route.
+      if (thread.contactHold && !(provider.protocol === 'echo' && thread.permissionMode === 'default')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'shared file policy: this tool has no enforceable shared execution boundary' });
       const error = attachmentError(params.attachments ?? [], provider);
       if (error) throw new RpcFailure({ code: RpcErrorCode.Refused, ...error });
       const rootId = thread.parentThreadId;
