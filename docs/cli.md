@@ -10,7 +10,8 @@ The global flags (`--json`, `--thread`, `--data-dir`, `--core`, `--channel`)
 are read anywhere until a command's own text begins. The table `OWNED` in
 `packages/core/src/cli-args.ts` names the commands that parse their own flags
 and where their text starts: after `boite browser fill <target>`,
-`browser run <script>` (`-` for stdin), `browser eval` or `secret ... --`,
+`browser run <script>` (`-` for stdin), `browser recipe run <name>`,
+`browser recipe save <name> <file|->`, `browser eval` or `secret ... --`,
 every word is the command's, so `boite browser fill '#q' --json` types
 `--json`. Before that text, `--` ends Boite's flags and hands every later word
 to the command: `boite task add -- --json` adds the task `--json`, and

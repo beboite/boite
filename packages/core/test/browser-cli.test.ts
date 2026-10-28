@@ -166,6 +166,14 @@ test('the browser CLI reads agent-browser command lines into actions', () => {
   expect(parse(['browser', 'profiles', 'add', 'Account', 'B', '--json', '--channel', 'dev'])).toMatchObject({ positional: ['browser', 'profiles', 'add', 'Account', 'B'], json: true, channel: 'dev' });
   expect(parse(['browser', 'profiles', 'add', '--', '--odd']).positional).toEqual(['browser', 'profiles', 'add', '--odd']);
   expect(parse(['browser', 'profiles', '--json'])).toMatchObject({ positional: ['browser', 'profiles'], json: true });
+  // A recipe's arguments are its script's, after the name to run or the name and file to save.
+  const recipe = parse(['browser', 'recipe', 'run', '--json', '--tab', 'browser:a', 'search', '--core', 'x', '--json']);
+  expect(recipe).toMatchObject({ positional: ['browser', 'recipe', 'run', '--tab', 'browser:a', 'search', '--core', 'x', '--json'], json: true });
+  expect(recipe.core).toBeUndefined();
+  const saved = parse(['browser', 'recipe', 'save', 'search', '--about', 'finds a page', '-', '--usage', '<query>', '--thread', 'q']);
+  expect(saved).toMatchObject({ positional: ['browser', 'recipe', 'save', 'search', '--about', 'finds a page', '-', '--usage', '<query>', '--thread', 'q'] });
+  expect(saved.thread).toBeUndefined();
+  expect(parse(['browser', 'recipe', 'show', 'search', '--json'])).toMatchObject({ positional: ['browser', 'recipe', 'show', 'search'], json: true });
 });
 
 test('browser output is agent-browser text: a check, the page reached and the dialogs answered', () => {

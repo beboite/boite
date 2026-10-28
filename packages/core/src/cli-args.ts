@@ -83,13 +83,19 @@ const OWNED: { owns: (positional: string[]) => boolean; help: boolean; text?: (p
  */
 const BROWSER_TEXT: Record<string, number> = { fill: 1, type: 1, select: 1, dialog: 1, eval: 0, evaluate: 0, run: 1 };
 
+/** `recipe run <name> <args>` and `recipe save <name> <file|-> <args>`, counting the sub-command. */
+const RECIPE_TEXT: Record<string, number> = { run: 2, save: 3 };
+
+/** The browser flags that take the next word as their value (`recipe save --about "..."`). */
+const VALUE_FLAGS = ['--tab', '--about', '--usage'];
+
 /** A flag of the command's own; `-` alone is an operand, the stdin of `run -`. */
 const isFlag = (word: string): boolean => word.length > 1 && word.startsWith('-');
 
 function browserText(words: string[]): boolean {
   const [action = '', ...rest] = words;
-  const plain = rest.filter((word, index) => !isFlag(word) && rest[index - 1] !== '--tab');
-  const before = BROWSER_TEXT[action];
+  const plain = rest.filter((word, index) => !isFlag(word) && !VALUE_FLAGS.includes(rest[index - 1] ?? ''));
+  const before = action === 'recipe' ? RECIPE_TEXT[plain[0] ?? ''] : BROWSER_TEXT[action];
   return before !== undefined && plain.length >= before;
 }
 
