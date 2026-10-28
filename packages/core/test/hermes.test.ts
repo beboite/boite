@@ -281,6 +281,26 @@ describe('hermes', () => {
     expect(loggedLines('prompt ').at(-1)?.split(' ')[1]).toBe(QWEN);
   });
 
+  test('with no probe left, a warm process going back to the agent own model reads it the same way', async () => {
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const { threadId } = await hermesThread(client, LLAMA);
+    await runTurn(client, threadId, 'first');
+    await waitFor(() => harness?.core.procs.liveCount(threadId) === 0);
+    const descriptorPath = join(harness?.dataDir ?? '', 'providers', 'hermes-fake.json');
+    writeFileSync(descriptorPath, readFileSync(descriptorPath, 'utf8').replace('"Fake Hermes"', '"Fake Hermes reloaded"'), 'utf8');
+    await client.call('providers.reload', {});
+    await client.call('settings.set', { warmProcessMinutes: 5 });
+    // Loaded on Llama, which the thread asks for: nothing to look up yet.
+    await runTurn(client, threadId, 'second');
+    const opened = loggedLines('new:').length;
+
+    await client.call('threads.update', { threadId, model: 'default' });
+    await runTurn(client, threadId, 'third');
+    expect(loggedLines('initialize').length).toBe(3);
+    expect(loggedLines('new:')).toHaveLength(opened + 1);
+    expect(loggedLines('prompt ').at(-1)?.split(' ')[1]).toBe(QWEN);
+  });
+
   test('a load Hermes answers with no session is replaced in the same turn, carrying the history', async () => {
     const client = await startCore({ warmProcessMinutes: 0 });
     const { threadId } = await hermesThread(client);

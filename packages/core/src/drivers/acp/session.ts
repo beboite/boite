@@ -164,6 +164,27 @@ export class AcpSession {
     this.catalogValid = false;
   }
 
+  /**
+   * The thread's model, options and mode, sent at the start of the process and
+   * of every turn. A thread going back to the agent's own model on an agent
+   * that lists models needs to know which one that is: a `session/load`
+   * reports the model the session was left on, and a reloaded descriptor
+   * drops the account's probe. Then one throwaway session says it, on a cold
+   * start or a warm turn alike.
+   */
+  private async applyControls(ctx: SessionContext): Promise<void> {
+    const agent = this.agent;
+    if (agent !== null && !isGrok(ctx.provider) && ctx.thread.model === AGENT_OWN_MODEL
+      && this.controls.hasModels() && !this.controls.hasOptions() && !this.controls.knowsOwnListedModel()) {
+      const discovered = await agent.request('session/new', { cwd: ctx.thread.cwd, mcpServers: [] });
+      this.controls.seedOwnListedModel(agentModelsOf(discovered)?.currentModelId ?? null);
+      await discardSession(agent, this.canDelete, discovered.sessionId);
+    }
+    await this.controls.applyModel(ctx);
+    await this.controls.applyConfig(ctx);
+    await this.controls.applyMode(ctx);
+  }
+
   seedConfig(options: SessionConfigOption[], ownModel: string | null = null): void {
     this.controls.seed(options);
     this.controls.seedOwnListedModel(ownModel);
@@ -378,9 +399,7 @@ export class AcpSession {
     // of the three, the agent may have switched on its own since the last
     // prompt, and a `session/load` reports none of them reliably. Each call
     // sends nothing when what it carries has not moved.
-    await this.controls.applyModel(turn.ctx);
-    await this.controls.applyConfig(turn.ctx);
-    await this.controls.applyMode(turn.ctx);
+    await this.applyControls(turn.ctx);
     const judged = this.costBaseline(turn);
     this.current = turn;
     let response: PromptResponse;
@@ -469,9 +488,7 @@ export class AcpSession {
         await this.open(ctx);
         this.protection?.assertReady();
         this.protection?.assertMcpReady();
-        await this.controls.applyModel(ctx);
-        await this.controls.applyConfig(ctx);
-        await this.controls.applyMode(ctx);
+        await this.applyControls(ctx);
         if (this.ended) throw new Error('the acp session was closed while it started');
       }, () => ({
         text: this.loaded ? ', loaded the saved session' : this.replaces !== null ? ', a new one replacing a session it cannot load' : '',
@@ -615,12 +632,9 @@ export class AcpSession {
       // throwaway session reads them once for the account, and the next cold
       // turn of any thread starts from what it found.
       // A load that listed models answers the model question: only an effort
-      // still has to be looked for, or the agent's own model for a thread
-      // going back to it, which a load cannot tell (it reports the model the
-      // session was left on) and no probe of this account recorded.
-      const ownUnknown = ctx.thread.model === AGENT_OWN_MODEL && this.controls.hasModels() && !this.controls.knowsOwnListedModel();
+      // still has to be looked for.
       if (!isGrok(ctx.provider) && !this.controls.hasOptions()
-        && (ctx.thread.effort !== null || ownUnknown || (ctx.thread.model !== AGENT_OWN_MODEL && !this.controls.hasModels()))) {
+        && (ctx.thread.effort !== null || (ctx.thread.model !== AGENT_OWN_MODEL && !this.controls.hasModels()))) {
         const discovered = await connection.agent.request('session/new', { cwd: ctx.thread.cwd, mcpServers: [] });
         this.seedConfig(discovered.configOptions ?? [], agentModelsOf(discovered)?.currentModelId ?? null);
         this.onOptions(discovered.configOptions ?? []);
