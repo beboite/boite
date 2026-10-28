@@ -1,6 +1,7 @@
 import { expect, vi } from 'vitest';
 import { flushSync } from 'svelte';
 import { confirm } from '../lib/confirm.svelte';
+import { restoreThread } from '../lib/archive';
 import { store } from '../lib/store.svelte';
 import { openWorkbench, query, test, treePaths, type, waitFor } from '../test/app';
 
@@ -364,6 +365,30 @@ test('an editor\'s read that answers after its replacement read a newer disk nev
   expect(query<HTMLTextAreaElement>('[data-testid=file-text]').value).toBe(external);
   expect(document.querySelector('[data-testid=file-dirty]')).toBeNull();
   await store.client!.call('files.write', { threadId: 't-trace', path, text: original });
+  store.panel.closeAll();
+});
+
+test('a thread archived and restored while its save is out learns what that save wrote', async () => {
+  const { id, original } = await openTree();
+  const writes = gateWrites();
+  const sent = `${original}Saved before the archive.\n`;
+  await edit(sent);
+  await clickSave();
+  await store.archive('t-trace');
+  await restoreThread(store, 't-trace');
+  await store.open('t-trace');
+  store.panel.openFile('docs/guide/tree.md');
+  await waitFor(() => document.querySelector<HTMLTextAreaElement>('[data-testid=file-text]')?.value === original);
+  await edit(`${original}Typed after the restore.\n`);
+  await edit(original);
+  await writes.releaseReversed();
+  vi.restoreAllMocks();
+  expect(await diskOf('docs/guide/tree.md')).toBe(sent);
+  // The text typed back to the old disk is an edit over what the save wrote.
+  expect(store.panel.draft(id)).toBe(original);
+  expect(document.querySelector('[data-testid=file-dirty]')).not.toBeNull();
+  await remount(id, original);
+  store.panel.keepDraft(id, null);
   store.panel.closeAll();
 });
 

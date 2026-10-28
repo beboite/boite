@@ -179,8 +179,20 @@ export class FileDocuments {
     this.#release(key, path, true);
   }
 
+  /**
+   * The thread's layout went, archived or pruned: every edit goes, and every
+   * document with nothing out. One with a read or write out stays until it
+   * answers, so the thread restored meanwhile takes that same document back,
+   * its queue included, rather than a second one the answer never reaches.
+   */
   forget(key: string): void {
-    this.#threads.delete(key);
+    const held = this.#threads.get(key);
+    if (!held) return;
+    for (const [path, document] of [...held]) {
+      document.edit(null);
+      if (document.idle) held.delete(path);
+    }
+    if (held.size === 0) this.#threads.delete(key);
   }
 
   #release(key: string, path: string, closing: boolean): void {

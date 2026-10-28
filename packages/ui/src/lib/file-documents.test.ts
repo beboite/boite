@@ -133,4 +133,26 @@ describe('the documents of every thread', () => {
     await saved;
     expect(documents.get('t-1', 'notes.md')).toBeUndefined();
   });
+
+  test('a thread forgotten while a write is out keeps that document, and the thread back takes the same one', async () => {
+    let shown = true;
+    const documents = new FileDocuments(() => shown);
+    const document = documents.hold('t-1', 'notes.md');
+    const { sent, send } = writes();
+    const saved = document.save('typed', send);
+    await turns();
+    documents.hold('t-1', 'idle.md').edit('only typed');
+    // Archived: the layout and every edit go, the write out keeps its owner.
+    shown = false;
+    documents.forget('t-1');
+    expect(documents.drafted('t-1')).toBe(false);
+    expect(documents.get('t-1', 'idle.md')).toBeUndefined();
+    expect(documents.get('t-1', 'notes.md')).toBe(document);
+    // Restored and reopened before the write answered.
+    shown = true;
+    expect(documents.hold('t-1', 'notes.md')).toBe(document);
+    sent[0]!.answer(ok('typed'));
+    await saved;
+    expect(documents.get('t-1', 'notes.md')?.disk).toBe('typed');
+  });
 });

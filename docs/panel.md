@@ -249,6 +249,8 @@ text only when no newer read or write already set it and no write was out
 during the read. An edit stays until no write is out and the disk confirmed
 its text. A tab closed while a read or write is out drops its edit, and the
 document stays until that answer lands, so the reopened tab knows the new disk.
+Archiving the thread drops its edits the same way and keeps such a document, which
+the restored thread takes back.
 
 An image opens fitted to the panel; the wheel zooms
 around the pointer, a drag pans, the bar has fit, 100% and the zoom steps, and
