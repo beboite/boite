@@ -34,10 +34,11 @@
 
   /**
    * The pages that change one machine take it from the bar above them; the
-   * others are this window's (appearance, experiments), the whole group's
-   * (machines) or pick their own (usage, which also reads every machine).
+   * others are this window's (appearance), the whole group's (machines) or
+   * pick their own (usage, which also reads every machine). Experiments mixes
+   * this device's switches with a machine's, so its bar sits above the latter.
    */
-  const MACHINE_TABS: SettingsTab[] = ['general', 'keyboard', 'voice', 'accounts', 'plugins', 'brain', 'limits', 'resources', 'advanced', 'diagnostics'];
+  const MACHINE_TABS: SettingsTab[] = ['general', 'keyboard', 'voice', 'accounts', 'plugins', 'brain', 'limits', 'resources', 'advanced', 'diagnostics', 'experiments'];
   /** Machines this window controls, and the window's own whatever its role there. */
   let choices = $derived(workspace.machines.filter((machine) => machine.store === store || (machine.store.connection === 'ready' && machine.store.owner)));
   let picked = $state<string | null>(null);
@@ -348,7 +349,7 @@
        rather than swapping it in one frame. -->
   {#key tab}
     <section class="framed" class:with-bar={bar} onscrollcapture={spy}>
-      {#if bar}{@render machineBar()}{/if}
+      {#if bar && tab !== 'experiments'}{@render machineBar()}{/if}
       {#key target}
       {#if tab === 'home'}
         <SettingsHome {store} tiles={tabs} {entries} onopen={open} />
@@ -377,7 +378,7 @@
       {:else if tab === 'plugins'}
         <PluginsPage store={target} />
       {:else if tab === 'experiments'}
-        <ExperimentsPage {store} />
+        <ExperimentsPage {store} {target} bar={bar ? machineBar : undefined} />
       {:else if tab === 'diagnostics'}
         <DiagnosticsPage store={target} {onopenthread} />
       {:else}

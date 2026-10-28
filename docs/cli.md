@@ -123,6 +123,16 @@ returns is printed. The script runs in the CLI's process with the agent's own
 rights and reaches the browser through the same calls as each command
 (`packages/core/src/browser-run.ts`).
 
+`boite browser network` lists the calls the page makes to its servers once
+capture has started, and `browser network <id>` shows one with its
+credentials hidden and the `page.fetch(url, { method, headers, body })` line
+that repeats it from a script, with the page's cookies
+([network calls](browser.md#network-calls)). A script that works can be kept
+as a recipe: `boite browser recipe save <name> <file|-> --about "..."
+[--usage "..."] [args...]` keeps it once a run passes, `recipe list` shows
+them, `recipe run <name> [args...]` runs one, and a run that fails says how
+to repair and save it again ([recipes](browser.md#recipes)).
+
 An action that starts a navigation waits for the next page's DOM and prints
 where it went; `open` waits for the DOM too, never for the load event, so a page
 whose image or script never finishes still answers within 10 seconds. `wait`

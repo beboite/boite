@@ -44,6 +44,7 @@
   import { startTheme } from './lib/theme';
   import { appName, appUpdater } from './lib/app-update.svelte';
   import { reportDesktopUpdates } from './lib/desktop-update.svelte';
+  import { watchUpdates } from './lib/update-watch';
   import MobileConnect from './components/MobileConnect.svelte';
   import { attentionCount, syncAppBadge } from './lib/badge';
   import { startViewport } from './lib/viewport';
@@ -233,12 +234,7 @@
     const stopAutoLink = agentAutoLink.start();
     // Another machine of the group reads this computer's app updates from its core.
     const stopDesktopReport = reportDesktopUpdates(() => workspace.machines.map((machine) => machine.store));
-    let stopAppUpdater: () => void = () => undefined;
-    let updateDelay: number | undefined;
-    const updateFrame = typeof requestAnimationFrame === 'function'
-      ? requestAnimationFrame(() => { updateDelay = window.setTimeout(() => { stopAppUpdater = appUpdater.start(); }, 0); })
-      : undefined;
-    if (updateFrame === undefined) updateDelay = window.setTimeout(() => { stopAppUpdater = appUpdater.start(); }, 0);
+    const stopUpdates = watchUpdates(() => workspace.machines.map((machine) => machine.store));
     let hidden = document.hidden;
     const resume = () => {
       if (document.hidden) return;
@@ -269,9 +265,7 @@
       stopAutoLink();
       stopDesktopReport();
       stopInstall();
-      if (updateFrame !== undefined) cancelAnimationFrame(updateFrame);
-      if (updateDelay !== undefined) clearTimeout(updateDelay);
-      stopAppUpdater();
+      stopUpdates();
       stopLocalNetwork();
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('online', resume);

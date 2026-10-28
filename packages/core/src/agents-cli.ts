@@ -29,7 +29,7 @@ type Printer = (lines: string[], value: unknown) => void;
 class AgentsUsage extends Error {}
 export { AgentsUsage };
 
-function ago(at: number | undefined, now = Date.now()): string {
+export function ago(at: number | undefined, now = Date.now()): string {
   if (at === undefined) return '';
   const s = Math.max(0, Math.round((now - at) / 1000));
   if (s < 60) return `${s}s ago`;

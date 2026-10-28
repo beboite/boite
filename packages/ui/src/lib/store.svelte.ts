@@ -226,6 +226,7 @@ export class Store {
   set connection(value) { this.#ctx.connection.connection = value; }
   get core() { return this.#ctx.connection.core; }
   set core(value) { this.#ctx.connection.core = value; }
+  get clockOffset() { return this.#ctx.connection.clockOffset; }
   get principal() { return this.#ctx.connection.principal; }
   set principal(value) { this.#ctx.connection.principal = value; }
   get endpointUrl() { return this.#ctx.connection.endpointUrl; }
@@ -486,6 +487,7 @@ export class Store {
   checkAccount(...args: Parameters<Accounts['checkAccount']>) { return this.#ctx.accounts.checkAccount(...args); }
   reloadProviders(...args: Parameters<Accounts['reloadProviders']>) { return this.#ctx.accounts.reloadProviders(...args); }
   loadHarnessUpdates(...args: Parameters<Accounts['loadHarnessUpdates']>) { return this.#ctx.accounts.loadHarnessUpdates(...args); }
+  freshenHarnessUpdates(...args: Parameters<Accounts['freshenHarnessUpdates']>) { return this.#ctx.accounts.freshenHarnessUpdates(...args); }
   updateHarness(...args: Parameters<Accounts['updateHarness']>) { return this.#ctx.accounts.updateHarness(...args); }
   skipHarnessUpdate(...args: Parameters<Accounts['skipHarnessUpdate']>) { return this.#ctx.accounts.skipHarnessUpdate(...args); }
   installProvider(...args: Parameters<Accounts['installProvider']>) { return this.#ctx.accounts.installProvider(...args); }
