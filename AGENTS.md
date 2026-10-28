@@ -80,7 +80,8 @@ with the command and date. Live-provider tests spend tokens and stay opt-in.
 
 ## Follow through on pull requests
 
-Opening a PR triggers automated reviews. Read every finding and the failures
+A PR marked ready gets an mtsu-patrol review; a draft gets CI only. Read every
+finding and the failures
 from every applicable CI job before changing code. Verify findings against the
 current head, fix valid issues and explain rejected suggestions. Group related
 fixes into one verified push. Integrate the base branch when a conflict or a
@@ -92,11 +93,19 @@ a bot only when a question needs its answer; do not request another review of
 a head it is already reviewing. Diagnose a failed job before retrying it and
 rerun only the failed jobs when the head is unchanged.
 
+A pull request runs the Linux checks, plus the Windows core suite for
+protection and shared toolchain inputs; the full Windows, macOS, desktop and
+E2E checks run in the merge queue
+([pull request runs](docs/ci.md#pull-request-runs)). A
+failure there removes the pull request: fix it like any CI failure, then merge
+again.
+
 Check CI and new review findings after a push. Track CI and reviews together;
 do not wait for one to finish before inspecting the other. A paused,
 quota-limited or delayed review is an explicit status to report.
 Finish when required checks pass, automatic reviews of the current head have
-finished and actionable findings are addressed. If work
+finished, or the head only answers a review that found no critical or major
+issue, and actionable findings are addressed. If work
 remains, report the current head, failing checks, unresolved finding links and
 the next action. Never describe an unchecked head or a confirmed unresolved bug
 as ready to merge.

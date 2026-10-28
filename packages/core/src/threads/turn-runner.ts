@@ -6,7 +6,8 @@ import { messageOf, refused } from '../errors.ts';
 import { logMessageOf } from '../log-errors.ts';
 import { reportSettlementError, settleTurn } from './turn-settlement.ts';
 import type { ThreadStore } from '../threads.ts';
-import { setThreadStatus, withLoad } from './records.ts';
+import { withLoad } from './records.ts';
+import { markRunning } from './lifecycle.ts';
 import { TurnAttempts, type TurnAttemptState } from './turn-attempts.ts';
 import { stderrTail } from '../drivers/stderr-tail.ts';
 
@@ -102,7 +103,7 @@ export class TurnRunner {
           this.core.journal.putTurn(state.running);
         });
         this.core.bus.emit('turn.started', state.running);
-        setThreadStatus(this.core, threadId, 'running');
+        markRunning(this.core, threadId);
       })());
       started = true;
       // A delegated agent with a worktree of its own: made from its parent's HEAD before the agent starts in it.

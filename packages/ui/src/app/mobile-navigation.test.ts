@@ -9,8 +9,8 @@ vi.mock('@tauri-apps/plugin-opener', () => import('../test/opener'));
 // once the setup has loaded the real one (`test-setup.ts`). A getter, so App
 // reads whichever is current when it runs.
 const navigation = vi.hoisted(() => ({ part: undefined as unknown, fail: undefined as ((error: Error) => void) | undefined }));
-vi.mock('../lib/deferred-parts', async (original) => {
-  const real = await original<typeof import('../lib/deferred-parts')>();
+vi.mock('../lib/mobile-navigation', async (original) => {
+  const real = await original<typeof import('../lib/mobile-navigation')>();
   navigation.part = real.mobileNavigation;
   return { ...real, get mobileNavigation() { return navigation.part; } };
 });

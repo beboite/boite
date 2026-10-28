@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowUp, GitBranch, Mic, MicOff, Paperclip, Square } from '@lucide/svelte';
+  import { ArrowUp, GitBranch, LoaderCircle, Mic, MicOff, Paperclip, Square } from '@lucide/svelte';
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { effectiveCompaction, type PermissionMode, type ProviderSummary } from '@boite/contracts';
@@ -39,6 +39,7 @@
     bot = null,
     provider,
     canSend,
+    waiting = false,
     answering = false,
     sendLabel = strings.composer.send,
     choice = $bindable(),
@@ -57,6 +58,8 @@
     bot?: string | null;
     provider: ProviderSummary | null | undefined;
     canSend: boolean;
+    /** Send was pressed while files were still being read: it goes once they are ready. */
+    waiting?: boolean;
     answering?: boolean;
     /** What Send does, when it answers a question rather than sending a message. */
     sendLabel?: string;
@@ -356,13 +359,14 @@
     type="button"
     class="primary icon send"
     data-testid="composer-send"
-    title={sendLabel}
-    aria-label={sendLabel}
+    data-waiting={waiting || undefined}
+    title={waiting ? strings.composer.sendWhenLoaded : sendLabel}
+    aria-label={waiting ? strings.composer.sendWhenLoaded : sendLabel}
     disabled={!canSend}
     onmousedown={keepFocus}
     onclick={() => onsubmit()}
   >
-    <ArrowUp size={16} strokeWidth={2.25} />
+    {#if waiting}<LoaderCircle size={16} strokeWidth={2.25} class="spinner" />{:else}<ArrowUp size={16} strokeWidth={2.25} />{/if}
     {#if answering}<span class="ui-label">{sendLabel}</span>{/if}
   </button>
 </div>
@@ -457,6 +461,8 @@
   }
 
   .send:not(:disabled):active { transform: scale(.92); }
+  .send :global(.spinner) { animation: spin 1s linear infinite var(--loops); }
+  @media (prefers-reduced-motion: reduce) { .send :global(.spinner) { animation: none; } }
   /* No chips to fill the row: the tools sit beside the send button on the right. */
   .answering { justify-content: flex-end; }
   .answering .stop, .answering .send { margin-left: 0; }
