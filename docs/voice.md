@@ -156,6 +156,12 @@ loaded model instead of starting a process per request:
   (`audio_ctx = seconds * 50 + 64`, at most 1500); the final request keeps the
   full window.
 - A disconnect or a cancel aborts the decode on the server.
+- Starting, replacing and stopping it, like the Nemotron decoder, are admitted
+  one at a time (`packages/core/src/speech-engine.ts`): a request for one model
+  never gets the engine a request for another model started meanwhile. A
+  request whose engine is replaced before it loads is refused, and a Nemotron
+  request names the engine it was given, so it is refused once another
+  replaced it.
 
 A runtime without `whisper-server`, and any `whisper-cli` set by path, runs one
 process per request as before, with the same thread count.

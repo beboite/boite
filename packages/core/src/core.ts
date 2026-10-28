@@ -442,8 +442,8 @@ export class Core {
     // left running or queued is closed here, or nothing ever would.
     const interrupted = this.threads.agentState.backgroundHistory.interruptLive();
     const recovered = this.threads.recoverStuckTurns();
-    // After recovery: a thread a usage limit stopped resumes at its window's reset, across restarts.
-    this.threads.limitResumes.start();
+    // After recovery: a resume planned before the previous core stopped, a usage limit's among them, goes on.
+    this.threads.resumes.start();
     // Watched limits are read on their own, so an alert reaches a phone with no window open.
     this.quotas.alerts.start();
     // What a dead core cut, and any resume planned before it died, goes on (`threads/auto-continue.ts`).
@@ -516,6 +516,7 @@ export class Core {
       channel: this.channel,
       pid: process.pid,
       startedAt: this.startedAt,
+      now: Date.now(),
       endpoint: { ...this.endpoint },
       dataDir: this.dataDir,
       trace: this.procs.capability(),
@@ -553,7 +554,7 @@ export class Core {
     this.threads.autoCompact.close();
     this.threads.backgroundCompact.close();
     this.threads.cacheKeepalive.close();
-    this.threads.limitResumes.close();
+    this.threads.resumes.close();
     this.threads.autoContinue.close();
     this.quotas.alerts.close();
     this.#drainPromise = this.agentRuntime.close().then(() => this.scheduler.drain(timeoutMs));
@@ -587,7 +588,7 @@ export class Core {
     this.threads.autoCompact.close();
     this.threads.backgroundCompact.close();
     this.threads.cacheKeepalive.close();
-    this.threads.limitResumes.close();
+    this.threads.resumes.close();
     this.threads.autoContinue.close();
     await this.threads.codeCheckpoints.close();
     await this.agentRuntime.close();

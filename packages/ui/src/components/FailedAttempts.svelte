@@ -45,7 +45,7 @@
                   {@const turn = turns.find(turn => turn.id === message.turnId)}
                   <AssistantMessage {store} {threadId} {message} from={0} to={0} {signedOut} showModel={true} />
                   <pre data-testid="error-diagnostic">{errors(message)}</pre>
-                  {#if turn}<TurnSummary {turn}>
+                  {#if turn}<TurnSummary {turn} clockOffset={store.clockOffset}>
                     {#snippet actions()}<MessageActions text={() => errors(message)} fork={canFork ? worktree => void store.fork(message.id, { worktree }) : undefined} />{/snippet}
                   </TurnSummary>{/if}
                 {/if}

@@ -53,7 +53,7 @@ test('unread attachments survive text edits and explicit removals during storage
     page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1` });
     await page.type('[data-testid=composer-input]', 'Keep one attachment');
     await page.evaluate(`(() => { const data = new DataTransfer(); for (const name of ['remove.txt', 'keep.txt']) data.items.add(new File([name], name, {type:'text/plain'})); document.querySelector('[data-testid=composer-input]').dispatchEvent(new ClipboardEvent('paste', {clipboardData:data,bubbles:true})); })()`);
-    await page.waitFor('document.querySelectorAll("[data-testid=composer-attachment]").length === 2');
+    await page.waitFor('document.querySelectorAll("[data-testid=composer-attachment]:not([data-loading])").length === 2');
     expect(await page.evaluate('globalThis.__boiteTest.workspace.active.flushDrafts()')).toBe(true);
     const script = await page.send('Page.addScriptToEvaluateOnNewDocument', { source: 'IDBFactory.prototype.open = function() { return {}; };' }) as { identifier: string };
     await page.reload();
@@ -190,7 +190,7 @@ test('unsent text survives the browser process being killed', async () => {
     await page.waitFor('document.querySelector("[data-testid=composer-input]")');
     await page.type('[data-testid=composer-input]', 'Recover after a forced exit');
     await page.evaluate(`(() => { const data = new DataTransfer(); data.items.add(new File([new Uint8Array(4 * 1024 * 1024)], 'draft.bin', { type: 'application/octet-stream' })); document.querySelector('[data-testid=composer-input]').dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true })); })()`);
-    await page.waitFor('document.querySelector("[data-testid=composer-attachment]")');
+    await page.waitFor('document.querySelector("[data-testid=composer-attachment]:not([data-loading])")');
     expect(await page.evaluate('globalThis.__boiteTest.workspace.active.flushDrafts()')).toBe(true);
     // close() kills the captured browser PID; no pagehide or unload callback saves the draft.
     await page.close();

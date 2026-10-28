@@ -83,6 +83,35 @@ test('a trail event written under an id freed by a deletion is still pruned afte
   } finally { journal.close(); }
 });
 
+test('an asynchronous question nobody answered outlives the retention of its events and an upgrade', () => {
+  const file = join(dir, 'journal.db');
+  const day = 86_400_000, now = 100 * day, askedAt = now - 31 * day;
+  const ask = (journal: Journal, id: string, async: boolean) => journal.append(
+    { type: 'question.asked', threadId: 'thr_a', version: 1, ts: askedAt, payload: { id, threadId: 'thr_a', ...(async ? { async: true } : {}), text: id } },
+    () => undefined);
+  let journal = new Journal(file);
+  try {
+    ask(journal, 'open', true);
+    ask(journal, 'answered', true);
+    ask(journal, 'blocking', false);
+    journal.append({ type: 'question.answered', threadId: 'thr_a', version: 1, ts: askedAt, payload: { questionId: 'answered', answer: null } }, () => undefined);
+    while (pruneEventsOnce(journal, now));
+    expect(journal.db.query("SELECT COUNT(*) AS n FROM events WHERE type LIKE 'question.%'").get()).toEqual({ n: 0 });
+  } finally { journal.close(); }
+  journal = new Journal(file);
+  try {
+    expect(journal.openAsyncQuestions().map(question => question.id)).toEqual(['open']);
+    // A journal from before the projection reads its pending cards from the events it still has.
+    journal.db.exec("DROP TABLE pending_questions; PRAGMA user_version = 44; INSERT INTO events (thread_id, ts, type, version, payload) VALUES ('thr_b', 1, 'question.asked', 1, '{\"id\":\"older\",\"threadId\":\"thr_b\",\"async\":true}')");
+  } finally { journal.close(); }
+  journal = new Journal(file);
+  try {
+    expect(journal.openAsyncQuestions().map(question => question.id)).toEqual(['older']);
+    journal.deleteThreads(['thr_b']);
+    expect(journal.openAsyncQuestions()).toEqual([]);
+  } finally { journal.close(); }
+});
+
 test('opening a journal builds no planner statistics; the retention ticks build them one ANALYZE at a time', () => {
   const journal = new Journal(join(dir, 'journal.db'));
   try {

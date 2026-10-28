@@ -1174,7 +1174,7 @@ describe('codex driver', () => {
     expect((await finished).usage).toBeNull();
   });
 
-  test('the turn usage sums every model request of the turn once, with no price, and the history counts its cache once', async () => {
+  test('the turn usage sums every model request of the turn once, with no price, and keeps its input apart from the cache', async () => {
     const client = await startCore();
     const threadId = await codexThread(client);
 
@@ -1184,18 +1184,20 @@ describe('codex driver', () => {
     const done = await finished;
     expect(done.status).toBe('done');
     // Two requests (8 + 20 input, 2 + 15 cached, 1 written, 4 + 6 output),
-    // neither the thread's earlier history nor the repeated update. The input
-    // keeps Codex's meaning: it still holds the cache reads.
+    // neither the thread's earlier history nor the repeated update. Codex's
+    // input holds both cache counts; the turn keeps only the uncached part,
+    // so the four buckets add up to what the model processed once.
     expect(done.usage).toEqual({
-      inputTokens: 28,
+      inputTokens: 10,
       outputTokens: 10,
       cacheReadTokens: 17,
       cacheWriteTokens: 1,
+      buckets: 1,
       costUsdEquivalent: null,
     });
-    // The usage page takes the cache reads out of Codex input once.
+    // The usage page reads the turn as it was stored.
     const history = await client.call('usage.history', { edges: [0, Date.now() + 60_000] });
-    expect(history.rows.map((row) => row.usage.inputTokens)).toEqual([11]);
+    expect(history.rows.map((row) => row.usage.inputTokens)).toEqual([10]);
   });
 
   test('stopping a turn interrupts it and the agent process is gone', async () => {
@@ -1243,6 +1245,33 @@ describe('codex driver', () => {
     delete process.env['CODEX_FAKE_DEAF'];
     await runTurn(client, threadId, 'still here');
   });
+
+  test('core shutdown during an accepted turn Codex never completes ends it once, before the journal closes', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_DEAF'] = '1';
+    const finished: { status: string; error: string | null }[] = [];
+    const logs: string[] = [];
+    harness!.core.bus.onAny((name, payload) => {
+      if (name === 'core.log') logs.push((payload as RpcEvents['core.log']).message);
+      if (name !== 'turn.finished') return;
+      const turn = payload as RpcEvents['turn.finished'];
+      if (turn.threadId === threadId) finished.push({ status: turn.status, error: turn.error });
+    });
+    await client.call('turns.start', { threadId, prompt: '[slow]' });
+    await waitFor(() => fakeLog().includes('waiting for interrupt'));
+    const stoppingAt = Date.now();
+    // A drain shorter than the stop grace: the driver shutdown is what closes Codex.
+    void harness!.core.drain(200);
+    await stopCore();
+    const stoppedIn = Date.now() - stoppingAt;
+    await new Promise((resolve) => setTimeout(resolve, 3_500));
+    // The drain stops the turn, Codex ignores the interrupt, and closing the
+    // session ends it at once: never the stop grace after the journal closed.
+    expect(finished).toEqual([{ status: 'stopped', error: null }]);
+    expect(stoppedIn).toBeLessThan(2_500);
+    expect(logs.filter((line) => /closed database|database is closed/i.test(line))).toEqual([]);
+  }, 20000);
 
   test('a stop that lands while the thread opens sends no prompt', async () => {
     const client = await startCore();

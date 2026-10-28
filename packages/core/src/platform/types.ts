@@ -137,6 +137,21 @@ export interface SecretVault {
   ids?(): Promise<string[] | null>;
 }
 
+/**
+ * An exclusive lock the OS holds on one file for this process until `release`
+ * or the process's death, whichever comes first. Never stale, never shared.
+ */
+export interface HeldFileLock {
+  /** Is the locked file still the one `path` names? False once released, moved away or deleted. */
+  stillAt(path: string): boolean;
+  /** Replaces the locked file's content through the held handle, whatever the path names by then. */
+  write(text: string): void;
+  release(): void;
+}
+
+/** Locks `file`, created if missing, or answers null while another holder has it, one in this process included. */
+export type FileLocker = (file: string) => HeldFileLock | null;
+
 /** OS services used by the shared process registry. No native imports here. */
 export interface ProcessPlatform {
   /** Model tool execution only. Trusted account/control processes never gain authority from this descriptor. */
@@ -164,7 +179,11 @@ export interface ProcessPlatform {
   terminate(threadId: string): boolean;
   /** A held Windows handle, or a matching registered/sampled Linux birth. */
   terminateProcess(threadId: string, pid: number, startedAt?: number | null): boolean;
-  /** Windows' fallback tree kill, for a pid outside the job: `killAll` waits for a returned promise. */
+  /**
+   * Windows' fallback tree kill, for a pid outside the job: `killAll` waits for a returned promise.
+   * Call it in the tick that saw the root running: it holds the root by a handle of its own from
+   * then until the kill ended, so the pid cannot pass to another process meanwhile.
+   */
   terminateUnassigned(pid: number): void | Promise<unknown>;
   sample(threadId: string): ProcessSample | null;
   /** Toggle optional detailed counters without changing protection sampling. */

@@ -23,7 +23,7 @@ export class AgentEntrustments {
   constructor(private readonly core: Core, private readonly store: AgentStore) {
     core.activity.onGoal(event => this.ended(event));
     // Both sources stop with the core: activity closes first and the journal guard covers the bus.
-    core.bus.onAny((name, payload) => {
+    core.bus.onCommitted((name, payload) => {
       if (core.journal.isClosed()) return;
       try {
         if (name === 'thread.updated' && (payload as { archived?: boolean }).archived) this.drop((payload as { id: string }).id);

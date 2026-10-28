@@ -18,12 +18,13 @@ import { TRAIL_ONLY, UNWRITTEN, pruneOldEvents, pruneTrail, rewindTrailCursor, t
 import { analyze, staleStatistics } from './journal/statistics.ts';
 import { hydrate, hydratePart } from './journal/part-blobs.ts';
 import { migrate } from './journal/schema.ts';
+import { openAsyncQuestions, projectQuestion } from './journal/questions.ts';
 import { PROCESS_COLUMNS, PROCESS_FROM, ProcessRows } from './journal/processes.ts';
 import { runWrite } from './journal/statements.ts';
 import { WAL_LIMIT_BYTES, WalCheckpoints, type WalCheckpointOptions } from './journal/wal-checkpoints.ts';
 import { toAccount, toMessage, toProcess, toProject, toThread, toTurn, parseJson } from './journal/rows.ts';
 import { restoreDeletedRows, threadsWhere, VISIBLE_THREADS, writeThread } from './journal/thread-rows.ts';
-import { oneTurn, sumSessionUsage, writeTurn } from './journal/turn-rows.ts';
+import { oneTurn, sumSessionUsage, writeTurn, type SessionUsage } from './journal/turn-rows.ts';
 import type { AccountRow, MessageRow, ProcessRow, ProjectIconRow, ProjectRow, ThreadRow, TurnRow } from './journal/rows.ts';
 import type { DetectedIcon as StoredProjectIcon } from './project-icons.ts';
 import { copyStoredParts, foldStreamingParts, messageOfError, StreamBuffer } from './journal/stream-buffer.ts';
@@ -361,7 +362,7 @@ export class Journal {
     if (threadIds.length === 0) return;
     // Foreign keys are off: clear dependent records, including unsent composer input.
     this.db.transaction(() => {
-      for (const table of ['background_observations', 'turn_requests', 'turns', 'messages', 'native_agent_messages', 'part_blobs', 'streaming_parts', 'media_previews', 'media_displays', 'processes', 'command_lines', 'coordination_letters', 'coordination_wakes', 'events']) {
+      for (const table of ['background_observations', 'turn_requests', 'turns', 'messages', 'native_agent_messages', 'part_blobs', 'streaming_parts', 'media_previews', 'media_displays', 'processes', 'command_lines', 'coordination_letters', 'coordination_wakes', 'events', 'pending_questions']) {
         const query = this.db.query(`DELETE FROM ${table} WHERE thread_id = ?`);
         for (const id of threadIds) query.run(id);
       }
@@ -449,12 +450,12 @@ export class Journal {
 
   /** One turn read without the thread's history (`journal/turn-rows.ts`). */
   runningTurn(threadId: string): Turn | null { return oneTurn(this.db, 'running', threadId); }
-  lastTurn(threadId: string): Turn | null { return oneTurn(this.db, 'last', threadId); }
+  lastTurn(threadId: string, conversation = false): Turn | null { return oneTurn(this.db, conversation ? 'conversation' : 'last', threadId); }
   /** The newest turn that is neither queued nor running. */
   lastEndedTurn(threadId: string): Turn | null { return oneTurn(this.db, 'ended', threadId); }
   /** The oldest queued turn that runs `operation`. */
   queuedTurn(threadId: string, operation: string): Turn | null { return oneTurn(this.db, 'queued', threadId, operation); }
-  sessionUsage(threadId: string, generation: number, exceptTurnId: string): { costUsd: number; tokens: number } { return sumSessionUsage(this.db, threadId, generation, exceptTurnId); }
+  sessionUsage(threadId: string, generation: number, exceptTurnId: string): SessionUsage { return sumSessionUsage(this.db, threadId, generation, exceptTurnId); }
 
   /** A coordination contact needs one completion timestamp, without loading its turn history. */
   lastCompletedAt(threadId: string): number | null {
@@ -490,24 +491,9 @@ export class Journal {
     return requestSince(this.db, threadId);
   }
 
-  /**
-   * The asynchronous questions asked and never answered or skipped, oldest
-   * first. The one place events are read back: a pending card has no
-   * projection, and the trail keeps it for as long as events are kept.
-   */
+  /** The asynchronous questions asked and never answered or skipped, oldest first (`journal/questions.ts`). */
   openAsyncQuestions(): QuestionRequest[] {
-    const rows = this.db
-      .query(
-        `SELECT asked.payload FROM events asked
-          WHERE asked.type = 'question.asked' AND json_extract(asked.payload, '$.async') = 1
-            AND NOT EXISTS (
-              SELECT 1 FROM events done
-               WHERE done.thread_id = asked.thread_id AND done.id > asked.id AND done.type = 'question.answered'
-                 AND json_extract(done.payload, '$.questionId') = json_extract(asked.payload, '$.id'))
-          ORDER BY asked.id`,
-      )
-      .all() as { payload: string }[];
-    return rows.map((row) => JSON.parse(row.payload) as QuestionRequest);
+    return openAsyncQuestions(this.db);
   }
 
   unfinishedTurns(): Turn[] {
@@ -894,5 +880,6 @@ export class Journal {
     this.db
       .query('INSERT INTO events (thread_id, ts, type, version, payload) VALUES (?, ?, ?, ?, ?)')
       .run(event.threadId, event.ts ?? Date.now(), event.type, event.version, JSON.stringify(payload ?? null));
+    projectQuestion(this.db, event.type, event.threadId, event.payload);
   }
 }

@@ -124,6 +124,25 @@ test('Apply as proposed reads applied; Refuse reads refused and leaves the agent
   }
 });
 
+test('a model card names the provider and the model, a probed model id that holds a slash included', async () => {
+  const { client, store, agent } = await setup();
+  try {
+    await store.probeModels('opencode', 'a-opencode');
+    const { questionId } = await client.call('agents.settings.request', { threadId: 't-trace', agent: agent.id, key: 'model', value: 'opencode/anthropic/claude-sonnet-5', reason: 'Cheaper for reviews' });
+    const question = await asked(store, questionId);
+    card(store, question);
+    expect(query('[data-testid=agent-setting-proposed]').textContent).toBe('OpenCode · Claude Sonnet 5');
+    // A card drawn before cards named the provider holds an id of the bot's own (Claude's): Apply reads it so, and so does the card.
+    await unmount(mounted!);
+    const { modelRefs: _, ...legacy } = question.agentSetting!;
+    card(store, { ...question, agentSetting: legacy });
+    expect(query('[data-testid=agent-setting-proposed]').textContent).toBe('opencode/anthropic/claude-sonnet-5');
+  } finally {
+    store.detach();
+    client.close();
+  }
+});
+
 test('an archived agent closes its card without an answer', async () => {
   const { client, store, agent } = await setup();
   try {

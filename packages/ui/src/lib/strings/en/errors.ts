@@ -3,6 +3,7 @@ export const strings = {
   errors: {
     draftStorage: 'This device could not save your draft. Keep this window open and copy your text before closing it.',
     draftAttachment: 'An attachment could not be read from storage. Reload to recover it, or remove it before sending.',
+    filesLoading: 'A file is still loading. Answer once it is ready.',
     prefix: 'Error',
     activityUnsupported: 'This core does not support goals or loops. Update Boite on {machine}, then reconnect. Your command has not been sent.',
     pullRequestUnsupported: 'Update Boite on the machine hosting this thread to show its pull request. This core does not support pull request lookup yet.',

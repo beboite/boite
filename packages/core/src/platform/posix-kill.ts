@@ -109,6 +109,6 @@ export function stopGroup(
 /** A Bun child's kill: its whole group off Windows, the process itself on Windows. */
 export function killBunChild(proc: Bun.Subprocess): Promise<void> | undefined {
   if (process.platform !== 'win32') return stopGroup(proc.pid, () => proc.exitCode === null && proc.signalCode === null);
-  proc.kill();
+  if (proc.exitCode === null && proc.signalCode === null) proc.kill();
   return undefined;
 }

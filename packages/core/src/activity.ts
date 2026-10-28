@@ -1,3 +1,4 @@
+import { threadActive } from '@boite/contracts';
 import type { ActivityTurn, AgentTask, Attachment, ComposerChoice, GoalReview, MessagePart, RpcParams, ThreadActivity, ThreadSummary, Turn } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
@@ -79,6 +80,10 @@ export class ActivityStore {
         const event = payload as { threadId: string; part: MessagePart };
         this.observeTool(event.threadId, event.part);
       }
+    });
+    // An archive or removal that rolls back pauses, stops and forgets nothing.
+    core.bus.onCommitted((name, payload) => {
+      if (this.closed) return;
       if (name === 'thread.updated') {
         const thread = payload as { id: string; archived: boolean };
         if (thread.archived) this.pauseAll(thread.id);
@@ -341,7 +346,7 @@ export class ActivityStore {
     const thread = this.core.journal.getThread(threadId);
     const state = this.states.get(threadId);
     if (!thread || !state || thread.archived) return;
-    if (['running', 'queued', 'waiting'].includes(thread.status)) return;
+    if (threadActive(thread.status)) return;
     const kind = state.loop?.status === 'active' && (state.loop.nextRunAt ?? 0) <= Date.now() ? 'loop' : state.goal?.status === 'active' ? 'goal' : null;
     if (!kind) {
       if (state.loop?.status === 'active') this.schedule(threadId, Math.max(0, (state.loop.nextRunAt ?? Date.now()) - Date.now()));
@@ -381,7 +386,7 @@ export class ActivityStore {
       }
       const checklist = list?.items.length ? { open: list.items.filter(item => item.status === 'open').map(item => item.text), bounced: this.bounced.delete(threadId) } : undefined;
       const turnActivity: ActivityTurn = { kind, iteration, ...(feedback ? { review: feedback } : {}), ...(checklist ? { checklist } : {}) };
-      const turn = this.core.threads.startTurn(threadId, prompt, pending[kind] ?? [], undefined, undefined, turnActivity, undefined, undefined, [], undefined, null, undefined, choice);
+      const turn = this.core.threads.startTurn(threadId, { prompt, attachments: pending[kind] ?? [] }, { kind: 'goal', activity: turnActivity }, { choice });
       delete pending[kind];
       this.saveAttachments(threadId, pending);
       this.ownTurns.set(turn.id, { kind, generation: this.generations.get(`${threadId}:${kind}`) ?? 0, iteration });
@@ -459,7 +464,7 @@ export class ActivityStore {
       this.reviewing.set(reviewer, { threadId, generation, round });
       review.reviewerThreadId = reviewer;
       this.save(threadId);
-      this.core.threads.startTurn(reviewer, reviewPrompt(goal.objective, claim, round, goal.checklist?.items ?? []), [], undefined, 'delegation', undefined, undefined, `Review the goal: ${goal.objective}`.slice(0, 500));
+      this.core.threads.startTurn(reviewer, { prompt: reviewPrompt(goal.objective, claim, round, goal.checklist?.items ?? []), display: `Review the goal: ${goal.objective}`.slice(0, 500) }, { kind: 'delegation' });
     } catch (error) {
       if (reviewer) this.reviewing.delete(reviewer);
       review.reviewerThreadId = null;
