@@ -62,7 +62,7 @@ export function variableHome(variable: string, profile?: Pick<OsProfile, 'env'>)
   // On Windows Hermes keeps its home in `%LOCALAPPDATA%\hermes`, as its own
   // `_get_platform_default_hermes_home` reads it.
   if (variable === 'HERMES_HOME' && currentOs() === 'windows') {
-    const local = process.env['LOCALAPPDATA'];
+    const local = profile?.env?.['LOCALAPPDATA'] ?? process.env['LOCALAPPDATA'];
     return join(local !== undefined && local.length > 0 ? local : join(homePath(), 'AppData', 'Local'), 'hermes');
   }
   const fallback = ISOLATION_DEFAULTS[variable];

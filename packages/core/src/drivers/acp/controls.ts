@@ -177,6 +177,11 @@ export class SessionControls {
     return this.configOptions.length > 0;
   }
 
+  /** An agent that takes its model as a config option, which `applyConfig` sets. */
+  hasModelOption(): boolean {
+    return categoryOption(this.configOptions, 'model') !== null;
+  }
+
   /** The session answers listed models, which is where an agent with no model option takes them. */
   hasModels(): boolean {
     return this.agentModels !== null;
@@ -391,7 +396,10 @@ export class SessionControls {
     if (this.configOptions.length === 0 && !ctx.protectedExecution) return;
     const model = ctx.thread.model;
     const effort = ctx.thread.effort;
-    if (model !== this.appliedModel || ctx.protectedExecution) {
+    // An agent that lists models without a `model` option took it in
+    // `applyModel`, which records the model id it asked for.
+    const takenByListing = (this.agentModels !== null || this.ownListedModel !== null) && !this.hasModelOption();
+    if ((model !== this.appliedModel && !takenByListing) || ctx.protectedExecution) {
       // Back to the agent's own model on a session moved off it: that model
       // has to be asked for, or the session stays on the last one.
       const wanted = model === AGENT_OWN_MODEL && this.appliedModel !== undefined && this.ownModel !== null ? this.ownModel : model;

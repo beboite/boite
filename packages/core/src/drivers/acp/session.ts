@@ -175,7 +175,7 @@ export class AcpSession {
   private async applyControls(ctx: SessionContext): Promise<void> {
     const agent = this.agent;
     if (agent !== null && !isGrok(ctx.provider) && ctx.thread.model === AGENT_OWN_MODEL
-      && (this.controls.hasModels() || this.loaded) && !this.controls.hasOptions() && !this.controls.knowsOwnListedModel()) {
+      && (this.controls.hasModels() || this.loaded) && !this.controls.hasModelOption() && !this.controls.knowsOwnListedModel()) {
       const discovered = await agent.request('session/new', { cwd: ctx.thread.cwd, mcpServers: [] });
       const listed = agentModelsOf(discovered);
       this.controls.seedOwnListedModel(listed?.currentModelId ?? null);

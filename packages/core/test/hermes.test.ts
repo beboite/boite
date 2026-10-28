@@ -29,7 +29,7 @@ const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwA
 let harness: TestCore | null = null;
 let logFile = '';
 /** The variables these tests set, as the process had them: a later test file gets them back. */
-const TOUCHED = ['HERMES_FAKE_LOG', 'HERMES_FAKE_FORGET', 'HERMES_FAKE_LOAD_BARE', 'OPENAI_API_KEY', 'LOCALAPPDATA'];
+const TOUCHED = ['HERMES_FAKE_LOG', 'HERMES_FAKE_FORGET', 'HERMES_FAKE_LOAD_BARE', 'HERMES_FAKE_LOAD_OPTION', 'OPENAI_API_KEY', 'LOCALAPPDATA'];
 const outer = new Map(TOUCHED.map((name) => [name, process.env[name]]));
 
 afterEach(async () => {
@@ -191,6 +191,7 @@ describe('hermes', () => {
       Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
       process.env['LOCALAPPDATA'] = join(harness?.dataDir ?? homedir(), 'elsewhere');
       expect(variableHome('HERMES_HOME')).toBe(join(harness?.dataDir ?? homedir(), 'elsewhere', 'hermes'));
+      expect(variableHome('HERMES_HOME', { env: { LOCALAPPDATA: join(harness?.dataDir ?? homedir(), 'profile') } })).toBe(join(harness?.dataDir ?? homedir(), 'profile', 'hermes'));
       delete process.env['LOCALAPPDATA'];
       expect(variableHome('HERMES_HOME')).toBe(join(homedir(), 'AppData', 'Local', 'hermes'));
     } finally {
@@ -290,6 +291,22 @@ describe('hermes', () => {
     await client.call('threads.update', { threadId, model: 'default' });
     await runTurn(client, threadId, 'second');
     expect(loggedLines('new:')).toHaveLength(opened + 1);
+    expect(loggedLines('set_model ')).toEqual([LLAMA, QWEN]);
+    expect(loggedLines('prompt ').at(-1)?.split(' ')[1]).toBe(QWEN);
+  });
+
+  test('a load with a config option that is not the model still reads the agent own model', async () => {
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const { threadId } = await hermesThread(client, LLAMA);
+    await runTurn(client, threadId, 'first');
+    await waitFor(() => harness?.core.procs.liveCount(threadId) === 0);
+    const descriptorPath = join(harness?.dataDir ?? '', 'providers', 'hermes-fake.json');
+    writeFileSync(descriptorPath, readFileSync(descriptorPath, 'utf8').replace('"Fake Hermes"', '"Fake Hermes reloaded"'), 'utf8');
+    await client.call('providers.reload', {});
+
+    process.env['HERMES_FAKE_LOAD_OPTION'] = '1';
+    await client.call('threads.update', { threadId, model: 'default' });
+    await runTurn(client, threadId, 'second');
     expect(loggedLines('set_model ')).toEqual([LLAMA, QWEN]);
     expect(loggedLines('prompt ').at(-1)?.split(' ')[1]).toBe(QWEN);
   });
