@@ -233,7 +233,23 @@ export function writeLandsInside(cwd: string, path: string): boolean {
     try {
       return contains(realOf(root), join(realpathSync(probe), ...missing));
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return false;
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'EACCES' || code === 'EPERM') {
+        // Bun on macOS resolves a path by opening it, so a file its owner may
+        // not read fails here. Only a link moves a name: anything else lies
+        // where its parent resolves.
+        try {
+          if (lstatSync(probe).isSymbolicLink()) return false;
+        } catch {
+          return false;
+        }
+        const parent = dirname(probe);
+        if (parent === probe) return false;
+        missing.unshift(basename(probe));
+        probe = parent;
+        continue;
+      }
+      if (code !== 'ENOENT') return false;
       try {
         lstatSync(probe);
         return false;
