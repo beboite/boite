@@ -14,7 +14,7 @@ import {
   RETRY_DELAYS_MS,
   resumableBytes,
 } from './install-download.ts';
-import { pointCurrent, readReleaseRecord, RELEASE_RECORD, removeCurrent, writeReleaseRecord, type ReleaseRecord } from './install-release.ts';
+import { pointCurrent, readReleaseRecord, recoverCurrent, RELEASE_RECORD, removeCurrent, writeReleaseRecord, type ReleaseRecord } from './install-release.ts';
 import { checkSizes, extractRelease, markExecutable, reachesThroughLink } from './install-unpack.ts';
 import { upToDate } from './install-latest.ts';
 
@@ -86,6 +86,8 @@ export class InstallManager {
   /** The record `current` held when last read, with the file's identity then: every provider list reads it. */
   #records = new Map<ProviderId, { stamp: string; record: ReleaseRecord }>();
   #settledListeners: ((outcome: InstallOutcome) => void)[] = [];
+  /** Providers whose `current` was checked for a repointing a stopped core left half done. */
+  #settled = new Set<ProviderId>();
   /** Test seams: how long a silent download waits, and the pauses between attempts. */
   idleTimeoutMs = IDLE_TIMEOUT_MS;
   retryDelaysMs: readonly number[] = RETRY_DELAYS_MS;
@@ -99,7 +101,14 @@ export class InstallManager {
   // -- paths ----------------------------------------------------------------
 
   currentDir(providerId: ProviderId): string {
-    return agentsDirPath(this.dataDir, providerId);
+    const link = agentsDirPath(this.dataDir, providerId);
+    // Once per core: a repointing cut off by a stop settles before anything reads `current`.
+    if (!this.#settled.has(providerId)) {
+      this.#settled.add(providerId);
+      try { recoverCurrent(link); }
+      catch (error) { this.#log('warn', `${link}: an update that did not finish could not be settled (${messageOf(error)})`); }
+    }
+    return link;
   }
 
   releaseDir(providerId: ProviderId, version: string): string {
@@ -401,6 +410,8 @@ export class InstallManager {
   async #run(providerId: ProviderId, install: ProviderInstall, running: Running): Promise<void> {
     const part = this.partFile(providerId, install.version);
     const releaseDir = this.releaseDir(providerId, install.version);
+    // Once `current` points at the release, a later failure must not delete what it runs.
+    let activated = false;
     try {
       await downloadArchive({
         providerId,
@@ -424,6 +435,7 @@ export class InstallManager {
       writeReleaseRecord(releaseDir, install);
       this.#records.delete(providerId);
       pointCurrent(providerId, this.currentDir(providerId), releaseDir, (level, message) => this.#log(level, message));
+      activated = true;
       forgetWhich();
       dropPart(part);
 
@@ -447,7 +459,7 @@ export class InstallManager {
       // it got so far: the next install resumes there. A cancel, a wrong size or
       // a wrong digest starts over.
       if (!(error instanceof Dropped) && !(error instanceof Cancelled && error.keep)) dropPart(part);
-      if (!reachesThroughLink(this.dataDir, releaseDir)) rmSync(releaseDir, { recursive: true, force: true });
+      if (!activated && !reachesThroughLink(this.dataDir, releaseDir)) rmSync(releaseDir, { recursive: true, force: true });
       this.#running.delete(providerId);
       if (error instanceof Cancelled || (error as { name?: string } | null)?.name === 'InstallCancelled') {
         // Back to what is on disk: absent for a first install, the release that

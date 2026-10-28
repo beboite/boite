@@ -49,12 +49,29 @@ export function writeReleaseRecord(releaseDir: string, install: ProviderInstall)
   );
 }
 
+/** Where `current` waits while it is repointed, until the new one is in place. */
+function keptCurrent(link: string): string {
+  return `${link}.previous`;
+}
+
+function present(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * `current` points at the release that just landed: a junction on Windows, a
  * symlink elsewhere, and a plain rename of the directory where neither can be
- * made (an unprivileged account with no developer mode is the case). On that
- * last path an update has nothing to keep: the old release was moved into
- * `current` rather than linked, so repointing takes it.
+ * made (an unprivileged account with no developer mode is the case). The
+ * previous `current` steps aside as `current.previous` and goes only once the
+ * new one is in place; when neither a link nor the rename can be made, it
+ * comes back and the error stands, so the release that worked still runs. On
+ * the rename path an update has nothing to keep: the old release was moved
+ * into `current` rather than linked, so repointing takes it.
  */
 export function pointCurrent(
   providerId: ProviderId,
@@ -63,16 +80,39 @@ export function pointCurrent(
   log: (level: 'warn', message: string) => void,
 ): void {
   mkdirSync(dirname(link), { recursive: true });
-  removeCurrent(link);
+  recoverCurrent(link);
+  const kept = keptCurrent(link);
+  const moved = present(link);
+  if (moved) renameSync(link, kept);
   try {
-    symlinkSync(releaseDir, link, currentOs() === 'windows' ? 'junction' : 'dir');
+    try {
+      symlinkSync(releaseDir, link, currentOs() === 'windows' ? 'junction' : 'dir');
+    } catch (error) {
+      log(
+        'warn',
+        `${providerId}: no link could be made (${error instanceof Error ? error.message : String(error)}), the release directory was moved into place instead`,
+      );
+      renameSync(releaseDir, link);
+    }
   } catch (error) {
-    log(
-      'warn',
-      `${providerId}: no link could be made (${error instanceof Error ? error.message : String(error)}), the release directory was moved into place instead`,
-    );
-    renameSync(releaseDir, link);
+    if (moved) {
+      removeCurrent(link);
+      renameSync(kept, link);
+    }
+    throw error;
   }
+  if (moved) removeCurrent(kept);
+}
+
+/**
+ * Settles a repointing a stopped core left half done: a `current.previous`
+ * with no `current` goes back, one beside a `current` already in place goes.
+ */
+export function recoverCurrent(link: string): void {
+  const kept = keptCurrent(link);
+  if (!present(kept)) return;
+  if (present(link)) removeCurrent(kept);
+  else renameSync(kept, link);
 }
 
 /**
