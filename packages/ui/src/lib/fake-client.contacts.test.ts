@@ -67,6 +67,8 @@ test('a group contact keeps both sides of its exchange in the initiating convers
   const mine = (await source!.call('collaboration.get', { threadId: 't-trace' })).messages;
   expect(mine.map(letter => letter.id)).toEqual([sent.id, answer.id]);
   expect(mine[1]).toMatchObject({ from: { coreId: 'core-outside', threadId: 't-trace' }, to: { coreId: 'core-source', threadId: 't-trace' }, status: 'delivered' });
+  // As the core: routed contact mail outside a shared project holds the recipient.
+  expect((await source!.call('threads.get', { threadId: 't-trace' })).contactHold).toEqual({ contacts: [mine[1]!.contact!.name] });
   expect((await gateway!.call('collaboration.get', { threadId: 't-trace' })).messages).toEqual([]);
   const asked = await source!.call('collaboration.ask', { threadId: 't-trace', contact: 'outside', text: 'An agent for the notes project' });
   expect(asked.from.coreId).toBe('core-source');

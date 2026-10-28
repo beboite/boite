@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AGENT_ENV, BROWSER_RECORDING_CHUNK_BYTES, type BrowserAction, type BrowserReply } from '@boite/contracts';
+import { AGENT_ENV, BROWSER_RECIPE_SOURCE_MAX, BROWSER_RECORDING_CHUNK_BYTES, browserActionError, type BrowserAction, type BrowserReply } from '@boite/contracts';
 import { runCli } from '../src/cli.ts';
 import { browserAction, browserLines } from '../src/browser-cli.ts';
 import { parse } from '../src/cli-args.ts';
@@ -249,5 +249,102 @@ test('browser run sends a script\'s steps in order in one call, prints what they
       expect((await run(args, "await page.click('@e1'); return args")).out).toEndWith(`${JSON.stringify(args.slice(3), null, 2)}\n`);
       expect(tabs).toEqual(['browser:x']);
     }
+  } finally { owner.close(); await harness.stop(); }
+});
+
+test('network reads into a list, one call or a stop, and its output points at the call that repeats it', () => {
+  expect(browserAction(['network']).action).toEqual({ kind: 'network' });
+  expect(browserAction(['network', '--filter', 'api/']).action).toEqual({ kind: 'network', filter: 'api/' });
+  expect(browserAction(['network', 'n4']).action).toEqual({ kind: 'network-detail', callId: 'n4' });
+  expect(browserAction(['network', 'stop']).action).toEqual({ kind: 'network-stop' });
+  expect(() => browserAction(['network', 'n4', '--filter', 'x'])).toThrow('goes with the list');
+  const lines = (action: BrowserAction, value: unknown) => browserLines(action, { tabId: 'browser:t', value });
+  expect(lines({ kind: 'network' }, { capturing: true, started: true, calls: [] })[0]).toContain('reload or act on the page');
+  expect(lines({ kind: 'network' }, { capturing: true, started: false, calls: [
+    { id: 'n1', at: 0, method: 'GET', url: 'https://shop.test/api/items', type: 'Fetch', status: 200, bytes: 2048, durationMs: 31 },
+    { id: 'n2', at: 0, method: 'POST', url: 'https://shop.test/api/cart', type: 'XHR', failed: 'net::ERR_FAILED' },
+  ] })).toEqual([
+    'n1  GET  200  fetch  2.0 KB  31 ms  https://shop.test/api/items',
+    'n2  POST  failed (net::ERR_FAILED)  xhr  https://shop.test/api/cart',
+    "  browser network <id> shows a call's headers and bodies, and the page.fetch line that repeats it",
+  ]);
+});
+
+test('a recipe is kept only after its run passes, records a failed run with the way to repair it, and keeps what it said about itself when saved again', async () => {
+  const harness = await startTestCore();
+  const owner = await harness.connect();
+  try {
+    const { threadId } = await echoThread(harness, owner);
+    const command = harness.core.browser.command.bind(harness.core.browser);
+    let stock = 'in stock';
+    // The page is the CLI's stand-in; the recipes are the core's own, stored in this test's data folder.
+    spyOn(harness.core.browser, 'command').mockImplementation(async request => {
+      const action = request.action as BrowserAction;
+      if (action.kind === 'recipes' || action.kind.startsWith('recipe-')) return command(request);
+      if (action.kind === 'open') return { tabId: 'browser:t', url: action.url, title: 'Shop', value: { ok: true, navigated: true, url: action.url, title: 'Shop' } };
+      if (action.kind === 'snapshot') return { tabId: 'browser:t', value: { text: '- heading "Sold out"', refs: 0, url: 'https://shop.test/', title: 'Shop' } };
+      if (action.kind === 'get') return { tabId: 'browser:t', value: stock };
+      if (action.kind === 'status') return { value: { tabs: [{ tabId: 'browser:t', url: 'https://shop.test/', title: 'Shop', active: true }] } };
+      return { tabId: 'browser:t', value: { ok: true } };
+    });
+    const cli = async (args: string[], stdin?: string) => {
+      let out = '', error = '';
+      const code = await runCli(['browser', 'recipe', ...args], { cwd: harness.dataDir, ...(stdin === undefined ? {} : { stdin: async () => stdin }),
+        env: { [AGENT_ENV.threadId]: threadId, [AGENT_ENV.coreUrl]: harness.url, [AGENT_ENV.token]: harness.core.agents.tokenFor(threadId) },
+        out: text => out += text, err: text => error += text });
+      return { code, out, error };
+    };
+    const script = "await page.open('https://shop.test/item/' + args[0])\nconst said = await page.get('text', '#stock')\nif (said !== 'in stock') throw new Error('no stock line: ' + said)\nreturn said";
+
+    expect((await cli(['list'])).out).toContain('no recipe on this machine yet');
+    expect((await cli(['save', 'stock', '-', 'hat'], script)).error).toContain('needs --about');
+    expect((await cli(['save', 'Stock', '-', '--about', 'x'], script)).error).toContain('a recipe name is 1 to 48 lowercase letters');
+    // A script that fails its own run is not kept.
+    stock = 'gone';
+    const unproven = await cli(['save', 'stock', '-', '--about', 'Whether an item is in stock', '--usage', '<item>', 'hat'], script);
+    expect(unproven.code).toBe(1);
+    expect(unproven.error).toContain('recipe stock not saved: its run stopped at stock.js line 3');
+    expect((await cli(['list'])).out).toContain('no recipe on this machine yet');
+
+    stock = 'in stock';
+    expect((await cli(['save', 'stock', '-', '--about', 'Whether an item is in stock', '--usage', '<item>', 'hat'], script)).code).toBe(0);
+    const listed = await cli(['list']);
+    expect(listed.out).toMatch(/^stock {2}Whether an item is in stock\n {2}boite browser recipe run stock <item>\n {2}shop\.test; 1 run, last passed \d+s ago\n$/);
+
+    // The site changed: the run names the step, shows the page and says how to repair the recipe.
+    stock = 'Sold out';
+    const broken = await cli(['run', 'stock', 'cap']);
+    expect(broken.code).toBe(1);
+    expect(broken.out).toContain('✗ stock.js line 3: no stock line: Sold out\npage now: Shop  https://shop.test/\n- heading "Sold out"');
+    expect(broken.out).toContain('recipe stock needs a repair');
+    expect(broken.out).toContain('boite browser recipe save stock <file|-> <item> runs it and keeps it under the same name');
+    expect(broken.error).toContain('recipe stock stopped at stock.js line 3');
+    expect((await cli(['list'])).out).toMatch(/shop\.test; broken since \d+s ago: stock\.js line 3: no stock line: Sold out; repair it before relying on it/);
+
+    // The agent that hit it repairs it without repeating what it does.
+    const repaired = script.replace("said !== 'in stock'", "!['in stock', 'Sold out'].includes(said)");
+    expect((await cli(['save', 'stock', '-', 'cap'], repaired)).code).toBe(0);
+    const shown = await cli(['show', 'stock']);
+    expect(shown.out).toContain('stock  Whether an item is in stock\n  boite browser recipe run stock <item>\n  shop.test; 3 runs, last passed');
+    expect(shown.out).toEndWith(`${repaired}\n`);
+    expect((await cli(['run', 'stock', 'cap'])).out).toEndWith('Sold out\n');
+
+    expect((await cli(['delete', 'stock'])).out).toContain('✓ Deleted recipe stock');
+    expect((await cli(['run', 'stock'])).error).toContain('no recipe stock on this machine');
+    expect((await cli(['frobnicate'])).error).toContain('browser recipe frobnicate is not a command');
+    // Save takes its flags up to the script's first word: the words after it are the script's own.
+    const echoed = await cli(['save', 'echo', '-', '--about', 'Echoes its words', 'ok', '--tab', 'nope'], 'return args.join(" ")');
+    expect(echoed.code).toBe(0);
+    expect(echoed.out).toStartWith('ok --tab nope\n');
+    expect((await cli(['delete', 'echo'])).code).toBe(0);
+    // The core takes a recipe's name as a file name and its sites as host names, whoever calls it.
+    const save: BrowserAction = { kind: 'recipe-save', name: 'stock', about: 'x', source: 'return 1', sites: ['shop.test'] };
+    expect(browserActionError({ kind: 'recipe-get', name: '../settings' })).toContain('a recipe name is');
+    expect(browserActionError({ ...save, sites: ['shop.test/../x'] })).toContain('host names');
+    // Chromium reaches a host with an underscore, so a redirect can record one; a site is matched without its port.
+    expect(browserActionError({ ...save, sites: ['service_internal.test', '[::1]', '127.0.0.1'] })).toBeNull();
+    expect(browserActionError({ ...save, sites: ['127.0.0.1:8080'] })).toContain('host names');
+    expect(browserActionError({ ...save, about: '  ' })).toContain('needs --about');
+    expect(browserActionError({ ...save, source: 'x'.repeat(BROWSER_RECIPE_SOURCE_MAX + 1) })).toContain('a recipe script holds');
   } finally { owner.close(); await harness.stop(); }
 });

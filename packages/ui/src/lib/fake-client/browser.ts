@@ -74,6 +74,10 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
     // The demo browser downloads nothing.
     if (action.kind === 'downloads') return { value: { downloads: [] } };
     if (action.kind.startsWith('download-')) throw refusal(`no download ${(action as { downloadId: string }).downloadId} in this conversation; browser downloads lists them`);
+    // Nor does it keep a recipe: no script of the demo is worth running again.
+    if (action.kind === 'recipes') return { value: { recipes: [] } };
+    if (action.kind === 'recipe-save') throw refusal('the demo browser keeps no recipe');
+    if (action.kind.startsWith('recipe-')) throw refusal(`no recipe ${(action as { name: string }).name} on this machine; browser recipe list shows them`);
     if (action.kind === 'profiles') {
       const { profiles, defaultId } = browserProfilesOf(ctx.settings);
       return { value: { default: defaultId, profiles: [{ id: DEFAULT_BROWSER_PROFILE, name: 'Default', kept: true }, ...profiles.map(profile => ({ id: profile.id, name: profile.name, kept: true })), { id: PRIVATE_BROWSER_PROFILE, name: 'Private', kept: false }] } };
@@ -133,6 +137,10 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       case 'resize': tab.width = action.width; tab.height = action.height; moved(browser, tab); return reply({ width: tab.width, height: tab.height });
       case 'reset-viewport': Object.assign(tab, VIEWPORT); moved(browser, tab); return reply(VIEWPORT);
       case 'diagnostics': return reply({ entries: [], dropped: 0, history: [] });
+      // Its pages are drawn, not loaded: they make no call to capture.
+      case 'network': return reply({ capturing: true, started: false, calls: [] });
+      case 'network-detail': throw refusal(`no call ${action.callId} in this tab's capture; browser network lists them`);
+      case 'network-stop': return reply({ capturing: false });
       case 'preset': case 'appearance': return reply();
       default: throw refusal(`${action.kind} is not available in the demo browser`);
     }

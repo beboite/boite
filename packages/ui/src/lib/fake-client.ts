@@ -7,6 +7,7 @@ import { sharedLetterMethods } from './fake-client/shared-letters';
 import { sharedState, sharedContact, reconcileShared, refusedShared } from './fake-client/shared-state';
 import { startupMethods, resetStartup } from './fake-client/startup';
 import { composerMethods } from './fake-client/composer';
+import { holdContactMail } from './fake-client/contact-hold';
 import { seedWorking } from './fake-client/working-seed';
 import { sweepMergedPrFixtures, type MergedPrFixture } from './fake-client/merged-pr-archive';
 import {
@@ -231,6 +232,13 @@ export class FakeClient implements ObservableClient {
     this.#ctx.goneFolders.add(pathKey(thread.cwd));
     thread.worktreeRemoved = { ...removal, path: thread.cwd };
     this.#ctx.touch(thread);
+  }
+
+  /** What the core says of a thread whose history read contact mail outside a shared project. */
+  holdForContactMail(threadId: ThreadId, contacts: string[]): void {
+    const thread = this.#ctx.threads.get(threadId);
+    if (!thread) throw new Error(`no fake thread ${threadId}`);
+    holdContactMail(this.#ctx, threadId, contacts);
   }
 
   setMergedPrFixture(threadId: ThreadId, fixture: MergedPrFixture): void {

@@ -26,6 +26,43 @@ class StepError extends Error {
   }
 }
 
+/** A script that stopped: `where` is its step or line, `reason` what went wrong there. */
+export class BrowserScriptFailure extends Error {
+  constructor(readonly where: string, readonly reason: string) {
+    super(`browser run stopped at ${where}`);
+  }
+}
+
+/** A script to run: its text, the name its errors cite, its own words and the tab it starts on. */
+export interface BrowserScript { source: string; name: string; args: string[]; tab?: string }
+
+/** The longest text `page.fetch` returns: the reply crosses one RPC frame. */
+const FETCH_TEXT_MAX = 2_000_000;
+/** The longest `evaluate` expression the contract accepts, which `page.fetch` sends its request in. */
+const FETCH_SEND_MAX = 32_000;
+/**
+ * Runs in the page, so the request carries the page's cookies and passes its
+ * CORS rules as the site's own code does. It reads the body no further than
+ * `max`: a large download would otherwise sit whole in the page's memory.
+ */
+const PAGE_FETCH = `async (url, init, max) => {
+  const response = await fetch(url, init);
+  const out = { status: response.status, ok: response.ok, url: response.url, headers: Object.fromEntries(response.headers) };
+  const reader = response.body ? response.body.getReader() : null;
+  const decoder = new TextDecoder();
+  let text = '';
+  while (reader && text.length <= max) {
+    const { done, value } = await reader.read();
+    text += decoder.decode(value, { stream: !done });
+    if (done) break;
+  }
+  if (text.length > max) { await reader.cancel().catch(() => {}); return { ...out, text: text.slice(0, max), truncated: true }; }
+  if (/json/i.test(response.headers.get('content-type') || '') || /^\\s*[[{]/.test(text)) { try { return { ...out, json: JSON.parse(text) }; } catch {} }
+  return { ...out, text };
+}`;
+
+const hostOf = (url: string) => { try { return new URL(url).hostname.toLowerCase(); } catch { return null; } };
+
 /** Steps whose reply is data the script reads; the others print what they did when it is more than done. */
 const READS = new Set<BrowserAction['kind']>(['snapshot', 'get', 'evaluate', 'status', 'profiles', 'diagnostics', 'downloads', 'screenshot', 'activate']);
 const SCROLL: Record<string, [number, number]> = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
@@ -67,27 +104,52 @@ async function scriptLine(error: unknown, name: string): Promise<number | null> 
   return at - header;
 }
 
-export async function browserRun(args: string[], io: CliIo, client: CoreClient, threadId: string): Promise<{ lines: string[]; value: unknown }> {
-  const rest = [...args];
-  let current: string | undefined;
-  // `--tab <id>` before the script or right after it; the words after that are the script's own.
-  const takeTab = () => {
+/**
+ * Takes `--tab <id>` before the first word or right after it, as `run` and
+ * `recipe run` accept it; the words after that are the script's own.
+ */
+export function takeScriptTab(rest: string[], command: string, first: string): { word: string | undefined; tab: string | undefined } {
+  let tab: string | undefined;
+  const take = () => {
     if (rest[0] !== '--tab') return;
-    if (current !== undefined) throw new Error('browser run accepts one --tab');
-    current = rest[1];
-    if (!current) throw new Error('browser run --tab needs a tab id');
+    if (tab !== undefined) throw new Error(`browser ${command} accepts one --tab`);
+    tab = rest[1];
+    if (!tab) throw new Error(`browser ${command} --tab needs a tab id`);
     rest.splice(0, 2);
   };
-  takeTab();
-  const file = rest.shift();
-  if (file === undefined || file === '') throw new Error('browser run needs a script file, or - to read it from stdin; boite browser help shows what a script can call');
-  takeTab();
-  let source: string;
-  if (file === '-') {
-    if (!io.stdin) throw new Error('browser run - reads the script from stdin, which this caller does not provide');
-    source = await io.stdin();
-  } else source = readFileSync(resolve(io.cwd, file), 'utf8');
-  const name = file === '-' ? 'stdin.js' : basename(file);
+  take();
+  const word = rest.shift();
+  if (word === undefined || word === '') throw new Error(`browser ${command} needs ${first}`);
+  take();
+  return { word, tab };
+}
+
+/** A script file, or stdin for `-`, and the name its errors cite. */
+export async function readScript(file: string, io: CliIo, command: string): Promise<{ source: string; name: string }> {
+  if (file !== '-') return { source: readFileSync(resolve(io.cwd, file), 'utf8'), name: basename(file) };
+  if (!io.stdin) throw new Error(`browser ${command} - reads the script from stdin, which this caller does not provide`);
+  return { source: await io.stdin(), name: 'stdin.js' };
+}
+
+export async function browserRun(args: string[], io: CliIo, client: CoreClient, threadId: string): Promise<{ lines: string[]; value: unknown }> {
+  const rest = [...args];
+  const { word: file, tab } = takeScriptTab(rest, 'run', 'a script file, or - to read it from stdin; boite browser help shows what a script can call');
+  const { source, name } = await readScript(file!, io, 'run');
+  const { lines, value } = await runBrowserScript({ source, name, args: rest, ...(tab ? { tab } : {}) }, io, client, threadId);
+  return { lines, value };
+}
+
+/**
+ * Runs a script's steps against the conversation's browser. Prints what each
+ * step did as it goes; `sites` are the hosts it opened, fetched or ended on.
+ * A step or a line that fails stops it with a `BrowserScriptFailure`, after
+ * printing the page it left.
+ */
+export async function runBrowserScript(script: BrowserScript, io: CliIo, client: CoreClient, threadId: string): Promise<{ lines: string[]; value: unknown; sites: string[] }> {
+  const { source, name, args: rest } = script;
+  let current = script.tab;
+  const sites = new Set<string>();
+  const visit = (url: string) => { const host = hostOf(url); if (host) sites.add(host); };
   let body: ScriptBody;
   try { body = new AsyncFunction(...PARAMS, `${source}\n//# sourceURL=${name}`); }
   catch (error) { throw new Error(`${name} does not parse: ${(error as Error).message}`); }
@@ -101,6 +163,8 @@ export async function browserRun(args: string[], io: CliIo, client: CoreClient, 
       const problem = browserActionError(action);
       if (problem) throw new Error(problem);
       const { lines, value } = await browserStep(action, tab, output, io, client, threadId);
+      // Both the address asked for and the one reached: a redirect can lead to another site.
+      if (action.kind === 'open' || action.kind === 'navigate') { visit(action.url); visit(String((value as BrowserReply).url ?? '')); }
       // A tab the run was aimed at stays its own; a new one it opens becomes the run's.
       const opened = (value as BrowserReply).tabId;
       if (action.kind === 'open' && current !== undefined && opened) current = opened;
@@ -149,6 +213,27 @@ export async function browserRun(args: string[], io: CliIo, client: CoreClient, 
     dialog: (decision: 'accept' | 'dismiss', text?: string) => valueOf(`dialog ${decision}`, () => ({ kind: 'dialog', decision, ...(text !== undefined ? { text } : {}) })),
     tabs: async () => ((await valueOf('tabs', () => ({ kind: 'status' }))) as { tabs: unknown[] }).tabs,
     tab: async (id: string) => { await step(`tab ${id}`, () => ({ kind: 'activate' }), undefined, id); current = id; },
+    /** A request sent from the page; the label leaves the body and the query out: they can hold a password or a token. */
+    fetch: async (url: string, init: { method?: string; headers?: Record<string, string>; body?: string; credentials?: 'omit' | 'same-origin' | 'include' } = {}) => {
+      const method = (init.method ?? 'GET').toUpperCase();
+      const label = `fetch ${method} ${String(url).split(/[?#]/)[0]}`;
+      // Its own number, taken when the step starts: a script may run several fetches at once.
+      let number = 0;
+      const reply = await valueOf(label, () => {
+        number = steps;
+        if (init.body !== undefined && typeof init.body !== 'string') throw new Error('page.fetch takes a string body: JSON.stringify(value) for JSON');
+        const expression = `(${PAGE_FETCH})(${JSON.stringify(String(url))}, ${JSON.stringify(init)}, ${FETCH_TEXT_MAX})`;
+        // The request travels as one page expression, under the same cap as page.eval.
+        if (expression.length > FETCH_SEND_MAX) throw new Error(`page.fetch sends at most ${FETCH_SEND_MAX} characters of address, headers and body, this one ${expression.length}: build a longer body in the page and send it from page.eval`);
+        return { kind: 'evaluate', expression };
+      }) as { status: number; ok: boolean; url: string; json?: unknown; text?: string };
+      if (reply && typeof reply.url === 'string') visit(reply.url);
+      if (!reply || reply.status >= 400) {
+        const said = reply?.text ?? (reply?.json === undefined ? '' : JSON.stringify(reply.json));
+        throw new StepError(number, label, new Error(`HTTP ${reply?.status ?? '?'}${said ? `: ${said.slice(0, 300)}` : ''}`));
+      }
+      return reply;
+    },
     /** Any other command, in the words of `boite browser`; it returns what that command prints with --json. */
     command: async (...words: Array<string | number>) => {
       const typed = words.map(String);
@@ -172,16 +257,17 @@ export async function browserRun(args: string[], io: CliIo, client: CoreClient, 
   catch (error) {
     const line = error instanceof StepError ? null : await scriptLine(error, name);
     const where = error instanceof StepError ? `step ${error.step}, ${error.label}` : line === null ? name : `${name} line ${line}`;
-    io.out(`✗ ${where}: ${error instanceof Error ? error.message : String(error)}\n`);
+    const reason = error instanceof Error ? error.message : String(error);
+    io.out(`✗ ${where}: ${reason}\n`);
     // Where the page stopped, so the next call starts from it rather than from another snapshot.
     const now = await client.call('browser.command', { threadId, ...(current ? { tabId: current } : {}), action: { kind: 'snapshot', interactive: true } }).catch(() => null);
     const shot = now?.value as { text?: string; url?: string; title?: string } | undefined;
     if (shot?.text !== undefined) io.out(`page now: ${shot.title || '(untitled)'}  ${shot.url ?? ''}\n${shot.text}\n`);
-    throw new Error(`browser run stopped at ${where}`);
+    throw new BrowserScriptFailure(where, reason);
   }
-  if (result !== undefined) return { lines: [typeof result === 'string' ? result : json(result, 2)], value: { steps, result } };
+  if (result !== undefined) return { lines: [typeof result === 'string' ? result : json(result, 2)], value: { steps, result }, sites: [...sites] };
   const status = await client.call('browser.command', { threadId, action: { kind: 'status' } }).catch(() => null);
   const tabs = (status?.value as { tabs?: Array<{ tabId: string; url: string; title: string; active: boolean }> } | undefined)?.tabs ?? [];
   const tab = tabs.find(one => current ? one.tabId === current : one.active);
-  return { lines: [`✓ ${steps} ${steps === 1 ? 'step' : 'steps'}${tab ? `; the page is ${tab.title || '(untitled)'}  ${tab.url}` : ''}`], value: { steps } };
+  return { lines: [`✓ ${steps} ${steps === 1 ? 'step' : 'steps'}${tab ? `; the page is ${tab.title || '(untitled)'}  ${tab.url}` : ''}`], value: { steps }, sites: [...sites] };
 }

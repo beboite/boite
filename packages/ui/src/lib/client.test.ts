@@ -161,6 +161,67 @@ describe('rpcUrl', () => {
 });
 
 describe('WsClient', () => {
+  test('the hello measures how far the core clock runs ahead, from the middle of its round trip', async () => {
+    vi.useFakeTimers({ now: 1_000_000 });
+    const { client, socket } = connected();
+    try {
+      socket.open();
+      await vi.advanceTimersByTimeAsync(0);
+      const sent = Date.now();
+      await vi.advanceTimersByTimeAsync(400);
+      // The core read its clock 11 s ahead, halfway through the 400 ms trip.
+      socket.receive({ id: socket.frame(0).id, result: { core: { ...CORE, now: sent + 200 + 11_000 }, principal: 'owner' } });
+      await client.connect();
+      expect(client.clockOffset).toBe(11_000);
+      // Back from sleep the device set its clock right on the same socket: the probe's hello measures again.
+      const heard: number[] = [];
+      client.onClockOffset((offset) => heard.push(offset));
+      vi.setSystemTime(Date.now() + 11_000);
+      const resumed = client.resume();
+      await vi.advanceTimersByTimeAsync(0);
+      socket.receive({ id: socket.frame(1).id, result: { core: { ...CORE, now: Date.now() + 300 }, principal: 'owner' } });
+      await resumed;
+      expect(socket.closed).toBe(false);
+      expect(client.clockOffset).toBe(300);
+      expect(heard).toEqual([300]);
+      // A hello held behind an upload comes back 3 s later, held the whole way out: an odd trip that long cannot place the core's clock.
+      const late = client.resume();
+      await vi.advanceTimersByTimeAsync(0);
+      const probed = Date.now();
+      await vi.advanceTimersByTimeAsync(3_001);
+      socket.receive({ id: socket.frame(2).id, result: { core: { ...CORE, now: probed + 3_001 + 300 }, principal: 'owner' } });
+      await late;
+      expect(client.clockOffset).toBe(300);
+      expect(heard).toEqual([300]);
+      // The same slow trip after the device's clock fell 8 s behind: a shift larger than half the trip still counts.
+      vi.setSystemTime(Date.now() - 8_000);
+      const behind = client.resume();
+      await vi.advanceTimersByTimeAsync(0);
+      const again = Date.now();
+      await vi.advanceTimersByTimeAsync(3_000);
+      socket.receive({ id: socket.frame(3).id, result: { core: { ...CORE, now: again + 2_900 + 8_300 }, principal: 'owner' } });
+      await behind;
+      expect(client.clockOffset).toBe(9_700);
+      expect(heard).toEqual([300, 9_700]);
+      // Another slow trip, held on the way back this time, reads 6900: both guesses are 1.5 s wide, so neither replaces the other.
+      const back = client.resume();
+      await vi.advanceTimersByTimeAsync(0);
+      const third = Date.now();
+      await vi.advanceTimersByTimeAsync(3_000);
+      socket.receive({ id: socket.frame(4).id, result: { core: { ...CORE, now: third + 100 + 8_300 }, principal: 'owner' } });
+      await back;
+      expect(client.clockOffset).toBe(9_700);
+      expect(heard).toEqual([300, 9_700]);
+    } finally { client.close(); vi.useRealTimers(); }
+    const old = connected();
+    try {
+      old.socket.open();
+      old.socket.receive({ id: old.socket.frame(0).id, result: { core: CORE, principal: 'owner' } });
+      await old.client.connect();
+      expect(old.client.clockOffset).toBe(0);
+    } finally { old.client.close(); }
+  });
+
   test('a silent RPC expires without resending it, and a probe the core answers keeps the connection', async () => {
     vi.useFakeTimers();
     const { client, socket } = connected();
