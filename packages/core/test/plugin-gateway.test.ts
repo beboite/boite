@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { checkSettingsPatch, type PluginState, type SubscriptionProxy } from '@boite/contracts';
@@ -227,13 +227,16 @@ test.skipIf(process.platform === 'win32')('an update waits for the requests in f
   expect(live()).toBe(1);
 }, 60_000);
 
-test.skipIf(process.platform === 'win32')('an update that renames the gateway executable starts the new one before its record names it', async () => {
+test.skipIf(process.platform === 'win32')('an update that renames the gateway executable starts the new one before its record names it, with its saved settings', async () => {
   delete process.env[DOUANE_BINARY_ENV];
   const { owner } = await core('0.3.0', program('0.3.0'));
   harness!.core.plugins.gateways.readyMs = 3_000;
   await owner.call('plugins.install', { id: 'douane' });
   expect((await gatewayIs(owner, 'running')).gateway?.version).toBe('0.3.0');
   const dir = join(harness!.dataDir, 'plugins', 'douane');
+  const data = join(harness!.dataDir, 'douane');
+  // A setting Douane saved into its configuration.
+  appendFileSync(join(data, 'douane.toml'), '\n[routing]\nsaved = "kept"\n');
 
   harness!.core.plugins.recommended = [douane('0.4.0', program('0.4.0'), 'douane-next')];
   await owner.call('plugins.install', { id: 'douane' });
@@ -242,6 +245,9 @@ test.skipIf(process.platform === 'win32')('an update that renames the gateway ex
   expect(updated.gateway?.version).toBe('0.4.0');
   expect(existsSync(join(dir, 'douane-next'))).toBe(true);
   expect(existsSync(join(dir, 'douane'))).toBe(false);
+  expect(readFileSync(join(data, 'douane-next.toml'), 'utf8')).toContain('saved = "kept"');
+  // The previous name's file stays, for a release that goes back to it.
+  expect(readFileSync(join(data, 'douane.toml'), 'utf8')).toContain('saved = "kept"');
   await until(live, (count) => count === 1, 'one gateway process');
 }, 60_000);
 

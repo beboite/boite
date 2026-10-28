@@ -535,7 +535,7 @@ export class PluginStore {
     try {
       activation = switchRelease(dir, { previous: previous?.binary ?? null, binary, temporary, record });
       // The record names the previous release until the commit: the gateway is handed the new binary.
-      if (ran && providesGateway(manifest) && !await this.gateways.launch(id, false, { binary, executable: manifest.executable })) {
+      if (ran && providesGateway(manifest) && !await this.gateways.launch(id, false, { binary, executable: manifest.executable, replaces: previous?.manifest.executable ?? null })) {
         why = this.gateways.state(id, dir).error ?? `${id} ${manifest.version} did not start`;
         throw new Error(why);
       }

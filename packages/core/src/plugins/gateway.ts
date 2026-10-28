@@ -215,17 +215,24 @@ export class PluginGateways {
     return port;
   }
 
-  /** Writes the configuration once, then only moves its `listen` line: Douane saves its own settings into the same file. */
-  private writeConfig(id: string, executable: string, port: number): string {
+  /**
+   * Writes the configuration once, then only moves its `listen` line: Douane
+   * saves its own settings into the same file. A release that renames the
+   * executable starts from the file of the one it `replaces`, which stays for
+   * a rollback to that release.
+   */
+  private writeConfig(id: string, executable: string, port: number, replaces: string | null): string {
     const dir = this.dataDir(id);
     mkdirSync(join(dir, 'auth'), { recursive: true });
     const file = join(dir, `${executable}.toml`);
-    if (!existsSync(file)) writeFileSync(file, configText(port));
+    const previous = replaces === null || replaces === executable ? null : join(dir, `${replaces}.toml`);
+    const source = existsSync(file) ? file : previous !== null && existsSync(previous) ? previous : null;
+    if (source === null) writeFileSync(file, configText(port));
     else {
-      const text = readFileSync(file, 'utf8');
+      const text = readFileSync(source, 'utf8');
       const listen = `listen = "127.0.0.1:${port}"`;
       const next = /^listen\s*=.*$/m.test(text) ? text.replace(/^listen\s*=.*$/m, listen) : text.replace(/^\[server\]\s*$/m, `[server]\n${listen}`);
-      if (next !== text) writeFileSync(file, next);
+      if (next !== text || source !== file) writeFileSync(file, next);
     }
     return file;
   }
@@ -279,9 +286,10 @@ export class PluginGateways {
    * reason on its state and a relaunch scheduled like a crash). With
    * `relaunch` false a failure only leaves it `crashed`: a relaunch would
    * start it again while the caller reads why, and clear that reason.
-   * `candidate` is the program an update tries before its record names it.
+   * `candidate` is the program an update tries before its record names it,
+   * with the executable name of the release it `replaces`.
    */
-  async launch(id: string, relaunch = true, candidate?: { binary: string; executable: string }): Promise<boolean> {
+  async launch(id: string, relaunch = true, candidate?: { binary: string; executable: string; replaces: string | null }): Promise<boolean> {
     if (this.closing) return false;
     const entry = this.entry(id);
     if (entry.running !== null) return entry.status === 'running';
@@ -297,7 +305,7 @@ export class PluginGateways {
     await this.stopOrphan(id, config);
     if (this.closing || entry.running !== null) return entry.status === 'running';
     const port = this.choosePort(id);
-    this.writeConfig(id, program.executable, port);
+    this.writeConfig(id, program.executable, port, candidate?.replaces ?? null);
     const threadId = `plugin:${id}:gateway`;
     let spawned: SpawnedProcess;
     try {
