@@ -513,6 +513,7 @@ export class Core {
       channel: this.channel,
       pid: process.pid,
       startedAt: this.startedAt,
+      now: Date.now(),
       endpoint: { ...this.endpoint },
       dataDir: this.dataDir,
       trace: this.procs.capability(),

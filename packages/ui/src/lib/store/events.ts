@@ -55,6 +55,7 @@ export function listen(ctx: StoreContext, client: Client): void {
           models.effortAttempts.clear();
           s.error = null;
           s.core = client.core;
+          ctx.connection.clockOffset = client.clockOffset ?? 0;
           if (ctx.connection.localCore) noteThisComputer(s.core?.hostname);
           undo.discardExpired(s, s.core?.startedAt);
           // `WsClient` writes its principal from the hello answer before it
@@ -76,6 +77,7 @@ export function listen(ctx: StoreContext, client: Client): void {
   }
 
   // After the state handler above, so a reconnect has its principal and core first.
+  if (observable(client) && client.onClockOffset) ctx.off.push(client.onClockOffset((offset) => { if (current()) ctx.connection.clockOffset = offset; }));
   if (observable(client)) ctx.off.push(reportPreferences(client, current, experiments => heardDesktop(s, experiments, s.core?.coreId ?? null)));
   on('client.desktopExperiments', ({ experiments }) => heardDesktop(s, experiments, s.core?.coreId ?? null));
 

@@ -62,6 +62,11 @@ export interface CoreInfo {
   channel: Channel;
   pid: number;
   startedAt: Timestamp;
+  /**
+   * The core's clock when it answered. A client compares it with its own to
+   * count elapsed times from the core's timestamps; an older core omits it.
+   */
+  now?: Timestamp;
   /** Bind address, possibly a wildcard. `pairing.grant` gives the link a phone opens. */
   endpoint: { host: string; port: number };
   dataDir: string;
