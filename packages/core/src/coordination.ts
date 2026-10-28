@@ -338,7 +338,7 @@ export class Coordination {
       if (batch.length > 0) this.restoreProject(threadId);
       for (const letter of batch) this.update(letter, 'delivered');
       return batch;
-    });
+    }, () => this.ready(threadId, Infinity, from, true));
     return withRelations(this.core, this.self('').coreId, threadId, letters.map(letter => ({ ...letter, status: 'delivered' as const })));
   }
   /** A waiting agent takes the letter that just arrived, with what else it may read now. */
@@ -555,34 +555,40 @@ export class Coordination {
       this.core.threads.noteCoordination(threadId, turnId, prompt);
       for (const letter of batch) this.update(letter, 'delivered');
       return prompt;
-    });
+    }, () => this.ready(threadId, BATCH, null, true));
   }
   /**
-   * The oldest received letters this thread may take now. Held ones (paused,
-   * off, no longer permitted) stay in the inbox and never hide those behind them.
+   * The oldest received letters this thread may take now, only its local mail
+   * when `local`. Held ones (paused, off, no longer permitted) stay in the inbox
+   * and never hide those behind them.
    */
-  private ready(threadId: string, limit: number, from: AgentAddress | null = null): AgentLetter[] {
+  private ready(threadId: string, limit: number, from: AgentAddress | null = null, local = false): AgentLetter[] {
     const letters: AgentLetter[] = [];
-    const rows = this.core.journal.db.query("SELECT data FROM coordination_letters WHERE thread_id = ? AND direction = 'in' AND status = 'received' ORDER BY created_at").iterate(threadId) as IterableIterator<Row>;
-    for (const row of rows) {
-      const letter = JSON.parse(row.data) as AgentLetter;
-      if (letter.expiresAt > Date.now() && (from === null || same(letter.from, from)) && this.mayReceive(letter)) letters.push(letter);
-      if (letters.length >= limit) { rows.return?.(); break; }
-    }
+    // Its own statement: a cached one left half read at the limit breaks the next selection.
+    const statement = this.core.journal.db.prepare("SELECT data FROM coordination_letters WHERE thread_id = ? AND direction = 'in' AND status = 'received' ORDER BY created_at");
+    try {
+      for (const row of statement.iterate(threadId) as Iterable<Row>) {
+        const letter = JSON.parse(row.data) as AgentLetter;
+        if (letter.expiresAt > Date.now() && !(local && letter.contact) && (from === null || same(letter.from, from)) && this.mayReceive(letter)) letters.push(letter);
+        if (letters.length >= limit) break;
+      }
+    } finally { statement.finalize(); }
     return letters;
   }
   /**
    * The one way a letter reaches its agent: a wait's tool output, a hook, a
    * steer or a wake. Contact mail gets its file protection first. Mail this
    * turn cannot protect stays in the inbox, where the turn's end kicks it
-   * again, and `consume` gets the rest; `whole` refuses the batch instead.
-   * `update` refuses to deliver any letter `consume` was not given here.
+   * again, and `consume` gets the local mail `local` selects in its place, so
+   * held contact letters never fill the batch; without `local` the whole batch
+   * is refused. `update` refuses to deliver any letter `consume` was not given here.
    */
-  private admit<T>(threadId: string, letters: AgentLetter[], consume: (batch: AgentLetter[]) => T, whole = false): T {
+  private admit<T>(threadId: string, letters: AgentLetter[], consume: (batch: AgentLetter[]) => T, local?: () => AgentLetter[]): T {
     let batch = letters;
     try { protectLetters(this.core, threadId, batch); } catch (error) {
-      if (whole || !batch.some(letter => letter.contact)) throw error;
-      batch = batch.filter(letter => !letter.contact);
+      // Only a policy refusal holds mail back; anything else is a fault to report.
+      if (!local || !(error instanceof RpcFailure) || !batch.some(letter => letter.contact)) throw error;
+      batch = local();
     }
     const outer = this.admitting;
     this.admitting = new Set(batch.map(letter => letter.id));
@@ -631,7 +637,7 @@ export class Coordination {
       this.restoreProject(threadId);
       for (const letter of letters) this.update(letter, 'uncertain', `Awaiting provider turn ${turnId}`);
       return true;
-    }, true);
+    });
   }
   private async steer(threadId: string, prompt: string): Promise<{ submitted: boolean } | null> {
     if (this.closed) return null;
@@ -659,6 +665,7 @@ export class Coordination {
     if (!ready.length) return;
     this.delivering.add(threadId);
     const prompt = (batch: AgentLetter[]) => letterPrompt(batch, senderContext(this.core, this.self('').coreId, threadId));
+    const local = () => this.ready(threadId, BATCH, null, true);
     try {
       if (thread.status === 'running') {
         const letters = this.admit(threadId, ready, batch => {
@@ -666,7 +673,7 @@ export class Coordination {
           this.restoreProject(threadId);
           for (const letter of batch) this.update(letter, 'uncertain', 'Awaiting provider acknowledgement');
           return batch;
-        });
+        }, local);
         if (!letters) return;
         try {
           const result = await this.steer(threadId, prompt(letters));
@@ -688,7 +695,7 @@ export class Coordination {
           for (const letter of batch) this.update(letter, 'uncertain', 'Queued for provider delivery');
           this.core.journal.db.query('INSERT INTO coordination_wakes VALUES (?, ?)').run(threadId, Date.now());
           this.core.threads.startTurn(threadId, prompt(batch), [], undefined, 'coordination');
-        })());
+        })(), local);
       }
     } catch (error) {
       // A persistent agent that is paused or out of budget: its letters wait in the inbox for it.

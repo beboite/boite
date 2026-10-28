@@ -122,7 +122,7 @@ test.each([
   } finally {deliver.mockRestore();b.h.core.providers.require('echo').protocol='echo';done.resolve({status:'stopped',sessionId:null,usage:null});restore();}
 },30000);
 
-test.each(['steer','hook'] as const)('SEC-01 %s delivery leaves contact mail it cannot protect in the inbox and still delivers the local letter beside it',async delivery=>{
+test.each(['steer','hook'] as const)('SEC-01 %s delivery leaves contact mail it cannot protect in the inbox and still delivers the local letter behind a batch of it',async delivery=>{
   const {a,b}=await pair();
   const done=Promise.withResolvers<import('../src/drivers/types.ts').TurnResult>();
   const steered:string[]=[];
@@ -133,8 +133,10 @@ test.each(['steer','hook'] as const)('SEC-01 %s delivery leaves contact mail it 
     const local=b.h.core.threads.create({projectId:b.p.id,providerId:'echo',accountId:b.t.accountId});
     b.h.core.threads.startTurn(b.t.id,'Owner work');
     await waitFor(()=>b.h.core.threads.require(b.t.id).status==='running');
-    const contact=await a.c.call('contacts.sendHuman',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'External correspondence',requestId:`mixed-${delivery}`});
-    await waitFor(()=>b.h.core.coordination.get(b.t.id).messages.some(l=>l.id===contact.id));
+    // A whole batch of contact mail ahead of the local letter: protection holds all of it.
+    const contacts:AgentLetter[]=[];
+    for(let i=0;i<4;i++) contacts.push(await a.c.call('contacts.sendHuman',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'External correspondence',requestId:`mixed-${delivery}-${i}`}));
+    await waitFor(()=>contacts.every(contact=>b.h.core.coordination.get(b.t.id).messages.some(l=>l.id===contact.id)));
     const peer=await b.h.core.coordination.send({threadId:local.id,to:{coreId:b.id,threadId:b.t.id},text:'Local status',requestId:`local-${delivery}`});
     // A running native turn with no protection: the contact letter must wait for its end.
     b.h.core.providers.require('echo').protocol='pi';
@@ -147,9 +149,22 @@ test.each(['steer','hook'] as const)('SEC-01 %s delivery leaves contact mail it 
     expect(prompt).toContain('Local status');
     expect(prompt).not.toContain('External correspondence');
     expect(status(peer.id)).toBe('delivered');
-    expect(status(contact.id)).toBe('received');
+    for(const contact of contacts) expect(status(contact.id)).toBe('received');
     expect(b.h.core.coordination.config(b.t.id).paused).toBe(false);
   } finally {deliver.mockRestore();b.h.core.providers.require('echo').protocol='echo';done.resolve({status:'stopped',sessionId:null,usage:null});restore();}
+},30000);
+
+test('SEC-01 a fault while protecting contact mail is reported, never taken for a refusal that holds the letter back',async()=>{
+  const {a,b}=await pair();
+  const deliver=spyOn(b.h.core.coordination as unknown as {deliver(threadId:string):Promise<void>},'deliver').mockResolvedValue(undefined);
+  try {
+    const letter=await a.c.call('contacts.sendHuman',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'External correspondence',requestId:'fault'});
+    await waitFor(()=>b.h.core.coordination.get(b.t.id).messages.some(l=>l.id===letter.id));
+    const support=spyOn(b.h.core.sharedAccess.execution,'support').mockImplementation(()=>{throw new Error('checkout unreadable');});
+    try {expect(()=>b.h.core.coordination.wait(b.t.id,undefined,0)).toThrow('checkout unreadable');}
+    finally {support.mockRestore();}
+    expect(b.h.core.coordination.get(b.t.id).messages.find(l=>l.id===letter.id)?.status).toBe('received');
+  } finally {deliver.mockRestore();}
 },30000);
 
 test.each([false,true])('SEC-01 historical letters survive restart without losing protection (old history: %s)',async old=>{

@@ -237,6 +237,27 @@ test('a running driver receives a steer once, and uncertain dispatch is never re
   expect(h.core.coordination.take(b, h.core.journal.listTurns(b)[0]!.id)).toBeNull();
 });
 
+test('a hook that takes a full batch leaves the inbox readable for the next selection, on any thread', async () => {
+  const { h, a, b } = await setup(); enable(h, a, b);
+  let finish!: () => void;
+  restores.push(setDriver('echo', { protocol: 'echo', startTurn() {
+    return { done: new Promise(resolve => { finish = () => resolve({ status: 'stopped', sessionId: null, usage: null }); }), stop() { finish(); } };
+  } }));
+  // Letters stay in the inbox until a hook or a wait takes them.
+  const deliver = spyOn(h.core.coordination as unknown as { deliver(threadId: string): Promise<void> }, 'deliver').mockResolvedValue(undefined);
+  restores.push(() => deliver.mockRestore());
+  h.core.threads.startTurn(b, 'Deploy');
+  await waitFor(() => h.core.threads.require(b).status === 'running');
+  for (let i = 0; i < 5; i++) await send(h, a, dest(h, b), `Step ${i}`);
+  await send(h, b, dest(h, a), 'Back to you');
+  const turn = h.core.journal.lastTurn(b)!.id;
+  // Exactly a batch: the selection stops at its limit with a row still unread.
+  expect(h.core.coordination.take(b, turn)).toContain('Step 3');
+  expect((await h.core.coordination.wait(a, undefined, 0)).letters.map(letter => letter.text)).toEqual(['Back to you']);
+  expect(h.core.coordination.take(b, turn)).toContain('Step 4');
+  finish();
+});
+
 test('two real cores exchange signed directory, message, reply and receipt without sharing owner tokens', async () => {
   const one = await setup(); const two = await setup();
   const cardA = one.h.core.coordination.identity(), cardB = two.h.core.coordination.identity();
