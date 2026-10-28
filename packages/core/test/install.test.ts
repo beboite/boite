@@ -103,10 +103,10 @@ function url(path: string): string {
   return `${server.url.origin}${path}`;
 }
 
-function descriptor(install: Record<string, unknown>): Record<string, unknown> {
+function descriptor(install: Record<string, unknown>, executablePath = EXE_PATH): Record<string, unknown> {
   const profile = {
     detect: {},
-    executable: [{ kind: 'file', value: `{agentsDir}/${EXE_PATH}` }],
+    executable: [{ kind: 'file', value: `{agentsDir}/${executablePath}` }],
     isolation: { MANAGED_HOME: '{isolationDir}' },
     install,
   };
@@ -159,10 +159,10 @@ function nextInstall(): Record<string, unknown> {
 }
 
 /** Writes the descriptor and makes the core re-read it, the way a user would. */
-async function loadDescriptor(install: Record<string, unknown>): Promise<void> {
+async function loadDescriptor(install: Record<string, unknown>, executablePath = EXE_PATH): Promise<void> {
   const dir = join(harness.dataDir, 'providers');
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'managed.json'), JSON.stringify(descriptor(install), null, 2), 'utf8');
+  writeFileSync(join(dir, 'managed.json'), JSON.stringify(descriptor(install, executablePath), null, 2), 'utf8');
   const client = await harness.connect();
   const { rejected } = await client.call('providers.reload', {});
   expect(rejected).toEqual([]);
@@ -353,11 +353,11 @@ describe('managed installs', () => {
     expect(provider?.install?.state).toBe('failed');
     if (provider?.install?.state === 'failed') expect(provider.install.message).toContain('.install-complete.json');
   });
-  test('a release that current reaches without its completion record is not available', async () => {
+  test.each(['bin', '..bin'])('a release that current reaches without its completion record is not available (%s)', async (directory) => {
     // What an update a stop cut off leaves when recovery cannot settle it: the binary, no record.
-    await loadDescriptor(goodInstall());
-    mkdirSync(agentDir('current', 'bin'), { recursive: true });
-    writeFileSync(agentDir('current', 'bin', 'agent.exe'), EXE, { mode: 0o755 });
+    await loadDescriptor(goodInstall(), `${directory}/agent.exe`);
+    mkdirSync(agentDir('current', directory), { recursive: true });
+    writeFileSync(agentDir('current', directory, 'agent.exe'), EXE, { mode: 0o755 });
     const client = await harness.connect();
     const provider = (await client.call('providers.list', {})).loaded.find((entry) => entry.id === 'managed');
     expect(provider?.install?.state).toBe('absent');

@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { forgetWhich } from './which.ts';
 import {
   threadActive,
@@ -90,7 +90,10 @@ export function summarize(
   const executable = profile === undefined ? null : (resolveCommand(profile, enabled)?.shown ?? null);
   const current = installs.currentDir(entry.descriptor.id);
   // A program found in the managed release counts once that release is whole: an update cut off and not yet settled leaves its files without the record.
-  const inRelease = (path: string) => { const rest = relative(current, path); return rest !== '' && !rest.startsWith('..') && !isAbsolute(rest); };
+  const inRelease = (path: string): boolean => {
+    const rest = relative(current, path);
+    return rest !== '' && rest !== '..' && !rest.startsWith(`..${sep}`) && !isAbsolute(rest);
+  };
   const fromRelease = install !== undefined && profile !== undefined &&
     (profile.detect.file?.includes('{agentsDir}') === true || (executable !== null && inRelease(executable)));
   const available =
