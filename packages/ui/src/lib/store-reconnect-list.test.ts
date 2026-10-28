@@ -96,7 +96,7 @@ test('a load the gap ended is cleared on a row the answer left out', async () =>
   expect(store.threads.find(row => row.id === 't-trace')?.load ?? null).toBeNull();
 });
 
-test('a deletion the list left to a newer read that gave up is read again on the next reconnect', async () => {
+test.each([0, 1])('a deletion the list left to a newer read that gave up is read again on the next reconnect, %i quiet loads between', async (quiet) => {
   const { client, store, real } = await connected();
   let release: (() => void) | null = null;
   vi.mocked(client.call).mockImplementation(((method: string, params: never, callOptions?: never) => {
@@ -112,6 +112,8 @@ test('a deletion the list left to a newer read that gave up is read again on the
   const giveUp = store.preload('t-trace');
   release!();
   await store.reload();
+  // A load whose answer is empty, while that read is still out, does not forget what it owes.
+  for (let load = 0; load < quiet; load += 1) await store.reload();
   giveUp();
   expect(store.threads.some(row => row.id === 't-trace')).toBe(true);
 

@@ -83,11 +83,15 @@ export class Connection {
   /**
    * Where the last thread list applied here left this client: the next load
    * on the same client, a reconnect, reads only what changed since. A new
-   * client or `detach` (a new generation) reads whole again, and so does the
-   * next load once a newer read the list left rows to (`deferred`) gives up:
-   * those rows were never brought up to the cursor.
+   * client or `detach` (a new generation) reads whole again.
    */
-  #threadList: { client: Client; generation: number; cursor: ListCursor; deferred: ReadonlySet<number> } | null = null;
+  #threadList: { client: Client; generation: number; cursor: ListCursor } | null = null;
+  /**
+   * The newer reads still out that an applied list left rows to. A list that
+   * changed nothing there does not settle them, so they stay until they end;
+   * one that gives up drops the cursor, since its rows never reached it.
+   */
+  readonly #deferred = new Set<number>();
   #localRecovery: ReturnType<typeof setTimeout> | null = null;
   /** Moves on every stop, so an ask still out from an earlier loss never reschedules. */
   #recoveryGeneration = 0;
@@ -97,7 +101,11 @@ export class Connection {
   #signed = false;
 
   constructor(private readonly ctx: StoreContext) {
-    ctx.threadReads.onAbandoned(sequence => { if (this.#threadList?.deferred.has(sequence)) this.#threadList = null; });
+    ctx.threadReads.onFinished((sequence, applied) => {
+      if (!this.#deferred.delete(sequence) || applied) return;
+      this.#threadList = null;
+      this.#deferred.clear();
+    });
   }
 
   /**
@@ -644,7 +652,10 @@ export class Connection {
         const fresh = answer.kind === 'full' ? answer.threads : applyThreadChanges(s.threads, answer.threads, answer.removed);
         const applied = threadRead.active;
         s.threads = reconcileRows(s.threads, threadRead.apply(fresh, s.threads));
-        this.#threadList = applied && answer.cursor ? { client, generation, cursor: answer.cursor, deferred: threadRead.deferred } : null;
+        // A whole list wrote every row an older read had left: only its own deferrals stay.
+        if (!applied || !answer.cursor || answer.kind === 'full') this.#deferred.clear();
+        for (const sequence of threadRead.deferred) this.#deferred.add(sequence);
+        this.#threadList = applied && answer.cursor ? { client, generation, cursor: answer.cursor } : null;
         const read = reopened && s.openThread?.unread === false ? s.threads.find(t => t.id === s.openThread?.id) : undefined;
         if (read) read.unread = false;
         const listed = new Set(s.threads.map(t => s.threadKey(t.id)));

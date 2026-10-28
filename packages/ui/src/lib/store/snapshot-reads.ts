@@ -2,13 +2,13 @@
 export class SnapshotReads<T extends { id: string }> {
   #sequence = 0;
   #reads = new Set<SnapshotRead<T>>();
-  #abandoned = new Set<(sequence: number) => void>();
+  #finished = new Set<(sequence: number, applied: boolean) => void>();
   constructor(private readonly group: (row: T) => string) {}
 
-  /** Hears every read that ends without applying, by its sequence. */
-  onAbandoned(listener: (sequence: number) => void): () => void {
-    this.#abandoned.add(listener);
-    return () => this.#abandoned.delete(listener);
+  /** Hears every read that ends, by its sequence, and whether it applied. */
+  onFinished(listener: (sequence: number, applied: boolean) => void): () => void {
+    this.#finished.add(listener);
+    return () => this.#finished.delete(listener);
   }
 
   begin(scope = 'all'): SnapshotRead<T> {
@@ -19,7 +19,7 @@ export class SnapshotReads<T extends { id: string }> {
     const read = new SnapshotRead(scope, sequence, this.group, (applied) => {
       this.#reads.delete(read);
       for (const older of this.#reads) older.release(scope, sequence, applied);
-      if (!applied) for (const listener of this.#abandoned) listener(sequence);
+      for (const listener of this.#finished) listener(sequence, applied);
     });
     this.#reads.add(read);
     return read;
