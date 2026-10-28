@@ -52,6 +52,8 @@ export interface BotLease {
    * a sync's answer gives them back, until a lease of the bot lists them.
    */
   started?: ThreadId[];
+  /** Threads the bot's owner or the bot took off its desk: a start of them this machine still holds is let go. */
+  dropped?: ThreadId[];
   v: number;
 }
 
@@ -108,6 +110,8 @@ export function checkLease(value: unknown, field = 'lease'): BotLease {
     name: textOf(raw.name, `${field}.name`, 100),
     projectIds: list(raw.projectIds, 'projectIds', 50),
     watched: list(raw.watched, 'watched', 200),
+    // A bot's core older than this field sends none.
+    ...(raw.dropped === undefined ? {} : { dropped: list(raw.dropped, 'dropped', 200) }),
     v: raw.v,
   };
 }
@@ -222,7 +226,7 @@ export class GroupBotHost {
 
   /** A lease the bot's core sent, still watching the threads it started here that the bot does not list yet. */
   private kept(saved: BotLease | undefined, sent: BotLease): BotLease {
-    const started = (saved?.started ?? []).filter(id => !sent.watched.includes(id) && this.core.journal.getThread(id) !== null);
+    const started = (saved?.started ?? []).filter(id => !sent.watched.includes(id) && !(sent.dropped ?? []).includes(id) && this.core.journal.getThread(id) !== null);
     return started.length === 0 ? sent : { ...sent, watched: [...sent.watched, ...started].slice(-200), started };
   }
 

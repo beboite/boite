@@ -27,6 +27,8 @@ import { quoted } from './validation.ts';
 const DAY = 86_400_000;
 const NAMES = 'group-bots:names:';
 const FOLLOW = 'group-bots:follow:';
+/** Threads of other machines the owner or the bot took off a bot's desk, as `<core-id>/<thread-id>`, newest last. */
+const DROPPED = 'group-bots:dropped:';
 /** The machines the last sync gave a lease to: one that loses every lease hears it once. */
 const LEASED = 'group-bots:leased';
 /** How long a request to another machine may take before it counts as unreachable. */
@@ -103,7 +105,9 @@ export class GroupBots {
     // A follow is kept as `<core-id>/<thread-id>`.
     const watched = Object.keys(this.follows(agent.id)).flatMap(key => { const pair = remoteGrant(key); return pair?.coreId === coreId ? [pair.projectId] : []; });
     const pending = [...this.sending].filter(send => send.agentId === agent.id && send.coreId === coreId).map(send => send.threadId);
-    return { agentId: agent.id, threadId, name: agent.name, projectIds, watched: [...new Set([...watched, ...pending])].slice(-200), v };
+    // Taken off the desk on purpose: a thread it started there that machine still holds for it stays off.
+    const dropped = this.dropped(agent.id).flatMap(key => { const pair = remoteGrant(key); return pair?.coreId === coreId ? [pair.projectId] : []; });
+    return { agentId: agent.id, threadId, name: agent.name, projectIds, watched: [...new Set([...watched, ...pending])].slice(-200), ...(dropped.length ? { dropped } : {}), v };
   }
 
   /** The owner entrusted or took back projects of other machines, or archived the bot: those machines hear it now. */
@@ -133,16 +137,26 @@ export class GroupBots {
     return !follow.row.archived || follow.seenAt > now - DAY;
   }
 
+  private dropped(agentId: string): string[] { return (this.core.journal.getSetting(`${DROPPED}${agentId}`) as string[] | undefined) ?? []; }
+  private writeDropped(agentId: string, keys: string[]): void {
+    if (keys.length === 0) this.core.journal.deleteSetting(`${DROPPED}${agentId}`);
+    else this.core.journal.setSetting(`${DROPPED}${agentId}`, keys.slice(-200));
+  }
+
   follow(agentId: string, peer: CoordinationPeer, row: ProjectThreadRow, origin: AgentWatch['origin'] = 'followed'): void {
     const follows = this.follows(agentId);
     const key = `${peer.coreId}/${row.id}`;
     const fresh = follows[key] === undefined;
+    const dropped = this.dropped(agentId);
+    if (dropped.includes(key)) this.writeDropped(agentId, dropped.filter(entry => entry !== key));
     this.writeFollows(agentId, { ...follows, [key]: { at: follows[key]?.at ?? Date.now(), origin: follows[key]?.origin ?? origin, row: { ...row, machine: machineArg(this.core, peer) }, seenAt: Date.now() } });
     if (fresh) this.schedule(peer.coreId, SYNC_MS);
   }
   unfollow(agentId: string, coreId: string, threadId: ThreadId): boolean {
     const follows = this.follows(agentId);
     const key = `${coreId}/${threadId}`;
+    const dropped = this.dropped(agentId);
+    if (!dropped.includes(key)) { this.writeDropped(agentId, [...dropped, key]); this.schedule(coreId, SYNC_MS); }
     if (follows[key] === undefined) return false;
     const { [key]: _gone, ...rest } = follows;
     this.writeFollows(agentId, rest);
@@ -325,7 +339,8 @@ export class GroupBots {
     if (typeof agentId !== 'string' || row === null || row.projectId === null) return;
     const agent = this.store.records.find('profile', agentId);
     if (agent === null || agent.status !== 'active' || !this.grants(agent, peer.coreId).includes(row.projectId)) return;
-    if (this.follows(agent.id)[`${peer.coreId}/${row.id}`] === undefined) this.follow(agent.id, peer, row, 'started');
+    const key = `${peer.coreId}/${row.id}`;
+    if (this.follows(agent.id)[key] === undefined && !this.dropped(agent.id).includes(key)) this.follow(agent.id, peer, row, 'started');
   }
 
   /** A `bot.*` request of a member: its events for this machine's bots, or what its bots ask of this machine. */

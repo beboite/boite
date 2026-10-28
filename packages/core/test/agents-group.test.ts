@@ -423,6 +423,28 @@ test('a thread a bot started on another machine whose answer was lost comes back
   expect(pc.core.workforce.groupHost.leases(deskId)[agent().id]!.started).toBeUndefined();
 }, 30_000);
 
+test('a thread a bot started on another machine and took off its desk before any lease sync stays off it', async () => {
+  answering();
+  const { desk, pc, pcOwner, pcId, deskId, cli, agent, machine } = await setup();
+  await pcOwner.call('settings.set', { groupBots: true });
+  await desk.core.workforce.group.sync(pcId);
+  const started = await cli(['thread', 'new', `${machine}/Notes`, 'Sort the letters', '--title', 'Sort', '--request-id', 'sort-1']);
+  const ref = `${machine}/${/^thread: (\S+)$/m.exec(started.out)![1]!}`;
+  const id = ref.slice(machine.length + 1);
+  expect((await cli(['bot', 'unwatch', ref])).code).toBe(0);
+  expect(desk.core.workforce.group.desk(agent())).toEqual([]);
+  // The lease that tells that machine so lets the start go there, and nothing puts it back.
+  await desk.core.workforce.group.sync(pcId);
+  expect(desk.core.workforce.group.desk(agent())).toEqual([]);
+  expect(pc.core.workforce.groupHost.leases(deskId)[agent().id]).toMatchObject({ watched: [] });
+  expect(pc.core.workforce.groupHost.leases(deskId)[agent().id]!.started).toBeUndefined();
+  // Watching it again is the owner's or the bot's call, as for any thread there.
+  expect((await cli(['bot', 'watch', ref])).code).toBe(0);
+  await desk.core.workforce.group.sync(pcId);
+  expect(desk.core.workforce.group.desk(agent()).map(watch => watch.threadId)).toEqual([id]);
+  expect(pc.core.workforce.groupHost.leases(deskId)[agent().id]).toMatchObject({ watched: [id] });
+}, 30_000);
+
 test('a full outbox goes in requests a member accepts, oldest first, none left behind', () => {
   const row = { id: 'thr_x', title: 'Letter', projectId: 'prj_x', project: 'Notes', status: 'idle', archived: false, branch: null, questions: 0, permissions: 0, pullRequest: null, updatedAt: 1, lastCompletedAt: null } as const;
   const events: BotEvent[] = Array.from({ length: OUTBOX_MAX }, (_, index) => ({ agentId: 'agt_ada', kind: 'turn', key: `turn:${index}`, row, status: 'done', answer: 'x'.repeat(1_500) + 'é'.repeat(1_000) }));

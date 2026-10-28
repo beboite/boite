@@ -477,7 +477,8 @@ never as a letter. `groupThreads` plays no part. A retry with the same
 one. When the answer to `bot.start` is lost, that machine keeps the thread
 watched until a lease of the bot lists it: the next lease sync's answer, or the
 event of its first turn, puts it back on the bot's desk, and that answer still
-reaches the bot once. A project of that machine not entrusted to the bot is refused with the
+reaches the bot once. A thread taken off the desk (`boite bot unwatch`) before
+that is let go there too: the bot's leases name what it took off. A project of that machine not entrusted to the bot is refused with the
 ones it may use there; a machine with `groupBots` off, too old for `bot.start`
 or not answering is named as for every other request. The thread there
 obeys that machine's rule: it starts nothing until the user writes in it.
