@@ -134,7 +134,10 @@ test("fake agents.create: the core's refusals, then the bot made at once on the 
 test('fake model cards name the provider and move an agent to another one, allowing the route', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
   const mira = await agent(client);
-  await client.call('agents.runtime.configure', { agentId: mira.id, expectedRevision: mira.revision, config: await client.call('agents.runtime.get', { agentId: mira.id }) });
+  // Two routes the owner named already hold the card's reference as their ids.
+  const policy = await client.call('agents.runtime.get', { agentId: mira.id });
+  const own = policy.allowedRoutes[0]!;
+  await client.call('agents.runtime.configure', { agentId: mira.id, expectedRevision: mira.revision, config: { ...policy, allowedRoutes: [{ ...own, id: 'codex/default' }, { ...own, id: 'codex/default-3', effort: 'low' }] } });
   const { id: threadId } = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
   await client.call('turns.start', { threadId, prompt: 'Move the bot.' });
   await client.settled();
@@ -149,5 +152,5 @@ test('fake model cards name the provider and move an agent to another one, allow
   expect(saved.selection).toMatchObject({ providerId: 'codex', model: 'default' });
   const config = await client.call('agents.runtime.get', { agentId: mira.id });
   expect(config.defaultRoute).toMatchObject({ providerId: 'codex', model: 'default' });
-  expect(config.allowedRoutes.map(route => `${route.providerId}/${route.model}`)).toEqual(['echo/echo-1', 'codex/default']);
+  expect(config.allowedRoutes.map(route => `${route.id}: ${route.providerId}/${route.model}`)).toEqual(['codex/default: echo/echo-1', 'codex/default-3: echo/echo-1', 'codex/default-2: codex/default']);
 });

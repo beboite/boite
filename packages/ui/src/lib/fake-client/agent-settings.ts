@@ -127,8 +127,11 @@ function write(ctx: FakeContext, agent: AgentProfile, key: AgentSettingAsk['key'
       // As the core: applying the card allows the route in the agent's settings.
       const routes = config.allowedRoutes, ref = `${providerId}/${model}`;
       const listed = routes.some(route => route.providerId === providerId && route.accountId === accountId && route.model === model);
-      const name = modelsOf(ctx, providerId, accountId).find(entry => entry.id === model)?.name ?? model;
-      const allowedRoutes = listed ? routes : [...routes, { id: routes.some(route => route.id === ref) ? `${ref}-${routes.length + 1}` : ref, name, providerId, accountId, model, effort }];
+      const name = (modelsOf(ctx, providerId, accountId).find(entry => entry.id === model)?.name ?? model).slice(0, 100);
+      // The route's id is the reference, numbered until no route holds it.
+      let id = ref.slice(0, 64);
+      for (let n = 2; routes.some(route => route.id === id); n++) id = `${ref.slice(0, 60)}-${n}`;
+      const allowedRoutes = listed ? routes : [...routes, { id, name, providerId, accountId, model, effort }];
       return ctx.agents.writeSetting(agent.id, { selection, config: { ...config, defaultRoute: selection, allowedRoutes } });
     }
     case 'effort': return ctx.agents.writeSetting(agent.id, { selection: { ...agent.selection, effort: value as string | null } });
