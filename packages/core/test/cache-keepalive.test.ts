@@ -191,7 +191,7 @@ describe('cache keepalive', () => {
       s.state.pings = [MISS];
       const missed = s.client.next('turn.finished', t => t.threadId === s.threadId && t.execution?.operation === 'keepalive');
       await s.turn();
-      expect((await missed).usage).toEqual(MISS);
+      expect((await missed).usage).toEqual({ ...MISS, buckets: 1 });
       await pause(700);
       expect((await s.pings()).length).toBe(1);
     } finally { s.restore(); }

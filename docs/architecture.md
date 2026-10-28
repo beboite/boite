@@ -571,9 +571,11 @@ cores; a fixed known divergence must leave its explicit exception list.
 `bun run check:architecture` checks production runtime imports, including literal
 dynamic imports. It rejects cycles, runtime cross-imports, contracts importing
 runtimes, native backends imported outside their boundary and internal imports
-of entry modules. Type-only imports, Svelte scripts and Rust are outside this
-check. Unmapped workspace exports fail. The same check enforces 900 source lines
-or a shrinking allowance in `scripts/architecture/size-budget.json`.
+of entry modules. Svelte component scripts count as modules; type-only imports
+do not. Rust, Kotlin and Java have no import graph here. Unmapped workspace
+exports fail. The same check enforces 900 source lines, Rust and the Android
+sources included, or a shrinking allowance in
+`scripts/architecture/size-budget.json`.
 `bun run audit:complexity` provides an advisory ranking, not a CI threshold.
 [Development](development.md#architecture-checks) owns the commands and scope.
 

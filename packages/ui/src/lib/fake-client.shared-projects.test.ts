@@ -245,6 +245,20 @@ test('an authenticated agent uses only its own source and cannot confirm a share
   expect(await a.call('sharedBoard.apply',{...as,command:{kind:'remove',cardId:'agent-card',requestId:'agent-remove'}}).catch(e=>e)).toMatchObject({code:RpcErrorCode.Refused});
 });
 
+test('an agent hears its board as todos.list reads it, without a shared card its source may not reach, as server.ts visibleTodos',async()=>{
+  const {a,b,as,bs}=await sharedPair({agentThreadId:'t-trace'});
+  await a.call('sharedProjects.configure',{sharedProjectId:as.sharedProjectId,board:true});
+  await b.call('sharedProjects.configure',{sharedProjectId:bs.sharedProjectId,board:true});
+  await a.call('sharedBoard.apply',{...as,command:{kind:'add',cardId:'restricted-shared',requestId:'restricted-add',text:'Shared work'}});
+  await a.call('collaboration.configure',{threadId:as.threadId,config:{mode:'team',remote:false,paused:false,resources:''}});
+  a.becomes('agent');
+  const events:string[][]=[];a.on('todos.updated',e=>events.push(e.todos.map(t=>t.id)));
+  await a.call('todos.add',{threadId:as.threadId,text:'Local work'});
+  const listed=(await a.call('todos.list',{threadId:as.threadId})).map(t=>t.id);
+  expect(listed).not.toContain('restricted-shared');
+  expect(events).toEqual([listed]);
+});
+
 test('host review routes and exact file overrides stay private, scoped and revocable',async()=>{
   const {a,b,as,bs}=await sharedPair();
   const account=(await b.call('accounts.list',{})).find(a=>a.providerId==='echo')!;

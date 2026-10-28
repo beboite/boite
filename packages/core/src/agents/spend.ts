@@ -23,7 +23,7 @@ export function agentSpend(core: Core, botThreadId: string, sinceMs: number): Ag
   let costUsd = 0;
   let unpriced = 0;
   for (const row of core.journal.usageOfTree(botThreadId, sinceMs)) {
-    const { usage, priced } = priceGroup(core, row, row.provider_id, row.model);
+    const { usage, priced } = priceGroup(core, row);
     costUsd += usage.costUsdEquivalent ?? 0;
     unpriced += row.reported - priced;
   }

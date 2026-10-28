@@ -4,6 +4,7 @@
   import { currentSetting, experimentOf, isExperimentKey, type QuestionAnswer, type Settings, type SettingAsk } from '@boite/contracts';
   import { readExperiments, setExperiment, subscribeExperiments } from '../lib/experiments';
   import { keepFocus } from '../lib/focus';
+  import { desktopSettings } from '../lib/settings-tabs';
   import { retiredHint, settingHeading, settingHint, settingLabel, settingPlaceText, settingsReachable, settingValueText } from '../lib/setting-requests';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -46,7 +47,7 @@
   let busy = $state(false);
   /** The same test Settings makes to draw the phone's own page (`SettingsShell.svelte`). */
   const narrow = new MediaQuery('(max-width: 720px)');
-  const phone = $derived(narrow.current && window.__TAURI_INTERNALS__ === undefined);
+  const phone = $derived(!desktopSettings(narrow.current));
 
   const change = $derived(setting.kind === 'change' ? setting : null);
   /** An experiment is this device's own switch, which any of the user's devices flips for itself. */

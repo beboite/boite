@@ -2,6 +2,7 @@ import { afterEach, expect, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { test } from '../test/fake-client';
 import SubscriptionProxySettings from './SubscriptionProxySettings.svelte';
+import { phoneWidth } from '../test/phone-width';
 
 let mounted: ReturnType<typeof mount> | undefined;
 afterEach(async () => { if (mounted) await unmount(mounted); mounted = undefined; document.body.innerHTML = ''; });
@@ -33,6 +34,21 @@ test('the plugin choice saves local mode at the Douane plugin\'s port and says i
   q('subscription-proxy-remote')!.click();
   flushSync();
   expect(q<HTMLInputElement>('subscription-proxy-url')?.value).toBe('http://127.0.0.1:8787');
+});
+
+test('on a phone, which leaves Plugins to the desktop, the card says the plugin is missing and leads nowhere', async ({ ready }) => {
+  const restore = phoneWidth();
+  try {
+    const { store, client } = await ready({ delayMs: 0 });
+    await client.call('plugins.uninstall', { id: 'douane' });
+    mounted = mount(SubscriptionProxySettings, { target: document.body, props: { store } });
+    flushSync();
+    q('subscription-proxy-local')!.click();
+    await vi.waitFor(() => expect(q('subscription-proxy-plugin')?.dataset.state).toBe('missing'));
+    expect(q('subscription-proxy-open-plugins')).toBeNull();
+  } finally {
+    restore();
+  }
 });
 
 test('without the plugin installed the card says so and leads to Plugins', async ({ ready }) => {

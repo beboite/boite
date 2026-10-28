@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import type { ThreadSummary, Turn, Usage } from '@boite/contracts';
+import type { ThreadSummary, Turn, Usage, WorkflowRun } from '@boite/contracts';
 import { echoThread, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
-import { MAX_USAGE_EDGES } from '../src/usage.ts';
+import { MAX_USAGE_EDGES, sessionUsage } from '../src/usage.ts';
 import { priceOf } from '../src/pricing/index.ts';
+import { workflowUsage } from '../src/workflows/usage.ts';
 import { thrown } from './settle.ts';
 
 const DAY = 86_400_000;
@@ -22,8 +23,14 @@ afterEach(async () => {
   await harness.stop();
 });
 
+/** A turn this core recorded: its buckets are canonical. */
 function usage(inputTokens: number, outputTokens: number, cacheReadTokens = 0, cost: number | null = null): Usage {
-  return { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens: 0, costUsdEquivalent: cost };
+  return { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens: 0, buckets: 1, costUsdEquivalent: cost };
+}
+
+/** A turn an older core recorded, as its provider counted it. */
+function legacy(inputTokens: number, outputTokens: number, cacheReadTokens: number, cacheWriteTokens: number): Usage {
+  return { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUsdEquivalent: null };
 }
 
 function turn(thread: ThreadSummary, finishedAt: number | null, spent: Usage | null, execution?: { providerId: string; model: string | null } | null): Turn {
@@ -91,7 +98,7 @@ test('usage.history puts a turn finished on an edge in the later bucket and drop
   ]);
 });
 
-test('usage.history splits providers and models, counts unreported turns and takes the cache out of Codex input', async () => {
+test('usage.history splits providers and models, counts unreported turns and reads every turn\'s buckets as stored', async () => {
   const { echo, codex } = await threads();
   const journal = harness.core.journal;
   const day = D0 + 2 * DAY + 3_600_000;
@@ -99,11 +106,12 @@ test('usage.history splits providers and models, counts unreported turns and tak
   journal.putTurn(turn(echo, day + 1, usage(20, 5, 0, 0.5), { providerId: 'claude', model: 'opus' }));
   journal.putTurn(turn(echo, day + 2, usage(7, 3), { providerId: 'claude', model: null }));
   journal.putTurn(turn(echo, day + 3, null, { providerId: 'claude', model: null }));
-  journal.putTurn(turn(codex, day + 4, usage(1000, 50, 800), { providerId: 'codex', model: 'gpt-5' }));
+  // Codex turns are stored like every other: the input without the cache.
+  journal.putTurn(turn(codex, day + 4, usage(200, 50, 800), { providerId: 'codex', model: 'gpt-5' }));
   // A listed model with no usage reported stays unpriced rather than $0.
   journal.putTurn(turn(codex, day + 4, null, { providerId: 'codex', model: 'gpt-5-mini' }));
   // Saved before execution snapshots: counted under the thread's provider and model.
-  journal.putTurn(turn(codex, day + 5, usage(100, 10, 40), null));
+  journal.putTurn(turn(codex, day + 5, usage(60, 10, 40), null));
 
   const client = await harness.connect();
   const history = await client.call('usage.history', { edges: EDGES });
@@ -137,13 +145,17 @@ test('usage.history prices tokens at the public rates, whatever running total th
   const { echo } = await threads();
   const journal = harness.core.journal;
   const day = D0 + 3_600_000;
-  const spent = (cost: number | null): Usage => ({ inputTokens: 1_000, outputTokens: 2_000, cacheReadTokens: 1_000_000, cacheWriteTokens: 100_000, costUsdEquivalent: cost });
+  const spent = (cost: number | null, hourWrites = 0): Usage => ({ inputTokens: 1_000, outputTokens: 2_000, cacheReadTokens: 1_000_000, cacheWriteTokens: 100_000, ...(hourWrites > 0 ? { cacheWriteHourTokens: hourWrites } : {}), buckets: 1, costUsdEquivalent: cost });
   // A resumed Claude CLI charged a stopped turn the whole session again; the same tokens priced at the rates cost about a dollar.
-  journal.putTurn(turn(echo, day, spent(180.78), { providerId: 'claude', model: 'claude-opus-5-5' }));
+  journal.putTurn(turn(echo, day, spent(180.78, 100_000), { providerId: 'claude', model: 'claude-opus-5-5' }));
   // A delegated thread records the model with its provider's prefix, and the driver could not take the turn's share apart.
-  journal.putTurn(turn(echo, day + 1, spent(null), { providerId: 'claude', model: 'claude/claude-opus-5-5' }));
-  // OpenCode writes the five-minute cache, Claude Code the one-hour cache.
+  journal.putTurn(turn(echo, day + 1, spent(null, 100_000), { providerId: 'claude', model: 'claude/claude-opus-5-5' }));
+  // OpenCode writes the five-minute cache, Claude Code the one-hour cache: the turn says which, not the provider's descriptor.
   journal.putTurn(turn(echo, day + 2, spent(0.01), { providerId: 'opencode', model: 'anthropic/claude-opus-5-5' }));
+  // A provider removed since keeps the price its turns recorded.
+  journal.putTurn(turn(echo, day + 2, spent(0.02, 100_000), { providerId: 'removed-claude', model: 'claude-opus-5-5' }));
+  // A turn that wrote at both lifetimes pays each write its own rate.
+  journal.putTurn(turn(echo, day + 2, spent(0.03, 40_000), { providerId: 'mixed', model: 'claude-opus-5-5' }));
   // No public rate: the agent's own figure stays.
   journal.putTurn(turn(echo, day + 3, spent(0.4), { providerId: 'opencode', model: 'house-model' }));
 
@@ -162,8 +174,72 @@ test('usage.history prices tokens at the public rates, whatever running total th
   expect(rows['opencode:anthropic/claude-opus-5-5']).toMatchObject({ priced: 1, price: fiveMinutes });
   expect(rows['opencode:anthropic/claude-opus-5-5']!.usage.costUsdEquivalent).toBeCloseTo(cost(fiveMinutes.rates), 10);
   expect(rows['opencode:house-model']).toMatchObject({ priced: 1, price: null, usage: { costUsdEquivalent: 0.4 } });
+  expect(rows['removed-claude:claude-opus-5-5']).toMatchObject({ priced: 1, price: hour });
+  expect(rows['removed-claude:claude-opus-5-5']!.usage.costUsdEquivalent).toBeCloseTo(cost(hour.rates), 10);
+  const mixed = cost(fiveMinutes.rates) + 40_000 * (hour.rates.cacheWrite - fiveMinutes.rates.cacheWrite) / 1_000_000;
+  expect(rows['mixed:claude-opus-5-5']).toMatchObject({ priced: 1, price: fiveMinutes, usage: { cacheWriteTokens: 100_000, cacheWriteHourTokens: 40_000 } });
+  expect(rows['mixed:claude-opus-5-5']!.usage.costUsdEquivalent).toBeCloseTo(mixed, 10);
   // The thread ranking prices the same way.
-  expect(history.threads.find((thread) => thread.threadId === echo.id)?.usage.costUsdEquivalent).toBeCloseTo(2 * cost(hour.rates) + cost(fiveMinutes.rates) + 0.4, 10);
+  expect(history.threads.find((thread) => thread.threadId === echo.id)?.usage.costUsdEquivalent).toBeCloseTo(3 * cost(hour.rates) + cost(fiveMinutes.rates) + mixed + 0.4, 10);
+});
+
+test('usage.history reads turns an older core recorded with the provider\'s current protocol and counts them as estimated', async () => {
+  const { codex } = await threads();
+  const journal = harness.core.journal;
+  const day = D0 + 3_600_000;
+  // Codex counted both caches inside its input; a turn recorded since did not.
+  journal.putTurn(turn(codex, day, legacy(1000, 50, 800, 100), { providerId: 'codex', model: 'gpt-5' }));
+  journal.putTurn(turn(codex, day + 1, usage(100, 50, 800), { providerId: 'codex', model: 'gpt-5' }));
+  // Claude Code wrote for an hour.
+  journal.putTurn(turn(codex, day + 2, legacy(1_000, 2_000, 1_000_000, 100_000), { providerId: 'claude', model: 'claude-opus-5-5' }));
+  // No provider says what this one counted: its turn stays as stored, and estimated.
+  journal.putTurn(turn(codex, day + 3, legacy(500, 5, 300, 0), { providerId: 'gone', model: 'house-model' }));
+  journal.putTurn(turn(codex, day + 4, usage(500, 5, 300), { providerId: 'kept', model: 'house-model' }));
+
+  const client = await harness.connect();
+  const history = await client.call('usage.history', { edges: EDGES });
+  const rows = Object.fromEntries(history.rows.map((row) => [row.providerId, row]));
+  expect(rows.codex).toMatchObject({ turns: 2, reported: 2, estimated: 1, usage: { inputTokens: 200, cacheReadTokens: 1600, cacheWriteTokens: 100 } });
+  const hour = priceOf('claude-opus-5-5', true)!;
+  expect(rows.claude).toMatchObject({ estimated: 1, price: hour, usage: { cacheWriteHourTokens: 100_000 } });
+  expect(rows.claude!.usage.costUsdEquivalent).toBeCloseTo((1_000 * hour.rates.input + 2_000 * hour.rates.output + 1_000_000 * hour.rates.cacheRead + 100_000 * hour.rates.cacheWrite) / 1_000_000, 10);
+  expect(rows.gone).toMatchObject({ estimated: 1, usage: { inputTokens: 500, cacheReadTokens: 300 } });
+  expect(rows.kept).not.toHaveProperty('estimated');
+  expect(rows.kept!.usage.inputTokens).toBe(500);
+});
+
+test('a row that joins newer five-minute writes and older hour writes shows the rate most of its writes paid', async () => {
+  const { codex } = await threads();
+  const model = { providerId: 'claude', model: 'claude-opus-5-5' };
+  harness.core.journal.putTurn(turn(codex, D0 + 1, { ...usage(10, 10), cacheWriteTokens: 10 }, model));
+  harness.core.journal.putTurn(turn(codex, D0 + 2, legacy(10, 10, 0, 1000), model));
+
+  const client = await harness.connect();
+  const [row] = (await client.call('usage.history', { edges: EDGES, providerId: 'claude' })).rows;
+  expect(row).toMatchObject({ estimated: 1, usage: { cacheWriteTokens: 1010, cacheWriteHourTokens: 1000 } });
+  expect(row!.price).toEqual(priceOf('claude-opus-5-5', true));
+});
+
+test('every reader sums an older Codex turn and a newer one as the same disjoint buckets', async () => {
+  const { echo, codex } = await threads();
+  const journal = harness.core.journal;
+  journal.putThread({ ...codex, parentThreadId: echo.id });
+  journal.db.run("INSERT INTO delegated_agents VALUES (?, ?, 'req', 'fp', 'default', 'task')", [codex.id, echo.id]);
+  journal.db.run("INSERT INTO workflow_steps VALUES (?, 'run_mixed', 'step')", [codex.id]);
+  journal.putTurn(turn(codex, D0 + 1, legacy(1000, 50, 800, 100), { providerId: 'codex', model: 'gpt-5' }));
+  journal.putTurn(turn(codex, D0 + 2, usage(10, 5, 20), { providerId: 'codex', model: 'gpt-5' }));
+  const buckets = (spent: Usage | undefined) => spent && [spent.inputTokens, spent.outputTokens, spent.cacheReadTokens, spent.cacheWriteTokens];
+  const expected = [110, 55, 820, 100];
+
+  const client = await harness.connect();
+  const history = await client.call('usage.history', { edges: EDGES, providerId: 'codex' });
+  expect(history.rows.map((row) => row.estimated)).toEqual([1]);
+  expect(buckets(history.rows[0]?.usage)).toEqual(expected);
+  expect(buckets(history.threads[0]?.usage)).toEqual(expected);
+  expect(buckets((await client.call('usage.get', { threadId: codex.id })).total)).toEqual(expected);
+  expect(sessionUsage(harness.core, codex.id, 0, '').tokens).toBe(1085);
+  expect(buckets(workflowUsage(harness.core, { id: 'run_mixed', nodes: [] } as unknown as WorkflowRun).usage)).toEqual(expected);
+  expect(buckets(harness.core.delegation.get(echo.id).usage)).toEqual(expected);
 });
 
 test('usage.history keeps the top threads of each ranking', async () => {
@@ -188,7 +264,7 @@ test('usage.history keeps the top threads of each ranking', async () => {
   expect(filtered.rows).toHaveLength(1);
   expect(filtered.rows[0]).toMatchObject({ providerId: 'muse', turns: 1 });
   expect(filtered.threads).toHaveLength(1);
-  expect(filtered.threads[0]).toMatchObject({ threadId: priced.id, providerId: 'muse', turns: 1, usage: usage(4, 2) });
+  expect(filtered.threads[0]).toMatchObject({ threadId: priced.id, providerId: 'muse', turns: 1, usage: { inputTokens: 4, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, costUsdEquivalent: null } });
 });
 
 test('usage.history rejects edges that are not ascending timestamps', async () => {

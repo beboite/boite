@@ -209,12 +209,12 @@ test('a Codex bot\'s budget prices turns that report no cost at the model\'s rat
   const bot = h.core.threads.require(threadId);
   const child = { ...bot, id: 'thr_budget_child', title: 'Subagent', parentThreadId: bot.id, agentSessionId: undefined };
   h.core.journal.putThread(child);
-  // Codex reports tokens and no cost; its input includes the cache reads. At
-  // gpt-6.1-sol rates: 150k uncached input $0.30, 100k cache reads $0.01, 29k output $0.29.
+  // Codex reports tokens and no cost. At gpt-6.1-sol rates: 150k uncached
+  // input $0.30, 100k cache reads $0.01, 29k output $0.29.
   const now = Date.now();
   const spend = (id: string, thread: typeof bot): Turn => {
     const turn: Turn = { id, threadId: thread.id, status: 'done', queuedAt: now - 2000, startedAt: now - 1900, finishedAt: now - 1000, error: null,
-      usage: { inputTokens: 250_000, outputTokens: 29_000, cacheReadTokens: 100_000, cacheWriteTokens: 0, costUsdEquivalent: null },
+      usage: { inputTokens: 150_000, outputTokens: 29_000, cacheReadTokens: 100_000, cacheWriteTokens: 0, costUsdEquivalent: null, buckets: 1 },
       execution: { providerId: 'codex', accountId: thread.accountId, model: 'gpt-6.1-sol', effort: null, speed: null, permissionMode: thread.permissionMode, sessionId: null, sessionGeneration: 0, selectionVersion: 0 } };
     h.core.journal.putTurn(turn);
     return turn;

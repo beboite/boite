@@ -43,10 +43,9 @@ prerequisites, adjacent runtime files and shell E2E coverage.
 - Reject bad descriptors, paths, origins and tokens with the file or field and
   the expected value. Rejected providers remain visible to the client.
 - Keep SDKs and Workers lazy. Nothing heavy loads at core startup.
-- New RPC methods are owner-only unless `DEVICE_METHODS` in
-  `packages/contracts/src/access.ts` permits paired devices or `AGENT_METHODS`
-  in `packages/core/src/access.ts` permits agents. Record the reason beside
-  the permission.
+- New RPC methods are owner-only unless `DEVICE_METHODS` permits paired
+  devices or `AGENT_METHODS` permits agents, both in
+  `packages/contracts/src/access.ts`. Record the reason beside the permission.
 - The shell owns windows, the tray, native dialogs and core startup. Execution
   and application logic belong in the core.
 - Reach the main window through `window::main_window`. Tauri's
@@ -92,6 +91,13 @@ acknowledgement is not a new finding or a prerequisite for completion. Mention
 a bot only when a question needs its answer; do not request another review of
 a head it is already reviewing. Diagnose a failed job before retrying it and
 rerun only the failed jobs when the head is unchanged.
+
+A pull request runs the Linux checks, plus the Windows core suite for
+protection and shared toolchain inputs; the full Windows, macOS, desktop and
+E2E checks run in the merge queue
+([pull request runs](docs/ci.md#pull-request-runs)). A
+failure there removes the pull request: fix it like any CI failure, then merge
+again.
 
 Check CI and new review findings after a push. Track CI and reviews together;
 do not wait for one to finish before inspecting the other. A paused,

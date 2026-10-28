@@ -2,7 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { startTestCore, echoThread, removeDir, waitFor, type TestCore } from './harness.ts';
+import { startTestCore, echoThread, removeDir, rolledBackArchive, waitFor, type TestCore } from './harness.ts';
 import { holdTurn, openCard, saveSecret, secretValue, SpyVault, stopTurn } from './secret-fixture.ts';
 import { thrown } from './settle.ts';
 import { DpapiVault } from '../src/platform/windows/dpapi-vault.ts';
@@ -46,6 +46,17 @@ test('an unused ref expires after ten minutes even without a sweep', async () =>
   const ref = await saveSecret(h, owner, threadId, 'API_KEY', secretValue());
   h.core.secrets.now = () => Date.now() + 10 * 60_000 + 1;
   expect(await thrown(owner.call('secrets.use', { threadId, ref, use: { ...quiet, cwd: h.dataDir } }))).toThrow('expired');
+});
+
+test('an archive that rolls back leaves the running turn its ref', async () => {
+  h = await startTestCore();
+  const owner = await h.connect();
+  const { threadId } = await echoThread(h, owner);
+  await holdTurn(h, owner, threadId);
+  const ref = await saveSecret(h, owner, threadId, 'API_KEY', secretValue());
+  rolledBackArchive(h, threadId);
+  expect(h.core.threads.require(threadId).archived).toBe(false);
+  expect(await owner.call('secrets.use', { threadId, ref, use: { ...quiet, cwd: h.dataDir } })).toMatchObject({ exitCode: 0 });
 });
 
 test('ending a turn erases an unused ref before another turn starts', async () => {

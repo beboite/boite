@@ -9,7 +9,7 @@ import { invalidParams, messageOf, notFound, refused, unavailable } from './erro
 import { runAcpLogin, type AcpLoginRun } from './drivers/acp/login.ts';
 import { antigravityCertificates } from './drivers/antigravity.ts';
 import { loginFolders, publishLoginCatalog } from './account-login.ts';
-import { probeThreadId } from './providers/probe.ts';
+import { AccountOperations } from './account-operations.ts';
 import { openCodeBackgroundCompaction } from './providers/opencode.ts';
 import { activeSubscriptionProxy, subscriptionProxyEnv } from './subscription-proxy.ts';
 import { agentEnv, hostAgentsEnabled, profileFor, resolveExecutable, resolveLaunch } from './providers/resolve.ts';
@@ -114,7 +114,10 @@ export class AccountStore {
   /** The share problems last logged per account, so a spawn repeats a warning only when it changed. */
   private readonly shareLog = new Map<AccountId, string>();
 
-  constructor(private readonly core: Core) {}
+  /** Checks, discovery, quota reads and resets: what removal stops and waits for. */
+  readonly operations: AccountOperations;
+
+  constructor(private readonly core: Core) { this.operations = new AccountOperations(core); }
 
   list(): Account[] {
     return this.core.journal.listAccounts();
@@ -189,8 +192,7 @@ export class AccountStore {
     this.removing.add(accountId);
     try {
       await this.cancelLoginRun(accountId);
-      await this.core.procs.stopAndWait(`check:${accountId}`);
-      await this.core.procs.stopAndWait(probeThreadId(account.providerId, accountId));
+      await this.operations.drain(accountId);
       await this.checks.get(accountId)?.catch(() => {});
       checkAgentReferences();
       // Cancelling yields to RPC work; a turn may have started on this account.
@@ -270,9 +272,8 @@ export class AccountStore {
     const profile = profileFor(provider);
     const launch = resolveLaunch(profile);
     if (!launch) throw refused(`${provider.name} is not installed`, { accountId, field: 'executable' });
-    const threadId = `check:${accountId}`;
     let result: Pick<Account, 'status' | 'identity'>;
-    this.core.providers.installs.acquire(provider.id);
+    const operation = this.operations.open(accountId, provider.id, `check:${accountId}`, message => this.core.log('warn', `checking ${accountId}: ${message}`));
     try {
       const read = provider.protocol === 'codex-appserver'
         ? (await import('./drivers/codex/auth.ts')).readCodexAccount
@@ -280,18 +281,14 @@ export class AccountStore {
       result = await read({ executable: launch.executable, args: [...launch.prefix, ...(profile?.launch?.args ?? [])],
         cwd: account.isolationDir ?? this.core.dataDir, env: agentEnv(provider, this.accountEnv(account, provider)),
         spawnChild: (cmd, args, opts) => {
-          this.require(accountId);
           if (this.logins.get(accountId)?.cancelled) throw refused('Sign-in cancelled', { accountId });
-          return this.core.procs.spawnChild(threadId, cmd, args, opts);
+          return operation.spawnChild(cmd, args, opts);
         }, onLine: () => {},
       });
     } catch (error) {
       this.saveCheck(accountId, { status: 'error', identity: null });
       throw refused(`connection check failed: ${messageOf(error)}`, { accountId });
-    } finally {
-      try { await this.core.procs.stopAndWait(threadId); }
-      finally { this.core.providers.installs.release(provider.id); }
-    }
+    } finally { await operation.close(); }
     return this.saveCheck(accountId, result);
   }
 

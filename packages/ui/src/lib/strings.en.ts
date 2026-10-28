@@ -84,6 +84,7 @@ import { strings as features } from './strings/en/features';
 import { strings as quotas } from './strings/en/quotas';
 import { strings as harnessUpdates } from './strings/en/harnessUpdates';
 import { strings as providerSettings } from './strings/en/providerSettings';
+import { strings as localAcp } from './strings/en/localAcp';
 import { strings as plugins } from './strings/en/plugins';
 import { strings as time } from './strings/en/time';
 import { strings as errors } from './strings/en/errors';
@@ -175,6 +176,7 @@ export const strings = {
   ...quotas,
   ...harnessUpdates,
   ...providerSettings,
+  ...localAcp,
   ...plugins,
   ...time,
   ...errors,

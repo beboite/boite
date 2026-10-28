@@ -7,7 +7,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { AgentContact, AgentLetter, ContactRequest, CoordinationPeer, RpcParams, RpcResult } from '@boite/contracts';
 import type { Core } from '../core.ts';
-import { checkRemoteContact, checkTranscript, checkMatchExtras } from '../coordination-lookup.ts';
+import { checkRemoteContact, checkTranscript, checkMatchExtras, PARTIAL, partialList, partialName } from '../coordination-lookup.ts';
 import { address, LETTER_TTL_MS, RESIDENT_LETTER_TTL_MS, same, text } from '../coordination-letter.ts';
 import { PeerRefusal, type Operation } from '../coordination-wire.ts';
 import { refused, unavailable, messageOf, RpcFailure } from '../errors.ts';
@@ -74,25 +74,28 @@ export class ContactMailboxes {
     if (!found) return undefined;
     try { return found.stamp === this.stamp(found.via) ? found : undefined; } catch { return undefined; }
   }
-  async contacts(threadId: string): Promise<RpcResult<'collaboration.contacts'>> {
+  async contacts(threadId: string): Promise<RpcResult<'collaboration.contacts'>> { return (await this.discover(threadId)).contacts; }
+  /** This thread's contacts, direct and through each group member, and the members that could not say which they carry. */
+  private async discover(threadId: string): Promise<{ contacts: RpcResult<'collaboration.contacts'>; unavailable: string[] }> {
     const local = this.core.contacts.forThread(threadId);
     const config = this.core.coordination.config(threadId);
-    if (config.mode === 'off' || !config.remote) return [];
+    if (config.mode === 'off' || !config.remote) return { contacts: [], unavailable: [] };
     const from = this.source(threadId);
     const replies = await Promise.all(this.core.group.peers().sort((a, b) => a.coreId.localeCompare(b.coreId)).map(async peer => {
       try {
         const stamp = this.stamp(peer.coreId);
         const contacts = await this.core.coordination.request(peer, 'contact.route', { action: 'contacts', from }) as (ContactSummary & { admission: number })[];
-        if (!Array.isArray(contacts) || contacts.length > 32 || this.stamp(peer.coreId) !== stamp) return [];
+        if (!Array.isArray(contacts) || contacts.length > 32) throw refused('route.contacts: expected at most 32 contacts');
+        if (this.stamp(peer.coreId) !== stamp) throw refused('route: group admission changed during discovery');
         return contacts.map(contact => {
           if (!Number.isSafeInteger(contact.admission) || !['connected', 'connecting', 'offline'].includes(contact.link)) throw refused('route.contact: expected its admission and link state');
           return { via: peer.coreId, admission: contact.admission, contact: { coreId: text(contact.coreId, 'route.contact.coreId', 100), name: text(contact.name, 'route.contact.name', 200), projects: Array.isArray(contact.projects) ? contact.projects.filter(name => typeof name === 'string').slice(0, 256) : [], link: contact.link } };
         });
-      } catch { return []; }
+      } catch { return peer.name; }
     }));
     this.source(threadId);
     const result = [...local];
-    const offered = replies.flat();
+    const offered = replies.flatMap(reply => typeof reply === 'string' ? [] : reply);
     for (const { via, contact, admission } of offered) {
       // A contact that opened this core's projects through that member is listed already, and still asked through a mailbox.
       const relayed = this.core.coordination.trusted().find(peer => peer.coreId === contact.coreId);
@@ -103,11 +106,15 @@ export class ContactMailboxes {
       this.remember(threadId, via, contact, admission);
       if (!result.some(entry => entry.coreId === contact.coreId)) result.push(contact);
     }
-    return result;
+    return { contacts: result, unavailable: replies.flatMap(reply => typeof reply === 'string' ? [reply] : []) };
   }
   async resolve(threadId: string, coreId: string): Promise<SourceRoute | undefined> {
     let route = this.route(threadId, coreId);
-    if (!route) { await this.contacts(threadId); route = this.route(threadId, coreId); }
+    if (route) return route;
+    const { unavailable: silent } = await this.discover(threadId);
+    route = this.route(threadId, coreId);
+    // Not offered may only mean not heard from: name the members that did not answer.
+    if (!route && silent.length) throw refused(`${silent.join(', ')} did not answer; the route to this machine is unknown until they do`);
     return route;
   }
   private async request(route: SourceRoute, body: Record<string, unknown>): Promise<unknown> {
@@ -116,20 +123,28 @@ export class ContactMailboxes {
     if (route.stamp !== this.stamp(route.via)) throw refused('route: group admission changed');
     return answer;
   }
-  async directory(threadId: string): Promise<AgentContact[]> {
-    const local = new Set(this.core.coordination.trusted().map(peer => peer.coreId));
-    const contacts = await this.contacts(threadId);
+  directory(threadId: string): Promise<{ entries: AgentContact[]; unavailable: string[] }> {
+    return this.lookup(threadId, 'directory', { partial: PARTIAL }, (entry, peer) => checkRemoteContact(entry as AgentContact, peer));
+  }
+  /**
+   * One lookup on every contact reached through a group route. A member or a
+   * contact that fails, or answers without some of its machines, is named in
+   * `unavailable` beside what the others found.
+   */
+  private async lookup<T>(threadId: string, operation: 'directory' | 'search', payload: Record<string, unknown>, check: (entry: unknown, peer: CoordinationPeer) => T): Promise<{ entries: T[]; unavailable: string[] }> {
+    const direct = new Set(this.core.coordination.trusted().map(peer => peer.coreId));
+    const { contacts, unavailable: silent } = await this.discover(threadId);
     const from = this.source(threadId);
-    const results = await Promise.all(contacts.filter(contact => !local.has(contact.coreId)).map(async contact => {
+    const results = await Promise.all(contacts.filter(contact => !direct.has(contact.coreId) && this.route(threadId, contact.coreId)).map(async contact => {
       const route = this.route(threadId, contact.coreId)!;
       try {
-        const entries = await this.request(route, { action: 'lookup', from, coreId: contact.coreId, operation: 'directory', payload: {} }) as AgentContact[];
-        if (!Array.isArray(entries) || entries.length > 100) return [];
-        return entries.map(entry => checkRemoteContact(entry, { coreId: contact.coreId, name: contact.name, url: '', publicKey: '' }));
-      } catch { return []; }
+        const answer = partialList(await this.request(route, { action: 'lookup', from, coreId: contact.coreId, operation, payload }));
+        const peer = { coreId: contact.coreId, name: contact.name, url: '', publicKey: '' };
+        return { entries: answer.entries.map(entry => check(entry, peer)), missing: answer.unavailable === 0 ? null : partialName(contact.name, answer.unavailable) };
+      } catch { return { entries: [], missing: contact.name }; }
     }));
     this.source(threadId);
-    return results.flat();
+    return { entries: results.flatMap(result => result.entries), unavailable: [...silent, ...results.flatMap(result => result.missing === null ? [] : [result.missing])] };
   }
   async read(threadId: string, coreId: string, payload: unknown): Promise<RpcResult<'collaboration.read'>> {
     const route = await this.resolve(threadId, coreId);
@@ -140,19 +155,8 @@ export class ContactMailboxes {
     if (contact.threadId !== (payload as { threadId: string }).threadId) throw refused('transcript of another thread');
     return { contact, ...checkTranscript(result) };
   }
-  async search(threadId: string, words: string[]): Promise<RpcResult<'collaboration.search'>['matches']> {
-    const contacts = await this.contacts(threadId);
-    const direct = new Set(this.core.coordination.trusted().map(peer => peer.coreId));
-    const results = await Promise.all(contacts.filter(contact => !direct.has(contact.coreId) && this.route(threadId, contact.coreId)).map(async contact => {
-      const route = this.route(threadId, contact.coreId)!;
-      try {
-        const entries = await this.request(route, { action: 'lookup', from: this.source(threadId), coreId: contact.coreId, operation: 'search', payload: { words } }) as RpcResult<'collaboration.search'>['matches'];
-        if (!Array.isArray(entries) || entries.length > 100) return [];
-        return entries.map(entry => ({ ...checkRemoteContact(entry, { coreId: contact.coreId, name: contact.name, url: '', publicKey: '' }), ...checkMatchExtras(entry) }));
-      } catch { return []; }
-    }));
-    this.source(threadId);
-    return results.flat();
+  search(threadId: string, words: string[]): Promise<{ entries: RpcResult<'collaboration.search'>['matches']; unavailable: string[] }> {
+    return this.lookup(threadId, 'search', { words, partial: PARTIAL }, (entry, peer) => ({ ...checkRemoteContact(entry as AgentContact, peer), ...checkMatchExtras(entry as { matched?: unknown; excerpts?: unknown }) }));
   }
   async relay(letter: AgentLetter): Promise<AgentLetter> {
     const route = this.route(letter.from.threadId, letter.to.coreId);

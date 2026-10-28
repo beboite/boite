@@ -34,6 +34,30 @@ async function open(edit?: (rows: PluginState[]) => void): Promise<void> {
   await vi.waitFor(() => expect(row('bots')).not.toBeNull());
 }
 
+test('an update that lands while the list is out is not undone by the older list', async () => {
+  client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  const call = client.call.bind(client), on = client.on.bind(client);
+  const rows = await call('plugins.list', {});
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let update!: (value: PluginState) => void;
+  vi.spyOn(client, 'call').mockImplementation((async (method: string, params: unknown) => {
+    if (method === 'plugins.list') { await held; return rows; }
+    return call(method as never, params as never);
+  }) as never);
+  vi.spyOn(client, 'on').mockImplementation(((event: string, handler: (value: PluginState) => void) => {
+    if (event === 'plugins.updated') update = handler;
+    return on(event as never, handler as never);
+  }) as never);
+  mounted = mount(PluginsPage, { target: document.body, props: { store: { client, providers: [] } as unknown as Store } });
+  await vi.waitFor(() => expect(update).toBeDefined());
+  update({ ...rows.find(plugin => plugin.id === 'bots')!, availableVersion: '99.0.0', version: '99.0.0' });
+  release();
+  await vi.waitFor(() => expect(row('bots')).not.toBeNull());
+  expect(row('bots')!.textContent).toContain('99.0.0');
+});
+
 function type(selector: string, value: string): void {
   const input = q(selector) as HTMLInputElement;
   input.value = value;

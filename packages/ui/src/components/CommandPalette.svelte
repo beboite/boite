@@ -10,6 +10,8 @@
   import { PALETTE_LIMIT, RECENT_THREADS, rankItems, sectionRows, type PaletteItem } from '../lib/palette';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import { MediaQuery } from 'svelte/reactivity';
+  import { desktopSettings } from '../lib/settings-tabs';
   import { workspace, type Machine } from '../lib/workspace.svelte';
   import MachineIcon from './MachineIcon.svelte';
   import ProjectTile from './ProjectTile.svelte';
@@ -29,6 +31,7 @@
   let previous: HTMLElement | null = null;
 
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
+  const phoneWidth = new MediaQuery('(max-width: 720px)');
   const now = $derived(minuteClock.now);
 
   $effect(() => {
@@ -101,7 +104,7 @@
     return { items, places };
   });
 
-  let commandItems = $derived.by((): PaletteItem[] => appCommands(store, inShell));
+  let commandItems = $derived.by((): PaletteItem[] => appCommands(store, !desktopSettings(phoneWidth.current)));
 
   const snapshot = { rows: [] as PaletteItem[] };
   /** The ranked rows, a project's threads, the projects and the commands mixed until `sections` cuts them. */
