@@ -36,6 +36,9 @@ test('the store follows a policy file edited while connected', async ({ ready })
   await vi.waitFor(() => expect(store.policy?.present).toBe(false));
   client.changePolicy(policyFixture('managed'));
   await vi.waitFor(() => expect(store.policy?.locked).toContain('network.push'));
+  // The core lists its providers again after a change: the one the file now denies is off, saying why.
+  await vi.waitFor(() => expect(store.providers.find((provider) => provider.id === 'grok')).toMatchObject({ enabled: false, policy: { policy: 'providers.deny' } }));
+  expect(store.settings?.autoInstallUpdates).toBe(false);
 });
 
 test('a core without the policy method leaves nothing locked', async ({ createStore }) => {

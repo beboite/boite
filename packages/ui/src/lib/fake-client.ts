@@ -403,6 +403,8 @@ export class FakeClient implements ObservableClient {
     this.#ctx.policy = structuredClone(policy);
     applyPolicy(this.#ctx);
     this.#ctx.emit('policy.changed', structuredClone(policy));
+    this.#ctx.emit('settings.updated', { ...this.#ctx.settings });
+    this.#ctx.emit('providers.updated', { loaded: structuredClone(this.#ctx.providers), rejected: [] });
   }
 
   /** A line of the core's own log, as `core.log` carries it: a failed scheduler, a guard at work. */
