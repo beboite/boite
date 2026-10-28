@@ -405,6 +405,11 @@ its cost.
 On a subscription the figure is what the same tokens would cost on the API, not
 money spent.
 
+A bot's daily budget and its status's `today.costUsd` use the same rule
+(`priceGroup` in `packages/core/src/usage.ts`) over the bot's thread and the
+threads below it, subagents included ([bots](bots.md#budget-and-limits)), so
+the budget and this page agree on what a turn cost.
+
 ## When a provider refuses a turn
 
 Two refusals mean the provider is unavailable, not that the request is wrong.

@@ -29,7 +29,7 @@ import type { AccountRow, MessageRow, ProcessRow, ProjectIconRow, ProjectRow, Th
 import type { DetectedIcon as StoredProjectIcon } from './project-icons.ts';
 import { copyStoredParts, foldStreamingParts, messageOfError, StreamBuffer } from './journal/stream-buffer.ts';
 import { requestSince } from './journal/request-since.ts';
-import { usageByBucket, usageByThread, type UsageSumRow, type UsageThreadRow } from './journal/usage-sums.ts';
+import { usageByBucket, usageByThread, usageOfTree, type UsageGroupRow, type UsageSumRow, type UsageThreadRow } from './journal/usage-sums.ts';
 import { sent, type Projection } from './journal/sent.ts';
 import { threadSessions, type NativeSession } from './threads/native-sessions.ts';
 import { deleteComposerInput } from './journal/composer-assets.ts';
@@ -511,6 +511,11 @@ export class Journal {
   /** The same sums per thread and provider over `[from, to)`. */
   usageByThread(from: number, to: number): UsageThreadRow[] {
     return usageByThread(this.db, from, to);
+  }
+
+  /** The same sums per provider and model over a thread and its descendants since `since` (a bot's spend). */
+  usageOfTree(rootId: string, since: number): UsageGroupRow[] {
+    return usageOfTree(this.db, rootId, since);
   }
 
   // -- messages -------------------------------------------------------------

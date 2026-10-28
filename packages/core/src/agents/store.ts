@@ -18,6 +18,7 @@ import { AgentSettingCards, registerAgentSettingMethods } from './setting-cards.
 import { MemoryKeeper } from './memory.ts';
 import { agentContextIf, deskPullRequest, deskState, linkedPullRequests } from './context.ts';
 import { finalText, midnight, type AgentFact, type AgentWake } from './runtime.ts';
+import { agentSpend, rootThread } from './spend.ts';
 import { migrateAgents } from './migration.ts';
 import { boolean, ids, integer, object, oneOf, text } from './validation.ts';
 
@@ -78,7 +79,16 @@ export class AgentStore {
     this.off = core.bus.onAny((name, payload) => {
       if (core.journal.isClosed() || this.threads.size === 0) return;
       const threadId = (payload as { threadId?: unknown; id?: unknown } | null)?.threadId ?? (name === 'thread.updated' ? (payload as { id?: unknown }).id : undefined);
-      if (typeof threadId !== 'string' || !this.threads.has(threadId)) return;
+      if (typeof threadId !== 'string') return;
+      if (!this.threads.has(threadId)) {
+        // A subagent's finished turn spends its bot's budget: the bot's sums are read again and clients told.
+        if (name !== 'turn.finished') return;
+        const root = rootThread(core, threadId);
+        if (!this.threads.has(root)) return;
+        this.todays.delete(root);
+        this.changed();
+        return;
+      }
       if (name === 'thread.updated' && (payload as ThreadSummary).unread === false) this.readUp(threadId);
       if (name.startsWith('turn.') || name === 'thread.updated' || name === 'thread.removed') this.todays.delete(threadId);
       if (name === 'message.part' || name === 'thread.updated' || name === 'thread.removed' || name.startsWith('question.') || name.startsWith('permission.')) this.changed();
@@ -441,16 +451,17 @@ export class AgentStore {
    * Its turns started since `since`, summed in SQL through the partial index
    * `turns_by_thread_queue` (whose `started_at IS NOT NULL` the query repeats):
    * an agent thread gathers thousands of turns, today's are a few. A turn
-   * still waiting in the queue counts once it starts.
+   * still waiting in the queue counts once it starts. The cost is the
+   * budget's (`agentSpend`): priced from usage, subagents included.
    */
   private today(threadId: string, since: number): AgentStatus['today'] {
     const held = this.todays.get(threadId);
     if (held?.since === since) return { ...held.today };
-    const today = this.core.journal.db.query(`SELECT COUNT(*) AS turns,
+    const counts = this.core.journal.db.query(`SELECT COUNT(*) AS turns,
       COALESCE(SUM(json_extract(execution, '$.operation') IN ('routine', 'event')), 0) AS wakes,
-      COALESCE(SUM(COALESCE(quiet, 0) <> 0), 0) AS quiet,
-      COALESCE(SUM(json_extract(usage, '$.costUsdEquivalent')), 0) AS costUsd
-      FROM turns INDEXED BY turns_by_thread_queue WHERE thread_id = ? AND queued_at >= ? AND started_at IS NOT NULL`).get(threadId, since) as AgentStatus['today'];
+      COALESCE(SUM(COALESCE(quiet, 0) <> 0), 0) AS quiet
+      FROM turns INDEXED BY turns_by_thread_queue WHERE thread_id = ? AND queued_at >= ? AND started_at IS NOT NULL`).get(threadId, since) as Omit<AgentStatus['today'], 'costUsd'>;
+    const today = { ...counts, costUsd: agentSpend(this.core, threadId, since).costUsd };
     this.todays.set(threadId, { since, today });
     return { ...today };
   }

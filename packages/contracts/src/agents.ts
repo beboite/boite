@@ -26,10 +26,11 @@ export interface AgentRuntimeConfig {
   /** Project and desk facts wake this bot automatically. Default true; false keeps them for its next routine. */
   eventWakes?: boolean;
   /**
-   * What the agent's own turns may spend in a day (API-equivalent dollars, the
-   * core's `costUsdEquivalent`), counted from local midnight. Past it, wakes are
-   * skipped with a line in its thread; the user's own messages still run. Null
-   * or missing: no cap.
+   * What the agent may spend in a day in API-equivalent dollars, counted from
+   * local midnight: its turns and its children's (subagents, workflow steps,
+   * memory pass), priced from usage the way `usage.history` prices them. Past
+   * it, wakes are skipped with a line in its thread; its children and the
+   * user's own messages still run. Null or missing: no cap.
    */
   dailyBudgetUsd?: number | null;
 }
@@ -169,7 +170,11 @@ export interface AgentStatus {
   unread: number;
   /** The last answer it gave the user (not a quiet one), for its row. */
   last: { text: string; at: number } | null;
-  /** Its own turns since local midnight. */
+  /**
+   * Its own turns since local midnight. `costUsd` is what its daily budget
+   * counts: priced from usage the way `usage.history` prices it, its
+   * subagents, workflow steps and memory pass included.
+   */
   today: { turns: number; wakes: number; quiet: number; costUsd: number };
   /**
    * Its last memory pass: `threadId` is the core's own child conversation that

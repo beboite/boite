@@ -73,7 +73,7 @@ function sumsToUsage(sums: UsageSums, cachedInInput: boolean): Usage {
   };
 }
 
-interface Priced {
+export interface Priced {
   usage: Usage;
   priced: number;
   price: UsagePrice | null;
@@ -93,11 +93,19 @@ function priced(sums: UsageSums, model: string | null, protocol: string | null):
   return { usage: { ...usage, costUsdEquivalent: costAt(price.rates, usage) }, priced: sums.reported, price };
 }
 
-export function usageHistory(core: Core, edges: number[], providerId?: ProviderId): UsageHistory {
+/**
+ * The turns of one provider and model priced the way `usage.history` prices
+ * them (`priced`); a bot's daily budget reads the same rule (`agents/spend.ts`).
+ */
+export function priceGroup(core: Core, sums: UsageSums, providerId: ProviderId, model: string | null): Priced {
   // A provider removed since keeps its protocol through its shipped id.
-  const protocolOf = (id: ProviderId): string | null => core.providers.get(id)?.protocol ?? (id === 'claude' ? 'claude-sdk' : id === 'codex' ? 'codex-appserver' : null);
+  const protocol = core.providers.get(providerId)?.protocol ?? (providerId === 'claude' ? 'claude-sdk' : providerId === 'codex' ? 'codex-appserver' : null);
+  return priced(sums, model, protocol);
+}
+
+export function usageHistory(core: Core, edges: number[], providerId?: ProviderId): UsageHistory {
   const rows = core.journal.usageByBucket(edges).filter((row) => providerId === undefined || row.provider_id === providerId).map((row) => {
-    const cost = priced(row, row.model, protocolOf(row.provider_id));
+    const cost = priceGroup(core, row, row.provider_id, row.model);
     return {
       bucket: row.bucket,
       providerId: row.provider_id,
@@ -113,7 +121,7 @@ export function usageHistory(core: Core, edges: number[], providerId?: ProviderI
   const byThread = new Map<ThreadId, UsageHistoryThread>();
   for (const row of core.journal.usageByThread(edges[0]!, edges[edges.length - 1]!)) {
     if (providerId !== undefined && row.provider_id !== providerId) continue;
-    const { usage } = priced(row, row.model, protocolOf(row.provider_id));
+    const { usage } = priceGroup(core, row, row.provider_id, row.model);
     const entry = byThread.get(row.thread_id);
     if (entry !== undefined) {
       entry.turns += row.turns;
