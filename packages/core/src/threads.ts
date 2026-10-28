@@ -47,6 +47,7 @@ import { admissionRefusal } from './threads/admission.ts';
 import { ThreadRecovery } from './threads/recovery.ts';
 import { LimitResumes } from './threads/limit-resume.ts';
 import { AutoContinues } from './threads/auto-continue.ts';
+import { ResumePlanner } from './threads/resume.ts';
 import { ThreadTitles } from './threads/retitle.ts';
 import { SideQuestions } from './threads/side-questions.ts';
 import { messagePage, threadSnapshot, type MessagePage } from './threads/snapshot.ts';
@@ -112,6 +113,8 @@ export class ThreadStore {
   readonly backgroundCompact: BackgroundCompaction;
   /** The `cacheKeepalive` setting: pings that keep a waiting thread's prompt cache warm. */
   readonly cacheKeepalive: CacheKeepalive;
+  /** Every resume the core plans by itself, whatever stopped the turn (`threads/resume.ts`). */
+  readonly resumes: ResumePlanner;
   /** Threads a usage limit stopped, resumed once its window resets (`threads/limit-resume.ts`). */
   readonly limitResumes: LimitResumes;
   /** Turns stopped before their answer, resumed by themselves (`threads/auto-continue.ts`). */
@@ -141,8 +144,9 @@ export class ThreadStore {
     this.autoCompact = new AutoCompaction(core, this);
     this.backgroundCompact = new BackgroundCompaction(core, this);
     this.cacheKeepalive = new CacheKeepalive(core, this);
-    this.limitResumes = new LimitResumes(core, this);
-    this.autoContinue = new AutoContinues(core, this);
+    this.resumes = new ResumePlanner(core, this);
+    this.limitResumes = new LimitResumes(core, this.resumes);
+    this.autoContinue = new AutoContinues(core, this, this.resumes);
     this.recovery = new ThreadRecovery(core);
     this.handoff = new RestartHandoff(core, this);
   }
@@ -759,7 +763,7 @@ export class ThreadStore {
    */
   cancelRetry(threadId: ThreadId): boolean {
     this.require(threadId);
-    return this.runner.cancelRetry(threadId) || this.limitResumes.cancel(threadId, 'cancelled by the user') || this.autoContinue.cancel(threadId, 'cancelled by the user');
+    return this.runner.cancelRetry(threadId) || this.resumes.cancel(threadId, 'cancelled by the user');
   }
 
   stopTurn(threadId: ThreadId): boolean {
@@ -767,7 +771,7 @@ export class ThreadStore {
     this.handoff.forget(threadId);
     this.cacheKeepalive.forget(threadId);
     // Stop on a thread waiting for a usage limit to reset means: do not resume it.
-    const plannedResume = this.limitResumes.cancel(threadId, 'the thread was stopped') || this.autoContinue.cancel(threadId, 'the thread was stopped');
+    const plannedResume = this.resumes.cancel(threadId, 'the thread was stopped');
     this.core.coordination.pause(threadId);
     // Runs first: once they are stopped, a team with no child has nothing left to pause.
     const childrenStopped = this.core.workflows.stopRoot(threadId, 'Stopped with its thread') + this.core.delegation.stop(threadId);

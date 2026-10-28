@@ -325,12 +325,14 @@ stays held for review; it is never submitted again automatically.
 
 A turn a provider refused for availability retries at capacity within the same
 turn, or, with `autoResumeLimitedThreads`, resumes after a usage limit's reset
-from a plan journalled under `limit-resumes`; `ThreadSummary.retry` shows
-either ([usage](usage.md#when-a-provider-refuses-a-turn)). Any other turn that
-stops before its answer (an error, a crash, a compaction, background work that
-ended without waking the agent) resumes by itself from a plan journalled under
-`auto-continues`, twice in a row at most
+after a usage limit's reset; `ThreadSummary.retry` shows either
+([usage](usage.md#when-a-provider-refuses-a-turn)). Any other turn that stops
+before its answer (an error, a crash, a compaction, background work that ended
+without waking the agent) resumes by itself, twice in a row at most
 ([restart handoff](restart-handoff.md#turns-that-stop-before-their-answer)).
+Both kinds are one `ResumePlanner` (`threads/resume.ts`): one plan per thread
+with its reason, journalled under `resumes`, checked again when it fires. Their
+prompts and labels live in `threads/resume-text.ts`.
 
 Owner and paired-device connections name one visible conversation through
 `threads.focus`. Claude, Codex, ACP, pi and Muse can prepare their traced process

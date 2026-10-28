@@ -165,6 +165,21 @@ test('a thread stopped by a usage limit resumes once at the reset, never for a w
   } finally { await h.stop(); }
 });
 
+test('a cache ping neither cancels a planned usage limit resume nor stands for the turn it resumes', async () => {
+  const h = await startTestCore({ settings: { autoResumeLimitedThreads: true } });
+  try {
+    const client = await h.connect();
+    const { threadId } = await echoThread(h, client);
+    const limited = await client.call('turns.start', { threadId, prompt: '[usage-limit:500]' });
+    await waitFor(() => retryOf(h, threadId)?.turnId === limited.id);
+    const ping = h.core.threads.startTurn(threadId, 'ping', { kind: 'keepalive' });
+    await waitFor(() => h.core.journal.getTurn(ping.id)?.status === 'done');
+    expect(retryOf(h, threadId)).toMatchObject({ kind: 'usage-limit', turnId: limited.id });
+    await waitFor(() => h.core.journal.listTurns(threadId).length === 3);
+    expect(h.core.journal.listTurns(threadId)[2]!.execution?.operation).toBe('resume');
+  } finally { await h.stop(); }
+});
+
 test('a planned resume is cancelled by a new message, by Stop and by Cancel', async () => {
   const h = await startTestCore({ settings: { autoResumeLimitedThreads: true } });
   try {

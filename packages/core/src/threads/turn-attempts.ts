@@ -9,6 +9,7 @@ import { LivePermissions } from './live-permissions.ts';
 import { LiveSettings } from './live-settings.ts';
 import { saveThread, withLoad } from './records.ts';
 import { markRunning } from './lifecycle.ts';
+import { RESUME_TEXT, modeRestartPrompt } from './resume-text.ts';
 import type { CarriedInput } from './turn-context.ts';
 
 /** The current attempt snapshots, shared with live controls and final settlement. */
@@ -41,7 +42,7 @@ export const STOP_DEADLINE_ERROR = 'The agent did not stop in time; its processe
  */
 export const CAPACITY_RETRY = { delaysMs: [30_000, 120_000, 300_000] };
 /** What a try after capacity sends when the attempt before it had already written something. */
-export const CAPACITY_CONTINUE_PROMPT = 'The model was at capacity and your previous attempt stopped partway through. Continue the current task from where it stopped. Do not repeat completed work.';
+export const CAPACITY_CONTINUE_PROMPT = RESUME_TEXT.capacity.prompt;
 
 type RetryOutcome = 'retry' | 'stop' | 'cancel';
 
@@ -217,7 +218,7 @@ export class TurnAttempts {
         // Shown once the context is built, so a fresh session's history does not carry it twice.
         this.threads.noteSystem(threadId, turnId, note.prompt, note.label, 'turn.resumedAfterUpdate');
       } else if (resumed && state.thread.sessionId !== null) {
-        context.prompt = `Continue the current task from where it stopped. The user changed the permission mode to ${permissions.mode}. Do not repeat completed work. Retain subsequent instructions already in the conversation.\n\nRequest for reference:\n${context.prompt}`;
+        context.prompt = modeRestartPrompt(permissions.mode, context.prompt);
       }
       // A later attempt resumes a session that already holds the earlier ones, refused or not.
       if (attempt > 1 && state.thread.sessionId !== null) context.sessionBefore = sessionAfter(context.sessionBefore, usage, totals);

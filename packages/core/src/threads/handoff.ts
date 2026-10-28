@@ -2,6 +2,7 @@ import type { RpcEventName, RpcEvents, ThreadId, ThreadSummary, Turn, TurnId } f
 import type { Core } from '../core.ts';
 import { messageOf } from '../errors.ts';
 import type { ThreadStore } from '../threads.ts';
+import { RESUME_TEXT } from './resume-text.ts';
 import { STOP_DEADLINE } from './turn-runner.ts';
 
 /**
@@ -19,8 +20,6 @@ export const HANDOFF = { graceMs: 30_000, longToolMs: 30_000, maxAgeMs: 3_600_00
 const KEY = 'restart-handoff';
 /** The request of the interrupted turn is quoted up to this many characters. */
 const QUOTE_LIMIT = 8_000;
-
-const RESUME_PROMPT = 'Boite restarted, to install an update for instance, and stopped your previous turn before it finished. The conversation and the files are as you left them. A command that was running at that moment may have been cut short: check its result before relying on it. Continue the work from where you stopped, without starting over.';
 
 interface Entry { turnId: TurnId; threadId: ThreadId; was: 'running' | 'queued'; admittedTurnId?: TurnId }
 interface HandoffRecord { at: number; turns: Entry[] }
@@ -245,7 +244,7 @@ export class RestartHandoff {
    * continue the children a handoff cut with it too, and a crash resume
    * (`threads/auto-continue.ts`) leads with its own reason.
    */
-  continuation(turn: Turn, lead: string = RESUME_PROMPT): string {
+  continuation(turn: Turn, lead: string = RESUME_TEXT.handoff.prompt): string {
     const opening = turn.execution?.operation === 'resume'
       ? Array.from(this.core.journal.walkTurnMessages(turn.threadId, turn.id, { blobs: false })).find(message => message.role === 'system') ?? null
       : this.core.journal.lastUserMessage(turn.threadId, turn.id);
