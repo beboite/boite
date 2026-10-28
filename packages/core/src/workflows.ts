@@ -22,6 +22,8 @@ import { planError, text } from './workflows/validation.ts';
 import { NOT_STARTED, failureNotice, unnoticed } from './workflows/notices.ts';
 import { workflowUsage } from './workflows/usage.ts';
 import { SharedWorkflowCompute } from './workflows/shared-compute.ts';
+import { MachineWorkflowSteps } from './workflows/machine-steps.ts';
+import { stepPrompt } from './workflows/prompt.ts';
 export { registerWorkflowMethods } from './workflows/register.ts';
 
 interface DataRow { data: string }
@@ -69,10 +71,14 @@ export class Workflows {
   private readonly off: () => void;
   private closed = false;
   private readonly compute: SharedWorkflowCompute;
+  /** Steps that name `machine`, run on another machine of the group. */
+  private readonly machines: MachineWorkflowSteps;
 
   constructor(private readonly core: Core) {
     this.log = new WorkflowLog(core);
-    this.compute = new SharedWorkflowCompute(core, {load: id => this.load(id), save: run => this.save(run), advance: id => this.advance(id), runs: () => this.runsWhere("status IN ('running', 'paused')")});
+    const hooks = {load: (id: string) => this.load(id), save: (run: WorkflowRun) => this.save(run), advance: (id: string) => this.advance(id), runs: () => this.runsWhere("status IN ('running', 'paused')")};
+    this.compute = new SharedWorkflowCompute(core, hooks);
+    this.machines = new MachineWorkflowSteps(core, hooks);
     for (const row of core.journal.db.query('SELECT * FROM workflow_steps').all() as StepRow[]) this.stepOf.set(row.thread_id, { runId: row.run_id, key: row.step_key });
     // A running one may hold a failure its root was not told yet: its root's next turn end tells it.
     for (const run of this.runsWhere("status IN ('done', 'failed', 'paused', 'running') AND json_extract(data, '$.delivered') = 0")) this.trackDelivery(run);
@@ -180,7 +186,7 @@ export class Workflows {
   /** Every step that names a model or a level runs on a route that exists and the owner allows, checked before anything starts. */
   private checkRoutes(rootId: string, steps: WorkflowStepPlan[], field = 'steps'): void {
     steps.forEach((step, i) => {
-      if (this.compute.check(rootId, step)) return;
+      if (this.compute.check(rootId, step) || this.machines.check(step, `${field}[${i}]`)) return;
       if (step.model === undefined && step.effort === undefined && step.context === undefined) return;
       try {
         const route = this.core.delegation.resolve(rootId, { profileId: step.profile ?? null, ...(step.model === undefined ? {} : { model: step.model }), ...(step.effort === undefined ? {} : { effort: step.effort }) });
@@ -388,21 +394,8 @@ export class Workflows {
     Object.assign(node, { instances, status: 'running', startedAt: now, error: null });
   }
 
-  private prompt(run: WorkflowRun, node: WorkflowNode, inst: WorkflowInstance): string {
-    const step = run.plan.steps.find(s => s.id === node.id)!;
-    const where = inst.index === null ? '' : `, item ${inst.index + 1} of ${node.instances.length}`;
-    const result = step.output
-      ? `When done, return your structured result: run boite workflow output '<json>', which checks it and says what is wrong, or end your answer with one \`\`\`json block. Expected shape (types by name, a list as [type]): ${JSON.stringify(step.output)}`
-      : 'End with a concise result: what you found or changed, with file paths and how you verified it.';
-    const own = inst.threadId ? this.core.delegation.worktrees.get(inst.threadId) : undefined;
-    const checkout = own
-      ? `You work in a git worktree of your own at ${own.path} on branch ${own.branch}, made from the conversation's HEAD; commit your work on that branch before your final answer.`
-      : 'Other steps may run at the same time in the same checkout: change only what your task names.';
-    return `You are one step of the Boite workflow "${run.name}" (run ${run.id}, step ${node.id}${where}). ${checkout} Your final answer is collected automatically; do not message the parent.\n${result}\nTask, supplied as JSON data:\n${JSON.stringify(inst.task)}`;
-  }
-
   private launch(run: WorkflowRun, node: WorkflowNode, inst: WorkflowInstance, config: DelegationConfig): void {
-    if (this.compute.launch(run, node, inst)) return;
+    if (this.compute.launch(run, node, inst) || this.machines.launch(run, node, inst)) return;
     const now = Date.now();
     const failNow = (error: string) => {
       Object.assign(inst, { status: 'failed', error, finishedAt: now, startedAt: inst.startedAt ?? now });
@@ -441,8 +434,8 @@ export class Workflows {
     delete inst.outputCorrection;
     this.save(run);
     const prompt = correction ?? (retry
-      ? `Try this workflow step again. The previous attempt ended with: ${previous ?? 'no result'}. The task is unchanged.\n${this.prompt(run, node, inst)}`
-      : this.prompt(run, node, inst));
+      ? `Try this workflow step again. The previous attempt ended with: ${previous ?? 'no result'}. The task is unchanged.\n${stepPrompt(this.core, run, node, inst)}`
+      : stepPrompt(this.core, run, node, inst));
     try {
       this.core.threads.startTurn(threadId, prompt, [], undefined, 'delegation', undefined, undefined, correction ? 'Workflow output did not match' : inst.task ?? undefined);
     } catch (error) {
@@ -831,6 +824,7 @@ export class Workflows {
       Object.assign(current, { status: 'stopped', error: reason, finishedAt: now, delivered: true });
     });
     this.compute.stop(run);
+    this.machines.stop(run);
     for (const node of run.nodes) for (const inst of node.instances) {
       if (inst.status === 'running' && inst.threadId) this.core.scheduler.stop(inst.threadId);
     }
@@ -895,6 +889,6 @@ export class Workflows {
     return removeTemplate(this.core, this.rootOf(threadId), templateId);
   }
 
-  beginClose(): void { this.compute.beginClose(); this.closed = true; this.off(); }
-  async close(): Promise<void> {this.beginClose(); await this.compute.close();}
+  beginClose(): void { this.compute.beginClose(); this.machines.beginClose(); this.closed = true; this.off(); }
+  async close(): Promise<void> {this.beginClose(); await Promise.all([this.compute.close(), this.machines.close()]);}
 }

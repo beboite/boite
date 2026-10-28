@@ -94,7 +94,7 @@ interface Report {
 interface Stop { key: string; parentId: string; childId: string; retire?: true }
 
 /** The caller's record of a child on another machine. `childId` is null until that machine answered or reported. */
-interface RemoteChild {
+export interface RemoteChild {
   coreId: string;
   machine: string;
   childId: string | null;
@@ -108,6 +108,8 @@ interface RemoteChild {
   at: number;
   createdAt: number;
   retired?: true;
+  /** A workflow step's: its run follows it, so `delegate list` does not show it and its result and questions are not mail. */
+  workflow?: true;
 }
 
 /** The member's link from a child here to its parent on another machine. */
@@ -145,6 +147,8 @@ export class RemoteDelegation {
   private readonly reports: Outbox<Report>;
   private readonly stops: Outbox<Stop>;
   private probe: ProviderProbe | null = null;
+  /** Told of each parent here whose children elsewhere reported: workflow steps settle from it. */
+  private readonly watchers = new Set<(rootId: string) => void>();
   private closed = false;
   private readonly boot: ReturnType<typeof setTimeout>;
 
@@ -163,6 +167,12 @@ export class RemoteDelegation {
   }
 
   useProbe(probe: ProviderProbe): void { this.probe = probe; }
+
+  /** Calls `listener` with each parent here whose children on other machines reported; returns the unsubscribe. */
+  watch(listener: (rootId: string) => void): () => void {
+    this.watchers.add(listener);
+    return () => { this.watchers.delete(listener); };
+  }
 
   private start(): void {
     if (this.closed || this.core.journal.isClosed()) return;
@@ -227,7 +237,12 @@ export class RemoteDelegation {
 
   childIds(rootId: string): string[] {
     if (!this.roots.has(rootId)) return [];
-    return this.records(rootId).flatMap(record => (record.childId !== null && record.state !== null ? [record.childId] : []));
+    return this.records(rootId).flatMap(record => (record.childId !== null && record.state !== null && !record.workflow ? [record.childId] : []));
+  }
+
+  /** The record a spawn of this parent took under that request id, answered or not. */
+  record(rootId: string, requestId: string): RemoteChild | undefined {
+    return this.roots.has(rootId) ? this.records(rootId).find(record => record.requestId === requestId) : undefined;
   }
 
   /** Whether a spawn of this parent on another machine took that request id. */
@@ -238,7 +253,7 @@ export class RemoteDelegation {
   /** The children of this parent on other machines, as `delegate list` shows them. */
   members(rootId: string): DelegatedAgent[] {
     if (!this.roots.has(rootId)) return [];
-    return this.records(rootId).flatMap(record => (record.childId !== null && record.state !== null ? [this.member(rootId, record)] : []));
+    return this.records(rootId).flatMap(record => (record.childId !== null && record.state !== null && !record.workflow ? [this.member(rootId, record)] : []));
   }
 
   /** Whether a child of this parent on another machine is at work, as far as that machine reported. */
@@ -270,8 +285,9 @@ export class RemoteDelegation {
    * picked from that machine's list when one is named, then the member's
    * answer. A record is written before asking, so a report of a child whose
    * answer was lost still finds its parent, and the same request id asks again.
+   * `workflow`: a step of a run of this parent, which needs no enabled team, only one not paused.
    */
-  async spawn(params: RpcParams<'delegation.spawn'>): Promise<DelegatedAgent> {
+  async spawn(params: RpcParams<'delegation.spawn'>, workflow = false): Promise<DelegatedAgent> {
     const parent = this.core.threads.require(params.threadId);
     if (parent.parentThreadId || this.parentOf(parent.id)) throw refused('delegation supports one level; ask the parent to delegate another task');
     if (parent.agentSessionId) throw refused('delegation.spawn.machine: a bot\'s subagents run on its own machine', { field: 'machine' });
@@ -303,16 +319,16 @@ export class RemoteDelegation {
       if (active.fingerprint !== fingerprint) throw refused('requestId already used for different content');
       return active.result;
     }
-    const result = Promise.resolve().then(() => this.startThere(parent, peer, { requestId, fingerprint, task, title, worktree, project, context, request }, known !== undefined));
+    const result = Promise.resolve().then(() => this.startThere(parent, peer, { requestId, fingerprint, task, title, worktree, project, context, request }, known !== undefined, workflow));
     this.spawning.set(key, { fingerprint, result });
     try { return await result; }
     finally { this.spawning.delete(key); }
   }
 
   private async startThere(parent: ThreadSummary, peer: CoordinationPeer, ask: { requestId: string; fingerprint: string; task: string; title: string; worktree: boolean; project?: string; context?: unknown; request: { profileId: string | null; model?: string; effort?: string; speed?: string } },
-    retry: boolean): Promise<DelegatedAgent> {
+    retry: boolean, workflow: boolean): Promise<DelegatedAgent> {
     // A start asked before whose answer was lost passed these gates then: it is only asked again.
-    const config = retry ? this.core.delegation.config(parent.id) : this.host.available(parent);
+    const config = retry ? this.core.delegation.config(parent.id) : workflow ? this.unpaused(parent.id) : this.host.available(parent);
     const { request } = ask;
     const base = this.core.delegation.route(parent, config, request.profileId);
     if (!base) throw invalidParams(`profileId: expected ${[...new Set([CONVERSATION_PROFILE_ID, ...config.profiles.map(p => p.id)])].join(', ')}`);
@@ -342,6 +358,7 @@ export class RemoteDelegation {
     if (!retry) {
       this.save(parent.id, [...this.records(parent.id), {
         coreId: peer.coreId, machine: peer.name, childId: null, requestId: ask.requestId, fingerprint: ask.fingerprint, task: ask.task, profileId, title: ask.title, state: null, at: 0, createdAt: Date.now(),
+        ...(workflow ? { workflow: true as const } : {}),
       }]);
     }
     let answer: unknown;
@@ -379,8 +396,15 @@ export class RemoteDelegation {
     return this.member(parent.id, records[index]!);
   }
 
-  /** `delegation.send` from the parent to its child on another machine. */
-  async send(params: RpcParams<'delegation.send'>, origin: 'agent' | 'user'): Promise<AgentLetter> {
+  /** A workflow run's team: off is fine, paused holds it. */
+  private unpaused(rootId: string): DelegationConfig {
+    const config = this.core.delegation.config(rootId);
+    if (config.enabled && config.paused) throw refused('subagents are paused for this thread; the owner resumes them in Subagents > Settings');
+    return config;
+  }
+
+  /** `delegation.send` from the parent to its child on another machine. `workflow`: a run correcting its step there. */
+  async send(params: RpcParams<'delegation.send'>, origin: 'agent' | 'user', workflow = false): Promise<AgentLetter> {
     const root = this.core.threads.require(params.threadId);
     const record = this.child(root.id, params.toThreadId);
     if (!record) throw refused('toThreadId must be this agent\'s parent or a direct child');
@@ -394,7 +418,8 @@ export class RemoteDelegation {
       if (existing.fingerprint !== fingerprint) throw refused('requestId already used for different content');
       return JSON.parse(existing.data) as AgentLetter;
     }
-    this.host.available(root);
+    if (workflow) this.unpaused(root.id);
+    else this.host.available(root);
     const peer = this.peerOf(record);
     let answer: unknown;
     try { answer = await this.core.coordination.request(peer, 'delegation.letter', { parentId: root.id, childId, requestId, text: body, origin }); }
@@ -481,7 +506,12 @@ export class RemoteDelegation {
         if (rootId !== null) touched.add(rootId);
       } catch (error) { this.core.log('warn', `delegation report from ${peer.name}: ${messageOf(error)}`); }
     }
-    for (const rootId of touched) this.host.changed(rootId);
+    for (const rootId of touched) {
+      this.host.changed(rootId);
+      for (const listener of this.watchers) {
+        try { listener(rootId); } catch (error) { this.core.log('warn', `delegation report from ${peer.name}: ${messageOf(error)}`); }
+      }
+    }
     return { ok: true };
   }
 
@@ -521,6 +551,8 @@ export class RemoteDelegation {
   private fileLetter(rootId: string, peer: CoordinationPeer, record: RemoteChild, letter: NonNullable<Report['letter']>): void {
     if (!['result', 'question', 'agent'].includes(letter.origin)) throw invalidParams('delegation.report.letter.origin: expected result, question or agent');
     const body = text(letter.text, 'delegation.report.letter.text', 4000), requestId = text(letter.requestId, 'delegation.report.letter.requestId', 160);
+    // A workflow step's answer goes to its run, never to the parent as mail, and its questions stay on its card there.
+    if (record.workflow && letter.origin !== 'agent') return;
     const sender = `${peer.coreId}:${record.childId}`;
     if (this.core.journal.db.query('SELECT 1 FROM delegation_messages WHERE sender_id = ? AND request_id = ?').get(sender, requestId)) return;
     const root = this.core.journal.getThread(rootId);

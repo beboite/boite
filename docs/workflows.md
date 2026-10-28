@@ -60,6 +60,39 @@ models` lists the choices.
 | `when` | `{ "path", "equals" }`, `{ "path", "notEmpty": true }` or `{ "path", "empty": true }`. A false condition skips the step |
 | `output` | The JSON shape the step must return: `"string"`, `"number"`, `"boolean"`, `"any"`, `[shape]` or `{ "key": shape }` |
 | `worktree` | Optional. `true` runs the step in a git worktree of its own on a new branch from the conversation's HEAD, as `delegate spawn --worktree` does ([delegation](delegation.md#children-in-their-own-worktree)). The step's `worktree` record, `boite workflow show` and the run's summary name the branch to merge, or say it was removed with nothing in it |
+| `machine` | Optional. Another machine of the group, by name or core id prefix as `delegate spawn --machine` takes it. The step runs there ([below](#steps-on-another-machine)). Not with `compute` |
+| `project` | Optional, with `machine` only. One of that machine's projects, as `delegate spawn --project`. Left out, the one named like this conversation's project |
+
+### Steps on another machine
+
+A step with `"machine": "pc"` runs as a subagent of the run's conversation on
+that machine of the group, the way `delegate spawn --machine` starts one
+([delegation](delegation.md#on-another-machine-of-the-group)): in the project
+`project` names there, or the one named like this conversation's, on this
+conversation's model there or the `model`, `effort` and `profile` the step
+names, matched against that machine's list. With `worktree` its branch stays on
+that machine. Each attempt asks with a request id made from the run, the
+execution and its attempt, so a lost answer or a restart here finds the same
+subagent there instead of starting another.
+
+The plan check refuses a machine that is not in the group with the words of
+`delegate spawn --machine`. A machine whose owner keeps `groupThreads` off, a
+model that machine lacks, or a project it does not have fails the step at
+launch with that refusal, which names the setting to propose. A brief that
+passes 12,000 characters once the step's instructions wrap it fails the step.
+
+The step settles from that machine's reports, with no polling: once its
+subagent ends a turn there, the run reads its whole answer (up to 64,000
+characters), takes the last `json` block when the step has `output`, and asks
+that subagent once more on a mismatch, as for a step here. `boite workflow
+output` does not reach the run from there, so its brief asks only for the block.
+Its result and questions never reach the conversation as mail, and `delegate
+list` does not show it: its run does. Stop and archive stop it there once that
+machine takes the stop; retry starts a new subagent there and stops the old
+one. A restart here leaves it at work there: once the run resumes, the same
+request id finds it and its last report settles the step. `instance.machine`
+keeps the machine, the request id, that machine's thread id (never a local
+`threadId`) and the last turn judged.
 
 The optional `compute` field selects an explicitly offered shared-project host:
 `{ sharedProjectId, host: { ownerCoreId, coreId, projectId }, profileId, baseCommit }`.

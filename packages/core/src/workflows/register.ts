@@ -4,9 +4,12 @@ import type { RpcContext } from '../router.ts';
 import type { ProviderProbe } from '../providers/probe.ts';
 
 /** Registered beside delegation: the same principals, the core checks the thread. */
-/** The model names a plan's steps carry, so their providers' lists are read before the checks. */
+/** The model names a plan's steps carry, so their providers' lists are read before the checks. A step on another machine is matched there. */
 function stepModels(steps: unknown): (string | undefined)[] {
-  return Array.isArray(steps) ? steps.map(step => typeof (step as { model?: unknown } | null)?.model === 'string' ? (step as { model: string }).model : undefined) : [];
+  return Array.isArray(steps) ? steps.map(step => {
+    const raw = step as { model?: unknown; machine?: unknown } | null;
+    return typeof raw?.model === 'string' && raw.machine == null ? raw.model : undefined;
+  }) : [];
 }
 
 export function registerWorkflowMethods(core: Core, probe: ProviderProbe): void {
