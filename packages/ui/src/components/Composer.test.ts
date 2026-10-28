@@ -2138,6 +2138,40 @@ test('a pasted copy over the byte total holds Send until its pictures are fitted
   } finally { decode.mockRestore(); }
 });
 
+test('Send pressed over the byte total goes by itself once the pictures are fitted', async ({ app: _app }) => {
+  const { copyImages } = await import('../lib/composer-clipboard');
+  const { browserCodec } = await import('../lib/image-prepare');
+  const heavy = Array.from({ length: 30 }, (_, at) => ({ kind: 'image' as const, mimeType: 'image/jpeg' as const, data: Buffer.alloc(400 * 1024, at).toString('base64'), name: `shot-${at}.jpg` }));
+  const decode = vi.spyOn(browserCodec, 'decode').mockImplementation(async () => ({
+    width: 1170, height: 2532, hasAlpha: () => false, close() {},
+    async encode(_width, _height, mimeType) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return new Blob([new Uint8Array(100 * 1024)], { type: mimeType });
+    }
+  }));
+  try {
+    const from = { text: heavy.map((_, at) => `[Image ${at + 1}]`).join(' '), attachments: heavy, queued: [], sending: false, paused: false };
+    const copied = clipboard();
+    expect(copyImages(copied, from, 0, from.text.length)).toBe(true);
+    await store.open('t-trace');
+    await waitFor(() => !store.busy);
+    const before = store.openThread!.messages.length;
+    await type('look ');
+    input().focus();
+    input().setSelectionRange(5, 5);
+    expect(clipboardEvent('paste', copied).defaultPrevented).toBe(true);
+    // One Enter while the box still weighs 12 MB, nothing typed after it.
+    press('Enter');
+    await waitFor(() => (store.openThread?.messages.length ?? 0) > before, 4000);
+    const sent = store.openThread!.messages.filter((message) => message.role === 'user');
+    expect(sent.at(-1)!.parts.filter((part) => part.type === 'image')).toHaveLength(30);
+    expect(sent.at(-1)!.parts.find((part) => part.type === 'text')).toMatchObject({ text: expect.stringContaining('look') });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(store.openThread!.messages.filter((message) => message.role === 'user')).toHaveLength(sent.length);
+    expect(input().value).toBe('');
+  } finally { decode.mockRestore(); }
+});
+
 test('a pasted copy that stays over the byte total at its smallest says to remove pictures, and keeps them', async ({ app: _app }) => {
   const { copyImages } = await import('../lib/composer-clipboard');
   const { browserCodec } = await import('../lib/image-prepare');
