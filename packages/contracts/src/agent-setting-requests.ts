@@ -136,7 +136,7 @@ export function agentSettingValue(profile: AgentProfile, config: AgentRuntimeCon
     case 'model': return agentModelRef(profile.selection);
     case 'effort': return profile.selection.effort;
     case 'autoMemory': return config.autoMemory !== false;
-    case 'eventWakes': return config.eventWakes !== false;
+    case 'eventWakes': return config.eventWakes === true;
     case 'subagents': return config.subagents.enabled;
     case 'dailyBudget': return config.dailyBudgetUsd ?? null;
   }

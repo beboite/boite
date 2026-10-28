@@ -43,25 +43,25 @@ function foldOutput(entry: ToolEntry): void {
  * is a tool, one part per approval question.
  */
 export class CodexTurn {
-  private messageId: MessageId | null = null;
-  private nextIndex = 0;
-  private textIndex: number | null = null;
-  private thinkingIndex: number | null = null;
+  #messageId: MessageId | null = null;
+  #nextIndex = 0;
+  #textIndex: number | null = null;
+  #thinkingIndex: number | null = null;
   /** The reasoning section the last thinking delta belonged to. */
-  private thinkingSection: string | null = null;
-  private readonly tools = new Map<string, ToolEntry>();
-  private readonly textItems = new Map<string, { index: number; text: string; complete: boolean }>();
+  #thinkingSection: string | null = null;
+  readonly #tools = new Map<string, ToolEntry>();
+  readonly #textItems = new Map<string, { index: number; text: string; complete: boolean }>();
   /** Tools whose streamed output waits for the next flush, so a chatty command costs one write per beat. */
-  private readonly dirty = new Set<string>();
-  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  readonly #dirty = new Set<string>();
+  #flushTimer: ReturnType<typeof setTimeout> | null = null;
 
-  private completedTurnId: string | null = null;
-  private status: TurnResult['status'] = 'done';
-  private error: string | null = null;
-  private diagnosticError: string | undefined;
-  private resolve: (result: TurnResult) => void = () => undefined;
-  private decide: () => void = () => undefined;
-  private wake: () => void = () => undefined;
+  #completedTurnId: string | null = null;
+  #status: TurnResult['status'] = 'done';
+  #error: string | null = null;
+  #diagnosticError: string | undefined;
+  #resolve: (result: TurnResult) => void = () => undefined;
+  #decide: () => void = () => undefined;
+  #wake: () => void = () => undefined;
 
   readonly done: Promise<TurnResult>;
   /** Resolves the moment the outcome is known, before anything is journalled. */
@@ -88,18 +88,18 @@ export class CodexTurn {
   lastErrorInfo: unknown = null;
   /** When the account's spent window resets, from `account/rateLimits/updated`; null when none is spent or nothing was said. */
   spentWindowResetsAt: number | null = null;
-  private refusal: TurnRefusal | undefined;
+  #refusal: TurnRefusal | undefined;
 
   constructor(readonly ctx: TurnContext) {
     this.sessionId = ctx.sessionId;
     this.done = new Promise<TurnResult>((resolve) => {
-      this.resolve = resolve;
+      this.#resolve = resolve;
     });
     this.finished = new Promise<void>((resolve) => {
-      this.decide = resolve;
+      this.#decide = resolve;
     });
     this.stopped = new Promise<void>((resolve) => {
-      this.wake = resolve;
+      this.#wake = resolve;
     });
   }
 
@@ -109,7 +109,7 @@ export class CodexTurn {
 
   markStopped(): void {
     this.isStopped = true;
-    this.wake();
+    this.#wake();
   }
 
   /** `turn/completed`, or a `turn/start` that already answered with a finished turn. */
@@ -117,38 +117,38 @@ export class CodexTurn {
     if (this.decided) return;
     switch (record.status) {
       case 'completed':
-        this.completedTurnId = record.id;
+        this.#completedTurnId = record.id;
         break;
       case 'interrupted':
-        this.status = 'stopped';
+        this.#status = 'stopped';
         break;
       case 'failed':
-        this.refusal = codexRefusal(record.error?.codexErrorInfo ?? this.lastErrorInfo, record.error?.message, this.spentWindowResetsAt);
+        this.#refusal = codexRefusal(record.error?.codexErrorInfo ?? this.lastErrorInfo, record.error?.message, this.spentWindowResetsAt);
         this.fail(record.error?.message ?? 'the codex agent failed the turn');
         return;
       default:
         return;
     }
     this.decided = true;
-    this.decide();
+    this.#decide();
   }
 
   fail(reason: string, diagnostic?: string): void {
     if (this.decided) return;
     this.decided = true;
-    this.status = 'error';
-    this.error = reason;
-    this.diagnosticError = diagnostic;
+    this.#status = 'error';
+    this.#error = reason;
+    this.#diagnosticError = diagnostic;
     this.part(this.takeIndex(), { type: 'error', message: reason });
-    this.decide();
+    this.#decide();
   }
 
   /** A stop the agent never got to act on: the turn ends stopped, with nothing drawn. */
   endStopped(): void {
     if (this.decided) return;
     this.decided = true;
-    this.status = 'stopped';
-    this.decide();
+    this.#status = 'stopped';
+    this.#decide();
   }
 
   /**
@@ -161,92 +161,92 @@ export class CodexTurn {
     this.decided = true;
     this.sessionLost = true;
     if (this.isStopped) {
-      this.status = 'stopped';
+      this.#status = 'stopped';
     } else {
-      this.status = 'error';
-      this.error = reason;
+      this.#status = 'error';
+      this.#error = reason;
     }
-    this.decide();
+    this.#decide();
   }
 
   settle(): void {
     if (this.settled) return;
-    this.flushOutput();
+    this.#flushOutput();
     this.settled = true;
     this.decided = true;
-    this.wake();
-    this.decide();
-    if (this.messageId !== null) {
-      this.ctx.emit.complete(this.messageId, this.status === 'error' ? 'error' : 'complete');
+    this.#wake();
+    this.#decide();
+    if (this.#messageId !== null) {
+      this.ctx.emit.complete(this.#messageId, this.#status === 'error' ? 'error' : 'complete');
     }
-    this.resolve({
-      status: this.status,
+    this.#resolve({
+      status: this.#status,
       sessionId: this.sessionId,
       usage: this.usage,
-      error: this.error ?? undefined,
-      ...(this.diagnosticError === undefined ? {} : { diagnosticError: this.diagnosticError }),
+      error: this.#error ?? undefined,
+      ...(this.#diagnosticError === undefined ? {} : { diagnosticError: this.#diagnosticError }),
       promptCache: this.cacheLife,
-      ...(this.status === 'done' && this.sessionId && this.completedTurnId
-        ? { checkpoint: { sessionId: this.sessionId, entry: this.completedTurnId } } : {}),
+      ...(this.#status === 'done' && this.sessionId && this.#completedTurnId
+        ? { checkpoint: { sessionId: this.sessionId, entry: this.#completedTurnId } } : {}),
       ...(this.sessionLost ? { sessionLost: true } : {}),
-      ...(this.status === 'error' && this.refusal ? { refusal: this.refusal } : {}),
+      ...(this.#status === 'error' && this.#refusal ? { refusal: this.#refusal } : {}),
     });
   }
 
   // -- parts ----------------------------------------------------------------
 
-  private message(): MessageId {
-    if (this.messageId === null) this.messageId = this.ctx.emit.startMessage('assistant');
-    return this.messageId;
+  #message(): MessageId {
+    if (this.#messageId === null) this.#messageId = this.ctx.emit.startMessage('assistant');
+    return this.#messageId;
   }
 
   part(index: number, part: MessagePart): void {
-    this.ctx.emit.part(this.message(), index, part);
+    this.ctx.emit.part(this.#message(), index, part);
   }
 
   takeIndex(): number {
-    this.textIndex = null;
-    this.thinkingIndex = null;
-    const index = this.nextIndex;
-    this.nextIndex += 1;
+    this.#textIndex = null;
+    this.#thinkingIndex = null;
+    const index = this.#nextIndex;
+    this.#nextIndex += 1;
     return index;
   }
 
   writeText(text: string, itemId?: string): void {
     if (text.length === 0) return;
     if (itemId) {
-      let entry = this.textItems.get(itemId);
+      let entry = this.#textItems.get(itemId);
       if (entry?.complete) return;
       if (!entry) {
         entry = { index: this.takeIndex(), text: '', complete: false };
-        this.textItems.set(itemId, entry);
+        this.#textItems.set(itemId, entry);
         this.part(entry.index, { type: 'text', text: '' });
       }
       entry.text += text;
-      this.ctx.emit.delta(this.message(), entry.index, text);
+      this.ctx.emit.delta(this.#message(), entry.index, text);
       return;
     }
-    if (this.textIndex === null) {
-      const index = this.nextIndex;
-      this.nextIndex += 1;
-      this.textIndex = index;
-      this.thinkingIndex = null;
+    if (this.#textIndex === null) {
+      const index = this.#nextIndex;
+      this.#nextIndex += 1;
+      this.#textIndex = index;
+      this.#thinkingIndex = null;
       this.part(index, { type: 'text', text: '' });
     }
-    this.ctx.emit.delta(this.message(), this.textIndex, text);
+    this.ctx.emit.delta(this.#message(), this.#textIndex, text);
   }
 
   completeText(itemId: string, text: string): void {
-    const entry = this.textItems.get(itemId) ?? { index: this.takeIndex(), text: '', complete: false };
+    const entry = this.#textItems.get(itemId) ?? { index: this.takeIndex(), text: '', complete: false };
     if (entry.complete) return;
     entry.text = text; entry.complete = true;
-    this.textItems.set(itemId, entry);
+    this.#textItems.set(itemId, entry);
     this.part(entry.index, { type: 'text', text, complete: true });
   }
 
   /** A thinking part is open: its deltas already report the `thinking` phase. */
   get thinkingOpen(): boolean {
-    return this.thinkingIndex !== null;
+    return this.#thinkingIndex !== null;
   }
 
   /**
@@ -257,17 +257,17 @@ export class CodexTurn {
    */
   writeThinking(text: string, section?: string): void {
     if (text.length === 0) return;
-    if (this.thinkingIndex === null) {
-      const index = this.nextIndex;
-      this.nextIndex += 1;
-      this.thinkingIndex = index;
-      this.textIndex = null;
+    if (this.#thinkingIndex === null) {
+      const index = this.#nextIndex;
+      this.#nextIndex += 1;
+      this.#thinkingIndex = index;
+      this.#textIndex = null;
       this.part(index, { type: 'thinking', text: '' });
-    } else if (section !== undefined && this.thinkingSection !== null && section !== this.thinkingSection) {
-      this.ctx.emit.delta(this.message(), this.thinkingIndex, '\n\n');
+    } else if (section !== undefined && this.#thinkingSection !== null && section !== this.#thinkingSection) {
+      this.ctx.emit.delta(this.#message(), this.#thinkingIndex, '\n\n');
     }
-    if (section !== undefined) this.thinkingSection = section;
-    this.ctx.emit.delta(this.message(), this.thinkingIndex, text);
+    if (section !== undefined) this.#thinkingSection = section;
+    this.ctx.emit.delta(this.#message(), this.#thinkingIndex, text);
   }
 
   /**
@@ -276,34 +276,34 @@ export class CodexTurn {
    * completed item carries the whole output anyway.
    */
   appendOutput(itemId: string, delta: string): void {
-    const entry = this.tools.get(itemId);
+    const entry = this.#tools.get(itemId);
     if (entry === undefined || entry.status !== 'running' || delta.length === 0) return;
     const pending = entry.pending ??= { pieces: [], length: 0 };
     pending.pieces.push(delta);
     pending.length += delta.length;
     // A flood between two beats is folded early, so the pieces stay bounded.
     if (pending.length > LIVE_OUTPUT_MAX * 4) foldOutput(entry);
-    this.dirty.add(itemId);
-    if (this.flushTimer !== null) return;
-    this.flushTimer = setTimeout(() => this.flushOutput(), LIVE_OUTPUT_BEAT_MS);
-    this.flushTimer.unref?.();
+    this.#dirty.add(itemId);
+    if (this.#flushTimer !== null) return;
+    this.#flushTimer = setTimeout(() => this.#flushOutput(), LIVE_OUTPUT_BEAT_MS);
+    this.#flushTimer.unref?.();
   }
 
-  private flushOutput(): void {
-    if (this.flushTimer !== null) clearTimeout(this.flushTimer);
-    this.flushTimer = null;
-    for (const itemId of this.dirty) {
-      const entry = this.tools.get(itemId);
+  #flushOutput(): void {
+    if (this.#flushTimer !== null) clearTimeout(this.#flushTimer);
+    this.#flushTimer = null;
+    for (const itemId of this.#dirty) {
+      const entry = this.#tools.get(itemId);
       if (entry === undefined || entry.status !== 'running') continue;
       foldOutput(entry);
-      this.drawTool(itemId, entry);
+      this.#drawTool(itemId, entry);
     }
-    this.dirty.clear();
+    this.#dirty.clear();
   }
 
   /** `item/started` opens the part, `item/completed` replaces the same one by item id. */
   upsertTool(itemId: string, view: ToolView): void {
-    const entry = this.tools.get(itemId) ?? {
+    const entry = this.#tools.get(itemId) ?? {
       index: this.takeIndex(),
       name: view.name,
       input: null,
@@ -317,12 +317,12 @@ export class CodexTurn {
     entry.status = view.status;
     if (view.exitCode !== undefined) entry.exitCode = view.exitCode;
     entry.nativeAgents = view.nativeAgents;
-    this.tools.set(itemId, entry);
-    this.dirty.delete(itemId);
-    this.drawTool(itemId, entry);
+    this.#tools.set(itemId, entry);
+    this.#dirty.delete(itemId);
+    this.#drawTool(itemId, entry);
   }
 
-  private drawTool(itemId: string, entry: ToolEntry): void {
+  #drawTool(itemId: string, entry: ToolEntry): void {
     this.part(entry.index, {
       type: 'tool',
       toolId: itemId,

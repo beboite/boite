@@ -35,6 +35,27 @@ test('changed instructions wake the agent once; a rename does not', async ({ rea
   expect(thread.turns.map(t => promptOf(thread.messages, t.id)?.displayText)).toEqual(['Just created', 'Instructions changed']);
 });
 
+test('an outside event wakes the bot in the fake as in the core, quoted as data under its key', async ({ ready }) => {
+  const { client } = await ready({ delayMs: 0 });
+  const agent = await client.call('agents.profile.save', { value: { name: 'Scout', domain: '', instructions: '', avatar: '', selection, status: 'active' } });
+  const { threadId } = await client.call('agents.open', { agentId: agent.id });
+  await vi.waitFor(async () => expect((await client.call('threads.get', { threadId })).status).toBe('idle'));
+  expect(await client.call('agents.event', { agent: 'scout', key: 'ci', text: 'Build failed on main' })).toEqual({ agentId: agent.id, key: 'external:ci' });
+  await expect(client.call('agents.event', { agent: 'Scout', key: 'bad key!', text: 'x' })).rejects.toThrow('key');
+  const thread = await client.call('threads.get', { threadId });
+  expect(promptOf(thread.messages, thread.turns.at(-1)!.id)).toMatchObject({ displayText: 'Outside event ci', text: expect.stringContaining('"Build failed on main"') });
+  // As the core: the text is a JSON quote, cut with a note when quoting outgrows the cap, and a shared name is refused.
+  await vi.waitFor(async () => expect((await client.call('threads.get', { threadId })).status).toBe('idle'));
+  await client.call('agents.event', { agent: 'Scout', key: 'noise', text: '"done"\n' + '\u0001'.repeat(15_000) });
+  const noisy = await client.call('threads.get', { threadId });
+  const text = promptOf(noisy.messages, noisy.turns.at(-1)!.id)!.text;
+  expect(text.length).toBeLessThanOrEqual(16_000);
+  expect(JSON.parse(/you: ("(?:[^"\\]|\\.)*")/.exec(text)![1]!)).toMatch(/^"done"\n\u0001+$/);
+  expect(text).toMatch(/ of 15007 characters\)$/);
+  await client.call('agents.profile.save', { value: { name: 'scout', domain: '', instructions: '', avatar: '', selection, status: 'active' } });
+  await expect(client.call('agents.event', { agent: 'Scout', text: 'x' })).rejects.toThrow('2 bots are named');
+});
+
 test('a routine run is a routine turn on the agent\'s thread, and a quiet answer sets its outcome and leaves nothing unread', async ({ ready }) => {
   const { client } = await ready({ delayMs: 0 });
   const agent = await client.call('agents.profile.save', { value: { name: 'Scout', domain: '', instructions: '', avatar: '', selection, status: 'active' } });

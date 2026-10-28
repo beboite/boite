@@ -416,8 +416,8 @@ export class Coordination {
     // It may hear back from that contact for a while, even outside the projects opened to it.
     if (contact) this.#core.contacts.reach.noteSent(from.threadId, contact.coreId);
     this.#core.threads.runner.noteMail(from.threadId, letter.createdAt);
-    // The thread's turns now report back to the agent that wrote to it.
-    if (resident) this.#core.workforce.projects.follow(resident.id, to.threadId);
+    // The thread's turns now report back to the agent that wrote to it, waking it only once it watches the thread.
+    if (resident) this.#core.workforce.projects.follow(resident.id, to.threadId, 'touched');
     this.#changed(from.threadId);
     if (to.coreId === from.coreId) {
       try { this.#receive(letter); } catch (error) { this.update(letter, 'rejected', messageOf(error)); }

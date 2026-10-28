@@ -20,7 +20,7 @@ import { hydrate, hydratePart } from './journal/part-blobs.ts';
 import { migrate } from './journal/schema.ts';
 import { openAsyncQuestions, projectQuestion } from './journal/questions.ts';
 import { PROCESS_COLUMNS, PROCESS_FROM, ProcessRows } from './journal/processes.ts';
-import { runWrite } from './journal/statements.ts';
+import { cachePages, runWrite } from './journal/statements.ts';
 import { WAL_LIMIT_BYTES, WalCheckpoints, type WalCheckpointOptions } from './journal/wal-checkpoints.ts';
 import { toAccount, toMessage, toProcess, toProject, toThread, toTurn, parseJson } from './journal/rows.ts';
 import { threadsWhere, VISIBLE_THREADS, writeThread } from './journal/thread-rows.ts';
@@ -92,7 +92,7 @@ export class Journal {
 
   constructor(file: string, options: JournalOptions = {}) {
     this.onError = options.onError ?? ((message) => console.error(message));
-    this.db = new Database(file, { create: true });
+    this.db = cachePages(new Database(file, { create: true }));
     this.stream = new StreamBuffer(this.db, this, this.onError);
     this.processes = new ProcessRows(this.db);
     try {

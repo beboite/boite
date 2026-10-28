@@ -129,7 +129,10 @@ test('an agent reads and drives only the threads of the projects entrusted to it
 });
 
 test('its messages reach a thread as the agent\'s whatever that thread\'s settings, and the thread\'s turns come back as events', async () => {
-  const prompts = answering(); const { h, self, worker, cli, off, facts, hurry, events } = await setup();
+  const prompts = answering(); const { h, owner, self, worker, cli, off, facts, hurry, events, agent } = await setup();
+  // A thread it only wrote to wakes it with project-wide wakes on.
+  const config = await owner.call('agents.runtime.get', { agentId: agent().id });
+  await owner.call('agents.runtime.configure', { agentId: agent().id, expectedRevision: agent().revision, config: { ...config, eventWakes: true } });
   await off(worker);
   const sent = await cli(['thread', 'send', worker, 'Finish, verify and open the pull request', '--json']);
   expect(sent.err).toBe('');
@@ -148,7 +151,7 @@ test('its messages reach a thread as the agent\'s whatever that thread\'s settin
   // The thread is on the agent's desk now: its turn's answer waits as a fact, a short while for more.
   await waitFor(() => facts().some(f => f.text.includes(`Turn done in thread ${worker}, titled "Worker".`)));
   expect(facts().find(f => f.text.includes(worker))!.text).toContain('Its final answer: "Done in');
-  expect((await h.connect().then(c => c.call('agents.snapshot', {}))).watches.map(w => [w.threadId, w.origin])).toContainEqual([worker, 'followed']);
+  expect((await h.connect().then(c => c.call('agents.snapshot', {}))).watches.map(w => [w.threadId, w.origin])).toContainEqual([worker, 'touched']);
   await Bun.sleep(700);
   expect(events()).toHaveLength(1);
   hurry();
@@ -214,6 +217,45 @@ test('events: failures and asks from any thread, finished turns only from follow
     await entrust(['Other']);
     expect(facts()).toEqual([]);
   } finally { asker.close(); }
+});
+
+test('a bot with default settings wakes for a thread it started or watches, and holds the turns of a thread it only wrote to', async () => {
+  const prompts = answering(); const { h, owner, self, worker, cli, facts, hurry, events } = await setup(['test']);
+  // B: the bot answers a question of a thread of its project, which puts it on its desk.
+  await owner.call('turns.start', { threadId: worker, prompt: 'Start B' });
+  await waitFor(() => settled(h, worker));
+  const asker = await connect(h.url, h.core.agents.tokenFor(worker));
+  try {
+    const { questionId } = await asker.call('questions.ask', { threadId: worker, text: 'Merge now?', options: ['Yes', 'No'] });
+    await waitFor(() => facts().some(f => f.key === `ask:${questionId}`));
+    expect((await cli(['answer', worker, questionId, 'Yes'])).err).toBe('');
+  } finally { asker.close(); }
+  expect((await owner.call('agents.snapshot', {})).watches.find(w => w.threadId === worker)?.origin).toBe('touched');
+  await owner.call('turns.start', { threadId: worker, prompt: 'Build B' });
+  await waitFor(() => facts().some(f => f.key.startsWith('turn:') && f.text.includes(worker)) && settled(h, worker));
+  // A: a thread the bot started.
+  const before = events().length;
+  const started = await cli(['thread', 'new', 'test', 'Build A']);
+  const a = /thread: (\S+)/.exec(started.out)![1]!;
+  await waitFor(() => facts().some(f => f.text.includes(a)));
+  hurry();
+  await waitFor(() => events().length === before + 1 && settled(h, self));
+  await Bun.sleep(700);
+  expect(events()).toHaveLength(before + 1);
+  const prompt = prompts.get(self)!.at(-1)!;
+  expect(prompt).toContain(`Turn done in thread ${a}`);
+  expect(prompt).not.toContain(worker);
+  // B's turns wait for the bot's next routine.
+  expect(facts().some(f => f.key.startsWith('turn:') && f.text.includes(worker))).toBe(true);
+  // Watching B makes it its business: B's next turn wakes it.
+  expect((await cli(['bot', 'watch', worker])).err).toBe('');
+  expect((await owner.call('agents.snapshot', {})).watches.find(w => w.threadId === worker)?.origin).toBe('followed');
+  const held = facts().length;
+  await owner.call('turns.start', { threadId: worker, prompt: 'Again B' });
+  await waitFor(() => facts().length === held + 1 && settled(h, worker));
+  hurry();
+  await waitFor(() => events().length === before + 2 && settled(h, self));
+  expect(prompts.get(self)!.at(-1)!).toContain(`Turn done in thread ${worker}`);
 });
 
 test('it starts threads in its projects, and the thread\'s first answer comes back as an event', async () => {

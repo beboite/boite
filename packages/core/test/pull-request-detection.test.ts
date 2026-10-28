@@ -52,7 +52,7 @@ test('automatic discovery pins the repository and ignores another fork with the 
   const f = await fixture();
   f.setList([{ ...candidate('OPEN', 9), isCrossRepository: true, headRepositoryOwner: { login: 'someone' } }, candidate()]);
   expect(await f.client.call('threads.pullRequest', { threadId: f.threadId })).toEqual({ number: 7, url, state: 'OPEN' });
-  expect(f.calls[0]).toEqual(expect.arrayContaining(['--repo', 'github.com/example/repo']));
+  expect(f.calls[0]).toEqual(expect.arrayContaining(['--hostname', 'github.com', 'owner=example', 'name=repo']));
 });
 
 test('an open PR takes precedence over the old merged PR of a reused branch', async () => {
@@ -76,7 +76,11 @@ test('a missing gh is retried automatically after a bounded delay', async () => 
 test('new automatic work supersedes a terminal explicit link on a reused branch', async () => {
   const f = await fixture();
   f.setDetail('CLOSED');
+  f.setList([candidate('CLOSED')]);
   await f.client.call('threads.linkPullRequest', { threadId: f.threadId, url });
   f.setList([candidate('OPEN', 8), candidate('CLOSED')]);
-  expect(await f.client.call('threads.pullRequest', { threadId: f.threadId })).toEqual({ number: 8, url: candidate('OPEN', 8).url, state: 'OPEN' });
+  // The link read the repository's page: the next one, fifteen seconds later, shows the new work.
+  const clock = spyOn(Date, 'now').mockReturnValue(Date.now() + 15_000);
+  try { expect(await f.client.call('threads.pullRequest', { threadId: f.threadId })).toEqual({ number: 8, url: candidate('OPEN', 8).url, state: 'OPEN' }); }
+  finally { clock.mockRestore(); }
 });

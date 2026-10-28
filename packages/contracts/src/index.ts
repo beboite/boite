@@ -53,6 +53,7 @@ import type { TurnsRpcEvents, TurnsRpcMethods } from './turns';
 import type { UsageRpcMethods } from './usage';
 export * from './ids';
 export * from './providers';
+export * from './local-acp';
 export * from './accounts';
 export * from './plugins';
 export * from './projects';

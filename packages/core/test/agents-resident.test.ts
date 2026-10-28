@@ -10,7 +10,7 @@ import { SCHEMA_VERSION } from '../src/journal/schema.ts';
 import { checkSchedule, nextOccurrence } from '../src/agents/routines.ts';
 import { agentContext, ROUTINES_TEXT_MAX } from '../src/agents/context.ts';
 import { connect } from '../src/client.ts';
-import { makeAgent, settled, turnsOf } from './agent-fixture.ts';
+import { makeAgent, scripted, settled, turnsOf } from './agent-fixture.ts';
 import { thrown } from './settle.ts';
 
 let h: TestCore;
@@ -43,7 +43,7 @@ test('default route must be allowed; account grants restrict identity and child 
 test('a runtime saved by an older core still loads, and its retired keys are gone', async () => {
   h.core.journal.setSetting(`agents:runtime:${agent.id}`, { ...policy(), compactAfterTurns: 12, maxRunMinutes: 10 });
   const read = await client.call('agents.runtime.get', { agentId: agent.id });
-  expect(read).toEqual({ ...policy(), eventWakes: true, defaultRoute: current().selection });
+  expect(read).toEqual({ ...policy(), eventWakes: false, defaultRoute: current().selection });
   expect(await thrown(client.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: current().revision, config: { ...policy(), dailyBudgetUsd: -1 } }))).toThrow('dailyBudgetUsd');
 });
 
@@ -89,21 +89,24 @@ test('the main model and helper model have independent allowlists', async () => 
 });
 
 test('Run now starts a routine turn once per request, and refuses while the thread is at work', async () => {
-  const routine = await client.call('agents.routine.save', { value: routineValue() });
-  const request = { routineId: routine.id, requestId: 'routine-once-001' };
-  const first = await client.call('agents.routine.run', request);
-  expect((await client.call('agents.routine.run', request)).turnId).toBe(first.turnId);
-  expect(h.core.journal.getTurn(first.turnId)?.execution?.operation).toBe('routine');
-  // Run now leaves the schedule where it was.
-  expect(h.core.workforce.records.get('routine', routine.id)).toMatchObject({ lastTurnId: first.turnId, nextAt: routine.nextAt });
-  await waitFor(() => settled(h, threadId));
-  await client.call('turns.start', { threadId, prompt: '[sleep:60000]' });
-  await waitFor(() => h.core.threads.require(threadId).status === 'running');
-  expect(await thrown(client.call('agents.routine.run', { ...request, requestId: 'routine-once-002' }))).toThrow('is at work');
-  await client.call('turns.stop', { threadId });
-  await waitFor(() => settled(h, threadId));
-  await client.call('agents.routine.remove', { routineId: routine.id });
-  expect(h.core.workforce.records.list('routine')).toEqual([]);
+  const echo = scripted(ctx => ctx.prompt === 'Hold this turn' ? { hold: true } : { text: 'Routine done' });
+  try {
+    const routine = await client.call('agents.routine.save', { value: routineValue() });
+    const request = { routineId: routine.id, requestId: 'routine-once-001' };
+    const first = await client.call('agents.routine.run', request);
+    expect((await client.call('agents.routine.run', request)).turnId).toBe(first.turnId);
+    expect(h.core.journal.getTurn(first.turnId)?.execution?.operation).toBe('routine');
+    // Run now leaves the schedule where it was.
+    expect(h.core.workforce.records.get('routine', routine.id)).toMatchObject({ lastTurnId: first.turnId, nextAt: routine.nextAt });
+    await waitFor(() => settled(h, threadId));
+    await client.call('turns.start', { threadId, prompt: 'Hold this turn' });
+    await waitFor(() => h.core.threads.require(threadId).status === 'running');
+    expect(await thrown(client.call('agents.routine.run', { ...request, requestId: 'routine-once-002' }))).toThrow('is at work');
+    await client.call('turns.stop', { threadId });
+    await waitFor(() => settled(h, threadId));
+    await client.call('agents.routine.remove', { routineId: routine.id });
+    expect(h.core.workforce.records.list('routine')).toEqual([]);
+  } finally { echo.restore(); }
 });
 
 test('an agent schedules and removes only its own routines, from its own thread', async () => {

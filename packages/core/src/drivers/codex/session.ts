@@ -70,44 +70,44 @@ const SQLITE_INIT_CLOSE_MS = 2_000;
  * core shutdown or a changed setup ends it.
  */
 export class CodexSession {
-  private readonly retention = new SessionRetention();
-  private child: SpawnedChild | null = null;
-  private rpc: CodexRpc | null = null;
-  private starting: Promise<void> | null = null;
+  readonly #retention = new SessionRetention();
+  #child: SpawnedChild | null = null;
+  #rpc: CodexRpc | null = null;
+  #starting: Promise<void> | null = null;
 
   /** The Codex thread id: what `ctx.sessionId` stores and `thread/resume` takes. */
-  private threadId: string | null = null;
+  #threadId: string | null = null;
   /** What `thread/start` or `thread/resume` said it runs on, for the prompt cache lifetime. */
-  private served: { model: string | null; provider: string | null } = { model: null, provider: null };
-  private lastStderr = '';
-  private exitCode: number | null = null;
-  private exited: Promise<number | null> | null = null;
-  private processClosed: Promise<void> = Promise.resolve();
-  private idle: Timer | null = null;
+  #served: { model: string | null; provider: string | null } = { model: null, provider: null };
+  #lastStderr = '';
+  #exitCode: number | null = null;
+  #exited: Promise<number | null> | null = null;
+  #processClosed: Promise<void> = Promise.resolve();
+  #idle: Timer | null = null;
   /** The turn whose `turn/start` is in flight. Context updates also arrive while idle. */
-  private current: CodexTurn | null = null;
+  #current: CodexTurn | null = null;
   /** The account's spent windows, from `account/rateLimits/updated`. */
-  private readonly spentWindows = new SpentWindows();
+  readonly #spentWindows = new SpentWindows();
   /** The turn this session is running, from its process start to its settle. */
-  private active: CodexTurn | null = null;
+  #active: CodexTurn | null = null;
   /** Armed by a stop: an agent that has not ended the turn by then loses its process. */
-  private stopTimer: Timer | null = null;
-  private contextSink: CodexTurn['ctx']['context'] | null = null;
+  #stopTimer: Timer | null = null;
+  #contextSink: CodexTurn['ctx']['context'] | null = null;
   /** The context the process was opened with, for a hook that runs while no turn is. */
-  private opener: SessionContext | null = null;
-  private queue: Promise<void> = Promise.resolve();
-  private running = 0;
+  #opener: SessionContext | null = null;
+  #queue: Promise<void> = Promise.resolve();
+  #running = 0;
   /** `agentMessage` items that are asynchronous questions: drawn as cards, their text deltas dropped. */
-  private readonly asyncItems = new Set<string>();
-  private closing = false;
-  private ended = false;
+  readonly #asyncItems = new Set<string>();
+  #closing = false;
+  #ended = false;
   /** This app-server has no `turn/settings/update`: an older codex, or the feature refused. */
-  private liveSettingsRefused = false;
-  private initializing = false;
-  private sqliteInitFailed = false;
-  private startupStderr = '';
+  #liveSettingsRefused = false;
+  #initializing = false;
+  #sqliteInitFailed = false;
+  #startupStderr = '';
   /** Rolling rate-limit updates, forwarded as quota readings of this session's account. */
-  private readonly rateLimits = new CodexRateLimits(() => this.rpc, () => this.current?.ctx ?? this.opener);
+  readonly #rateLimits = new CodexRateLimits(() => this.#rpc, () => this.#current?.ctx ?? this.#opener);
 
   constructor(
     readonly key: string,
@@ -117,43 +117,43 @@ export class CodexSession {
 
   /** Reusable only while the process is up and the turn asks for the very same setup. */
   usable(key: string, warmMs: number): boolean {
-    return !this.ended && !this.closing && this.key === key && this.retention.reusable(warmMs, this.warmMs);
+    return !this.#ended && !this.#closing && this.key === key && this.#retention.reusable(warmMs, this.warmMs);
   }
 
   setViewed(viewed: boolean): void {
-    this.retention.setViewed(viewed);
-    this.clearIdle();
-    if (!viewed && !this.busy() && !this.ended) this.armIdle();
+    this.#retention.setViewed(viewed);
+    this.#clearIdle();
+    if (!viewed && !this.busy() && !this.#ended) this.#armIdle();
   }
 
   async prepare(ctx: SessionContext, forTurn = false): Promise<void> {
-    this.retention.prepare(forTurn);
-    try { await this.start(ctx); }
-    catch (error) { this.drop(); throw error; }
+    this.#retention.prepare(forTurn);
+    try { await this.#start(ctx); }
+    catch (error) { this.#drop(); throw error; }
     finally { ctx.finishStartup?.(); }
   }
 
   /** Read-only account discovery on a ready host in the explicitly selected workspace. */
   async catalog(ctx: ProbeContext): Promise<ModelInfo[] | null> {
-    if (!this.threadId || this.ended || this.closing || this.initializing || this.busy()) return null;
-    return preparedModels(ctx, this.opener, this.rpc);
+    if (!this.#threadId || this.#ended || this.#closing || this.#initializing || this.busy()) return null;
+    return preparedModels(ctx, this.#opener, this.#rpc);
   }
 
   busy(): boolean {
-    return this.running > 0;
+    return this.#running > 0;
   }
 
   attach(turn: CodexTurn, warmMs: number): void {
-    this.retention.beginTurn();
+    this.#retention.beginTurn();
     this.warmMs = warmMs;
-    this.running += 1;
-    this.clearIdle();
-    this.queue = this.queue.then(async () => {
+    this.#running += 1;
+    this.#clearIdle();
+    this.#queue = this.#queue.then(async () => {
       try {
-        await this.runTurn(turn);
+        await this.#runTurn(turn);
       } catch (error) {
         turn.fail(messageOf(error));
-        this.endTurn(turn, true);
+        this.#endTurn(turn, true);
       }
     });
   }
@@ -165,10 +165,10 @@ export class CodexSession {
     // turn id arrives, so the order of the two never decides the outcome.
     turn.markStopped();
     // A turn still queued behind another reads the stop when its own run begins.
-    if (this.active !== turn) return;
+    if (this.#active !== turn) return;
     turn.ctx.finishStartup?.();
-    if (this.current === turn) this.interrupt(turn);
-    this.armStopGrace(turn);
+    if (this.#current === turn) this.#interrupt(turn);
+    this.#armStopGrace(turn);
   }
 
   /**
@@ -177,46 +177,46 @@ export class CodexSession {
    * stop is the user's, so it wins after the grace: the turn ends stopped and
    * the process goes, and the next turn resumes the Codex thread on a new one.
    */
-  private armStopGrace(turn: CodexTurn): void {
-    if (this.stopTimer !== null) return;
-    this.stopTimer = setTimeout(() => {
-      this.stopTimer = null;
-      if (turn.decided || this.active !== turn) return;
+  #armStopGrace(turn: CodexTurn): void {
+    if (this.#stopTimer !== null) return;
+    this.#stopTimer = setTimeout(() => {
+      this.#stopTimer = null;
+      if (turn.decided || this.#active !== turn) return;
       turn.ctx.log('warn', `codex: the agent did not end the stopped turn within ${STOP_GRACE_MS} ms; its process is stopped`);
       turn.endStopped();
-      this.drop();
+      this.#drop();
     }, STOP_GRACE_MS);
-    this.stopTimer.unref?.();
+    this.#stopTimer.unref?.();
   }
 
-  private clearStopGrace(): void {
-    if (this.stopTimer === null) return;
-    clearTimeout(this.stopTimer);
-    this.stopTimer = null;
+  #clearStopGrace(): void {
+    if (this.#stopTimer === null) return;
+    clearTimeout(this.#stopTimer);
+    this.#stopTimer = null;
   }
 
-  private interrupt(turn: CodexTurn): void {
-    const rpc = this.rpc;
-    const threadId = this.threadId;
+  #interrupt(turn: CodexTurn): void {
+    const rpc = this.#rpc;
+    const threadId = this.#threadId;
     if (rpc === null || threadId === null || turn.turnId === null) return;
     void rpc.request('turn/interrupt', { threadId, turnId: turn.turnId }).catch(() => undefined);
   }
 
   async steer(turn: CodexTurn, text: string, attachments: TurnContext['attachments'] = []): Promise<boolean> {
-    if (this.current !== turn || turn.settled || turn.isStopped || !this.rpc || !this.threadId || !turn.turnId) return false;
-    await this.rpc.request('turn/steer', { threadId: this.threadId, expectedTurnId: turn.turnId, input: [{ type: 'text', text, text_elements: [] }, ...imageInputsOf(attachments)] });
+    if (this.#current !== turn || turn.settled || turn.isStopped || !this.#rpc || !this.#threadId || !turn.turnId) return false;
+    await this.#rpc.request('turn/steer', { threadId: this.#threadId, expectedTurnId: turn.turnId, input: [{ type: 'text', text, text_elements: [] }, ...imageInputsOf(attachments)] });
     return true;
   }
 
   /** Effort and service tier for the requests the running turn has not sent yet; see `updateTurnSettings`. */
   async applySettings(turn: CodexTurn, change: LiveTurnSettings): Promise<LiveTurnSettings> {
-    if (this.current !== turn || turn.settled || turn.isStopped || !this.rpc || !this.threadId || !turn.turnId || this.liveSettingsRefused) return {};
+    if (this.#current !== turn || turn.settled || turn.isStopped || !this.#rpc || !this.#threadId || !turn.turnId || this.#liveSettingsRefused) return {};
     try {
-      const taken = await updateTurnSettings(this.rpc, this.threadId, turn.turnId, change);
+      const taken = await updateTurnSettings(this.#rpc, this.#threadId, turn.turnId, change);
       Object.assign(turn.ctx.thread, taken);
       return taken;
     } catch (error) {
-      this.liveSettingsRefused = true;
+      this.#liveSettingsRefused = true;
       turn.ctx.log('info', `codex: no effort or speed change on a running turn (${messageOf(error)}); it applies to the next turn`);
       return {};
     }
@@ -224,33 +224,33 @@ export class CodexSession {
 
   /** Archive, shutdown, an idle window, a changed setup: the process goes. */
   close(reason: string | null, ctx?: SessionContext): void {
-    if (this.ended) return;
-    this.closing = true;
+    if (this.#ended) return;
+    this.#closing = true;
     if (reason !== null && ctx !== undefined) ctx.log('warn', `codex session: ${reason}`);
-    this.drop();
+    this.#drop();
   }
 
   // -- the turn -------------------------------------------------------------
 
-  private async runTurn(turn: CodexTurn): Promise<void> {
-    this.active = turn;
+  async #runTurn(turn: CodexTurn): Promise<void> {
+    this.#active = turn;
     try {
-      await this.start(turn.ctx);
+      await this.#start(turn.ctx);
     } catch (error) {
       if (error instanceof ThreadLostError) turn.loseSession(error.message);
       else if (turn.isStopped) turn.endStopped();
       else turn.fail(messageOf(error));
-      this.endTurn(turn, true);
+      this.#endTurn(turn, true);
       return;
     } finally {
       turn.ctx.finishStartup?.();
     }
 
-    const rpc = this.rpc;
-    const threadId = this.threadId;
+    const rpc = this.#rpc;
+    const threadId = this.#threadId;
     if (rpc === null || threadId === null) {
       turn.fail('the codex session went away before the turn');
-      this.endTurn(turn, true);
+      this.#endTurn(turn, true);
       return;
     }
 
@@ -258,12 +258,12 @@ export class CodexSession {
     // Stopped while the process or the thread was opening: the prompt never goes out.
     if (turn.isStopped) {
       turn.endStopped();
-      this.endTurn(turn, false);
+      this.#endTurn(turn, false);
       return;
     }
-    this.current = turn;
-    turn.spentWindowResetsAt = this.spentWindows.latest();
-    this.contextSink = turn.ctx.context;
+    this.#current = turn;
+    turn.spentWindowResetsAt = this.#spentWindows.latest();
+    this.#contextSink = turn.ctx.context;
     const ctx = turn.ctx;
     try {
       // The thread as it stands for this turn, not as it stood when the
@@ -281,7 +281,7 @@ export class CodexSession {
           serviceTier: ctx.thread.speed ?? "default",
         });
         turn.turnId = started.turn.id;
-        if (turn.isStopped) this.interrupt(turn);
+        if (turn.isStopped) this.#interrupt(turn);
         // A server that answers with a turn already finished settles it here;
         // the one that answers `inProgress` settles on `turn/completed`.
         turn.finish(started.turn);
@@ -289,42 +289,42 @@ export class CodexSession {
     } catch (error) {
       // A child that died takes the connection with it, and its exit says more
       // than "the request failed": give it a moment to be reported.
-      const code = await exitWithin(this.exited, EXIT_GRACE_MS, this.processClosed);
+      const code = await exitWithin(this.#exited, EXIT_GRACE_MS, this.#processClosed);
       if (turn.isStopped) turn.endStopped();
-      else turn.fail(code === undefined ? messageOf(error) : this.exitSentence(code), code === undefined ? logMessageOf(error) : this.exitSentence(code, true));
-      this.current = null;
-      this.endTurn(turn, true);
+      else turn.fail(code === undefined ? messageOf(error) : this.#exitSentence(code), code === undefined ? logMessageOf(error) : this.#exitSentence(code, true));
+      this.#current = null;
+      this.#endTurn(turn, true);
       return;
     }
 
     await turn.finished;
-    this.current = null;
+    this.#current = null;
     // Only OpenAI's own endpoint has a published lifetime; Codex never sends a
     // retention option, so the default for the model applies.
-    if (this.served.provider === 'openai') turn.cacheLife = openAiCacheLife(modelOf(ctx) ?? this.served.model);
-    this.endTurn(turn, turn.isStopped);
+    if (this.#served.provider === 'openai') turn.cacheLife = openAiCacheLife(modelOf(ctx) ?? this.#served.model);
+    this.#endTurn(turn, turn.isStopped);
   }
 
-  private endTurn(turn: CodexTurn, drop: boolean): void {
-    if (this.active === turn) this.active = null;
-    this.clearStopGrace();
+  #endTurn(turn: CodexTurn, drop: boolean): void {
+    if (this.#active === turn) this.#active = null;
+    this.#clearStopGrace();
     turn.settle();
-    this.running = Math.max(0, this.running - 1);
-    if (drop || this.closing || this.retention.idleMs(this.warmMs) <= 0) {
-      this.drop();
+    this.#running = Math.max(0, this.#running - 1);
+    if (drop || this.#closing || this.#retention.idleMs(this.warmMs) <= 0) {
+      this.#drop();
       return;
     }
-    if (this.running === 0 && !this.retention.viewed) this.armIdle();
+    if (this.#running === 0 && !this.#retention.viewed) this.#armIdle();
   }
 
   // -- the process ----------------------------------------------------------
 
-  private start(ctx: SessionContext): Promise<void> {
-    if (this.starting === null) this.starting = noteReady(ctx, 'Codex app-server', () => this.open(ctx), () => ({ text: this.served.model ? `, on ${this.served.model}` : '', data: { model: this.served.model } }), () => this.active?.isStopped === true || this.closing || this.ended);
-    return this.starting;
+  #start(ctx: SessionContext): Promise<void> {
+    if (this.#starting === null) this.#starting = noteReady(ctx, 'Codex app-server', () => this.#open(ctx), () => ({ text: this.#served.model ? `, on ${this.#served.model}` : '', data: { model: this.#served.model } }), () => this.#active?.isStopped === true || this.#closing || this.#ended);
+    return this.#starting;
   }
 
-  private async open(ctx: SessionContext): Promise<void> {
+  async #open(ctx: SessionContext): Promise<void> {
     // thread/resume cannot replace dynamicTools. Replaying through the core's
     // existing session-loss retry installs them on thread/start before any prompt.
     if (ctx.protectedExecution && ctx.sessionId !== null) throw new ThreadLostError('Protected Codex tools require thread/start; replay the captured conversation');
@@ -334,9 +334,9 @@ export class CodexSession {
       throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
     }
 
-    const rpc = await this.initialize(ctx, executable, profile?.launch?.args ?? []);
+    const rpc = await this.#initialize(ctx, executable, profile?.launch?.args ?? []);
     rpc.notify('initialized', {});
-    void this.reportSkippedHooks(rpc, ctx);
+    void this.#reportSkippedHooks(rpc, ctx);
     const policy = MODE_POLICY[ctx.thread.permissionMode];
     const model = modelOf(ctx);
     // A context mode without MCP turns the user's servers off by name.
@@ -356,8 +356,8 @@ export class CodexSession {
         config,
         excludeTurns: true,
       });
-      this.threadId = resumed.thread.id;
-      this.served = servedOf(resumed);
+      this.#threadId = resumed.thread.id;
+      this.#served = servedOf(resumed);
       return;
     }
 
@@ -368,21 +368,21 @@ export class CodexSession {
       ...sandbox,
       ...(model === null ? {} : { model }),
     });
-    this.threadId = created.thread.id;
-    this.served = servedOf(created);
+    this.#threadId = created.thread.id;
+    this.#served = servedOf(created);
   }
 
   /** Only restart a failed SQLite initialization, before any thread or prompt is sent. */
-  private async initialize(ctx: SessionContext, executable: string, args: string[]): Promise<CodexRpc> {
-    this.initializing = true;
+  async #initialize(ctx: SessionContext, executable: string, args: string[]): Promise<CodexRpc> {
+    this.#initializing = true;
     try {
       for (let attempt = 1; ; attempt += 1) {
-        if (this.closing || this.active?.isStopped) throw new Error('the codex startup was stopped');
-        this.exitCode = null;
-        this.lastStderr = '';
-        this.sqliteInitFailed = false;
-        this.startupStderr = '';
-        const rpc = this.spawn(ctx, executable, args);
+        if (this.#closing || this.#active?.isStopped) throw new Error('the codex startup was stopped');
+        this.#exitCode = null;
+        this.#lastStderr = '';
+        this.#sqliteInitFailed = false;
+        this.#startupStderr = '';
+        const rpc = this.#spawn(ctx, executable, args);
         try {
           await rpc.request('initialize', {
             clientInfo: { name: CLIENT_NAME, title: null, version: pkg.version },
@@ -391,16 +391,16 @@ export class CodexSession {
           });
           return rpc;
         } catch (error) {
-          await this.waitForStartupClose();
-          if (this.closing || this.active?.isStopped || this.exitCode !== 1 || !this.sqliteInitFailed) throw error;
-          if (attempt >= SQLITE_INIT_ATTEMPTS) throw withLogDiagnostic(new Error(this.exitSentence(this.exitCode)), this.exitSentence(this.exitCode, true));
+          await this.#waitForStartupClose();
+          if (this.#closing || this.#active?.isStopped || this.#exitCode !== 1 || !this.#sqliteInitFailed) throw error;
+          if (attempt >= SQLITE_INIT_ATTEMPTS) throw withLogDiagnostic(new Error(this.#exitSentence(this.#exitCode)), this.#exitSentence(this.#exitCode, true));
           const delay = SQLITE_INIT_BACKOFF_MS * attempt;
           ctx.log('warn', `codex: retrying SQLite initialization in ${delay} ms (attempt ${attempt + 1}/${SQLITE_INIT_ATTEMPTS})`);
           let timer: Timer | undefined;
           try {
             await Promise.race([
               new Promise<void>(resolve => { timer = setTimeout(resolve, delay); }),
-              ...(this.active === null ? [] : [this.active.stopped]),
+              ...(this.#active === null ? [] : [this.#active.stopped]),
             ]);
           } finally {
             clearTimeout(timer);
@@ -408,11 +408,11 @@ export class CodexSession {
         }
       }
     } finally {
-      this.initializing = false;
+      this.#initializing = false;
     }
   }
 
-  private spawn(ctx: SessionContext, executable: string, args: string[]): CodexRpc {
+  #spawn(ctx: SessionContext, executable: string, args: string[]): CodexRpc {
     args = subscriptionProxyCodexArgs(args, ctx.accountEnv);
     const context = contextArgs(ctx.thread.contextMode);
     if (ctx.thread.permissionMode === 'yolo' && !context.includes('features.hooks=false')) args = [...args, '--config', 'features.hooks=false'];
@@ -423,97 +423,97 @@ export class CodexSession {
       cwd: ctx.thread.cwd,
       env: { ...process.env, ...ctx.accountEnv },
     });
-    this.child = child;
+    this.#child = child;
     const rpc = new CodexRpc(child, {
       notification: (method, params) => {
-        if (this.child !== child) return;
-        this.onNotification(method, params);
+        if (this.#child !== child) return;
+        this.#onNotification(method, params);
       },
       request: async (method, params) => {
-        if (this.child !== child) throw new Error('the codex process was replaced');
-        return this.onRequest(ctx, method, params);
+        if (this.#child !== child) throw new Error('the codex process was replaced');
+        return this.#onRequest(ctx, method, params);
       },
       log: (level, message, context) => {
-        if (this.child !== child) return;
+        if (this.#child !== child) return;
         ctx.log(level, message, context);
       },
-      fault: (reason) => { void this.transportFault(child, reason); },
+      fault: (reason) => { void this.#transportFault(child, reason); },
     });
-    this.rpc = rpc;
-    this.watch(child, ctx, rpc);
-    this.opener = ctx;
+    this.#rpc = rpc;
+    this.#watch(child, ctx, rpc);
+    this.#opener = ctx;
     return rpc;
   }
 
-  private watch(child: SpawnedChild, ctx: SessionContext, rpc: CodexRpc): void {
+  #watch(child: SpawnedChild, ctx: SessionContext, rpc: CodexRpc): void {
     // Refuse warm reuse without interrupting drainage; initialize owns SQLite retries.
-    child.stdin.once('close', () => { if (this.child === child && !this.initializing) this.closing = true; });
+    child.stdin.once('close', () => { if (this.#child === child && !this.#initializing) this.#closing = true; });
     let closed: () => void = () => undefined;
-    this.processClosed = new Promise<void>(resolve => { closed = resolve; });
+    this.#processClosed = new Promise<void>(resolve => { closed = resolve; });
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => {
-      if (this.child !== child) return;
-      if (this.initializing) {
-        this.startupStderr = (this.startupStderr + chunk).slice(-4_096);
-        if (/failed to initialize sqlite state runtime/i.test(this.startupStderr)) this.sqliteInitFailed = true;
+      if (this.#child !== child) return;
+      if (this.#initializing) {
+        this.#startupStderr = (this.#startupStderr + chunk).slice(-4_096);
+        if (/failed to initialize sqlite state runtime/i.test(this.#startupStderr)) this.#sqliteInitFailed = true;
       }
       for (const line of chunk.split(/\r?\n/)) {
         const text = line.trim();
         if (text.length === 0) continue;
-        this.lastStderr = text.slice(0, STDERR_MAX);
-        ctx.log('warn', `codex agent: ${this.lastStderr}`, { kind: 'provider-output', event: 'provider.output' });
+        this.#lastStderr = text.slice(0, STDERR_MAX);
+        ctx.log('warn', `codex agent: ${this.#lastStderr}`, { kind: 'provider-output', event: 'provider.output' });
       }
     });
-    this.exited = new Promise<number | null>((resolve) => {
+    this.#exited = new Promise<number | null>((resolve) => {
       child.once('exit', (code) => {
-        if (this.child === child) this.exitCode = code;
+        if (this.#child === child) this.#exitCode = code;
         resolve(code);
       });
       // `close` and not `exit`: stderr is flushed by then, so the sentence the
       // turn fails with carries the line the agent printed on its way out.
       child.once('close', () => {
         closed();
-        if (this.child !== child) return;
-        const sentence = this.exitSentence(this.exitCode);
-        rpc.fail(sentence, this.exitSentence(this.exitCode, true));
-        this.failCurrent(sentence, this.exitSentence(this.exitCode, true));
-        if (!this.closing && !this.initializing) this.drop();
+        if (this.#child !== child) return;
+        const sentence = this.#exitSentence(this.#exitCode);
+        rpc.fail(sentence, this.#exitSentence(this.#exitCode, true));
+        this.#failCurrent(sentence, this.#exitSentence(this.#exitCode, true));
+        if (!this.#closing && !this.#initializing) this.#drop();
       });
       child.once('error', (error) => {
         resolve(null);
         closed();
-        if (this.child !== child) return;
+        if (this.#child !== child) return;
         const sentence = `the codex agent did not start: ${messageOf(error)}`;
         rpc.fail(sentence);
-        this.failCurrent(sentence, logMessageOf(error));
-        if (!this.closing && !this.initializing) this.drop();
+        this.#failCurrent(sentence, logMessageOf(error));
+        if (!this.#closing && !this.#initializing) this.#drop();
       });
     });
   }
 
-  private async transportFault(child: SpawnedChild, reason: string): Promise<void> {
+  async #transportFault(child: SpawnedChild, reason: string): Promise<void> {
     // initialize owns SQLite failures and can replace this child before a late close.
-    if (this.child !== child || this.initializing) return;
-    this.closing = true;
-    const code = await exitWithin(this.exited, EXIT_GRACE_MS, this.processClosed);
-    if (this.child !== child) return;
-    this.failCurrent(code === undefined ? reason : this.exitSentence(code), code === undefined ? reason : this.exitSentence(code, true));
-    this.drop();
+    if (this.#child !== child || this.#initializing) return;
+    this.#closing = true;
+    const code = await exitWithin(this.#exited, EXIT_GRACE_MS, this.#processClosed);
+    if (this.#child !== child) return;
+    this.#failCurrent(code === undefined ? reason : this.#exitSentence(code), code === undefined ? reason : this.#exitSentence(code, true));
+    this.#drop();
   }
 
-  private failCurrent(reason: string, diagnostic: string): void {
-    const turn = this.current;
+  #failCurrent(reason: string, diagnostic: string): void {
+    const turn = this.#current;
     if (turn?.isStopped) turn.endStopped();
     else turn?.fail(reason, diagnostic);
   }
 
   /** An RPC error can arrive before the failed child exits and drains stderr. */
-  private async waitForStartupClose(): Promise<void> {
+  async #waitForStartupClose(): Promise<void> {
     let timer: Timer | undefined;
     try {
       await Promise.race([
-        this.processClosed,
-        ...(this.active === null ? [] : [this.active.stopped]),
+        this.#processClosed,
+        ...(this.#active === null ? [] : [this.#active.stopped]),
         new Promise<void>(resolve => { timer = setTimeout(resolve, SQLITE_INIT_CLOSE_MS); }),
       ]);
     } finally {
@@ -521,9 +521,9 @@ export class CodexSession {
     }
   }
 
-  private exitSentence(code: number | null, diagnostic = false): string {
+  #exitSentence(code: number | null, diagnostic = false): string {
     const head = `the codex agent exited with code ${code === null ? 'unknown' : code}`;
-    return diagnostic || this.lastStderr.length === 0 ? head : `${head}: ${this.lastStderr}`;
+    return diagnostic || this.#lastStderr.length === 0 ? head : `${head}: ${this.#lastStderr}`;
   }
 
   /**
@@ -531,58 +531,58 @@ export class CodexSession {
    * child, through the registry. The child's own close is ignored once it is
    * let go, so it can no longer bring that turn its `turn/completed`.
    */
-  private drop(): void {
-    if (this.ended) return;
-    this.ended = true;
-    this.closing = true;
-    this.clearIdle();
-    endOnClose(this.current, 'the codex session was closed');
-    this.rpc?.fail('the codex session was closed');
-    this.rpc = null;
-    const child = this.child;
-    this.child = null;
+  #drop(): void {
+    if (this.#ended) return;
+    this.#ended = true;
+    this.#closing = true;
+    this.#clearIdle();
+    endOnClose(this.#current, 'the codex session was closed');
+    this.#rpc?.fail('the codex session was closed');
+    this.#rpc = null;
+    const child = this.#child;
+    this.#child = null;
     releaseChild(child);
     this.onEnded(this);
   }
 
-  private armIdle(): void {
-    this.idle = setTimeout(() => {
-      this.idle = null;
-      this.drop();
-    }, this.retention.idleMs(this.warmMs));
-    this.idle?.unref?.();
+  #armIdle(): void {
+    this.#idle = setTimeout(() => {
+      this.#idle = null;
+      this.#drop();
+    }, this.#retention.idleMs(this.warmMs));
+    this.#idle?.unref?.();
   }
 
-  private clearIdle(): void {
-    if (this.idle === null) return;
-    clearTimeout(this.idle);
-    this.idle = null;
+  #clearIdle(): void {
+    if (this.#idle === null) return;
+    clearTimeout(this.#idle);
+    this.#idle = null;
   }
 
   // -- what the agent sends -------------------------------------------------
 
-  private onNotification(method: string, raw: unknown): void {
+  #onNotification(method: string, raw: unknown): void {
     const params = (raw ?? {}) as Record<string, unknown>;
     // Child threads may share this app-server. Their text, tools and turn endings belong to them.
-    if (typeof params['threadId'] === 'string' && this.threadId !== null && params['threadId'] !== this.threadId) return;
+    if (typeof params['threadId'] === 'string' && this.#threadId !== null && params['threadId'] !== this.#threadId) return;
     if (method === 'thread/tokenUsage/updated') {
-      this.reportUsage(params);
+      this.#reportUsage(params);
       return;
     }
-    if (method === 'hook/completed') return this.onHook(params['run'] as CodexHookRun | undefined);
+    if (method === 'hook/completed') return this.#onHook(params['run'] as CodexHookRun | undefined);
     if (method === 'account/rateLimits/updated') {
-      if (this.spentWindows.note(params['rateLimits']) && this.current !== null) this.current.spentWindowResetsAt = this.spentWindows.latest();
-      this.rateLimits.updated(params);
+      if (this.#spentWindows.note(params['rateLimits']) && this.#current !== null) this.#current.spentWindowResetsAt = this.#spentWindows.latest();
+      this.#rateLimits.updated(params);
       return;
     }
-    const turn = this.current;
+    const turn = this.#current;
     if (turn === null) return;
     if (typeof params['turnId'] === 'string' && turn.turnId !== null && params['turnId'] !== turn.turnId) return;
     turn.ctx.reportProviderEvent?.();
     switch (method) {
       case 'turn/started': {
         const record = params['turn'] as CodexTurnRecord | undefined;
-        if (record) { turn.turnId = record.id; if (turn.isStopped) this.interrupt(turn); }
+        if (record) { turn.turnId = record.id; if (turn.isStopped) this.#interrupt(turn); }
         break;
       }
       case 'turn/completed': {
@@ -595,16 +595,16 @@ export class CodexSession {
         turnError(turn, params);
         break;
       default:
-        this.renderNotification(turn, method, params);
+        this.#renderNotification(turn, method, params);
         break;
     }
   }
 
   /** Rendering receives only the filtered turn; lifecycle decisions stay in onNotification. */
-  private renderNotification(turn: CodexTurn, method: string, params: Record<string, unknown>): void {
+  #renderNotification(turn: CodexTurn, method: string, params: Record<string, unknown>): void {
     switch (method) {
       case 'item/agentMessage/delta':
-        if (typeof params['itemId'] === 'string' && this.asyncItems.has(params['itemId'])) break;
+        if (typeof params['itemId'] === 'string' && this.#asyncItems.has(params['itemId'])) break;
         turn.writeText(textOf(params['delta']), typeof params['itemId'] === 'string' ? params['itemId'] : undefined);
         break;
       case 'item/commandExecution/outputDelta':
@@ -625,7 +625,7 @@ export class CodexSession {
       case 'item/started':
       case 'item/completed': {
         const item = params['item'] as CodexItem | undefined;
-        if (item !== undefined && typeof item.id === 'string') this.renderItem(turn, item, method === 'item/completed');
+        if (item !== undefined && typeof item.id === 'string') this.#renderItem(turn, item, method === 'item/completed');
         break;
       }
       default:
@@ -637,7 +637,7 @@ export class CodexSession {
   }
 
   /** Completed items replace their own parts; asynchronous questions are drawn once per item. */
-  private renderItem(turn: CodexTurn, item: CodexItem, completed: boolean): void {
+  #renderItem(turn: CodexTurn, item: CodexItem, completed: boolean): void {
     switch (item.type) {
       case 'reasoning':
         // Presence is activity even with summary=[]; encrypted content is never read.
@@ -650,9 +650,9 @@ export class CodexSession {
         return;
       case 'agentMessage':
         if (item.delivery === 'async') {
-          if (this.asyncItems.has(item.id)) return;
-          this.asyncItems.add(item.id);
-          for (const question of item.questions ?? []) this.askAsync(turn, question);
+          if (this.#asyncItems.has(item.id)) return;
+          this.#asyncItems.add(item.id);
+          for (const question of item.questions ?? []) this.#askAsync(turn, question);
         } else if (completed && typeof item.text === 'string') turn.completeText(item.id, item.text);
         return;
     }
@@ -667,17 +667,17 @@ export class CodexSession {
    * stopped the turn, drawn in the thread as a quiet line, since the agent
    * writes nothing else for it. A denied tool shows on its own card already.
    */
-  private onHook(run: CodexHookRun | undefined): void {
+  #onHook(run: CodexHookRun | undefined): void {
     if (run === undefined) return;
     const outcome = HOOK_OUTCOMES[run.status];
     if (outcome === undefined) return;
-    const turn = this.current ?? this.active;
+    const turn = this.#current ?? this.#active;
     const said = (run.entries ?? [])
       .filter((entry) => entry.kind !== 'context')
       .map((entry) => entry.text.trim())
       .filter((text) => text.length > 0)
       .join('\n');
-    const ctx = turn?.ctx ?? this.opener;
+    const ctx = turn?.ctx ?? this.#opener;
     ctx?.hook?.({ event: run.eventName, name: tildePath(run.sourcePath), outcome, message: said.length === 0 ? null : said });
     if (turn === null || turn.settled) return;
     if (outcome === 'stopped' || (outcome === 'blocked' && run.eventName === 'userPromptSubmit')) {
@@ -691,7 +691,7 @@ export class CodexSession {
    * Settings can say which ones and why. An older Codex without `hooks/list`
    * is one line in the log.
    */
-  private async reportSkippedHooks(rpc: CodexRpc, ctx: SessionContext): Promise<void> {
+  async #reportSkippedHooks(rpc: CodexRpc, ctx: SessionContext): Promise<void> {
     if (ctx.thread.permissionMode === 'yolo') return;
     try {
       const listed = await rpc.request<CodexHooksListed>('hooks/list', { cwds: [ctx.thread.cwd] });
@@ -714,12 +714,12 @@ export class CodexSession {
   }
 
   /** Usage also arrives while the session has no active turn. */
-  private reportUsage(params: Record<string, unknown>): void {
-    if (params['threadId'] !== this.threadId) return;
+  #reportUsage(params: Record<string, unknown>): void {
+    if (params['threadId'] !== this.#threadId) return;
     const usage = params['tokenUsage'] as { total?: CodexTokenUsage; last?: CodexTokenUsage; modelContextWindow?: number } | undefined;
     const last = usage?.last;
     if (!last) return;
-    const turn = this.current;
+    const turn = this.#current;
     if (turn && params['turnId'] === turn.turnId) {
       const delta = usageDelta(turn.usageTotal, usage.total, last);
       turn.usageCounts = turn.usageCounts ? addCounts(turn.usageCounts, delta) : delta;
@@ -731,18 +731,18 @@ export class CodexSession {
       const cache = last.cachedInputTokens ?? 0;
       const breakdown = typeof last.inputTokens === 'number' && typeof last.outputTokens === 'number'
         ? { input: last.inputTokens - cache, cache, output: last.outputTokens } : undefined;
-      this.contextSink?.({ tokens, window: usage?.modelContextWindow ?? null, ...(breakdown ? { breakdown } : {}) });
+      this.#contextSink?.({ tokens, window: usage?.modelContextWindow ?? null, ...(breakdown ? { breakdown } : {}) });
     }
   }
 
-  private async onRequest(ctx: SessionContext, method: string, raw: unknown): Promise<unknown> {
+  async #onRequest(ctx: SessionContext, method: string, raw: unknown): Promise<unknown> {
     const params = (raw ?? {}) as Record<string, unknown>;
     if (ctx.protectedExecution) {
       ctx.protectedExecution.check();
       if (method === 'item/tool/call' && params['tool'] === PROTECTED_TOOL) {
-        return protectedTool(this.current?.ctx ?? null, params['arguments'], this.current?.stopped ?? Promise.resolve());
+        return protectedTool(this.#current?.ctx ?? null, params['arguments'], this.#current?.stopped ?? Promise.resolve());
       }
-      if (method === 'item/tool/call' && params['tool'] === PROTECTED_COMMIT) return protectedCommit(this.current?.ctx ?? null, params['arguments'], this.current?.stopped ?? Promise.resolve());
+      if (method === 'item/tool/call' && params['tool'] === PROTECTED_COMMIT) return protectedCommit(this.#current?.ctx ?? null, params['arguments'], this.#current?.stopped ?? Promise.resolve());
       if (method === 'item/permissions/requestApproval') return {permissions: {}};
       if (method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval') return {decision: 'decline'};
       if (method === 'mcpServer/elicitation/request') return {action: 'decline'};
@@ -750,7 +750,7 @@ export class CodexSession {
     }
     switch (method) {
       case 'item/commandExecution/requestApproval': {
-        const decision = await this.askUser(
+        const decision = await this.#askUser(
           COMMAND_TOOL_NAME,
           { command: textOf(params['command']), cwd: params['cwd'] ?? null },
           textOf(params['reason']),
@@ -758,7 +758,7 @@ export class CodexSession {
         return { decision };
       }
       case 'item/fileChange/requestApproval': {
-        const decision = await this.askUser(
+        const decision = await this.#askUser(
           FILE_CHANGE_TOOL_NAME,
           { grantRoot: params['grantRoot'] ?? null },
           textOf(params['reason']),
@@ -766,13 +766,13 @@ export class CodexSession {
         return { decision };
       }
       case 'item/tool/requestUserInput':
-        return { answers: await this.askQuestions(ctx, params['questions']) };
+        return { answers: await this.#askQuestions(ctx, params['questions']) };
       case 'mcpServer/elicitation/request':
-        return this.answerElicitation(ctx, params);
+        return this.#answerElicitation(ctx, params);
       case 'item/permissions/requestApproval': {
         // Only asked with Codex's exec_permission_approvals or
         // request_permissions_tool features on. An empty profile grants nothing.
-        const decision = await this.askUser(
+        const decision = await this.#askUser(
           PERMISSIONS_TOOL_NAME,
           { permissions: params['permissions'] ?? null, cwd: params['cwd'] ?? null },
           textOf(params['reason']),
@@ -794,7 +794,7 @@ export class CodexSession {
    * a url, or a device verification has no card yet and is declined, which
    * Codex reports as a refused call instead of a failed request.
    */
-  private async answerElicitation(ctx: SessionContext, params: Record<string, unknown>): Promise<unknown> {
+  async #answerElicitation(ctx: SessionContext, params: Record<string, unknown>): Promise<unknown> {
     const server = textOf(params['serverName']);
     const meta = (params['_meta'] ?? {}) as Record<string, unknown>;
     const schema = params['requestedSchema'] as { required?: unknown } | undefined;
@@ -804,7 +804,7 @@ export class CodexSession {
       ctx.log('warn', `codex: declined a ${textOf(params['mode']) || 'modeless'} elicitation from MCP server ${server || '(unnamed)'}, which boite cannot show`);
       return { action: 'decline' };
     }
-    const decision = await this.askUser(
+    const decision = await this.#askUser(
       `mcp:${server}`,
       { message: textOf(params['message']), tool_title: meta['tool_title'] ?? null, tool_params: meta['tool_params'] ?? null },
       '',
@@ -820,8 +820,8 @@ export class CodexSession {
    * the request is answered with what was collected: leaving it unanswered
    * would hang the agent.
    */
-  private async askQuestions(ctx: SessionContext, raw: unknown): Promise<Record<string, string>> {
-    const turn = this.current;
+  async #askQuestions(ctx: SessionContext, raw: unknown): Promise<Record<string, string>> {
+    const turn = this.#current;
     const answers: Record<string, string> = {};
     if (turn === null || !Array.isArray(raw)) return answers;
     for (const entry of raw as CodexQuestion[]) {
@@ -832,7 +832,7 @@ export class CodexSession {
         continue;
       }
       const options = optionsOf(entry.options);
-      const answer = await this.askOne(turn, {
+      const answer = await this.#askOne(turn, {
         text: questionTextOf(entry),
         options,
         // A question the server marks `isOther`, or one with no options at all,
@@ -852,7 +852,7 @@ export class CodexSession {
    * and brings it back with `turn/steer` or as the next prompt, framed as the
    * Codex TUI frames it: `> title`, a blank line, the answer.
    */
-  private askAsync(turn: CodexTurn, question: { title?: string; options?: string[] | null }): void {
+  #askAsync(turn: CodexTurn, question: { title?: string; options?: string[] | null }): void {
     const text = typeof question.title === 'string' ? question.title.trim() : '';
     if (text.length === 0) return;
     const ask: QuestionAsk = { text, options: optionsOf(question.options), allowText: true, multiple: false, async: true };
@@ -861,7 +861,7 @@ export class CodexSession {
   }
 
   /** One question card, drawn and then folded with what the user picked. */
-  private async askOne(turn: CodexTurn, ask: QuestionAsk): Promise<QuestionAnswer | null> {
+  async #askOne(turn: CodexTurn, ask: QuestionAsk): Promise<QuestionAnswer | null> {
     const ticket = turn.ctx.askQuestion(ask);
     const index = turn.takeIndex();
     turn.part(index, { type: 'question', questionId: ticket.questionId, ...ask, answer: null });
@@ -872,12 +872,12 @@ export class CodexSession {
   }
 
   /** The inline permission card, and the Codex decision the answer becomes. */
-  private async askUser(
+  async #askUser(
     toolName: string,
     input: unknown,
     reason: string,
   ): Promise<'accept' | 'decline' | 'cancel'> {
-    const turn = this.current;
+    const turn = this.#current;
     if (turn === null || turn.isStopped) return 'cancel';
     if (turn.ctx.thread.permissionMode === 'yolo') return 'accept';
     const ticket = turn.ctx.requestPermission(toolName, input, reason.length === 0 ? null : reason);
