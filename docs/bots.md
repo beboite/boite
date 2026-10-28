@@ -540,7 +540,9 @@ takes that provider's signed-in default; an account the owner granted only to
 other bots is refused. A model outside the bot's allowed routes can be
 proposed: applying the card is the owner allowing it, so the route joins
 the allowed routes and becomes the default one. Apply checks the model again
-and refuses it once its provider is turned off or signed out. A model card
+and refuses a move to another provider once that provider is turned off or
+signed out; a model of the bot's own provider passes, as on its settings
+page, which takes one whatever the provider's state. A model card
 drawn before cards named the provider holds a model id of the bot's provider
 and settles on that id. Any change to the bot, from the card or from the page,
 settles the cards it answers, and a card whose key no longer exists closes, as
