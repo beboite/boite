@@ -55,17 +55,19 @@ most once per quiet spell.
 ## Bench
 
 ```sh
+export BOITE_DATA_DIR=$(mktemp -d)
 nice -n 10 bun bench/journal-reads.ts --runs 3
+rm -rf "$BOITE_DATA_DIR"
 ```
 
-Branch `boite/journal-page-cache` on `26325751`, three runs, medians.
+Commit `93f26b4b` of `boite/journal-page-cache`, three runs, medians.
 4,000 threads of about 700 bytes with 10 messages each, every list after a
-thread write on the same connection:
+thread write on the same connection, the write outside the time:
 
 | page cache | read from the file per list | list time |
 | --- | ---: | ---: |
-| SQLite default, 2 MiB | 3,670 KiB | 56.1 ms |
-| the journal's, 64 MiB | 1.8 KiB | 56.2 ms |
+| SQLite default, 2 MiB | 3,670 KiB | 27.2 ms |
+| the journal's, 64 MiB | 1.8 KiB | 27.4 ms |
 
 The bench's journal was just written, so its pages are still in the kernel's
 cache and the time is the same: what the 64 MiB cache removes is the 3.6 MiB
