@@ -122,7 +122,7 @@ real('network finds the API call behind a page with its credentials hidden, and 
   const saved = await cli(['recipe', 'save', 'list-items', '-', '--about', 'Lists the items of a query', '--usage', '<query>', 'hats'], script);
   expect(saved.code).toBe(0);
   expect(saved.out).toContain('✓ Kept recipe list-items\n  boite browser recipe run list-items <query>\n  127.0.0.1; 1 run, last passed');
-  expect(statSync(join(harness.dataDir, 'browser-recipes', 'list-items.json')).mode & 0o777).toBe(0o600);
+  if (process.platform !== 'win32') expect(statSync(join(harness.dataDir, 'browser-recipes', 'list-items.json')).mode & 0o777).toBe(0o600);
   const ran = await cli(['recipe', 'run', 'list-items', 'caps']);
   expect(ran.code).toBe(0);
   expect(ran.out).toEndWith(`${JSON.stringify(['caps red', 'caps blue'], null, 2)}\n`);
