@@ -500,9 +500,16 @@ export class Drafts {
         if (!source || !this.#incognito(source)) this.ctx.sync.touched(entry.section, entry.id, value === null);
         // Each atomic entry includes its own revision; null is a deletion tombstone.
         // The old complete v1 backup remains available throughout migration.
-        try { localStorage.setItem(`${this.#key}:entry:${key}`, `{"updatedAt":${updatedAt},"value":${serialized}}`); entry.backedUp = true; }
-        // Without a journal, or while a late one is still opening, the backup is the only copy.
-        catch { if (typeof indexedDB === 'undefined' || (this.#hydrated && !this.#durableReady)) this.ctx.store.error = strings.errors.draftStorage; }
+        const line = `${this.#key}:entry:${key}`;
+        try { localStorage.setItem(line, `{"updatedAt":${updatedAt},"value":${serialized}}`); entry.backedUp = true; }
+        catch {
+          // Pictures past the quota wait for the journal as bare IDs, but the
+          // words go in at once: a crash before the journal lands keeps them,
+          // and each picture comes back as one the journal must still give.
+          try { localStorage.setItem(line, `{"updatedAt":${updatedAt},"value":${JSON.stringify(value, withoutBytes)}}`); } catch { /* The older line stays. */ }
+          // Without a journal, or while a late one is still opening, the backup is the only copy.
+          if (typeof indexedDB === 'undefined' || (this.#hydrated && !this.#durableReady)) this.ctx.store.error = strings.errors.draftStorage;
+        }
         this.#changed = true;
         if (!this.#collecting) this.#checkpoint();
       });
@@ -710,6 +717,11 @@ function attachments(value: unknown, assets: Map<string, string>): Attachment[] 
       ...(data === undefined ? { pendingDraftAsset: item.assetId } : {}) };
     return [attachment];
   });
+}
+
+/** A JSON replacer that keeps each saved file's asset ID and drops its bytes. */
+function withoutBytes(this: { assetId?: unknown }, field: string, value: unknown): unknown {
+  return field === 'data' && typeof this.assetId === 'string' ? undefined : value;
 }
 
 const pendingFiles = (input: Input) => [...input.attachments, ...input.queued.flatMap(item => item.attachments)].filter(file => unresolvedAssetId(file) !== undefined);

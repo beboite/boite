@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { RpcErrorCode, type ComposerRecord, type RpcMethodName, type Thread } from '@boite/contracts';
+import { ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, RpcErrorCode, type ComposerRecord, type RpcMethodName, type Thread } from '@boite/contracts';
 import { RpcFailure } from './client';
 import { FakeClient } from './fake-client';
 import { FakeComposerState } from './fake-client/composer';
 import { setExperiment } from './experiments';
 import { Store } from './store.svelte';
+import { bytes } from './format';
+import { fill, strings } from './strings';
 
 // jsdom has no IndexedDB: the durable journal is a recorder here, and the
 // synchronous backup in localStorage is what a restarted Store reads back.
@@ -440,6 +442,27 @@ test('a put the core keeps failing is tried again after a pause, not on every ti
   await vi.waitFor(async () => expect((await recordOf(desk.client, 'inputs', 't-trace'))?.value?.input.text).toBe('Stored once the disk has room'), { timeout: 8000 });
   expect(putsOf(desk, 't-trace')).toHaveLength(2);
 }, 15_000);
+
+test('a box the core refuses as over its attachment limit says so and keeps every word and picture on the device', async () => {
+  const desk = await device('desk', new FakeClient({ delayMs: 0 }));
+  const text = 'a prompt that describes every problem at once. '.repeat(1300);
+  desk.store.editComposerText('t-trace', text);
+  // What cancelling a queued draft leaves: its queue merged into one box, past what one message may carry.
+  desk.store.composerStates['t-trace']!.attachments = Array.from({ length: ATTACHMENTS_PER_TURN + 1 }, (_, index) =>
+    ({ kind: 'image' as const, mimeType: 'image/png', name: `shot-${index}.png`, data: btoa(`picture ${index}`) }));
+  desk.store.editComposerText('t-trace', text + 'and the end');
+  await vi.waitFor(() => expect(desk.store.error).toBe(fill(strings.errors.draftOverLimit, { count: String(ATTACHMENTS_PER_TURN), max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) })));
+  const box = desk.store.composerStates['t-trace']!;
+  expect(box.text).toBe(text + 'and the end');
+  expect(box.attachments).toHaveLength(ATTACHMENTS_PER_TURN + 1);
+  expect((await recordOf(desk.client, 'inputs', 't-trace'))?.value ?? null).toBeNull();
+  // Once it fits again, it reaches the core.
+  desk.store.error = null;
+  box.attachments = box.attachments.slice(0, ATTACHMENTS_PER_TURN);
+  desk.store.editComposerText('t-trace', text + 'and the end, trimmed');
+  await vi.waitFor(async () => expect((await recordOf(desk.client, 'inputs', 't-trace'))?.value?.input.attachments).toHaveLength(ATTACHMENTS_PER_TURN));
+  expect(desk.store.error).toBeNull();
+});
 
 test('the open draft follows the worktree switch and model another device chose for it', async () => {
   const desk = await device('desk', new FakeClient({ delayMs: 0 }));

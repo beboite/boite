@@ -1,7 +1,9 @@
-import { RpcErrorCode, type Attachment, type ComposerAttachment, type ComposerQueuedPrompt, type ComposerRecord, type ComposerValue, type PreviewReference } from '@boite/contracts';
+import { ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, RpcErrorCode, type Attachment, type ComposerAttachment, type ComposerQueuedPrompt, type ComposerRecord, type ComposerValue, type PreviewReference } from '@boite/contracts';
 import { RpcFailure, type Client } from '../client';
 import { unresolvedAssetId, type DraftAttachment } from '../draft-attachments';
+import { bytes } from '../format';
 import { secureId } from '../secure-id';
+import { fill, strings } from '../strings';
 import type { Choice, Draft } from '../store.svelte';
 import type { QueuedPrompt } from './composer.svelte';
 import type { StoreContext } from './context';
@@ -642,6 +644,12 @@ export class ComposerSync {
         return;
       }
       this.#dirty.add(key);
+      if (error instanceof RpcFailure && error.code === RpcErrorCode.InvalidParams && error.message.startsWith('composer.attachments:')) {
+        // Past what one message may carry, no retry can fit: the box stays on this device, and the next edit tries again.
+        this.ctx.store.error = fill(strings.errors.draftOverLimit, { count: String(ATTACHMENTS_PER_TURN), max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) });
+        failed = true;
+        return;
+      }
       // A core that restarted dropped the assets nothing referenced: what this device holds the bytes of goes up again.
       if (error instanceof RpcFailure && error.message.includes('assetId') && this.#lost(this.#localOf(this.#source(key)))) return;
       failed = true;

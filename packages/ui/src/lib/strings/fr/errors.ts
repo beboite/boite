@@ -5,6 +5,7 @@ export const fr: Translation = {
   errors: {
     draftStorage: "Cet appareil n'a pas pu enregistrer votre brouillon. Gardez cette fenêtre ouverte et copiez votre texte avant de la fermer.",
     draftAttachment: "Une pièce jointe n'a pas pu être lue depuis le stockage. Rechargez pour la récupérer, ou retirez-la avant l'envoi.",
+    draftOverLimit: "Ce brouillon porte plus qu'un message ne peut contenir ({count} pièces jointes, {max} au total), vos autres appareils ne peuvent donc pas le recevoir. Il reste sur cet appareil : retirez des pièces jointes ou découpez-le.",
     prefix: 'Erreur',
     activityUnsupported: "Ce cœur ne gère pas les objectifs ni les boucles. Mettez Boite à jour sur {machine}, puis reconnectez-vous. Votre commande n'a pas été envoyée.",
     pullRequestUnsupported: "Mettez Boite à jour sur la machine qui héberge cette conversation pour afficher sa pull request. Ce cœur ne sait pas encore les chercher.",
