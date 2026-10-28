@@ -42,7 +42,7 @@
       <input id="{uid}-chars" type="number" inputmode="numeric" min={AUTO_GOAL_MIN_CHARS.min} max={AUTO_GOAL_MIN_CHARS.max} step="100"
         data-testid="auto-goal-min-chars" aria-invalid={!valid}
         aria-describedby={valid ? undefined : `${uid}-chars-error`} disabled={saving} bind:value={chars}
-        oninput={() => { dirty = true; }} onchange={() => void save()} />
+        oninput={(event) => { dirty = event.currentTarget.valueAsNumber !== saved; }} onchange={() => void save()} />
       <span class="unit ui-label">{strings.experiments.autoGoal.unit}</span>
     </span>
     {#if !valid}

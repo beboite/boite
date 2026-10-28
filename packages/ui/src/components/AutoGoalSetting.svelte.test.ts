@@ -36,3 +36,22 @@ test('a length typed back to the saved one still follows a change saved elsewher
   await settle();
   expect(field().value).toBe('3000');
 });
+
+test('a length typed back before the field loses focus, so with no change event, still follows a change saved elsewhere', async () => {
+  const store = $state({
+    owner: true,
+    settings: { autoGoalMinChars: 1500 } as Partial<Settings>,
+    saveSettings: vi.fn(async () => true),
+  });
+  mounted = mount(AutoGoalSetting, { target: document.body, props: { store: store as unknown as Store } });
+  flushSync();
+  for (const value of ['1600', '1500']) {
+    field().value = value;
+    field().dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+  }
+  store.settings = { autoGoalMinChars: 3000 };
+  await settle();
+  expect(field().value).toBe('3000');
+  expect(store.saveSettings).not.toHaveBeenCalled();
+});
