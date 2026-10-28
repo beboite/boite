@@ -130,3 +130,24 @@ test("fake agents.create: the core's refusals, then the bot made at once on the 
   expect(models[0]!.default).not.toBe(true);
   expect((await client.call('agents.create', { threadId: onDefault.id, name: 'Herald' })).agent.selection.model).toBe(models.find((model) => model.default === true)!.id);
 });
+
+test('fake model cards name the provider and move an agent to another one, allowing the route', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  const mira = await agent(client);
+  await client.call('agents.runtime.configure', { agentId: mira.id, expectedRevision: mira.revision, config: await client.call('agents.runtime.get', { agentId: mira.id }) });
+  const { id: threadId } = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
+  await client.call('turns.start', { threadId, prompt: 'Move the bot.' });
+  await client.settled();
+  const read = (await client.call('agents.settings.read', { threadId, agent: mira.id })).settings.find(s => s.key === 'model')!;
+  expect(read.value).toBe('echo/echo-1');
+  expect(read.choices?.slice(0, 3)).toEqual([{ id: 'echo/echo-1', label: 'Echo' }, { id: 'opencode/default', label: 'OpenCode default' }, { id: 'codex/default', label: 'Codex default' }]);
+  await expect(client.call('agents.settings.request', { threadId, agent: mira.id, key: 'model', value: 'echo-1', reason: 'r' })).rejects.toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'value', key: 'model' } });
+
+  const card = await client.call('agents.settings.request', { threadId, agent: mira.id, key: 'model', value: 'codex/default', reason: 'Reviews need a larger model' });
+  expect(card.setting).toMatchObject({ key: 'model', previous: 'echo/echo-1', value: 'codex/default' });
+  const saved = await client.call('agents.settings.apply', { threadId, questionId: card.questionId });
+  expect(saved.selection).toMatchObject({ providerId: 'codex', model: 'default' });
+  const config = await client.call('agents.runtime.get', { agentId: mira.id });
+  expect(config.defaultRoute).toMatchObject({ providerId: 'codex', model: 'default' });
+  expect(config.allowedRoutes.map(route => `${route.providerId}/${route.model}`)).toEqual(['echo/echo-1', 'codex/default']);
+});

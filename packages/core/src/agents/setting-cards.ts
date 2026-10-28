@@ -10,14 +10,17 @@
  * contracts/agent-setting-requests.ts, where the in-memory client reads them.
  */
 import {
-  agentSettingAnswerText, agentSettingValue, AGENT_SETTING_KEYS, AGENT_STATUSES, checkAgentSettingRequest, normalizeAgentSetting, settledAgentSetting,
+  agentModelRoute, agentSettingAnswerText, agentSettingValue, AGENT_SETTING_KEYS, AGENT_STATUSES, checkAgentSettingRequest, normalizeAgentSetting, settledAgentSetting,
   type AgentProfile, type AgentSettingApplyParams, type AgentSettingAsk, type AgentSettingContext, type AgentSettingReading,
-  type AgentSettingRequestParams, type AgentSettingsReading, type AgentSettingsReadParams, type QuestionAnswer, type RequestId,
+  type AccountId, type AgentSettingChoice, type AgentSettingRequestParams, type AgentSettingsReading, type AgentSettingsReadParams,
+  type ProviderId, type QuestionAnswer, type RequestId,
 } from '@boite/contracts';
 import type { Core } from '../core.ts';
+import { loggedInAccount } from '../delegation/routes.ts';
 import { messageOf, notFound, refused, RpcFailure } from '../errors.ts';
 import { agentProvider, checkEffort, checkModel, modelsFor } from '../threads/selection.ts';
 import { remoteGrant } from './group-bots.ts';
+import { sameRoute } from './resident.ts';
 import type { AgentStore } from './store.ts';
 
 export class AgentSettingCards {
@@ -71,16 +74,52 @@ export class AgentSettingCards {
       projects: this.projectChoices(agent),
       bots: this.store.records.list('profile').filter(bot => bot.status !== 'archived'),
       model: model => checked(() => {
-        const kept = checkModel(provider, accountId, model);
-        if (kept === null) throw refused('model: expected a model id');
-        // The same test `agents.profile.save` makes once the owner set a policy.
-        if (this.core.journal.getSetting(`agents:runtime:${agent.id}`) && !this.store.resident.allowed(agent.id, { ...agent.selection, model: kept })) {
-          throw refused(`model: ${kept} is not among the models ${agent.name} may use; the owner allows models in its settings`);
-        }
-        return kept;
+        const route = this.modelRoute(agent, model);
+        const ref = `${route.providerId}/${route.model}`;
+        // An account the owner granted to other bots stays theirs. A model its settings do not allow yet
+        // is the owner's to allow, which applying the card does.
+        if (!this.store.resident.accountAllowed(agent.id, route.accountId)) throw refused(`model: ${ref} runs on an account the owner has not granted ${agent.name}`);
+        return ref;
       }),
       effort: effort => checked(() => checkEffort(provider, accountId, agent.selection.model, effort)),
     };
+  }
+
+  /**
+   * The route a model card names: `<provider>/<model>` of any installed
+   * provider, or a model id of the agent's own, which may hold a slash itself
+   * (`opencode/glm-5.3`).
+   */
+  private modelRoute(agent: AgentProfile, wanted: string): { providerId: ProviderId; accountId: AccountId; model: string } {
+    const own = agentProvider(this.core, agent);
+    const ownRoute = () => ({ providerId: own.id, accountId: agent.selection.accountId, model: checkModel(own, agent.selection.accountId, wanted)! });
+    const slash = wanted.indexOf('/');
+    const named = slash > 0 ? this.core.providers.get(wanted.slice(0, slash)) : undefined;
+    if (named === undefined) return ownRoute();
+    const model = wanted.slice(slash + 1);
+    const accountId = this.accountOn(agent, named.id);
+    if (accountId !== undefined && modelsFor(named, accountId).some(entry => entry.id === model)) return { providerId: named.id, accountId, model };
+    if (modelsFor(own, agent.selection.accountId).some(entry => entry.id === wanted)) return ownRoute();
+    if (accountId === undefined) throw refused(`model: ${named.id} has no signed-in account on this machine`, { field: 'model', providerId: named.id });
+    return { providerId: named.id, accountId, model: checkModel(named, accountId, model)! };
+  }
+
+  /** The agent's own login on its provider; on another, that provider's signed-in default. */
+  private accountOn(agent: AgentProfile, providerId: ProviderId): AccountId | undefined {
+    if (providerId === agent.selection.providerId) return agent.selection.accountId;
+    return loggedInAccount(this.core.accounts.list().filter(account => account.providerId === providerId))?.id;
+  }
+
+  /** Every model a card may move the agent to: its provider's, then the current ones of each other provider signed in here. */
+  private modelChoices(agent: AgentProfile, ctx: AgentSettingContext): AgentSettingChoice[] {
+    const providers = this.core.providers.available().sort((a, b) => Number(b.id === agent.selection.providerId) - Number(a.id === agent.selection.providerId));
+    return providers.flatMap(summary => {
+      const accountId = this.accountOn(agent, summary.id);
+      if (accountId === undefined) return [];
+      const own = summary.id === agent.selection.providerId;
+      return modelsFor(this.core.providers.require(summary.id), accountId).filter(model => own || !model.legacy)
+        .map(model => ({ id: `${summary.id}/${model.id}`, label: model.name }));
+    }).filter(choice => ctx.model(choice.id).ok);
   }
 
   /**
@@ -102,14 +141,12 @@ export class AgentSettingCards {
     await this.store.group.refresh();
     const agent = this.agentFor(params.threadId, params.agent);
     const ctx = this.context(agent);
-    const provider = agentProvider(this.core, agent);
-    const models = modelsFor(provider, agent.selection.accountId);
-    const model = models.find(m => m.id === agent.selection.model);
+    const model = modelsFor(agentProvider(this.core, agent), agent.selection.accountId).find(m => m.id === agent.selection.model);
     const settings = AGENT_SETTING_KEYS.map((key): AgentSettingReading => {
       const value = agentSettingValue(agent, ctx.config, key);
       if (key === 'status') return { key, value, choices: AGENT_STATUSES.map(status => ({ id: status, label: status })) };
       if (key === 'projects') return { key, value, choices: [...ctx.projects] };
-      if (key === 'model') return { key, value, choices: models.filter(m => ctx.model(m.id).ok).map(m => ({ id: m.id, label: m.name })) };
+      if (key === 'model') return { key, value, choices: this.modelChoices(agent, ctx) };
       if (key === 'effort' && model?.effort?.levels.length) return { key, value, choices: model.effort.levels.map(level => ({ id: level.id, label: level.label })) };
       return { key, value };
     });
@@ -144,7 +181,8 @@ export class AgentSettingCards {
     const ctx = this.context(agent);
     let value = ask.value;
     // A name is checked again: another card may have given it to a bot since this one was drawn.
-    if (params.value !== undefined || ask.key === 'name') {
+    // A model too: its provider may have signed out, and a card drawn before cards named the provider holds a bare id.
+    if (params.value !== undefined || ask.key === 'name' || ask.key === 'model') {
       const normalized = normalizeAgentSetting(ask.key, params.value ?? ask.value, ctx);
       if (!normalized.ok) throw refused(normalized.message, { field: 'value', key: ask.key });
       value = normalized.value;
@@ -165,11 +203,24 @@ export class AgentSettingCards {
       case 'status': return save({ ...agent, status: value as AgentProfile['status'] });
       case 'projects': return save({ ...agent, projectIds: value as string[] });
       case 'model': {
-        const provider = agentProvider(this.core, agent);
+        // Another provider runs on its signed-in default login; the agent keeps its own on its provider.
+        const { providerId, model } = agentModelRoute(value as string);
+        const accountId = this.accountOn(agent, providerId);
+        if (accountId === undefined) throw refused(`model: ${providerId} has no signed-in account on this machine`, { field: 'value', key });
         // A level the new model lacks goes back to its default rather than refusing the change.
+        const provider = this.core.providers.require(providerId);
         let effort: string | null = null;
-        try { effort = checkEffort(provider, agent.selection.accountId, value as string, agent.selection.effort); } catch { /* The model's default level. */ }
-        return save({ ...agent, selection: { ...agent.selection, model: value as string, effort } });
+        try { effort = checkEffort(provider, accountId, model, agent.selection.effort); } catch { /* The model's default level. */ }
+        const selection = { ...agent.selection, providerId, accountId, model, effort };
+        if (!this.core.journal.getSetting(`agents:runtime:${agent.id}`)) return save({ ...agent, selection });
+        // Applying the card is the owner allowing the model: it joins the routes the bot's settings allow.
+        const routes = ctx.config.allowedRoutes;
+        if (routes.some(route => sameRoute(route, selection))) return configure({ ...ctx.config, defaultRoute: selection });
+        const ref = `${providerId}/${model}`;
+        let id = ref.slice(0, 64);
+        for (let n = 2; routes.some(route => route.id === id); n++) id = `${ref.slice(0, 60)}-${n}`;
+        const name = (modelsFor(provider, accountId).find(entry => entry.id === model)?.name ?? model).slice(0, 100);
+        return configure({ ...ctx.config, defaultRoute: selection, allowedRoutes: [...routes, { id, name, providerId, accountId, model, effort }] });
       }
       case 'effort': return save({ ...agent, selection: { ...agent.selection, effort: value as string | null } });
       case 'autoMemory': return configure({ ...ctx.config, autoMemory: value as boolean });

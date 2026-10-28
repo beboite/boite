@@ -1,11 +1,11 @@
-import type { AgentProfile, AgentRuntimeConfig } from './agents.ts';
+import type { AgentProfile, AgentRuntimeConfig, AgentSelection } from './agents.ts';
 import type { QuestionAnswer, QuestionOption, RequestId, ThreadId } from './index.ts';
 import { SETTING_REASON_MAX, sameSetting } from './setting-requests.ts';
 
 /*
  * A thread, or a persistent agent about itself or another bot, asking the user
  * to change one of a bot's settings: rename it, rewrite its instructions,
- * pause it, entrust it a project, run it on another model, give it a daily
+ * pause it, entrust it a project, run it on another model or provider, give it a daily
  * budget. The same flow as a settings card (setting-requests.ts): a card asked
  * without stopping, whose Apply is the owner's (`agents.settings.apply`). The
  * core settles the card once the value moves, from the card or from the
@@ -44,7 +44,7 @@ export interface AgentSettingAsk {
   /** The agent's name when the card was asked: a thread has no agents snapshot to read it from. */
   agentName: string;
   key: AgentSettingKey;
-  /** The proposed value: text, a status, project ids sorted, a model id, an effort or null, a boolean, dollars a day or null. */
+  /** The proposed value: text, a status, project ids sorted, a model as `<provider>/<model>`, an effort or null, a boolean, dollars a day or null. */
   value: unknown;
   /** The value when the card was asked. It settles once the setting leaves it. */
   previous: unknown;
@@ -98,9 +98,24 @@ export interface AgentSettingContext {
   projects: readonly AgentSettingChoice[];
   /** The bots not archived: a name is taken while another of them holds it. */
   bots: readonly Pick<AgentProfile, 'id' | 'name'>[];
-  /** The model as `agents.profile.save` would keep it, the agent's policy included. */
+  /**
+   * The model as `agents.profile.save` would keep it, the agent's policy
+   * included, as `<provider>/<model>`: a model id of the agent's provider, or
+   * `<provider>/<model>` of another installed one.
+   */
   model: (model: string) => Checked<string>;
   effort: (effort: string | null) => Checked<string | null>;
+}
+
+/** A model as a card names it, `<provider>/<model>`; null runs on the provider's default. */
+export function agentModelRef(selection: Pick<AgentSelection, 'providerId' | 'model'>): string | null {
+  return selection.model === null ? null : `${selection.providerId}/${selection.model}`;
+}
+
+/** The provider and model of a `<provider>/<model>` reference: a provider id holds no slash, a model id may (`opencode/glm-5.3`). */
+export function agentModelRoute(ref: string): { providerId: string; model: string } {
+  const slash = ref.indexOf('/');
+  return { providerId: ref.slice(0, slash), model: ref.slice(slash + 1) };
 }
 
 /** The value a setting has now; projects sorted, so two lists compare by their ids. */
@@ -112,7 +127,7 @@ export function agentSettingValue(profile: AgentProfile, config: AgentRuntimeCon
     case 'avatar':
     case 'status': return profile[key];
     case 'projects': return [...(profile.projectIds ?? [])].sort();
-    case 'model': return profile.selection.model;
+    case 'model': return agentModelRef(profile.selection);
     case 'effort': return profile.selection.effort;
     case 'autoMemory': return config.autoMemory !== false;
     case 'eventWakes': return config.eventWakes !== false;
@@ -244,8 +259,10 @@ export function settledAgentSetting(setting: AgentSettingAsk, profile: AgentProf
   const archiving = setting.key === 'status' && setting.value === 'archived';
   if (!archiving && (config === null || profile.status === 'archived')) return 'close';
   const now = archiving ? profile.status : agentSettingValue(profile, config!, setting.key);
-  if (sameSetting(now, setting.previous)) return null;
-  return { optionIds: [sameSetting(now, setting.value) ? 'applied' : 'changed'], value: now };
+  // A model card drawn before cards named the provider holds the bare model id.
+  const held = (value: unknown) => (setting.key === 'model' && value === profile.selection.model ? now : value);
+  if (sameSetting(now, held(setting.previous))) return null;
+  return { optionIds: [sameSetting(now, held(setting.value)) ? 'applied' : 'changed'], value: now };
 }
 
 /** The longest value a refusal or an outcome quotes: a bot's instructions run to thousands of characters. */

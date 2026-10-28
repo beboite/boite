@@ -128,9 +128,10 @@ ${CONTROL_HELP}
   settings bot request <key> <value> --why <text>
                                  a card asking the user to change one, for you
                                  or --bot <name>: name Ada, status paused,
-                                 projects +boite -old (+<machine>/<name> for a
-                                 project of another machine of the group),
-                                 instructions with
+                                 model codex/gpt-6.1-sol (<provider>/<model>,
+                                 any provider), projects +boite -old
+                                 (+<machine>/<name> for a project of another
+                                 machine of the group), instructions with
                                  --instructions-file <path>; the outcome
                                  arrives as a message (applied, changed, refused)
   settings bot create <name>     create the bot the user asked for, at once,
@@ -693,9 +694,14 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
           const text = JSON.stringify(reading.key === 'projects' && Array.isArray(value) ? value.map(id => reading.choices?.find(choice => choice.id === id)?.label ?? id) : value ?? null);
           return rest[1] === undefined ? clipped(text) : text;
         };
+        // Every provider's models make a long list: the full view cuts it, `settings bot model` shows it whole.
+        const choices = (reading: (typeof shown)[number]): string => {
+          const text = (reading.choices ?? []).map(choice => choice.label === choice.id ? choice.id : `${choice.label} (${choice.id})`).join(', ');
+          return rest[1] === undefined ? clipped(text, 600) : text;
+        };
         print([
           `bot: ${read.agentName} (${read.agentId})`,
-          ...shown.map(reading => `${reading.key} ${named(reading, reading.value)}${reading.choices?.length ? `\n    choices: ${reading.choices.map(choice => choice.label === choice.id ? choice.id : `${choice.label} (${choice.id})`).join(', ')}` : ''}`),
+          ...shown.map(reading => `${reading.key} ${named(reading, reading.value)}${reading.choices?.length ? `\n    choices: ${choices(reading)}` : ''}`),
         ], rest[1] === undefined ? read : shown[0]);
         return;
       }

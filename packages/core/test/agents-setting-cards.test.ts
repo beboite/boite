@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AgentProfile, MessagePart } from '@boite/contracts';
+import type { AgentProfile, MessagePart, ModelInfo } from '@boite/contracts';
 import { runCli } from '../src/cli.ts';
 import { connect } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
@@ -261,6 +261,43 @@ test('an agent whose stored model its provider no longer lists still takes a pro
   // Choosing a model is still checked.
   expect(await thrown(owner.call('agents.profile.save', { id: agent.id, expectedRevision: profile().revision, value: { ...profile(), selection: { ...profile().selection, model: 'echo/other' } } })))
     .toThrow('the provider does not offer this model');
+});
+
+test('a bot asks to run on another provider; applying the card moves it there on its signed-in login and allows the route', async () => {
+  const { h, owner, agent, self, run, profile, cards, drawn } = await setup();
+  // A second provider on the echo driver, with its own models and a signed-in default account.
+  const shipped = JSON.parse(readFileSync(join(import.meta.dir, '../src/providers/shipped/echo.json'), 'utf8')) as Record<string, unknown>;
+  const models: ModelInfo[] = [{ id: 'twin-large', name: 'Twin Large', effort: { levels: [{ id: 'low', label: 'Low' }, { id: 'xhigh', label: 'Extra high' }], default: 'xhigh' } }];
+  mkdirSync(join(h.dataDir, 'providers'), { recursive: true });
+  writeFileSync(join(h.dataDir, 'providers', 'twin.json'), JSON.stringify({ ...shipped, id: 'twin', name: 'Twin', shortName: 'Twin', models }));
+  expect((await owner.call('providers.reload', {})).rejected).toEqual([]);
+  h.core.accounts.ensureDefaults();
+  const twinAccount = h.core.accounts.list().find(account => account.providerId === 'twin')!.id;
+  await owner.call('agents.profile.save', { id: agent.id, expectedRevision: profile().revision, value: { ...profile(), selection: { ...profile().selection, effort: 'low' } } });
+
+  // The reading names every model by its provider, its own first, beyond the one route its settings allow.
+  expect(h.core.workforce.resident.config(agent.id).allowedRoutes.map(route => route.model)).toEqual(['echo']);
+  const read = await run(['settings', 'bot', 'model'], self);
+  expect(read.out).toContain('model "echo/echo"');
+  expect(read.out).toContain('choices: Echo (echo/echo), Twin Large (twin/twin-large)');
+  expect((await run(['settings', 'bot', 'request', 'model', 'twin/nothing', '--why', 'Try it.'], self)).err).toContain('the provider does not offer this model');
+  expect((await run(['settings', 'bot', 'request', 'model', 'echo', '--why', 'Stay.'], self)).err).toContain('model is already "echo/echo"');
+
+  expect((await run(['settings', 'bot', 'request', 'model', 'twin/twin-large', '--why', 'Reviews need a larger model.'], self)).code).toBe(0);
+  const [card] = cards(self);
+  expect(card!.agentSetting).toMatchObject({ key: 'model', previous: 'echo/echo', value: 'twin/twin-large' });
+  await owner.call('agents.settings.apply', { threadId: self, questionId: card!.id });
+  // Its effort carries over where the new model has the level.
+  expect(profile().selection).toMatchObject({ providerId: 'twin', accountId: twinAccount, model: 'twin-large', effort: 'low' });
+  // The owner's Apply allowed it: the bot's settings list the route, and it is the default one.
+  const config = h.core.workforce.resident.config(agent.id);
+  expect(config.allowedRoutes.map(route => [route.id, route.name, route.providerId, route.model])).toEqual([['default', 'Default', 'echo', 'echo'], ['twin/twin-large', 'Twin Large', 'twin', 'twin-large']]);
+  expect(config.defaultRoute).toMatchObject({ providerId: 'twin', model: 'twin-large' });
+  expect(drawn(self, card!.id)!.answer).toEqual({ optionIds: ['applied'], value: 'twin/twin-large' });
+
+  // A model id of the provider it now runs on needs no prefix.
+  await waitFor(() => settled(h, self));
+  expect((await run(['settings', 'bot', 'request', 'model', 'twin-large', '--why', 'Stay.'], self)).err).toContain('model is already "twin/twin-large"');
 });
 
 test('a discussion creates the bot the user asked for, without a card, and reads its conversation', async () => {
