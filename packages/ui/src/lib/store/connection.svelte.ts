@@ -83,15 +83,13 @@ export class Connection {
   /**
    * Where the last thread list applied here left this client: the next load
    * on the same client, a reconnect, reads only what changed since. A new
-   * client or `detach` (a new generation) reads whole again.
+   * client or `detach` (a new generation) reads whole again, and so does the
+   * load after a list that left rows to newer reads: those may give them up,
+   * and are rare enough that a whole list costs less than following them.
    */
   #threadList: { client: Client; generation: number; cursor: ListCursor } | null = null;
-  /**
-   * The newer reads still out that an applied list left rows to. A list that
-   * changed nothing there does not settle them, so they stay until they end;
-   * one that gives up drops the cursor, since its rows never reached it.
-   */
-  readonly #deferred = new Set<number>();
+  /** Moves each time a list keeps no cursor, so a list asked before then keeps none either. */
+  #listDrops = 0;
   #localRecovery: ReturnType<typeof setTimeout> | null = null;
   /** Moves on every stop, so an ask still out from an earlier loss never reschedules. */
   #recoveryGeneration = 0;
@@ -100,13 +98,7 @@ export class Connection {
   /** Its hellos carry this device's key: one that opens says a group of that machine knows the device. */
   #signed = false;
 
-  constructor(private readonly ctx: StoreContext) {
-    ctx.threadReads.onFinished((sequence, applied) => {
-      if (!this.#deferred.delete(sequence) || applied) return;
-      this.#threadList = null;
-      this.#deferred.clear();
-    });
-  }
+  constructor(private readonly ctx: StoreContext) {}
 
   /**
    * What this client may ask of the core. A paired device reaches the list in
@@ -624,12 +616,13 @@ export class Connection {
     const projectRead = this.ctx.projectReads.begin();
     const threadRead = this.ctx.threadReads.begin();
     const lastList = this.#threadList;
+    const listDrops = this.#listDrops;
     const accountRead = this.ctx.accountReads.begin();
     // The global reads also serve the reopen, avoiding duplicate per-thread reads.
     const permissionRead = requests.permissionRead(client, 'all');
     const questionRead = requests.questionRead(client, 'all');
     const open = s.openThread;
-    const reopened = open && s.visible ? s.open(open.id, false, { requests: false }).catch((error: unknown) => { if (current()) this.ctx.fail(error); }) : null;
+    const reopened = open && s.visible ? s.open(open.id, false, { requests: false, listed: true }).catch((error: unknown) => { if (current()) this.ctx.fail(error); }) : null;
     const secretRead = requests.secretRead(client, 'all', async () => {
       await reopened;
       const visible = requests.secretParts(s.openThread);
@@ -652,10 +645,9 @@ export class Connection {
         const fresh = answer.kind === 'full' ? answer.threads : applyThreadChanges(s.threads, answer.threads, answer.removed);
         const applied = threadRead.active;
         s.threads = reconcileRows(s.threads, threadRead.apply(fresh, s.threads));
-        // A whole list wrote every row an older read had left: only its own deferrals stay.
-        if (!applied || !answer.cursor || answer.kind === 'full') this.#deferred.clear();
-        for (const sequence of threadRead.deferred) this.#deferred.add(sequence);
-        this.#threadList = applied && answer.cursor ? { client, generation, cursor: answer.cursor } : null;
+        const kept = applied && answer.cursor && !threadRead.deferred && listDrops === this.#listDrops;
+        this.#threadList = kept ? { client, generation, cursor: answer.cursor! } : null;
+        if (!kept) this.#listDrops += 1;
         const read = reopened && s.openThread?.unread === false ? s.threads.find(t => t.id === s.openThread?.id) : undefined;
         if (read) read.unread = false;
         const listed = new Set(s.threads.map(t => s.threadKey(t.id)));

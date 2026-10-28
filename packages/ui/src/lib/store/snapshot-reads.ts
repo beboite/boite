@@ -2,24 +2,21 @@
 export class SnapshotReads<T extends { id: string }> {
   #sequence = 0;
   #reads = new Set<SnapshotRead<T>>();
-  #finished = new Set<(sequence: number, applied: boolean) => void>();
   constructor(private readonly group: (row: T) => string) {}
 
-  /** Hears every read that ends, by its sequence, and whether it applied. */
-  onFinished(listener: (sequence: number, applied: boolean) => void): () => void {
-    this.#finished.add(listener);
-    return () => this.#finished.delete(listener);
-  }
-
-  begin(scope = 'all'): SnapshotRead<T> {
+  /**
+   * A read that `protect`s owns its rows against older reads still out. One
+   * that does not leaves them their rows: an older read that will land the
+   * same rows anyway, its own answer reaching them through `change`.
+   */
+  begin(scope = 'all', protect = true): SnapshotRead<T> {
     const sequence = ++this.#sequence;
-    for (const older of this.#reads) {
+    if (protect) for (const older of this.#reads) {
       if (scope === 'all' || older.scope === 'all' || older.scope === scope) older.protect(scope, sequence);
     }
     const read = new SnapshotRead(scope, sequence, this.group, (applied) => {
       this.#reads.delete(read);
       for (const older of this.#reads) older.release(scope, sequence, applied);
-      for (const listener of this.#finished) listener(sequence, applied);
     });
     this.#reads.add(read);
     return read;
@@ -45,11 +42,8 @@ export class SnapshotRead<T extends { id: string }> {
   readonly changes = new Map<string, T | null>();
   readonly patches = new Map<string, Partial<T>>();
   readonly protected = new Map<string, { pending: Set<number>; applied: boolean }>();
-  /**
-   * The newer reads still in flight that `apply` left their rows to. Until
-   * they apply, those rows are not known to match this read's answer.
-   */
-  deferred: ReadonlySet<number> = new Set();
+  /** `apply` left some rows to newer reads, which may still give them up. */
+  deferred = false;
   active = true;
   constructor(readonly scope: string, readonly sequence: number, private readonly group: (row: T) => string, private readonly close: (applied: boolean) => void) {}
 
@@ -68,7 +62,7 @@ export class SnapshotRead<T extends { id: string }> {
   /** Fresh unrelated rows still land; newer reads and events own their rows. */
   apply(fresh: readonly T[], held: readonly T[]): T[] {
     if (!this.active) return [...held];
-    this.deferred = new Set([...this.protected.values()].filter(entry => !entry.applied).flatMap(entry => [...entry.pending]));
+    this.deferred = this.protected.size > 0;
     const owned = (row: T) => this.scope === 'all' || this.group(row) === this.scope;
     const protectedRow = (row: T) => this.protected.has('all') || this.protected.has(this.group(row));
     const rows = new Map(held.filter(row => !owned(row) || protectedRow(row)).map(row => [row.id, row]));

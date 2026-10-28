@@ -19,11 +19,11 @@ async function connected(options: FakeClientOptions = {}) {
   store.attach(client);
   await store.connect();
   const real = client.call.bind(client);
-  const lists: { method: string; bytes: number }[] = [];
+  const lists: { method: string; bytes: number; kind?: string }[] = [];
   vi.spyOn(client, 'call').mockImplementation(((method: string, params: never, callOptions?: never) => {
     const answer = real(method as never, params, callOptions);
     if (method !== 'threads.list' && method !== 'threads.listChanges') return answer;
-    return answer.then((result) => { lists.push({ method, bytes: bytes(result) }); return result; });
+    return answer.then((result) => { lists.push({ method, bytes: bytes(result), kind: (result as { kind?: string }).kind }); return result; });
   }) as typeof client.call);
   return { client, store, lists, real };
 }
@@ -96,27 +96,102 @@ test('a load the gap ended is cleared on a row the answer left out', async () =>
   expect(store.threads.find(row => row.id === 't-trace')?.load ?? null).toBeNull();
 });
 
-test.each([0, 1])('a deletion the list left to a newer read that gave up is read again on the next reconnect, %i quiet loads between', async (quiet) => {
-  const { client, store, real } = await connected();
-  let release: (() => void) | null = null;
+/** Holds the next answer to each method armed with `hold`, until `release` lets the oldest go. */
+function gate(client: FakeClient, real: FakeClient['call']) {
+  const armed: string[] = [];
+  const waiting: (() => void)[] = [];
   vi.mocked(client.call).mockImplementation(((method: string, params: never, callOptions?: never) => {
     const answer = real(method as never, params, callOptions);
-    if (method !== 'threads.listChanges' || release) return answer;
-    return answer.then(value => new Promise(resolve => { release = () => resolve(value); }));
+    const at = armed.indexOf(method);
+    if (at < 0) return answer;
+    armed.splice(at, 1);
+    return answer.then(value => new Promise(resolve => { waiting.push(() => resolve(value)); }));
   }) as typeof client.call);
+  return {
+    hold: (method: string) => { armed.push(method); },
+    held: (count: number) => vi.waitFor(() => expect(waiting.length).toBe(count)),
+    release: () => waiting.shift()!(),
+  };
+}
+
+const listed = (store: Store, id: string) => store.threads.some(row => row.id === id);
+
+/** `t-trace` is deleted while away, and a press on it reads its row after the reconnect's list was asked. */
+async function deletedUnderPress() {
+  const { client, store, real } = await connected();
+  const calls = gate(client, real);
+  calls.hold('threads.listChanges');
   client.drop();
   await client.elsewhere('threads.remove', { threadId: 't-trace' });
   await client.restore();
-  await vi.waitFor(() => expect(release).not.toBeNull());
-  // A press on the row reads it after the list was asked: the list leaves that row to it.
+  await calls.held(1);
   const giveUp = store.preload('t-trace');
-  release!();
+  calls.release();
   await store.reload();
-  // A load whose answer is empty, while that read is still out, does not forget what it owes.
-  for (let load = 0; load < quiet; load += 1) await store.reload();
-  giveUp();
-  expect(store.threads.some(row => row.id === 't-trace')).toBe(true);
+  return { client, store, calls, giveUp };
+}
 
+test('a deletion the list left to a newer read that gave up is read again on the next reconnect', async () => {
+  const { client, store, giveUp } = await deletedUnderPress();
+  expect(listed(store, 't-trace')).toBe(true);
+  giveUp();
   await reconnect(client, store);
-  expect(store.threads.some(row => row.id === 't-trace')).toBe(false);
+  expect(listed(store, 't-trace')).toBe(false);
+});
+
+test('a quiet load before that read gives up does not forget the deletion', async () => {
+  const { client, store, giveUp } = await deletedUnderPress();
+  await store.reload();
+  giveUp();
+  await reconnect(client, store);
+  expect(listed(store, 't-trace')).toBe(false);
+});
+
+test('a load still out when that read gives up does not forget the deletion', async () => {
+  const { client, store, calls, giveUp } = await deletedUnderPress();
+  calls.hold('threads.list');
+  calls.hold('threads.listChanges');
+  const load = store.reload();
+  await calls.held(1);
+  giveUp();
+  calls.release();
+  await load;
+  await reconnect(client, store);
+  expect(listed(store, 't-trace')).toBe(false);
+});
+
+test('a change an open left to a press that gave up is read again on the next reconnect', async () => {
+  const { client, store, real } = await connected({ idle: 10 });
+  const calls = gate(client, real);
+  calls.hold('threads.listChanges');
+  client.drop();
+  await client.elsewhere('threads.pin', { threadId: 't-idle-7', pinned: true });
+  await client.restore();
+  await calls.held(1);
+  calls.hold('threads.get');
+  const opened = store.open('t-idle-7');
+  await calls.held(2);
+  calls.release();
+  // The list applies before the press begins, so only the open stands between them.
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(store.connection).toBe('ready');
+  expect(store.threads.find(row => row.id === 't-idle-7')?.pinned).toBeFalsy();
+  const giveUp = store.preload('t-idle-7');
+  calls.release();
+  await opened;
+  giveUp();
+  await store.open('t-bench');
+  await reconnect(client, store);
+  expect(store.threads.find(row => row.id === 't-idle-7')?.pinned).toBe(true);
+});
+
+test('a reconnect with a thread open keeps reading only what changed', async () => {
+  const { client, store, lists } = await connected();
+  await store.open('t-bench');
+  for (const pinned of [true, false]) {
+    lists.length = 0;
+    await reconnect(client, store, () => client.elsewhere('threads.pin', { threadId: 't-trace', pinned }));
+    expect(store.threads.find(row => row.id === 't-trace')?.pinned).toBe(pinned);
+    expect(lists.map(list => list.kind)).toEqual(['changes']);
+  }
 });
