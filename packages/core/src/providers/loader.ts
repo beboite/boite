@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { forgetWhich } from './which.ts';
 import {
   threadActive,
@@ -88,9 +88,15 @@ export function summarize(
   const profile = profileFor(entry.descriptor);
   // A provider that is turned off is listed from what is already known: asking its program its version would start it.
   const executable = profile === undefined ? null : (resolveCommand(profile, enabled)?.shown ?? null);
+  const current = installs.currentDir(entry.descriptor.id);
+  // A program found in the managed release counts once that release is whole: an update cut off and not yet settled leaves its files without the record.
+  const inRelease = (path: string) => { const rest = relative(current, path); return rest !== '' && !rest.startsWith('..') && !isAbsolute(rest); };
+  const fromRelease = install !== undefined && profile !== undefined &&
+    (profile.detect.file?.includes('{agentsDir}') === true || (executable !== null && inRelease(executable)));
   const available =
     profile !== undefined &&
-    detectResolves(profile, installs.currentDir(entry.descriptor.id), dataDir) &&
+    (!fromRelease || installs.installedVersion(entry.descriptor.id) !== null) &&
+    detectResolves(profile, current, dataDir) &&
     (profile.executable.length === 0 || executable !== null);
   return {
     id: entry.descriptor.id,

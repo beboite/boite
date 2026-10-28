@@ -353,6 +353,16 @@ describe('managed installs', () => {
     expect(provider?.install?.state).toBe('failed');
     if (provider?.install?.state === 'failed') expect(provider.install.message).toContain('.install-complete.json');
   });
+  test('a release that current reaches without its completion record is not available', async () => {
+    // What an update a stop cut off leaves when recovery cannot settle it: the binary, no record.
+    await loadDescriptor(goodInstall());
+    mkdirSync(agentDir('current', 'bin'), { recursive: true });
+    writeFileSync(agentDir('current', 'bin', 'agent.exe'), EXE, { mode: 0o755 });
+    const client = await harness.connect();
+    const provider = (await client.call('providers.list', {})).loaded.find((entry) => entry.id === 'managed');
+    expect(provider?.install?.state).toBe('absent');
+    expect(provider?.available).toBe(false);
+  });
   test('a release is downloaded, checked, unpacked and pointed at by {agentsDir}', async () => {
     await loadDescriptor(goodInstall());
     const client = await harness.connect();
