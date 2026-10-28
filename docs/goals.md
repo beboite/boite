@@ -125,7 +125,11 @@ subagent's thread never does.
 The message stays as typed, and the goal's objective is that same prompt,
 verbatim, its spaces included. The turn it starts is the goal's first: the agent
 hears the prompt with the goal's rules, as a `/goal2` turn, and a claim or a
-blocker it ends on counts, so no second run comes before the review. A prompt
+blocker it ends on counts, so no second run comes before the review. That
+holds across a core restart while the turn still waits in line
+(`auto-goal:<thread>` marks it `first`): the goal stays active and the next
+core runs the turn as the goal's. A turn the restart interrupts leaves the goal
+paused, as any goal turn does. A prompt
 queued with the experiment on never shares a delivery with one queued with it
 off. The core decides in `threads.startTurn` from the
 experiments of the app that sent the prompt (`turns.start`) or that queued it
@@ -165,7 +169,8 @@ a pass, models read again after an account change, and a restart. The opt-in
 `goal-tracker.live.test.ts` (`BOITE_E2E_CLAUDE=1`) runs one real goal on Haiku
 with the checklist on Automatic. `auto-goal.test.ts` covers automatic goals:
 the threshold and its edge, the experiment off, a command, a steer, a queued
-prompt across a restart, `goal track` and its refusals, and the card claimed
+prompt across a restart, a first turn still in line across a restart for an
+update (its claim, its blocker), `goal track` and its refusals, and the card claimed
 after a passing review. UI unit tests cover `/goal2` in the slash menu,
 the checklist model row on General, the goal bar's verdicts and checklist, the
 Automatic goals switch and its threshold row, the "Automatic goal" label, and

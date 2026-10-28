@@ -62,7 +62,10 @@ export class ActivityStore {
     for (const thread of savedThreads) {
       const saved = core.journal.getSetting(`activity:${thread.id}`) as ThreadActivity | undefined;
       if (!saved) continue;
-      let changed = pauseActivity(saved, 'Core restarted. Resume to continue.');
+      // An automatic goal's first turn still in line runs as the goal's after the restart: with its rules, its claim or blocker counting.
+      const first = firstInLine(core, thread.id, saved);
+      if (first) this.ownTurns.set(first, { kind: 'goal', generation: 0, iteration: 1 });
+      let changed = !first && pauseActivity(saved, 'Core restarted. Resume to continue.');
       const review = saved.goal?.review;
       for (const verdict of review?.verdicts ?? []) this.reviewers.add(verdict.threadId);
       // The interrupted review is not adopted: resuming starts a fresh one.
@@ -163,12 +166,14 @@ export class ActivityStore {
       return false;
     }
     // The turn still under way is the goal's first: its claim or blocker counts, and no second run starts before them.
-    if (['queued', 'running', 'waiting'].includes(this.core.journal.getTurn(turnId)?.status ?? '')) {
+    // `first` keeps that across a restart, while the turn waits in line.
+    const first = ['queued', 'running', 'waiting'].includes(this.core.journal.getTurn(turnId)?.status ?? '');
+    if (first) {
       this.ownTurns.set(turnId, { kind: 'goal', generation: this.generations.get(`${threadId}:goal`) ?? 0, iteration: 1 });
       this.states.get(threadId)!.goal!.iterations = 1;
       this.save(threadId);
     }
-    this.core.journal.setSetting(`auto-goal:${threadId}`, { turnId, messageId });
+    this.core.journal.setSetting(`auto-goal:${threadId}`, { turnId, messageId, ...(first ? { first } : {}) });
     try { addGoalCard(this.core, threadId, objective); } catch (error) { this.core.log('warn', `automatic goal card: ${messageOf(error)}`); }
     return true;
   }
@@ -612,7 +617,15 @@ export class ActivityStore {
     this.core.bus.emit('thread.activity', { threadId, activity });
   }
 
-  close(): void { this.closed = true; this.tracker.close(); for (const threadId of this.states.keys()) this.pauseAll(threadId); }
+  close(): void {
+    this.closed = true;
+    this.tracker.close();
+    for (const [threadId, state] of this.states) {
+      // The next core runs an automatic goal's first turn still in line as the goal's (constructor).
+      if (firstInLine(this.core, threadId, state)) this.clearTimer(threadId);
+      else this.pauseAll(threadId);
+    }
+  }
 }
 
 export function validateLoop(loop: NonNullable<RpcParams<'threads.activity.set'>['loop']>): void {
@@ -630,6 +643,14 @@ function createdTaskId(text: string | null): string | null {
     if (typeof id === 'string' || typeof id === 'number') return String(id);
   } catch { /* Older agents return a human-readable confirmation. */ }
   return /Task\s+#?(\d+)\s+created/i.exec(text ?? '')?.[1] ?? null;
+}
+
+/** The queued user's turn an automatic goal took as its first, while the goal waits on it: `autoGoal` stores `first`. */
+function firstInLine(core: Core, threadId: string, state: ThreadActivity): string | null {
+  const started = core.journal.getSetting(`auto-goal:${threadId}`) as { turnId?: string; first?: boolean } | undefined;
+  const goal = state.goal;
+  if (!started?.first || !started.turnId || !goal?.auto || goal.status !== 'active' || goal.iterations !== 1 || state.loop?.status === 'active') return null;
+  return core.journal.getTurn(started.turnId)?.status === 'queued' ? started.turnId : null;
 }
 
 function pauseActivity(state: ThreadActivity, error: string | null): boolean {

@@ -7,7 +7,7 @@ import { connect, type CoreClient } from '../src/client.ts';
 import { runCli, type CliIo } from '../src/cli.ts';
 import { agentGuide } from '../src/agent-guide.ts';
 import { setDriver } from '../src/drivers/index.ts';
-import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { echoThread, holdAccountTurns, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
 
 let h: TestCore;
@@ -35,7 +35,7 @@ const cards = (client: CoreClient, threadId: string) => client.call('todos.list'
  * top-level conversation running until `release`: a steer has a turn to
  * join, and a goal stays under way.
  */
-function roles(options: { hold?: boolean; prompts?: string[] } = {}) {
+function roles(options: { hold?: boolean; prompts?: string[]; answer?: string } = {}) {
   const held: (() => void)[] = [];
   restore = setDriver('echo', {
     protocol: 'echo',
@@ -44,7 +44,7 @@ function roles(options: { hold?: boolean; prompts?: string[] } = {}) {
       if (h.core.activity.ownsTracker(ctx.thread.id)) {
         ctx.emit.part(id, 0, { type: 'text', text: ctx.prompt.includes('Say which open items') ? json({ done: [1] }) : json({ items: [{ text: 'Fix the login page', source: 'Fix the login page.' }] }) });
       } else if (h.core.activity.ownsReviewer(ctx.thread.id)) ctx.emit.part(id, 0, { type: 'text', text: 'Checks pass.\nVERDICT: PASS' });
-      else { options.prompts?.push(ctx.prompt); ctx.emit.part(id, 0, { type: 'text', text: 'Fixed.\n[BOITE_GOAL_COMPLETE]' }); }
+      else { options.prompts?.push(ctx.prompt); ctx.emit.part(id, 0, { type: 'text', text: options.answer ?? 'Fixed.\n[BOITE_GOAL_COMPLETE]' }); }
       ctx.emit.complete(id, 'complete');
       const result = { status: 'done' as const, sessionId: null, usage: null };
       if (!options.hold || ctx.thread.parentThreadId) return { stop() {}, done: Promise.resolve(result) };
@@ -62,8 +62,8 @@ async function desktop(experiments: ExperimentId[] = ['auto-goal']) {
   const client = await connect(h.url, h.token, { client: { version: 'test', name: 'shell' } });
   clients.push(client);
   await client.call('client.preferences', report(experiments));
-  const { threadId } = await echoThread(h, client);
-  return { client, threadId };
+  const { threadId, accountId } = await echoThread(h, client);
+  return { client, threadId, accountId };
 }
 
 /** `boite <args>` as the conversation's own agent. */
@@ -302,4 +302,40 @@ test('goal track during the turn makes that turn the goal\'s first, so its claim
   expect(prompts).toHaveLength(1);
   expect(goalOf(threadId)).toMatchObject({ iterations: 1, review: { verdicts: [{ verdict: 'pass' }] } });
   held.release();
+});
+
+test.each([
+  ['claim', 'Fixed.\n[BOITE_GOAL_COMPLETE]'],
+  ['blocker', 'The login service is down.\n[BOITE_GOAL_BLOCKED]'],
+])('a first turn still in line when the core restarts for an update stays the automatic goal\'s first: its %s counts', async (signal, answer) => {
+  restartDir = mkdtempSync(join(tmpdir(), 'auto-goal-handoff-'));
+  let stops = 0;
+  h = await startTestCore({ dataDir: restartDir, onShutdown: () => { stops += 1; } });
+  const prompts: string[] = [];
+  roles({ prompts, answer });
+  const { client, threadId, accountId } = await desktop();
+  holdAccountTurns(h, accountId);
+  const text = prompt(1500);
+  const turn = await client.call('turns.start', { threadId, prompt: text });
+  expect(goalOf(threadId)).toMatchObject({ auto: true, iterations: 1 });
+  expect(h.core.journal.getTurn(turn.id)?.status).toBe('queued');
+  const asked = await fetch(`${h.url}/shutdown-for-update?pid=${process.pid}`, { method: 'POST', headers: { authorization: `Bearer ${h.token}` } });
+  expect(asked.status).toBe(202);
+  await waitFor(() => stops === 1);
+  await h.core.drain();
+  await h.stop();
+
+  h = await startTestCore({ dataDir: restartDir });
+  await waitFor(() => h.core.journal.getTurn(turn.id)?.status === 'done', 5000);
+  // The turn ran with the goal's rules, and its signal decided the goal rather than a second run.
+  expect(prompts).toHaveLength(1);
+  expect(prompts[0]).toContain(`Work toward this goal: ${text}`);
+  if (signal === 'claim') {
+    await waitFor(() => goalOf(threadId)?.status === 'complete', 10_000);
+    expect(goalOf(threadId)).toMatchObject({ iterations: 1, review: { verdicts: [{ verdict: 'pass' }] } });
+  } else {
+    await waitFor(() => goalOf(threadId)?.blocked === true);
+    expect(goalOf(threadId)).toMatchObject({ status: 'paused', iterations: 1, error: 'The agent reported a blocker. Reply to resume.' });
+  }
+  expect(h.core.journal.listTurns(threadId)).toHaveLength(1);
 });
