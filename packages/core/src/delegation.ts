@@ -566,9 +566,9 @@ export class Delegation {
     // A restart handoff stopped it on purpose: the next core continues it, so this is no result,
     // and its worktree is still in use. A child the user or its parent stopped is in `stopped` first.
     if (turn.status === 'stopped' && this.core.threads.handoff.active && !this.stopped.has(thread.id) && (link || this.delegated(thread.id))) {
-      if (link) this.remote.state(thread.id);
       // The handoff resumes a remote child's own turns, not those its parent's letters opened.
       if (!this.core.threads.handoff.carries(turn.id)) recordRestartCut(this.core, turn);
+      if (link) this.remote.state(thread.id);
       return;
     }
     // Ended to wait on its own background work: it is not done, and its worktree is still in use.
@@ -820,7 +820,11 @@ export class Delegation {
   }
   /** Once the server listens after a restart handoff: the children it cut go on (`delegation/restart.ts`). */
   resumeAfterRestart(): number {
-    return this.closed || this.core.journal.isClosed() ? 0 : resumeRestartCuts(this.core);
+    if (this.closed || this.core.journal.isClosed()) return 0;
+    const resumed = resumeRestartCuts(this.core);
+    // A child for a parent elsewhere whose cut did not go on: that stop is final now.
+    this.remote.restate();
+    return resumed;
   }
   /** What an agent reads about its team on a turn ([guide](./delegation/guide.ts)). */
   instructions(threadId: string, request?: string, fresh = true): string { return teamInstructions(this.core, threadId, request, fresh); }

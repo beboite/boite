@@ -13,6 +13,13 @@ export function recordRestartCut(core: Core, turn: Turn): void {
   core.journal.setSetting(RESTART_CUT, [...cut.filter(entry => entry.childId !== turn.threadId), { childId: turn.threadId, turnId: turn.id }]);
 }
 
+/** Whether a restart continues this cut turn: this core hands it on, or the next one has yet to continue it. */
+export function restartContinues(core: Core, childId: string, turnId: string): boolean {
+  const handoff = core.threads.handoff;
+  if (handoff.carries(turnId) || handoff.inheritedTurns().has(turnId)) return true;
+  return ((core.journal.getSetting(RESTART_CUT) as RestartCut[] | undefined) ?? []).some(cut => cut.childId === childId && cut.turnId === turnId);
+}
+
 /**
  * The previous core cut these children, but this one does not carry its
  * handoff on (older than an hour, unreadable): none of them resumes, and their

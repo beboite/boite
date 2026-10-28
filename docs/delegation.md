@@ -291,12 +291,17 @@ waiting for the same child. A refusal drops the entry; a machine that left the
 group drops its outbox. A start whose answer was lost keeps its record on the
 parent's machine: the next report or the same `--request-id` finds the child.
 Archiving the parent before then keeps the retirement asked, and the report
-or answer that names the child sends it. Each stop carries an id of its own,
-which the child's machine keeps once applied: a stop sent again because its
-answer was lost does not cut the instruction that followed it, and
-`delegate send` delivers a stop still waiting before its letter. A restart
+or answer that names the child sends it; a stop asked by request id before
+then (a workflow step stopped while its start was out) waits the same way.
+Each stop carries an id of its own, which the child's machine keeps once
+applied: a stop sent again because its answer was lost does not cut the
+instruction that followed it, and `delegate send` delivers a stop still
+waiting before its letter. A restart
 handoff on the child's machine keeps a turn the parent's letter opened and
-continues it like the turns of a child here.
+continues it like the turns of a child here. Until that machine's next core
+continues a cut turn, its reports mark the child `restarting`, which the parent
+counts as at work rather than as a result; a turn that does not go on is
+reported again without the mark, and that stop is final.
 A machine whose Boite lacks these operations is reported too old before
 anything starts there.
 

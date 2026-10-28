@@ -23,18 +23,22 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { CONVERSATION_PROFILE_ID, delegationReply } from '@boite/contracts';
-import type { AgentLetter, CoordinationPeer, ContextPreset, ContextRequest, DelegatedAgent, DelegationConfig, DelegationInput, DelegationResultPage, DelegationWorktree, PermissionMode, RpcParams, ThreadSummary, Turn } from '@boite/contracts';
+import type { AgentLetter, CoordinationPeer, ContextPreset, ContextRequest, DelegatedAgent, DelegationConfig, DelegationResultPage, RpcParams, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { PeerRefusal } from '../coordination-wire.ts';
 import { assertDriverRunnable } from '../drivers/index.ts';
 import { invalidParams, messageOf, refused, requiredText as text, unavailable } from '../errors.ts';
 import { newId } from '../ids.ts';
 import type { ProviderProbe } from '../providers/probe.ts';
-import { GROUP_THREADS_OFF, machineArg, memberModels, memberNamed, peerRefusal, PERMISSION_MODES } from '../threads/group-spawn.ts';
+import { GROUP_THREADS_OFF, machineArg, memberModels, memberNamed, peerRefusal } from '../threads/group-spawn.ts';
 import { modelsFor } from '../threads/selection.ts';
 import { anyModel, catalog, chooseModel, conversationRoute, discover, loggedInAccount } from './routes.ts';
 import { Outbox } from './outbox.ts';
+import { restartContinues } from './restart.ts';
 import { resultPageOf } from './results.ts';
+import { checkStart, readableState, type ChildState, type ParentLink, type RemoteChild, type Report, type Start, type Started, type Stop, type WireRoute } from './remote-wire.ts';
+
+export type { ChildState, ParentLink, RemoteChild } from './remote-wire.ts';
 
 const RECORDS = 'remote-delegates:';
 const PARENT = 'remote-parent:';
@@ -45,75 +49,6 @@ const READ_MS = 3000;
 const LETTER_MS = 15 * 60_000;
 
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-
-/** The model a child runs on there. `strict`: picked from that machine's list, so exactly that or nothing. */
-interface WireRoute { providerId: string; model: string | null; effort: string | null; speed: string | null; strict?: true }
-
-/** What the caller's machine sends with `delegation.start`. */
-interface Start {
-  parent: { threadId: string; title: string; projectId: string; project: string };
-  requestId: string;
-  /** The caller's fingerprint of the spawn: the same request id with another one is refused. */
-  fingerprint: string;
-  task: string;
-  title: string;
-  worktree: boolean;
-  project?: string;
-  context?: ContextRequest | ContextPreset;
-  route: WireRoute;
-  permissionMode: PermissionMode;
-}
-
-/** A child as the member last saw it: what `delegate list` shows on the caller's machine. */
-export interface ChildState {
-  thread: ThreadSummary;
-  lastTurn: Turn | null;
-  result: string | null;
-  needsInput?: DelegationInput[];
-  worktree?: DelegationWorktree;
-  /** Its project's name on the member. */
-  project?: string;
-}
-
-/** What a member answers to `delegation.start`. */
-interface Started { childId: string; at: number; state: ChildState }
-
-/** One entry of the member's outbox to the caller. */
-interface Report {
-  key: string;
-  parentId: string;
-  childId: string;
-  requestId: string;
-  at: number;
-  state?: ChildState;
-  removed?: true;
-  letter?: { origin: 'result' | 'question' | 'agent'; requestId: string; text: string; checkpoint?: true };
-}
-
-/** One entry of the caller's outbox to the member. Each stop asked has its own `id`: the member applies it once, however often it is sent. */
-interface Stop { key: string; id: string; parentId: string; childId: string; retire?: true }
-
-/** The caller's record of a child on another machine. `childId` is null until that machine answered or reported. */
-export interface RemoteChild {
-  coreId: string;
-  machine: string;
-  childId: string | null;
-  requestId: string;
-  fingerprint: string;
-  task: string;
-  profileId: string;
-  title: string;
-  state: ChildState | null;
-  /** When the member took the state kept here; an older one arriving late is ignored. */
-  at: number;
-  createdAt: number;
-  retired?: true;
-  /** A workflow step's: its run follows it, so `delegate list` does not show it and its result and questions are not mail. */
-  workflow?: true;
-}
-
-/** The member's link from a child here to its parent on another machine. `stop`: the id of the last stop applied to it. */
-export interface ParentLink { coreId: string; machine: string; parentId: string; title: string; projectId: string; project: string; requestId: string; fingerprint: string; at: number; stop?: string }
 
 /** What the delegation module lends this one: its private state and its mail. */
 export interface RemoteHost {
@@ -128,13 +63,6 @@ export interface RemoteHost {
   file(letter: AgentLetter, rootId: string, senderId: string, recipientId: string, requestId: string, fingerprint: string): void;
   update(letter: AgentLetter, status: AgentLetter['status'], error: string | null): void;
 }
-
-const readableState = (value: unknown): value is ChildState => {
-  const state = value as ChildState | null;
-  return typeof state?.thread?.id === 'string' && typeof state.thread.status === 'string' && typeof state.thread.title === 'string'
-    && (state.lastTurn === null || typeof state.lastTurn?.id === 'string') && (state.result === null || typeof state.result === 'string')
-    && (state.needsInput === undefined || Array.isArray(state.needsInput));
-};
 
 /** Both sides of a subagent on another machine of the group. */
 export class RemoteDelegation {
@@ -176,9 +104,7 @@ export class RemoteDelegation {
 
   private start(): void {
     if (this.closed || this.core.journal.isClosed()) return;
-    for (const childId of this.parents.keys()) {
-      try { this.state(childId); } catch (error) { this.core.log('warn', `remote subagent ${childId}: ${messageOf(error)}`); }
-    }
+    this.restate();
     this.reports.start();
     this.stops.start();
   }
@@ -258,13 +184,20 @@ export class RemoteDelegation {
 
   /** Whether a child of this parent on another machine is at work, as far as that machine reported. */
   busy(rootId: string): boolean {
-    return this.members(rootId).some(agent => (agent.lastTurn !== null && ['queued', 'running'].includes(agent.lastTurn.status)) || ['queued', 'running', 'waiting'].includes(agent.thread.status) || agent.thread.backgroundWait?.state === 'waiting');
+    if (!this.roots.has(rootId)) return false;
+    return this.records(rootId).some(record => record.childId !== null && record.state !== null && !record.workflow && this.atWork(rootId, record));
+  }
+
+  /** A restart there cut its turn, and that machine's next core continues it: at work too. */
+  private atWork(rootId: string, record: RemoteChild): boolean {
+    const agent = this.member(rootId, record);
+    return record.state?.restarting === true || (agent.lastTurn !== null && ['queued', 'running'].includes(agent.lastTurn.status)) || ['queued', 'running', 'waiting'].includes(agent.thread.status) || agent.thread.backgroundWait?.state === 'waiting';
   }
 
   private member(rootId: string, record: RemoteChild): DelegatedAgent {
     const state = record.state!, childId = record.childId!;
     const lastTurn = state.lastTurn;
-    const terminal = lastTurn !== null && !['queued', 'running'].includes(lastTurn.status);
+    const terminal = lastTurn !== null && !['queued', 'running'].includes(lastTurn.status) && !state.restarting;
     const wait = state.thread.backgroundWait?.state;
     return {
       thread: { ...state.thread, parentThreadId: rootId }, profileId: record.profileId, task: record.task, lastTurn, result: state.result,
@@ -464,8 +397,24 @@ export class RemoteDelegation {
     const record = this.child(rootId, childId);
     if (!record) return false;
     this.stopThere(record.coreId, rootId, childId, false);
-    const agent = this.member(rootId, record);
-    return (agent.lastTurn !== null && ['queued', 'running'].includes(agent.lastTurn.status)) || ['queued', 'running', 'waiting'].includes(agent.thread.status) || agent.thread.backgroundWait?.state === 'waiting';
+    return this.atWork(rootId, record);
+  }
+
+  /**
+   * Stops the child a spawn of this parent took under that request id: now
+   * when that machine named it, else once a report or a late answer names
+   * it. False when no spawn took that id.
+   */
+  stopRequest(rootId: string, requestId: string): boolean {
+    const records = this.roots.has(rootId) ? this.records(rootId) : [];
+    const record = records.find(entry => entry.requestId === requestId);
+    if (!record) return false;
+    if (record.childId !== null) this.stopThere(record.coreId, rootId, record.childId, false);
+    else if (!record.stopping) {
+      record.stopping = true;
+      this.save(rootId, records);
+    }
+    return true;
   }
 
   /** Every child of this parent on another machine; how many were at work. */
@@ -490,10 +439,12 @@ export class RemoteDelegation {
     this.save(rootId, records);
   }
 
-  /** A record now names its child; one retired before that is retired there now. */
+  /** A record now names its child; one stopped or retired before that is stopped or retired there now. */
   private named(rootId: string, record: RemoteChild, childId: string): RemoteChild {
-    if (record.childId === null && record.retired) this.stopThere(record.coreId, rootId, childId, true);
-    return { ...record, childId };
+    if (record.childId !== null) return { ...record, childId };
+    if (record.retired || record.stopping) this.stopThere(record.coreId, rootId, childId, record.retired === true);
+    const { stopping: _asked, ...named } = record;
+    return { ...named, childId };
   }
 
   private stopThere(coreId: string, parentId: string, childId: string, retire: boolean): void {
@@ -627,7 +578,16 @@ export class RemoteDelegation {
   private snapshot(childId: string): ChildState {
     const state = this.host.snapshot(childId);
     const project = state.thread.projectId ? this.core.journal.getProject(state.thread.projectId)?.name : undefined;
-    return { ...state, ...(project === undefined ? {} : { project }) };
+    const turn = state.lastTurn;
+    const restarting = turn?.status === 'stopped' && restartContinues(this.core, childId, turn.id);
+    return { ...state, ...(project === undefined ? {} : { project }), ...(restarting ? { restarting: true as const } : {}) };
+  }
+
+  /** Each child here tells its parent where it stands: at boot, and once a restart's continuations went on. */
+  restate(): void {
+    for (const childId of this.parents.keys()) {
+      try { this.state(childId); } catch (error) { this.core.log('warn', `remote subagent ${childId}: ${messageOf(error)}`); }
+    }
   }
 
   /**
@@ -855,40 +815,4 @@ export class RemoteDelegation {
     }
     return { stopped };
   }
-}
-
-/** A `delegation.start` request checked field by field. */
-function checkStart(value: unknown): Start {
-  const raw = (value ?? {}) as Record<string, unknown>;
-  const parent = (raw.parent ?? {}) as Record<string, unknown>;
-  const route = (raw.route ?? {}) as Record<string, unknown>;
-  const optional = (field: unknown, name: string, max: number): string | null => (field === null || field === undefined ? null : text(field, `delegation.start.route.${name}`, max));
-  if (typeof raw.worktree !== 'boolean') throw invalidParams('delegation.start.worktree: expected true or false');
-  if (typeof raw.permissionMode !== 'string' || !(PERMISSION_MODES as readonly string[]).includes(raw.permissionMode)) throw invalidParams(`delegation.start.permissionMode: expected ${PERMISSION_MODES.join(', ')}`);
-  if (route.strict !== undefined && route.strict !== true) throw invalidParams('delegation.start.route.strict: expected true or absent');
-  const context = raw.context;
-  if (context !== undefined && (context === null || (typeof context !== 'string' && typeof context !== 'object') || Array.isArray(context))) throw invalidParams('delegation.start.context: expected a preset or a context request');
-  return {
-    parent: {
-      threadId: text(parent.threadId, 'delegation.start.parent.threadId', 128),
-      title: text(parent.title, 'delegation.start.parent.title', 200),
-      projectId: typeof parent.projectId === 'string' ? parent.projectId.slice(0, 128) : '',
-      project: typeof parent.project === 'string' ? parent.project.slice(0, 200) : '',
-    },
-    requestId: text(raw.requestId, 'delegation.start.requestId', 128),
-    fingerprint: text(raw.fingerprint, 'delegation.start.fingerprint', 128),
-    task: text(raw.task, 'delegation.start.task', 12_000),
-    title: text(raw.title, 'delegation.start.title', 120),
-    worktree: raw.worktree,
-    ...(raw.project === undefined ? {} : { project: text(raw.project, 'delegation.start.project', 4096) }),
-    ...(context === undefined ? {} : { context: context as ContextRequest | ContextPreset }),
-    route: {
-      providerId: text(route.providerId, 'delegation.start.route.providerId', 128),
-      model: optional(route.model, 'model', 256),
-      effort: optional(route.effort, 'effort', 64),
-      speed: optional(route.speed, 'speed', 64),
-      ...(route.strict === true ? { strict: true as const } : {}),
-    },
-    permissionMode: raw.permissionMode as PermissionMode,
-  };
 }

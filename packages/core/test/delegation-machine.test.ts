@@ -370,6 +370,8 @@ test('a turn the parent there started with delegate send is cut by a restart han
   await pc.core.threads.handoff.begin(0);
   // Before, nothing kept it: the handoff skips sub-work, and delegation only kept local children.
   expect(pc.core.journal.getSetting('delegation-restart-cut')).toEqual([{ childId: child.thread.id, turnId: cut.id }]);
+  await pc.core.delegation.remote.flush(desk.core.coordination.card().coreId);
+  expect(desk.core.delegation.remote.child(threadId, child.thread.id)?.state).toMatchObject({ lastTurn: { id: cut.id, status: 'stopped' }, restarting: true });
   expect(pc.core.delegation.resumeAfterRestart()).toBe(1);
   await waitFor(() => pc.core.journal.listTurns(child.thread.id)[2]?.status === 'done');
   const resumed = pc.core.journal.listTurns(child.thread.id)[2]!;
@@ -392,4 +394,52 @@ test('a member that turns groupThreads off while a start is on its way creates n
   // Before, the setting was read once on arrival and a child started anyway.
   expect(await thrown(starting)).toThrow('groupThreads is off on this machine');
   expect(childrenOnPc()).toHaveLength(0);
+});
+
+test('a stop asked by request id before that machine named the child stops it once a report names it', async () => {
+  const { held } = answering();
+  const { desk, pc, threadId, pcId, deskId, machine, cli, childrenOnPc } = await setup();
+  const request = desk.core.coordination.request.bind(desk.core.coordination);
+  desk.core.coordination.request = (async (peer, operation, payload) => {
+    const answer = await request(peer, operation, payload);
+    if (operation === 'delegation.start') throw new Error('lost start reply');
+    return answer;
+  }) as typeof desk.core.coordination.request;
+  let away = true;
+  const report = pc.core.coordination.request.bind(pc.core.coordination);
+  pc.core.coordination.request = ((peer, operation, payload) => (operation === 'delegation.report' && away
+    ? Promise.reject(new Error('offline')) : report(peer, operation, payload))) as typeof pc.core.coordination.request;
+  expect((await cli(['delegate', 'spawn', 'Read HOLD-ON', '--machine', machine, '--project', 'notes', '--request-id', 'stop-unnamed'])).err).toContain('lost start reply');
+  const child = childrenOnPc()[0]!;
+  await waitFor(() => held.has(child.id));
+  expect(desk.core.delegation.remote.stopRequest(threadId, 'stop-unnamed')).toBe(true);
+  expect(desk.core.delegation.remote.stopRequest(threadId, 'never-asked')).toBe(false);
+  away = false;
+  await pc.core.delegation.remote.flush(deskId);
+  await desk.core.delegation.remote.flush(pcId);
+  expect(held.has(child.id)).toBe(false);
+  expect(pc.core.threads.require(child.id).archived).toBe(false);
+  expect(desk.core.delegation.remote.child(threadId, child.id)?.stopping).toBeUndefined();
+});
+
+test('a restart of the child\'s machine keeps the child at work for its parent until that stop is final', async () => {
+  const { held } = answering();
+  const { desk, pc, owner, threadId, deskId, spawn } = await setup();
+  const child = await spawn('Read HOLD-ON', '--project', 'notes', '--request-id', 'restart-first');
+  await waitFor(() => held.has(child.thread.id));
+  await pc.core.threads.handoff.begin(0);
+  await pc.core.delegation.remote.flush(deskId);
+  const seen = () => desk.core.delegation.remote.child(threadId, child.thread.id)!;
+  expect(seen().state?.lastTurn?.status).toBe('stopped');
+  // Before, the parent read that cut as the child's final stop, with a result to collect.
+  expect(seen().state?.restarting).toBe(true);
+  expect(desk.core.delegation.remote.busy(threadId)).toBe(true);
+  expect((await owner.call('delegation.get', { threadId })).agents[0]!.resultRef).toBeUndefined();
+  // That machine's next core does not continue it after all: the stop it reports again is final.
+  pc.core.threads.handoff.forget(child.thread.id);
+  pc.core.delegation.remote.restate();
+  await pc.core.delegation.remote.flush(deskId);
+  expect(seen().state?.restarting).toBeUndefined();
+  expect(desk.core.delegation.remote.busy(threadId)).toBe(false);
+  expect((await owner.call('delegation.get', { threadId })).agents[0]!.resultRef?.turnId).toBe(seen().state!.lastTurn!.id);
 });
