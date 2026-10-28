@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'bun:test';
 import { lockDataDir, takeLock } from '../src/data-lock.ts';
+import { lockFile } from '../src/platform/index.ts';
 import { removeDir } from './harness.ts';
 
 /*
@@ -107,4 +108,17 @@ test('a core older than this lock that replaces the file before the record is wr
     },
   })).toThrow(`busy ${process.ppid}`);
   expect(readFileSync(file, 'utf8')).toBe(older);
+});
+
+test('a record that cannot be written lets go of the lock it was written through', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'boite-lock-race-'));
+  dirs.push(dir);
+  const file = join(dir, 'core.lock');
+  const full = (path: string) => {
+    const lock = lockFile(path);
+    return lock && { ...lock, write() { throw new Error('ENOSPC: no space left on device'); } };
+  };
+  expect(() => takeLock(file, holder => `busy ${holder}`, {}, full)).toThrow('ENOSPC');
+  // Still held, the lock would keep this process out of its own directory until it exits.
+  takeLock(file, holder => `busy ${holder}`)();
 });

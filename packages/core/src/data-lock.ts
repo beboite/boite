@@ -115,7 +115,13 @@ export function takeLock(file: string, busy: (holder: number | null) => string, 
     const key = startKey(process.pid);
     // Through the held handle, never by path: a core older than this lock may have replaced the file
     // since it was judged, and a write by path would land in that core's file.
-    lock.write(`${JSON.stringify({ pid: process.pid, startedAt: Date.now(), ...(key === null ? {} : { startKey: key }), osLock: true }, null, 2)}\n`);
+    try {
+      lock.write(`${JSON.stringify({ pid: process.pid, startedAt: Date.now(), ...(key === null ? {} : { startKey: key }), osLock: true }, null, 2)}\n`);
+    } catch (error) {
+      // A full disk, say: still held, the lock would keep this process out of its own directory.
+      lock.release();
+      throw error;
+    }
     // Replaced meanwhile: the next attempt locks that core's file and reads its record.
     if (!lock.stillAt(file)) {
       lock.release();
