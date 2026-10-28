@@ -264,7 +264,7 @@ test('usage.history keeps the top threads of each ranking', async () => {
   expect(filtered.rows).toHaveLength(1);
   expect(filtered.rows[0]).toMatchObject({ providerId: 'muse', turns: 1 });
   expect(filtered.threads).toHaveLength(1);
-  expect(filtered.threads[0]).toMatchObject({ threadId: priced.id, providerId: 'muse', turns: 1, usage: { inputTokens: 4, outputTokens: 2 } });
+  expect(filtered.threads[0]).toMatchObject({ threadId: priced.id, providerId: 'muse', turns: 1, usage: { inputTokens: 4, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, costUsdEquivalent: null } });
 });
 
 test('usage.history rejects edges that are not ascending timestamps', async () => {
