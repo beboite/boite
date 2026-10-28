@@ -4,6 +4,7 @@ import type { MessagePart } from '@boite/contracts';
 import { nativeAgentPartSql } from './native-agent-parts.ts';
 import { addPartBlobCodecs, createPartBlobs } from './part-blobs.ts';
 import { createCommandLines } from './processes.ts';
+import { createPendingQuestions } from './questions.ts';
 import { parseJson } from './rows.ts';
 import { createSharedProjects } from '../contacts/project-journal.ts';
 import { createSharedBoard } from '../contacts/board-journal.ts';
@@ -11,7 +12,7 @@ import { createSharedCompute } from '../contacts/compute-journal.ts';
 import { createSharedAccess } from '../contacts/access-journal.ts';
 import { createSharedReview } from '../contacts/review-journal.ts';
 
-export const SCHEMA_VERSION = 44;
+export const SCHEMA_VERSION = 45;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -467,6 +468,10 @@ export function migrate(db: Database, file: string): { from: number; to: number 
         status TEXT NOT NULL, thread_id TEXT, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL
       ) WITHOUT ROWID;`);
     version = 44;
+  }
+  if (version < 45) {
+    createPendingQuestions(db);
+    version = 45;
   }
   createSharedProjects(db);
   createSharedBoard(db);

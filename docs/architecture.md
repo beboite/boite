@@ -127,7 +127,11 @@ out again once the newest events are deleted, so every deletion of events
 brings that cursor back to the last id in the same transaction. `message.started` keeps only the first
 1,024 characters of each string. The types that are read back (`question.asked`,
 `question.answered`, `thread.memory`) keep their whole payload and have partial
-indexes, so startup and a thread open no longer scan the events table.
+indexes, so a thread open no longer scans the events table. An asynchronous
+question nobody answered lives in `pending_questions` (`journal/questions.ts`),
+written in the transaction of the event that asks or closes it, so its card
+comes back at startup after its events are pruned (schema 45 fills it once from
+the events still kept).
 
 The blur a deferred picture is drawn with before its bytes arrive is a
 `media_previews` row, keyed by message and part, and the light WebP copy the
