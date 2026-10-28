@@ -49,8 +49,12 @@ export interface Report {
   letter?: { origin: 'result' | 'question' | 'agent'; requestId: string; text: string; checkpoint?: true };
 }
 
-/** One entry of the caller's outbox to the member. Each stop asked has its own `id`: the member applies it once, however often it is sent. */
-export interface Stop { key: string; id: string; parentId: string; childId: string; retire?: true }
+/**
+ * One entry of the caller's outbox to the member. Each stop asked is numbered
+ * in the order the caller asked it: the member applies it once, and never
+ * after one it applied later, however often or late it arrives.
+ */
+export interface Stop { key: string; seq: number; parentId: string; childId: string; retire?: true }
 
 /** The caller's record of a child on another machine. `childId` is null until that machine answered or reported. */
 export interface RemoteChild {
@@ -73,8 +77,8 @@ export interface RemoteChild {
   workflow?: true;
 }
 
-/** The member's link from a child here to its parent on another machine. `stop`: the id of the last stop applied to it. */
-export interface ParentLink { coreId: string; machine: string; parentId: string; title: string; projectId: string; project: string; requestId: string; fingerprint: string; at: number; stop?: string }
+/** The member's link from a child here to its parent on another machine. `stop`: the number of the last stop applied to it. */
+export interface ParentLink { coreId: string; machine: string; parentId: string; title: string; projectId: string; project: string; requestId: string; fingerprint: string; at: number; stop?: number }
 
 export const readableState = (value: unknown): value is ChildState => {
   const state = value as ChildState | null;

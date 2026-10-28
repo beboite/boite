@@ -13,6 +13,16 @@ export function recordRestartCut(core: Core, turn: Turn): void {
   core.journal.setSetting(RESTART_CUT, [...cut.filter(entry => entry.childId !== turn.threadId), { childId: turn.threadId, turnId: turn.id }]);
 }
 
+/** A child stopped for good: no restart continues its cut turn, from this core's handoff, the previous one's or a cut kept here. */
+export function endRestart(core: Core, childId: string): void {
+  core.threads.handoff.forget(childId);
+  const cut = (core.journal.getSetting(RESTART_CUT) as RestartCut[] | undefined) ?? [];
+  const rest = cut.filter(entry => entry.childId !== childId);
+  if (rest.length === cut.length) return;
+  if (rest.length) core.journal.setSetting(RESTART_CUT, rest);
+  else core.journal.deleteSetting(RESTART_CUT);
+}
+
 /** Whether a restart continues this cut turn: this core hands it on, or the next one has yet to continue it. */
 export function restartContinues(core: Core, childId: string, turnId: string): boolean {
   const handoff = core.threads.handoff;

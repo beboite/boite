@@ -17,7 +17,7 @@ import { ChildWorktrees } from './delegation/worktrees.ts';
 import { checkConfig, createChild, readConfig, type ChildRequest } from './delegation/children.ts';
 import { Retirements } from './delegation/retirement.ts';
 import { pauseHold, pauseOver } from './delegation/pauses.ts';
-import { dropRestartCuts, recordRestartCut, resumeRestartCuts } from './delegation/restart.ts';
+import { dropRestartCuts, endRestart, recordRestartCut, resumeRestartCuts } from './delegation/restart.ts';
 import { delegationPrompt, teamInstructions } from './delegation/guide.ts';
 import { RemoteDelegation, type ChildState } from './delegation/remote.ts';
 import type { Connection } from './router.ts';
@@ -753,8 +753,9 @@ export class Delegation {
     this.changed(root.id);
     return stopped;
   }
-  /** Stops one child: final until an explicit new instruction. True when it was at work. */
+  /** Stops one child: final until an explicit new instruction, so no restart continues it, and a parent elsewhere hears so. True when it was at work. */
   private halt(id: string): boolean {
+    endRestart(this.core, id);
     // A child at rest on its own background work is at work too: stopping it ends that work.
     const waiting = withLoad(this.core, this.core.threads.require(id)).backgroundWait?.state === 'waiting';
     this.stopped.add(id);
@@ -768,6 +769,7 @@ export class Delegation {
     for (const letter of this.letters(id, 'uncertain')) {
       if (letter.error?.startsWith('Queued for provider turn ')) this.update(letter, 'rejected', 'Agent stopped before provider delivery');
     }
+    this.remote.state(id);
     return busy;
   }
   /**

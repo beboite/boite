@@ -280,9 +280,9 @@ or be away:
 | --- | --- | --- | --- |
 | `delegation.start` | parent's machine | parent and `--request-id` | starts the child, or answers the one it started for that key; other content under the same key is refused. `groupThreads` and the caller's membership are checked again right before the child is created |
 | `delegation.report` | child's machine | child, and a letter's request id | keeps the newest state; files a result, question or message once |
-| `delegation.letter` | parent's machine | parent and request id | files the steer once, answering an open question when it is one |
+| `delegation.letter` | parent's machine | parent and request id | applies the stop it carries first and waits for the turn that stop ended, then files the steer once, answering an open question when it is one |
 | `delegation.read` | parent's machine | none, read only | returns a page of the named turn's answer |
-| `delegation.stop` | parent's machine | the stop's own `id` | stops it once, and archives it when the parent was archived or deleted; the same `id` again changes nothing |
+| `delegation.stop` | parent's machine | the stop's number | stops it once, and archives it when the parent was archived or deleted; the same number again, or one older than the last applied, stops nothing |
 
 Reports and stops wait in an outbox in the sender's journal until the other
 machine took them, tried again after 5 s, 15 s, 1 min and then every 5 min,
@@ -291,17 +291,23 @@ waiting for the same child. A refusal drops the entry; a machine that left the
 group drops its outbox. A start whose answer was lost keeps its record on the
 parent's machine: the next report or the same `--request-id` finds the child.
 Archiving the parent before then keeps the retirement asked, and the report
-or answer that names the child sends it; a stop asked by request id before
-then (a workflow step stopped while its start was out) waits the same way.
-Each stop carries an id of its own, which the child's machine keeps once
-applied: a stop sent again because its answer was lost does not cut the
-instruction that followed it, and `delegate send` delivers a stop still
-waiting before its letter. A restart
+or answer that names the child sends it. Deleting it for good (with its
+project, or an incognito conversation) keeps only that retirement, until the
+report names the child. A stop asked by request id before then (a workflow
+step stopped while its start was out) waits the same way.
+The parent's machine numbers its stops in the order asked, and the child's
+machine keeps the number of the last one it applied: a stop sent again because
+its answer was lost, or arriving after a later one, does not cut the
+instruction that followed it. `delegate send` carries the stop still waiting
+for that child; the child's machine applies it before the letter and files the
+letter once the turn it stopped is over, so the stop ends the turn it meant
+and the instruction opens the next one. A restart
 handoff on the child's machine keeps a turn the parent's letter opened and
 continues it like the turns of a child here. Until that machine's next core
 continues a cut turn, its reports mark the child `restarting`, which the parent
-counts as at work rather than as a result; a turn that does not go on is
-reported again without the mark, and that stop is final.
+counts as at work rather than as a result. A stop of that machine's owner or
+of the parent ends the cut for good and is reported at once without the mark;
+so is a turn the next core does not continue.
 A machine whose Boite lacks these operations is reported too old before
 anything starts there.
 
