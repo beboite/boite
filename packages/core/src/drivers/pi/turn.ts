@@ -154,11 +154,15 @@ export class PiTurn {
       costUsdEquivalent: null,
     };
     const cost = usage.cost?.total;
+    const written = usage.cacheWrite ?? 0;
+    // Anthropic's split, which pi passes through: the part written for an hour.
+    const hour = (base.cacheWriteHourTokens ?? 0) + Math.min(Math.max(0, usage.cacheWrite1h ?? 0), written);
     this.usage = {
       inputTokens: base.inputTokens + (usage.input ?? 0),
       outputTokens: base.outputTokens + (usage.output ?? 0),
       cacheReadTokens: base.cacheReadTokens + (usage.cacheRead ?? 0),
-      cacheWriteTokens: base.cacheWriteTokens + (usage.cacheWrite ?? 0),
+      cacheWriteTokens: base.cacheWriteTokens + written,
+      ...(hour > 0 ? { cacheWriteHourTokens: hour } : {}),
       costUsdEquivalent:
         typeof cost === 'number' ? (base.costUsdEquivalent ?? 0) + cost : base.costUsdEquivalent,
     };

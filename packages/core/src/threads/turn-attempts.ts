@@ -309,7 +309,9 @@ export class TurnAttempts {
       resumed = true;
       because = 'after a permission mode change';
     }
-    result = { ...result, usage: sumAttempts(usage, result.usage), ...(totals ? { agentTotals: totals } : {}) };
+    // The drivers hand over canonical buckets: the turn records that it holds them.
+    const spent = sumAttempts(usage, result.usage);
+    result = { ...result, usage: spent === null ? null : { ...spent, buckets: 1 }, ...(totals ? { agentTotals: totals } : {}) };
     if (state.running.execution) state.running.execution = { ...state.running.execution, permissionMode: state.thread.permissionMode };
     return result;
   }

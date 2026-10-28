@@ -228,18 +228,35 @@ export class SessionControls {
       }
     }
 
+    const set = (withEffort: string | null) => agent.request('session/set_model', {
+      sessionId,
+      modelId,
+      ...(withEffort === null ? {} : { _meta: { reasoningEffort: withEffort } }),
+    });
+    // The session already runs this model: only the effort is new.
+    const running = this.appliedModel === undefined ? listed?.currentModelId === modelId : this.appliedModel === modelId;
+    let refusal: unknown;
     try {
-      await agent.request('session/set_model', {
-        sessionId,
-        modelId,
-        ...(effort === null ? {} : { _meta: { reasoningEffort: effort } }),
-      });
+      await set(effort);
       this.appliedModel = modelId;
       this.appliedEffort = effort;
+      return;
     } catch (error) {
-      if (wanted !== null) throw new ModelRefused(`thread.model: ${ctx.provider.name} refused the model ${wanted}: ${messageOf(error)}`);
-      ctx.log('warn', `acp: the agent refused the effort ${effort} on ${modelId}: ${messageOf(error)}`);
+      refusal = error;
     }
+    if (wanted !== null && !running && effort !== null) {
+      // The pair was refused: the model alone tells which half the agent rejects.
+      try {
+        await set(null);
+        this.appliedModel = modelId;
+        this.appliedEffort = null;
+      } catch (error) {
+        throw new ModelRefused(`thread.model: ${ctx.provider.name} refused the model ${wanted}: ${messageOf(error)}`);
+      }
+    } else if (wanted !== null && !running) {
+      throw new ModelRefused(`thread.model: ${ctx.provider.name} refused the model ${wanted}: ${messageOf(refusal)}`);
+    }
+    ctx.log('warn', `acp: the agent refused the effort ${effort} on ${modelId}: ${messageOf(refusal)}`);
   }
 
   /** What a `session/new` or `session/load` answered about modes, if anything. */

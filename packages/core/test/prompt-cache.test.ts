@@ -4,6 +4,9 @@ import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { cacheLifeOf, mapUsage as claudeUsage } from '../src/drivers/claude/mapping.ts';
 import { acpCacheLife } from '../src/drivers/acp/turn.ts';
 import { piCacheLife } from '../src/drivers/pi/mapping.ts';
+import { PiTurn } from '../src/drivers/pi/turn.ts';
+import type { TurnContext } from '../src/drivers/types.ts';
+import { priceOf, priceUsage } from '../src/pricing/index.ts';
 import { openAiCacheLife, promptCacheOf } from '../src/prompt-cache.ts';
 
 describe('openAiCacheLife', () => {
@@ -132,5 +135,26 @@ describe('promptCacheOf', () => {
       .toEqual({ ...previous, at: 5000, readTokens: 900 });
     expect(promptCacheOf({ status: 'done', sessionId: 's', usage: usage(900), promptCache: null }, { ...thread, model: 'claude-sonnet-5' }, 5000, previous)).toBeNull();
     expect(promptCacheOf({ status: 'done', sessionId: 's', usage: usage(0), promptCache: null }, thread, 5000, previous)).toBeNull();
+  });
+});
+
+describe('the hour writes a pi turn records', () => {
+  const turnOf = (...reports: { cacheWrite?: number; cacheWrite1h?: number }[]): Usage => {
+    const turn = new PiTurn({ sessionId: null } as unknown as TurnContext);
+    for (const report of reports) turn.addUsage(report);
+    return turn.usage!;
+  };
+
+  test('each message adds its one-hour writes, bounded by its writes, and the turn is priced by them', () => {
+    const hour = turnOf({ cacheWrite: 1_000_000, cacheWrite1h: 1_000_000 });
+    expect(hour).toMatchObject({ cacheWriteTokens: 1_000_000, cacheWriteHourTokens: 1_000_000 });
+    expect(priceUsage('claude-opus-5-5', hour)?.cost).toBeCloseTo(priceOf('claude-opus-5-5', true)!.rates.cacheWrite, 10);
+    // A five-minute message, an hour one and one that claims more than it wrote.
+    const mixed = turnOf({ cacheWrite: 300, cacheWrite1h: 0 }, { cacheWrite: 200, cacheWrite1h: 200 }, { cacheWrite: 50, cacheWrite1h: 80 });
+    expect(mixed).toMatchObject({ cacheWriteTokens: 550, cacheWriteHourTokens: 250 });
+  });
+
+  test('a pi that sends no split records no hour writes', () => {
+    expect(turnOf({ cacheWrite: 400 })).not.toHaveProperty('cacheWriteHourTokens');
   });
 });

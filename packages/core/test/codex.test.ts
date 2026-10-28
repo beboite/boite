@@ -1192,6 +1192,7 @@ describe('codex driver', () => {
       outputTokens: 10,
       cacheReadTokens: 17,
       cacheWriteTokens: 1,
+      buckets: 1,
       costUsdEquivalent: null,
     });
     // The usage page reads the turn as it was stored.

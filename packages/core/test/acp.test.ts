@@ -466,6 +466,7 @@ describe('acp driver', () => {
       outputTokens: 4,
       cacheReadTokens: 2,
       cacheWriteTokens: 0,
+      buckets: 1,
       costUsdEquivalent: 0.0042,
     });
     // `used` and `size` of the same update are the context meter.

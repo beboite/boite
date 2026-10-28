@@ -37,7 +37,10 @@ without that value, fails the turn before its prompt with a `thread.model:`
 error; the prompt never runs on the model the session was already on. The next
 turn asks again, so a model the agent takes later runs. The agent's own model
 needs no call, and an agent with no model option at all keeps its own. A
-refused effort stays one warning in the log.
+refused effort stays one warning in the log. Grok takes the model and the effort
+in one `session/set_model`: when it refuses the pair for a model the session
+does not run yet, the core asks for the model alone, so only a refused model
+fails the turn.
 
 Claude cannot be trusted to switch fast mode on in a running process. The
 setter is accepted and `getSettings` reports `fastMode: true`, yet on a Max

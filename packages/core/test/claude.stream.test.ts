@@ -198,6 +198,7 @@ describe('claude driver', () => {
       cacheWriteTokens: 7,
       // No split in the result: Claude Code writes for an hour.
       cacheWriteHourTokens: 7,
+      buckets: 1,
       costUsdEquivalent: 0.0125,
     });
 

@@ -1,4 +1,4 @@
-import type { ProviderId, ThreadId, Usage, UsageHistory, UsageHistoryThread, UsagePrice } from '@boite/contracts';
+import type { ProviderId, ThreadId, Usage, UsageHistory, UsageHistoryRow, UsageHistoryThread, UsagePrice } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams } from './errors.ts';
 import type { UsageSums } from './journal/usage-sums.ts';
@@ -91,7 +91,7 @@ interface Priced {
  * agent's own sum: Claude's is a running total the driver has to take apart,
  * Codex and Grok report none, and a rate prices every provider the same way.
  * Only what each turn stored decides it, never the provider's descriptor, so
- * editing or removing a provider leaves its history as it was.
+ * editing or removing a provider leaves the turns recorded since as they were.
  */
 function priced(sums: UsageSums, model: string | null): Priced {
   const usage = sumsToUsage(sums);
@@ -100,25 +100,58 @@ function priced(sums: UsageSums, model: string | null): Priced {
   return { usage: { ...usage, costUsdEquivalent: quote.cost }, priced: sums.reported, price: quote.price };
 }
 
+/**
+ * Turns an older core recorded, read as their provider counted: Codex's input
+ * held both caches and Claude Code wrote for an hour. Nothing in such a turn
+ * says which protocol produced it, so this asks the provider's descriptor as
+ * it is now, without rewriting the turn, and the row counts them as estimated.
+ */
+function estimate(sums: UsageSums, protocol: string | null): UsageSums {
+  if (protocol === 'codex-appserver') return { ...sums, input_tokens: Math.max(0, sums.input_tokens - sums.cache_read_tokens - sums.cache_write_tokens) };
+  if (protocol === 'claude-sdk') return { ...sums, cache_write_hour_tokens: sums.cache_write_tokens };
+  return sums;
+}
+
 export function usageHistory(core: Core, edges: number[], providerId?: ProviderId): UsageHistory {
-  const rows = core.journal.usageByBucket(edges).filter((row) => providerId === undefined || row.provider_id === providerId).map((row) => {
-    const cost = priced(row, row.model);
-    return {
-      bucket: row.bucket,
-      providerId: row.provider_id,
-      model: row.model,
-      turns: row.turns,
-      reported: row.reported,
-      priced: cost.priced,
-      usage: cost.usage,
-      price: cost.price,
-    };
-  });
+  // A provider removed since keeps its protocol through its shipped id.
+  const protocolOf = (id: ProviderId): string | null => core.providers.get(id)?.protocol ?? (id === 'claude' ? 'claude-sdk' : id === 'codex' ? 'codex-appserver' : null);
+  const read = (row: UsageSums & { provider_id: ProviderId; model: string | null }): Priced =>
+    priced(row.legacy ? estimate(row, protocolOf(row.provider_id)) : row, row.model);
+
+  // The turns an older core recorded come as their own group; a row joins both.
+  const rows = new Map<string, UsageHistoryRow>();
+  for (const row of core.journal.usageByBucket(edges)) {
+    if (providerId !== undefined && row.provider_id !== providerId) continue;
+    const cost = read(row);
+    const estimated = row.legacy ? row.reported : 0;
+    const key = JSON.stringify([row.bucket, row.provider_id, row.model]);
+    const entry = rows.get(key);
+    if (entry === undefined) {
+      rows.set(key, {
+        bucket: row.bucket,
+        providerId: row.provider_id,
+        model: row.model,
+        turns: row.turns,
+        reported: row.reported,
+        priced: cost.priced,
+        ...(estimated > 0 ? { estimated } : {}),
+        usage: cost.usage,
+        price: cost.price,
+      });
+      continue;
+    }
+    entry.turns += row.turns;
+    entry.reported += row.reported;
+    entry.priced += cost.priced;
+    if (estimated > 0) entry.estimated = (entry.estimated ?? 0) + estimated;
+    add(entry.usage, cost.usage);
+    entry.price ??= cost.price;
+  }
 
   const byThread = new Map<ThreadId, UsageHistoryThread>();
   for (const row of core.journal.usageByThread(edges[0]!, edges[edges.length - 1]!)) {
     if (providerId !== undefined && row.provider_id !== providerId) continue;
-    const { usage } = priced(row, row.model);
+    const { usage } = read(row);
     const entry = byThread.get(row.thread_id);
     if (entry !== undefined) {
       entry.turns += row.turns;
@@ -147,7 +180,7 @@ export function usageHistory(core: Core, edges: number[], providerId?: ProviderI
     const ranked = all.filter((thread) => measure(thread) > 0).sort((a, b) => measure(b) - measure(a));
     for (const thread of ranked.slice(0, TOP_THREADS)) kept.add(thread);
   }
-  return { edges, rows, threads: [...kept] };
+  return { edges, rows: [...rows.values()], threads: [...kept] };
 }
 
 export function registerUsageMethods(core: Core): void {

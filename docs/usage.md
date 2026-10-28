@@ -333,16 +333,21 @@ app-server counts both cache counts inside its input, and
 already report them apart, and Muse's counts are stored as it sends them. `cacheWriteHourTokens` says how many of the
 writes went to a one-hour cache: the Claude driver reads it from the result's
 `cache_creation` split and counts every write as an hour write when the split
-is missing, since Claude Code writes for an hour.
+is missing, since Claude Code writes for an hour. Pi passes Anthropic's
+`cacheWrite1h` through and records it the same way. The core stamps
+`buckets: 1` on each turn's usage as it takes it from the driver.
 
 Every reader, `usage.get`, `usage.history`, delegation and workflow totals,
 sums the stored buckets as they are. None asks the provider's descriptor, so
-editing or removing a provider leaves its history unchanged. Schema 45
-(`journal/usage-buckets.ts`) rewrote the turns an older core stored once: Codex
-input loses its cache counts and Claude Code writes become hour writes, each
-provider id resolved by the registry at the upgrade with the shipped `codex`
-and `claude` ids as the fallback. A custom provider removed before the upgrade
-keeps the counts it had.
+editing or removing a provider leaves the history of these turns unchanged.
+
+A turn an older core recorded has no `buckets` and is never rewritten, since
+nothing in it says which protocol counted it. `usage.history` reads it as its
+provider's current descriptor says, with the shipped `codex` and `claude` ids
+as the fallback: Codex input loses its cache counts and Claude Code writes
+become hour writes. A row's `estimated` counts such turns, because editing or
+removing the provider changes how they read. `usage.get` and the thread totals
+sum them as stored.
 
 ### The API estimate
 
@@ -367,7 +372,8 @@ matches a model and computes the cost.
   rate, where the list gives the five-minute rate, so a turn's
   `cacheWriteHourTokens` cost twice the input rate and its other writes the
   listed rate. A row's `price` shows the write rate most of its writes paid.
-  OpenCode and pi record no hour writes and keep the listed rate.
+  Pi records the hour writes Anthropic reports to it; OpenCode records none
+  and keeps the listed rate.
 - A rate the list leaves out is the input rate, which is what a provider
   without a cache discount bills.
 - Rates are the base tier. A request past a long-context threshold (Claude
@@ -520,10 +526,8 @@ added on top, and the uninstalled mode (`?fake=1&uninstalled=1`) starts empty.
   public rates over an inflated reported cost, the hour cache write of a
   removed provider and of a mixed turn, the
   reported fallback, legacy turns, the top threads union, provider filtering,
-  refused parameters and one real echo turn.
-- `packages/core/test/journal-usage-buckets.test.ts`: the schema 45 rewrite of
-  older turns, once per journal and once per provider id, with and without a
-  registry.
+  refused parameters and one real echo turn. Turns an older core recorded are
+  read through the provider's current protocol and counted as estimated.
 - `packages/core/test/pricing.test.ts`: model id matching, the cache write
   rates, missing rates and the price list's coverage.
 - `packages/core/test/claude.session.test.ts`: the warm running total, a

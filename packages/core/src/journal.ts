@@ -18,10 +18,9 @@ import { TRAIL_ONLY, UNWRITTEN, pruneOldEvents, pruneTrail, rewindTrailCursor, t
 import { analyze, staleStatistics } from './journal/statistics.ts';
 import { hydrate, hydratePart } from './journal/part-blobs.ts';
 import { migrate } from './journal/schema.ts';
-import type { JournalOptions } from './journal/options.ts';
 import { PROCESS_COLUMNS, PROCESS_FROM, ProcessRows } from './journal/processes.ts';
 import { runWrite } from './journal/statements.ts';
-import { WAL_LIMIT_BYTES, WalCheckpoints } from './journal/wal-checkpoints.ts';
+import { WAL_LIMIT_BYTES, WalCheckpoints, type WalCheckpointOptions } from './journal/wal-checkpoints.ts';
 import { toAccount, toMessage, toProcess, toProject, toThread, toTurn, parseJson } from './journal/rows.ts';
 import { threadsWhere, VISIBLE_THREADS, writeThread } from './journal/thread-rows.ts';
 import { oneTurn, sumSessionUsage, writeTurn } from './journal/turn-rows.ts';
@@ -33,6 +32,13 @@ import { usageByBucket, usageByThread, type UsageSumRow, type UsageThreadRow } f
 import { sent, type Projection } from './journal/sent.ts';
 import { threadSessions, type NativeSession } from './threads/native-sessions.ts';
 import { deleteComposerInput } from './journal/composer-assets.ts';
+
+export interface JournalOptions {
+  /** Where a write that fails on a timer, with no caller to throw to, is reported. */
+  onError?: (message: string) => void;
+  /** Overrides the WAL checkpoint thresholds, for tests (`journal/wal-checkpoints.ts`). */
+  checkpoints?: WalCheckpointOptions;
+}
 
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
 export interface MessagePage {
@@ -95,7 +101,7 @@ export class Journal {
       this.db.exec('PRAGMA busy_timeout = 5000');
       // The WAL file shrinks back to this at a restart, so it grows past it only once that much was written since.
       this.db.exec(`PRAGMA journal_size_limit = ${WAL_LIMIT_BYTES}`);
-      this.schema = this.db.transaction(() => migrate(this.db, file, options.usageProtocol))();
+      this.schema = this.db.transaction(() => migrate(this.db, file))();
       foldStreamingParts(this.db); // What a stream left beside its row when the last core stopped without closing.
       // An incognito conversation never outlives the core that held it.
       this.purgeIncognitoThreads();

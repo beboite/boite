@@ -340,18 +340,13 @@ export class Core {
     this.logs = new DiagnosticLogs(this.dataDir, [this.token]);
     this.logs.attach(this.bus);
     this.bus.onError = (message) => this.log('error', message);
-    // Before the journal: the upgrade that freezes stored usage asks it each provider's protocol.
-    this.providers = new ProviderRegistry(this.dataDir);
     let phaseAt = performance.now();
     const phase = (event: string, message: string, data?: Record<string, string | number | boolean | null>): void => {
       const now = performance.now();
       this.logs.info(`${message} in ${Math.round(now - phaseAt)} ms`, { source: 'startup', event, durationMs: now - phaseAt, ...(data ? { data } : {}) });
       phaseAt = now;
     };
-    this.journal = new Journal(join(this.dataDir, 'journal.db'), {
-      onError: (message) => this.log('error', message),
-      usageProtocol: (id) => this.providers.get(id)?.protocol ?? null,
-    });
+    this.journal = new Journal(join(this.dataDir, 'journal.db'), { onError: (message) => this.log('error', message) });
     const schema = this.journal.schema;
     phase('startup.journal-opened', schema.from === schema.to ? `Journal opened at schema ${schema.to}` : `Journal opened and migrated from schema ${schema.from} to ${schema.to}`,
       { schemaFrom: schema.from, schemaTo: schema.to, dataDir: options.dataDirKind ?? 'custom', channel: this.channel });
@@ -368,6 +363,7 @@ export class Core {
       (preferences, before) => this.threads.cards.settleClient(preferences, before),
       (experiments) => this.bus.emit('client.desktopExperiments', { experiments }),
     );
+    this.providers = new ProviderRegistry(this.dataDir);
     this.providers.loadSwitches(this.journal.getSetting(PROVIDER_SWITCHES));
     this.accounts = new AccountStore(this);
     this.projects = new ProjectStore(this);

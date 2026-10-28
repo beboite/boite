@@ -358,7 +358,8 @@ function finishTurn(ctx: FakeContext, thread: Thread, turn: Turn, message: Messa
     outputTokens: Math.max(1, Math.ceil(modelPrompt.length / 4)),
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
-    costUsdEquivalent: Math.round(modelPrompt.length * 0.02) / 1000
+    costUsdEquivalent: Math.round(modelPrompt.length * 0.02) / 1000,
+    buckets: 1
   };
   turn.status = record.cancelled ? 'stopped' : 'done';
   turn.finishedAt = ctx.now();
