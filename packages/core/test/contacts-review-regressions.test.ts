@@ -122,6 +122,36 @@ test.each([
   } finally {deliver.mockRestore();b.h.core.providers.require('echo').protocol='echo';done.resolve({status:'stopped',sessionId:null,usage:null});restore();}
 },30000);
 
+test.each(['steer','hook'] as const)('SEC-01 %s delivery leaves contact mail it cannot protect in the inbox and still delivers the local letter beside it',async delivery=>{
+  const {a,b}=await pair();
+  const done=Promise.withResolvers<import('../src/drivers/types.ts').TurnResult>();
+  const steered:string[]=[];
+  // A hook-only turn cannot be steered, so the hook is the only way in.
+  const restore=setDriver('echo',{...getDriver('echo'),startTurn:()=>({done:done.promise,stop:()=>done.resolve({status:'stopped',sessionId:null,usage:null}),...delivery==='steer'?{steer:async(text:string)=>{steered.push(text);return true;}}:{}})});
+  const deliver=spyOn(b.h.core.coordination as unknown as {deliver(threadId:string):Promise<void>},'deliver').mockResolvedValue(undefined);
+  try {
+    const local=b.h.core.threads.create({projectId:b.p.id,providerId:'echo',accountId:b.t.accountId});
+    b.h.core.threads.startTurn(b.t.id,'Owner work');
+    await waitFor(()=>b.h.core.threads.require(b.t.id).status==='running');
+    const contact=await a.c.call('contacts.sendHuman',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'External correspondence',requestId:`mixed-${delivery}`});
+    await waitFor(()=>b.h.core.coordination.get(b.t.id).messages.some(l=>l.id===contact.id));
+    const peer=await b.h.core.coordination.send({threadId:local.id,to:{coreId:b.id,threadId:b.t.id},text:'Local status',requestId:`local-${delivery}`});
+    // A running native turn with no protection: the contact letter must wait for its end.
+    b.h.core.providers.require('echo').protocol='pi';
+    deliver.mockRestore();
+    const coordination=b.h.core.coordination as unknown as {deliver(threadId:string):Promise<void>};
+    const status=(id:string)=>b.h.core.coordination.get(b.t.id).messages.find(l=>l.id===id)?.status;
+    // A delivery kicked as the spy came off may be the one that steers; either way the local letter goes.
+    if(delivery==='steer'){await coordination.deliver(b.t.id);await waitFor(()=>status(peer.id)==='delivered');}
+    const prompt=delivery==='hook'?b.h.core.coordination.take(b.t.id,b.h.core.journal.lastTurn(b.t.id)!.id):steered.join('\n');
+    expect(prompt).toContain('Local status');
+    expect(prompt).not.toContain('External correspondence');
+    expect(status(peer.id)).toBe('delivered');
+    expect(status(contact.id)).toBe('received');
+    expect(b.h.core.coordination.config(b.t.id).paused).toBe(false);
+  } finally {deliver.mockRestore();b.h.core.providers.require('echo').protocol='echo';done.resolve({status:'stopped',sessionId:null,usage:null});restore();}
+},30000);
+
 test.each([false,true])('SEC-01 historical letters survive restart without losing protection (old history: %s)',async old=>{
   const {a,b}=await pair();const id=await association(a,b);
   const letter=await a.c.call('collaboration.send',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'Ordinary project correspondence',requestId:'history'});
@@ -175,8 +205,12 @@ test.each(['claude-sdk','codex-appserver','acp','muse','pi'] as const)('SEC-01 u
     // A deterministic warm driver, no CLI, account login or paid inference.
     b.h.core.providers.require('echo').protocol=protocol;
     const letter=await a.c.call('contacts.sendHuman',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'External work',requestId:protocol});
-    await waitFor(()=>b.h.core.coordination.config(b.t.id).paused);
+    await waitFor(()=>b.h.core.coordination.get(b.t.id).messages.some(l=>l.id===letter.id));
+    // The refusal is synchronous: once this delivery returns, no steer can follow.
+    await (b.h.core.coordination as unknown as {deliver(threadId:string):Promise<void>}).deliver(b.t.id);
     expect(steers).toBe(0);
+    // It waits for the turn's end without pausing the thread, so ordinary letters still arrive.
+    expect(b.h.core.coordination.config(b.t.id).paused).toBe(false);
     expect(b.h.core.coordination.get(b.t.id).messages.find(l=>l.id===letter.id)?.status).toBe('received');
     expect(b.h.core.sharedAccess.bound(b.t.id)).toBeNull();
   } finally {b.h.core.providers.require('echo').protocol='echo';done.resolve({status:'stopped',sessionId:null,usage:null});restore();}

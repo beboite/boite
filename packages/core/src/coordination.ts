@@ -334,17 +334,11 @@ export class Coordination {
   }
   /** Received letters for this thread, from one sender or any, marked delivered. */
   private claim(threadId: string, from: AgentAddress | null): AgentLetter[] {
-    let letters = this.ready(threadId, Infinity, from);
-    const take = () => this.admit(threadId, letters, () => {
-      if (letters.length > 0) this.restoreProject(threadId);
-      for (const letter of letters) this.update(letter, 'delivered');
+    const letters = this.admit(threadId, this.ready(threadId, Infinity, from), batch => {
+      if (batch.length > 0) this.restoreProject(threadId);
+      for (const letter of batch) this.update(letter, 'delivered');
+      return batch;
     });
-    try { take(); } catch (error) {
-      // Contact mail this turn cannot protect stays in the inbox for a later delivery; the rest is read now.
-      if (!letters.some(letter => letter.contact)) throw error;
-      letters = letters.filter(letter => !letter.contact);
-      take();
-    }
     return withRelations(this.core, this.self('').coreId, threadId, letters.map(letter => ({ ...letter, status: 'delivered' as const })));
   }
   /** A waiting agent takes the letter that just arrived, with what else it may read now. */
@@ -554,11 +548,12 @@ export class Coordination {
     if (this.delivering.has(threadId)) return null;
     const letters = this.ready(threadId, BATCH);
     if (!letters.length) return null;
-    return this.admit(threadId, letters, () => {
+    return this.admit(threadId, letters, batch => {
+      if (!batch.length) return null;
       this.restoreProject(threadId);
-      const prompt = letterPrompt(letters, senderContext(this.core, this.self('').coreId, threadId));
+      const prompt = letterPrompt(batch, senderContext(this.core, this.self('').coreId, threadId));
       this.core.threads.noteCoordination(threadId, turnId, prompt);
-      for (const letter of letters) this.update(letter, 'delivered');
+      for (const letter of batch) this.update(letter, 'delivered');
       return prompt;
     });
   }
@@ -578,15 +573,20 @@ export class Coordination {
   }
   /**
    * The one way a letter reaches its agent: a wait's tool output, a hook, a
-   * steer or a wake. Contact mail gets its file protection first, and a refusal
-   * leaves the batch where it was; `update` refuses to deliver any letter
-   * `consume` was not given here.
+   * steer or a wake. Contact mail gets its file protection first. Mail this
+   * turn cannot protect stays in the inbox, where the turn's end kicks it
+   * again, and `consume` gets the rest; `whole` refuses the batch instead.
+   * `update` refuses to deliver any letter `consume` was not given here.
    */
-  private admit<T>(threadId: string, letters: AgentLetter[], consume: () => T): T {
-    protectLetters(this.core, threadId, letters);
+  private admit<T>(threadId: string, letters: AgentLetter[], consume: (batch: AgentLetter[]) => T, whole = false): T {
+    let batch = letters;
+    try { protectLetters(this.core, threadId, batch); } catch (error) {
+      if (whole || !batch.some(letter => letter.contact)) throw error;
+      batch = batch.filter(letter => !letter.contact);
+    }
     const outer = this.admitting;
-    this.admitting = new Set(letters.map(letter => letter.id));
-    try { return consume(); } finally { this.admitting = outer; }
+    this.admitting = new Set(batch.map(letter => letter.id));
+    try { return consume(batch); } finally { this.admitting = outer; }
   }
   private inProject(letter: AgentLetter): boolean {
     if (letter.from.coreId !== this.self('').coreId || letter.to.coreId !== this.coreId) return false;
@@ -626,11 +626,12 @@ export class Coordination {
     const letters = this.rows("thread_id = ? AND direction = 'in' AND status = 'uncertain'", threadId)
       .map(row => JSON.parse(row.data) as AgentLetter).filter(letter => letter.error === 'Queued for provider delivery');
     if (!letters.length || this.closed || letters.some(letter => letter.expiresAt <= Date.now() || !this.mayReceive(letter))) return false;
+    // The wake was scheduled for this batch: it crosses whole or not at all.
     return this.admit(threadId, letters, () => {
       this.restoreProject(threadId);
       for (const letter of letters) this.update(letter, 'uncertain', `Awaiting provider turn ${turnId}`);
       return true;
-    });
+    }, true);
   }
   private async steer(threadId: string, prompt: string): Promise<{ submitted: boolean } | null> {
     if (this.closed) return null;
@@ -654,21 +655,21 @@ export class Coordination {
     const thread = this.core.journal.getThread(threadId);
     // A thread whose last turn failed wakes like an idle one: each letter starts at most one turn, so a failing provider cannot loop.
     if (!thread || thread.archived || thread.status === 'waiting' || thread.status === 'queued') return;
-    const letters = this.ready(threadId, BATCH);
-    if (!letters.length) return;
+    const ready = this.ready(threadId, BATCH);
+    if (!ready.length) return;
     this.delivering.add(threadId);
+    const prompt = (batch: AgentLetter[]) => letterPrompt(batch, senderContext(this.core, this.self('').coreId, threadId));
     try {
-      const prompt = letterPrompt(letters, senderContext(this.core, this.self('').coreId, threadId));
       if (thread.status === 'running') {
-        const steering = this.admit(threadId, letters, () => {
-          if (!this.core.threads.canSteer(threadId)) return false;
+        const letters = this.admit(threadId, ready, batch => {
+          if (!batch.length || !this.core.threads.canSteer(threadId)) return null;
           this.restoreProject(threadId);
-          for (const letter of letters) this.update(letter, 'uncertain', 'Awaiting provider acknowledgement');
-          return true;
+          for (const letter of batch) this.update(letter, 'uncertain', 'Awaiting provider acknowledgement');
+          return batch;
         });
-        if (!steering) return;
+        if (!letters) return;
         try {
-          const result = await this.steer(threadId, prompt);
+          const result = await this.steer(threadId, prompt(letters));
           if (result === null || this.closed || this.core.journal.isClosed()) return;
           for (const letter of letters) {
             const current = this.find(letter.id, 'in');
@@ -683,10 +684,10 @@ export class Coordination {
         }
       } else {
         // One transaction records the wake, message states and scheduled turn.
-        this.admit(threadId, letters, () => this.core.journal.db.transaction(() => {
-          for (const letter of letters) this.update(letter, 'uncertain', 'Queued for provider delivery');
+        this.admit(threadId, ready, batch => batch.length > 0 && this.core.journal.db.transaction(() => {
+          for (const letter of batch) this.update(letter, 'uncertain', 'Queued for provider delivery');
           this.core.journal.db.query('INSERT INTO coordination_wakes VALUES (?, ?)').run(threadId, Date.now());
-          this.core.threads.startTurn(threadId, prompt, [], undefined, 'coordination');
+          this.core.threads.startTurn(threadId, prompt(batch), [], undefined, 'coordination');
         })());
       }
     } catch (error) {

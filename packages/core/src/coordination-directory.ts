@@ -54,7 +54,8 @@ export class CoordinationLookups {
     this.side.checkLookupAccess(threadId, config.remote);
     const reachable = new Set(this.side.localReach(threadId).map(contact => contact.threadId));
     const localCoreId = this.side.selfId();
-    return { agents: agents.filter(contact => contact.coreId !== localCoreId || reachable.has(contact.threadId)), unavailable };
+    // A group member that is down fails both its own directory and the contact routes asked of it: it is named once.
+    return { agents: agents.filter(contact => contact.coreId !== localCoreId || reachable.has(contact.threadId)), unavailable: [...new Set(unavailable)] };
   }
   /** Every contact this thread may reach on each trusted machine, in parallel; a machine that fails is named, not fatal. */
   private async remoteAll<T>(threadId: string, operation: 'search' | 'read', payload: unknown, check: (answer: unknown, peer: CoordinationPeer) => T, peers = this.side.trusted()): Promise<{ results: T[]; unavailable: string[] }> {

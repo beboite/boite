@@ -349,6 +349,12 @@ test('routed lookups name a silent gateway or a contact missing machines, never 
     expect(listed(directory.agents)).toBe(false);
     expect(directory.unavailable).toEqual([gateway]);
     expect((await a.core.coordination.search(source, 'External contact worker')).unavailable).toEqual([gateway]);
+    // The whole member is down: its own directory fails too, and it is still named once.
+    const down = spyOn(b.core.coordination as unknown as { localDirectory(): unknown }, 'localDirectory').mockImplementation(() => { throw new Error('offline'); });
+    try {
+      expect((await a.core.coordination.directory(source)).unavailable).toEqual([gateway]);
+      expect((await a.core.coordination.search(source, 'External contact worker')).unavailable).toEqual([gateway]);
+    } finally { down.mockRestore(); }
   } finally { handle.mockRestore(); }
   const whole = await a.core.coordination.directory(source);
   expect(listed(whole.agents)).toBe(true);
