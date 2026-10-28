@@ -1,6 +1,6 @@
 import type { Account, PermissionMode, ProviderDescriptor, ProviderId, RpcEvents, ThreadId, ThreadRetry, ThreadSummary, Turn, TurnId, Usage } from '@boite/contracts';
 import type { Core } from '../core.ts';
-import { releaseThread } from '../drivers/index.ts';
+import { assertDriverRunnable, releaseThread } from '../drivers/index.ts';
 import type { Driver, TurnContext, TurnHandle, TurnResult } from '../drivers/types.ts';
 import type { Resume } from '../providers/update-resume.ts';
 import type { ThreadStore } from '../threads.ts';
@@ -150,6 +150,7 @@ export class TurnAttempts {
       const checkpoint = this.threads.codeCheckpoints.begin(state.thread, turnId);
       if (checkpoint && driver.prepare) {
         const context = this.threads.contexts.makeSessionContext(state.thread, provider, account);
+        assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), account);
         void driver.prepare(context, { forTurn: true }).catch(error => {
           if (!this.stopRequested.has(threadId)) this.core.log('warn', `preparing the turn failed: ${String(error)}`, { source: provider.id, threadId, event: 'provider.prepareFailed' });
         });
@@ -228,6 +229,8 @@ export class TurnAttempts {
         source: 'turns', event: 'turn.attempt.started', threadId, turnId, providerId: provider.id, ...(state.thread.model ? { model: state.thread.model } : {}),
         data: { attempt, why, protocol: provider.protocol, accountId: account.id, resume: state.thread.sessionId !== null, permissionMode: permissions.mode, effort: state.thread.effort ?? null, speed: state.thread.speed ?? null },
       }));
+      // Preparation, capacity waits and lost-session retries can all outlive an admin edit.
+      assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), account);
       const handle = driver.startTurn(context);
       this.handles.set(threadId, handle);
       permissions.attach(handle);

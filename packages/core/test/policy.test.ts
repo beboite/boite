@@ -13,6 +13,10 @@ import type { CoreClient } from '../src/client.ts';
 import { runCli } from '../src/cli.ts';
 import type { Core } from '../src/core.ts';
 import { Bus } from '../src/bus.ts';
+import { setDriver } from '../src/drivers/index.ts';
+import { CONTACT_LINK_ROUTE } from '../src/contacts/store.ts';
+import { HELLO_INPUT } from '../src/contacts/link-hello.ts';
+import { openResponse, pack, SEALED, unpack } from '../src/group/seal.ts';
 import { parseFlags } from '../src/main.ts';
 import { listenHost, resolveHost } from '../src/listen-host.ts';
 import { parseManifest, platformKey } from '../src/plugins/manifest.ts';
@@ -21,7 +25,7 @@ import { PolicyStore, STRICTEST_POLICY, lockedKeys, machinePolicyFile, parsePoli
 import { DEFAULT_SETTINGS } from '../src/settings.ts';
 import { DEFAULT_SPEECH } from '../src/speech.ts';
 import { Telemetry } from '../src/telemetry.ts';
-import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { echoThread, holdAccountTurns, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { rejection } from './settle.ts';
 
 const cleanups: (() => Promise<void> | void)[] = [];
@@ -495,4 +499,218 @@ test('pullRequests: false runs no gh, links and watches included', async () => {
   await refusedBy(client.call('threads.watchPullRequest', { threadId }), 'pullRequests');
   // The background discovery and the archive go through the same spawn.
   expect(await rejection(harness.core.pullRequests.gh(threadId, ['pr', 'list']))).toMatchObject({ reason: { message: expect.stringContaining('key pullRequests in') } });
+});
+
+
+// Policy boundaries that may be reached after the RPC was admitted.
+for (const target of ['proxy', 'plugin'] as const) {
+  test(`gateway boundary: a disabled saved ${target} cannot plan or import outside allowedBaseUrls`, async () => {
+    const { harness, client, policy } = await core();
+    const requests: string[] = [];
+    const gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+      requests.push(new URL(request.url).pathname);
+      return Response.json({ accounts: [{ id: 'fixture-import' }] });
+    } });
+    cleanups.push(() => { gateway.stop(true); });
+    const baseUrl = `http://127.0.0.1:${gateway.port}`;
+    await client.call('settings.set', { subscriptionProxy: { ...PROXY, enabled: false, baseUrl } });
+    if (target === 'plugin') {
+      const running = spyOn(harness.core.plugins.gateways, 'running').mockReturnValue(true);
+      const port = spyOn(harness.core.plugins.gateways, 'port').mockReturnValue(gateway.port!);
+      cleanups.push(() => { running.mockRestore(); port.mockRestore(); });
+    }
+    const account = await client.call('accounts.add', { providerId: 'claude', label: 'Fixture' });
+    mkdirSync(account.isolationDir!, { recursive: true });
+    writeFileSync(join(account.isolationDir!, '.credentials.json'), JSON.stringify({ claudeAiOauth: { refreshToken: 'fixture-refresh-token' } }));
+    policy.write({ gateway: { allowedBaseUrls: ['https://corp.example'] } });
+    await client.call('policy.get', {});
+    await refusedBy(client.call('subscriptionProxy.movePlan', { target }), 'gateway.allowedBaseUrls');
+    await refusedBy(client.call('subscriptionProxy.move', { target, ids: [`${account.id}:login`] }), 'gateway.allowedBaseUrls');
+    expect(requests).toEqual([]);
+  });
+}
+
+test('gateway boundary: a reload while listing accounts prevents the following credential import', async () => {
+  const { harness, client, policy } = await core();
+  const listed = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const requests: string[] = [];
+  const gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+    const path = new URL(request.url).pathname;
+    requests.push(path);
+    if (path === '/admin/api/accounts') { listed.resolve(); await release.promise; return Response.json({ accounts: [] }); }
+    return Response.json({ accounts: [{ id: 'fixture-import' }] });
+  } });
+  cleanups.push(() => { release.resolve(); gateway.stop(true); });
+  await client.call('settings.set', { subscriptionProxy: { ...PROXY, enabled: false, baseUrl: `http://127.0.0.1:${gateway.port}` } });
+  const account = await client.call('accounts.add', { providerId: 'claude', label: 'Fixture' });
+  mkdirSync(account.isolationDir!, { recursive: true });
+  writeFileSync(join(account.isolationDir!, '.credentials.json'), JSON.stringify({ claudeAiOauth: { refreshToken: 'fixture-refresh-token' } }));
+  const moving = rejection(client.call('subscriptionProxy.move', { ids: [`${account.id}:login`] }));
+  await listed.promise;
+  policy.write({ gateway: { allowedBaseUrls: ['https://corp.example'] } });
+  await client.call('policy.get', {});
+  release.resolve();
+  expect(await moving).toMatchObject({ reason: { rpc: { data: { policy: 'gateway.allowedBaseUrls' } } } });
+  expect(requests).toEqual(['/admin/api/accounts']);
+});
+
+test('provider boundary: a provider denied while its turn is queued never starts', async () => {
+  const { harness, client, policy } = await core();
+  const { threadId } = await echoThread(harness, client);
+  let launches = 0;
+  const restore = setDriver('echo', { protocol: 'echo', startTurn() {
+    launches += 1;
+    return { stop() {}, done: Promise.resolve({ status: 'done', sessionId: null, usage: null }) };
+  } });
+  cleanups.push(restore);
+  const release = holdAccountTurns(harness);
+  cleanups.push(release);
+  const turn = await client.call('turns.start', { threadId, prompt: 'queued fixture' });
+  expect(harness.core.journal.getTurn(turn.id)?.status).toBe('queued');
+  policy.write({ providers: { deny: ['echo'] } });
+  await client.call('policy.get', {});
+  release();
+  await waitFor(() => !['queued', 'running'].includes(harness.core.journal.getTurn(turn.id)!.status));
+  expect(harness.core.journal.getTurn(turn.id)).toMatchObject({ status: 'error', error: expect.stringContaining('key providers.deny in') });
+  expect(launches).toBe(0);
+});
+
+test('provider boundary: a policy reload between a lost session and its retry stops the retry', async () => {
+  const { harness, client, policy } = await core();
+  const { threadId } = await echoThread(harness, client);
+  harness.core.journal.putThread({ ...harness.core.threads.require(threadId), sessionId: 'fixture-lost-session' });
+  let launches = 0;
+  const restore = setDriver('echo', { protocol: 'echo', startTurn() {
+    launches += 1;
+    policy.write({ providers: { deny: ['echo'] } });
+    harness.core.policy.reload();
+    return { stop() {}, done: Promise.resolve(launches === 1
+      ? { status: 'error', sessionId: 'fixture-lost-session', usage: null, sessionLost: true, error: 'session lost' }
+      : { status: 'done', sessionId: null, usage: null }) };
+  } });
+  cleanups.push(restore);
+  const turn = await client.call('turns.start', { threadId, prompt: 'retry fixture' });
+  await waitFor(() => !['queued', 'running'].includes(harness.core.journal.getTurn(turn.id)!.status));
+  expect(harness.core.journal.getTurn(turn.id)).toMatchObject({ status: 'error', error: expect.stringContaining('key providers.deny in') });
+  expect(launches).toBe(1);
+});
+
+async function policyContacts() {
+  const host = await core();
+  const guest = await core();
+  host.harness.core.contacts.selfUrl = async () => host.harness.url;
+  const hostId = host.harness.core.coordination.card().coreId;
+  const guestId = guest.harness.core.coordination.card().coreId;
+  const invite = await host.client.call('contacts.invite', {});
+  return { host, guest, hostId, guestId, invite };
+}
+
+test('contacts boundary: an invitation issued before contacts are disabled cannot be spent over HTTP', async () => {
+  const { host, guest, invite } = await policyContacts();
+  host.policy.write({ network: { contacts: false } });
+  await host.client.call('policy.get', {});
+  const result = await rejection(guest.client.call('contacts.join', { link: invite.link }));
+  expect(result).toMatchObject({ reason: { rpc: { message: expect.stringContaining('403') } } });
+  expect(host.harness.core.contacts.list()).toEqual([]);
+  // Refusing the join preserves the invitation and preferences for when the restriction lifts.
+  host.policy.remove();
+  await host.client.call('policy.get', {});
+  expect(await guest.client.call('contacts.join', { link: invite.link })).toBeDefined();
+});
+
+test('contacts boundary: existing HTTP and socket exchanges stop on reload, own-device links still work', async () => {
+  const { host, guest, hostId, guestId, invite } = await policyContacts();
+  await guest.client.call('contacts.join', { link: invite.link });
+  await waitFor(() => host.harness.core.contacts.linked(guestId));
+  expect(await guest.harness.core.coordination.check(hostId)).toEqual({ ok: true });
+  expect(await host.harness.core.coordination.check(guestId)).toEqual({ ok: true });
+  host.policy.write({ network: { contacts: false } });
+  await host.client.call('policy.get', {});
+  expect(await rejection(guest.harness.core.coordination.check(hostId))).toHaveProperty('reason');
+  // A contact's existing link carries the host's requests into the guest's desk.
+  host.policy.remove();
+  await host.client.call('policy.get', {});
+  guest.policy.write({ network: { contacts: false } });
+  await guest.client.call('policy.get', {});
+  expect(await rejection(host.harness.core.coordination.check(guestId))).toHaveProperty('reason');
+  // This independent own-device trust is governed separately from contacts.
+  const own = await core();
+  const hostCard = host.harness.core.coordination.card();
+  const ownCard = own.harness.core.coordination.card();
+  host.harness.core.coordination.trust({ ...ownCard, name: 'Own fixture', url: own.harness.url });
+  own.harness.core.coordination.trust({ ...hostCard, name: 'Host fixture', url: host.harness.url });
+  host.policy.write({ network: { contacts: false } });
+  await host.client.call('policy.get', {});
+  expect(await own.harness.core.coordination.check(hostId)).toEqual({ ok: true });
+});
+
+test('contacts boundary: a previously linked contact cannot upgrade a new socket after reload', async () => {
+  const { host, guest, hostId, guestId, invite } = await policyContacts();
+  await guest.client.call('contacts.join', { link: invite.link });
+  await waitFor(() => host.harness.core.contacts.linked(guestId));
+  host.policy.write({ network: { contacts: false } });
+  await host.client.call('policy.get', {});
+  const hello = JSON.stringify({ v: 1, from: guestId, to: hostId, at: Date.now(), nonce: crypto.randomUUID() });
+  const response = await fetch(`${host.harness.url}${CONTACT_LINK_ROUTE}`, { headers: {
+    'x-boite-peer': guestId,
+    'x-boite-hello': Buffer.from(hello).toString('base64url'),
+    'x-boite-signature': guest.harness.core.coordination.signature(Buffer.from(`${HELLO_INPUT}${hello}`)).toString('base64'),
+  } });
+  expect(response.status).toBe(403);
+  await response.arrayBuffer();
+});
+
+
+test('contacts boundary: group contact relays obey the sender policy without blocking group coordination', async () => {
+  const host = await core();
+  const member = await core();
+  await host.harness.core.group.create('Policy fixtures');
+  await member.harness.core.group.join((await host.harness.core.group.invite()).invite);
+  const { threadId } = await echoThread(member.harness, member.client);
+  const hostId = host.harness.core.coordination.card().coreId;
+  const peer = member.harness.core.group.peers().find(peer => peer.coreId === hostId)!;
+  const payload = { action: 'contacts', from: member.harness.core.coordination.describe(threadId) };
+  expect(await member.harness.core.coordination.request(peer, 'contact.route', payload)).toEqual([]);
+  member.policy.write({ network: { contacts: false } });
+  await member.client.call('policy.get', {});
+  expect(await rejection(member.harness.core.coordination.request(peer, 'contact.route', payload)))
+    .toMatchObject({ reason: { data: { policy: 'network.contacts' } } });
+  expect(await member.harness.core.coordination.check(hostId)).toEqual({ ok: true });
+  member.policy.remove();
+  await member.client.call('policy.get', {});
+  host.policy.write({ network: { contacts: false } });
+  await host.client.call('policy.get', {});
+  expect(await rejection(member.harness.core.coordination.request(peer, 'contact.route', payload)))
+    .toMatchObject({ reason: { message: expect.stringContaining('key network.contacts in') } });
+  expect(await member.harness.core.coordination.check(hostId)).toEqual({ ok: true });
+});
+
+
+test('contacts boundary: a directory assembled before a reload is absent from the signed refusal', async () => {
+  const { host, guest, hostId, guestId, invite } = await policyContacts();
+  await guest.client.call('contacts.join', { link: invite.link });
+  const { threadId } = await echoThread(host.harness, host.client);
+  const projectId = host.harness.core.threads.require(threadId).projectId!;
+  await host.client.call('contacts.grant', { coreId: guestId, projectId });
+  const asked = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<never[]>();
+  const directory = spyOn(host.harness.core.contacts.members, 'directory').mockImplementation(() => { asked.resolve(); return release.promise; });
+  cleanups.push(() => { release.resolve([]); directory.mockRestore(); });
+  const body = JSON.stringify({ from: guestId, to: hostId, at: Date.now(), nonce: crypto.randomUUID(), operation: 'directory', payload: {} });
+  const signature = guest.harness.core.coordination.signature(Buffer.from(body)).toString('base64');
+  const sealed = guest.harness.core.contacts.sealFor(hostId, pack(body, signature))!;
+  const pending = fetch(`${host.harness.url}/agent-messages`, { method: 'POST', headers: {
+    'content-type': 'application/json', 'x-boite-peer': guestId, 'x-boite-signature': SEALED,
+  }, body: sealed.body });
+  await asked.promise;
+  host.policy.write({ network: { contacts: false } });
+  await host.client.call('policy.get', {});
+  release.resolve([]);
+  const response = await pending;
+  const answer = JSON.parse(unpack(openResponse(await response.text(), sealed.responseKey, sealed.context)).body);
+  expect(response.status).toBe(400);
+  expect(answer.error).toContain('key network.contacts in');
+  expect(answer.result).toBeUndefined();
+  expect(JSON.stringify(answer)).not.toContain(threadId);
 });
