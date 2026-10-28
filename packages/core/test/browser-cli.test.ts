@@ -307,6 +307,8 @@ test('a recipe is kept only after its run passes, records a failed run with the 
     const save: BrowserAction = { kind: 'recipe-save', name: 'stock', about: 'x', source: 'return 1', sites: ['shop.test'] };
     expect(browserActionError({ kind: 'recipe-get', name: '../settings' })).toContain('a recipe name is');
     expect(browserActionError({ ...save, sites: ['shop.test/../x'] })).toContain('host names');
+    // Chromium reaches a host with an underscore, so a redirect can record one.
+    expect(browserActionError({ ...save, sites: ['service_internal.test', '[::1]', '127.0.0.1:8080'] })).toBeNull();
     expect(browserActionError({ ...save, about: '  ' })).toContain('needs --about');
     expect(browserActionError({ ...save, source: 'x'.repeat(BROWSER_RECIPE_SOURCE_MAX + 1) })).toContain('a recipe script holds');
   } finally { owner.close(); await harness.stop(); }

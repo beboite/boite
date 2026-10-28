@@ -392,7 +392,8 @@ back.
 `page.fetch(url, { method, headers, body })` in a script runs `fetch` in the
 page, so the request carries the page's cookies and passes its CORS rules as
 the site's own code would. It returns the status, final address, headers and
-the body as `json` when it parses, as `text` otherwise. It reads no further
+the body as `json` when the reply is typed JSON or starts with `{` or `[` and
+parses, as `text` otherwise (a bare `42` stays text). It reads no further
 than 2,000,000 characters and returns them with `truncated: true`. A status of 400 or more fails the step with
 the start of the body. The step's label leaves the query and the body out. The
 request travels as one page expression, so address, headers and body fit in
