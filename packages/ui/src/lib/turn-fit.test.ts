@@ -1,7 +1,8 @@
 import { writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { ATTACHMENTS_TOTAL_MAX_BYTES, IMAGE_MAX_EDGE, decodedBytes, type Attachment } from '@boite/contracts';
-import { gatherAttachments } from './composer-attachments';
+import { attachFiles, gatherAttachments } from './composer-attachments';
+import type { Store } from './store.svelte';
 import { FIT_FLOOR_EDGE, fitHeld, fitTurn, waterLevel } from './turn-fit';
 import type { ImageCodec } from './image-prepare';
 import { startBunCodec, type BunCodec } from '../test/bun-codec';
@@ -95,6 +96,25 @@ describe('fitTurn', () => {
     expect(await fitting).toBe(true);
     expect(box.attachments).toHaveLength(29);
     expect(box.attachments).not.toContain(removed);
+  });
+
+  test('a file picked while the box is fitted waits for that fit, then the pictures make room for it', async () => {
+    const slow = (codec: ImageCodec, delay: number): ImageCodec => ({
+      async decode(file) {
+        const image = (await codec.decode(file))!;
+        return { ...image, async encode(...args) { await new Promise(resolve => setTimeout(resolve, delay)); return image.encode(...args); } };
+      }
+    });
+    const box = { attachments: Array.from({ length: 3 }, (_, at) => jpeg(`shot-${at}.jpg`, 4 * 1024 * KB)) };
+    void fitHeld(box, slow(weighingCodec(4 * 1024 * KB), 2));
+    // The composer hands the files a stand-in that keeps undo steps; the box is what its fits run on.
+    const holder = { get attachments() { return box.attachments; }, set attachments(value: Attachment[]) { box.attachments = value; }, box };
+    const store = { error: null } as unknown as Store;
+    const pdf = new File([new Uint8Array(4 * 1024 * KB)], 'spec.pdf', { type: 'application/pdf' });
+    await attachFiles(store, [pdf], holder, null, undefined, slow(weighingCodec(4 * 1024 * KB), 5));
+    expect(store.error).toBeNull();
+    expect(box.attachments.map(one => one.name)).toEqual(['shot-0.jpg', 'shot-1.jpg', 'shot-2.jpg', 'spec.pdf']);
+    expect(box.attachments.reduce((sum, one) => sum + decodedBytes(one.data), 0)).toBeLessThanOrEqual(ATTACHMENTS_TOTAL_MAX_BYTES);
   });
 });
 

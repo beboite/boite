@@ -429,7 +429,7 @@
       // Each picture that arrives is one undo step, its reference in the text included.
       const holder = {
         get attachments() { return state.attachments; },
-        set attachments(value: Attachment[]) { checkpoint(state); state.attachments = value; }
+        set attachments(value: Attachment[]) { checkpoint(state); state.attachments = value; }, box: state
       };
       await attachFiles(inputStore, files, holder, attachmentProvider, () => {
         if (inputStore.composerStates[inputKey] === state) insertImageReference(inputStore, inputKey);

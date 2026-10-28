@@ -3,7 +3,7 @@ import { acceptAttachments, attachedBytes, decodedBytes, isImageMimeType, readAt
 import { bytes } from './format';
 import { IMAGE_SOURCE_MAX_BYTES, isReducible, prepareImage, type ImageCodec } from './image-prepare';
 import { fill, strings } from './strings';
-import { fitTurn } from './turn-fit';
+import { fitTurn, queued } from './turn-fit';
 
 /** The composer reads the running fit of its box here, beside the other ways pictures come in. */
 export { fitting } from './turn-fit';
@@ -22,6 +22,8 @@ export interface Holder {
   /** Null when images go anywhere, as files given with an answer do. */
   noImages: { provider: string } | null;
   codec?: ImageCodec;
+  /** The box the files go to: their fit waits for any other running there (`lib/turn-fit.ts`). */
+  box?: object;
 }
 
 /**
@@ -75,7 +77,10 @@ export async function gatherAttachments(files: File[], holder: Holder): Promise<
     if (result.refused !== null) refuse(result.refused);
     else holder.add(attachment);
   }
-  if (waiting.length > 0) await admitFitted(waiting, holder, refuse);
+  if (waiting.length > 0) {
+    const admit = (): Promise<void> => admitFitted(waiting, holder, refuse);
+    await (holder.box ? queued(holder.box, admit) : admit());
+  }
   return refused;
 }
 
@@ -103,7 +108,8 @@ async function admitFitted(waiting: { attachment: Attachment; name: string }[], 
 export async function attachFiles(
   store: Store,
   files: File[],
-  state: { attachments: Attachment[] },
+  /** `box` names the state behind a stand-in, the one its fits run on; the state itself otherwise. */
+  state: { attachments: Attachment[]; box?: object },
   attachmentProvider: ProviderSummary | null | undefined,
   onimage?: () => void,
   codec?: ImageCodec
@@ -116,7 +122,8 @@ export async function attachFiles(
     },
     replace: (lighter) => { state.attachments = state.attachments.map(attachment => lighter.get(attachment) ?? attachment); },
     noImages: attachmentProvider && !attachmentProvider.capabilities.images ? { provider: attachmentProvider.name } : null,
-    codec
+    codec,
+    box: state.box ?? state
   });
   if (refused !== null) store.error = refused;
 }

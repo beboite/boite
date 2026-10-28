@@ -131,28 +131,32 @@ export async function fitTurn(attachments: Attachment[], codec: ImageCodec = bro
   return { attachments: next, fits: total() <= max };
 }
 
-/** The fit running on each box, so a second one waits for the first and a send for both. */
-const running = new WeakMap<object, Promise<boolean>>();
+/** What runs on each box, fits and files making room, so one waits for the other and a send for both. */
+const running = new WeakMap<object, Promise<void>>();
 
-/** The fit still running on `target`, or undefined: what a send waits for. */
-export function fitting(target: object): Promise<boolean> | undefined {
+/** What still runs on `target`, or undefined: what a send waits for. Never rejects. */
+export function fitting(target: object): Promise<void> | undefined {
   return running.get(target);
+}
+
+/** `work` on `box` once what runs there ended: pictures swapped by one never get swapped again by another. */
+export function queued<T>(box: object, work: () => Promise<T>): Promise<T> {
+  const run = (running.get(box) ?? Promise.resolve()).then(work);
+  const tail = run.then(() => undefined, () => undefined);
+  running.set(box, tail);
+  void tail.then(() => { if (running.get(box) === tail) running.delete(box); });
+  return run;
 }
 
 /**
  * What a box holds, fitted in place: for the ways in that join pictures
  * without reading files, a paste of copied pictures or queued prompts taken
  * back. A picture removed while the fitting ran stays removed. Fits of one box
- * run one after the other, so none swaps in copies another already replaced.
- * True only when what the box holds at the end is within the budget.
+ * run one after the other (`queued`), so none swaps in copies another already
+ * replaced. True only when what the box holds at the end is within the budget.
  */
 export function fitHeld(target: { attachments: Attachment[] }, codec?: ImageCodec, max = ATTACHMENTS_TOTAL_MAX_BYTES): Promise<boolean> {
-  const previous = running.get(target);
-  const run = (previous ?? Promise.resolve(true)).then(() => fitNow(target, codec, max), () => fitNow(target, codec, max));
-  running.set(target, run);
-  const done = (): void => { if (running.get(target) === run) running.delete(target); };
-  run.then(done, done);
-  return run;
+  return queued(target, () => fitNow(target, codec, max));
 }
 
 async function fitNow(target: { attachments: Attachment[] }, codec: ImageCodec | undefined, max: number): Promise<boolean> {
