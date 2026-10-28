@@ -3,7 +3,7 @@
  * few lines a model reads back cheaply: one row per child or run, its state,
  * its model and reasoning, its time, then the one next step that makes sense.
  */
-import { CONVERSATION_PROFILE_ID, speedName } from '@boite/contracts';
+import { threadActive, CONVERSATION_PROFILE_ID, speedName } from '@boite/contracts';
 import type { DelegatedAgent, DelegationModelChoice, DelegationView, PauseOrigin, RpcParams, WorkflowRun } from '@boite/contracts';
 import type { CoreClient } from './client.ts';
 import { INTERRUPTION_TEXT } from './delegation/interruption.ts';
@@ -28,7 +28,6 @@ export interface DelegateOptions {
 }
 
 export const DELEGATE_ACTIONS = 'models, spawn, list, send, stop, resume, wait, result or profiles';
-const ACTIVE = new Set(['queued', 'running', 'waiting']);
 const PROFILE_ID = /^[a-zA-Z0-9_-]{1,64}$/;
 
 /** `42s`, `3m05s`, `1h02m`. */
@@ -51,7 +50,7 @@ const oneLine = (text: string, max: number) => {
  */
 function stateOf(agent: DelegatedAgent): string {
   if (agent.thread.status === 'waiting') return agent.needsInput?.find(need => need.kind === 'permission' || need.blocking)?.kind === 'question' ? 'question' : 'approval';
-  if (ACTIVE.has(agent.thread.status)) return agent.thread.status;
+  if (threadActive(agent.thread.status)) return agent.thread.status;
   const wait = agent.thread.backgroundWait;
   if (wait) return wait.state;
   const turn = agent.lastTurn?.status;
@@ -59,7 +58,7 @@ function stateOf(agent: DelegatedAgent): string {
 }
 
 /** A child at work, a turn under way or a wait on its own background work. */
-const busy = (agent: DelegatedAgent) => ACTIVE.has(agent.thread.status) || agent.thread.backgroundWait?.state === 'waiting';
+const busy = (agent: DelegatedAgent) => threadActive(agent.thread.status) || agent.thread.backgroundWait?.state === 'waiting';
 
 /** `codex/gpt-5.5 effort=high speed=priority`: what a child runs on, the speed as its stored tier id. */
 export function routeOf(agent: DelegatedAgent): string {
@@ -78,7 +77,7 @@ function agentRow(agent: DelegatedAgent, now: number): string[] {
   if (wait?.state === 'interrupted') lines.push(`  interrupted: ${oneLine(wait.for, 200)} ended without waking it (${INTERRUPTION_TEXT[wait.reason]}); boite delegate send ${agent.thread.id} "<instruction>" resumes it`);
   for (const need of agent.needsInput ?? []) lines.push(needLine(agent.thread.id, need));
   if (agent.worktree) lines.push(`  ${worktreeLine(agent.worktree)}`);
-  if (ACTIVE.has(agent.thread.status) || !agent.result) return lines;
+  if (threadActive(agent.thread.status) || !agent.result) return lines;
   // A turn ended on background work left a checkpoint, never the final result.
   return [...lines, `  ${wait ? 'checkpoint' : 'result'}: ${oneLine(agent.result, 300)}${agent.result.length > 300 && agent.resultRef ? ` (full: boite delegate result ${agent.resultRef.agentId} ${agent.resultRef.turnId})` : ''}`];
 }

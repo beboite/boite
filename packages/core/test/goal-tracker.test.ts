@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { DEFAULT_DELEGATION_CONFIG, defaultTrackerModel, type Message, type ThreadActivity } from '@boite/contracts';
 import { ActivityStore } from '../src/activity.ts';
 import { lastJson, readUpdate, TRACKER_RULES, turnDigest } from '../src/goal-tracker-prompt.ts';
@@ -68,8 +68,14 @@ test('a reviewed goal\'s tracker writes the checklist, checks each turn and tell
     },
     reviewer: ctx => { reviews.push(ctx.prompt); return 'All there.\nVERDICT: PASS'; },
   });
+  const starts = spyOn(h.core.threads, 'startTurn');
   await client.call('threads.activity.set', { threadId, goal: { objective: 'fait un thème sombre et une page de réglages', review: true } });
   await waitFor(() => goalOf(threadId).status === 'complete');
+  // Each pass starts as a goal check, not as the delegation its tracker child is stored as.
+  const origins = (id: string) => starts.mock.calls.filter(([started]) => started === id).map(([, , origin]) => origin?.kind);
+  expect(origins(goalOf(threadId).checklist!.threadId!)).toEqual(['goal-check', 'goal-check', 'goal-check']);
+  expect(origins(threadId)).toEqual(['goal', 'goal']);
+  starts.mockRestore();
 
   const list = goalOf(threadId).checklist!;
   expect(list.items.map(item => [item.id, item.text, item.status])).toEqual([[1, 'Ajouter un thème sombre', 'done'], [2, 'Ajouter une page de réglages', 'done']]);

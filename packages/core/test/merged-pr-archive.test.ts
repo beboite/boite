@@ -163,8 +163,8 @@ test.each(['before Done', 'after Done', 'scheduled turn'] as const)('Done stops 
       done: gate.then(() => ({ status: 'stopped' as const, sessionId: null, usage: null })),
     };
   } });
-  const turn = core.threads.startTurn(f.threadId, 'Finish reporting the merged change.', [], undefined,
-    timing === 'scheduled turn' ? 'compact' : undefined);
+  const turn = core.threads.startTurn(f.threadId, 'Finish reporting the merged change.',
+    timing === 'scheduled turn' ? { kind: 'compact', automatic: false } : undefined);
   try {
     await waitFor(() => core.threads.runner.handles.has(f.threadId));
     if (timing === 'before Done') report();

@@ -130,3 +130,35 @@ test("fake agents.create: the core's refusals, then the bot made at once on the 
   expect(models[0]!.default).not.toBe(true);
   expect((await client.call('agents.create', { threadId: onDefault.id, name: 'Herald' })).agent.selection.model).toBe(models.find((model) => model.default === true)!.id);
 });
+
+test('fake model cards name the provider and move an agent to another one, allowing the route', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  const mira = await agent(client);
+  // Two routes the owner named already hold the card's reference as their ids.
+  const policy = await client.call('agents.runtime.get', { agentId: mira.id });
+  const own = policy.allowedRoutes[0]!;
+  await client.call('agents.runtime.configure', { agentId: mira.id, expectedRevision: mira.revision, config: { ...policy, allowedRoutes: [{ ...own, id: 'codex/default' }, { ...own, id: 'codex/default-3', effort: 'low' }] } });
+  const { id: threadId } = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
+  await client.call('turns.start', { threadId, prompt: 'Move the bot.' });
+  await client.settled();
+  const read = (await client.call('agents.settings.read', { threadId, agent: mira.id })).settings.find(s => s.key === 'model')!;
+  expect(read.value).toBe('echo/echo-1');
+  expect(read.choices?.slice(0, 3)).toEqual([{ id: 'echo/echo-1', label: 'Echo' }, { id: 'opencode/default', label: 'OpenCode default' }, { id: 'codex/default', label: 'Codex default' }]);
+  await expect(client.call('agents.settings.request', { threadId, agent: mira.id, key: 'model', value: 'echo-1', reason: 'r' })).rejects.toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'value', key: 'model' } });
+  // The refusal names why the model is out of reach, as the core's does.
+  const ask = (value: string) => client.call('agents.settings.request', { threadId, agent: mira.id, key: 'model', value, reason: 'r' });
+  await client.call('providers.setEnabled', { providerId: 'codex', enabled: false });
+  await expect(ask('codex/default')).rejects.toThrow('codex is not installed or is turned off');
+  await client.call('providers.setEnabled', { providerId: 'codex', enabled: true });
+  await client.call('accounts.remove', { accountId: 'a-opencode' });
+  await expect(ask('opencode/default')).rejects.toThrow('opencode has no signed-in account');
+  await expect(ask('codex/gpt-9')).rejects.toThrow('the provider does not offer this model');
+
+  const card = await client.call('agents.settings.request', { threadId, agent: mira.id, key: 'model', value: 'codex/default', reason: 'Reviews need a larger model' });
+  expect(card.setting).toMatchObject({ key: 'model', previous: 'echo/echo-1', value: 'codex/default' });
+  const saved = await client.call('agents.settings.apply', { threadId, questionId: card.questionId });
+  expect(saved.selection).toMatchObject({ providerId: 'codex', model: 'default' });
+  const config = await client.call('agents.runtime.get', { agentId: mira.id });
+  expect(config.defaultRoute).toMatchObject({ providerId: 'codex', model: 'default' });
+  expect(config.allowedRoutes.map(route => `${route.id}: ${route.providerId}/${route.model}`)).toEqual(['codex/default: echo/echo-1', 'codex/default-3: echo/echo-1', 'codex/default-2: codex/default']);
+});

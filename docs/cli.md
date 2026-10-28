@@ -763,8 +763,10 @@ MCP tools `boite_settings` and `boite_settings_request` do the same.
 `autoMemory` (the memory pass), `eventWakes` (automatic project and desk wakes),
 `subagents` and `dailyBudget` (dollars a day,
 or `null` for none). It prints the bot's name, each value and, for status,
-projects, models and efforts, the choices; the listing cuts long instructions
-to their start, one key or `--json` prints them whole. `--bot <name or id>`
+projects, models and efforts, the choices; a model reads `<provider>/<model>`,
+and its choices span every provider signed in on the machine. The listing cuts
+long instructions and choice lists to their start, one key or `--json` prints
+them whole. `--bot <name or id>`
 names the bot; in a bot's own conversation it defaults to that bot.
 `eventWakes` defaults to `true`. Setting it to `false` keeps the bot active for
 user messages and routines while project and desk facts wait durably for the
@@ -779,9 +781,12 @@ reads a file; `projects` takes `+name -name` edits or a whole list
 (`Notes,Other`, or JSON), resolved by name or id and stored as ids; a project
 of another machine of the group is `<machine>/<name>` (`+skoll/Hearthfall`),
 offered once that machine lets bots in (`groupBots`) and stored as
-`<core-id>/<project-id>`; the other
+`<core-id>/<project-id>`; `model` takes `<provider>/<model>`
+(`codex/gpt-6.1-sol`), or a model id of the bot's own provider; the other
 keys read their value as `settings request` does. The refusals are the same, plus an unknown or ambiguous bot
-(the refusal lists them) and a model the bot's policy does not allow.
+(the refusal lists them) and a model on an account the owner granted only to
+other bots. A model outside the bot's allowed routes joins them when the card
+is applied ([bots](bots.md#asking-to-change-a-bots-settings)).
 
 The card names the bot and the change; for projects, each project added or
 removed has a tick the owner can clear before Apply. Apply calls
