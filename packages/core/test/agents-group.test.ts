@@ -445,6 +445,16 @@ test('a thread a bot started on another machine and took off its desk before any
   expect(pc.core.workforce.groupHost.leases(deskId)[agent().id]).toMatchObject({ watched: [id] });
 }, 30_000);
 
+test('a thread id of another machine too long for the bot\'s lease is refused, and the next lease sync still goes', async () => {
+  answering();
+  const { desk, pc, pcOwner, pcId, deskId, owner, self, agent, machine } = await setup();
+  await pcOwner.call('settings.set', { groupBots: true });
+  await desk.core.workforce.group.sync(pcId);
+  expect(await thrown(owner.call('agents.watch', { threadId: self, machine, watchThreadId: 'x'.repeat(129), watched: false }))).toThrow('watchThreadId: expected 1 to 128 characters');
+  await desk.core.workforce.group.sync(pcId);
+  expect(pc.core.workforce.groupHost.leases(deskId)[agent().id]).toMatchObject({ watched: [] });
+}, 30_000);
+
 test('a full outbox goes in requests a member accepts, oldest first, none left behind', () => {
   const row = { id: 'thr_x', title: 'Letter', projectId: 'prj_x', project: 'Notes', status: 'idle', archived: false, branch: null, questions: 0, permissions: 0, pullRequest: null, updatedAt: 1, lastCompletedAt: null } as const;
   const events: BotEvent[] = Array.from({ length: OUTBOX_MAX }, (_, index) => ({ agentId: 'agt_ada', kind: 'turn', key: `turn:${index}`, row, status: 'done', answer: 'x'.repeat(1_500) + 'é'.repeat(1_000) }));

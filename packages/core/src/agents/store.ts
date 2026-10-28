@@ -315,7 +315,8 @@ export class AgentStore {
     object(params, 'params');
     const agent = this.named(params, 'agents.watch');
     // A thread of another machine of the group: that machine checks it is one of the bot's projects there.
-    if (params.machine !== undefined) return this.group.watch(agent, text(params.machine, 'machine', 200), text(params.watchThreadId, 'watchThreadId', 160), params.watched === true);
+    // Its id travels in the bot's lease, which takes ids of at most 128 characters.
+    if (params.machine !== undefined) return this.group.watch(agent, text(params.machine, 'machine', 200), text(params.watchThreadId, 'watchThreadId', 128), params.watched === true);
     const target = this.core.threads.require(text(params.watchThreadId, 'watchThreadId', 160));
     if (target.agentSessionId || target.parentThreadId) throw refused('agents.watch.watchThreadId: expected a top-level conversation, not an agent\'s thread or a subagent', { field: 'watchThreadId' });
     if (!params.watched) {
