@@ -86,30 +86,38 @@ export function resultPageOf(core: Core, agentId: ThreadId, turnId: unknown, off
 
 /** Event-driven waits own no provider input and have no effect on automatic mail. */
 export class DelegationWaits {
-  private readonly pending = new Set<() => void>();
-  private closed = false;
+  readonly #pending = new Set<() => void>();
+  #closed = false;
   /** `settling`: a child whose turn ended while its worktree is still being looked at has not answered yet. */
-  constructor(private readonly core: Core, private readonly agents: (threadId: ThreadId) => DelegatedAgent[], private readonly settling: (threadId: ThreadId) => boolean = () => false) {}
-  get size(): number { return this.pending.size; }
+  readonly #core: Core;
+  readonly #agents: (threadId: ThreadId) => DelegatedAgent[];
+  readonly #settling: (threadId: ThreadId) => boolean;
+
+  constructor(core: Core, agents: (threadId: ThreadId) => DelegatedAgent[], settling: (threadId: ThreadId) => boolean = () => false) {
+    this.#core = core;
+    this.#agents = agents;
+    this.#settling = settling;
+  }
+  get size(): number { return this.#pending.size; }
 
   wait(params: RpcParams<'delegation.wait'>, connection?: Connection): Promise<DelegationWaitResult> {
     const timeout = delegationWaitTimeout(params.timeoutMs);
-    directChildren(this.core, params.threadId, params.agentId);
-    if (this.closed || this.core.stopping) return Promise.reject(refused('delegation.wait: the core is stopping'));
+    directChildren(this.#core, params.threadId, params.agentId);
+    if (this.#closed || this.#core.stopping) return Promise.reject(refused('delegation.wait: the core is stopping'));
     return new Promise((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       let off = () => {};
       let offClose = () => {};
       let settled = false;
-      const cleanup = () => { settled = true; offClose(); off(); if (timer !== undefined) clearTimeout(timer); this.pending.delete(cancel); };
+      const cleanup = () => { settled = true; offClose(); off(); if (timer !== undefined) clearTimeout(timer); this.#pending.delete(cancel); };
       const cancel = () => { cleanup(); reject(refused('delegation.wait: the core is stopping')); };
       const inspect = (timedOut = false) => {
         if (settled) return;
         try {
-          directChildren(this.core, params.threadId, params.agentId);
-          const agents = this.agents(params.threadId).filter(agent => params.agentId === undefined || agent.thread.id === params.agentId);
+          directChildren(this.#core, params.threadId, params.agentId);
+          const agents = this.#agents(params.threadId).filter(agent => params.agentId === undefined || agent.thread.id === params.agentId);
           // A child that ended its turn to wait on its background work has not answered yet.
-          const waiting = agents.some(agent => (agent.lastTurn !== null && ['queued', 'running'].includes(agent.lastTurn.status)) || agent.thread.backgroundWait?.state === 'waiting' || this.settling(agent.thread.id));
+          const waiting = agents.some(agent => (agent.lastTurn !== null && ['queued', 'running'].includes(agent.lastTurn.status)) || agent.thread.backgroundWait?.state === 'waiting' || this.#settling(agent.thread.id));
           // A child stopped on a question or an approval waits on someone: its running turn would hold the wait to its timeout.
           const asks = agents.some(agent => agent.needsInput?.some(need => need.kind === 'permission' || need.blocking));
           if (waiting && !asks && !timedOut) return;
@@ -117,8 +125,8 @@ export class DelegationWaits {
           resolve({ state: asks ? 'needs_input' : waiting ? 'waiting_for_children' : params.agentId && agents.some(agent => agent.settlement === 'result_available') ? 'result_available' : 'settled', timedOut: timedOut && !asks, agents });
         } catch (error) { cleanup(); reject(error); }
       };
-      this.pending.add(cancel);
-      off = this.core.bus.onCommitted(name => {
+      this.#pending.add(cancel);
+      off = this.#core.bus.onCommitted(name => {
         if (name === 'turn.finished' || name === 'delegation.changed' || name === 'thread.removed') inspect();
       });
       timer = setTimeout(() => inspect(true), timeout);
@@ -129,5 +137,5 @@ export class DelegationWaits {
     });
   }
 
-  close(): void { this.closed = true; for (const cancel of [...this.pending]) cancel(); }
+  close(): void { this.#closed = true; for (const cancel of [...this.#pending]) cancel(); }
 }

@@ -49,15 +49,12 @@ export function teamInstructions(core: Core, threadId: string, request: string |
   if (thread.parentThreadId && (core.workforce.memory.owns(threadId) || core.activity.ownsTracker(threadId))) return '';
   if (thread.parentThreadId && core.activity.ownsReviewer(threadId)) return '\nYou are a Boite goal reviewer. Your final answer and its VERDICT line go to the goal automatically; do not message the parent, start subagents or edit project files.\n';
   const link = core.delegation.remote.parentOf(threadId);
-  if (link) {
+  if (link || thread.parentThreadId) {
+    if (!link && !config.enabled) return '';
     const own = core.delegation.worktrees.get(threadId);
-    const checkout = own ? `Own worktree ${own.path} on branch ${own.branch}: commit your work there; the branch stays on this machine.` : 'Shared checkout: change only the files your task names.';
-    return `\nYou are a Boite subagent of ${link.parentId} on ${link.machine}. Blocked: boite delegate send ${link.parentId} "<what blocks you>". Your final answer returns automatically. You cannot start subagents, workflows or threads. Waiting on your PR: boite pr watch, never a polling loop; each wake opens your next turn and its answer goes to the parent. ${checkout}\n`;
-  }
-  if (thread.parentThreadId) {
-    const own = core.delegation.worktrees.get(threadId);
-    const checkout = own ? `Own worktree ${own.path} on branch ${own.branch}: commit your work there; the parent merges it.` : 'Shared checkout: change only the files your task names.';
-    return config.enabled ? `\nYou are a Boite subagent of ${root.id}. Blocked: boite delegate send ${root.id} "<what blocks you>". Your final answer returns automatically. You cannot start subagents or workflows. Waiting on your PR: boite pr watch, never a polling loop; each wake opens your next turn and its answer goes to the parent. ${checkout}\n` : '';
+    const checkout = own ? `Own worktree ${own.path} on branch ${own.branch}: commit your work there; ${link ? 'the branch stays on this machine.' : 'the parent merges it.'}` : 'Shared checkout: change only the files your task names.';
+    const parentId = link?.parentId ?? root.id;
+    return `\nYou are a Boite subagent of ${parentId}${link ? ` on ${link.machine}` : ''}. Blocked: boite delegate send ${parentId} "<what blocks you>". Your final answer returns automatically. You cannot start subagents${link ? ', workflows or threads' : ' or workflows'}. Waiting on your PR: boite pr watch, never a polling loop; each wake opens your next turn and its answer goes to the parent. ${checkout}\n`;
   }
   // With delegation off, only a workflow request is worth the words; spawn would be refused anyway.
   const asked = request === undefined || /workflow/i.test(request) || (config.enabled && DELEGATION_WORDS.test(request));

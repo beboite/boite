@@ -29,87 +29,97 @@ function batchOf<T>(entries: T[]): T[] {
  * is heard from. A refusal is final: that machine does not want it.
  */
 export class Outbox<T extends { key: string }> {
-  private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
-  private readonly attempts = new Map<string, number>();
-  private readonly sending = new Set<string>();
-  private closed = false;
+  readonly #timers = new Map<string, ReturnType<typeof setTimeout>>();
+  readonly #attempts = new Map<string, number>();
+  readonly #sending = new Set<string>();
+  #closed = false;
 
-  constructor(private readonly core: Core, private readonly prefix: string, private readonly deliver: (peer: CoordinationPeer, entries: T[]) => Promise<unknown>,
-    private readonly merge: (kept: T, next: T) => T = (_kept, next) => next) {}
+  readonly #core: Core;
+  readonly #prefix: string;
+  readonly #deliver: (peer: CoordinationPeer, entries: T[]) => Promise<unknown>;
+  readonly #merge: (kept: T, next: T) => T;
 
-  entries(coreId: string): T[] { return (this.core.journal.getSetting(`${this.prefix}${coreId}`) as T[] | undefined) ?? []; }
+  constructor(core: Core, prefix: string, deliver: (peer: CoordinationPeer, entries: T[]) => Promise<unknown>,
+    merge: (kept: T, next: T) => T = (_kept, next) => next) {
+    this.#core = core;
+    this.#prefix = prefix;
+    this.#deliver = deliver;
+    this.#merge = merge;
+  }
+
+  entries(coreId: string): T[] { return (this.#core.journal.getSetting(`${this.#prefix}${coreId}`) as T[] | undefined) ?? []; }
 
   /** An entry replaces the one waiting under its key. */
   push(coreId: string, entry: T): void {
     const entries = this.entries(coreId);
     const kept = entries.find(waiting => waiting.key === entry.key);
-    this.save(coreId, [...entries.filter(waiting => waiting.key !== entry.key), kept ? this.merge(kept, entry) : entry]);
-    this.schedule(coreId, FLUSH_MS);
+    this.#save(coreId, [...entries.filter(waiting => waiting.key !== entry.key), kept ? this.#merge(kept, entry) : entry]);
+    this.#schedule(coreId, FLUSH_MS);
   }
 
   /** Withdraws an entry not sent yet. */
   remove(coreId: string, key: string): void {
     const entries = this.entries(coreId);
-    if (entries.some(entry => entry.key === key)) this.save(coreId, entries.filter(entry => entry.key !== key));
+    if (entries.some(entry => entry.key === key)) this.#save(coreId, entries.filter(entry => entry.key !== key));
   }
 
   /** Once the core is up: each machine something waits for. */
   start(): void {
-    for (const { key } of this.core.journal.db.query('SELECT key FROM settings WHERE key GLOB ?').all(`${this.prefix}*`) as { key: string }[]) this.schedule(key.slice(this.prefix.length), FLUSH_MS);
+    for (const { key } of this.#core.journal.db.query('SELECT key FROM settings WHERE key GLOB ?').all(`${this.#prefix}*`) as { key: string }[]) this.#schedule(key.slice(this.#prefix.length), FLUSH_MS);
   }
 
   /** That machine answers: what waited for it goes now, not after the wait its absence set. */
   heard(coreId: string): void {
-    if (this.closed || this.sending.has(coreId) || this.core.journal.isClosed() || this.entries(coreId).length === 0) return;
-    clearTimeout(this.timers.get(coreId));
-    this.timers.delete(coreId);
-    this.attempts.delete(coreId);
-    this.schedule(coreId, 0);
+    if (this.#closed || this.#sending.has(coreId) || this.#core.journal.isClosed() || this.entries(coreId).length === 0) return;
+    clearTimeout(this.#timers.get(coreId));
+    this.#timers.delete(coreId);
+    this.#attempts.delete(coreId);
+    this.#schedule(coreId, 0);
   }
 
   async flush(coreId: string): Promise<void> {
-    if (this.closed || this.core.journal.isClosed() || this.sending.has(coreId)) return;
+    if (this.#closed || this.#core.journal.isClosed() || this.#sending.has(coreId)) return;
     const batch = batchOf(this.entries(coreId));
     if (batch.length === 0) return;
-    const peer = this.core.group.peers().find(member => member.coreId === coreId);
+    const peer = this.#core.group.peers().find(member => member.coreId === coreId);
     // A machine that left the group hears nothing more.
-    if (peer === undefined) { this.core.journal.deleteSetting(`${this.prefix}${coreId}`); return; }
-    this.sending.add(coreId);
+    if (peer === undefined) { this.#core.journal.deleteSetting(`${this.#prefix}${coreId}`); return; }
+    this.#sending.add(coreId);
     let away = false;
-    try { await this.deliver(peer, batch); }
+    try { await this.#deliver(peer, batch); }
     catch (error) {
       away = !(error instanceof PeerRefusal);
-      if (!away) this.core.log('warn', `${this.prefix}${peer.name} refused ${batch.length} entries: ${messageOf(error)}`);
-    } finally { this.sending.delete(coreId); }
-    if (this.closed || this.core.journal.isClosed()) return;
+      if (!away) this.#core.log('warn', `${this.#prefix}${peer.name} refused ${batch.length} entries: ${messageOf(error)}`);
+    } finally { this.#sending.delete(coreId); }
+    if (this.#closed || this.#core.journal.isClosed()) return;
     if (away) {
-      const attempt = this.attempts.get(coreId) ?? 0;
-      this.attempts.set(coreId, attempt + 1);
-      this.schedule(coreId, RETRY_MS[Math.min(attempt, RETRY_MS.length - 1)]!);
+      const attempt = this.#attempts.get(coreId) ?? 0;
+      this.#attempts.set(coreId, attempt + 1);
+      this.#schedule(coreId, RETRY_MS[Math.min(attempt, RETRY_MS.length - 1)]!);
       return;
     }
-    this.attempts.delete(coreId);
+    this.#attempts.delete(coreId);
     // An entry replaced while it was on its way stays, and goes next.
     const sent = new Map(batch.map(entry => [entry.key, JSON.stringify(entry)]));
-    this.save(coreId, this.entries(coreId).filter(entry => sent.get(entry.key) !== JSON.stringify(entry)));
-    if (this.entries(coreId).length) this.schedule(coreId, FLUSH_MS);
+    this.#save(coreId, this.entries(coreId).filter(entry => sent.get(entry.key) !== JSON.stringify(entry)));
+    if (this.entries(coreId).length) this.#schedule(coreId, FLUSH_MS);
   }
 
   close(): void {
-    this.closed = true;
-    for (const timer of this.timers.values()) clearTimeout(timer);
-    this.timers.clear();
+    this.#closed = true;
+    for (const timer of this.#timers.values()) clearTimeout(timer);
+    this.#timers.clear();
   }
 
-  private save(coreId: string, entries: T[]): void {
-    if (entries.length) this.core.journal.setSetting(`${this.prefix}${coreId}`, entries);
-    else this.core.journal.deleteSetting(`${this.prefix}${coreId}`);
+  #save(coreId: string, entries: T[]): void {
+    if (entries.length) this.#core.journal.setSetting(`${this.#prefix}${coreId}`, entries);
+    else this.#core.journal.deleteSetting(`${this.#prefix}${coreId}`);
   }
 
-  private schedule(coreId: string, delay: number): void {
-    if (this.closed || this.timers.has(coreId)) return;
-    const timer = setTimeout(() => { this.timers.delete(coreId); void this.flush(coreId).catch(error => this.core.log('warn', `${this.prefix}${coreId}: ${messageOf(error)}`)); }, delay);
+  #schedule(coreId: string, delay: number): void {
+    if (this.#closed || this.#timers.has(coreId)) return;
+    const timer = setTimeout(() => { this.#timers.delete(coreId); void this.flush(coreId).catch(error => this.#core.log('warn', `${this.#prefix}${coreId}: ${messageOf(error)}`)); }, delay);
     timer.unref?.();
-    this.timers.set(coreId, timer);
+    this.#timers.set(coreId, timer);
   }
 }

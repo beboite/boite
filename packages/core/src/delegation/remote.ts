@@ -34,7 +34,7 @@ import { newId } from '../ids.ts';
 import type { ProviderProbe } from '../providers/probe.ts';
 import { GROUP_THREADS_OFF, machineArg, memberModels, memberNamed, peerRefusal } from '../threads/group-spawn.ts';
 import { modelsFor } from '../threads/selection.ts';
-import { anyModel, catalog, chooseModel, conversationRoute, discover, loggedInAccount } from './routes.ts';
+import { catalog, checkModelAllowed, chooseModel, discover, loggedInAccount } from './routes.ts';
 import { Outbox } from './outbox.ts';
 import { restartContinues } from './restart.ts';
 import { resultPageOf } from './results.ts';
@@ -290,12 +290,7 @@ export class RemoteDelegation {
     if (request.model !== undefined || request.effort !== undefined || request.speed !== undefined) {
       const models = await memberModels(this.#core, parent, peer, 'run subagents on a model chosen from another machine');
       const picked = chooseModel(models.choices, { providerId: base.providerId, model: base.model, effort: base.effort ?? null, speed: null }, request, `boite delegate models --machine ${machineArg(this.#core, peer)}`);
-      if (request.model !== undefined && !anyModel(config)) {
-        const allowed = [conversationRoute(parent), ...config.profiles];
-        if (!allowed.some(r => r.providerId === picked.providerId && r.model === picked.model)) {
-          throw refused(`the owner limited subagents to this conversation's model and the profiles (${allowed.map(r => r.id).join(', ')}); leave --model out or name one of them`);
-        }
-      }
+      if (request.model !== undefined) checkModelAllowed(config, parent, picked);
       route = { providerId: picked.providerId, model: picked.model, effort: picked.effort, speed: picked.speed, strict: true };
       if (request.model !== undefined) profileId = `${picked.providerId}/${picked.model}`;
     } else {

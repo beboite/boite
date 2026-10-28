@@ -32,6 +32,15 @@ export type Asker = Pick<ThreadSummary, 'providerId' | 'accountId' | 'model'>;
 /** On unless the owner turned it off. Older saved configs have no field. */
 export const anyModel = (config: DelegationConfig): boolean => config.anyModel !== false;
 
+/** Explicit model choices respect the same owner-approved routes here and on another machine. */
+export function checkModelAllowed(config: DelegationConfig, parent: ThreadSummary, choice: Pick<DelegationModelChoice, 'providerId' | 'model'>): void {
+  if (anyModel(config)) return;
+  const allowed = [conversationRoute(parent), ...config.profiles];
+  if (!allowed.some(route => route.providerId === choice.providerId && route.model === choice.model)) {
+    throw refused(`the owner limited subagents to this conversation's model and the profiles (${allowed.map(route => route.id).join(', ')}); leave --model out or name one of them`);
+  }
+}
+
 /** The parent's account on its own provider, else that provider's logged-in default login. */
 export function accountFor(core: Core, parent: Asker, providerId: ProviderId): Account | undefined {
   const accounts = core.accounts.list().filter(account => account.providerId === providerId);
@@ -173,10 +182,7 @@ export function resolveRoute(core: Core, parent: ThreadSummary, config: Delegati
   let route: ChildRoute;
   if (request.model !== undefined) {
     const choice = pick(catalog(core, parent, true).choices, parent, request.model);
-    const allowed = [conversationRoute(parent), ...profiles];
-    if (!anyModel(config) && !allowed.some(r => r.providerId === choice.providerId && r.model === choice.model)) {
-      throw refused(`the owner limited subagents to this conversation's model and the profiles (${allowed.map(r => r.id).join(', ')}); leave --model out or name one of them`);
-    }
+    checkModelAllowed(config, parent, choice);
     const sameAsParent = choice.providerId === parent.providerId && choice.model === parent.model;
     route = {
       id: label(choice), name: choice.name, providerId: choice.providerId, accountId: choice.accountId, model: choice.model,
