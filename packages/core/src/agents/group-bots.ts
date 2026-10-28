@@ -13,11 +13,11 @@
  * sent.
  */
 import { createHash } from 'node:crypto';
-import type { AgentProfile, AgentWatch, CoordinationPeer, ProjectThreadDetail, ProjectThreadRow, ResidentView, RpcParams, ThreadId } from '@boite/contracts';
+import type { AgentProfile, AgentSpawn, AgentWatch, CoordinationPeer, ProjectThreadDetail, ProjectThreadRow, ResidentView, RpcParams, ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { PeerGone, PeerRefusal, type BotOperation } from '../coordination-wire.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unavailable } from '../errors.ts';
-import { machineArg, memberNamed } from '../threads/group-spawn.ts';
+import { machineArg, memberNamed, type StartFields } from '../threads/group-spawn.ts';
 import { GROUP_BOTS_OFF, OUTBOX_MAX, type BotEvent, type BotLease } from './group-host.ts';
 import { QUESTION_GRACE_MS } from './projects.ts';
 import { NOTICE_BATCH_MS } from './runtime.ts';
@@ -34,6 +34,7 @@ export const REQUEST_MS = 10_000;
 const SYNC_MS = 500;
 const RETRY_MS = [5_000, 15_000, 60_000, 300_000];
 const TEXT_MAX = 1_500;
+const fold = (name: string): string => name.trim().replace(/\s+/g, '-').toLowerCase();
 
 /** A thread of another machine on a bot's desk, with the row that machine last sent. */
 interface RemoteFollow { at: number; origin: AgentWatch['origin']; row: ProjectThreadRow; seenAt: number }
@@ -61,17 +62,17 @@ export class GroupBots {
   /** Sends whose answers have not arrived yet: lease syncs already carry their watches. */
   private readonly sending = new Set<{ agentId: string; coreId: string; threadId: ThreadId }>();
   private version = Date.now();
-  private readonly start: ReturnType<typeof setTimeout>;
+  private readonly startup: ReturnType<typeof setTimeout>;
 
   constructor(private readonly core: Core, private readonly store: AgentStore) {
     // The leases go once the core is up: a restart may follow a grant that never reached its machine.
-    this.start = setTimeout(() => { if (!core.journal.isClosed()) for (const coreId of this.machines()) this.schedule(coreId, 0); }, 2_000);
-    this.start.unref?.();
+    this.startup = setTimeout(() => { if (!core.journal.isClosed()) for (const coreId of this.machines()) this.schedule(coreId, 0); }, 2_000);
+    this.startup.unref?.();
   }
 
   close(): void {
     this.closed = true;
-    clearTimeout(this.start);
+    clearTimeout(this.startup);
     for (const held of this.timers.values()) clearTimeout(held.timer);
     this.timers.clear();
   }
@@ -362,7 +363,7 @@ export class GroupBots {
    * refusal there comes back as a refusal; a machine that does not answer
    * comes back as unavailable, naming it.
    */
-  private async ask(threadId: ThreadId, machine: string, method: string, operation: Exclude<BotOperation, 'bot.event' | 'bot.lease'>, payload: Record<string, unknown>): Promise<{ agent: AgentProfile; peer: CoordinationPeer; result: unknown }> {
+  private async ask(threadId: ThreadId, machine: string, method: string, operation: Exclude<BotOperation, 'bot.event' | 'bot.lease'>, payload: Record<string, unknown>, words?: Words): Promise<{ agent: AgentProfile; peer: CoordinationPeer; result: unknown }> {
     const agent = this.store.projects.botOf(threadId);
     if (agent === null) throw refused(`${method}: no project is entrusted to this conversation; the owner entrusts projects to a bot in its settings on the Bots page`, { field: 'threadId', expected: 'the thread of a bot' });
     if (typeof machine !== 'string' || machine.trim().length === 0) throw invalidParams(`${method}.machine: expected the name of a machine of the group`);
@@ -375,7 +376,7 @@ export class GroupBots {
       return { agent, peer, result };
     } catch (error) {
       this.reached(peer.coreId, describe(peer, error));
-      throw error instanceof RpcFailure ? error : failure(this.core, peer, error);
+      throw error instanceof RpcFailure ? error : failure(this.core, peer, error, words);
     }
   }
 
@@ -437,6 +438,69 @@ export class GroupBots {
         if (this.follows(pending.agentId)[`${pending.coreId}/${pending.threadId}`] === undefined) this.schedule(pending.coreId, 0);
       }
     }
+  }
+
+  /**
+   * The project of another machine `thread new` names for a bot: `<machine>/<name>`
+   * or `<core-id>/<project-id>`, or its name or id there with `--machine`.
+   * Null for a project of this machine. A project of that machine not
+   * entrusted to the bot is refused, naming the ones it may use there.
+   */
+  async away(agent: AgentProfile, project: string, machine: string | null): Promise<{ peer: CoordinationPeer; projectId: string } | null> {
+    let peer: CoordinationPeer;
+    let name: string;
+    if (machine !== null) {
+      peer = memberNamed(this.core, machine, 'agent.spawn');
+      name = project.trim();
+    } else {
+      const slash = project.indexOf('/');
+      if (slash <= 0) return null;
+      const part = project.slice(0, slash).trim();
+      const found = this.core.group.peers().filter(entry => entry.coreId === part || fold(entry.name) === fold(part) || fold(machineArg(this.core, entry)) === fold(part) || (/^[0-9a-f]{6,}$/.test(part) && entry.coreId.startsWith(part)));
+      if (found.length === 0) return null;
+      // Two machines by that name: the refusal names them by core id.
+      peer = found.length === 1 ? found[0]! : memberNamed(this.core, part, 'agent.spawn');
+      name = project.slice(slash + 1).trim();
+    }
+    const granted = this.grants(agent, peer.coreId);
+    const match = () => granted.find(id => id === name || this.names(peer.coreId).find(entry => entry.id === id)?.name.toLowerCase() === name.toLowerCase());
+    let projectId = match();
+    if (projectId === undefined && granted.length > 0) {
+      // Its names were never read, or the project was renamed since: they are read again once.
+      try { await within(this.sync(peer.coreId), REQUEST_MS, peer.name); }
+      catch (error) { if (match() === undefined) throw failure(this.core, peer, error, startWords(peer)); }
+      projectId = match();
+    }
+    if (projectId !== undefined) return { peer, projectId };
+    const at = machineArg(this.core, peer);
+    const mine = granted.map(id => this.label(`${peer.coreId}/${id}`));
+    throw refused(`agent.spawn.project: ${name} is not a project of ${peer.name} entrusted to ${agent.name}; ${mine.length === 0 ? `no project of ${at} is` : `there it may start threads in ${mine.join(', ')}`}, and here in any project; the owner entrusts one with boite settings bot request projects +${at}/<project> --why "<what you look after there>"`,
+      { field: 'project', machine: at, expected: mine });
+  }
+
+  /**
+   * `thread new` of a bot in a project of another machine entrusted to it:
+   * that machine checks the lease and starts the thread with `bot.start`,
+   * then the thread is on the bot's desk. A lease sync waits for the answer,
+   * so none leaves without that thread among the ones the bot follows there.
+   */
+  async start(threadId: ThreadId, peer: CoordinationPeer, start: StartFields & { project: string }): Promise<AgentSpawn> {
+    for (let running = this.running.get(peer.coreId); running !== undefined; running = this.running.get(peer.coreId)) await running.catch(() => undefined);
+    const job = (async () => {
+      const { agent, result } = await this.ask(threadId, machineArg(this.core, peer), 'agent.spawn', 'bot.start', { ...start }, startWords(peer));
+      const spawned = result as (AgentSpawn & { row?: unknown }) | null;
+      const row = rowOf(spawned?.row);
+      if (typeof spawned?.thread?.id !== 'string' || typeof spawned.turnId !== 'string' || spawned.address?.coreId !== peer.coreId || row === null || row.id !== spawned.thread.id) {
+        throw unavailable(`${peer.name} gave an answer this machine does not read; update Boite on both machines`, { field: 'machine' });
+      }
+      this.follow(agent.id, peer, row, 'started');
+      const { row: _row, ...answer } = spawned;
+      return { ...answer, project: typeof answer.project === 'string' ? answer.project : row.project ?? '', machine: machineArg(this.core, peer) } satisfies AgentSpawn;
+    })();
+    const slot = job.then(() => undefined, () => undefined);
+    this.running.set(peer.coreId, slot);
+    try { return await job; }
+    finally { if (this.running.get(peer.coreId) === slot) this.running.delete(peer.coreId); }
   }
 
   /** `boite bot watch <machine>/<id>`: that machine checks the thread is one of the bot's projects there first. */
@@ -508,16 +572,27 @@ function describe(peer: CoordinationPeer, error: unknown): string {
   return `${peer.name} is unreachable: ${messageOf(error)}`;
 }
 
+/** What a request words its own way when that machine is too old for it, or away. */
+interface Words { old?: string; away?: string }
+
+/** How a bot's `thread new` there fails. */
+function startWords(peer: CoordinationPeer): Words {
+  return {
+    old: `Boite on ${peer.name} is too old to start threads for a bot of another machine; the owner updates it in Settings, Machines and updates`,
+    away: 'the same --request-id later answers the thread if it started there',
+  };
+}
+
 /** A refusal or an unavailable error a bot can act on, naming the machine. */
-function failure(core: Core, peer: CoordinationPeer, error: unknown): RpcFailure {
+function failure(core: Core, peer: CoordinationPeer, error: unknown, words: Words = {}): RpcFailure {
   const machine = machineArg(core, peer);
   if (error instanceof PeerRefusal) {
     if (error.message === GROUP_BOTS_OFF) {
       return refused(`${peer.name} does not let the bots of the other machines of its group look after its projects; propose the switch to the user with boite settings request groupBots true --machine ${machine} --why "<what you look after there>"`, { field: 'machine', machine, setting: 'groupBots' });
     }
-    if (error.message.startsWith('operation: expected')) return refused(`Boite on ${peer.name} is too old to let a bot of another machine look after its projects; the owner updates it in Settings, Machines and updates`, { field: 'machine', machine });
+    if (error.message.startsWith('operation: expected')) return refused(words.old ?? `Boite on ${peer.name} is too old to let a bot of another machine look after its projects; the owner updates it in Settings, Machines and updates`, { field: 'machine', machine });
     return refused(`${machine}: ${error.message}`, { field: 'machine', machine });
   }
   if (error instanceof PeerGone) return refused(`${peer.name} removed this machine from its group`, { field: 'machine', machine });
-  return unavailable(`${machine} is unreachable (${messageOf(error)}); its events reach you once it is back`, { field: 'machine', machine });
+  return unavailable(`${machine} is unreachable (${messageOf(error)}); ${words.away ?? 'its events reach you once it is back'}`, { field: 'machine', machine });
 }

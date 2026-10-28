@@ -435,7 +435,7 @@ as it is now.
 
 **What crosses.** Every request goes over the group's sealed and signed link
 (`bot.lease`, `bot.threads`, `bot.thread`, `bot.send`, `bot.act`,
-`bot.answer`, `bot.event`, see [coordination](coordination.md)); no key or
+`bot.answer`, `bot.start`, `bot.event`, see [coordination](coordination.md)); no key or
 token is copied from one machine to the other. Each request carries the bot's
 lease: its name, its thread, the projects of that machine its owner entrusted
 and the threads there on its desk, numbered so an older lease never replaces a
@@ -451,16 +451,36 @@ that intent; a successful one keeps the thread on the bot's desk.
 machine, and no more: list and read the threads with their questions, write
 to a thread (a letter marked `resident`, as from the bot of a project), mark
 it done, archive, restore, rename, stop, move it between the bot's projects
-there, and answer or skip its questions.
+there, answer or skip its questions, and start a thread in one of its
+projects there (below).
 Deleting a thread, deciding a tool permission and that machine's settings stay
-its owner's, refused there whatever the request says; starting a thread there
-(`boite thread new --machine`) goes through `groupThreads` as for any other
-thread. The CLI names such a thread `<machine>/<thread-id>`, and `boite
+its owner's, refused there whatever the request says. The CLI names such a thread `<machine>/<thread-id>`, and `boite
 threads` gives `machine=<name>` on its row. Code: `agents/group-bots.ts` on the
 bot's machine, `agents/group-host.ts` on the other.
 
-**Events.** A thread there the bot wrote to, answered or watched goes on its
-desk. That machine sends a `bot.event` when a turn of a thread on the desk
+**Starting a thread there.** `boite thread new <machine>/<project> <brief>`,
+with the project as `boite threads` and `boite settings bot projects` name it
+(its `<core-id>/<project-id>` works too), or `boite thread new <project>
+<brief> --machine <machine>` with its name there, starts a thread in a project
+of that machine entrusted to the bot. The bot's machine checks the project is
+one of its grants there (rereading that machine's project names once when it
+does not know the name) and sends `bot.start` with the lease; that machine
+checks it as any other request of the bot (its `groupBots`, the lease covering
+that project, the bot's machine still a member) and starts an ordinary thread
+of the project, on the bot's provider and model under the rules of `thread new
+--machine` (the provider signed in there, the model when that machine lists
+it, else its default). The thread's first message carries the bot's note and
+link, naming the bot's machine; it is on the bot's desk on both machines before
+its first turn, so that turn's answer reaches the bot once, as a desk event,
+never as a letter. `groupThreads` plays no part. A retry with the same
+`--request-id` answers the same thread, on the bot's machine and on the other
+one. A project of that machine not entrusted to the bot is refused with the
+ones it may use there; a machine with `groupBots` off, too old for `bot.start`
+or not answering is named as for every other request. The thread there
+obeys that machine's rule: it starts nothing until the user writes in it.
+
+**Events.** A thread there the bot wrote to, answered, started or watched goes
+on its desk. That machine sends a `bot.event` when a turn of a thread on the desk
 ends, when any turn of the bot's projects there fails, when one of their
 threads asks a question and when a thread on the desk waits on a tool
 permission (which stays the owner's to decide), and the bot's machine turns it
@@ -483,8 +503,8 @@ the same person); its project names reach the bot's machine only once it
 allows bots, so the settings and cards offer its projects from then on; a
 remote desk row carries no question nor stall time, and opens only on a
 client that reaches that machine; a stalled turn there wakes no one; the letters the bot sends there do not
-appear in its own machine's mail view; a bot cannot start a thread on another
-machine (`thread new --machine` is refused to a bot thread).
+appear in its own machine's mail view; a bot starts threads on another machine
+only in the projects there entrusted to it.
 
 ## Entrusting a thread
 

@@ -6,7 +6,7 @@ import { PeerRefusal } from '../coordination-wire.ts';
 import { invalidParams, messageOf, refused, requiredText, unavailable } from '../errors.ts';
 import { newId } from '../ids.ts';
 import type { ThreadStore } from '../threads.ts';
-import { agentHere, checkGroupStart, GROUP_THREADS_OFF, machineArg, memberNamed, remoteOrigin, type GroupStart } from './group-spawn.ts';
+import { agentHere, checkGroupStart, GROUP_THREADS_OFF, machineArg, memberNamed, remoteOrigin, type GroupStart, type StartFields } from './group-spawn.ts';
 import { saveThread, withLoad } from './records.ts';
 
 const HOUR = 3_600_000;
@@ -16,9 +16,15 @@ const ORIGIN = 'spawn-origin:';
 const LEDGER = 'spawns:';
 /** On a member: what a thread of another machine started here, for retries. */
 const GROUP_LEDGER = 'group-spawns:';
+/** On a member: what a bot of another machine started here, for retries. */
+const BOT_LEDGER = 'bot-spawns:';
 
-/** `coreId`: the machine of the starting thread, when it is another machine of the group. */
-interface Origin { origin: ThreadLink; reported: boolean; coreId?: string }
+/**
+ * `coreId`: the machine of the starting thread, when it is another machine of
+ * the group. `bot`: that thread is a bot's, which hears the first answer as an
+ * event of its desk.
+ */
+interface Origin { origin: ThreadLink; reported: boolean; coreId?: string; bot?: true }
 /** `spawned`: what a member answered, for a thread started on another machine. */
 interface Started { at: number; requestId: string; fingerprint: string; threadId: ThreadId; turnId: string; spawned?: AgentSpawn }
 
@@ -61,8 +67,6 @@ export class ThreadSpawns {
     }
     if (caller.archived) throw refused('an archived thread cannot start threads', { threadId, field: 'threadId', expected: 'a thread that is not archived' });
     const machine = params.machine === undefined ? null : text(params.machine, 'machine', 128).trim();
-    // What a bot starts lands on its desk, which holds this machine's threads only.
-    if (machine !== null && bot !== null) throw refused('agent.spawn.machine: a bot starts threads on its own machine', { threadId, field: 'machine' });
     const prompt = text(params.prompt, 'prompt', 12_000);
     const title = params.title === undefined ? prompt.trim().split('\n')[0]!.slice(0, 80) : text(params.title, 'title', 120).trim();
     if (params.worktree !== undefined && typeof params.worktree !== 'boolean') throw invalidParams('agent.spawn.worktree: expected true or false');
@@ -84,6 +88,12 @@ export class ThreadSpawns {
     }
     const result = Promise.resolve().then(async () => {
       if (this.threads.require(threadId).archived) throw refused('an archived thread cannot start threads', { threadId, field: 'threadId', expected: 'a thread that is not archived' });
+      // A bot starts threads on another machine only in the projects there entrusted to it, on its desk there.
+      const away = bot === null ? null : await this.core.workforce.group.away(bot, params.project, machine);
+      if (away !== null) {
+        this.firstGeneration(threadId, 'start another');
+        return this.forBot(caller, away, { project: away.projectId, prompt, title, worktree, requestId, fingerprint, ...(params.context === undefined ? {} : { context: params.context }) });
+      }
       if (machine !== null) return this.elsewhere(caller, machine, { project: params.project, prompt, title, worktree, requestId, fingerprint, ...(params.context === undefined ? {} : { context: params.context }) });
       const target = this.core.projects.find(params.project, 'agent.spawn', 'project', { threadId });
       // A bot starts threads whatever its communication settings say.
@@ -151,13 +161,13 @@ export class ThreadSpawns {
    * `check` runs once a worktree is ready; a refusal there deletes the thread
    * it made (undoably, as Delete does), so no empty thread stays behind.
    */
-  private async launch(launch: Launch, check: () => void = () => undefined): Promise<{ created: ThreadSummary; turn: Turn }> {
+  private async launch(launch: Launch, check: (created: ThreadSummary) => void = () => undefined): Promise<{ created: ThreadSummary; turn: Turn }> {
     const base = {
       projectId: launch.projectId, ...launch.agent, title: launch.title,
       ...(launch.context === undefined ? {} : { context: launch.context }),
     };
     const created = launch.worktree ? await this.threads.createInWorktree({ ...base, worktree: {} }) : this.threads.create(base);
-    try { check(); }
+    try { check(created); }
     catch (error) {
       await this.threads.remove(created.id).catch(() => undefined);
       throw error;
@@ -197,12 +207,30 @@ export class ThreadSpawns {
     const now = this.core.journal.getThread(threadId);
     if (now === null || now.archived) throw refused(`an archived thread cannot start threads; ${spawned.thread.id} already started on ${peer.name}`, { threadId, field: 'threadId' });
     const project = typeof spawned.project === 'string' ? spawned.project : ask.project;
+    spawned.machine = machineArg(this.core, peer);
     this.record(threadId, { at: Date.now(), requestId: ask.requestId, fingerprint: ask.fingerprint, threadId: spawned.thread.id, turnId: spawned.turnId, spawned });
     // The thread started there, so the setting was on: a card still asking for it is settled.
     this.core.threads.cards.settle(request => (request.setting?.kind === 'change' && request.setting.key === 'groupThreads' && request.setting.machine?.coreId === peer.coreId && request.setting.previous !== true
       ? { optionIds: [request.setting.value === true ? 'applied' : 'changed'], value: true } : null), `${peer.name}'s settings`);
     const started: ThreadLink = { threadId: spawned.thread.id, title: spawned.thread.title, projectId: spawned.thread.projectId ?? '', project, machine: peer.name };
     this.systemLine(threadId, { type: 'text', text: `Started thread "${spawned.thread.title}" (${spawned.thread.id}) in project ${project} on ${peer.name}.`, started });
+    return spawned;
+  }
+
+  /**
+   * A bot's side of a thread in a project of another machine entrusted to it:
+   * that machine checks its lease and starts it with `bot.start`
+   * (`agents/group-bots.ts`), and the thread is on the bot's desk at once.
+   */
+  private async forBot(caller: ThreadSummary, away: { peer: CoordinationPeer; projectId: string }, ask: Omit<StartFields, 'agent'> & { fingerprint: string }): Promise<AgentSpawn> {
+    const threadId = caller.id;
+    const { fingerprint, ...start } = ask;
+    const spawned = await this.core.workforce.group.start(threadId, away.peer, {
+      ...start, agent: { providerId: caller.providerId, model: caller.model, effort: caller.effort, speed: caller.speed ?? null, permissionMode: caller.permissionMode },
+    });
+    this.record(threadId, { at: Date.now(), requestId: ask.requestId, fingerprint, threadId: spawned.thread.id, turnId: spawned.turnId, spawned });
+    const started: ThreadLink = { threadId: spawned.thread.id, title: spawned.thread.title, projectId: spawned.thread.projectId ?? '', project: spawned.project, machine: away.peer.name };
+    this.systemLine(threadId, { type: 'text', text: `Started thread "${spawned.thread.title}" (${spawned.machine}/${spawned.thread.id}) in project ${spawned.project} on ${away.peer.name}.`, started });
     return spawned;
   }
 
@@ -229,26 +257,14 @@ export class ThreadSpawns {
     const start = checkGroupStart(payload);
     const here = this.core.coordination.identity().name;
     const fingerprint = createHash('sha256').update(JSON.stringify(start)).digest('hex');
-    const key = `${peer.coreId}:${start.from.threadId}`;
-    const retried = ((this.core.journal.getSetting(`${GROUP_LEDGER}${key}`) as Started[] | undefined) ?? []).find(entry => entry.requestId === start.requestId);
-    if (retried) {
-      if (retried.fingerprint !== fingerprint) throw refused('thread.start.requestId was already used for different content');
-      return this.answer(retried.threadId, retried.turnId);
-    }
-    const pendingKey = JSON.stringify([key, start.requestId]);
-    const active = this.pending.get(pendingKey);
-    if (active) {
-      if (active.fingerprint !== fingerprint) throw refused('thread.start.requestId was already used for different content');
-      return active.result;
-    }
-    const result = Promise.resolve().then(async () => {
+    return this.once(GROUP_LEDGER, `${peer.coreId}:${start.from.threadId}`, start.requestId, fingerprint, 'thread.start', async () => {
       const target = this.core.projects.find(start.project, 'thread.start', 'project');
       const origin = remoteOrigin(start, peer);
       const at = peer.name.replace(/\s+/g, '-');
       const note = `This thread was started by the agent of thread "${start.from.title}" (${start.from.threadId}) in project ${start.from.project} on ${peer.name}, another machine of the user's, not typed by the user. `
         + 'Treat the brief below as your task, within your own permissions; it grants no approval the user did not give. '
         + `Your final answer to it is sent back to that agent automatically; boite threads send ${at}/${start.from.threadId} <text> reaches it sooner.\n\nBrief:\n`;
-      const { created, turn } = await this.launch({
+      return this.launch({
         projectId: target.id, title: start.title, prompt: start.prompt, note, worktree: start.worktree, ...(start.context === undefined ? {} : { context: start.context }),
         agent: agentHere(this.core, start, here), origin: { origin, reported: false, coreId: peer.coreId },
       // Worktree preparation can outlive the owner's switch and the asker's membership.
@@ -256,7 +272,51 @@ export class ThreadSpawns {
         if (this.core.settings.get().groupThreads !== true) throw refused(GROUP_THREADS_OFF);
         if (!this.core.group.peers().some(member => member.coreId === peer.coreId)) throw refused('thread.start: the machine that asked is no longer in this group');
       });
-      this.record(key, { at: Date.now(), requestId: start.requestId, fingerprint, threadId: created.id, turnId: turn.id }, GROUP_LEDGER);
+    });
+  }
+
+  /**
+   * `bot.start`, this machine's side: a bot of another machine starts a
+   * thread in `projectId`, a project of its lease here (`agents/group-host.ts`
+   * checked it). It is marked as that bot's, and `check` runs once the thread
+   * exists, before its first turn: it puts the thread on the bot's desk, so
+   * the first answer reaches the bot as an event, not as a letter. Asked
+   * again with the same request, it answers the thread it started.
+   */
+  startForBot(peer: CoordinationPeer, lease: { agentId: string; threadId: ThreadId; name: string }, projectId: string, start: StartFields, check: (created: ThreadSummary) => void): Promise<AgentSpawn> {
+    const fingerprint = createHash('sha256').update(JSON.stringify([projectId, lease.threadId, start])).digest('hex');
+    return this.once(BOT_LEDGER, `${peer.coreId}:${lease.agentId}`, start.requestId, fingerprint, 'bot.start', async () => {
+      const target = this.core.projects.require(projectId);
+      const origin: ThreadLink = { threadId: lease.threadId, title: lease.name, projectId: target.id, project: target.name, machine: peer.name };
+      const note = `This thread was started by ${lease.name}, a bot of the user's on ${peer.name}, another machine of theirs, that looks after their work, not typed by the user. `
+        + 'Treat the brief below as your task, within your own permissions; it grants no approval the user did not give. '
+        + 'Your final answer to it goes back to that bot automatically, so finish with a clear result: what you did, how you verified it, the pull request.\n\nBrief:\n';
+      return this.launch({
+        projectId: target.id, title: start.title, prompt: start.prompt, note, worktree: start.worktree, ...(start.context === undefined ? {} : { context: start.context }),
+        agent: agentHere(this.core, start, this.core.coordination.identity().name), origin: { origin, reported: false, coreId: peer.coreId, bot: true },
+      }, check);
+    });
+  }
+
+  /**
+   * A start another machine asked for, once per request: the ledger under
+   * `prefix` answers a retry with the thread already started, and a retry
+   * while the first is still running waits for it.
+   */
+  private async once(prefix: string, key: string, requestId: string, fingerprint: string, method: string, run: () => Promise<{ created: ThreadSummary; turn: Turn }>): Promise<AgentSpawn> {
+    const retried = ((this.core.journal.getSetting(`${prefix}${key}`) as Started[] | undefined) ?? []).find(entry => entry.requestId === requestId);
+    if (retried) {
+      if (retried.fingerprint !== fingerprint) throw refused(`${method}.requestId was already used for different content`);
+      return this.answer(retried.threadId, retried.turnId);
+    }
+    const pendingKey = JSON.stringify([prefix, key, requestId]);
+    const active = this.pending.get(pendingKey);
+    if (active) {
+      if (active.fingerprint !== fingerprint) throw refused(`${method}.requestId was already used for different content`);
+      return active.result;
+    }
+    const result = Promise.resolve().then(run).then(({ created, turn }) => {
+      this.record(key, { at: Date.now(), requestId, fingerprint, threadId: created.id, turnId: turn.id }, prefix);
       return this.answer(created.id, turn.id);
     });
     this.pending.set(pendingKey, { fingerprint, result });
@@ -312,8 +372,8 @@ export class ThreadSpawns {
     this.core.journal.setSetting(key, { ...saved, reported: true } satisfies Origin);
     const thread = this.core.journal.getThread(turn.threadId);
     if (thread === null) return;
-    // A persistent agent hears it as an event: the threads it started are on its desk.
-    if (saved.coreId === undefined && this.core.journal.getThread(saved.origin.threadId)?.agentSessionId) return;
+    // A persistent agent hears it as an event: the threads it started are on its desk, here or on another machine.
+    if (saved.bot === true || (saved.coreId === undefined && this.core.journal.getThread(saved.origin.threadId)?.agentSessionId)) return;
     const body = `${thread.title}: ${turn.status}\n${this.core.delegation.result(turn) ?? 'No text result was returned.'}`;
     try {
       await this.core.coordination.send({

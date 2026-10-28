@@ -32,7 +32,6 @@ export interface GroupStart {
 
 const PERMISSION_MODES: readonly PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions', 'yolo', 'plan', 'dontAsk'];
 const fold = (name: string): string => name.trim().replace(/\s+/g, '-').toLowerCase();
-const optional = (value: unknown, field: string, max: number): string | null => (value === null || value === undefined ? null : requiredText(value, `thread.start.${field}`, max));
 
 /** What `--machine` takes for `peer`: its name, or a core id prefix when another machine of the group goes by the same one. */
 export function machineArg(core: Core, peer: CoordinationPeer): string {
@@ -62,30 +61,27 @@ export function memberNamed(core: Core, query: string, method: string): Coordina
   throw refused(`${method}.machine: ${found.length} machines are named ${wanted}; name one by a core id prefix: ${found.map(peer => peer.coreId.slice(0, 8)).join(', ')}`, { field: 'machine' });
 }
 
-/** A `thread.start` request checked field by field. */
-export function checkGroupStart(value: unknown): GroupStart {
+/** What a thread started on another machine runs: a `thread.start` request without its starter, or a `bot.start` one. */
+export type StartFields = Omit<GroupStart, 'from'>;
+
+/** The fields of a `thread.start` or `bot.start` request, checked one by one. */
+export function checkStartFields(value: unknown, method = 'thread.start'): StartFields {
   const raw = (value ?? {}) as Record<string, unknown>;
-  const from = (raw.from ?? {}) as Record<string, unknown>;
   const agent = (raw.agent ?? {}) as Record<string, unknown>;
-  if (typeof raw.worktree !== 'boolean') throw invalidParams('thread.start.worktree: expected true or false');
-  if (typeof agent.permissionMode !== 'string' || !(PERMISSION_MODES as readonly string[]).includes(agent.permissionMode)) throw invalidParams(`thread.start.agent.permissionMode: expected ${PERMISSION_MODES.join(', ')}`);
+  const optional = (entry: unknown, field: string, max: number): string | null => (entry === null || entry === undefined ? null : requiredText(entry, `${method}.${field}`, max));
+  if (typeof raw.worktree !== 'boolean') throw invalidParams(`${method}.worktree: expected true or false`);
+  if (typeof agent.permissionMode !== 'string' || !(PERMISSION_MODES as readonly string[]).includes(agent.permissionMode)) throw invalidParams(`${method}.agent.permissionMode: expected ${PERMISSION_MODES.join(', ')}`);
   const context = raw.context;
-  if (context !== undefined && (context === null || (typeof context !== 'string' && typeof context !== 'object') || Array.isArray(context))) throw invalidParams('thread.start.context: expected a preset or a context request');
+  if (context !== undefined && (context === null || (typeof context !== 'string' && typeof context !== 'object') || Array.isArray(context))) throw invalidParams(`${method}.context: expected a preset or a context request`);
   return {
-    from: {
-      threadId: requiredText(from.threadId, 'thread.start.from.threadId', 128),
-      title: requiredText(from.title, 'thread.start.from.title', 200),
-      projectId: requiredText(from.projectId, 'thread.start.from.projectId', 128),
-      project: requiredText(from.project, 'thread.start.from.project', 200),
-    },
-    project: requiredText(raw.project, 'thread.start.project', 4096),
-    prompt: requiredText(raw.prompt, 'thread.start.prompt', 12_000),
-    title: requiredText(raw.title, 'thread.start.title', 120).trim(),
+    project: requiredText(raw.project, `${method}.project`, 4096),
+    prompt: requiredText(raw.prompt, `${method}.prompt`, 12_000),
+    title: requiredText(raw.title, `${method}.title`, 120).trim(),
     worktree: raw.worktree,
     ...(context === undefined ? {} : { context: context as ContextRequest | ContextPreset }),
-    requestId: requiredText(raw.requestId, 'thread.start.requestId', 128),
+    requestId: requiredText(raw.requestId, `${method}.requestId`, 128),
     agent: {
-      providerId: requiredText(agent.providerId, 'thread.start.agent.providerId', 128),
+      providerId: requiredText(agent.providerId, `${method}.agent.providerId`, 128),
       model: optional(agent.model, 'agent.model', 200),
       effort: optional(agent.effort, 'agent.effort', 64),
       speed: optional(agent.speed, 'agent.speed', 64),
@@ -94,12 +90,28 @@ export function checkGroupStart(value: unknown): GroupStart {
   };
 }
 
+/** A `thread.start` request checked field by field. */
+export function checkGroupStart(value: unknown): GroupStart {
+  const raw = (value ?? {}) as Record<string, unknown>;
+  const from = (raw.from ?? {}) as Record<string, unknown>;
+  const fields = checkStartFields(value);
+  return {
+    from: {
+      threadId: requiredText(from.threadId, 'thread.start.from.threadId', 128),
+      title: requiredText(from.title, 'thread.start.from.title', 200),
+      projectId: requiredText(from.projectId, 'thread.start.from.projectId', 128),
+      project: requiredText(from.project, 'thread.start.from.project', 200),
+    },
+    ...fields,
+  };
+}
+
 /**
  * The agent a thread started from another machine runs on here: the
  * caller's provider on this machine's signed-in login, with the caller's
  * model, level and speed when this login lists that model, else its default.
  */
-export function agentHere(core: Core, start: GroupStart, machine: string): { providerId: string; accountId: string; model?: string; effort: string | null; speed: string | null; permissionMode: PermissionMode } {
+export function agentHere(core: Core, start: Pick<GroupStart, 'agent'>, machine: string): { providerId: string; accountId: string; model?: string; effort: string | null; speed: string | null; permissionMode: PermissionMode } {
   const { providerId, model, effort, speed, permissionMode } = start.agent;
   const provider = core.providers.available().some(summary => summary.id === providerId) ? core.providers.require(providerId) : null;
   const account = provider === null ? undefined : loggedInAccount(core.accounts.list().filter(entry => entry.providerId === providerId));

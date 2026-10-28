@@ -10,18 +10,20 @@
  * What the bot may do here is what a bot of this machine does on a project
  * entrusted to it (`projects.ts`): list, read, steer with letters marked as
  * its own, answer questions, archive, mark done, stop, rename, move between
- * its projects. Deleting threads, tool permissions and settings are never
+ * its projects, start a thread in one of them (`bot.start`, on the bot's desk
+ * here at once). Deleting threads, tool permissions and settings are never
  * asked of this machine: there is no operation for them.
  *
  * Events go back by themselves: a turn of a thread it follows, any failed
  * turn, any question, a permission a followed thread waits on. They wait in a
  * bounded outbox per machine while it is away and leave once it answers.
  */
-import type { AgentLetter, CoordinationPeer, PermissionRequest, ProjectId, ProjectThreadRow, QuestionRequest, ThreadId, ThreadSummary, Turn } from '@boite/contracts';
+import type { AgentLetter, AgentSpawn, CoordinationPeer, PermissionRequest, ProjectId, ProjectThreadRow, QuestionRequest, ThreadId, ThreadSummary, Turn } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { RESIDENT_LETTER_TTL_MS } from '../coordination-letter.ts';
 import { MAX_BODY, PeerRefusal, type BotOperation } from '../coordination-wire.ts';
 import { invalidParams, messageOf, refused } from '../errors.ts';
+import { checkStartFields } from '../threads/group-spawn.ts';
 import type { Steward } from './projects.ts';
 
 /** What this machine answers while its owner has not let the bots of the group look after its projects. */
@@ -288,7 +290,36 @@ export class GroupBotHost {
         this.watch(peer.coreId, lease.agentId, target.id);
         return { id: letter.id, status: 'received' as const, thread: this.core.workforce.projects.row(this.core.threads.require(target.id)) };
       }
+      case 'bot.start': return this.start(peer, this.take(peer, raw.lease), raw);
     }
+  }
+
+  /**
+   * `bot.start`: the bot starts a thread in a project of its lease here, on
+   * the rules a thread of another machine starts on (`threads/spawn.ts`). It
+   * goes on the bot's desk before its first turn, so that turn's answer goes
+   * back as an event of the desk. The answer carries the thread's row.
+   */
+  private async start(peer: CoordinationPeer, lease: BotLease, raw: Record<string, unknown>): Promise<AgentSpawn & { row: ProjectThreadRow }> {
+    const start = checkStartFields(raw, 'bot.start');
+    const wanted = start.project.trim().toLowerCase();
+    const scope = this.scope(lease);
+    const projectId = scope.find(id => id === start.project || this.core.journal.getProject(id)?.name.toLowerCase() === wanted);
+    if (projectId === undefined) {
+      const names = scope.map(id => this.core.journal.getProject(id)?.name ?? id);
+      throw refused(`bot.start.project: ${start.project} is not a project entrusted to ${lease.name} here${names.length ? `; its projects here are ${names.join(', ')}` : ''}`, { field: 'project', expected: names });
+    }
+    const spawned = await this.core.threads.spawns.startForBot(peer, lease, projectId, start, created => {
+      // Worktree preparation can outlive the owner's switch, the asker's membership and the grant.
+      if (!this.allowed()) throw refused(GROUP_BOTS_OFF);
+      if (this.member(peer.coreId) === null) throw refused('bot.start: the machine that asked is no longer in this group');
+      const now = this.leases(peer.coreId)[lease.agentId];
+      if (now === undefined || !this.scope(now).includes(projectId)) throw refused(`bot.start.project: ${start.project} is no longer entrusted to ${lease.name} here`, { field: 'project' });
+      this.watch(peer.coreId, lease.agentId, created.id);
+    });
+    // A retry puts it back on the desk, whatever a lease sync did meanwhile.
+    this.watch(peer.coreId, lease.agentId, spawned.thread.id);
+    return { ...spawned, row: this.core.workforce.projects.row(this.core.threads.require(spawned.thread.id)) };
   }
 
   /**
