@@ -59,6 +59,8 @@ function askToFollowLink(url: string): Promise<boolean> {
 export class Connection {
   connection = $state<ClientState>('idle');
   core = $state<CoreInfo | null>(null);
+  /** How far the core's clock runs ahead of this device's (`Client.clockOffset`). */
+  clockOffset = $state(0);
   /** Owner on the core token, session on a paired one; what decides who may pair a phone. */
   principal = $state<Principal | null>(null);
   /** The address of the core this UI talks to; null on the fake client. */
@@ -364,6 +366,7 @@ export class Connection {
     this.ctx.workbench.tracedThreadId = null;
     this.principal = null;
     this.core = null;
+    this.clockOffset = 0;
     this.attachEndpoint(endpoint);
     await s.connect();
     await s.openWhereLeft();
@@ -438,6 +441,7 @@ export class Connection {
       const core = await client.connect();
       if (!this.ctx.currentClient(client, generation)) return;
       this.core = core;
+      this.clockOffset = client.clockOffset ?? 0;
       // Before the landing: a draft it opens unfolds its project over the restored folds.
       this.ctx.projects.restoreFolds();
       if (this.localCore) noteThisComputer(core.hostname);

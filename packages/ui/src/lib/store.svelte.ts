@@ -226,6 +226,7 @@ export class Store {
   set connection(value) { this.#ctx.connection.connection = value; }
   get core() { return this.#ctx.connection.core; }
   set core(value) { this.#ctx.connection.core = value; }
+  get clockOffset() { return this.#ctx.connection.clockOffset; }
   get principal() { return this.#ctx.connection.principal; }
   set principal(value) { this.#ctx.connection.principal = value; }
   get endpointUrl() { return this.#ctx.connection.endpointUrl; }

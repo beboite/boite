@@ -26,11 +26,13 @@ export function writeTurn(db: Database, turn: Turn): void {
 /**
  * One turn of a thread picked in SQL, so a thread with thousands of turns
  * reads one row, not its history. Newest first by rowid, which is what
- * `listTurns(threadId)` ends with; `queued` takes the oldest.
+ * `listTurns(threadId)` ends with; `queued` takes the oldest. `conversation`
+ * leaves out a cache keepalive's pings, which are not the conversation's turns.
  */
 const ONE_TURN = {
   running: "SELECT * FROM turns WHERE thread_id = ? AND status = 'running' ORDER BY rowid DESC LIMIT 1",
   last: 'SELECT * FROM turns WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1',
+  conversation: "SELECT * FROM turns WHERE thread_id = ? AND COALESCE(json_extract(execution, '$.operation'), '') <> 'keepalive' ORDER BY rowid DESC LIMIT 1",
   ended: "SELECT * FROM turns WHERE thread_id = ? AND status NOT IN ('queued', 'running') ORDER BY rowid DESC LIMIT 1",
   queued: "SELECT * FROM turns WHERE thread_id = ? AND status = 'queued' AND json_extract(execution, '$.operation') = ? ORDER BY rowid LIMIT 1",
 } as const;
