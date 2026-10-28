@@ -263,6 +263,24 @@ describe('hermes', () => {
     expect(loggedLines('prompt ').at(-1)?.split(' ')[1]).toBe(QWEN);
   });
 
+  test('with no probe of the account left, that cold turn reads the agent own model from a throwaway session', async () => {
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const { threadId } = await hermesThread(client, LLAMA);
+    await runTurn(client, threadId, 'first');
+    await waitFor(() => harness?.core.procs.liveCount(threadId) === 0);
+    // A reload of a changed descriptor drops the account's probe.
+    const descriptorPath = join(harness?.dataDir ?? '', 'providers', 'hermes-fake.json');
+    writeFileSync(descriptorPath, readFileSync(descriptorPath, 'utf8').replace('"Fake Hermes"', '"Fake Hermes reloaded"'), 'utf8');
+    await client.call('providers.reload', {});
+    const opened = loggedLines('new:').length;
+
+    await client.call('threads.update', { threadId, model: 'default' });
+    await runTurn(client, threadId, 'second');
+    expect(loggedLines('new:')).toHaveLength(opened + 1);
+    expect(loggedLines('set_model ')).toEqual([LLAMA, QWEN]);
+    expect(loggedLines('prompt ').at(-1)?.split(' ')[1]).toBe(QWEN);
+  });
+
   test('a load Hermes answers with no session is replaced in the same turn, carrying the history', async () => {
     const client = await startCore({ warmProcessMinutes: 0 });
     const { threadId } = await hermesThread(client);

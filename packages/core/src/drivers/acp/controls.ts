@@ -139,6 +139,10 @@ export class SessionControls {
     if (this.ownListedModel === null && modelId !== null) this.ownListedModel = modelId;
   }
 
+  knowsOwnListedModel(): boolean {
+    return this.ownListedModel !== null;
+  }
+
   /** The model option's value in a `session/new` answer, the first one kept. */
   noteOwnModel(options: SessionConfigOption[] | null): void {
     if (this.ownModel !== null) return;

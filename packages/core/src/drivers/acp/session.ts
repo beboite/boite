@@ -22,7 +22,7 @@ import type { LiveTurnSettings, ProbeContext, ProbeFilter, SessionContext } from
 import { OpenCommands } from './commands.ts';
 import { SessionControls } from './controls.ts';
 import { failureText, loadRefusal, LoadRefused, rpcReason, rpcRefusal } from './load.ts';
-import { AGENT_OWN_MODEL } from './models.ts';
+import { AGENT_OWN_MODEL, agentModelsOf } from './models.ts';
 import { canDeleteSessions, CLIENT_NAME, discardSession, EXIT_GRACE_MS, isGrok, isHermes, STDERR_MAX, type AcpDeps, type Timer } from './protocol.ts';
 import { jsonLinesOnly } from './stdout.ts';
 import { commandsOf, imageBlocksOf, usdCostOf, type AcpTurn } from './turn.ts';
@@ -615,11 +615,14 @@ export class AcpSession {
       // throwaway session reads them once for the account, and the next cold
       // turn of any thread starts from what it found.
       // A load that listed models answers the model question: only an effort
-      // still has to be looked for.
+      // still has to be looked for, or the agent's own model for a thread
+      // going back to it, which a load cannot tell (it reports the model the
+      // session was left on) and no probe of this account recorded.
+      const ownUnknown = ctx.thread.model === AGENT_OWN_MODEL && this.controls.hasModels() && !this.controls.knowsOwnListedModel();
       if (!isGrok(ctx.provider) && !this.controls.hasOptions()
-        && (ctx.thread.effort !== null || (ctx.thread.model !== AGENT_OWN_MODEL && !this.controls.hasModels()))) {
+        && (ctx.thread.effort !== null || ownUnknown || (ctx.thread.model !== AGENT_OWN_MODEL && !this.controls.hasModels()))) {
         const discovered = await connection.agent.request('session/new', { cwd: ctx.thread.cwd, mcpServers: [] });
-        this.seedConfig(discovered.configOptions ?? []);
+        this.seedConfig(discovered.configOptions ?? [], agentModelsOf(discovered)?.currentModelId ?? null);
         this.onOptions(discovered.configOptions ?? []);
         await discardSession(connection.agent, this.canDelete, discovered.sessionId);
       }
