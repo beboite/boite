@@ -18,7 +18,7 @@
   import { projectName } from '../lib/format';
   import { workspace } from '../lib/workspace.svelte';
   import Menu from './Menu.svelte';
-  import { ThreadRename } from '../lib/thread-rename.svelte';
+  import { ThreadRename, commitOnUnmount } from '../lib/thread-rename.svelte';
   import { watchStatus } from '../lib/pull-request-watch';
   import ContextModeBadge from './ContextModeBadge.svelte';
   import CoordinationDialog from './CoordinationDialog.svelte';
@@ -34,6 +34,7 @@
   });
   /** The rename in progress, bound to the thread it began on rather than to whatever is open later. */
   let rename = $state<ThreadRename | null>(null);
+  commitOnUnmount(() => rename);
   let coordinationThreadId = $state<string | null>(null);
   $effect(() => {
     if (thread?.id !== coordinationThreadId) coordinationThreadId = null;

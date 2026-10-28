@@ -33,3 +33,12 @@ export class ThreadRename {
     this.#settled = true;
   }
 }
+
+/**
+ * Called while a component starts: when it unmounts with a rename open, the
+ * title typed so far still lands. A machine switch removes the input, and a
+ * browser may not send the blur that would have committed it.
+ */
+export function commitOnUnmount(current: () => ThreadRename | null): void {
+  $effect(() => () => void current()?.commit());
+}

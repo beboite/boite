@@ -14,7 +14,7 @@
   import PullRequestBadge from './PullRequestBadge.svelte';
   import { projectName } from '../lib/format';
   import { canMarkDone, markDone } from '../lib/recent.svelte';
-  import { ThreadRename } from '../lib/thread-rename.svelte';
+  import { ThreadRename, commitOnUnmount } from '../lib/thread-rename.svelte';
   let {
     machine,
     project,
@@ -42,6 +42,7 @@
   let open = $derived(workspace.active === owner && owner.openThread?.id === thread.id);
   /** The rename in progress, bound to the machine and thread it began on. */
   let renaming = $state<ThreadRename | null>(null);
+  commitOnUnmount(() => renaming);
   const pr = trackThreadPullRequest(() => ({ owner, thread, hidden }));
   const pullRequest = $derived(pr.value);
   /** Only a project or pull request needs a second line; the machine and the provider stay beside the title. */

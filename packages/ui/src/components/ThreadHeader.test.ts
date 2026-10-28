@@ -61,3 +61,12 @@ test('Enter commits once and Escape commits nothing, whatever blur follows', asy
   await settle();
   expect(rename).toHaveBeenCalledTimes(1);
 });
+
+test('a header unmounted with its rename open, as a machine switch does, still writes the title typed so far', async () => {
+  const rename = await start();
+  await renameOpen('Typed before the switch');
+  await unmount(mounted!);
+  mounted = undefined;
+  await settle();
+  expect(rename.mock.calls).toEqual([['t-trace', 'Typed before the switch']]);
+});
