@@ -98,7 +98,8 @@ export class AutoCompaction {
     if (thread === null || reading === null || this.timers.has(threadId)) return;
     const limit = effectiveCompaction(this.core.settings.get(), thread).autoCompact?.tokens ?? null;
     if (limit === null || reading.tokens < limit) return;
-    const last = this.core.journal.lastTurn(threadId);
+    // A keepalive's ping says nothing of the conversation, as after a turn.
+    const last = this.core.journal.lastTurn(threadId, true);
     if (last !== null && (last.status !== 'done' || last.execution?.operation === 'compact')) return;
     this.fire(threadId);
   }

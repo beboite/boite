@@ -198,7 +198,8 @@ lowered the limit, or a restart dropped its timer. When a client shows it
 the user reads and types, instead of letting the next prompt wait for the
 agent's own blocking compaction. A background copy cannot help there, since
 one starts only below the limit. As after a turn, a last turn that stopped or
-failed is left to the user, and a compaction never chains into another: when
+failed is left to the user (a cache keepalive ping does not count as the last
+turn), and a compaction never chains into another: when
 the last turn is one, even still over the limit, a look starts nothing. An ACP agent names its `compact` command only once its session is
 prepared, so that announcement, on a shown thread, is checked the same way. A prompt that crosses the
 limit by itself is compacted by the agent before it is sent, as above. The in-memory client implements `turn-end`

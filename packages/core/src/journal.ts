@@ -451,7 +451,7 @@ export class Journal {
 
   /** One turn read without the thread's history (`journal/turn-rows.ts`). */
   runningTurn(threadId: string): Turn | null { return oneTurn(this.db, 'running', threadId); }
-  lastTurn(threadId: string): Turn | null { return oneTurn(this.db, 'last', threadId); }
+  lastTurn(threadId: string, conversation = false): Turn | null { return oneTurn(this.db, conversation ? 'conversation' : 'last', threadId); }
   /** The newest turn that is neither queued nor running. */
   lastEndedTurn(threadId: string): Turn | null { return oneTurn(this.db, 'ended', threadId); }
   /** The oldest queued turn that runs `operation`. */

@@ -210,6 +210,21 @@ describe('automatic compaction', () => {
     client.close();
   });
 
+  test('a failed cache keepalive ping does not stand for the conversation\'s last turn', async () => {
+    const client = await h.connect();
+    const { threadId } = await quiet(client);
+    await turn(client, threadId, 'x'.repeat(950));
+    const pinged = client.next('turn.finished', t => t.threadId === threadId && t.execution?.operation === 'keepalive');
+    h.core.threads.startTurn(threadId, '[error]', [], undefined, 'keepalive');
+    expect((await pinged).status).toBe('error');
+    await client.call('settings.set', { autoCompact: { tokens: 1000, moments: [] } });
+    expect((await client.call('threads.get', { threadId })).context?.tokens ?? 0).toBeGreaterThanOrEqual(1000);
+    const compacted = client.next('turn.finished', t => t.threadId === threadId && t.execution?.operation === 'compact');
+    await client.call('threads.focus', { threadId });
+    expect(await compacted).toMatchObject({ status: 'done', execution: { automatic: true } });
+    client.close();
+  });
+
   test('a compaction that keeps more than the limit is not chained by the next looks', async () => {
     // Each look brings a new context reading; without a guard every one compacted again, with no prompt between.
     const restore = setDriver('echo', { ...echoDriver, startTurn(ctx) {
