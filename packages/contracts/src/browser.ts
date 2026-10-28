@@ -408,7 +408,7 @@ function checkRecipeSave(action: BrowserAction & { kind: 'recipe-save' }): strin
   if (!text(action.about, 300) || !action.about.trim() || /[\u0000-\u001f]/.test(action.about)) return 'a recipe needs --about, one line of 1 to 300 characters saying what it does';
   if (action.usage !== undefined && (typeof action.usage !== 'string' || action.usage.length > 200 || /[\u0000-\u001f]/.test(action.usage))) return 'recipe --usage is one line of at most 200 characters';
   if (!text(action.source, BROWSER_RECIPE_SOURCE_MAX)) return `a recipe script holds 1 to ${BROWSER_RECIPE_SOURCE_MAX} characters`;
-  return Array.isArray(action.sites) && action.sites.length <= 20 && action.sites.every(site => text(site, 253) && /^[\w.:[\]-]+$/.test(site)) ? null : 'recipe sites must be at most 20 host names';
+  return Array.isArray(action.sites) && action.sites.length <= 20 && action.sites.every(site => text(site, 253) && /^([\w.-]+|\[[\da-f:.]+\])$/i.test(site)) ? null : 'recipe sites must be at most 20 host names';
 }
 
 const ACTION_CHECKS: BrowserActionChecks = {
