@@ -166,7 +166,8 @@ export class Delegation {
       try {
         const view = await client.call('delegation.get', { threadId });
         if (!current()) return;
-        for (const agent of view.agents) {
+        // A child on another machine is that machine's report: this machine's events never patch it.
+        for (const agent of view.agents.filter(agent => !agent.machine)) {
           const summary = pending.updates.get(agent.thread.id);
           if (summary) patchRow(agent.thread, summary);
           const load = pending.loads.get(agent.thread.id);
@@ -192,7 +193,7 @@ export class Delegation {
 
   /** A `thread.load` on a team row, kept for a team read in flight like a whole row. */
   patchLoad(threadId: ThreadId, load: ThreadLoad): void {
-    const agent = this.delegation?.agents.find(agent => agent.thread.id === threadId);
+    const agent = this.delegation?.agents.find(agent => !agent.machine && agent.thread.id === threadId);
     if (agent) patchLoad(agent.thread, load);
     const pending = this.teamRead;
     if (pending?.client === this.ctx.client) pending.loads.set(threadId, load);
@@ -200,7 +201,7 @@ export class Delegation {
 
   /** Load-only changes update team rows without fetching the team's messages again. */
   patchThread(summary: ThreadSummary): void {
-    const agent = this.delegation?.agents.find(agent => agent.thread.id === summary.id);
+    const agent = this.delegation?.agents.find(agent => !agent.machine && agent.thread.id === summary.id);
     if (agent) patchRow(agent.thread, summary);
     const pending = this.teamRead;
     const open = this.ctx.store.openThread;
