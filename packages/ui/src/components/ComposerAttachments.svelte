@@ -150,7 +150,8 @@
     padding: 8px 12px 0;
     overflow: hidden;
   }
-  .attachments.expanded { flex-wrap: wrap; }
+  /* Opened, the tiles wrap and scroll past three and a half rows, the half row telling there is more: fifty would push the bar off a phone. */
+  .attachments.expanded { flex-wrap: wrap; max-height: calc(8px + 3.5 * 42px + 3 * 6px); overflow-y: auto; overscroll-behavior: contain; }
 
   .attachment, .more {
     position: relative;

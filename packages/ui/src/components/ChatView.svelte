@@ -262,7 +262,8 @@
 
   .chat.drafting {
     --composer-input-height: 80px;
-    --composer-input-padding: 18px 20px 12px;
+    --composer-input-padding: 18px 20px 0;
+    --composer-input-gap: 12px;
     --composer-bar-padding: 8px 16px 16px;
   }
 
@@ -342,7 +343,8 @@
   @media (max-width: 720px) {
     .chat.drafting {
       --composer-input-height: 64px;
-      --composer-input-padding: 16px 16px 10px;
+      --composer-input-padding: 16px 16px 0;
+      --composer-input-gap: 10px;
       --composer-bar-padding: 4px 12px 12px;
     }
     .project-choice :global(.trigger) { min-height: var(--touch-target); }

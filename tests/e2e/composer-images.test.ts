@@ -361,6 +361,8 @@ test('fifty pasted screenshots fit one turn, shown on desktop and phone', async 
       // The strip folds past one row; opened, it shows all fifty.
       if (await page.evaluate('!!document.querySelector("[data-testid=composer-attachments-more]")')) await page.click('[data-testid=composer-attachments-more]');
       await page.waitFor('document.querySelectorAll("[data-testid=composer-attachment]").length === 50');
+      // Opened, fifty tiles scroll in the strip: the box and the bar stay on screen.
+      expect(await page.evaluate<boolean>('document.querySelector("[data-testid=composer-send]").getBoundingClientRect().bottom <= innerHeight')).toBe(true);
       await page.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
       await page.screenshot(join(import.meta.dir, '.artifacts', `fifty-images-${phone ? 'phone' : 'desktop'}.png`));
     }

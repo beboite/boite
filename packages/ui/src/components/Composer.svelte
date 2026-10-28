@@ -846,7 +846,9 @@
     transition: border-color var(--dur-3) var(--ease-out-quint), box-shadow var(--dur-3) var(--ease-out-quint);
   }
 
-  .input-wrap { position: relative; }
+  /* The bottom gap sits under the box, not inside it: a textarea scrolls its text
+     through its own padding, and a line cut there read as running under the bar. */
+  .input-wrap { position: relative; margin-bottom: var(--composer-input-gap, 6px); }
 
   .input-highlight {
     position: absolute;
@@ -868,9 +870,9 @@
   textarea, .input-paint {
     /* A textarea's own text-rendering: auto drops kerning on Android, and the caret drifted from the painted letters. */
     text-rendering: optimizeLegibility; font-kerning: normal; font-variant-ligatures: normal; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; width: 100%;
-    min-height: var(--composer-input-height, 44px);
+    min-height: calc(var(--composer-input-height, 44px) - var(--composer-input-gap, 6px));
     max-height: 200px;
-    padding: var(--composer-input-padding, 12px 14px 6px);
+    padding: var(--composer-input-padding, 12px 14px 0);
     border: none;
     background: transparent;
     font-size: var(--text-reading);
