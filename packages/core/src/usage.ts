@@ -1,7 +1,7 @@
 import type { ProviderId, ThreadId, Usage, UsageHistory, UsageHistoryRow, UsageHistoryThread, UsagePrice } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams } from './errors.ts';
-import type { UsageSums } from './journal/usage-sums.ts';
+import { usageGroups, type UsageGroup, type UsageSums } from './journal/usage-sums.ts';
 import { priceUsage } from './pricing/index.ts';
 
 /** A year of days plus the closing edge. */
@@ -42,17 +42,65 @@ export function totalTokens(usage: Usage): number {
   return usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
 }
 
-export function usageOf(core: Core, threadId?: ThreadId): { byThread: Record<ThreadId, Usage>; total: Usage } {
-  const byThread: Record<ThreadId, Usage> = {};
-  const total = emptyUsage();
-  for (const turn of core.journal.listTurns(threadId)) {
-    if (turn.usage === null) continue;
-    const bucket = byThread[turn.threadId] ?? emptyUsage();
-    add(bucket, turn.usage);
-    byThread[turn.threadId] = bucket;
-    add(total, turn.usage);
+/** A provider removed since keeps its protocol through its shipped id. */
+function protocolOf(core: Core, id: ProviderId): string | null {
+  return core.providers.get(id)?.protocol ?? (id === 'claude' ? 'claude-sdk' : id === 'codex' ? 'codex-appserver' : null);
+}
+
+/**
+ * Turns an older core recorded, read as their provider counted: Codex's input
+ * held both caches and Claude Code wrote for an hour. Nothing in such a turn
+ * says which protocol produced it, so this asks the provider's descriptor as
+ * it is now, without rewriting the turn.
+ */
+function estimate(usage: Usage, protocol: string | null): Usage {
+  if (protocol === 'codex-appserver') return { ...usage, inputTokens: Math.max(0, usage.inputTokens - usage.cacheReadTokens - usage.cacheWriteTokens) };
+  if (protocol === 'claude-sdk' && usage.cacheWriteTokens > 0) return { ...usage, cacheWriteHourTokens: usage.cacheWriteTokens };
+  return usage;
+}
+
+/**
+ * A group of turns as disjoint buckets: the one reading every total of the
+ * core uses, so `usage.get`, `usage.history`, a session, a workflow and a
+ * delegation team count an older turn the same way.
+ */
+function groupUsage(core: Core, group: UsageSums & { provider_id: ProviderId }): Usage {
+  const usage = sumsToUsage(group);
+  return group.legacy ? estimate(usage, protocolOf(core, group.provider_id)) : usage;
+}
+
+/** `usageGroups` summed per key. */
+export function sumGroups(core: Core, groups: readonly UsageGroup[]): Map<string | null, Usage> {
+  const sums = new Map<string | null, Usage>();
+  for (const group of groups) {
+    const usage = groupUsage(core, group);
+    const into = sums.get(group.key);
+    if (into === undefined) sums.set(group.key, usage);
+    else add(into, usage);
   }
-  return { byThread, total };
+  return sums;
+}
+
+/** `usageGroups` summed whole. */
+export function usageTotal(core: Core, groups: readonly UsageGroup[]): Usage {
+  const total = emptyUsage();
+  for (const group of groups) add(total, groupUsage(core, group));
+  return total;
+}
+
+/** What an agent session already used: its last reported totals, else its turns (`Journal.sessionUsage`). */
+export function sessionUsage(core: Core, threadId: ThreadId, generation: number, exceptTurnId: string): { costUsd: number; tokens: number } {
+  const { reported, groups } = core.journal.sessionUsage(threadId, generation, exceptTurnId);
+  if (reported !== null) return reported;
+  const usage = usageTotal(core, groups);
+  return { costUsd: usage.costUsdEquivalent ?? 0, tokens: totalTokens(usage) };
+}
+
+export function usageOf(core: Core, threadId?: ThreadId): { byThread: Record<ThreadId, Usage>; total: Usage } {
+  const groups = threadId === undefined
+    ? usageGroups(core.journal.db, { key: 't.thread_id', where: '1' })
+    : usageGroups(core.journal.db, { key: 't.thread_id', where: 't.thread_id = ?' }, threadId);
+  return { byThread: Object.fromEntries(sumGroups(core, groups)) as Record<ThreadId, Usage>, total: usageTotal(core, groups) };
 }
 
 function checkEdges(edges: unknown): number[] {
@@ -93,32 +141,16 @@ interface Priced {
  * Only what each turn stored decides it, never the provider's descriptor, so
  * editing or removing a provider leaves the turns recorded since as they were.
  */
-function priced(sums: UsageSums, model: string | null): Priced {
-  const usage = sumsToUsage(sums);
+function priced(usage: Usage, sums: UsageSums, model: string | null): Priced {
   const quote = priceUsage(model, usage);
   if (quote === null || sums.reported === 0) return { usage, priced: sums.priced, price: quote?.price ?? null };
   return { usage: { ...usage, costUsdEquivalent: quote.cost }, priced: sums.reported, price: quote.price };
 }
 
-/**
- * Turns an older core recorded, read as their provider counted: Codex's input
- * held both caches and Claude Code wrote for an hour. Nothing in such a turn
- * says which protocol produced it, so this asks the provider's descriptor as
- * it is now, without rewriting the turn, and the row counts them as estimated.
- */
-function estimate(sums: UsageSums, protocol: string | null): UsageSums {
-  if (protocol === 'codex-appserver') return { ...sums, input_tokens: Math.max(0, sums.input_tokens - sums.cache_read_tokens - sums.cache_write_tokens) };
-  if (protocol === 'claude-sdk') return { ...sums, cache_write_hour_tokens: sums.cache_write_tokens };
-  return sums;
-}
-
 export function usageHistory(core: Core, edges: number[], providerId?: ProviderId): UsageHistory {
-  // A provider removed since keeps its protocol through its shipped id.
-  const protocolOf = (id: ProviderId): string | null => core.providers.get(id)?.protocol ?? (id === 'claude' ? 'claude-sdk' : id === 'codex' ? 'codex-appserver' : null);
-  const read = (row: UsageSums & { provider_id: ProviderId; model: string | null }): Priced =>
-    priced(row.legacy ? estimate(row, protocolOf(row.provider_id)) : row, row.model);
+  const read = (row: UsageSums & { provider_id: ProviderId; model: string | null }): Priced => priced(groupUsage(core, row), row, row.model);
 
-  // The turns an older core recorded come as their own group; a row joins both.
+  // The turns an older core recorded come as their own group, which the row counts as estimated.
   const rows = new Map<string, UsageHistoryRow>();
   for (const row of core.journal.usageByBucket(edges)) {
     if (providerId !== undefined && row.provider_id !== providerId) continue;

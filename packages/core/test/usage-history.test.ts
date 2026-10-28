@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import type { ThreadSummary, Turn, Usage } from '@boite/contracts';
+import type { ThreadSummary, Turn, Usage, WorkflowRun } from '@boite/contracts';
 import { echoThread, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
-import { MAX_USAGE_EDGES } from '../src/usage.ts';
+import { MAX_USAGE_EDGES, sessionUsage } from '../src/usage.ts';
 import { priceOf } from '../src/pricing/index.ts';
+import { workflowUsage } from '../src/workflows/usage.ts';
 import { thrown } from './settle.ts';
 
 const DAY = 86_400_000;
@@ -205,6 +206,28 @@ test('usage.history reads turns an older core recorded with the provider\'s curr
   expect(rows.gone).toMatchObject({ estimated: 1, usage: { inputTokens: 500, cacheReadTokens: 300 } });
   expect(rows.kept).not.toHaveProperty('estimated');
   expect(rows.kept!.usage.inputTokens).toBe(500);
+});
+
+test('every reader sums an older Codex turn and a newer one as the same disjoint buckets', async () => {
+  const { echo, codex } = await threads();
+  const journal = harness.core.journal;
+  journal.putThread({ ...codex, parentThreadId: echo.id });
+  journal.db.run("INSERT INTO delegated_agents VALUES (?, ?, 'req', 'fp', 'default', 'task')", [codex.id, echo.id]);
+  journal.db.run("INSERT INTO workflow_steps VALUES (?, 'run_mixed', 'step')", [codex.id]);
+  journal.putTurn(turn(codex, D0 + 1, legacy(1000, 50, 800, 100), { providerId: 'codex', model: 'gpt-5' }));
+  journal.putTurn(turn(codex, D0 + 2, usage(10, 5, 20), { providerId: 'codex', model: 'gpt-5' }));
+  const buckets = (spent: Usage | undefined) => spent && [spent.inputTokens, spent.outputTokens, spent.cacheReadTokens, spent.cacheWriteTokens];
+  const expected = [110, 55, 820, 100];
+
+  const client = await harness.connect();
+  const history = await client.call('usage.history', { edges: EDGES, providerId: 'codex' });
+  expect(history.rows.map((row) => row.estimated)).toEqual([1]);
+  expect(buckets(history.rows[0]?.usage)).toEqual(expected);
+  expect(buckets(history.threads[0]?.usage)).toEqual(expected);
+  expect(buckets((await client.call('usage.get', { threadId: codex.id })).total)).toEqual(expected);
+  expect(sessionUsage(harness.core, codex.id, 0, '').tokens).toBe(1085);
+  expect(buckets(workflowUsage(harness.core, { id: 'run_mixed', nodes: [] } as unknown as WorkflowRun).usage)).toEqual(expected);
+  expect(buckets(harness.core.delegation.get(echo.id).usage)).toEqual(expected);
 });
 
 test('usage.history keeps the top threads of each ranking', async () => {

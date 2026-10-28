@@ -22,6 +22,8 @@ import { pauseHold, pauseOver } from './delegation/pauses.ts';
 import { dropRestartCuts, recordRestartCut, resumeRestartCuts } from './delegation/restart.ts';
 import { DELEGATION_WORDS, delegationPrompt, subagentGuide } from './delegation/guide.ts';
 import type { Connection } from './router.ts';
+import { usageGroups } from './journal/usage-sums.ts';
+import { usageTotal } from './usage.ts';
 
 interface AgentRow { thread_id: string; root_id: string; request_id: string; fingerprint: string; profile_id: string; task: string }
 interface LetterRow { data: string; fingerprint: string }
@@ -217,13 +219,8 @@ export class Delegation {
   get(threadId: string): DelegationView {
     const root = this.root(threadId);
     const agents = this.rows(root.id).map(row => this.member(row));
-    const totals = this.core.journal.db.query(`SELECT
-      SUM(json_extract(usage, '$.inputTokens')) AS inputTokens, SUM(json_extract(usage, '$.outputTokens')) AS outputTokens,
-      SUM(json_extract(usage, '$.cacheReadTokens')) AS cacheReadTokens, SUM(json_extract(usage, '$.cacheWriteTokens')) AS cacheWriteTokens,
-      SUM(json_extract(usage, '$.costUsdEquivalent')) AS costUsdEquivalent
-      FROM turns WHERE thread_id IN (SELECT thread_id FROM delegated_agents WHERE root_id = ?)
-      OR (thread_id = ? AND json_extract(execution, '$.operation') = 'delegation')` ).get(root.id, root.id) as Usage;
-    const usage: Usage = { inputTokens: totals.inputTokens ?? 0, outputTokens: totals.outputTokens ?? 0, cacheReadTokens: totals.cacheReadTokens ?? 0, cacheWriteTokens: totals.cacheWriteTokens ?? 0, costUsdEquivalent: totals.costUsdEquivalent ?? null };
+    const usage = usageTotal(this.core, usageGroups(this.core.journal.db, { where: `t.thread_id IN (SELECT thread_id FROM delegated_agents WHERE root_id = ?)
+      OR (t.thread_id = ? AND json_extract(t.execution, '$.operation') = 'delegation')` }, root.id, root.id));
     const letters = (threadId === root.id
       ? this.core.journal.db.query('SELECT data FROM delegation_messages WHERE root_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 100').all(root.id)
       : this.core.journal.db.query('SELECT data FROM delegation_messages WHERE root_id = ? AND (sender_id = ? OR recipient_id = ?) ORDER BY created_at DESC, rowid DESC LIMIT 100').all(root.id, threadId, threadId)) as LetterRow[];

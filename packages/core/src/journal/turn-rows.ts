@@ -1,6 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import type { Turn } from '@boite/contracts';
 import { parseJson, toTurn, type TurnRow } from './rows.ts';
+import { usageGroups, type UsageGroup } from './usage-sums.ts';
 
 export function writeTurn(db: Database, turn: Turn): void {
   db.query(
@@ -46,17 +47,19 @@ export function oneTurn(db: Database, which: keyof typeof ONE_TURN, ...params: s
  * generation `generation` recorded, except `exceptTurnId`. The agent starts
  * from those, which can be less than the sum of the session's turns: a process
  * that started from zero left the earlier ones out. Turns recorded before
- * those totals fall back to that sum, in SQL. A turn with no recorded
- * generation counts in none.
+ * those totals fall back to that sum: `groups`, which `usage.ts` reads. A
+ * turn with no recorded generation counts in none.
  */
-export function sumSessionUsage(db: Database, threadId: string, generation: number, exceptTurnId: string): { costUsd: number; tokens: number } {
+export function sumSessionUsage(db: Database, threadId: string, generation: number, exceptTurnId: string): SessionUsage {
   const reported = db.query(`SELECT id, agent_totals FROM turns WHERE thread_id = ? AND id <> ? AND agent_totals IS NOT NULL
     AND json_extract(execution, '$.sessionGeneration') = ? ORDER BY rowid DESC LIMIT 1`)
     .get(threadId, exceptTurnId, generation) as { id: string; agent_totals: string } | null;
-  if (reported !== null) return parseJson<{ costUsd: number; tokens: number }>(reported.agent_totals, `turns.agent_totals of ${reported.id}`);
-  const row = db.query(`SELECT COALESCE(SUM(json_extract(usage, '$.costUsdEquivalent')), 0) AS costUsd,
-    COALESCE(SUM(json_extract(usage, '$.inputTokens') + json_extract(usage, '$.outputTokens') + json_extract(usage, '$.cacheReadTokens') + json_extract(usage, '$.cacheWriteTokens')), 0) AS tokens
-    FROM turns WHERE thread_id = ? AND id <> ? AND usage IS NOT NULL AND json_extract(execution, '$.sessionGeneration') = ?`)
-    .get(threadId, exceptTurnId, generation) as { costUsd: number; tokens: number };
-  return { costUsd: row.costUsd, tokens: row.tokens };
+  if (reported !== null) return { reported: parseJson<{ costUsd: number; tokens: number }>(reported.agent_totals, `turns.agent_totals of ${reported.id}`), groups: [] };
+  return { reported: null, groups: usageGroups(db, { where: "t.thread_id = ? AND t.id <> ? AND json_extract(t.execution, '$.sessionGeneration') = ?" }, threadId, exceptTurnId, generation) };
+}
+
+/** An agent session's last reported totals, or the groups of its turns to sum. */
+export interface SessionUsage {
+  reported: { costUsd: number; tokens: number } | null;
+  groups: UsageGroup[];
 }

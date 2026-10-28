@@ -337,17 +337,19 @@ is missing, since Claude Code writes for an hour. Pi passes Anthropic's
 `cacheWrite1h` through and records it the same way. The core stamps
 `buckets: 1` on each turn's usage as it takes it from the driver.
 
-Every reader, `usage.get`, `usage.history`, delegation and workflow totals,
-sums the stored buckets as they are. None asks the provider's descriptor, so
-editing or removing a provider leaves the history of these turns unchanged.
+Every reader, `usage.get`, `usage.history`, a session's fallback total,
+delegation and workflow totals, sums the turns through one SQL grouping
+(`journal/usage-sums.ts` `usageGroups`) and one reading of each group
+(`usage.ts`). Marked buckets are summed as they are and never ask the
+provider's descriptor, so editing or removing a provider leaves those turns
+unchanged.
 
 A turn an older core recorded has no `buckets` and is never rewritten, since
-nothing in it says which protocol counted it. `usage.history` reads it as its
+nothing in it says which protocol counted it. Every reader takes it as its
 provider's current descriptor says, with the shipped `codex` and `claude` ids
 as the fallback: Codex input loses its cache counts and Claude Code writes
-become hour writes. A row's `estimated` counts such turns, because editing or
-removing the provider changes how they read. `usage.get` and the thread totals
-sum them as stored.
+become hour writes. A `usage.history` row's `estimated` counts such turns,
+because editing or removing the provider changes how they read.
 
 ### The API estimate
 
@@ -527,7 +529,9 @@ added on top, and the uninstalled mode (`?fake=1&uninstalled=1`) starts empty.
   removed provider and of a mixed turn, the
   reported fallback, legacy turns, the top threads union, provider filtering,
   refused parameters and one real echo turn. Turns an older core recorded are
-  read through the provider's current protocol and counted as estimated.
+  read through the provider's current protocol and counted as estimated, and
+  `usage.get`, a session, a workflow and a delegation team sum an older and a
+  newer Codex turn to the same buckets as the history.
 - `packages/core/test/pricing.test.ts`: model id matching, the cache write
   rates, missing rates and the price list's coverage.
 - `packages/core/test/claude.session.test.ts`: the warm running total, a
