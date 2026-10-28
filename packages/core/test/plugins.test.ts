@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { PLUGIN_MANIFEST_FILE, type Account, type PluginManifest } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
 import { parsePluginPool, verifyPluginDownload } from '../src/plugins.ts';
+import { ACTIVATION_FILE } from '../src/plugins/activation.ts';
 import { fetchManifest } from '../src/plugins/source.ts';
 import type { SpawnedProcess } from '../src/procs.ts';
 import { parseManifest, platformKey } from '../src/plugins/manifest.ts';
@@ -248,6 +249,61 @@ describe('recommended plugins', () => {
     expect(state.status).toBe('error');
     expect(state.error).toContain('sha256 does not match');
     expect(existsSync(join(harness.dataDir, 'plugins', 'pool-switcher'))).toBe(false);
+  });
+});
+
+describe('one operation at a time on a plugin', () => {
+  test('an install or a pool listing asked for while an uninstall stops the plugin is refused, and the uninstall leaves nothing', async () => {
+    harness = await startPoolCore(); const client = await harness.connect();
+    const dir = installPool(harness.dataDir);
+    serveDownloads({ [POOL_URL]: new Uint8Array([1, 2, 3, 4]) });
+    const stopped = Promise.withResolvers<void>();
+    const forget = spyOn(harness.core.plugins.apps, 'forget').mockImplementation(() => stopped.promise);
+    try {
+      const uninstall = client.call('plugins.uninstall', { id: 'pool-switcher' });
+      await waitFor(() => forget.mock.calls.length === 1);
+      expect(await thrown(client.call('plugins.install', { id: 'pool-switcher' }))).toThrow('Wait for the current plugin operation');
+      expect(await thrown(client.call('plugins.accounts', { id: 'pool-switcher' }))).toThrow('Wait for pool-switcher to be uninstalled');
+      stopped.resolve();
+      expect((await uninstall).status).toBe('not-installed');
+      expect(existsSync(dir)).toBe(false);
+      expect(harness.core.plugins.state('pool-switcher').status).toBe('not-installed');
+    } finally { stopped.resolve(); forget.mockRestore(); }
+  });
+
+  test('an update whose record cannot be written keeps the binary and the record that worked together', async () => {
+    harness = await startPoolCore(); const client = await harness.connect();
+    const dir = installPool(harness.dataDir);
+    const before = readFileSync(join(dir, 'installed.json'), 'utf8');
+    serveDownloads({ [POOL_URL]: new Uint8Array([1, 2, 3, 4]) });
+    // A directory where the record is staged: its write fails, as a full disk would make it.
+    mkdirSync(join(dir, 'installed.json.part'));
+    await client.call('plugins.install', { id: 'pool-switcher' });
+    await waitFor(() => harness!.core.plugins.state('pool-switcher').status !== 'installing');
+    expect(harness.core.plugins.state('pool-switcher')).toMatchObject({ status: 'error', version: '2.0.1' });
+    expect(readFileSync(join(dir, `pool${EXE}`), 'utf8')).toBe('fixture');
+    expect(readFileSync(join(dir, 'installed.json'), 'utf8')).toBe(before);
+    // Nothing of the update stays beside them but the obstacle the test planted.
+    expect(readdirSync(dir).sort()).toEqual(['installed.json', 'installed.json.part', `pool${EXE}`]);
+  });
+
+  test.each([
+    { stage: 'before its record committed', committed: false },
+    { stage: 'after its record committed', committed: true },
+  ])('an activation a stopped core left $stage settles to one whole release', async ({ committed }) => {
+    harness = await startPoolCore();
+    const dir = installPool(harness.dataDir);
+    const record = readFileSync(join(dir, 'installed.json'), 'utf8');
+    const next = JSON.stringify({ ...JSON.parse(record), installedAt: 2 });
+    // What the activation leaves between moving the binaries and dropping the kept one.
+    renameSync(join(dir, `pool${EXE}`), join(dir, `pool${EXE}.previous`));
+    writeFileSync(join(dir, `pool${EXE}`), 'new-binary');
+    writeFileSync(join(dir, committed ? 'installed.json' : 'installed.json.part'), next);
+    writeFileSync(join(dir, ACTIVATION_FILE), JSON.stringify({ previous: `pool${EXE}`, binary: `pool${EXE}` }));
+    expect(harness.core.plugins.state('pool-switcher').status).toBe('installed');
+    expect(readFileSync(join(dir, `pool${EXE}`), 'utf8')).toBe(committed ? 'new-binary' : 'fixture');
+    expect(readFileSync(join(dir, 'installed.json'), 'utf8')).toBe(committed ? next : record);
+    expect(readdirSync(dir).sort()).toEqual(['installed.json', `pool${EXE}`]);
   });
 });
 

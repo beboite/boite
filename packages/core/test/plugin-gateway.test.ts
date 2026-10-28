@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { checkSettingsPatch, type PluginState, type SubscriptionProxy } from '@boite/contracts';
@@ -241,6 +241,24 @@ test('an update whose release exits at once says so, even when its relaunch woul
   const back = await until(() => state(owner), (plugin) => plugin.status === 'error' && plugin.gateway?.status === 'running', 'the previous release back');
   expect(back.version).toBe('0.3.0');
   expect(back.error).toBe('douane exited with code 1. 0.3.0 runs again.');
+  await until(live, (count) => count === 1, 'one gateway process');
+}, 30_000);
+
+test('an update whose record cannot be written after its gateway answered puts the previous binary back and runs it', async () => {
+  const { owner } = await core();
+  await owner.call('plugins.install', { id: 'douane' });
+  await gatewayIs(owner, 'running');
+  const dir = join(harness!.dataDir, 'plugins', 'douane');
+  const binary = join(dir, process.platform === 'win32' ? 'douane.exe' : 'douane');
+  // A directory where the record is staged: its write fails, as a full disk would make it.
+  mkdirSync(join(dir, 'installed.json.part'));
+  harness!.core.plugins.recommended = [douane('0.5.0', new Uint8Array([5]))];
+  await owner.call('plugins.install', { id: 'douane' });
+  const back = await until(() => state(owner), (plugin) => plugin.status === 'error' && plugin.gateway?.status === 'running', 'the previous release back');
+  expect(back.version).toBe('0.3.0');
+  expect(back.error).toMatch(/0\.3\.0 runs again\.$/);
+  expect([...readFileSync(binary)]).toEqual([1, 2, 3]);
+  expect(existsSync(`${binary}.previous`)).toBe(false);
   await until(live, (count) => count === 1, 'one gateway process');
 }, 30_000);
 
