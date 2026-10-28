@@ -2119,10 +2119,8 @@ test('a pasted copy over the byte total holds Send until its pictures are fitted
     input().focus();
     input().setSelectionRange(5, 5);
     expect(clipboardEvent('paste', copied).defaultPrevented).toBe(true);
-    // Enter at once: the box still weighs 12 MB.
+    // Enter at once, while the box still weighs 12 MB: that one Enter sends once the pictures fit.
     press('Enter');
-    await waitFor(() => input().value === '' || store.composerStates['t-trace']!.attachments.reduce((sum, one) => sum + decodedBytes(one.data), 0) <= ATTACHMENTS_TOTAL_MAX_BYTES, 4000);
-    if (input().value !== '') press('Enter');
     await waitFor(() => (store.openThread?.messages.length ?? 0) > before, 4000);
     const sent = store.openThread!.messages.filter((message) => message.role === 'user').at(-1)!.parts.filter((part) => part.type === 'image');
     expect(sent).toHaveLength(30);
