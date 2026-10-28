@@ -153,6 +153,13 @@ export interface Settings {
    */
   goalTracker?: GoalTrackerModel | null;
   /**
+   * With the `auto-goal` experiment on in the sending app, a prompt of at
+   * least this many characters that starts a turn also starts a reviewed goal
+   * with that prompt as its objective (`docs/goals.md`). Missing:
+   * `AUTO_GOAL_MIN_CHARS.default`.
+   */
+  autoGoalMinChars?: number;
+  /**
    * Independent token limit and idle moments for automatic compaction. The
    * limit reaches native tool boundaries where supported. Null or missing
    * leaves each agent's own behaviour. Missing on older cores.

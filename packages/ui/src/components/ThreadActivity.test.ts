@@ -307,3 +307,16 @@ test('the checklist line says when its tracker reads, and why there is no list',
   toggle().click();
   await vi.waitFor(() => expect(document.querySelector('[data-testid=goal-checklist-error]')!.textContent).toBe('The tracker wrote an empty checklist.'));
 });
+
+test('an automatic goal says so in the goal bar and one click removes it', async () => {
+  const store = render({ tasks: [], loop: null, goal: { objective: 'Fix the login page.', status: 'active', iterations: 0, error: null, auto: true,
+    review: { phase: 'working', maxRounds: 5, reviewerThreadId: null, claimTurnId: null, delivered: 0, verdicts: [] } } });
+  const goal = document.querySelector('[data-testid=activity-goal]')!;
+  expect(goal.querySelector('.kind .wide')!.textContent).toBe('Automatic goal');
+  expect(goal.querySelector('.kind .narrow')!.textContent).toBe('Auto');
+  const call = vi.fn().mockResolvedValue({ tasks: [], loop: null, goal: null });
+  vi.spyOn(store, 'client', 'get').mockReturnValue({ call } as unknown as Store['client']);
+  goal.querySelector<HTMLButtonElement>('[aria-label=Remove]')!.click();
+  await Promise.resolve();
+  expect(call).toHaveBeenCalledWith('threads.activity.control', { threadId: 'thread', kind: 'goal', action: 'remove' });
+});

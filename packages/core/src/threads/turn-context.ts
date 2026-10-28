@@ -74,7 +74,9 @@ export class TurnContexts {
     const skills = builtinSkills(this.core.dataDir, message => { try { this.core.logs.warn(message, { source: 'skills', event: 'skills.write-failed' }); } catch { /* The guide is built without that skill. */ } });
     // Echo treats "question" as a test directive, including in injected help.
     // A persistent agent's thread has no checkout of its own: no pull request to watch, no project to add.
-    return agentGuide(provider.protocol !== 'echo' && settings.asyncQuestions !== false, logAccess, skills, !!thread.agentSessionId);
+    // `boite goal track` needs the Automatic goals experiment and a top-level thread of the user's.
+    const goalTrack = !thread.parentThreadId && !thread.agentSessionId && (this.core.clients.desktopExperiments() ?? this.core.clients.current()?.experiments ?? []).includes('auto-goal');
+    return agentGuide(provider.protocol !== 'echo' && settings.asyncQuestions !== false, logAccess, skills, !!thread.agentSessionId, goalTrack);
   }
 
   /** The guide as a session option, for a driver that puts it in the system prompt. */

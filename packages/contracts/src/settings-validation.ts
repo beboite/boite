@@ -92,6 +92,9 @@ export interface AutoCompact {
   moments: AutoCompactMoment[];
 }
 
+/** The bounds of `Settings.autoGoalMinChars`, and the length it reads as when missing. */
+export const AUTO_GOAL_MIN_CHARS = { min: 200, max: 20000, default: 1500 } as const;
+
 /** The bounds of `CacheKeepalive.hours`, and what the setting offers first. */
 export const CACHE_KEEPALIVE_HOURS = { min: 1, max: 24, default: 12 } as const;
 
@@ -300,6 +303,12 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
       return { ok: false, field: 'goalTracker', message: `goalTracker must be null or { providerId, model, effort }: two non-empty strings, the model at most ${TITLE_MODEL_MAX} characters, and the effort a level name or null` };
     }
     next.goalTracker = { providerId: text(providerId), model: text(model), effort: level };
+  }
+  if (patch.autoGoalMinChars !== undefined) {
+    const chars = patch.autoGoalMinChars, LIMIT = AUTO_GOAL_MIN_CHARS;
+    if (!Number.isInteger(chars) || chars < LIMIT.min || chars > LIMIT.max) {
+      return { ok: false, field: 'autoGoalMinChars', message: `autoGoalMinChars must be an integer between ${LIMIT.min} and ${LIMIT.max}` };
+    }
   }
   if (patch.autoCompact !== undefined && patch.autoCompact !== null) {
     const { tokens, moments } = (typeof patch.autoCompact === 'object' ? patch.autoCompact : {}) as Partial<AutoCompact>;

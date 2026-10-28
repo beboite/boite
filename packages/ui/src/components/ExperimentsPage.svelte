@@ -3,6 +3,7 @@
   import CompactionSettings from './CompactionSettings.svelte';
   import CacheKeepaliveSettings from './CacheKeepaliveSettings.svelte';
   import DeviceStreamSettings from './DeviceStreamSettings.svelte';
+  import AutoGoalSetting from './AutoGoalSetting.svelte';
   import { untrack } from 'svelte';
   import { EXPERIMENT_IDS, canFollowDesktop, desktopExperiments, followsDesktop, readExperiments, setExperiment, setFollowDesktop, subscribeExperiments, type ExperimentId } from '../lib/experiments';
   import { experimentCopy } from '../lib/experiment-copy';
@@ -65,6 +66,8 @@
           onchange={(event) => toggle(id, event.currentTarget.checked)}
         />
       </label>
+      <!-- Its threshold is the core's, under the switch while it is on. -->
+      {#if id === 'auto-goal' && store && enabled.includes(id)}<AutoGoalSetting {store} />{/if}
     {/each}
   </section>
 

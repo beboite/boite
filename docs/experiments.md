@@ -36,6 +36,7 @@ client switches; `lib/experiment-copy.ts` supplies their labels.
 | Claude Code session import (`session-import`) | Import a terminal conversation from the project menu or palette; see [session import](imports.md). |
 | Prompt cache timer (`prompt-cache`) | An idle-thread countdown based on reported writes or documented estimates; see [prompt cache](prompt-cache.md). |
 | Show actions in recordings (`recording-indicators`) | Click markers and navigation keys in native browser recordings. Typed text and password input are not shown as key labels. |
+| Automatic goals (`auto-goal`) | A long prompt starts a reviewed goal and a board card, and `boite goal track` lets the agent start one; see [automatic goals](goals.md#automatic-goals). Its threshold (`autoGoalMinChars`) is an owner-only core setting shown under the switch. |
 | Pinned model quotas (`pinned-quotas`) | Pin the current model provider's limits in a conversation corner or below the thread list; see [placement and behavior](development.md#ui-spacing-and-motion). |
 
 The page also has three owner-only core settings, separate from those client

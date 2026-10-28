@@ -48,7 +48,7 @@ export const BOT_GUIDE = [
  * `bot`: a bot's thread, which has no checkout or project of its own: the
  * project-bound commands go and the bot section comes last.
  */
-export function agentGuide(asyncQuestions: boolean, logAccess = false, skills: readonly ListedSkill[] = [], bot = false): string {
+export function agentGuide(asyncQuestions: boolean, logAccess = false, skills: readonly ListedSkill[] = [], bot = false, goalTrack = false): string {
   const report = skills.find(skill => skill.name === REPORT_ISSUE_SKILL.name);
   const others = skills.filter(skill => skill !== report);
   const pullRequests = 'Link each PR: `boite pr link <url>`, then `boite pr watch`: it wakes you on CI, reviews and conflicts, so do not poll.';
@@ -68,6 +68,8 @@ export function agentGuide(asyncQuestions: boolean, logAccess = false, skills: r
     bot
       ? 'Task tracking is optional. Use it only when steps help you and the user. `boite task add <text>` / `boite task start|done <id>` track those steps.'
       : 'Task tracking is optional. Use it only when steps help you and the user. `boite task add <text>` / `boite task start|done <id>` track those steps. `boite todo list|add <text>|claim <id>` manages project todos; claim marks work done for user confirmation.',
+    // Only while the user has Automatic goals on (`docs/goals.md`).
+    ...(goalTrack ? ["When the user's prompt lists several distinct requests, run `boite goal track` first: it turns that prompt into a reviewed goal with a checklist."] : []),
     bot
       ? '`boite projects` lists projects. `boite thread new <project> <brief>` starts independent work in any of them, not a subagent; it lands on your desk, its answers come back as events and you drive it like the threads of your projects.'
       : '`boite projects` lists projects; `boite projects add <folder>` adds one. `boite thread new <project> <brief>` starts independent work in a project, not a subagent; its first answer comes back.',

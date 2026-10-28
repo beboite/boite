@@ -600,7 +600,7 @@ export class ThreadStore {
     return this.moves.userMove(threadId, projectId, stopBackground);
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: ActivityTurn, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], startedBy?: ThreadLink, sentFrom: SentFrom | null = null, persistAdmission?: () => (() => void), executionChoice?: ComposerChoice): Turn {
+  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: ActivityTurn, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], startedBy?: ThreadLink, sentFrom: SentFrom | null = null, persistAdmission?: () => (() => void), executionChoice?: ComposerChoice, autoGoal?: string): Turn {
     if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
     let thread = this.require(threadId);
     this.codeCheckpoints.assertAvailable(thread.cwd);
@@ -734,8 +734,8 @@ export class ThreadStore {
       // His own message, a resume or a parent's message to its subagent puts the agent back to work,
       // so a pause the core left on Stop, a failure or a restart ends with it; the owner's stays.
       if (!activity && !startedBy && (!operation || operation === 'resume' || (operation === 'delegation' && thread.parentThreadId))) this.core.coordination.resumeForUser(threadId);
-      // A `/goal2`'s checklist reads what the user adds, drops or changes.
-      if (!activity && !operation && !startedBy && !nativeCommandPrompt(prompt)) this.core.activity.userMessage(threadId, prompt);
+      // `autoGoal`, the prompt as typed, may start an automatic goal (`docs/goals.md`); otherwise a `/goal2`'s checklist reads what the user adds, drops or changes.
+      if (!activity && !operation && !startedBy && !nativeCommandPrompt(prompt) && !(autoGoal !== undefined && this.core.activity.autoGoal(threadId, turn.id, autoGoal, executionChoice))) this.core.activity.userMessage(threadId, prompt);
     });
     this.autoCompact.cancel(threadId);
     this.cacheKeepalive.cancel(threadId);

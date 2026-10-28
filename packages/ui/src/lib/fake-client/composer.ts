@@ -158,7 +158,10 @@ export class FakeComposerState {
           const selection = choiceOf(thread);
           if (chosen) Object.assign(thread, chosen, { permissionMode: selection.permissionMode });
           // `turns.start` fixes the turn's execution before its first await: the whole picker goes back at once, before any update can land.
+          // The experiments it was queued with decide an automatic goal, as in the core.
+          ctx.queuedExperiments = head.experiments ?? [];
           const started = methods['turns.start']({ threadId: row.id, ...payload, clientRequestId: requestId });
+          ctx.queuedExperiments = null;
           if (chosen) Object.assign(thread, selection);
           await started;
         }

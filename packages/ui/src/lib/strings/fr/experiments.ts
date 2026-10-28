@@ -30,6 +30,13 @@ export const fr: Translation = {
     contacts: {
       title: 'Contacts',
       hint: 'Une page Accueil à côté des conversations, où vous reliez votre Boite à celle d\'un autre propriétaire via Tailscale, pour que vos agents et les siens travaillent ensemble sur les projets que chacun ouvre. Pas encore prêt pour un usage quotidien'
+    },
+    autoGoal: {
+      title: 'Objectifs automatiques',
+      hint: "Un long message lance un objectif relu sur lui-même, avec sa checklist et une carte sur le tableau du projet, et l'agent peut en lancer un quand un message liste plusieurs demandes. Retirez l'objectif depuis la barre d'objectif pour l'abandonner",
+      minChars: 'Longueur du message',
+      minCharsHint: 'Un message qui lance un tour avec au moins ce nombre de caractères lance un objectif automatique',
+      unit: 'caractères'
     }
   }
 };

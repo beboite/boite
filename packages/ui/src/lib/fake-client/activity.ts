@@ -1,6 +1,6 @@
 /** A thread's goal, loop and task list, and the timer that runs them. */
 import { errorText } from '../errors';
-import { attachmentError, RpcErrorCode, threadActive, type AgentTask, type Thread, type ThreadActivity, type Turn } from '@boite/contracts';
+import { AUTO_GOAL_MIN_CHARS, attachmentError, RpcErrorCode, threadActive, type AgentTask, type Thread, type ThreadActivity, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { refusal } from './shared';
 import { workflowAnswer, workflowChild } from './delegation';
@@ -178,12 +178,14 @@ function validateGoal(thread: Thread, goal: GoalInput): RpcFailure | null {
   return null;
 }
 
-function setGoal(ctx: FakeContext, thread: Thread, activity: ThreadActivity, goal: GoalInput): void {
+function setGoal(ctx: FakeContext, thread: Thread, activity: ThreadActivity, goal: GoalInput, auto = false): void {
   const error = validateGoal(thread, goal);
   if (error) throw error;
   stopReview(ctx, thread);
   stopChecklist(ctx, thread);
+  if (activity.goal?.auto) ctx.unlinkGoalCards(thread);
   activity.goal = goal === null ? null : {
+    ...(auto ? { auto: true as const } : {}),
     objective: goal.objective.trim(), status: 'active', iterations: 0, error: null,
     ...(goal.review ? { review: { phase: 'working' as const, maxRounds: 5, reviewerThreadId: null, claimTurnId: null, delivered: 0, verdicts: [] }, checklist: { threadId: null, phase: 'idle' as const, items: [], model: null, effort: null, error: null } } : {}),
   };
@@ -253,6 +255,42 @@ function updateLoopClock(activity: ThreadActivity, params: ActivityControl): voi
   if (params.kind === 'loop' && params.action === 'resume' && activity.loop) activity.loop.nextRunAt = Date.now();
 }
 
+const NATIVE_COMMAND = /^\s*\/[\w:-]+(?:\s|$)/;
+const busy = (thread: Thread) => [thread.activity?.goal, thread.activity?.loop].some(item => item && item.status !== 'complete');
+
+/** As the core's `startsAutoGoal`: the sending app had `auto-goal` on, and the prompt, no command, reaches the owner's threshold. */
+export function startsAutoGoal(ctx: FakeContext, text: string, experiments: readonly string[] | null | undefined): boolean {
+  if (!experiments?.includes('auto-goal') || NATIVE_COMMAND.test(text)) return false;
+  return text.trim().length >= (ctx.settings.autoGoalMinChars ?? AUTO_GOAL_MIN_CHARS.default);
+}
+
+/** As the core's `ActivityStore.autoGoal`: the prompt of `turnId` becomes a reviewed goal and a linked card. */
+export function startAutoGoal(ctx: FakeContext, thread: Thread, turnId: string, objective: string): boolean {
+  if (thread.archived || thread.parentThreadId || busy(thread) || !objective.trim()) return false;
+  const activity = structuredClone(thread.activity ?? { goal: null, loop: null, tasks: [] });
+  setGoal(ctx, thread, activity, { objective, review: true }, true);
+  thread.activity = activity;
+  ctx.autoGoalTurns.set(thread.id, turnId);
+  startChecklist(ctx, thread);
+  ctx.publishActivity(thread);
+  ctx.addGoalCard(thread, objective);
+  scheduleActivity(ctx, thread.id);
+  return true;
+}
+
+/** The prompt of the newest turn the user started, as the core's `lastPrompt`. */
+function lastPrompt(thread: Thread): { turnId: string; text: string } | null {
+  for (const message of [...thread.messages].reverse()) {
+    if (message.role !== 'user' || !message.turnId || thread.turns.find(turn => turn.id === message.turnId)?.execution?.operation) continue;
+    if (thread.messages.find(other => other.turnId === message.turnId)?.id !== message.id) continue;
+    const part = message.parts[0];
+    if (part?.type !== 'text' || part.activity || part.startedBy) continue;
+    const text = part.displayText ?? part.text;
+    if (text.trim() && !NATIVE_COMMAND.test(text)) return { turnId: message.turnId, text };
+  }
+  return null;
+}
+
 export function activityMethods(ctx: FakeContext) {
   return {
     'threads.activity.set': async (params) => {
@@ -269,9 +307,21 @@ export function activityMethods(ctx: FakeContext) {
       scheduleActivity(ctx, thread.id);
       return structuredClone(activity);
     },
+    'threads.goal.track': async (params) => {
+      const thread = ctx.thread(params.threadId);
+      if (thread.archived) throw refusal('goal track needs an existing, unarchived conversation');
+      if (!(ctx.desktopExperiments ?? ctx.clientPreferences?.experiments ?? []).includes('auto-goal')) throw refusal('goal track needs the Automatic goals experiment, which is off in the desktop app (Settings, Experiments)');
+      if (busy(thread)) throw refusal('this conversation already has a goal or a loop; it must finish or be removed first');
+      const last = lastPrompt(thread);
+      if (!last) throw refusal('this conversation has no prompt of the user to track');
+      if (ctx.autoGoalTurns.get(thread.id) === last.turnId) throw refusal("the user's last prompt already started a goal");
+      if (!startAutoGoal(ctx, thread, last.turnId, last.text)) throw refusal('a reviewed goal starts reviewer conversations; start it in a top-level conversation');
+      return structuredClone(thread.activity!);
+    },
     'threads.activity.control': async (params) => {
       const thread = ctx.thread(params.threadId);
       const activity = validateControl(thread, params);
+      if (params.kind === 'goal' && params.action === 'remove' && activity.goal?.auto) ctx.unlinkGoalCards(thread);
       if (params.kind === 'goal' && params.action !== 'resume') stopReview(ctx, thread);
       if (params.kind === 'goal' && (params.action === 'remove' || params.action === 'complete')) stopChecklist(ctx, thread);
       applyControl(activity, params);

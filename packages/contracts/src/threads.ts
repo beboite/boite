@@ -436,8 +436,10 @@ export interface ThreadActivity {
   /**
    * `blocked`: the agent ended a goal turn with `[BOITE_GOAL_BLOCKED]` and
    * waits for the user. The goal is paused; the user's next message resumes it.
+   * `auto`: the core started this reviewed goal by itself, from a long prompt
+   * or `boite goal track` (the `auto-goal` experiment, `docs/goals.md`).
    */
-  goal: { objective: string; status: 'active' | 'paused' | 'complete'; iterations: number; error: string | null; dismissed?: boolean; blocked?: boolean; review?: GoalReview; checklist?: GoalChecklist } | null;
+  goal: { objective: string; status: 'active' | 'paused' | 'complete'; iterations: number; error: string | null; dismissed?: boolean; blocked?: boolean; review?: GoalReview; checklist?: GoalChecklist; auto?: true } | null;
   loop: { prompt: string; intervalMs: number; maxIterations?: number | null; status: 'active' | 'paused' | 'complete'; iterations: number; nextRunAt: number | null; error: string | null; history?: ActivityIteration[] } | null;
   tasks: AgentTask[];
   tasksDismissed?: boolean;
@@ -549,6 +551,13 @@ export interface ThreadsRpcMethods {
    */
   'threads.activity.set': { params: { threadId: ThreadId; goal?: { objective: string; review?: boolean } | null; loop?: { prompt: string; intervalMs: number; maxIterations?: number | null } | null; attachments?: Attachment[] }; result: ThreadActivity };
   'threads.activity.control': { params: { threadId: ThreadId; kind: 'goal' | 'loop'; action: 'pause' | 'resume' | 'remove' | 'complete' }; result: ThreadActivity };
+  /**
+   * `boite goal track`: an automatic reviewed goal on the thread whose
+   * objective is the user's last prompt, verbatim. Refused while the
+   * `auto-goal` experiment is off on the desktop app, while a goal or loop is
+   * under way, and when that prompt already started one.
+   */
+  'threads.goal.track': { params: { threadId: ThreadId }; result: ThreadActivity };
   /** The agent's task list, whole, as the tasks surface shows it. */
   'threads.tasks.set': { params: { threadId: ThreadId; tasks: AgentTask[] }; result: ThreadActivity };
   'threads.tasks.get': { params: { threadId: ThreadId }; result: AgentTask[] };

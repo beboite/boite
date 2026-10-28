@@ -188,3 +188,47 @@ test('the desktop app follows no one', async () => {
   expect(document.querySelector('[data-testid=experiments-follow]')).toBeNull();
   expect(query<HTMLInputElement>('[data-testid=experiment-whip]').checked).toBe(false);
 });
+test('Automatic goals is off by default; on, its threshold row sits under the switch and saves a valid length', async () => {
+  const saved: unknown[] = [];
+  const store = { owner: true, settings: {}, providers: [], accountsOf: () => [], modelsOf: () => [], saveSettings: async (patch: unknown) => { saved.push(patch); return true; } } as unknown as Store;
+  running = mount(ExperimentsPage, { target: document.body, props: { store } });
+  flushSync();
+  await tick();
+  const toggle = query<HTMLInputElement>('[data-testid=experiment-auto-goal]');
+  expect(toggle.checked).toBe(false);
+  expect(toggle.closest('label')?.textContent).toContain('Automatic goals');
+  expect(document.querySelector('[data-testid=auto-goal-settings]')).toBeNull();
+
+  toggle.click();
+  flushSync();
+  await tick();
+  expect(window.localStorage.getItem(EXPERIMENTS_STORAGE_KEY)).toBe('["auto-goal"]');
+  const row = query('[data-testid=auto-goal-settings]');
+  expect(toggle.closest('label')!.nextElementSibling).toBe(row);
+  const field = query<HTMLInputElement>('[data-testid=auto-goal-min-chars]');
+  expect(field.value).toBe('1500');
+  expect(row.textContent).toContain('Prompt length');
+
+  field.value = '150';
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  field.dispatchEvent(new Event('change', { bubbles: true }));
+  flushSync();
+  await tick();
+  expect(query('[data-testid=auto-goal-min-chars-error]').textContent).toContain('200 to 20000');
+  expect(saved).toEqual([]);
+
+  field.value = '800';
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  field.dispatchEvent(new Event('change', { bubbles: true }));
+  flushSync();
+  await tick();
+  expect(saved).toEqual([{ autoGoalMinChars: 800 }]);
+
+  // A paired device has the switch, never the core's threshold.
+  unmount(running);
+  running = mount(ExperimentsPage, { target: document.body, props: { store: { ...store, owner: false } as unknown as Store } });
+  flushSync();
+  await tick();
+  expect(query<HTMLInputElement>('[data-testid=experiment-auto-goal]').checked).toBe(true);
+  expect(document.querySelector('[data-testid=auto-goal-settings]')).toBeNull();
+});

@@ -9,7 +9,7 @@ import { composerValue } from './composer-validation.ts';
 import { steerUser, userSteeringUnavailable } from './threads/user-steering.ts';
 import { DraftReservationLedger, type DraftOwnership } from './threads/draft-reservation-ledger.ts';
 import { needsModelDiscovery } from './threads/selection.ts';
-import { composerActivity, isComposerActivity } from './composer-activity.ts';
+import { composerActivity, isComposerActivity, startsAutoGoal } from './composer-activity.ts';
 import { composerBatch } from './composer-batch.ts';
 
 const choiceOf = (thread: ThreadSummary): ComposerChoice => ({ providerId: thread.providerId, accountId: thread.accountId, model: thread.model, effort: thread.effort, speed: thread.speed ?? null, permissionMode: thread.permissionMode });
@@ -216,7 +216,9 @@ export class Composer {
           if (activity) {
             if (item.previewReferences?.length) throw refused('Activity commands do not accept page references.');
             this.core.activity.set({ threadId: id, ...activity, attachments }, undefined, choice);
-          } else this.core.threads.startTurn(id, batch.text, attachments, current.selectionVersion ?? 0, undefined, undefined, batch.requestId, undefined, batch.previewReferences, undefined, batch.entries[0]!.sentFrom ?? null, undefined, choice);
+          } else this.core.threads.startTurn(id, batch.text, attachments, current.selectionVersion ?? 0, undefined, undefined, batch.requestId, undefined, batch.previewReferences, undefined, batch.entries[0]!.sentFrom ?? null, undefined, choice,
+            // Decided from the experiments the prompt was queued with, so a restart keeps what it meant.
+            startsAutoGoal(batch.text, item.experiments, this.core.settings.get().autoGoalMinChars) ? batch.text : undefined);
           this.complete(section, id, batch.entries.map(entry => entry.id));
         });
       } catch (error) {

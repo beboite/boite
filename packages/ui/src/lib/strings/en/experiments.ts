@@ -28,6 +28,13 @@ export const strings = {
     contacts: {
       title: 'Contacts',
       hint: 'A Home page beside Threads where you link your Boite with another owner\'s through Tailscale, so your agents and theirs work together on the projects each side opens. Not ready for everyday use'
+    },
+    autoGoal: {
+      title: 'Automatic goals',
+      hint: 'A long prompt starts a reviewed goal on itself, with its checklist and a card on the project board, and the agent may start one when a prompt lists several requests. Remove the goal from the goal bar to drop it',
+      minChars: 'Prompt length',
+      minCharsHint: 'A prompt that starts a turn with at least this many characters starts an automatic goal',
+      unit: 'characters'
     }
   }
 } as const;

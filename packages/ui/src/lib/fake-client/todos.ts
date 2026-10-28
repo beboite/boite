@@ -1,5 +1,5 @@
 /** The project todo lists every thread of a project shares. */
-import { TODO_STATUSES, type Thread, type Todo, type TodoGoal } from '@boite/contracts';
+import { TODO_STATUSES, TODO_TEXT_MAX, type Thread, type Todo, type TodoGoal } from '@boite/contracts';
 import { refusal, todoText } from './shared';
 import type { FakeContext, FakeMethods } from './context';
 import { applySharedBoard, sharedTodos } from './shared-board';
@@ -54,6 +54,23 @@ export function followGoal(ctx: FakeContext, thread: Thread): void {
       todo.updatedAt = ctx.now();
     }
   }
+  emitTodos(ctx, thread.projectId);
+}
+
+/** An automatic goal's card, as the core's `addGoalCard`: the prompt's first line, linked to its conversation. */
+export function addGoalCard(ctx: FakeContext, thread: Thread, prompt: string): void {
+  const text = prompt.split('\n').map((line) => line.trim()).find(Boolean)?.slice(0, TODO_TEXT_MAX);
+  if (thread.projectId === null || thread.incognito || !text) return;
+  const at = ctx.now();
+  ctx.todos.push({ id: `todo-${++ctx.seq}`, projectId: thread.projectId, text, status: 'open', threadId: thread.id, goalThreadId: thread.id, createdAt: at, updatedAt: at });
+  emitTodos(ctx, thread.projectId);
+}
+
+/** A removed automatic goal: its open cards go back to To do, linked to nothing. */
+export function unlinkGoalCards(ctx: FakeContext, thread: Thread): void {
+  const linked = ctx.todos.filter((todo) => todo.goalThreadId === thread.id && todo.status === 'open');
+  if (!linked.length || thread.projectId === null) return;
+  for (const todo of linked) { todo.goalThreadId = null; todo.updatedAt = ctx.now(); }
   emitTodos(ctx, thread.projectId);
 }
 
