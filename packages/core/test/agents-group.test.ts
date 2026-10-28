@@ -385,6 +385,44 @@ test('a bot\'s thread on a machine that does not answer is refused, naming it', 
   expect(away.err).toContain('the same --request-id later answers the thread if it started there');
 }, 30_000);
 
+test('a thread a bot started on another machine whose answer was lost comes back on its desk, and its first answer reaches the bot once', async () => {
+  let finish!: () => void;
+  const held = new Promise<void>(resolve => { finish = resolve; });
+  answering(ctx => ctx.prompt.includes('Sort the letters') ? held : Promise.resolve());
+  const { desk, pc, pcOwner, pcId, deskId, cli, facts, agent, machine } = await setup();
+  await pcOwner.call('settings.set', { groupBots: true });
+  await desk.core.workforce.group.sync(pcId);
+  // That machine starts the thread, then its answer is lost on the way back.
+  const request = desk.core.coordination.request.bind(desk.core.coordination);
+  desk.core.coordination.request = async (peer, op, payload) => {
+    const result = await request(peer, op, payload);
+    if (op === 'bot.start') throw new Error('connection reset');
+    return result;
+  };
+  const lost = await cli(['thread', 'new', `${machine}/Notes`, 'Sort the letters', '--title', 'Sort', '--request-id', 'sort-1']);
+  expect(lost.code).not.toBe(0);
+  desk.core.coordination.request = request;
+  const id = pc.core.journal.listThreads().find(t => t.title === 'Sort')!.id;
+  expect(desk.core.workforce.group.desk(agent())).toEqual([]);
+
+  // A lease sync that does not list it keeps it watched there, and the desk takes it back.
+  await desk.core.workforce.group.sync(pcId);
+  expect(pc.core.workforce.groupHost.leases(deskId)[agent().id]!.watched).toContain(id);
+  expect(desk.core.workforce.group.desk(agent())).toMatchObject([{ threadId: id, coreId: pcId, origin: 'started' }]);
+
+  finish();
+  const answered = () => facts().filter(fact => fact.text.includes(`Turn done in thread ${machine}/${id}`));
+  await waitFor(() => answered().length === 1);
+  const again = await cli(['thread', 'new', `${machine}/Notes`, 'Sort the letters', '--title', 'Sort', '--request-id', 'sort-1', '--json']);
+  expect((JSON.parse(again.out) as AgentSpawn).thread.id).toBe(id);
+  await desk.core.workforce.group.sync(pcId);
+  await waitFor(() => pc.core.workforce.groupHost.outbox(deskId).length === 0);
+  expect(answered()).toHaveLength(1);
+  // The bot's lease lists it now: that machine holds it as any thread the bot follows.
+  expect(pc.core.workforce.groupHost.leases(deskId)[agent().id]).toMatchObject({ watched: [id] });
+  expect(pc.core.workforce.groupHost.leases(deskId)[agent().id]!.started).toBeUndefined();
+}, 30_000);
+
 test('a full outbox goes in requests a member accepts, oldest first, none left behind', () => {
   const row = { id: 'thr_x', title: 'Letter', projectId: 'prj_x', project: 'Notes', status: 'idle', archived: false, branch: null, questions: 0, permissions: 0, pullRequest: null, updatedAt: 1, lastCompletedAt: null } as const;
   const events: BotEvent[] = Array.from({ length: OUTBOX_MAX }, (_, index) => ({ agentId: 'agt_ada', kind: 'turn', key: `turn:${index}`, row, status: 'done', answer: 'x'.repeat(1_500) + 'é'.repeat(1_000) }));

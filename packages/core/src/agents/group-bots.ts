@@ -275,7 +275,7 @@ export class GroupBots {
     const v = this.next();
     const leases = this.store.records.list('profile').flatMap(agent => { const lease = this.leaseOf(agent, coreId, v); return lease ? [lease] : []; });
     try {
-      const answer = await within(this.core.coordination.request(peer, 'bot.lease', { v, leases }), REQUEST_MS, peer.name) as { projects?: unknown; rows?: unknown };
+      const answer = await within(this.core.coordination.request(peer, 'bot.lease', { v, leases }), REQUEST_MS, peer.name) as { projects?: unknown; rows?: unknown; started?: unknown };
       this.attempts.delete(coreId);
       this.reached(coreId, null);
       const leased = new Set((this.core.journal.getSetting(LEASED) as string[] | undefined) ?? []);
@@ -286,6 +286,8 @@ export class GroupBots {
         this.core.journal.setSetting(`${NAMES}${coreId}`, { projects, at: Date.now() });
       }
       if (Array.isArray(answer?.rows)) for (const entry of answer.rows.slice(0, 500)) { const row = rowOf(entry); if (row !== null) this.seen(coreId, row); }
+      // Threads a bot started there whose answer never came back: its desk takes them now.
+      if (Array.isArray(answer?.started)) for (const entry of answer.started.slice(0, 500) as { agentId?: unknown; row?: unknown }[]) this.adopt(peer, entry?.agentId, rowOf(entry?.row));
     } catch (error) {
       this.reached(coreId, describe(peer, error));
       // A machine that refused tells this one when its owner changes its mind (`setting.changed`).
@@ -314,6 +316,18 @@ export class GroupBots {
 
   // -- requests from a member --------------------------------------------------
 
+  /**
+   * A thread a bot started on that machine that is not on its desk here, as
+   * when the answer to `bot.start` was lost: it goes on the desk, and the next
+   * lease lists it, which tells that machine the bot has it.
+   */
+  private adopt(peer: CoordinationPeer, agentId: unknown, row: ProjectThreadRow | null): void {
+    if (typeof agentId !== 'string' || row === null || row.projectId === null) return;
+    const agent = this.store.records.find('profile', agentId);
+    if (agent === null || agent.status !== 'active' || !this.grants(agent, peer.coreId).includes(row.projectId)) return;
+    if (this.follows(agent.id)[`${peer.coreId}/${row.id}`] === undefined) this.follow(agent.id, peer, row, 'started');
+  }
+
   /** A `bot.*` request of a member: its events for this machine's bots, or what its bots ask of this machine. */
   async peer(peer: CoordinationPeer, operation: BotOperation, payload: unknown): Promise<unknown> {
     if (operation !== 'bot.event') return this.core.workforce.groupHost.handle(peer, operation, payload);
@@ -335,6 +349,7 @@ export class GroupBots {
     if (event.kind === 'row') return;
     const agent = this.store.records.find('profile', event.agentId);
     if (agent === null || agent.status !== 'active' || row.projectId === null || !this.grants(agent, peer.coreId).includes(row.projectId)) return;
+    if (event.started === true) this.adopt(peer, agent.id, row);
     const machine = machineArg(this.core, peer);
     const ref = `${machine}/${row.id}`;
     const follows = this.follows(agent.id)[`${peer.coreId}/${row.id}`] !== undefined;

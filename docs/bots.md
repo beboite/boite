@@ -474,7 +474,10 @@ link, naming the bot's machine; it is on the bot's desk on both machines before
 its first turn, so that turn's answer reaches the bot once, as a desk event,
 never as a letter. `groupThreads` plays no part. A retry with the same
 `--request-id` answers the same thread, on the bot's machine and on the other
-one. A project of that machine not entrusted to the bot is refused with the
+one. When the answer to `bot.start` is lost, that machine keeps the thread
+watched until a lease of the bot lists it: the next lease sync's answer, or the
+event of its first turn, puts it back on the bot's desk, and that answer still
+reaches the bot once. A project of that machine not entrusted to the bot is refused with the
 ones it may use there; a machine with `groupBots` off, too old for `bot.start`
 or not answering is named as for every other request. The thread there
 obeys that machine's rule: it starts nothing until the user writes in it.
