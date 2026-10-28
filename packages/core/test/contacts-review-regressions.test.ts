@@ -2,7 +2,7 @@ import {afterEach, expect, spyOn, test} from 'bun:test';
 import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {startTestCore, waitFor, type TestCore} from './harness.ts';
+import {holdAccountTurns, startTestCore, waitFor, type TestCore} from './harness.ts';
 import {connect, type CoreClient} from '../src/client.ts';
 import {thrown} from './settle.ts';
 import {protectLetters} from '../src/contacts/letter-scopes.ts';
@@ -152,6 +152,35 @@ test.each(['steer','hook'] as const)('SEC-01 %s delivery leaves contact mail it 
     for(const contact of contacts) expect(status(contact.id)).toBe('received');
     expect(b.h.core.coordination.config(b.t.id).paused).toBe(false);
   } finally {deliver.mockRestore();b.h.core.providers.require('echo').protocol='echo';done.resolve({status:'stopped',sessionId:null,usage:null});restore();}
+},30000);
+
+test('SEC-01 an idle wake leaves contact mail it cannot protect in the inbox and still wakes for the local letter behind it',async()=>{
+  const {a,b}=await pair();
+  const deliver=spyOn(b.h.core.coordination as unknown as {deliver(threadId:string):Promise<void>},'deliver').mockResolvedValue(undefined);
+  const support=spyOn(b.h.core.sharedAccess.execution,'support');
+  try {
+    const local=b.h.core.threads.create({projectId:b.p.id,providerId:'echo',accountId:b.t.accountId});
+    const contact=await a.c.call('contacts.sendHuman',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'External correspondence',requestId:'idle-mixed'});
+    await waitFor(()=>b.h.core.coordination.get(b.t.id).messages.some(l=>l.id===contact.id));
+    const peer=await b.h.core.coordination.send({threadId:local.id,to:{coreId:b.id,threadId:b.t.id},text:'Local status',requestId:'idle-local'});
+    // An idle thread whose route cannot protect contact mail.
+    support.mockImplementation(()=>({supported:false,reason:'no protected route'}) as ReturnType<typeof support>);
+    deliver.mockRestore();
+    const status=(id:string)=>b.h.core.coordination.get(b.t.id).messages.find(l=>l.id===id)?.status;
+    // The wake waits for its account, so nothing it does can mask a pause applied as it was scheduled.
+    const release=holdAccountTurns(b.h);
+    try {
+      await (b.h.core.coordination as unknown as {deliver(threadId:string):Promise<void>}).deliver(b.t.id);
+      expect(b.h.core.threads.require(b.t.id).status).toBe('queued');
+      expect(b.h.core.coordination.config(b.t.id).paused).toBe(false);
+    } finally {release();}
+    // The refusal holds the contact letter only; the local letter's wake runs.
+    await waitFor(()=>status(peer.id)==='delivered');
+    expect(status(contact.id)).toBe('received');
+    // Then only refused contact mail is left: that pauses coordination until something changes.
+    await waitFor(()=>b.h.core.coordination.config(b.t.id).paused);
+    expect(status(contact.id)).toBe('received');
+  } finally {support.mockRestore();deliver.mockRestore();}
 },30000);
 
 test('SEC-01 a fault while protecting contact mail is reported, never taken for a refusal that holds the letter back',async()=>{

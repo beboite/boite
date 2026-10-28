@@ -706,6 +706,7 @@ export class Coordination {
           for (const letter of batch) this.update(letter, 'uncertain', 'Queued for provider delivery');
           this.core.journal.db.query('INSERT INTO coordination_wakes VALUES (?, ?)').run(threadId, Date.now());
           this.core.threads.startTurn(threadId, prompt(batch), [], undefined, 'coordination');
+          return true;
         })(), refusal => { held = refusal; return local(); });
         // No turn of an idle thread ends to retry its refused contact mail: the refusal pauses coordination until the owner's trust or message.
         if (!woke && held) throw held;
