@@ -2,6 +2,7 @@ import { RpcErrorCode, type DesktopUpdateStatus, type ProviderId, type ServerUpd
 import { RpcFailure } from '../client';
 import { confirm } from '../confirm.svelte';
 import { fill, strings } from '../strings';
+import { updateStale } from '../update-freshness';
 import type { StoreContext } from './context';
 
 /** What one machine started for an update-everything click; its progress arrives as events. */
@@ -88,6 +89,18 @@ export class ServerUpdater {
       if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) this.legacy = true;
       else this.error = this.ctx.reason(error);
     } finally { if (client === this.ctx.client) this.busy = false; }
+  }
+
+  /**
+   * Reads that machine's Boite, then checks it again when its core's own
+   * reading is stale. A core checks every six hours from its start, so its
+   * cached answer can say up to date about a release published since.
+   */
+  async freshen(now = Date.now()): Promise<void> {
+    if (this.snapshot === null) await this.load();
+    const state = this.snapshot;
+    // Only an installation the core can update checks at all; a download or a failure stays shown as it is.
+    if (state?.mode === 'systemd' && ['idle', 'current'].includes(state.phase) && updateStale(state.checkedAt, now)) await this.load(true);
   }
 
   async install(machine: string): Promise<void> {

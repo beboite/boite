@@ -12,6 +12,7 @@ import type {
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import type { LoginState } from '../store.svelte';
+import { updateStale } from '../update-freshness';
 import type { StoreContext } from './context';
 
 export interface AccountGateway {
@@ -327,7 +328,8 @@ export class Accounts {
    * A core from before updates answers MethodNotFound: that machine simply
    * offers none, which is not an error worth a toast.
    */
-  async loadHarnessUpdates(refresh = false): Promise<void> {
+  /** `quiet`: a check nobody asked for logs its failure instead of showing it. */
+  async loadHarnessUpdates(refresh = false, quiet = !refresh): Promise<void> {
     const client = this.ctx.client;
     if (!client || !this.ctx.store.owner) return;
     const generation = this.ctx.clientGeneration;
@@ -340,9 +342,22 @@ export class Accounts {
         this.harnessUpdates = [];
         return;
       }
-      if (refresh) this.ctx.fail(error);
+      if (!quiet) this.ctx.fail(error);
       else console.warn('reading the agent updates failed', error);
     }
+  }
+
+  /**
+   * Checks this machine's agents again when their last check is stale: the
+   * core checks every six hours from its start, so its reading can miss a
+   * release published since. Nothing starts while one of them is checking,
+   * updating or shows a failure.
+   */
+  async freshenHarnessUpdates(now = Date.now()): Promise<void> {
+    const updates = this.harnessUpdates;
+    if (updates.length === 0 || updates.some((update) => update.state !== 'idle')) return;
+    const newest = Math.max(...updates.map((update) => update.checkedAt ?? 0));
+    if (updateStale(newest === 0 ? null : newest, now)) await this.loadHarnessUpdates(true, true);
   }
 
   async updateHarness(providerId: ProviderId): Promise<void> {

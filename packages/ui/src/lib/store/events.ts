@@ -63,7 +63,7 @@ export function listen(ctx: StoreContext, client: Client): void {
           // first load, and what refreshes it after a reconnect.
           s.principal = client.principal;
           ctx.serverUpdater.reset();
-          if (s.owner && !s.localCore) { void ctx.serverUpdater.load(); void ctx.serverUpdater.loadDesktop(); }
+          if (s.owner && !s.localCore) { void ctx.serverUpdater.freshen(); void ctx.serverUpdater.loadDesktop(); }
           void s.reload();
           // A reconnect lists the composer records again; the first connection does once the journal is read.
           void ctx.sync.resync();
