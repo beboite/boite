@@ -42,6 +42,7 @@ export function travel(host: EditingHost, back: boolean): void {
 function restoreStep({ store, key, box, state, moved }: EditingHost, step: ComposerSnapshot): void {
   state.attachments = [...step.attachments];
   state.previewReferences = [...step.previewReferences];
+  state.editing = step.editing;
   // Persists the draft at once; the references it would re-derive are the step's own.
   store.editComposerText(key, step.text);
   state.previewReferences = [...step.previewReferences];

@@ -6,11 +6,12 @@ import App from '../App.svelte';
 import { FakeClient } from '../lib/fake-client';
 import { RpcFailure } from '../lib/client';
 import { defaultPrefs, PREFS_STORAGE_KEY, STASH_STORAGE_KEY } from '../lib/prefs';
-import { store } from '../lib/store.svelte';
+import { Store, store } from '../lib/store.svelte';
 import { repliesOf, TYPING_PAUSE_MS } from '../lib/question-reply.svelte';
 import { closeTour } from '../lib/onboarding.svelte';
 import { freshWork, work, WORK_STORAGE_KEY } from '../lib/work-prefs.svelte';
 import { setExperiment } from '../lib/experiments';
+import { retryTurn } from '../lib/composer-edit';
 
 /**
  * The three composer keys, on the whole app over the in-memory fake: Ctrl+Enter
@@ -1007,6 +1008,89 @@ test('a pending send cannot duplicate a turn or erase text typed for the next pr
   expect(input().value).toBe('still composing the next prompt [Image 1] ');
   expect(store.composerStates['t-trace']!.attachments.map(item => item.name)).toEqual(['next.png']);
   expect(rpc.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(1);
+});
+
+test('a prompt on its way when the app dies comes back after a restart, its images too, and reaches the thread once', async ({ oldCoreApp: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  const client = store.client!;
+  const call = client.call.bind(client);
+  const starts: string[] = [];
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    // A prompt and its picture uploading over a slow link: the app dies before the core has it.
+    if (method === 'turns.start') { starts.push((params as { clientRequestId: string }).clientRequestId); return new Promise(() => {}); }
+    return call(method, params);
+  });
+  await type('a long prompt in flight ');
+  paste(pngFile('flight.png'));
+  await waitFor(() => chips().length === 1);
+  press('Enter');
+  await waitFor(() => starts.length === 1 && input().value === '');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  // No pagehide, no flush: the page is gone. The next app reads the synchronous backup the old one left.
+  const core = (client as FakeClient).core!;
+  const next = new Store();
+  next.machineId = store.machineId;
+  next.endpointUrl = store.endpointUrl;
+  const restarted = new FakeClient({ delayMs: 0, missing: OLD_CORE });
+  const nextStarts: string[] = [];
+  const nextCall = restarted.call.bind(restarted);
+  vi.spyOn(restarted, 'call').mockImplementation(async (method, params) => {
+    if (method === 'turns.start') nextStarts.push((params as { clientRequestId: string }).clientRequestId);
+    return nextCall(method, params);
+  });
+  await restarted.connect();
+  restarted.core!.hostname = core.hostname;
+  restarted.core!.dataDir = core.dataDir;
+  next.attach(restarted);
+  try {
+    await next.connect();
+    // Asked again under the id it first went out with, so a core that did take it answers with that turn.
+    await waitFor(() => nextStarts.length === 1, 2000);
+    expect(nextStarts).toEqual(starts);
+    await waitFor(() => (next.composerStates['t-trace']?.queued.length ?? 0) === 0, 2000);
+    const thread = await restarted.call('threads.get', { threadId: 't-trace' });
+    const sent = thread.messages.filter(message => message.role === 'user' && message.parts.some(part => part.type === 'text' && part.text.includes('a long prompt in flight')));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.parts.filter(part => part.type === 'image')).toHaveLength(1);
+  } finally { next.detach(); restarted.close(); }
+});
+
+test('a new conversation whose creation is on its way when the app dies comes back as its draft, image included', async ({ app: _app }) => {
+  store.startDraft(store.projects[0]!.id);
+  await waitFor(() => store.draft !== null);
+  const client = store.client!;
+  const call = client.call.bind(client);
+  let creating = false;
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'threads.create') { creating = true; return new Promise(() => {}); }
+    return call(method, params);
+  });
+  await type('the first prompt of a new conversation ');
+  paste(pngFile('first.png'));
+  await waitFor(() => chips().length === 1);
+  press('Enter');
+  await waitFor(() => creating && input().value === '');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const core = (client as FakeClient).core!;
+  const next = new Store();
+  next.machineId = store.machineId;
+  next.endpointUrl = store.endpointUrl;
+  const restarted = new FakeClient({ delayMs: 0 });
+  await restarted.connect();
+  restarted.core!.hostname = core.hostname;
+  restarted.core!.dataDir = core.dataDir;
+  next.attach(restarted);
+  try {
+    await next.connect();
+    // Its conversation may or may not exist: the words wait in their draft, nothing starts by itself.
+    await waitFor(() => next.draftEntries.some(row => row.text.startsWith('the first prompt of a new conversation')), 2000);
+    const id = next.draftEntries.find(row => row.text.startsWith('the first prompt of a new conversation'))!.id;
+    next.startDraft(store.projects[0]!.id, { draftId: id });
+    expect(next.composerStates.draft?.text).toBe('the first prompt of a new conversation [Image 1] ');
+    expect(next.composerStates.draft?.attachments.map(item => item.name)).toEqual(['first.png']);
+    expect(next.composerStates.draft?.queued).toEqual([]);
+  } finally { next.detach(); restarted.close(); }
 });
 
 // -- images -------------------------------------------------------------------
@@ -2093,6 +2177,51 @@ test('Ctrl+Z after deleting everything and a stray key brings back the text and 
   await new Promise(resolve => setTimeout(resolve, 10));
   expect(input().value).toBe('');
   expect(chips()).toEqual([]);
+});
+
+test('Edit on a sent message over a long unsent draft is one undo step: Ctrl+Z gives the draft back as a plain draft', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await send('the sent prompt');
+  const draft = 'an unsent draft that took an hour to write '.repeat(500);
+  await type(draft);
+  paste(pngFile('unsent.png'));
+  await waitFor(() => chips().length === 1);
+  const full = input().value;
+  const row = Array.from(document.querySelectorAll('[data-testid=message][data-role=user]')).find(row => row.querySelector('[data-testid=text-part]')?.textContent === 'the sent prompt')!;
+  row.querySelector<HTMLButtonElement>('[data-testid=message-edit]')!.click();
+  await waitFor(() => input().value === 'the sent prompt');
+  const message = store.composerStates['t-trace']!.editing;
+  expect(message).toBeTruthy();
+  input().focus();
+  press('z', { ctrlKey: true });
+  await waitFor(() => input().value === full && chips().length === 1);
+  // Back to what it was: a draft, which sending would not turn into an edit of that message.
+  expect(store.composerStates['t-trace']!.editing ?? null).toBeNull();
+  expect(document.querySelector('[data-testid=composer-editing]')).toBeNull();
+  press('y', { ctrlKey: true });
+  await waitFor(() => input().value === 'the sent prompt');
+  expect(store.composerStates['t-trace']!.editing).toBe(message);
+});
+
+test('a retry whose resend fails leaves the words typed meanwhile in the box and holds its prompt in the queue', async ({ oldCoreApp: _app }) => {
+  await store.open('t-trace');
+  await send('the prompt to retry');
+  const prompt = store.openThread!.messages.findLast(message => message.role === 'user')!;
+  const client = store.client!;
+  const call = client.call.bind(client);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'turns.start') { await gate; throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'resend refused' }); }
+    return call(method, params);
+  });
+  const retrying = retryTurn(store, 't-trace', prompt);
+  await type('the next prompt, typed while the retry went out');
+  release();
+  await retrying;
+  expect(input().value).toBe('the next prompt, typed while the retry went out');
+  expect(store.composerStates['t-trace']!.queued.map(entry => entry.text)).toEqual(['the prompt to retry']);
+  expect(store.composerStates['t-trace']!.paused).toBe(true);
 });
 
 test('copying an image reference carries its picture to another composer, and stays text in its own', async ({ app: _app }) => {
