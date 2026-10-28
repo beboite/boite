@@ -80,7 +80,8 @@ with the command and date. Live-provider tests spend tokens and stay opt-in.
 
 ## Follow through on pull requests
 
-Opening a PR triggers automated reviews. Read every finding and the failures
+A PR marked ready gets an mtsu-patrol review; a draft gets CI only. Read every
+finding and the failures
 from every applicable CI job before changing code. Verify findings against the
 current head, fix valid issues and explain rejected suggestions. Group related
 fixes into one verified push. Integrate the base branch when a conflict or a

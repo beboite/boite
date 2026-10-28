@@ -678,8 +678,9 @@ mtsu-patrol reviews each ready head; it is not a required check.
 its free quota left most pull requests with a limit notice instead of a review.
 
 A review with no critical or major finding is the last one: the push that
-answers it needs no second review, and mtsu-patrol skips a small push after
-such a review, saying so in its summary.
+only answers it needs no second review. mtsu-patrol skips a push of at most
+150 changed lines after such a review (a setting in its panel) and says so in
+its summary.
 
 Follow the [PR rules](../AGENTS.md#follow-through-on-pull-requests): inspect CI
 and review findings together, verify and group fixes before pushing, and report
