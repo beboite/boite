@@ -310,12 +310,15 @@ describe('worktrees.remove', () => {
   /** Starts `worktrees.remove` and holds its git once started, before it deletes anything; `during` runs meanwhile. */
   async function whileGitRemoves(projectId: string, path: string, during: () => Promise<void>): Promise<void> {
     const signal = join(harness.dataDir, 'remove-may-run');
+    // Bun itself waits, then runs the real git with its output: no shell, so Windows runs it too.
+    const hold = 'const [signal, ...args] = process.argv.slice(1); while (!require("node:fs").existsSync(signal)) Bun.sleepSync(20);'
+      + ' process.exit(Bun.spawnSync(["git", ...args], { stdout: "inherit", stderr: "inherit" }).exitCode ?? 1);';
     const procs = harness.core.procs, spawn = procs.spawn.bind(procs);
     let waiting = false;
     const spy = spyOn(procs, 'spawn').mockImplementation((scope, command, args, options) => {
       if (command !== 'git' || !args.includes('remove')) return spawn(scope, command, args, options);
       waiting = true;
-      return spawn(scope, 'sh', ['-c', 'while [ ! -e "$0" ]; do sleep 0.02; done; exec git "$@"', signal, ...args], options);
+      return spawn(scope, process.execPath, ['-e', hold, signal, ...args], options);
     });
     try {
       const removing = client.call('worktrees.remove', { projectId, path });
@@ -349,7 +352,7 @@ describe('worktrees.remove', () => {
     await client.call('threads.remove', { threadId: thread.id });
     // A link made before the removal: the same folder under another name, and a folder inside it.
     const alias = join(project.path, 'alias');
-    symlinkSync(thread.cwd, alias, 'dir');
+    symlinkSync(thread.cwd, alias, process.platform === 'win32' ? 'junction' : 'dir');
     mkdirSync(join(thread.cwd, 'sub'));
     await whileGitRemoves(project.id, thread.cwd, async () => {
       // Undoing the deletion would bring it back live, and its next turn would start in the folder git deletes.
@@ -374,7 +377,7 @@ describe('worktrees.remove', () => {
     const started: string[] = [], refusals: string[] = [];
     const restore = setDriver('echo', { ...echoDriver, setViewed: () => {}, releaseThread: () => {},
       prepare: async (context) => {
-        try { context.spawnChild('sh', ['-c', 'sleep 60'], { cwd: context.thread.cwd }); started.push(context.thread.id); }
+        try { context.spawnChild(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { cwd: context.thread.cwd }); started.push(context.thread.id); }
         catch (error) { refusals.push(error instanceof Error ? error.message : String(error)); }
       },
     });
