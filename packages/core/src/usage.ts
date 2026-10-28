@@ -177,7 +177,8 @@ export function usageHistory(core: Core, edges: number[], providerId?: ProviderI
     entry.priced += cost.priced;
     if (estimated > 0) entry.estimated = (entry.estimated ?? 0) + estimated;
     add(entry.usage, cost.usage);
-    entry.price ??= cost.price;
+    // The rate most of the joined writes paid, which neither group alone tells.
+    entry.price = priceUsage(entry.model, entry.usage)?.price ?? entry.price ?? cost.price;
   }
 
   const byThread = new Map<ThreadId, UsageHistoryThread>();

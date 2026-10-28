@@ -208,6 +208,18 @@ test('usage.history reads turns an older core recorded with the provider\'s curr
   expect(rows.kept!.usage.inputTokens).toBe(500);
 });
 
+test('a row that joins newer five-minute writes and older hour writes shows the rate most of its writes paid', async () => {
+  const { codex } = await threads();
+  const model = { providerId: 'claude', model: 'claude-opus-5-5' };
+  harness.core.journal.putTurn(turn(codex, D0 + 1, { ...usage(10, 10), cacheWriteTokens: 10 }, model));
+  harness.core.journal.putTurn(turn(codex, D0 + 2, legacy(10, 10, 0, 1000), model));
+
+  const client = await harness.connect();
+  const [row] = (await client.call('usage.history', { edges: EDGES, providerId: 'claude' })).rows;
+  expect(row).toMatchObject({ estimated: 1, usage: { cacheWriteTokens: 1010, cacheWriteHourTokens: 1000 } });
+  expect(row!.price).toEqual(priceOf('claude-opus-5-5', true));
+});
+
 test('every reader sums an older Codex turn and a newer one as the same disjoint buckets', async () => {
   const { echo, codex } = await threads();
   const journal = harness.core.journal;
