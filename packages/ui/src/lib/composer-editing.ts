@@ -5,6 +5,8 @@ import { recordEdit, redoStep, settled, undoStep, type ComposerSnapshot } from '
 import { copiedFrom, copyImages, fitCopy, pastesAsText } from './composer-clipboard';
 import { acceptAttachments } from './attachments';
 import { fill, strings } from './strings';
+import { touchScreen } from './device';
+import { undo } from './undo.svelte';
 
 /**
  * The composer's own edits: undo and redo from its history, and the copy, cut
@@ -36,6 +38,29 @@ export function travel(host: EditingHost, back: boolean): void {
   const { state, box } = host;
   const step = back ? undoStep(state, boxSelection(box)) : redoStep(state, boxSelection(box));
   if (step) restoreStep(host, step);
+}
+
+/** Less than this gone, and no picture: a box cleared on a phone is no loss worth a toast. */
+const WORTH_UNDO_CHARS = 40;
+let offered = 0;
+
+/**
+ * A phone has no Ctrl+Z: a draft emptied in one go, or replaced by Edit,
+ * offers its way back in the undo toast for a few seconds, the step Ctrl+Z
+ * would take. Typing closes the offer (`closeDraftUndo`), and a box changed
+ * since is left alone, so the toast never takes back another step.
+ */
+export function offerDraftUndo(host: EditingHost, before: { text: string; attachments: number }, message: string): void {
+  if (!touchScreen() || (before.text.trim().length < WORTH_UNDO_CHARS && before.attachments === 0)) return;
+  const { state } = host, after = state.text;
+  undo.offer(message, async () => { if (state.text === after) travel(host, true); });
+  offered = undo.current?.id ?? 0;
+}
+
+/** The composer's undo offer ends with the next edit. */
+export function closeDraftUndo(): void {
+  if (offered && undo.current?.id === offered) undo.dismiss();
+  offered = 0;
 }
 
 /** Text, pictures, page references and selection exactly as the step held them. */

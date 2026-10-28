@@ -1,6 +1,8 @@
 import type { Message } from '@boite/contracts';
 import { tick, untrack } from 'svelte';
 import type { Store } from './store.svelte';
+import { offerDraftUndo } from './composer-editing';
+import { strings } from './strings';
 
 /**
  * A first page holds about one screen, and a list that does not reach past
@@ -95,5 +97,7 @@ export async function editWhole(store: Store, threadId: string, message: Message
     (now?.attachments.length ?? 0) !== attachments.length || attachments.some((part, index) => now?.attachments[index] !== part) ||
     (now?.previewReferences?.length ?? 0) !== references.length || references.some((reference, index) => now?.previewReferences?.[index] !== reference)) return false;
   store.startEdit(threadId, message);
+  const edited = store.composerStates[threadId]!;
+  offerDraftUndo({ store, key: threadId, box: undefined, state: edited, provider: null, moved: () => {} }, { text: text ?? '', attachments: attachments.length }, strings.composer.draftReplaced);
   return true;
 }

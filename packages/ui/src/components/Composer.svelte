@@ -12,7 +12,7 @@
   import { fitHeight, selfSizing } from '../lib/composer-size';
   import { editComposerInput, insertImageReference, removeImageReferences, touchesImageReference, trackImageSend } from '../lib/composer-images';
   import { checkpoint, editKind, recordEdit, resetHistory, settled } from '../lib/composer-history';
-  import { boxSelection, copySelection, pasteImages, travel, type EditingHost } from '../lib/composer-editing';
+  import { boxSelection, closeDraftUndo, copySelection, offerDraftUndo, pasteImages, travel, type EditingHost } from '../lib/composer-editing';
   import { ComposerMentions } from '../lib/composer-mentions.svelte';
   import { unresolvedAssetId } from '../lib/draft-attachments';
   import { focusInitial, focusWithin } from '../lib/focus';
@@ -280,13 +280,14 @@
     // A host whose undo could not be cancelled already rewrote the box: the old path keeps its references.
     const nativeUndo = input.inputType === 'historyUndo' || input.inputType === 'historyRedo';
     const state = stateForInput(); noteTyping(store, key);
+    closeDraftUndo();
+    const prior = { text: state.text, attachments: state.attachments.length };
     // The state still holds the text before this edit: that is the step undo returns to.
-    if (!nativeUndo) {
-      const kind = touchesImageReference(state.text, state.attachments, pendingEdit) ? 'big' : editKind(input.inputType, pendingEdit);
-      recordEdit(state, kind, before, input.data ?? null);
-    }
+    const kind = nativeUndo ? null : touchesImageReference(state.text, state.attachments, pendingEdit) ? 'big' : editKind(input.inputType, pendingEdit);
+    if (kind) recordEdit(state, kind, before, input.data ?? null);
     const whole = editComposerInput(store, key, element, nativeUndo, pendingEdit);
     settled(state);
+    if (kind === 'big' && !state.text && !state.attachments.length) offerDraftUndo(editing(), prior, strings.composer.draftCleared);
     pendingEdit = undefined;
     recall = null;
     // Typing is proof the box has the keyboard, whatever the focus event did.

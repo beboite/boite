@@ -12,6 +12,7 @@ import { closeTour } from '../lib/onboarding.svelte';
 import { freshWork, work, WORK_STORAGE_KEY } from '../lib/work-prefs.svelte';
 import { setExperiment } from '../lib/experiments';
 import { retryTurn } from '../lib/composer-edit';
+import { strings } from '../lib/strings';
 
 /**
  * The three composer keys, on the whole app over the in-memory fake: Ctrl+Enter
@@ -2201,6 +2202,33 @@ test('Edit on a sent message over a long unsent draft is one undo step: Ctrl+Z g
   press('y', { ctrlKey: true });
   await waitFor(() => input().value === 'the sent prompt');
   expect(store.composerStates['t-trace']!.editing).toBe(message);
+});
+
+test('on a phone, a draft emptied at once or replaced by Edit offers Undo in a toast that brings back its text and images', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await send('the sent prompt');
+  vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
+    media, matches: media === '(pointer: coarse)', onchange: null, addListener() {}, removeListener() {},
+  }) as unknown as MediaQueryList);
+  await type('a long prompt typed on the phone '.repeat(300));
+  paste(pngFile('phone.png'));
+  await waitFor(() => chips().length === 1);
+  const full = input().value;
+  input().focus();
+  // Select all, then the keyboard's delete: the phone has no Ctrl+Z to take it back.
+  input().setSelectionRange(0, full.length);
+  edit('deleteContentBackward', '', 0);
+  await waitFor(() => chips().length === 0 && document.querySelector('[data-testid=undo-toast]') !== null);
+  expect(query('[data-testid=undo-toast]')!.textContent).toContain(strings.composer.draftCleared);
+  query<HTMLButtonElement>('[data-testid=undo-action]').click();
+  await waitFor(() => input().value === full && chips().length === 1);
+  // Edit on a sent message replaces the draft the same way, and the toast gives it back.
+  const row = Array.from(document.querySelectorAll('[data-testid=message][data-role=user]')).find(row => row.querySelector('[data-testid=text-part]')?.textContent === 'the sent prompt')!;
+  row.querySelector<HTMLButtonElement>('[data-testid=message-edit]')!.click();
+  await waitFor(() => input().value === 'the sent prompt' && document.querySelector('[data-testid=undo-toast]')?.textContent?.includes(strings.composer.draftReplaced) === true);
+  query<HTMLButtonElement>('[data-testid=undo-action]').click();
+  await waitFor(() => input().value === full && chips().length === 1);
+  expect(store.composerStates['t-trace']!.editing ?? null).toBeNull();
 });
 
 test('a retry whose resend fails leaves the words typed meanwhile in the box and holds its prompt in the queue', async ({ oldCoreApp: _app }) => {
