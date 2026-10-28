@@ -203,16 +203,20 @@ describe('gatherAttachments', () => {
 });
 
 describe('receiveFiles', () => {
-  test('a file refused once read leaves its slot to the next one past the cap', async () => {
+  test('a file refused once read leaves its slot to the next one past the cap, from this intake or a later one', async () => {
     const store = { error: null } as unknown as Store;
     const box = { input: {}, attachments: [] as Attachment[], placed() {}, settle(placeholder: Attachment, ready: Attachment | null) {
       box.attachments = ready ? box.attachments.map(item => item === placeholder ? ready : item) : box.attachments.filter(item => item !== placeholder);
     } };
     const notes = Array.from({ length: ATTACHMENTS_PER_TURN }, (_, at) => file(`note-${at}.txt`, 'text/plain', 10));
-    // The heavy one shows as a tile like the rest: only its read says it is too big.
-    notes.splice(1, 0, file('heavy.bin', 'application/octet-stream', ATTACHMENT_MAX_BYTES + 1));
-    await receiveFiles(store, notes, box, null);
-    expect(box.attachments.map(one => one.name)).toEqual(notes.filter(one => one.name !== 'heavy.bin').map(one => one.name));
-    expect(store.error).toContain('heavy.bin');
+    // The heavy ones show as tiles like the rest: only their reads say they are too big.
+    const heavy = (name: string) => file(name, 'application/octet-stream', ATTACHMENT_MAX_BYTES + 1);
+    const first = receiveFiles(store, [heavy('heavy-a.bin'), heavy('heavy-b.bin'), ...notes.slice(0, -1)], box, null);
+    expect(box.attachments).toHaveLength(ATTACHMENTS_PER_TURN);
+    // Dropped while the box is full of tiles still being read, it waits for the slot the second heavy one leaves.
+    const second = receiveFiles(store, notes.slice(-1), box, null);
+    await Promise.all([first, second]);
+    expect(box.attachments.map(one => one.name)).toEqual(notes.map(one => one.name));
+    expect(store.error).toContain('heavy-a.bin');
   });
 });

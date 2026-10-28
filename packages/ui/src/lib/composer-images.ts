@@ -76,6 +76,15 @@ export function removeImageReferences(store: Store, key: string, at: number) {
   if (state.selection) state.mentionInsertion = (state.mentionInsertion ?? 0) + 1;
 }
 
+/**
+ * What a Send waiting on a file read was pressed on. A sync that swaps the
+ * box changes it; a file that lands, even a picture that went as a file and
+ * took its reference with it, does not.
+ */
+export function sendShape(text: string, attachments: Attachment[]): string {
+  return `${attachments.length}:${text.replace(/\[Image [1-9]\d*\]/g, '')}`;
+}
+
 /** A box nobody types in: a step of the undo history, or a draft set aside. */
 export interface QuietBox {
   text: string;

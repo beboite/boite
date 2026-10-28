@@ -1124,9 +1124,10 @@ steps included. A placeholder is never saved, synced or uploaded; when a sync
 conflict moves the words to a new draft, the file lands in that draft instead
 (`followRead`, `lib/draft-attachments.ts`). Send pressed meanwhile waits on a
 spinner and goes once every file is ready, in the box it was pressed in; typing
-on cancels it. A refused file drops its tile and its reference, in the box and
-in its undo steps, and says why. A file past the twenty waits for one of
-them to be refused, and is refused itself only once they are all read.
+on, or a sync that swaps the box, cancels it. A refused file drops its tile
+and its reference, in the box and in its undo steps, and says why. A file past
+the twenty, from the same drop or a later one, waits for one of them to be
+refused, and is refused itself only once they are all read.
 
 The Claude driver fits every prompt image to the same edge again before it
 goes in (`drivers/claude/images.ts`, Bun's image codec, same format), because

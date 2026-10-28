@@ -1458,7 +1458,27 @@ test('Send pressed during a file read goes once the file is ready, unless the us
   expect(input().value).toBe('');
 });
 
+test('a send waiting on a file never sends the words a sync swapped into its box', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await type('Mine, with notes');
+  vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(() => {});
+  paste(new File(['notes'], 'notes.txt', { type: 'text/plain' }));
+  await waitFor(() => chips().length === 1);
+  const before = store.openThread!.messages.length;
+  press('Enter');
+  await waitFor(() => query<HTMLButtonElement>('[data-testid=composer-send]').dataset.waiting === 'true');
+  // A conflict sets these words and their file aside and writes the other side's box, as `#write` does.
+  const state = Object.values(store.composerStates).find(one => one.text === 'Mine, with notes')!;
+  state.text = 'Theirs';
+  state.attachments = [];
+  await waitFor(() => query<HTMLButtonElement>('[data-testid=composer-send]').dataset.waiting === undefined);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect(store.openThread!.messages.length).toBe(before);
+  expect(input().value).toBe('Theirs');
+});
+
 test('a send waiting on a draft\'s file never sends another draft opened in the same box', async ({ app: _app }) => {
+
   await openDraft();
   await type('Second draft words');
   const parked = store.draft!.id!;

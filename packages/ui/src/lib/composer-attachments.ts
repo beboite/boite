@@ -139,8 +139,11 @@ export function receiveFiles(
     if (first) refuse(fill(strings.composer.attachTooMany, { name: first.name, max: String(ATTACHMENTS_PER_TURN) }));
   };
   for (const file of files) if (over.length > 0 || !admit(file)) over.push(file);
-  if (waiting.length === 0) { refuseOver(); return Promise.resolve(); }
-  const run = (reads.get(receiver.input) ?? Promise.resolve()).then(async () => {
+  const ahead = reads.get(receiver.input);
+  // Full of tiles still being read: these wait behind them, which may leave them a slot.
+  if (waiting.length === 0 && (over.length === 0 || !ahead)) { refuseOver(); return Promise.resolve(); }
+  const run = (ahead ?? Promise.resolve()).then(async () => {
+    admitWaiting();
     for (let next = 0; next < waiting.length; next++) {
       const [file, placeholder] = waiting[next]!;
       // A read that throws still settles its placeholder: no tile waits forever.
@@ -152,7 +155,9 @@ export function receiveFiles(
     }
     refuseOver();
   });
-  reads.set(receiver.input, run.catch(() => {}));
+  // Only reads still going are waited on: once every one has settled, a full box refuses at once.
+  const settled: Promise<void> = run.catch(() => {}).then(() => { if (reads.get(receiver.input) === settled) reads.delete(receiver.input); });
+  reads.set(receiver.input, settled);
   return run;
 }
 
