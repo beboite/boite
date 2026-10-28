@@ -53,6 +53,8 @@ const hasContent = (local: Local | null) => !!local && (!boxEmpty(local.input) |
 export class ComposerSync {
   /** True when this core answered that it has no composer records. */
   #refused = $state(false);
+  /** The over-limit warning this sync raised, and the box it is about: only that box, accepted, takes it back. */
+  #overLimit: { key: string; message: string } | null = null;
   #epoch = 0;
   #client: Client | null = null;
   #listed = false;
@@ -608,6 +610,7 @@ export class ComposerSync {
         const now = this.#localOf(this.#source(key));
         if (result.accepted) {
           if (sendNow) this.#forced.delete(key);
+          if (this.#overLimit?.key === key) { if (this.ctx.store.error === this.#overLimit.message) this.ctx.store.error = null; this.#overLimit = null; }
           this.#know(key, result.record);
           const stored = this.#known.get(key)!;
           if (stored.hash === sent.hash) { if (this.#parts(this.#shape(now)).hash !== sent.hash) this.#dirty.add(key); return; }
@@ -646,7 +649,9 @@ export class ComposerSync {
       this.#dirty.add(key);
       if (error instanceof RpcFailure && error.code === RpcErrorCode.InvalidParams && error.message.startsWith('composer.attachments:')) {
         // Past what one message may carry, no retry can fit: the box stays on this device, and the next edit tries again.
-        this.ctx.store.error = fill(strings.errors.draftOverLimit, { count: String(ATTACHMENTS_PER_TURN), max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) });
+        const message = fill(strings.errors.draftOverLimit, { count: String(ATTACHMENTS_PER_TURN), max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) });
+        this.ctx.store.error = message;
+        this.#overLimit = { key, message };
         failed = true;
         return;
       }

@@ -456,8 +456,7 @@ test('a box the core refuses as over its attachment limit says so and keeps ever
   expect(box.text).toBe(text + 'and the end');
   expect(box.attachments).toHaveLength(ATTACHMENTS_PER_TURN + 1);
   expect((await recordOf(desk.client, 'inputs', 't-trace'))?.value ?? null).toBeNull();
-  // Once it fits again, it reaches the core.
-  desk.store.error = null;
+  // Once it fits again, it reaches the core and the warning it raised goes.
   box.attachments = box.attachments.slice(0, ATTACHMENTS_PER_TURN);
   desk.store.editComposerText('t-trace', text + 'and the end, trimmed');
   await vi.waitFor(async () => expect((await recordOf(desk.client, 'inputs', 't-trace'))?.value?.input.attachments).toHaveLength(ATTACHMENTS_PER_TURN));
