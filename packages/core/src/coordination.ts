@@ -3,7 +3,8 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { defaultCoordinationConfig } from '@boite/contracts';
 import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentTranscript, ContactRequest, CoordinationBridgeResponse, CoordinationConfig, CoordinationPeer, CoordinationView, RpcParams } from '@boite/contracts';
-import { checkMatchExtras, checkRemoteContact, checkTranscript, searchContacts, searchWords, transcript } from './coordination-lookup.ts';
+import { checkRemoteContact } from './coordination-lookup.ts';
+import { CoordinationLookups } from './coordination-directory.ts';
 import { PeerDesk } from './coordination-peer.ts';
 import { CoordinationBridge } from './coordination-bridge.ts';
 import { dropGroupRead, groupPeers } from './coordination-group.ts';
@@ -14,7 +15,6 @@ import { checkTailnetName } from './contacts/invite.ts';
 import { outgoingContact, incomingContact } from './contacts/human-letters.ts';
 import {protectLetters} from './contacts/letter-scopes.ts';
 import type { Connection } from './router.ts';
-import { projectCoordination } from './contacts/project-coordination.ts';
 import { pack, SEALED } from './group/seal.ts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unavailable } from './errors.ts';
@@ -44,6 +44,7 @@ type Row = { data: string; fingerprint: string | null };
 export class Coordination {
   readonly bridge = new CoordinationBridge();
   readonly mailboxes: ContactMailboxes;
+  private readonly lookups: CoordinationLookups;
   private key: ReturnType<typeof createPrivateKey> | null = null;
   private publicKey = '';
   private coreId = '';
@@ -68,6 +69,10 @@ export class Coordination {
   /** `threadJsonChecked`: the core already validated visible thread JSON at this start. */
   constructor(private readonly core: Core, threadJsonChecked = false) {
     this.mailboxes = new ContactMailboxes(core);
+    this.lookups = new CoordinationLookups(core, {
+      selfId: () => this.self('').coreId, config: threadId => this.config(threadId), trusted: () => this.trusted(), localReach: threadId => this.localReach(threadId),
+      contact: (threadId, resident) => this.contact(threadId, resident), checkLookupAccess: (threadId, remote) => this.checkLookupAccess(threadId, remote), mailboxes: this.mailboxes,
+    });
     this.desk = new PeerDesk(core, {
       closed: () => this.closed, selfId: () => this.self('').coreId, trusted: () => this.trusted(), peers: () => this.peers(), signature: input => this.signature(input),
       directory: () => this.localDirectory(), contactDirectory: coreId => this.contactDirectory(coreId), receive: (letter, peer) => this.mailboxes.receive(letter, peer) ?? this.receive(letter, peer), received: id => this.find(id, 'in') ?? this.mailboxes.received(id),
@@ -300,102 +305,11 @@ export class Coordination {
       });
     }
   }
-  async directory(threadId: string): Promise<{ agents: AgentContact[]; unavailable: string[] }> {
-    const thread = this.core.threads.require(threadId);
-    const config = this.config(threadId);
-    if (thread.archived || config.mode === 'off') return { agents: [], unavailable: [] };
-    const agents = this.localReach(threadId).filter(a => a.threadId !== threadId);
-    const unavailable: string[] = [];
-    if (config.remote) {
-      const found = await Promise.all(this.trusted().map(async peer => {
-        try {
-          const remote = await projectCoordination(this.core, threadId, peer, 'directory', {}) as AgentContact[];
-          if (!this.trusted().some(p => p.coreId === peer.coreId)) throw new Error('peer revoked');
-          if (!Array.isArray(remote) || remote.length > 100) throw new Error('invalid remote directory');
-          return { peer, contacts: remote.map(a => checkRemoteContact(a, peer)) };
-        } catch { return { peer, contacts: null }; }
-      }));
-      for (const result of found) {
-        if (result.contacts === null || !this.trusted().some(peer => peer.coreId === result.peer.coreId)) unavailable.push(result.peer.name);
-        else agents.push(...result.contacts);
-      }
-      agents.push(...await this.mailboxes.directory(threadId));
-    }
-    // Permissions may change while a remote directory is in flight.
-    this.checkLookupAccess(threadId, config.remote);
-    const reachable = new Set(this.localReach(threadId).map(contact => contact.threadId));
-    const localCoreId = this.self('').coreId;
-    return { agents: agents.filter(contact => contact.coreId !== localCoreId || reachable.has(contact.threadId)), unavailable };
-  }
-  /** Every contact this thread may reach on each trusted machine, in parallel; a machine that fails is named, not fatal. */
-  private async remoteAll<T>(threadId: string, operation: 'search' | 'read', payload: unknown, check: (answer: unknown, peer: CoordinationPeer) => T, peers = this.trusted()): Promise<{ results: T[]; unavailable: string[] }> {
-    const config = this.config(threadId);
-    if (!config.remote || config.mode === 'off') return { results: [], unavailable: [] };
-    const found = await Promise.all(peers.map(async peer => {
-      try {
-        const answer = await projectCoordination(this.core, threadId, peer, operation, payload);
-        if (!this.trusted().some(p => p.coreId === peer.coreId)) throw new Error('peer revoked');
-        return { peer, result: check(answer, peer), failed: null };
-      } catch (error) { return { peer, result: null, failed: error instanceof PeerRefusal ? `${peer.name} (${error.message})` : peer.name }; }
-    }));
-    this.checkLookupAccess(threadId, true);
-    // A peer that answered early may have been revoked while another one was pending.
-    for (const entry of found) {
-      if (!this.trusted().some(peer => peer.coreId === entry.peer.coreId)) {
-        entry.result = null;
-        entry.failed = entry.peer.name;
-      }
-    }
-    return { results: found.flatMap(entry => entry.result === null ? [] : [entry.result]), unavailable: found.flatMap(entry => entry.failed === null ? [] : [entry.failed]) };
-  }
+  directory(threadId: string): Promise<{ agents: AgentContact[]; unavailable: string[] }> { return this.lookups.directory(threadId); }
   /** Contacts here and on trusted machines whose fields or chat contain every word of the query. */
-  async search(threadId: string, query: string): Promise<{ matches: AgentMatch[]; unavailable: string[] }> {
-    const words = searchWords(query);
-    const config = this.config(threadId);
-    if (this.core.threads.require(threadId).archived || config.mode === 'off') return { matches: [], unavailable: [] };
-    const own = this.localReach(threadId).filter(a => a.threadId !== threadId);
-    const matches = searchContacts(this.core.journal.db, own, words);
-    const remote = await this.remoteAll(threadId, 'search', { words }, (answer, peer) => {
-      if (!Array.isArray(answer) || answer.length > 100) throw new Error('invalid remote search');
-      return answer.map(match => ({ ...checkRemoteContact(match, peer), ...checkMatchExtras(match) }));
-    });
-    const routed = config.remote ? await this.mailboxes.search(threadId, words) : [];
-    this.checkLookupAccess(threadId, config.remote);
-    const reachable = new Set(this.localReach(threadId).map(contact => contact.threadId));
-    const trusted = new Set(this.trusted().map(peer => peer.coreId));
-    const remoteMatches = remote.results.flat();
-    return {
-      matches: [...matches.filter(match => reachable.has(match.threadId)), ...remoteMatches.filter(match => trusted.has(match.coreId)), ...routed],
-      unavailable: [...new Set([...remote.unavailable, ...remoteMatches.filter(match => !trusted.has(match.coreId)).map(match => match.machine)])],
-    };
-  }
+  search(threadId: string, query: string): Promise<{ matches: AgentMatch[]; unavailable: string[] }> { return this.lookups.search(threadId, query); }
   /** Another reachable contact's conversation, text and tool names only. */
-  async read(threadId: string, target: AgentAddress, limit = 30, before?: number): Promise<AgentTranscript> {
-    const to = address(target, 'target');
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw invalidParams('limit: expected 1 to 100');
-    if (before !== undefined && !Number.isSafeInteger(before)) throw invalidParams('before: expected a timestamp');
-    const config = this.config(threadId);
-    const resident = to.coreId === this.self('').coreId && this.core.workforce.projects.over(threadId, to.threadId) !== null;
-    if (this.core.threads.require(threadId).archived || (config.mode === 'off' && !resident)) throw refused('coordination is disabled for this thread');
-    if (to.coreId === this.self('').coreId) {
-      const contact = (resident ? this.contact(to.threadId, true) : undefined) ?? this.localReach(threadId).find(a => same(a, to)) ?? (to.threadId === threadId ? this.contact(threadId) : undefined);
-      if (!contact) throw refused(`target: ${to.threadId} is not a contact this thread may reach; see boite threads`);
-      return { contact, ...transcript(this.core.journal.db, to.threadId, limit, before, id => this.core.journal.streamingMessage(id)) };
-    }
-    const peer = this.trusted().find(p => p.coreId === to.coreId);
-    if (!config.remote) throw refused('cross-machine coordination is disabled for this thread');
-    if (!peer) return this.mailboxes.read(threadId, to.coreId, { threadId: to.threadId, limit, ...(before === undefined ? {} : { before }) });
-    const { results, unavailable } = await this.remoteAll(threadId, 'read', { threadId: to.threadId, limit, ...(before === undefined ? {} : { before }) }, (answer, from) => {
-      const raw = answer as { contact?: AgentContact } | null;
-      const contact = checkRemoteContact(raw?.contact as AgentContact, from);
-      if (contact.threadId !== to.threadId) throw new Error('transcript of another thread');
-      return { contact, ...checkTranscript(answer) };
-    }, [peer]);
-    this.checkLookupAccess(threadId, true);
-    if (!this.trusted().some(current => current.coreId === peer.coreId)) throw refused('target.coreId: machine permission revoked');
-    if (!results[0]) throw refused(`${unavailable[0] ?? peer.name} did not answer the read`);
-    return results[0];
-  }
+  read(threadId: string, target: AgentAddress, limit = 30, before?: number): Promise<AgentTranscript> { return this.lookups.read(threadId, target, limit, before); }
   /**
    * Blocks until an incoming message (from `from` when given) arrives or the
    * timeout passes. What it returns counts as delivered: the agent read it in
