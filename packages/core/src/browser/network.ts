@@ -49,17 +49,24 @@ const quote = (text: string) => JSON.stringify(text);
 
 /** Headers that carry an address, whose query can hold a token: a redirect's `Location` above all. */
 const URL_HEADERS = new Set(['location', 'content-location', 'referer']);
-const RELATIVE_BASE = 'https://relative.invalid';
 
-/** An absolute or relative address with its credentials hidden, as `maskUrl` does. */
+/**
+ * An address with its credentials hidden, as `maskUrl` does. A relative one
+ * (`//host/path`, `next?a=1`) stays as written: resolving it against a
+ * placeholder would change where it leads.
+ */
 function maskHeaderUrl(raw: string): string {
-  try {
-    const masked = maskUrl(new URL(raw, RELATIVE_BASE).href);
-    return /^[a-z][a-z\d+.-]*:/i.test(raw) ? masked : masked.slice(RELATIVE_BASE.length);
-  } catch { return hidden(raw); }
+  if (/^[a-z][a-z\d+.-]*:/i.test(raw)) {
+    try { new URL(raw); return maskUrl(raw); } catch { /* masked in place below */ }
+  }
+  const [reference = ''] = raw.split('#');
+  const at = reference.indexOf('?');
+  const path = (at < 0 ? reference : reference.slice(0, at)).replace(/^([a-z][a-z\d+.-]*:)?\/\/[^/?#]*@/i, '$1//');
+  const query = at < 0 ? '' : maskQuery(reference.slice(at + 1));
+  return `${path}${query ? `?${query}` : ''}`.slice(0, 4000);
 }
 
-function maskHeaders(headers: unknown): Record<string, string> {
+export function maskHeaders(headers: unknown): Record<string, string> {
   const masked: Record<string, string> = {};
   if (!headers || typeof headers !== 'object') return masked;
   for (const [name, raw] of Object.entries(headers as Record<string, unknown>).slice(0, 100)) {
@@ -148,14 +155,19 @@ export function maskBody(body: string, mimeType = ''): string {
 
 const decoded = (text: string) => { try { return decodeURIComponent(text.replace(/\+/g, ' ')); } catch { return text; } };
 
+/** A query string with each credential parameter's value hidden. */
+function maskQuery(query: string): string {
+  return query.split('&').map(pair => {
+    const at = pair.indexOf('=');
+    return at > 0 && secretName(decoded(pair.slice(0, at))) ? `${pair.slice(0, at)}=${hidden(decoded(pair.slice(at + 1)))}` : pair;
+  }).join('&');
+}
+
 /** The address without its user info, a credential in its query left readable as hidden: the agent sees what to replace. */
 export function maskUrl(raw: string): string {
   try {
     const url = new URL(raw);
-    const query = url.search.slice(1).split('&').map(pair => {
-      const at = pair.indexOf('=');
-      return at > 0 && secretName(decoded(pair.slice(0, at))) ? `${pair.slice(0, at)}=${hidden(decoded(pair.slice(at + 1)))}` : pair;
-    }).join('&');
+    const query = maskQuery(url.search.slice(1));
     return `${url.origin}${url.pathname}${query ? `?${query}` : ''}`.slice(0, 4000);
   } catch { return raw.slice(0, 4000); }
 }

@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_ENV, type BrowserNetworkCall, type BrowserNetworkDetail, type BrowserRecipe } from '@boite/contracts';
-import { maskBody } from '../src/browser/network.ts';
+import { maskBody, maskHeaders } from '../src/browser/network.ts';
 import { runCli } from '../src/cli.ts';
 import { createBrowserFixture } from './browser/fixture.ts';
 import { thrown } from './settle.ts';
@@ -29,6 +29,14 @@ test('masking keeps pagination tokens and hides credentials in JSON that does no
   expect(maskBody(`)]}'\n{"text":"\\"token\\":1","rows":[{"password":"p"}]}`, 'application/json')).toBe(`)]}'\n{"text":"\\"token\\":1","rows":[{"password":"<hidden, 1 characters>"}]}`);
   expect(maskBody('<script>window.state = {"sessionId":"s-42","pin":1234}</script>', 'text/html')).toBe('<script>window.state = {"sessionId":"<hidden, 4 characters>","pin":"<hidden, 4 characters>"}</script>');
   expect(maskBody('{"rows":[1,2],"password":"hunt', 'application/json')).toBe('{"rows":[1,2],"password":"<hidden, 4 characters>"');
+});
+
+test('a header address keeps the form it was written in, its credentials hidden', () => {
+  expect(maskHeaders({ Location: '//login.example.test/oauth?token=t1&state=s', 'Content-Location': 'next?api_key=k1#done', Referer: 'https://ann:pw@shop.test/p?session=abc' })).toEqual({
+    location: '//login.example.test/oauth?token=<hidden, 2 characters>&state=s',
+    'content-location': 'next?api_key=<hidden, 2 characters>',
+    referer: 'https://shop.test/p?session=<hidden, 3 characters>',
+  });
 });
 
 real('network finds the API call behind a page with its credentials hidden, and a recipe repeats it with page.fetch', async () => {
