@@ -317,6 +317,15 @@ else: `speed=fast` for Claude, `speed=Fast (priority)` for that Codex tier.
 `speed=priority`. The older `delegate spawn <profile> "<brief>"` form still
 works.
 
+`boite delegate models --machine <name>` (MCP `boite_delegate_models` with
+`machine`) prints the models of another machine of the group instead, read
+from it now, for the caller's provider and model, in the same format. They are
+the models a thread started there with `boite thread new --machine <name>
+--model` can run on ([CLI](cli.md#commands)). That machine answers only while its **Threads
+from the other machines** switch (`groupThreads`) is on, and is refused with
+the settings hint otherwise; a machine whose Boite cannot list its models is
+reported too old.
+
 Every answer is a few plain lines. `delegate list` starts with one summary
 line (`subagents: on; 1 running, 1 waiting, 2 done, 0 failed, 0 stopped`, with
 `, N interrupted` when there are some), then one row per

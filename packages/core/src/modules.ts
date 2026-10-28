@@ -96,11 +96,12 @@ export function registerModules(core: Core): void {
   registerProviderMethods(core);
   const probe = registerProbeMethods(core);
   core.activity.useProbe(probe);
+  core.threads.spawns.useProbe(probe);
   core.router.register('delegation.result', params => core.delegation.resultPage(params));
   core.router.register('delegation.wait', (params, ctx) => core.delegation.wait(params, ctx.connection));
   core.router.register('delegation.get', params => core.delegation.get(params.threadId));
   core.router.register('delegation.configure', params => core.delegation.configure(params.threadId, params.config));
-  core.router.register('delegation.models', params => core.delegation.models(params.threadId, probe));
+  core.router.register('delegation.models', params => core.delegation.models(params.threadId, probe, params.machine));
   core.router.register('delegation.spawn', async params => {
     await core.delegation.prepareRoutes(params.threadId, probe, [typeof params.model === 'string' ? params.model : undefined]);
     return core.delegation.spawn(params);

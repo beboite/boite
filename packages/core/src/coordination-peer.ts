@@ -89,7 +89,7 @@ export class PeerDesk {
       if (rate.count > 120) return this.signed({nonce: envelope.nonce, error: 'peer rate limit'}, 429, sealing);
     } catch { return new Response('invalid signed message', { status: 403 }); }
     const groupOnly = envelope.operation === 'group.sync' || envelope.operation === 'group.push' || envelope.operation === 'contact.route'
-      || envelope.operation === 'thread.start' || envelope.operation.startsWith('setting.') || envelope.operation.startsWith('bot.'); // the group's own: sealed, from a member
+      || envelope.operation === 'thread.start' || envelope.operation === 'delegation.catalog' || envelope.operation.startsWith('setting.') || envelope.operation.startsWith('bot.'); // the group's own: sealed, from a member
     if (this.core.group.removedPeer(peer.coreId) !== null && (groupOnly || !this.side.trusted().some(p => p.coreId === peer.coreId))) {
       return this.signed({ nonce: envelope.nonce, error: 'this machine was removed from the group', gone: true }, 410, sealing);
     }
@@ -114,6 +114,7 @@ export class PeerDesk {
         if (!contact && envelope.operation.startsWith('contact.') && envelope.operation !== 'contact.route') throw refused('operation: only a contact sends contact operations');
         if (!member && envelope.operation.startsWith('relay.')) throw refused('operation: only a machine of this core\'s group relays for a contact');
         if (!member && envelope.operation === 'thread.start') throw refused('operation: only a machine of this core\'s group starts threads here');
+        if (!member && envelope.operation === 'delegation.catalog') throw refused('operation: only a machine of this core\'s group reads its models');
         if (!member && envelope.operation.startsWith('setting.')) throw refused('operation: only a machine of this core\'s group reads or announces its settings');
         if (!member && envelope.operation.startsWith('bot.')) throw refused('operation: only a machine of this core\'s group looks after projects here');
         if (contact) result = await this.contact(currentPeer, envelope.operation, envelope.payload, false);
@@ -143,10 +144,11 @@ export class PeerDesk {
           if (!as || relayed.grants.length === 0) throw refused('nothing of this machine is opened to that contact any more');
           result = await this.contact(as, request?.operation as string, request?.payload, true);
         } else if (envelope.operation === 'thread.start') result = await this.core.threads.spawns.startFor(currentPeer, envelope.payload);
+        else if (envelope.operation === 'delegation.catalog') result = await this.core.threads.spawns.catalogFor(envelope.payload);
         else if (envelope.operation === 'setting.read') result = readMachineSetting(this.core, envelope.payload);
         else if (envelope.operation === 'setting.changed') result = machineSettingChanged(this.core, currentPeer, envelope.payload);
         else if ((BOT_OPERATIONS as readonly string[]).includes(envelope.operation)) result = await this.core.workforce.group.peer(currentPeer, envelope.operation as BotOperation, envelope.payload);
-        else throw invalidParams(member ? 'operation: expected directory, deliver, receipt, search, read, group.sync, group.push, relay.*, thread.start, setting.* or bot.*' : 'operation: expected directory, deliver, receipt, search, read, group.sync or group.push');
+        else throw invalidParams(member ? 'operation: expected directory, deliver, receipt, search, read, group.sync, group.push, relay.*, thread.start, delegation.catalog, setting.* or bot.*' : 'operation: expected directory, deliver, receipt, search, read, group.sync or group.push');
       } catch (reason) {
         status = reason instanceof RpcFailure ? 400 : 500;
         error = reason instanceof RpcFailure ? reason.message : 'Machine could not process the request';

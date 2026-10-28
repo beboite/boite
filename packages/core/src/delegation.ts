@@ -6,7 +6,8 @@ import { invalidParams, messageOf, refused, requiredText as text } from './error
 import { isAgentHeld } from './agents/runtime.ts';
 import { checkContext } from './context-mode.ts';
 import { checkSavedSelection, checkSpeed } from './threads/selection.ts';
-import { anyModel, catalog, conversationRoute, discover, providersNamed, resolveRoute, type ChildRoute, type RouteRequest } from './delegation/routes.ts';
+import { anyModel, catalog, conversationRoute, discover, readNamed, resolveRoute, type ChildRoute, type RouteRequest } from './delegation/routes.ts';
+import { memberModels, memberNamed } from './threads/group-spawn.ts';
 import type { ProviderProbe } from './providers/probe.ts';
 import { newId } from './ids.ts';
 import { assertDriverRunnable } from './drivers/index.ts';
@@ -356,16 +357,15 @@ export class Delegation {
   async prepareRoutes(parentId: string, probe: ProviderProbe, models: (string | undefined)[]): Promise<void> {
     const named = models.filter((model): model is string => typeof model === 'string' && model.length > 0);
     if (!named.length) return;
-    const parent = this.root(parentId);
-    const known = catalog(this.core, parent, true).choices;
-    const missing = named.filter(model => !known.some(c => `${c.providerId}/${c.model}` === model || c.model === model));
-    if (!missing.length) return;
-    const only = missing.map(model => providersNamed(this.core, model));
-    await discover(this.core, probe, parent, only.some(list => list === undefined) ? undefined : [...new Set(only.flat() as string[])]);
+    await readNamed(this.core, probe, this.root(parentId), named);
   }
-  /** What `boite delegate models` prints: every runnable model, read from each agent once. */
-  async models(threadId: string, probe: ProviderProbe): Promise<DelegationModels> {
+  /**
+   * What `boite delegate models` prints: every runnable model, read from each
+   * agent once. With `machine`, that member's, read from it now.
+   */
+  async models(threadId: string, probe: ProviderProbe, machine?: string): Promise<DelegationModels> {
     const parent = this.root(threadId);
+    if (machine !== undefined) return memberModels(this.core, parent, memberNamed(this.core, text(machine, 'delegation.models.machine', 128).trim(), 'delegation.models'));
     const failures = await discover(this.core, probe, parent);
     const { choices, unavailable } = catalog(this.core, parent);
     const failed = new Set(failures.map(f => f.providerId));

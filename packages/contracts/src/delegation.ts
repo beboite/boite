@@ -221,7 +221,12 @@ export interface DelegationRpcMethods {
    * Project children of bots appear in that project's conversation list.
    */
   'delegation.spawn': { params: { threadId: ThreadId; project?: string; profileId?: string; model?: string; effort?: string; speed?: string; context?: ContextRequest | ContextPreset; task: string; title?: string; worktree?: boolean; requestId: string }; result: DelegatedAgent };
-  'delegation.models': { params: { threadId: ThreadId }; result: DelegationModels };
+  /**
+   * With `machine` (a member's name or core id prefix), that machine's
+   * models, read from it now while its owner keeps `groupThreads` on; `current`
+   * marks this conversation's model there.
+   */
+  'delegation.models': { params: { threadId: ThreadId; machine?: string }; result: DelegationModels };
   /**
    * From a parent to a child blocked on a question card, the text answers
    * that question (an option label, or free text where it takes some) and the

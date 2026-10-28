@@ -7,6 +7,7 @@ import { addUsage, emptyUsage, toSummary } from './shared';
 import { modelsOf, PROBED_PROTOCOLS, probe } from './provider-catalog';
 import type { FakeContext, FakeMethods } from './context';
 import { delegationProject } from './delegation-project';
+import { accountFor, memberModels, modelChoices } from './thread-models';
 
 function delegationRoot(ctx: FakeContext, threadId: ThreadId): ThreadId {
   const thread = ctx.thread(threadId);
@@ -17,25 +18,6 @@ export function delegationConfig(ctx: FakeContext, rootId: ThreadId): Delegation
   const saved = ctx.delegationConfigs.get(rootId) ?? DEFAULT_DELEGATION_CONFIG;
   const pause = saved.paused && saved.pausedBy ? { pausedBy: saved.pausedBy, ...(saved.pausedAt === undefined ? {} : { pausedAt: saved.pausedAt }) } : {};
   return structuredClone({ enabled: saved.enabled, paused: saved.paused, ...pause, profiles: saved.profiles, anyModel: saved.anyModel !== false });
-}
-
-/** The account a parent's children use on a provider: the parent's own there, else the provider's first. */
-function accountFor(ctx: FakeContext, parent: Thread, providerId: string) {
-  return ctx.accounts.find(entry => entry.id === parent.accountId && entry.providerId === providerId) ?? ctx.accounts.find(entry => entry.providerId === providerId);
-}
-
-/** What the real core's catalog reads: every available provider's models on its first account, the parent's own first. */
-function modelChoices(ctx: FakeContext, parent: Thread): DelegationModelChoice[] {
-  return ctx.providers.filter(provider => provider.available && providerEnabled(provider)).flatMap(provider => {
-    const account = accountFor(ctx, parent, provider.id);
-    if (!account) return [];
-    return modelsOf(ctx, provider.id, account.id).filter(model => !model.legacy).map(model => ({
-      providerId: provider.id, providerName: provider.name, accountId: account.id, model: model.id, name: model.name,
-      efforts: model.effort?.levels.map(level => level.id) ?? [], defaultEffort: model.effort?.default ?? null,
-      speeds: model.speeds?.map(speed => ({ ...speed })) ?? [],
-      current: parent.providerId === provider.id && parent.model === model.id,
-    }));
-  });
 }
 
 /** The core's bound on a speed before it looks at any model: `text(speed, 'speed', 64)`. */
@@ -338,8 +320,9 @@ export function delegationMethods(ctx: FakeContext) {
       const next = offset + Array.from(text).length;
       return { resultRef: { agentId: params.agentId, turnId: params.turnId }, text, offset, nextOffset: next < chars.length ? next : null, total: chars.length };
     },
-    'delegation.models': async ({ threadId }) => {
+    'delegation.models': async ({ threadId, machine }) => {
       const parent = ctx.thread(delegationRoot(ctx, threadId));
+      if (machine !== undefined) return { anyModel: true, choices: memberModels(ctx, parent, machine, 'delegation.models').choices, unavailable: [] };
       // The core's discover(): every agent-owned list nobody read yet is read first,
       // and a failed read is reported, never thrown. The fake's probe only clones
       // fixtures, so it cannot fail; this method skips the core's no-logged-in-account case.

@@ -166,6 +166,15 @@ export interface AgentDoorRpcMethods {
    * machine of the caller's group, in a project named there, once that
    * machine's owner turned on `groupThreads`. The same gates apply on the
    * caller's side, and that machine across projects in every case.
+   *
+   * Without `model`, `effort` and `speed` the thread runs on the caller's
+   * agent (on another machine, on its default model when it lacks the
+   * caller's). `model` is matched as `delegation.spawn` matches it
+   * (`provider/model`, a model id, a unique part) against this machine's
+   * models, or the member's with `machine`, read live each time; `effort` and
+   * `speed` are checked on that model, the caller's when `model` is left out.
+   * A miss is refused with the `expected` list and starts nothing; a member
+   * then starts on exactly that model or refuses.
    */
-  'agent.spawn': { params: { threadId: ThreadId; project: string; prompt: string; title?: string; worktree?: boolean; context?: ContextRequest | ContextPreset; requestId: string; machine?: string }; result: AgentSpawn };
+  'agent.spawn': { params: { threadId: ThreadId; project: string; prompt: string; title?: string; worktree?: boolean; context?: ContextRequest | ContextPreset; requestId: string; machine?: string; model?: string; effort?: string; speed?: string }; result: AgentSpawn };
 }

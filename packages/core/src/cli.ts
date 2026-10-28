@@ -53,7 +53,11 @@ export const USAGE = `usage: boite <command> [args] [--json]
                                  comes back to you (--worktree, --title <title>,
                                  --machine <name>: on another machine of the
                                  group, in a project there, once its owner
-                                 lets the group start threads there)
+                                 lets the group start threads there; --model
+                                 <provider/model>, --effort <level>, --speed
+                                 <tier> from boite delegate models, with the
+                                 same --machine for that machine's; refused
+                                 when it lacks them, never another model)
   projects                       the projects added to Boite
   projects add <folder>          add an existing folder as a project, so thread
                                  new and thread move can name it (--name <name>)
@@ -169,6 +173,8 @@ ${CONTROL_HELP}
                                  project another machine entrusted to it
   --request-id <id>              reuse to retry threads send|reply or delegate spawn|send
   delegate models                models, reasoning levels and speeds a subagent can use
+                                 (--machine <name>: another machine's, for
+                                 thread new --machine --model)
   delegate spawn <brief>         start a subagent on one bounded job; its result
                                  comes back as a message (--model <provider/model>,
                                  --effort <level>, --speed <tier>, --title <title>,
@@ -474,7 +480,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         ...(parsed.requestId === undefined ? {} : { requestId: parsed.requestId }), ...(parsed.timeout === undefined ? {} : { timeout: parsed.timeout }),
         ...(parsed.title === undefined ? {} : { title: parsed.title }), ...(parsed.model === undefined ? {} : { model: parsed.model }),
         ...(parsed.effort === undefined ? {} : { effort: parsed.effort }), ...(parsed.speed === undefined ? {} : { speed: parsed.speed }), ...(parsed.profile === undefined ? {} : { profile: parsed.profile }),
-        ...(parsed.worktree === true ? { worktree: true } : {}),
+        ...(parsed.worktree === true ? { worktree: true } : {}), ...(parsed.machine === undefined ? {} : { machine: parsed.machine }),
         ...(parsed.context === undefined ? {} : { context: contextRequest(parsed, readRules) }),
       }, print);
     },
@@ -547,6 +553,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
           threadId, project, prompt, requestId: parsed.requestId ?? crypto.randomUUID(),
           ...(parsed.title === undefined ? {} : { title: parsed.title }), ...(parsed.worktree ? { worktree: true } : {}),
           ...(parsed.machine === undefined ? {} : { machine: parsed.machine }),
+          ...(parsed.model === undefined ? {} : { model: parsed.model }), ...(parsed.effort === undefined ? {} : { effort: parsed.effort }), ...(parsed.speed === undefined ? {} : { speed: parsed.speed }),
           ...(parsed.context === undefined ? {} : { context: contextRequest(parsed, readRules) as RpcParams<'agent.spawn'>['context'] }),
         });
         // A bot hears of it through events on its desk, not as a message.

@@ -23,6 +23,8 @@ export interface DelegateOptions {
   profile?: string;
   /** A git worktree of its own instead of the parent's checkout. */
   worktree?: boolean;
+  /** `delegate models --machine <name>`: another machine of the group. */
+  machine?: string;
   /** What `contextRequest` built from the context flags; the core checks it. */
   context?: Record<string, unknown>;
 }
@@ -122,9 +124,12 @@ export async function delegateCommand(client: CoreClient, threadId: string, rest
   const requestId = options.requestId ?? crypto.randomUUID();
   switch (action) {
     case 'models': {
-      const models = await client.call('delegation.models', { threadId });
+      const machine = options.machine;
+      const models = await client.call('delegation.models', { threadId, ...(machine === undefined ? {} : { machine }) });
       print([
-        `models a child can run on: boite delegate spawn "<brief>" --model <provider/model> [--effort <level>] [--speed <tier>]`,
+        machine === undefined
+          ? `models a child can run on: boite delegate spawn "<brief>" --model <provider/model> [--effort <level>] [--speed <tier>]`
+          : `models a thread on ${machine} can run on: boite thread new <project> "<brief>" --machine ${machine} --model <provider/model> [--effort <level>] [--speed <tier>]`,
         ...models.choices.map(choiceRow),
         ...models.unavailable.map(u => `unavailable: ${u.providerId} (${u.reason})`),
         ...(models.anyModel ? [] : ['The owner allows only this conversation\'s model and the profiles (boite delegate profiles); --model must name one of them.']),

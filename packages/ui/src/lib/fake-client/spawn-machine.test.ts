@@ -31,3 +31,29 @@ test('a spawn on another machine names this machine, an unknown one, a shared na
   await twin.call('group.join', { invite: (await desk.call('group.invite', {})).invite });
   await expect(spawn('pc')).rejects.toThrow('agent.spawn.machine: 2 machines are named pc; name one by a core id prefix: pc, fade01');
 });
+
+test('thread new --model picks from this machine\'s models, or with --machine from that machine\'s, as the core does', async () => {
+  const desk = await machine('desk'), pc = await machine('pc');
+  await desk.call('group.create', { name: 'Home' });
+  await pc.call('group.join', { invite: (await desk.call('group.invite', {})).invite });
+  const label = (choice: { providerId: string; model: string }) => `${choice.providerId}/${choice.model}`;
+  const own = (await desk.call('agent.projects', { threadId: 't-trace' })).find(project => project.current)!;
+  const spawn = (params: { requestId: string; model?: string; effort?: string; machine?: string }) => desk.call('agent.spawn', { threadId: 't-trace', project: params.machine === undefined ? own.name : 'notes', prompt: 'Read the parser', ...params });
+
+  const here = await desk.call('delegation.models', { threadId: 't-trace' });
+  const other = here.choices.find(choice => !choice.current && choice.efforts.length > 0)!;
+  const spawned = await spawn({ requestId: 'model-1', model: label(other), effort: other.efforts[0]! });
+  expect(spawned.thread).toMatchObject({ providerId: other.providerId, model: other.model, effort: other.efforts[0] });
+  await expect(spawn({ requestId: 'model-2', model: 'nothing-like-it' })).rejects.toMatchObject({
+    message: 'model: no installed model matches "nothing-like-it"; run boite delegate models', data: { field: 'model', expected: here.choices.map(label) },
+  });
+
+  await expect(desk.call('delegation.models', { threadId: 't-trace', machine: 'pc' })).rejects.toThrow('boite settings request groupThreads true --machine pc --why');
+  await pc.call('settings.set', { groupThreads: true });
+  const there = await desk.call('delegation.models', { threadId: 't-trace', machine: 'pc' });
+  expect(there.choices.length).toBeGreaterThan(0);
+  await expect(spawn({ requestId: 'remote-1', machine: 'pc', model: 'nothing-like-it' })).rejects.toMatchObject({
+    message: 'model: no installed model matches "nothing-like-it"; run boite delegate models --machine pc', data: { field: 'model', expected: there.choices.map(label) },
+  });
+  await expect(spawn({ requestId: 'remote-2', machine: 'pc', model: label(there.choices[0]!) })).rejects.toThrow('the in-memory client does not start threads on another machine');
+});

@@ -2,9 +2,9 @@
 import { RpcErrorCode, type AgentProjectAdded, type AgentSpawn, type Message, type ThreadLink } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { missingFolder, pathKey } from './checks';
-import { coordinationConfig, fakeCore } from './coordination';
-import { fakeMember } from './requests';
+import { coordinationConfig } from './coordination';
 import { toSummary } from './shared';
+import { chooseHere, chooseModel, machineArg, memberModels, type ModelRequest } from './thread-models';
 import { resolveProject } from './thread-move';
 import type { FakeContext, FakeMethods } from './context';
 
@@ -56,17 +56,22 @@ export function spawnMethods(ctx: FakeContext, create: FakeMethods['threads.crea
       if (caller.archived) throw refuse('an archived thread cannot start threads', { threadId: caller.id, field: 'threadId', expected: 'a thread that is not archived' });
       const prompt = params.prompt.trim();
       if (!prompt || params.prompt.length > 12_000) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'agent.spawn.prompt: expected 1 to 12000 characters' });
+      const bounded = (value: unknown, field: string, max: number): string => {
+        if (typeof value !== 'string' || !value.trim() || value.length > max) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `agent.spawn.${field}: expected 1 to ${max} characters` });
+        return value.trim();
+      };
+      const choice: ModelRequest | null = params.model === undefined && params.effort === undefined && params.speed === undefined ? null : {
+        ...(params.model === undefined ? {} : { model: bounded(params.model, 'model', 256) }),
+        ...(params.effort === undefined ? {} : { effort: bounded(params.effort, 'effort', 64) }),
+        ...(params.speed === undefined ? {} : { speed: bounded(params.speed, 'speed', 64) }),
+      };
       if (params.machine !== undefined) {
-        // The core's refusals for another machine; a thread there is not simulated.
-        const machine = fakeMember(ctx, params.machine, 'agent.spawn');
-        const target = fakeCore(machine.coreId);
-        if (target === undefined) throw new RpcFailure({ code: RpcErrorCode.Unavailable, message: `${machine.name} did not answer`, data: { field: 'machine' } });
-        if (target.settings.groupThreads !== true) {
-          throw refuse(`${machine.name} does not let the other machines of its group start threads there; propose the switch to the user with boite settings request groupThreads true --machine ${machine.name.replace(/\s+/g, '-')} --why "<what the thread is for>"`, { field: 'machine', setting: 'groupThreads' });
-        }
+        // The core's refusals for another machine, its model list included; a thread there is not simulated.
+        const { machine, choices } = memberModels(ctx, caller, params.machine, 'agent.spawn');
+        if (choice !== null) chooseModel(choices, caller, choice, `boite delegate models --machine ${machineArg(ctx, machine)}`);
         throw new RpcFailure({ code: RpcErrorCode.Unavailable, message: 'the in-memory client does not start threads on another machine', data: { field: 'machine' } });
       }
-      const fingerprint = JSON.stringify([params.project, params.prompt, params.title ?? null, params.worktree === true, ...(params.context === undefined ? [] : [params.context])]);
+      const fingerprint = JSON.stringify([params.project, params.prompt, params.title ?? null, params.worktree === true, ...(params.context === undefined ? [] : [params.context]), ...(choice === null ? [] : [{ choice }])]);
       const ledger = ledgers.get(caller.id) ?? [];
       const retried = ledger.find(entry => entry.requestId === params.requestId);
       if (retried) {
@@ -88,9 +93,13 @@ export function spawnMethods(ctx: FakeContext, create: FakeMethods['threads.crea
         if (target.id !== caller.projectId && !config.remote) throw refuse('agent.spawn: this thread may only reach its own project; the owner allows other projects in Communication settings', { threadId: caller.id, field: 'project' });
         if (origins.has(caller.id) && caller.messages.filter(m => m.role === 'user').length <= 1) throw refuse('a thread an agent started cannot start another until the user writes in it', { threadId: caller.id, field: 'threadId' });
         const title = params.title?.trim() || prompt.split('\n')[0]!.slice(0, 80);
+        const picked = choice === null ? null : await chooseHere(ctx, caller, choice);
         const created = await create({
-          projectId: target.id, providerId: caller.providerId, accountId: caller.accountId, title,
-          ...(caller.model === null ? {} : { model: caller.model }), effort: caller.effort, permissionMode: caller.permissionMode,
+          projectId: target.id, title,
+          ...(picked === null
+            ? { providerId: caller.providerId, accountId: caller.accountId, ...(caller.model === null ? {} : { model: caller.model }), effort: caller.effort }
+            : { providerId: picked.providerId, accountId: picked.accountId, model: picked.model, effort: picked.effort, ...(picked.speed === null ? {} : { speed: picked.speed }) }),
+          permissionMode: caller.permissionMode,
           ...(params.worktree ? { worktree: {} } : {}), ...(params.context === undefined ? {} : { context: params.context }),
         });
         if (ctx.thread(caller.id).archived) throw refuse('an archived thread cannot start threads', { threadId: caller.id, field: 'threadId', expected: 'a thread that is not archived' });
