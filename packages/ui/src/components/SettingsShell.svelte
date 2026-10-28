@@ -29,7 +29,7 @@
   import SettingsMachineBar from './SettingsMachineBar.svelte';
   import { untrack } from 'svelte';
   import { revealSettingsCard } from '../lib/settings-flash';
-  import { desktopPage, machinePage, ownerOnly } from '../lib/settings-tabs';
+  import { desktopPage, desktopSettings, machinePage, ownerOnly } from '../lib/settings-tabs';
 
   let { store, onopenthread }: { store: Store; onopenthread?: () => void } = $props();
 
@@ -294,7 +294,7 @@
   {#if chosen}<SettingsMachineBar machine={chosen} machines={choices} onpick={(id) => { picked = id; }} />{/if}
 {/snippet}
 
-{#if narrow.current && !inShell}
+{#if !desktopSettings(narrow.current)}
   <MobileSettings {store} {target} bar={bar ? machineBar : undefined} {onopenthread} />
 {:else}
 <div class="settings" data-testid="settings">

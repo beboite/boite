@@ -22,6 +22,7 @@
   import { contextLevel, contextPercent } from '../lib/tokens';
   import { speedControl } from '../lib/model-speeds';
   import type { ComposerTarget } from '../lib/composer-target';
+  import { desktopSettings } from '../lib/settings-tabs';
 
   /**
    * The row under the composer's box: the model, effort, worktree and mode
@@ -101,7 +102,7 @@
    * nowhere, and the sentence behind it is the one a send would answer with.
    */
   const phoneWidth = new MediaQuery('(max-width: 720px)');
-  let providersReachable = $derived(store.owner && (!phoneWidth.current || window.__TAURI_INTERNALS__ !== undefined));
+  let providersReachable = $derived(store.owner && desktopSettings(phoneWidth.current));
   /**
    * The thread names an account that was removed and its agent has no other
    * account to move to on the next send: it sends again once another one is picked.

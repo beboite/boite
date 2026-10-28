@@ -346,6 +346,21 @@ test('a thread whose provider is turned off says so beside the picker, and the c
   await waitFor(() => chip() === null);
 });
 
+test('a phone, which leaves provider administration to the desktop, offers no way to a Providers page it lacks', async () => {
+  const original = window.matchMedia;
+  window.matchMedia = ((media: string) => Object.assign(new EventTarget(), {
+    media, matches: media.includes('max-width: 720px'), onchange: null, addListener() {}, removeListener() {}
+  })) as unknown as typeof window.matchMedia;
+  try {
+    await mountAt('landing');
+    document.querySelector<HTMLButtonElement>('[data-testid=composer-picker]')!.click();
+    await waitFor(() => document.querySelectorAll('[data-testid=composer-picker-menu] .tile[data-provider]').length > 1);
+    expect(document.querySelector('[data-testid=picker-more-providers]')).toBeNull();
+  } finally {
+    window.matchMedia = original;
+  }
+});
+
 test('a model the core already listed is picked at once, even while its list is read again', async () => {
   // Claude probes hold while `hold` is set: the refresh below reads for as long as the test wants.
   const original = FakeClient.prototype.call;

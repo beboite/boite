@@ -22,8 +22,10 @@ const PAGES: Record<SettingsTab, SettingsPage> = {
   appearance: { phone: 'page' },
   keyboard: { machine: true, phone: 'home' },
   voice: { machine: true, phone: 'page' },
-  accounts: { owner: true, machine: true, phone: 'page' },
-  plugins: { owner: true, machine: true, phone: 'page' },
+  // Installing, signing in and plugins stay on the desktop: a phone shows Home,
+  // and the window widened again shows the page the route still names.
+  accounts: { owner: true, machine: true, phone: 'home' },
+  plugins: { owner: true, machine: true, phone: 'home' },
   brain: { owner: true, machine: true, phone: 'page' },
   usage: { phone: 'page' },
   limits: { machine: true, phone: 'page' },
@@ -56,6 +58,14 @@ export function ownerOnly(tab: SettingsTab): boolean {
 
 export function machinePage(tab: SettingsTab): boolean {
   return PAGES[tab].machine === true;
+}
+
+/**
+ * Whether this window shows the desktop settings, the only ones with Providers
+ * and Plugins: the app always does, a browser once wider than a phone.
+ */
+export function desktopSettings(phoneWidth: boolean): boolean {
+  return !phoneWidth || window.__TAURI_INTERNALS__ !== undefined;
 }
 
 /** The page a desktop shows for a route. */

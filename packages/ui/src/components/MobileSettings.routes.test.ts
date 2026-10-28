@@ -17,9 +17,9 @@ afterEach(async () => {
 
 /** What a phone shows for a route: the page a desktop shows for it, the card's own page, or Home where the phone has no such page. */
 const ROUTES: { owner: boolean; tab: SettingsTab; section?: string; shows: string }[] = [
-  // The model picker's add-provider button opens Providers, on a phone too.
-  { owner: true, tab: 'accounts', shows: 'accounts-page' },
-  { owner: true, tab: 'plugins', shows: 'plugins-page' },
+  // Installing, signing in and plugins stay on the desktop.
+  { owner: true, tab: 'accounts', shows: 'mobile-settings-home' },
+  { owner: true, tab: 'plugins', shows: 'mobile-settings-home' },
   { owner: true, tab: 'general', section: 'secrets', shows: 'secrets-card' },
   { owner: true, tab: 'keyboard', shows: 'mobile-settings-home' },
   { owner: false, tab: 'accounts', shows: 'mobile-settings-home' },

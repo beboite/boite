@@ -18,8 +18,6 @@
   import UsagePage from './UsagePage.svelte';
   import VoiceSettings from './VoiceSettings.svelte';
   import BrainPage from './BrainPage.svelte';
-  import AccountsPage from './AccountsPage.svelte';
-  import PluginsPage from './PluginsPage.svelte';
   import ArchivedThreads from './ArchivedThreads.svelte';
   import WorktreesCard from './WorktreesCard.svelte';
   import WindowAllowlistCard from './WindowAllowlistCard.svelte';
@@ -51,8 +49,6 @@
   let page = $derived(routed !== 'home' && routed === store.settingsTab ? routed : phone ? 'phone' : privacy ? 'privacy' : routed);
   let machine = $derived(workspace.machines.find(machine => machine.store === store));
   const titleOf = (page: string): string => page === 'brain' ? strings.brain.heading : page === 'phone' ? strings.mobile.settingsPhone
-    : page === 'accounts' ? strings.settings.tabs.accounts
-    : page === 'plugins' ? strings.settings.tabs.plugins
     : page === 'privacy' ? strings.mobile.settingsPrivacy
     : page === 'archived' ? strings.settings.archived.heading
     : page === 'worktrees' ? strings.settings.worktrees.heading
@@ -182,7 +178,7 @@
       <h1>{#if shown === 'limits'}<QuotaMachineScope store={target} fallback={title} />{:else}{title}{/if}{#if info}<InfoTip topic={title} text={info} testid="mobile-settings-info" />{/if}</h1>
     </header>
     <div class="detail" data-testid="mobile-settings-detail">
-      {#if bar && ['accounts', 'plugins', 'brain', 'voice', 'limits', 'resources', 'diagnostics', 'worktrees', 'windows', 'secrets', 'auto-compact', 'archived'].includes(shown)}<div class="bar">{@render bar()}</div>{/if}
+      {#if bar && ['brain', 'voice', 'limits', 'resources', 'diagnostics', 'worktrees', 'windows', 'secrets', 'auto-compact', 'archived'].includes(shown)}<div class="bar">{@render bar()}</div>{/if}
       {#key target}
       {#if quota}
         <div class="tabs" role="tablist" aria-label={strings.usage.heading} data-testid="mobile-usage-tabs">
@@ -192,10 +188,6 @@
       {/if}
       {#if shown === 'brain' && target.owner}
         <BrainPage store={target} />
-      {:else if shown === 'accounts' && target.owner}
-        <AccountsPage store={target} />
-      {:else if shown === 'plugins' && target.owner}
-        <PluginsPage store={target} />
       {:else if shown === 'phone'}
         <div class="page phone-page">
           <!-- Which machine these apply to, once there is a choice, and the connection when it is not working. -->
