@@ -191,6 +191,10 @@ test('a native thread trusted while contact mail waits takes that letter, and a 
     await waitFor(()=>b.h.core.journal.lastTurn(b.t.id)?.finishedAt!=null);
     expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).toBeNull();
     expect(b.h.core.coordination.config(b.t.id).paused).toBe(false);
+    // The approval covers that letter as the owner trusted it, never another letter reusing its id.
+    const approved=b.h.core.coordination.get(b.t.id).messages.find(l=>l.id===waiting.id)!;
+    expect(()=>protectLetters(b.h.core,b.t.id,[{...approved,text:'Different text'}])).toThrow('shared file policy');
+    expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).not.toBeNull();
     const later=await a.c.call('collaboration.send',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'Another contact note',requestId:'native-later'});
     await waitFor(()=>b.h.core.coordination.config(b.t.id).paused);
     expect(status(later.id)).toBe('received');

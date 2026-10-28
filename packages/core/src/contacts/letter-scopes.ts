@@ -1,4 +1,5 @@
 /** External correspondence retains its execution authority with the history that consumed it. */
+import {createHash} from 'node:crypto';
 import {realpathSync} from 'node:fs';
 import type {AgentLetter} from '@boite/contracts';
 import type {Core} from '../core.ts';
@@ -10,11 +11,17 @@ import {incomingContact} from './human-letters.ts';
 /**
  * `peers` are every contact whose mail the history read; `holders` only those
  * whose mail came outside a shared project and holds it. Scopes saved before
- * `holders` existed hold through all their peers. `trusted` are the letters
- * still waiting when the owner trusted the history; they no longer hold it.
+ * `holders` existed hold through all their peers. `trusted` are the digests of
+ * the letters still waiting when the owner trusted the history; those letters,
+ * exactly as they were, no longer hold it.
  */
 interface LetterScope {bindings: AccessBinding[]; legacy: boolean; peers: string[]; holders?: string[]; trustedAt?: number; trusted?: string[]}
 const checkedHistory = new WeakMap<Core, Set<string>>();
+
+/** The sender chooses a letter's id, so an approval covers its content too. */
+function approval(letter: AgentLetter): string {
+  return createHash('sha256').update(JSON.stringify([letter.id, letter.from.coreId, letter.from.threadId, letter.contact?.coreId ?? null, letter.origin ?? null, letter.text, letter.replyTo, letter.createdAt, letter.expiresAt])).digest('hex');
+}
 
 function storedScope(core: Core, threadId: string): LetterScope | null {
   const saved = core.journal.getSetting(`shared-file-letters:${threadId}`) as LetterScope | null;
@@ -89,8 +96,9 @@ export function trustLetters(core: Core, threadId: string): void {
     // A refused wake left the holders' letters waiting: the owner trusted them
     // too, not a letter that arrives later.
     const holders = scope.holders ?? scope.peers;
-    const trusted = (core.journal.db.query("SELECT id, json_extract(data,'$.contact.coreId') AS peer FROM coordination_letters WHERE thread_id=? AND direction='in' AND status='received' AND json_type(data,'$.sharedProjectId') IS NULL").all(id) as {id: string; peer: string | null}[])
-      .filter(row => scope.trusted?.includes(row.id) || row.peer !== null && holders.includes(row.peer)).map(row => row.id);
+    const waiting = (core.journal.db.query("SELECT data FROM coordination_letters WHERE thread_id=? AND direction='in' AND status='received' AND json_type(data,'$.sharedProjectId') IS NULL").all(id) as {data: string}[])
+      .map(row => JSON.parse(row.data) as AgentLetter).filter(letter => letter.contact && letter.expiresAt > Date.now());
+    const trusted = waiting.map(approval).filter((digest, index) => scope.trusted?.includes(digest) || holders.includes(waiting[index]!.contact!.coreId));
     core.journal.setSetting(`shared-file-letters:${id}`, {...scope, legacy: false, holders: [], trustedAt: Date.now(), trusted});
     if (trusted.length) resumed.push(id);
   }
@@ -124,7 +132,7 @@ export function protectLetters(core: Core, threadId: string, letters: AgentLette
   if (!contactMail.length) return;
   // A letter the owner trusted while it waited carries no new authority.
   const trusted = storedScope(core, threadId)?.trusted ?? [];
-  const external = contactMail.filter(l => l.sharedProjectId || !trusted.includes(l.id));
+  const external = contactMail.filter(l => l.sharedProjectId || !trusted.includes(approval(l)));
   if (!external.length) return;
   const thread = core.threads.require(threadId);
   const protocol = core.providers.require(thread.providerId).protocol;

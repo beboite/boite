@@ -711,7 +711,8 @@ lose the hold, captured shared-project bindings stay, and a later letter
 outside a shared project holds the thread again. A native wake that the hold
 refused leaves its letters waiting and pauses coordination; trusting ends that
 pause and delivers the letters still waiting from the contacts the hold named,
-not one that arrives later. Agents and paired devices
+not one that arrives later. The approval is a digest of each letter's sender
+and content, so a letter that reuses an approved id holds the thread again. Agents and paired devices
 cannot call it. Unsupported
 native providers hold contact mail in the inbox before exposing its text,
 including on an active warm session; local work already running without that
