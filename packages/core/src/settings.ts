@@ -87,6 +87,8 @@ export class SettingsStore {
   followGateway(port: number): void {
     const proxy = this.get().subscriptionProxy;
     if (proxy?.mode !== 'local') return;
+    // The policy holds the proxy off: saving it now would store that over the user's choice.
+    if (this.stored().subscriptionProxy?.enabled !== proxy.enabled) return;
     const next = localProxy(proxy, port);
     if (next.baseUrl !== proxy.baseUrl || next.dashboardUrl !== proxy.dashboardUrl || next.kind !== proxy.kind) this.set({ subscriptionProxy: next });
   }

@@ -125,6 +125,8 @@ export class Telemetry {
   private inFlight: Promise<void> | null = null;
   private controller: AbortController | null = null;
   private revision = 0;
+  /** The analytics ceiling the queue was gathered under; undefined until the first launch reads it. */
+  private lastCeiling: 'off' | 'basic' | null | undefined;
   private uploadRevision = 0;
   private launchPending = false;
   private failures = 0;
@@ -186,6 +188,7 @@ export class Telemetry {
         });
       }
     });
+    this.lastCeiling = this.ceiling();
     this.launch();
     this.schedule(20_000);
   }
@@ -201,8 +204,11 @@ export class Telemetry {
   /** A host without a policy store (the unit tests' stand-in core) has no ceiling. */
   private ceiling(): 'off' | 'basic' | null { return this.core.policy?.analyticsCeiling() ?? null; }
 
-  /** The ceiling moved: what was queued under the old one is dropped and the launch counts again. */
+  /** The policy changed: when its ceiling moved, what was queued under the old one is dropped and the launch counts again. */
   policyChanged(): void {
+    const ceiling = this.ceiling();
+    if (ceiling === this.lastCeiling) return;
+    this.lastCeiling = ceiling;
     this.revision++;
     this.queue = [];
     this.controller?.abort();

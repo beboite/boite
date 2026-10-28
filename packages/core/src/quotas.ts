@@ -246,7 +246,7 @@ export class QuotaStore {
     const account = this.core.accounts.list().find((row) => row.id === accountId);
     if (!account) return;
     if (account.providerId === 'codex' && !this.isMuse(account)) { this.observeRead(account, reading, observedAt); return; }
-    if (!this.isMuse(account) || !this.base(account).enabled || !reading.windows.length) return;
+    if (!this.isMuse(account) || this.base(account).status !== 'unavailable' || !reading.windows.length) return;
     const previous = this.observations.get(accountId);
     if (previous && (previous.checkedAt ?? 0) > observedAt) return;
     const value: AccountQuota = { ...this.base(account), ...reading, status: 'ready', source: 'observation', checkedAt: observedAt };
@@ -335,7 +335,8 @@ export class QuotaStore {
         }
       }));
     }));
-    return [...result.map((row) => { const seen = this.observations.get(row.accountId); return seen ? this.alerts.decorate(seen) : row; }), ...await gateway];
+    // An observation kept from before the row was turned off, by the user or the policy, does not stand in for it.
+    return [...result.map((row) => { const seen = row.status === 'disabled' ? undefined : this.observations.get(row.accountId); return seen ? this.alerts.decorate(seen) : row; }), ...await gateway];
   }
   /**
    * One account's reading, through the same cache, backoff and shared read as
@@ -345,7 +346,8 @@ export class QuotaStore {
   async readAccount(accountId: string, refresh = false): Promise<AccountQuota | null> {
     const account = this.core.accounts.list().find((row) => row.id === accountId);
     if (account === undefined) return null;
-    return this.alerts.decorate(this.observations.get(accountId) ?? await this.one(account, refresh));
+    // `one` answers a Muse observation itself, and only while the row is on.
+    return this.alerts.decorate(await this.one(account, refresh));
   }
   private async one(account: Account, refresh: boolean): Promise<AccountQuota> {
     const base = this.base(account);

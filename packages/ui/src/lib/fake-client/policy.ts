@@ -184,7 +184,7 @@ const RULES: Partial<Record<RpcMethodName, Rule>> = {
   'providers.setEnabled': (values, params, ctx) => params.enabled === true ? provider(values, params, ctx) : null,
   'subscriptionProxy.configure': (values, params) => {
     const proxy = params.subscriptionProxy as Settings['subscriptionProxy'];
-    if (gatewayOff(values)) return 'gateway';
+    if (gatewayOff(values)) return proxy?.enabled || (params.key !== undefined && params.key !== null) ? 'gateway' : null;
     return proxy?.enabled ? gatewayBlockOf(values, proxy.baseUrl) : null;
   },
   'subscriptionProxy.setEnabled': (values, params, ctx) => params.enabled === true ? gatewayBlockOf(values, ctx.settings.subscriptionProxy?.baseUrl ?? null) : null,

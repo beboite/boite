@@ -194,7 +194,7 @@
     {:else if watched}
       {#key watched.tabId}
         <!-- This app hosts the tab: its own webview shows here, nothing is streamed. -->
-        {#if native && watched.view}<AgentNativeView view={watched.view} url={watched.url} />
+        {#if native && watched.view}<AgentNativeView view={watched.view} url={watched.url} search={policySearch(store.policy)} />
         {:else}<RemoteBrowser {store} {threadId} tabId={watched.tabId} />{/if}
       {/key}
     {/if}

@@ -156,6 +156,8 @@ export class FakeClient implements ObservableClient {
       ctx.usageSeeded = false;
       ctx.scheduler = { ...ctx.scheduler, running: [], queued: [] };
     }
+    // Again once the seeds and a first launch have set the providers the policy marks.
+    applyPolicy(ctx);
     if (options.load) this.#stopLoad = startLoad(ctx, options.load, options.loadTickMs);
     // After a first launch has cleared the threads, so no record names one that is gone.
     seedDiagnostics(ctx);

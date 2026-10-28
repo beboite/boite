@@ -789,11 +789,11 @@ export class ContactStore implements LinkedContacts {
       this.backoff.failed(coreId, 'link', this.backoff.mark());
       if (!this.closed) { this.changed(); if (link.state === 'connected') this.members.mark(this.members.holdersOf(coreId)); }
     };
-    // The hello rides in the upgrade's headers, before any frame. The name is checked
-    // again at each dial: its DNS answer may have left the tailnet since the join.
+    // The hello rides in the upgrade's headers. The name is checked again at each dial (its DNS answer may have left
+    // the tailnet since the join), and the policy once the link opens: contacts turned off drop it, to be dialed later.
     const url = contact.url;
     checkTailnetName(url, 'contact.url').then(() => TextSocket.connect(`${url.replace(/^http/, 'ws')}${CONTACT_LINK_ROUTE}`, LINK_DIAL_MS, { headers })).then(socket => {
-      if (this.closed || this.dialed.get(coreId) !== link) { socket.close(1000); return; }
+      if (this.closed || this.dialed.get(coreId) !== link || (this.core.policy.networkOff('contacts') && this.dialed.delete(coreId))) { socket.close(1000); return; }
       link.socket = socket;
       link.state = 'connected';
       this.backoff.heard(coreId);

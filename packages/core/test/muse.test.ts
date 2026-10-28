@@ -45,6 +45,16 @@ test('Muse quotas come only from observed host notifications, never a probe or a
   expect(fakeLog()).toBe(after);
   expect(after).not.toContain('usage/read');
   expect(after).not.toContain('resetCredit');
+  // The admin policy turns quota reads off: neither the kept observation nor a new one stands in for the refusal.
+  const policy = join(harness!.dataDir, 'no-policy.json');
+  writeFileSync(policy, JSON.stringify({ quotaReads: false }));
+  await client.call('policy.get', {});
+  expect(await quota()).toMatchObject({ status: 'disabled', windows: [], error: expect.stringContaining('key quotaReads in') });
+  await runTurn(client, threadId, '[quota]');
+  expect(await quota()).toMatchObject({ status: 'disabled', windows: [] });
+  expect(await harness!.core.quotas.readAccount(thread.accountId!)).toMatchObject({ status: 'disabled', windows: [] });
+  rmSync(policy);
+  await client.call('policy.get', {});
   await client.call('quotas.configure', { accountId: thread.accountId!, enabled: false });
   await runTurn(client, threadId, '[quota]');
   expect(await quota()).toMatchObject({ status: 'disabled', windows: [] });

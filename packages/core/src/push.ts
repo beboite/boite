@@ -412,7 +412,8 @@ export class PushStore {
     }
     if (this.closed || !this.core.journal.getSession(sessionId)) return;
     const subscription = this.subscriptions()[sessionId];
-    if (!subscription) return;
+    // The policy may have turned push off while the keys were read.
+    if (!subscription || this.core.policy.networkOff('push')) return;
     try {
       await this.send({ endpoint: subscription.endpoint, keys: subscription.keys }, JSON.stringify(payload), keys, createHash('sha256').update(payload.tag).digest('base64url').slice(0, 32));
     } catch (error) {

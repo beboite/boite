@@ -127,6 +127,12 @@ test('groups turned off: an invitation from another group cannot be joined', asy
   input.dispatchEvent(new Event('input', { bubbles: true }));
   flushSync();
   expect(byId<HTMLButtonElement>('group-join')?.disabled).toBe(true);
+  expect(input.disabled).toBe(true);
+  // Enter submits the form whatever the button says: the join is still not sent.
+  const joinGroup = vi.spyOn(store, 'joinGroup');
+  input.form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  flushSync();
+  expect(joinGroup).not.toHaveBeenCalled();
   expect(lockOf('network.groups')).not.toBeNull();
 });
 
@@ -157,6 +163,8 @@ test('a gateway address outside the allowed ones cannot be turned on; an allowed
   store.settings = { ...store.settings!, subscriptionProxy: { ...store.settings!.subscriptionProxy!, baseUrl: 'https://gateway.corp.example/v1' } };
   flushSync();
   expect(byId<HTMLInputElement>('gateway-switch-input')?.disabled).toBe(false);
+  // Nothing holds an allowed address, so no lock says otherwise.
+  expect(lockOf('gateway.allowedBaseUrls')).toBeNull();
 });
 
 test('quota reads turned off: the page is locked and every account says why instead of drawing limits', async ({ ready }) => {

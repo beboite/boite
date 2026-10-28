@@ -61,7 +61,8 @@ const RULES: Partial<Record<RpcMethodName, Rule>> = {
 
   'subscriptionProxy.configure': (core, params) => {
     const proxy = params.subscriptionProxy as Settings['subscriptionProxy'];
-    if (gatewayOff(core)) return ['gateway'];
+    // Saving it switched off, with no new key, stays possible as `setEnabled(false)` does.
+    if (gatewayOff(core)) return proxy?.enabled || (params.key !== undefined && params.key !== null) ? ['gateway'] : null;
     return proxy?.enabled ? gatewayAt(core, proxy.baseUrl) : null;
   },
   'subscriptionProxy.setEnabled': (core, params) => (params.enabled === true ? gatewayAt(core, core.settings.stored().subscriptionProxy?.baseUrl ?? null) : null),

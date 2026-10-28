@@ -18,7 +18,7 @@
  * (`policy-gate.ts`), and the flows that run by themselves ask here before
  * they reach the network.
  */
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { POLICY_KEYS, type AdminPolicy, type PolicyKey, type PolicyProblem, type PolicyRefusalData, type PolicyState, type Settings, type UpdatePolicy } from '@boite/contracts';
 import { refused, unavailable, type RpcFailure } from './errors.ts';
@@ -40,9 +40,17 @@ export function machinePolicyFile(platform: NodeJS.Platform = process.platform, 
 export function policyFileFor(given: string | undefined, env: Record<string, string | undefined> = process.env, platform: NodeJS.Platform = process.platform): string {
   if (given !== undefined) return given;
   const machine = machinePolicyFile(platform, env);
-  if (existsSync(machine)) return machine;
+  // `ProgramData` is the user's environment too: pointing it elsewhere does not hide the default location.
+  const candidates = platform === 'win32' ? [...new Set([machine, machinePolicyFile(platform, {})])] : [machine];
+  for (const file of candidates) if (present(file)) return file;
   const named = env.BOITE_POLICY_FILE;
   return named !== undefined && named.length > 0 ? named : machine;
+}
+
+/** Whether a file is there. A path that cannot be checked counts as there, so reading it fails closed. */
+function present(file: string): boolean {
+  try { statSync(file); return true; }
+  catch (error) { const code = (error as NodeJS.ErrnoException).code; return code !== 'ENOENT' && code !== 'ENOTDIR'; }
 }
 
 /** Every key at its strictest: what a file that does not parse means. */
@@ -138,9 +146,10 @@ export function parsePolicy(text: string | null, file: string): Parsed {
         values.providers = {};
         if (providers.allow !== undefined) values.providers.allow = ids('providers.allow', providers.allow);
         if (providers.deny !== undefined) {
+          const before = problems.length;
           const denied = ids('providers.deny', providers.deny);
-          // A deny list that cannot be read denies everything it might have named.
-          if (denied.length === 0 && !Array.isArray(providers.deny)) values.providers.allow = [];
+          // A deny list that cannot be read, one bad id included, denies everything it might have named.
+          if (problems.length > before) values.providers.allow = [];
           else values.providers.deny = denied;
         }
         break;

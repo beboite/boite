@@ -174,7 +174,10 @@ export function speechMethods(ctx: FakeContext) {
     },
     'speech.transcribe': async (params) => {
       const p = params;
+      const dictation = ctx.policy.present ? ctx.policy.values.dictation : undefined;
+      if (dictation === 'off') throw policyRefusal(ctx, 'dictation');
       if (!ctx.speechStatus.ready) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Configure Voice first' });
+      if (dictation === 'local' && ctx.speech.engine === 'api') throw policyRefusal(ctx, 'dictation', `the ${ctx.speech.apiProvider} cloud engine; only local is allowed`);
       if (p.revision !== ctx.speechStatus.revision) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Voice settings changed during recording; record again with the selected engine' });
       if (ctx.speechRequests.size) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Another transcription is running; try again shortly' });
       const request = Symbol(p.requestId);

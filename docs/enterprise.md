@@ -19,7 +19,10 @@ Only when no file exists at that path does the core read the file named by the
 `BOITE_POLICY_FILE` environment variable. This suits a container or a server
 whose administrator cannot write to the system location. A user who can set
 environment variables can also point it elsewhere, so a machine-wide policy
-belongs at the system path, writable only by administrators.
+belongs at the system path, writable only by administrators. On Windows,
+`C:\ProgramData\Boite\policy.json` still counts when the `ProgramData` variable
+points elsewhere, and a location that cannot be checked is read anyway, so the
+read fails closed instead of falling back to the variable.
 
 The core looks at the file every 3 seconds (a `stat`; the file is read only
 when its inode, size or modification time changed) and on every client read

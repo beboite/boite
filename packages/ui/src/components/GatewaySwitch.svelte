@@ -39,7 +39,7 @@
   <section class="card gateway-switch" data-testid="gateway-switch">
     <label for="{uid}-gateway" class="switch-row">
       <span class="text">
-        <span class="ui-label-box"><span class="ui-label" id="{uid}-gateway-name">{fill(strings.subscriptionProxy.use, { name })}</span><InfoTip topic={fill(strings.subscriptionProxy.use, { name })} text={strings.subscriptionProxy.enabledHint} /><PolicyLock {store} keys={['gateway', 'gateway.allowedBaseUrls']} /></span>
+        <span class="ui-label-box"><span class="ui-label" id="{uid}-gateway-name">{fill(strings.subscriptionProxy.use, { name })}</span><InfoTip topic={fill(strings.subscriptionProxy.use, { name })} text={strings.subscriptionProxy.enabledHint} />{#if blocked}<PolicyLock {store} keys={['gateway', 'gateway.allowedBaseUrls']} />{/if}</span>
         <span class="hint where">{proxy.mode === 'local' ? strings.subscriptionProxy.local : subscriptionProxyOrigin(proxy)}</span>
       </span>
       <input id="{uid}-gateway" type="checkbox" role="switch" data-testid="gateway-switch-input" aria-labelledby="{uid}-gateway-name"

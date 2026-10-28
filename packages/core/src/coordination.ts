@@ -6,7 +6,7 @@ import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentTranscri
 import { checkMatchExtras, checkRemoteContact, checkTranscript, searchContacts, searchWords, transcript } from './coordination-lookup.ts';
 import { PeerDesk } from './coordination-peer.ts';
 import { CoordinationBridge } from './coordination-bridge.ts';
-import { dropGroupRead, groupPeers } from './coordination-group.ts';
+import { dropGroupRead, groupPeers, policedRoutes } from './coordination-group.ts';
 import { address, coordinationGuide, coordinationUrl, LETTER_TTL_MS, letterPrompt, RESIDENT_LETTER_TTL_MS, same, text } from './coordination-letter.ts';
 import { projectName, senderContext, withProjects, withRelations } from './coordination-relation.ts';
 import { firstAnswer, PeerGone, PeerRefusal, post, settle, type Answer, type Envelope, type Operation } from './coordination-wire.ts';
@@ -831,20 +831,17 @@ export class Coordination {
    */
   private async exchange(peer: CoordinationPeer, operation: Operation, payload: unknown): Promise<unknown> {
     this.identityKey();
+    const routes = policedRoutes(this.core, peer);
     // A contact another member of the group holds is asked through that member.
     if (this.core.contacts.isRelayPeer(peer)) {
-      this.core.policy.assert(this.core.policy.networkOff('contacts'), 'network.contacts', peer.name);
       const via = this.core.contacts.members.via(peer.coreId);
       if (!via) throw unavailable(`${peer.name} is linked to a machine that left this group`);
       return this.core.contacts.members.send(via, peer.coreId, operation, payload);
     }
     // Signed and sealed anew for every address tried, the owner's app included: the same request sent twice
     // is a replay at a machine both addresses lead to, refused there, and every operation bears being asked twice.
-    const routes = this.core.group.routes(peer.coreId);
-    this.core.policy.assert(routes !== null && this.core.policy.networkOff('groups'), 'network.groups', peer.name);
     // A contact this core hosts is reached only down the link its core keeps open.
     const contact = routes === null && this.core.contacts.has(peer.coreId);
-    this.core.policy.assert(contact && this.core.policy.networkOff('contacts'), 'network.contacts', peer.name);
     if (contact && !this.core.contacts.linked(peer.coreId)) throw unavailable(`${peer.name} is not linked right now; its core dials this one again by itself`);
     const attempt = async (url: string | null): Promise<Answer> => {
       const nonce = randomUUID();

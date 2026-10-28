@@ -23,6 +23,13 @@ test('a gated method refuses with the core code, sentence and data', async ({ re
   });
 });
 
+test('a first launch lists the denied provider off, and dictation refuses as the core does', async ({ ready }) => {
+  const { client } = await ready({ delayMs: 0, uninstalled: true, policy: policyFixture('managed') });
+  expect((await client.call('providers.list', {})).loaded.find((provider) => provider.id === 'grok')).toMatchObject({ enabled: false, policy: { policy: 'providers.deny' } });
+  const closed = await ready({ delayMs: 0, policy: policyFixture('closed') });
+  await expect(closed.client.call('speech.transcribe', { requestId: 'r1', revision: 0, audio: '' } as never)).rejects.toMatchObject({ code: RpcErrorCode.Refused, data: { policy: 'dictation' } });
+});
+
 test('the address bar searches where the policy says, the default otherwise', () => {
   const search = policySearch(policyFixture('managed'));
   expect(search).toBe('https://search.example.com/?q={query}');

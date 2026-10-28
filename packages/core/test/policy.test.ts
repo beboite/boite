@@ -5,7 +5,7 @@
  * in a fresh temporary directory, never a machine path.
  */
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AGENT_ENV, POLICY_KEYS, RpcErrorCode, type AdminPolicy, type PolicyKey } from '@boite/contracts';
@@ -71,6 +71,14 @@ test('the machine location per platform, and BOITE_POLICY_FILE only when the mac
   mkdirSync(join(programData, 'Boite'));
   writeFileSync(join(programData, 'Boite', 'policy.json'), '{}');
   expect(policyFileFor(undefined, env, 'win32')).toBe(join(programData, 'Boite', 'policy.json'));
+  // A machine location that cannot be checked is the one read, so the read fails closed instead of falling back.
+  if (process.getuid?.() !== 0) {
+    const sealed = join(programData, 'sealed');
+    mkdirSync(join(sealed, 'Boite'), { recursive: true });
+    chmodSync(join(sealed, 'Boite'), 0);
+    cleanups.push(() => chmodSync(join(sealed, 'Boite'), 0o700));
+    expect(policyFileFor(undefined, { ...env, ProgramData: sealed }, 'win32')).toBe(join(sealed, 'Boite', 'policy.json'));
+  }
 });
 
 test('without a file nothing is locked and every flow is the user\'s', async () => {
@@ -106,6 +114,8 @@ test('a bad value takes its key\'s strictest value, an unknown key is ignored, a
   for (const problem of parsed.problems) expect(problem.message).toStartWith('/x/policy.json: ');
   // A `true` that restricts nothing locks nothing.
   expect(lockedKeys(parsed.values)).toEqual(['analytics', 'network.lan', 'network.push']);
+  // One bad id in a deny list denies every provider, not none.
+  expect(parsePolicy(JSON.stringify({ providers: { deny: ['echo', 'bad id'] } }), '/x/policy.json').values).toEqual({ providers: { allow: [] } });
 });
 
 test('problems reach the log and the client, naming file, field and expected value', async () => {
@@ -172,6 +182,11 @@ test('analytics: off sends nothing to the relay, consent and deletions included;
   await telemetry.flush();
   expect(telemetry.state().mode).toBe('off');
   expect(requests).toEqual([]);
+
+  // An edit of another key leaves the queue and the launch count alone: only a moved ceiling resets them.
+  const launch = spyOn(telemetry as unknown as { launch: () => void }, 'launch');
+  telemetry.policyChanged();
+  expect(launch).not.toHaveBeenCalled();
 
   const { client } = await core({ analytics: 'basic' });
   await refusedBy(client.call('telemetry.configure', { mode: 'enhanced' }), 'analytics');
@@ -256,6 +271,11 @@ test('gateway: false refuses the gateway and turns a saved one off without forge
   policy.remove();
   await client.call('policy.get', {});
   expect((await client.call('settings.get', {})).subscriptionProxy?.enabled).toBe(true);
+  // Saving it switched off is not using it; sending a new key is.
+  policy.write({ gateway: false });
+  await client.call('policy.get', {});
+  await refusedBy(client.call('subscriptionProxy.configure', { subscriptionProxy: { ...PROXY, enabled: false }, key: 'douane-policy-test-token' }), 'gateway');
+  expect((await client.call('subscriptionProxy.configure', { subscriptionProxy: { ...PROXY, enabled: false } })).subscriptionProxy?.enabled).toBe(false);
 });
 
 test('gateway.allowedBaseUrls: only a listed address may serve', async () => {

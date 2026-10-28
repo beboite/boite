@@ -36,3 +36,16 @@ export function migrateGroupPeer(core: Core, peer: CoordinationPeer): void {
   core.journal.setSetting(SETTING, allowed);
   core.coordination.untrust(peer.coreId, true);
 }
+
+/**
+ * The group routes to a peer, once the admin policy allows the way it is
+ * reached: a contact link, kept here or held by another member, needs
+ * `network.contacts`; a group route needs `network.groups`.
+ */
+export function policedRoutes(core: Core, peer: CoordinationPeer): string[] | null {
+  const routes = core.group.routes(peer.coreId);
+  const contact = core.contacts.isRelayPeer(peer) || (routes === null && core.contacts.has(peer.coreId));
+  core.policy.assert(contact && core.policy.networkOff('contacts'), 'network.contacts', peer.name);
+  core.policy.assert(!contact && routes !== null && core.policy.networkOff('groups'), 'network.groups', peer.name);
+  return routes;
+}
