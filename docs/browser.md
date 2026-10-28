@@ -380,14 +380,17 @@ response is described, never sent. Credentials are hidden before anything
 leaves the core: a header, a query parameter or a JSON or form field named
 like a cookie, an authorization, a password, a secret, a key, a session, a
 signature or a token reads `<hidden, N characters>`, after an acronym or in
-the plural too (`APIToken`, `apiKeys`), a list of them item by item. A body is masked whole,
-then cut. One that does not parse as JSON (a guard prefix, a stream of values,
-a page's inline script) has each `"name": value` pair masked on its own. Only
-pagination tokens stay readable (`page_token`, `next_page_token`,
-`continuation_token`, `next_token` and the like), since an agent pages through
-results with them; `page_access_token` is hidden. The note under
-a call with hidden values tells the agent to read them from the page each
-time. `browser network stop` forgets the calls and gives Chromium's buffers
+the plural too (`APIToken`, `apiKeys`). A list or an object under such a name
+is hidden whole, as is a value nested past 20 levels. The address in a
+`Location`, `Content-Location` or `Referer` header has its query masked as a
+call's address is. A body is masked whole, then cut. One that does not parse
+as JSON (a guard prefix, a stream of values, a page's inline script) has each
+`"name": value` pair masked on its own, a list or an object up to its closing
+bracket. Only pagination tokens stay readable (`page_token`,
+`next_page_token`, `continuation_token`, `next_token` and the like), since an
+agent pages through results with them; `page_access_token` is hidden. The
+note under a call with hidden values tells the agent to read them from the
+page each time. `browser network stop` forgets the calls and gives Chromium's buffers
 back.
 
 `page.fetch(url, { method, headers, body })` in a script runs `fetch` in the

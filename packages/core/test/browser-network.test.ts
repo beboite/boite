@@ -11,14 +11,22 @@ const browserFixture = createBrowserFixture();
 const { real, url } = browserFixture;
 
 test('masking keeps pagination tokens and hides credentials in JSON that does not parse whole', () => {
-  // An acronym and a list are credentials too; a list of pagination tokens is not.
-  expect(JSON.parse(maskBody(JSON.stringify({ APIToken: 'a1', XSRFToken: 'x1', apiKeys: ['k1', 'k22'], tokens: ['t1'], nextPageTokens: ['p'], session: { user: 'ann', token: 's1' } }))))
-    .toEqual({ APIToken: '<hidden, 2 characters>', XSRFToken: '<hidden, 2 characters>', apiKeys: ['<hidden, 2 characters>', '<hidden, 3 characters>'], tokens: ['<hidden, 2 characters>'], nextPageTokens: ['p'], session: { user: 'ann', token: '<hidden, 2 characters>' } });
+  // An acronym and a plural are credentials too, and a list or an object under such a name is hidden whole; a list of pagination tokens is not.
+  expect(JSON.parse(maskBody(JSON.stringify({ APIToken: 'a1', XSRFToken: 'x1', apiKeys: ['k1', 'k22'], tokens: ['t1'], nextPageTokens: ['p'], session: { user: 'ann', token: 's1' }, rows: [{ password: 'pw' }] }))))
+    .toEqual({ APIToken: '<hidden, 2 characters>', XSRFToken: '<hidden, 2 characters>', apiKeys: '<hidden, 12 characters>', tokens: '<hidden, 6 characters>', nextPageTokens: ['p'], session: '<hidden, 27 characters>', rows: [{ password: '<hidden, 2 characters>' }] });
+  // A value nested past 20 levels is hidden whole, never returned unread.
+  let deep: unknown = { token: 'deep-secret' };
+  for (let level = 0; level < 25; level++) deep = { a: deep };
+  expect(maskBody(JSON.stringify(deep))).not.toContain('deep-secret');
   const masked = JSON.parse(maskBody(JSON.stringify({ pageToken: 'p1', next_page_token: 'p2', nextToken: 'p3', pageAccessToken: 'EAAB1', page_access_token: 'EAAB2', cursorSecret: 'c1', client_secret_key: 'sk', signingKey: 'k2' })));
   expect(masked).toEqual({ pageToken: 'p1', next_page_token: 'p2', nextToken: 'p3', pageAccessToken: '<hidden, 5 characters>', page_access_token: '<hidden, 5 characters>', cursorSecret: '<hidden, 2 characters>', client_secret_key: '<hidden, 2 characters>', signingKey: '<hidden, 2 characters>' });
   // A guard prefix, a stream of values and a cut-off text fail JSON.parse; their pairs are masked one by one.
   expect(maskBody(`)]}'\n{"token":"abc","n":1}`, 'application/json')).toBe(`)]}'\n{"token":"<hidden, 3 characters>","n":1}`);
   expect(maskBody('{"a":1}\n{"apiKey": "k-1"}\n', 'application/x-ndjson')).toBe('{"a":1}\n{"apiKey": "<hidden, 3 characters>"}\n');
+  // There too a list or an object under a credential name is hidden through its closing bracket, and a quoted name inside a text value is not a field.
+  expect(maskBody(`)]}'\n{"tokens":["synthetic-token"],"n":1}`, 'application/json')).toBe(`)]}'\n{"tokens":"<hidden, 19 characters>","n":1}`);
+  expect(maskBody('{"a":1}\n{"apiKeys":["k1"],"session":{"id":"s"}}\n', 'application/x-ndjson')).toBe('{"a":1}\n{"apiKeys":"<hidden, 6 characters>","session":"<hidden, 10 characters>"}\n');
+  expect(maskBody(`)]}'\n{"text":"\\"token\\":1","rows":[{"password":"p"}]}`, 'application/json')).toBe(`)]}'\n{"text":"\\"token\\":1","rows":[{"password":"<hidden, 1 characters>"}]}`);
   expect(maskBody('<script>window.state = {"sessionId":"s-42","pin":1234}</script>', 'text/html')).toBe('<script>window.state = {"sessionId":"<hidden, 4 characters>","pin":"<hidden, 4 characters>"}</script>');
   expect(maskBody('{"rows":[1,2],"password":"hunt', 'application/json')).toBe('{"rows":[1,2],"password":"<hidden, 4 characters>"');
 });
@@ -74,6 +82,13 @@ real('network finds the API call behind a page with its credentials hidden, and 
   expect(bigDetail.responseBody).toStartWith('{"sessionToken":"<hidden, 7 characters>","rows":"yyy');
   expect(bigDetail.notes).toEqual(expect.arrayContaining([expect.stringContaining('the request body is cut at 50000'), expect.stringContaining('the response body is cut at 50000')]));
 
+  // A redirect's address can carry a token: its Location is masked as a call's address is, relative or not.
+  await command({ kind: 'evaluate', expression: "fetch('/sign-in').then(r => r.status)" });
+  const signIn = ((await command({ kind: 'network', filter: 'sign-in' })).value as { calls: BrowserNetworkCall[] }).calls[0]!;
+  expect(signIn.status).toBe(302);
+  const signInDetail = (await command({ kind: 'network-detail', callId: signIn.id })).value as BrowserNetworkDetail;
+  expect(signInDetail.responseHeaders?.location).toBe('/app?access_token=<hidden, 7 characters>&page=2');
+
   // Stopping forgets the calls and the bodies Chromium kept.
   await command({ kind: 'network-stop' });
   expect(await thrown(command({ kind: 'network-detail', callId: call.id }))).toThrow('network capture is off');
@@ -91,6 +106,8 @@ real('network finds the API call behind a page with its credentials hidden, and 
   const failed = await cli(['run', '-'], "await page.fetch('/api/fail')");
   expect(failed.code).toBe(1);
   expect(failed.out).toContain('✗ step 1, fetch GET /api/fail: HTTP 500: {"error":"the shelf is empty"}');
+  // Fetches sent at once: the one that fails names its own step, not the last one started.
+  expect((await cli(['run', '-'], "await Promise.all([page.fetch('/api/fail'), page.fetch('/api/items')])")).out).toContain('✗ step 1, fetch GET /api/fail: HTTP 500');
 
   // A recipe is kept once its run passed, under the site it worked on, and the next open names it.
   const script = `await page.open(${JSON.stringify(url('/app'))})\nconst reply = await page.fetch('/api/items', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: args[0] }) })\nreturn reply.json.items.map(item => args[0] + ' ' + item)`;

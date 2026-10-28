@@ -217,7 +217,10 @@ export async function runBrowserScript(script: BrowserScript, io: CliIo, client:
     fetch: async (url: string, init: { method?: string; headers?: Record<string, string>; body?: string; credentials?: 'omit' | 'same-origin' | 'include' } = {}) => {
       const method = (init.method ?? 'GET').toUpperCase();
       const label = `fetch ${method} ${String(url).split(/[?#]/)[0]}`;
+      // Its own number, taken when the step starts: a script may run several fetches at once.
+      let number = 0;
       const reply = await valueOf(label, () => {
+        number = steps;
         if (init.body !== undefined && typeof init.body !== 'string') throw new Error('page.fetch takes a string body: JSON.stringify(value) for JSON');
         const expression = `(${PAGE_FETCH})(${JSON.stringify(String(url))}, ${JSON.stringify(init)}, ${FETCH_TEXT_MAX})`;
         // The request travels as one page expression, under the same cap as page.eval.
@@ -227,7 +230,7 @@ export async function runBrowserScript(script: BrowserScript, io: CliIo, client:
       if (reply && typeof reply.url === 'string') visit(reply.url);
       if (!reply || reply.status >= 400) {
         const said = reply?.text ?? (reply?.json === undefined ? '' : JSON.stringify(reply.json));
-        throw new StepError(steps, label, new Error(`HTTP ${reply?.status ?? '?'}${said ? `: ${said.slice(0, 300)}` : ''}`));
+        throw new StepError(number, label, new Error(`HTTP ${reply?.status ?? '?'}${said ? `: ${said.slice(0, 300)}` : ''}`));
       }
       return reply;
     },

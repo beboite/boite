@@ -47,31 +47,88 @@ function secretName(name: string): boolean {
 const hidden = (value: string) => `<hidden, ${value.length} characters>`;
 const quote = (text: string) => JSON.stringify(text);
 
+/** Headers that carry an address, whose query can hold a token: a redirect's `Location` above all. */
+const URL_HEADERS = new Set(['location', 'content-location', 'referer']);
+const RELATIVE_BASE = 'https://relative.invalid';
+
+/** An absolute or relative address with its credentials hidden, as `maskUrl` does. */
+function maskHeaderUrl(raw: string): string {
+  try {
+    const masked = maskUrl(new URL(raw, RELATIVE_BASE).href);
+    return /^[a-z][a-z\d+.-]*:/i.test(raw) ? masked : masked.slice(RELATIVE_BASE.length);
+  } catch { return hidden(raw); }
+}
+
 function maskHeaders(headers: unknown): Record<string, string> {
   const masked: Record<string, string> = {};
   if (!headers || typeof headers !== 'object') return masked;
   for (const [name, raw] of Object.entries(headers as Record<string, unknown>).slice(0, 100)) {
-    const value = String(raw);
-    masked[name.toLowerCase()] = secretName(name) ? hidden(value) : value.slice(0, 2000);
+    const value = String(raw), lower = name.toLowerCase();
+    masked[lower] = secretName(name) ? hidden(value) : URL_HEADERS.has(lower) ? maskHeaderUrl(value) : value.slice(0, 2000);
   }
   return masked;
 }
 
+/**
+ * A credential field hides its whole value, a list or an object included, and
+ * a value nested past 20 levels is hidden whole rather than returned unread.
+ */
 function maskJson(value: unknown, depth = 0): unknown {
-  if (depth > 20 || !value || typeof value !== 'object') return value;
+  if (!value || typeof value !== 'object') return value;
+  if (depth > 20) return hidden(JSON.stringify(value));
   if (Array.isArray(value)) return value.map(item => maskJson(item, depth + 1));
-  return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, secretName(key) ? maskSecret(inner, depth + 1) : maskJson(inner, depth + 1)]));
+  return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key,
+    !secretName(key) || inner === null || typeof inner === 'boolean' ? maskJson(inner, depth + 1)
+      : hidden(typeof inner === 'string' ? inner : JSON.stringify(inner))]));
 }
 
-/** A credential field's value: a list of them is hidden item by item, an object keeps its own field names. */
-function maskSecret(value: unknown, depth: number): unknown {
-  if (typeof value === 'string' || typeof value === 'number') return hidden(String(value));
-  if (Array.isArray(value) && depth <= 20) return value.map(item => maskSecret(item, depth + 1));
-  return maskJson(value, depth);
+/** A `"name":` that opens a pair, wherever it sits in the text. */
+const PAIR_NAME = /"((?:[^"\\]|\\.){1,200})"(\s*:\s*)/g;
+
+/** Where the JSON value at `at` ends: past its closing quote or bracket, at the text's end when it was cut, or at `at` for none. */
+function valueEnd(text: string, at: number): number {
+  const skipString = (from: number) => {
+    let i = from + 1;
+    while (i < text.length && text[i] !== '"') i += text[i] === '\\' ? 2 : 1;
+    return Math.min(i + 1, text.length);
+  };
+  const first = text[at];
+  if (first === '"') return skipString(at);
+  if (first === '[' || first === '{') {
+    let depth = 0;
+    for (let i = at; i < text.length;) {
+      const c = text[i];
+      if (c === '"') { i = skipString(i); continue; }
+      if (c === '[' || c === '{') depth++;
+      else if ((c === ']' || c === '}') && --depth === 0) return i + 1;
+      i++;
+    }
+    return text.length;
+  }
+  const number = /^-?\d[\d.eE+-]*/.exec(text.slice(at, at + 400));
+  return number ? at + number[0].length : at;
 }
 
-/** A `"name": value` pair, its string value possibly cut short at the end of the text. */
-const JSON_PAIR = /"((?:[^"\\]|\\.){1,200})"(\s*:\s*)("(?:[^"\\]|\\.)*"?|-?\d[\d.eE+-]*)/g;
+/** Hides each credential pair of a text that does not parse whole: a string, a number, a list or an object, through its closing bracket. */
+function maskPairs(text: string): string {
+  let out = '', from = 0;
+  PAIR_NAME.lastIndex = 0;
+  for (let match = PAIR_NAME.exec(text); match; match = PAIR_NAME.exec(text)) {
+    const [pair, name, colon] = match as unknown as [string, string, string];
+    const start = match.index + pair.length;
+    if (!secretName(name)) {
+      // Past a plain value, so its text is never read as a name; into a list or an object, whose pairs are masked in turn.
+      if (text[start] !== '[' && text[start] !== '{') PAIR_NAME.lastIndex = Math.max(PAIR_NAME.lastIndex, valueEnd(text, start));
+      continue;
+    }
+    const end = valueEnd(text, start);
+    if (end === start) continue;
+    const value = text.slice(start, end);
+    out += `${text.slice(from, match.index)}"${name}"${colon}${quote(hidden(value.startsWith('"') ? value.replace(/^"|"$/g, '') : value))}`;
+    from = PAIR_NAME.lastIndex = end;
+  }
+  return out + text.slice(from);
+}
 
 /** Hides the credential fields of a JSON or form body, and of a query string. */
 export function maskBody(body: string, mimeType = ''): string {
@@ -86,8 +143,7 @@ export function maskBody(body: string, mimeType = ''): string {
     if (changed) return form.toString();
   }
   // JSON that does not parse whole, or sits inside a page's script: each pair is masked on its own.
-  return body.replace(JSON_PAIR, (pair, name: string, colon: string, value: string) =>
-    secretName(name) ? `"${name}"${colon}${quote(hidden(value.replace(/^"|"$/g, '')))}` : pair);
+  return maskPairs(body);
 }
 
 const decoded = (text: string) => { try { return decodeURIComponent(text.replace(/\+/g, ' ')); } catch { return text; } };
