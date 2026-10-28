@@ -174,7 +174,7 @@ ${CONTROL_HELP}
   --request-id <id>              reuse to retry threads send|reply or delegate spawn|send
   delegate models                models, reasoning levels and speeds a subagent can use
                                  (--machine <name>: another machine's, for
-                                 thread new --machine --model)
+                                 thread new or delegate spawn --machine --model)
   delegate spawn <brief>         start a subagent on one bounded job; its result
                                  comes back as a message (--model <provider/model>,
                                  --effort <level>, --speed <tier>, --title <title>,
@@ -184,6 +184,8 @@ ${CONTROL_HELP}
                                  light|neutral, --keep|--drop <parts>, --tools
                                  <Tool,...>, --rules <text>|--rules-file <path>)
                                  --project <p> places a bot's child in an entrusted project
+                                 --machine <name> runs it on another machine of the
+                                 group, in its project named like yours or --project
   delegate list                  every subagent and workflow: state, model, time
   delegate send <thread-id> <text>
                                  steer or reuse a subagent, or ask the parent;

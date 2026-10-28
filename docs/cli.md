@@ -459,7 +459,7 @@ boite bot unschedule <routine-id>
 boite bot watch|unwatch <thread-id>
 boite delegate models [--machine <name>]
 boite delegate profiles|list
-boite delegate spawn <brief> [--model <provider/model>] [--effort <level>] [--speed <tier>] [--profile <id>] [--title <t>] [--worktree] [context flags]
+boite delegate spawn <brief> [--model <provider/model>] [--effort <level>] [--speed <tier>] [--profile <id>] [--title <t>] [--worktree] [--machine <name> [--project <name>]] [context flags]
 boite delegate send <thread-id> <text>
 boite delegate wait [thread-id] [--timeout <s>]
 boite delegate result <thread-id> <turn-id> [offset]
@@ -842,6 +842,13 @@ owner wrote again, continues the children whose last turn stopped, or only the
 one named, and resumes the workflow runs a pause held
 ([delegation](delegation.md#stop-pause-and-resume)). Only the owner changes
 profiles or lifts the pause set in Subagents > Settings.
+`delegate spawn --machine <name>` runs the child on another machine of the
+group, in its project named like the parent's or the one `--project` names,
+under that machine's `groupThreads` switch; `--model` is matched against that
+machine's list, and without it the child runs on the parent's model there or
+is refused. `delegate list` names the machine after the model, and `send`,
+`stop`, `wait` and `result` reach the child there
+([delegation](delegation.md#on-another-machine-of-the-group)).
 [Workflows](workflows.md) run a JSON plan of such children: `workflow help`
 prints the whole format, `workflow run` starts it and opens it in the panel,
 and the results come back as one message when the run ends.

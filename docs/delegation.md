@@ -232,6 +232,67 @@ require an enabled team or custom profile; pause still holds launches. Workflow
 steps remain separate from the team's agent list. That guide owns plan syntax,
 structured output, commands and recovery.
 
+## On another machine of the group
+
+`boite delegate spawn "<brief>" --machine <name>` (MCP: `machine` on
+`boite_delegate_spawn`) starts the child on another machine of the same
+[group](groups.md), named as `--machine` names it for `thread new`. The child
+is an ordinary thread of that machine, in its project named like the parent's
+or the one `--project` names; a missing project is refused with that
+machine's project names. Its owner sees it in that machine's sidebar, where it
+belongs to no conversation of that machine.
+
+The machine that runs the child decides, through the same **Threads from the
+other machines** switch (`groupThreads`) as `thread new --machine`: while it is
+off the spawn is refused with the settings card to propose, and a letter from
+the parent is refused too. Stops, result pages and reports always pass. The
+parent's own gates apply first: subagents on and unpaused, the owner's
+any-model rule. A bot's subagents run on its own machine only.
+
+Without `--model`, `--effort` or `--speed`, the child runs on the parent's
+provider and model (or the named `--profile`) there, at the parent's level when
+that model lists it, else at its default; a machine where that provider has no
+account signed in or that model is not listed refuses with its own list. With
+one of them, the parent reads that machine's list first (`boite delegate models
+--machine <name>`), picks as `delegate models` does, and that machine starts on
+exactly that model, level and speed or refuses; a miss starts nothing.
+
+`delegate list` and `delegation.get` show the child with `machine` beside the
+model, as that machine last reported it: its state, last turn, last result,
+open questions and worktree. `delegate wait` settles on those reports.
+`delegate send <id>` steers it, or answers its question, through that machine
+at once, and is refused while it is away; `delegate result` reads the full
+answer from it. `delegate stop <id>`, a team stop and archiving or deleting the
+parent stop it there, and archiving or deleting the parent archives it there.
+Its result, its questions and its own `delegate send` to the parent come back
+as letters from that machine, which wake the parent once each. A worktree child
+branches from that machine's checkout of the project, and its branch stays
+there. `delegate spawn` and `thread new` refuse the child; its instructions
+tell it not to start workflows either.
+
+### The protocol
+
+Five sealed operations between the two machines, each safe to repeat, since
+the transport retries a request across addresses and either side can restart
+or be away:
+
+| Operation | From | Key | What the receiver does |
+| --- | --- | --- | --- |
+| `delegation.start` | parent's machine | parent and `--request-id` | starts the child, or answers the one it started for that key; other content under the same key is refused |
+| `delegation.report` | child's machine | child, and a letter's request id | keeps the newest state; files a result, question or message once |
+| `delegation.letter` | parent's machine | parent and request id | files the steer once, answering an open question when it is one |
+| `delegation.read` | parent's machine | none, read only | returns a page of the named turn's answer |
+| `delegation.stop` | parent's machine | child | stops it, and archives it when the parent was archived or deleted |
+
+Reports and stops wait in an outbox in the sender's journal until the other
+machine took them, tried again after 5 s, 15 s, 1 min and then every 5 min,
+and at once when that machine is heard from again. A report replaces the state
+waiting for the same child. A refusal drops the entry; a machine that left the
+group drops its outbox. A start whose answer was lost keeps its record on the
+parent's machine: the next report or the same `--request-id` finds the child.
+A machine whose Boite lacks these operations is reported too old before
+anything starts there.
+
 ## Shared-project hosts
 
 An associated project can offer compute separately from its read and board
