@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import type { CoreClient } from '../src/client.ts';
 import { notifiesOnFinish } from '@boite/contracts';
 import { AgentRuntime, EVENT_PROMPT_MAX, isAgentHeld, NOTICES_PER_HOUR } from '../src/agents/runtime.ts';
-import { agentGuide, BOT_GUIDE } from '../src/agent-guide.ts';
+import { agentGuide, BOT_GUIDE, OWN_SETTINGS } from '../src/agent-guide.ts';
+import { DELEGATION_WORDS } from '../src/delegation/guide.ts';
 import { agentContext } from '../src/agents/context.ts';
 import { costing, makeAgent, scripted, settled, turnsOf } from './agent-fixture.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
@@ -45,6 +46,9 @@ test('a bot\'s Boite guide is the thread guide less the project-bound commands, 
     expect(bot).not.toContain(projectBound);
   }
   for (const own of ['[quiet]', 'boite bot remember', 'boite bot schedule', 'boite bot watch|unwatch', 'boite settings bot request', '--open <url>', 'boite thread send <id> <text>', 'boite answer <id> <ask-id> <option-or-text>']) expect(BOT_GUIDE).toContain(own);
+  // A bot proposes a setting that stopped fitting on its own, not only when asked: none of five real bots drew a card in about 970 turns.
+  for (const when of ['When one no longer fits, propose the change yourself', 'eventWakes false', 'Never work around a setting']) expect(OWN_SETTINGS).toContain(when);
+  expect(DELEGATION_WORDS.test(OWN_SETTINGS)).toBe(false);
 
   // The test core starts with the Boite guide off; a bot first meets it on.
   await client.call('brain.configure', { path: null, enabled: false, boiteGuide: true });

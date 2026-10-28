@@ -247,7 +247,10 @@ user; wake on `routine` and `event` turns and end one that needs nothing with
 routines|schedule|unschedule`); note durable facts (`boite bot remember`);
 put threads on or off its desk (`boite bot watch|unwatch`); ask the user with
 `boite ask`, `--open <url>` for a login; propose a change to its own settings
-with `boite settings bot request`. With the Boite guide off (the brain's
+with `boite settings bot request` as soon as one stops fitting (the user's
+words contradict its instructions, most wakes end in `[quiet]`, its model or
+effort costs more than its work needs), rather than working around it in its
+memory, routines or the brain. With the Boite guide off (the brain's
 switch or a context mode without guides) the context block carries the bot
 section instead, so a bot never loses `[quiet]`.
 
@@ -519,15 +522,29 @@ Boite setting ([CLI](cli.md)). The keys are its name, its role (`domain`), its
 instructions (`--instructions-file <path>` for a long text), its picture
 (`avatar`: one or two characters, a robot code, or `""`), its `status`
 (`active`, `paused` or `archived`), the projects entrusted to it, its model and
-reasoning effort, the memory pass (`autoMemory`), its subagents and its daily
-budget (`dailyBudget`, dollars a day or `null`). A name another bot holds is
-refused, when the card is drawn and again when it is applied. The context
-block tells the bot how to ask, so one the user asks to
-rename itself draws the card, and one that needs a project it was not given
-asks for it instead of working around it. The card is asked without stopping and outlives its turn.
+reasoning effort, the memory pass (`autoMemory`), its automatic event wakes
+(`eventWakes`), its subagents and its daily budget (`dailyBudget`, dollars a
+day or `null`). A name another bot holds is refused, when the card is drawn and
+again when it is applied. The context block tells the bot how to ask and when:
+one the user asks to rename itself draws the card, one that needs a project it
+was not given asks for it, and one whose settings no longer fit its work (the
+user's words contradict its instructions, most wakes end quiet, its model or
+effort costs more than the work needs) proposes the change on its own instead
+of working around it. The card is asked without stopping and outlives its turn.
 Apply (`agents.settings.apply`, owner only) goes through the same checks as the
 bot's settings page, and for projects the owner can untick part of the
-proposal first. Any change to the bot, from the card or from the page,
+proposal first. A model is named `<provider>/<model>` (`codex/gpt-6.1-sol`),
+on any provider signed in on the machine; a model id of the bot's own provider
+needs no prefix. On its own provider the bot keeps its account, on another it
+takes that provider's signed-in default; an account the owner granted only to
+other bots is refused. A model outside the bot's allowed routes can be
+proposed: applying the card is the owner allowing it, so the route joins
+the allowed routes and becomes the default one. Apply checks the model again
+and refuses a move to another provider once that provider is turned off or
+signed out; a model of the bot's own provider passes, as on its settings
+page, which takes one whatever the provider's state. A model card
+drawn before cards named the provider holds a model id of the bot's provider
+and settles on that id. Any change to the bot, from the card or from the page,
 settles the cards it answers, and a card whose key no longer exists closes, as
 does one about a bot archived since, except the card that archived it; the
 asking thread reads the outcome as a message. Code:
