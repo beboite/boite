@@ -1,9 +1,10 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AgentAddress, CoordinationConfig } from '@boite/contracts';
 import { Core } from '../src/core.ts';
 import { setDriver } from '../src/drivers/index.ts';
+import { refused } from '../src/errors.ts';
 import { holdAccountTurns, echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 const cores: TestCore[] = [];
@@ -222,6 +223,24 @@ test('pausing in settings cancels an already queued wake', async () => {
   expect(h.core.coordination.get(to).messages.find(message => message.id === letter.id)?.status).toBe('received');
   expect(h.core.journal.listTurns(to)[0]?.status).toBe('stopped');
   stopBlocker();
+}, 12000);
+
+test('a queued wake whose protection refuses at the provider boundary stops and puts its letters back', async () => {
+  const { h, to, letter, stopBlocker, releaseAdmission } = await setupQueued();
+  const turnId = h.core.journal.listTurns(to)[0]!.id;
+  const prepare = spyOn(h.core.coordination, 'prepareWake').mockImplementationOnce(() => { throw refused('this route cannot protect the letter'); });
+  // The letter's status the moment the stopped wake gives it back, before any later delivery takes it again.
+  const statuses: (string | undefined)[] = [];
+  const restore = h.core.coordination.queuedCancelled.bind(h.core.coordination);
+  const cancelled = spyOn(h.core.coordination, 'queuedCancelled').mockImplementation(threadId => {
+    restore(threadId);
+    statuses.push(h.core.coordination.get(to).messages.find(message => message.id === letter.id)?.status);
+  });
+  restores.push(() => { prepare.mockRestore(); cancelled.mockRestore(); });
+  stopBlocker();
+  releaseAdmission();
+  await waitFor(() => h.core.journal.getTurn(turnId)?.status === 'stopped', 8000);
+  expect(statuses).toEqual(['received']);
 }, 12000);
 
 test('a queued wake rechecks expiry before sending anything to the provider', async () => {

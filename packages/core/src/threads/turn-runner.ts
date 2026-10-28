@@ -73,6 +73,14 @@ export class TurnRunner {
     if (next.effort !== before.effort || next.speed !== before.speed) this.attempts.changeSettings(next.id, next);
   }
 
+  /** A wake whose letters cannot cross, refused or faulted, still stops and puts them back in the inbox. */
+  private prepareWake(turnId: TurnId, threadId: ThreadId): boolean {
+    try { return this.core.coordination.prepareWake(threadId, turnId); } catch (error) {
+      this.threads.markQueuedStopped(turnId);
+      throw error;
+    }
+  }
+
   async runTurn(turnId: TurnId, threadId: ThreadId): Promise<void> {
     const queued = this.core.journal.getTurn(turnId);
     const selected = this.core.journal.getThread(threadId);
@@ -81,7 +89,7 @@ export class TurnRunner {
       this.threads.markQueuedStopped(turnId);
       return;
     }
-    if (queued.execution?.operation === 'coordination' && !this.core.coordination.prepareWake(threadId, turnId)) {
+    if (queued.execution?.operation === 'coordination' && !this.prepareWake(turnId, threadId)) {
       this.threads.markQueuedStopped(turnId);
       return;
     }
