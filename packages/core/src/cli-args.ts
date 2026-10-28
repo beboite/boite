@@ -59,9 +59,10 @@ const GLOBAL_FLAGS = ['--json', '--thread', '--data-dir', '--core', '--channel']
 /**
  * Commands that parse their own flags: every other word reaches them as typed.
  * `help` keeps `--help` the CLI's. `text` says the command's own text has
- * begun, after which a global flag is part of that text too.
+ * begun, after which a global flag is part of that text too. `terminator`
+ * says the command reads `--` itself.
  */
-const OWNED: { owns: (positional: string[]) => boolean; help: boolean; text?: (positional: string[]) => boolean }[] = [
+const OWNED: { owns: (positional: string[]) => boolean; help: boolean; text?: (positional: string[]) => boolean; terminator?: boolean }[] = [
   // agent-browser's own flags (-i, --text, --timeout...); see `browserText` for its text.
   { owns: ([command, action]) => command === 'browser' && action !== undefined, help: false, text: positional => browserText(positional.slice(1)) },
   // Their own filters (logs-cli.ts); a value comes next and is passed the same way.
@@ -71,7 +72,7 @@ const OWNED: { owns: (positional: string[]) => boolean; help: boolean; text?: (p
   // view-cli.ts: the script and scheme flags of `view check`.
   { owns: ([command, action]) => command === 'view' && action === 'check', help: true },
   // secret-cli.ts; after `--` every word is the child command's.
-  { owns: ([command]) => command === 'secret', help: false, text: positional => positional.includes('--') },
+  { owns: ([command]) => command === 'secret', help: false, text: positional => positional.includes('--'), terminator: true },
 ];
 
 /**
@@ -109,14 +110,17 @@ export function parse(argv: string[]): Parsed {
       return value;
     };
     const owner = OWNED.find(family => family.owns(parsed.positional));
-    if (owner && (owner.text?.(parsed.positional) || (!GLOBAL_FLAGS.includes(arg) && !(owner.help && (arg === '--help' || arg === '-h'))))) {
-      parsed.positional.push(arg);
-      continue;
-    }
-    // `--` ends the flags: every word after it is the command's text, `task add -- --json` included.
-    if (arg === '--') {
+    const text = owner?.text?.(parsed.positional) === true;
+    // `--` ends Boite's flags: every word after it is the command's, `task add -- --json` and
+    // `browser run -- batch.js --core` included. Inside a command's text it is that text,
+    // and `secret run <ref> -- <command>` reads its own.
+    if (arg === '--' && !text && owner?.terminator !== true) {
       parsed.positional.push(...argv.slice(index + 1));
       break;
+    }
+    if (owner && (text || (!GLOBAL_FLAGS.includes(arg) && !(owner.help && (arg === '--help' || arg === '-h'))))) {
+      parsed.positional.push(arg);
+      continue;
     }
     const boolean = BOOLEAN_OPTIONS.find(key => arg === `--${key}`);
     const numeric = NUMBER_OPTIONS.find(key => arg === `--${key}`);

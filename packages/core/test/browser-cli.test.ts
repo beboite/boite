@@ -153,6 +153,15 @@ test('the browser CLI reads agent-browser command lines into actions', () => {
   expect(stdin.core).toBeUndefined();
   // Any other command's text takes a global flag's spelling after `--`.
   expect(parse(['task', 'add', '--json', '--', '--json', '--core'])).toMatchObject({ positional: ['task', 'add', '--json', '--core'], json: true });
+  // A command that reads its own flags gets the words after `--`, and Boite takes none of them.
+  const owned = parse(['browser', 'run', '--json', '--', 'batch.js', '--core', 'arg']);
+  expect(owned).toMatchObject({ positional: ['browser', 'run', 'batch.js', '--core', 'arg'], json: true });
+  expect(owned.core).toBeUndefined();
+  expect(parse(['browser', 'snapshot', '--', '--json'])).toMatchObject({ positional: ['browser', 'snapshot', '--json'], json: false });
+  const logs = parse(['logs', '--', '--core', 'payload']);
+  expect([logs.positional, logs.core]).toEqual([['logs', '--core', 'payload'], undefined]);
+  // Inside a command's text, `--` is that text.
+  expect(parse(['browser', 'fill', '#q', '--', '--json']).positional).toEqual(['browser', 'fill', '#q', '--', '--json']);
   expect(parse(['browser', 'profiles', 'add', '--channel', 'dev']).positional).toEqual(['browser', 'profiles', 'add', '--channel', 'dev']);
   expect(parse(['browser', 'profiles', '--json'])).toMatchObject({ positional: ['browser', 'profiles'], json: true });
 });

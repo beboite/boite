@@ -12,8 +12,10 @@ are read anywhere until a command's own text begins. The table `OWNED` in
 and where their text starts: after `boite browser fill <target>`,
 `browser run <script>` (`-` for stdin), `browser eval` or `secret ... --`,
 every word is the command's, so `boite browser fill '#q' --json` types
-`--json`. Any other command ends its flags at `--`: `boite task add -- --json`
-adds the task `--json`.
+`--json`. Before that text, `--` ends Boite's flags and hands every later word
+to the command: `boite task add -- --json` adds the task `--json`, and
+`boite browser run -- batch.js --core x` passes `--core x` to the script.
+`secret run|pipe` reads its own `--`, before the child command.
 
 Every new native agent session receives a compact CLI guide before its first
 request, even without a connected brain. Enabled coordination and delegation
