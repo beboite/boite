@@ -1,6 +1,7 @@
 import { appendFileSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { BRANCH_NAME_MAX, type Project, type ThreadId, type WorktreeStorage } from '@boite/contracts';
+import { CheckoutReservations } from './checkouts.ts';
 import type { Core } from './core.ts';
 import { folderGone, messageOf, refused } from './errors.ts';
 import { newId } from './ids.ts';
@@ -91,6 +92,9 @@ interface WorktreePreparation {
  * may carry work nobody merged yet, and deleting it is a decision for a person.
  */
 export class Worktrees {
+  /** The checkouts a removal is deleting right now; see `CheckoutReservations`. */
+  readonly reservations = new CheckoutReservations();
+
   constructor(private readonly core: Core) {}
 
   /** Whether a repository's config names `checkout.workers`, by project path, read once. */

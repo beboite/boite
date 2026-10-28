@@ -264,6 +264,7 @@ export class TerminalStore {
     if (!existsSync(options.cwd)) {
       throw refused(`the working directory ${options.cwd} does not exist any more`, { id, cwd: options.cwd });
     }
+    this.core.worktrees.reservations.assertFree(options.cwd, 'a shell', { id });
     const picked = pickShell();
     const { shell, integrated } = options.integrate === true ? integrate(picked, this.core.dataDir) : { shell: picked, integrated: false };
     const described = describeShell(shell, integrated);

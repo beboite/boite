@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync,
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type { WorktreeEntry } from '@boite/contracts';
-import { parseWorktreeList } from '../src/worktree-sweep.ts';
+import { parseWorktreeList, WorktreeSweep } from '../src/worktree-sweep.ts';
 import { worktreeRoot } from '../src/worktree.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -300,8 +300,72 @@ describe('worktrees.remove', () => {
       return spawn(scope, command, args, options);
     });
     try { await held(); } finally { restoring.mockRestore(); }
-    put({ archived: true, archivedAt: 1 });
+    // A turn that ended in error rests like an idle one: nothing runs there.
+    put({ archived: true, archivedAt: 1, status: 'error' });
     expect(await client.call('worktrees.remove', { projectId: project.id, path: thread.cwd })).toEqual({ ok: true, branchDeleted: true });
+  });
+
+  test('a checkout git is removing cannot be restored or given a new thread until git ends', async () => {
+    const project = await repoProject();
+    const accountId = await echoAccount();
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Being removed', worktree: {} });
+    await client.call('threads.archive', { threadId: thread.id, archived: true });
+    const signal = join(harness.dataDir, 'remove-may-run');
+    const procs = harness.core.procs, spawn = procs.spawn.bind(procs);
+    let waiting = false;
+    // The removal's git starts, then waits for the test before it deletes anything.
+    const spy = spyOn(procs, 'spawn').mockImplementation((scope, command, args, options) => {
+      if (command !== 'git' || !args.includes('remove')) return spawn(scope, command, args, options);
+      waiting = true;
+      return spawn(scope, 'sh', ['-c', 'while [ ! -e "$0" ]; do sleep 0.02; done; exec git "$@"', signal, ...args], options);
+    });
+    try {
+      const removing = client.call('worktrees.remove', { projectId: project.id, path: thread.cwd });
+      await waitFor(() => waiting);
+      const restored = await rejection(client.call('threads.archive', { threadId: thread.id, archived: false }));
+      expect(restored.reason).toMatchObject({ rpc: { message: expect.stringContaining('is being removed'), data: expect.objectContaining({ field: 'cwd' }) } });
+      expect(harness.core.threads.require(thread.id).archived).toBe(true);
+      expect(await thrown(client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Arrives', cwd: thread.cwd }))).toThrow('is being removed');
+      writeFileSync(signal, '');
+      expect(await removing).toEqual({ ok: true, branchDeleted: true });
+    } finally { writeFileSync(signal, ''); spy.mockRestore(); }
+    expect(existsSync(thread.cwd)).toBe(false);
+    // Once git is done the reservation goes: restoring works, and the folder refuses the turn.
+    expect((await client.call('threads.archive', { threadId: thread.id, archived: false })).archived).toBe(false);
+  });
+
+  test('a proved branch is deleted only if no checkout took it back while the deletion waited', async () => {
+    const project = await repoProject();
+    const row = harness.core.projects.require(project.id);
+    const removable = addWorktree(project, 'reused');
+    const sha = git(removable, 'rev-parse', 'HEAD').trim();
+    const fresh = join(dirname(removable), 'reused-again');
+    const sweep = new WorktreeSweep(harness.core);
+    let removed = false, listing = 0;
+    let reusing: Promise<unknown> | null = null;
+    const reuse = (): Promise<unknown> => (reusing = harness.core.worktrees.ensure('thr_reused', row, 'boite/reused', fresh).catch((error: unknown) => error));
+    const procs = harness.core.procs, spawn = procs.spawn.bind(procs);
+    const spy = spyOn(procs, 'spawn').mockImplementation((scope, command, args, options) => {
+      if (command === 'git' && args.includes('remove')) removed = true;
+      // The deletion's own check of the branch: a thread taking the branch back starts beside it.
+      if (command === 'git' && removed && reusing === null && listing === 0 && args.includes('list')) void reuse();
+      return spawn(scope, command, args, options);
+    });
+    // A deletion that checks the branch in one locked section and deletes it in another leaves the reuse room in between.
+    const listed = sweep.listed.bind(sweep);
+    const between = spyOn(sweep, 'listed').mockImplementation(async (project) => {
+      listing += 1;
+      const answer = await listed(project).finally(() => { listing -= 1; });
+      if (removed && reusing === null) await reuse();
+      return answer;
+    });
+    try {
+      await sweep.removeSettled(row, removable, { sha, branch: 'boite/reused' });
+      await reusing;
+    } finally { spy.mockRestore(); between.mockRestore(); }
+    expect(reusing).not.toBeNull();
+    // A checkout that came back still has its branch; one that could not keeps nothing pointing at a deleted ref.
+    if (existsSync(fresh)) expect(git(project.path, 'rev-parse', '--verify', '--quiet', 'refs/heads/boite/reused').trim()).toBe(sha);
   });
 
   test('the list and a removal wait for a registration in progress in the same repository', async () => {

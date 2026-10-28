@@ -15,7 +15,10 @@ import type { Project, ProjectId, ThreadId, ThreadSummary, WorktreeEntry } from 
 import type { Core } from './core.ts';
 import { folderGone, invalidParams, messageOf, refused } from './errors.ts';
 import { git as readGit } from './git/read.ts';
+import { inside, keyOf } from './checkouts.ts';
 import { fetchedRepositories } from './pull-requests.ts';
+
+export { inside, keyOf } from './checkouts.ts';
 import { occupiesCheckout } from './threads/occupancy.ts';
 import { withRegistration, worktreeRoot } from './worktree.ts';
 
@@ -49,15 +52,6 @@ export interface Listed {
 /** The trace id the sweep's git runs under: one per project, like `workspace:<id>` for a mission. */
 function traceId(projectId: ProjectId): string {
   return `worktrees:${projectId}`;
-}
-
-/**
- * A path as it compares: absolute, native separators, no trailing separator,
- * and without case on Windows, where `D:\Dev` and `d:/dev` are one folder.
- */
-export function keyOf(path: string): string {
-  const full = resolve(path).replace(/[\\/]+$/, '');
-  return process.platform === 'win32' ? full.toLowerCase() : full;
 }
 
 /**
@@ -95,9 +89,6 @@ async function inOrder<T, R>(items: readonly T[], limit: number, work: (item: T)
   return out;
 }
 
-export function inside(root: string, target: string): boolean {
-  return target === root || target.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
-}
 
 async function exists(path: string): Promise<boolean> {
   try {
@@ -266,12 +257,18 @@ export class WorktreeSweep {
     // The one check every removal shares, made again at the moment git deletes:
     // no await between it and the spawn, so a thread restored or started during
     // the reads above keeps its checkout.
+    const keys = [await realKey(target.path), await realKey(path)];
     const removed = await this.registered(project, async () => {
       for (;;) {
         const holder = (await this.occupancy(project, target.path))();
         if (holder === 'moved') continue;
         this.refuseOccupied(project, path, holder);
-        return this.git(project, project.path, removal);
+        // Reserved in the same step as the check, until git ends: a restore, a
+        // new thread or a shell arriving meanwhile is refused, not deleted under.
+        const release = this.core.worktrees.reservations.reserve(target.path, keys);
+        try {
+          return await this.git(project, project.path, removal);
+        } finally { release(); }
       }
     });
     if (removed.code !== 0) {
@@ -292,9 +289,15 @@ export class WorktreeSweep {
 
   private async deleteProvedBranch(project: Project, branch: string, proof: { sha: string; branch: string | null }): Promise<GitRun> {
     if (proof.branch !== branch) return { code: 1, stdout: '', stderr: `the merged pull request proved ${proof.branch ?? 'a detached head'}, not ${branch}` };
-    const holder = (await this.listed(project)).find((worktree) => worktree.branch === branch);
-    if (holder !== undefined) return { code: 1, stdout: '', stderr: `${branch} is checked out at ${holder.path}` };
-    return this.registered(project, () => this.git(project, project.path, ['update-ref', '-d', `refs/heads/${branch}`, proof.sha]));
+    // One locked section: `update-ref` does not refuse a branch a worktree has, so
+    // no registration may take the branch back between the list and the deletion.
+    return this.registered(project, async () => {
+      const listed = await this.read(project, project.path, ['worktree', 'list', '--porcelain', '-z']);
+      if (listed.code !== 0) return { code: listed.code, stdout: '', stderr: `cannot list worktrees: ${listed.stderr.trim() || `exit ${listed.code}`}` };
+      const holder = parseWorktreeList(listed.stdout).find((worktree) => worktree.branch === branch);
+      if (holder !== undefined) return { code: 1, stdout: '', stderr: `${branch} is checked out at ${holder.path}` };
+      return this.git(project, project.path, ['update-ref', '-d', `refs/heads/${branch}`, proof.sha]);
+    });
   }
 
   private project(projectId: ProjectId): Project {

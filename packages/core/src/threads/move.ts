@@ -264,6 +264,7 @@ export class ThreadMove {
   }
 
   private write(thread: ThreadSummary, target: Project, cwd: string, branch: string | null, stopBackground: boolean, by: 'user' | 'agent', branchNamingPending: boolean): ThreadSummary {
+    this.core.worktrees.reservations.assertFree(cwd, 'a moved conversation', { threadId: thread.id });
     const source = this.core.journal.getProject(thread.projectId ?? '');
     const from: MoveEnd = { projectId: thread.projectId ?? '', name: source?.name ?? thread.projectId ?? '', cwd: thread.cwd };
     const to: MoveEnd = { projectId: target.id, name: target.name, cwd };
