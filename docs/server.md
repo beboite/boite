@@ -170,7 +170,10 @@ runs, symlinked installs and containers keep their own installation method.
 When a release is available, a Docker core's row has a tip with the Compose
 update command and another unmanaged core's tip points to this guide. A core predating this feature needs one manual update first.
 
-The server checks eight seconds after startup, then every six hours. It follows
+The server checks eight seconds after startup, then every six hours. An owner
+client that connects, or whose window is shown again, asks it to check at once
+when its last check is more than 15 minutes old; a download, a wait or a
+failure is left as it is. It follows
 its installed stable or nightly channel, downloads an immutable release's
 signed server archive, and verifies the publisher signature and embedded
 version before staging the complete core, CLI and UI. The archive is hashed as

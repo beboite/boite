@@ -217,6 +217,8 @@ export function providerInstallMethods(ctx: FakeContext) {
       return uninstall(ctx, params.providerId);
     },
     'providers.updates': async (params) => {
+      // As the real core: a check stamps every agent it read.
+      if (params.refresh === true) for (const update of ctx.harnessUpdates) if (update.state === 'idle') update.checkedAt = Date.now();
       return structuredClone(ctx.harnessUpdates);
     },
     'providers.update': async (params) => {

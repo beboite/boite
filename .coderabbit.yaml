@@ -5,12 +5,11 @@ reviews:
   request_changes_workflow: false
   high_level_summary: false
   poem: false
-  review_status: true
+  review_status: false
   review_details: false
+  # mtsu-patrol reviews pull requests; CodeRabbit stays off (docs/ci.md).
   auto_review:
-    enabled: true
-    # Agents open drafts and fix findings before the full CI run (docs/ci.md).
-    drafts: true
+    enabled: false
   path_filters:
     - '!bun.lock'
     - '!**/Cargo.lock'
@@ -41,4 +40,4 @@ reviews:
         Check desktop and phone behavior, real and in-memory clients, and
         routing through the Store belonging to the connected machine.
 chat:
-  auto_reply: true
+  auto_reply: false

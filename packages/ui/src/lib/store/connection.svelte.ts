@@ -665,7 +665,7 @@ export class Connection {
     try {
       await Promise.all([essential, ...secondary]);
       if (!current()) return;
-      void s.loadHarnessUpdates();
+      void s.loadHarnessUpdates().then(() => { if (current()) return s.freshenHarnessUpdates(); });
       // Beside the lists, not among them: the machines of the group are connected once it answers.
       void s.loadGroup();
       void s.refreshMemory();
