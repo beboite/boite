@@ -207,7 +207,8 @@ export class WorktreeSweep {
 
   private refuseOccupied(project: Project, path: string, holder: ThreadSummary | null): void {
     if (holder === null) return;
-    const why = holder.archived ? 'is still running there: wait for it to finish' : 'works there: archive it first';
+    const why = this.core.drafts.threads().some((draft) => draft.id === holder.id) ? 'is a draft whose agent runs there: send or discard it first'
+      : holder.archived ? 'is still running there: wait for it to finish' : 'works there: archive it first';
     throw refused(`thread "${holder.title}" (${holder.id}) ${why} (${path})`, {
       projectId: project.id, path, threadId: holder.id, threadTitle: holder.title,
       field: 'path', expected: 'a worktree no live thread uses',
@@ -223,7 +224,10 @@ export class WorktreeSweep {
   private async occupancy(project: Project, path: string): Promise<() => ThreadSummary | null | 'moved'> {
     const key = await realKey(path);
     const near = this.near(project, [path]);
-    const threads = (): ThreadSummary[] => this.core.threads.list({ includeArchived: true }).filter((thread) => thread.projectId === project.id || near(thread.cwd));
+    // A draft's thread is in no list until it is sent, yet its agent may already run there.
+    const drafts = new Set<string>();
+    const threads = (): ThreadSummary[] => [...this.core.threads.list({ includeArchived: true }), ...this.core.drafts.threads().map((draft) => (drafts.add(draft.id), draft))]
+      .filter((thread) => thread.projectId === project.id || near(thread.cwd));
     const keys = new Map<string, string>();
     await Promise.all([...new Set(threads().map((thread) => thread.cwd))].map(async (cwd) => { keys.set(cwd, await realKey(cwd)); }));
     return () => {
@@ -231,7 +235,8 @@ export class WorktreeSweep {
       for (const thread of threads()) {
         const at = keys.get(thread.cwd);
         if (at === undefined) return 'moved';
-        if (holder === null && inside(key, at) && occupiesCheckout(this.core, thread)) holder = thread;
+        const holds = drafts.has(thread.id) ? this.core.procs.liveCount(thread.id) > 0 : occupiesCheckout(this.core, thread);
+        if (holder === null && inside(key, at) && holds) holder = thread;
       }
       return holder;
     };

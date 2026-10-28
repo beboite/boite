@@ -48,6 +48,11 @@ export class DraftPreparations {
     return [...new Set([...this.ledger.list().map(ownership => ownership.path), ...live])];
   }
 
+  /** The threads of drafts not adopted yet, which no list holds: a worktree removal counts their processes. */
+  threads(): ThreadSummary[] {
+    return [...this.entries.values(), ...this.backlog].flatMap(entry => entry.thread && !entry.adopted ? [entry.thread] : []);
+  }
+
   /** Startup and speculative admission share one reconciliation barrier. */
   recover(): Promise<void> { return this.readiness ??= this.ledger.recover(); }
 

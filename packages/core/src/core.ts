@@ -381,8 +381,9 @@ export class Core {
     this.plugins = new PluginStore(this);
     this.sessions = new SessionStore(this);
     this.worktrees = new Worktrees(this);
-    // No thread row lands in a checkout a removal holds, whichever path writes it (`checkouts.ts`).
+    // No thread row lands and no process starts in a checkout a removal holds, whichever path asks (`checkouts.ts`).
     this.journal.admitThread = (thread) => this.worktrees.reservations.admit(thread);
+    this.procs.admitCwd = (cwd) => this.worktrees.reservations.assertFree(cwd, 'a process');
     this.keybindings = new KeybindingStore(this);
     this.imports = new ImportStore(this);
     // The journal erased the incognito conversations the last core left behind; their transcripts follow.
