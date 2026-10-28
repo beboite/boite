@@ -45,6 +45,9 @@ const EMBEDDED: Record<string, string> = {
 const LOADING_TAG = /<(img|image|source|video|audio|track|script|link|use|input|iframe|embed|object)\b[^>]*>/gi;
 const ADDRESS = /\s(src|href|xlink:href|poster|data)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi;
 const CSS_URL = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^'")\s]+))\s*\)/gi;
+const TAG = /<[a-z][^>]*>/gi;
+const ATTRIBUTE_VALUE = /\s[^\s=>]+\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/dg;
+const STYLE_BODY = /<style\b[^>]*>([\s\S]*?)(?=<\/style\s*>|$)/dgi;
 
 interface Edit { start: number; end: number; text: string }
 
@@ -145,16 +148,31 @@ export function buildView(source: string, directory: string, cwd: string, guard?
       }
     }
   }
-  for (const found of source.matchAll(CSS_URL)) {
-    const address = (found[1] ?? found[2] ?? found[3] ?? '').trim();
-    // An import is refused below, whatever it names.
-    if (kept(address) || /@import\s+$/i.test(source.slice(Math.max(0, found.index - 16), found.index))) continue;
-    // Inside a script a `url(` is often no address at all: it is embedded when it names a file, and left as written otherwise.
-    const rule = styled.slice(found.index, found.index + 4).toLowerCase() === 'url(';
-    if (remote(address)) { if (rule) problem(found.index, `url(${address}) is remote, and a view loads nothing remote. Embed the file from disk.`); continue; }
-    const file = load(address);
-    if (typeof file === 'string') { if (rule) problem(found.index, file); continue; }
-    edits.push({ start: found.index, end: found.index + found[0].length, text: `url("${dataUrl(file)}")` });
+  /**
+   * Where a `url(` is CSS: the bodies of `<style>` elements and the values of
+   * the page's attributes (`style`, SVG's `fill` or `mask`). Script text and
+   * prose keep theirs as written. The data URL goes unquoted, which no
+   * attribute's quotes can end early.
+   */
+  const css: [number, number][] = [];
+  for (const body of styled.matchAll(STYLE_BODY)) css.push(body.indices![1]!);
+  for (const tag of markup.matchAll(TAG)) {
+    for (const value of tag[0].matchAll(ATTRIBUTE_VALUE)) {
+      const [start, end] = (value.indices![1] ?? value.indices![2] ?? value.indices![3])!;
+      css.push([tag.index + start, tag.index + end]);
+    }
+  }
+  for (const [start, end] of css) {
+    for (const found of source.slice(start, end).matchAll(CSS_URL)) {
+      const at = start + found.index;
+      const address = (found[1] ?? found[2] ?? found[3] ?? '').trim();
+      // An import is refused below, whatever it names.
+      if (kept(address) || /@import\s+$/i.test(source.slice(Math.max(start, at - 16), at))) continue;
+      if (remote(address)) { problem(at, `url(${address}) is remote, and a view loads nothing remote. Embed the file from disk.`); continue; }
+      const file = load(address);
+      if (typeof file === 'string') { problem(at, file); continue; }
+      edits.push({ start: at, end: at + found[0].length, text: `url(${dataUrl(file)})` });
+    }
   }
   for (const found of styled.matchAll(/@import\s+(?:url\(\s*)?["']?([^"')\s;]+)/gi)) {
     problem(found.index, remote(found[1] ?? '')

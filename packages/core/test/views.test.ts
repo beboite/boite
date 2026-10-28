@@ -150,11 +150,20 @@ test('local files are embedded, and a remote address or a missing file is a prob
     '<script src="lib.js"></script>',
     '<a href="https://example.com/docs">docs</a>',
     '<script>var tag = "<img src=\\"https://example.com/in-a-string.png\\">";</script>',
+    // A `url(` in script text or prose is no address: it stays as written, and the script still parses.
+    '<script>const css = "url(dot.png)";</script>',
+    '<p>Write url(dot.png) or url(gone.png) in a rule.</p>',
+    '<svg><rect style=\'fill: url(dot.png)\'/></svg>',
   ].join('\n'), '<link rel="stylesheet" href="look.css"><link rel="stylesheet" href="theme/skin.css">'), join(harness.dataDir, 'views'), harness.dataDir);
   expect(built.problems).toEqual([]);
   const data = `data:image/png;base64,${PNG.toString('base64')}`;
   expect(built.html).toContain(`<img src="${data}" alt="">`);
-  expect(built.html).toContain(`url("${data}")`);
+  expect(built.html).toContain(`<div style="background: url(${data})"></div>`);
+  expect(built.html).toContain(`<rect style='fill: url(${data})'/>`);
+  const script = /<script>(const css[^<]*)<\/script>/.exec(built.html)![1]!;
+  expect(script).toBe('const css = "url(dot.png)";');
+  expect(() => new Function(script)).not.toThrow();
+  expect(built.html).toContain('<p>Write url(dot.png) or url(gone.png) in a rule.</p>');
   expect(built.html).toContain('<script>window.lib = "<\\/script>";</script>');
   expect(built.html).toContain('<style>.stage { height: 200px }</style>');
   expect(built.html).toContain(`<style>.skin { background: url("data:image/png;base64,${PNG.toString('base64')}") } .mark { background: url("#mark") }</style>`);
