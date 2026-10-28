@@ -159,13 +159,20 @@ test('a phone swipes the board one column a screen, a dot per column, and reache
   }
 });
 
-test('Ctrl+J opens the drawer on the tab picked last; a device without a shell opens the board', async () => {
+test('Ctrl+J opens the drawer on the tab picked last, the terminal until then; a device without a shell opens the board', async () => {
   const { store } = await ready();
   expect(store.boardAvailable()).toBe(true);
+  // Never picked: Ctrl+J is the shell it was before the board.
   store.toggleDrawer();
-  expect([store.boardShown, store.drawerTab]).toEqual([true, 'board']);
+  expect([store.boardShown, store.terminalShown('t-trace'), store.drawerTab]).toEqual([false, true, 'terminal']);
+  store.toggleDrawer();
+  expect(store.terminalShown('t-trace')).toBe(false);
+  // Picked once, the board is what it opens.
+  store.showBoard();
   store.toggleDrawer();
   expect(store.boardShown).toBe(false);
+  store.toggleDrawer();
+  expect([store.boardShown, store.terminalShown('t-trace'), store.drawerTab]).toEqual([true, false, 'board']);
   // The terminal tab: the board steps aside and Ctrl+J comes back to the shell.
   store.showBoard();
   const tabs = mount(DrawerTabs, { target: document.body, props: { store, current: 'board' } });

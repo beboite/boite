@@ -10,13 +10,13 @@ import type { StoreContext } from './context';
 
 /** Per core and thread: the tabs and splits, and whether the drawer was open. */
 const LAYOUT_KEY = 'boite:terminal-layout';
-/** Per device: the drawer's tab Ctrl+J opens, the project board or the terminal. */
+/** Per device: the drawer's tab Ctrl+J opens, the project board or the terminal; the terminal until the board is picked. */
 const DRAWER_TAB_KEY = 'boite:drawer-tab';
 
 type DrawerTab = 'board' | 'terminal';
 
 function readDrawerTab(): DrawerTab {
-  try { return localStorage.getItem(DRAWER_TAB_KEY) === 'terminal' ? 'terminal' : 'board'; } catch { return 'board'; }
+  try { return localStorage.getItem(DRAWER_TAB_KEY) === 'board' ? 'board' : 'terminal'; } catch { return 'terminal'; }
 }
 
 interface StoredLayout { layout: TerminalLayout; open: boolean }
