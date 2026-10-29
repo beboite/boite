@@ -18,7 +18,7 @@ export const strings = {
     rename: 'Rename {name}',
     nameLabel: 'Contact name',
     trusted: 'Trusted',
-    trustedTip: 'Its requests are answered without you: a project whose git remote matches is shared, otherwise the concierge agent decides. Reading conversations is never granted that way.',
+    trustedTip: 'Its requests can open a project without you: one whose git remote matches, otherwise the one the concierge agent picks. A request it cannot place waits for you. Reading conversations is never granted that way.',
     youShare: 'You share with {name}',
     theyShare: '{name} shares with you',
     nothingOpen: 'Nothing yet',

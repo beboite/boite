@@ -69,8 +69,6 @@ interface StoredContact extends Omit<Contact, 'link'> {
  */
 type StoredRequest = ContactRequest & { pendingSend?: true; remoteId?: string };
 type Frame = { t: 'req'; id: string; body: string; signature: string } | { t: 'res'; id: string; status: number; body: string; signature: string };
-/** What a contact reads when the concierge refuses: never the model's own words. */
-const CONCIERGE_REFUSAL = 'Nothing on this Boite fits this request.';
 
 interface LinkSocket { send(data: string): unknown; close(code?: number, reason?: string): void }
 
@@ -514,7 +512,7 @@ export class ContactStore implements LinkedContacts {
     return this.#requestView(request);
   }
 
-  /** A trusted contact's request: an exact git remote match opens its project, else the concierge decides. */
+  /** A trusted contact's request: an exact git remote match opens its project, else the concierge may open one; the owner decides the rest. */
   #autoDecide(id: string): void {
     if (this.#closed || this.#deciding.has(id)) return;
     const request = this.#requests().find(entry => entry.id === id && entry.direction === 'in' && entry.status === 'pending');
@@ -532,10 +530,10 @@ export class ContactStore implements LinkedContacts {
       const current = this.#requests().find(entry => entry.id === id);
       if (current?.status !== 'pending' || !this.find(current.coreId)?.trusted) return;
       if (verdict.accept) { this.#settle(id, true, verdict.projectId, undefined, 'concierge'); return; }
-      // The contact wrote the request the model read, and the model saw every project here:
-      // its reason stays in this core's log, and the contact reads fixed words.
-      this.#core.log('info', `contacts: the concierge refused ${request.contact}'s request: ${verdict.reason}`, { source: 'contacts' });
-      this.#settle(id, false, undefined, CONCIERGE_REFUSAL, 'concierge');
+      // Only the owner refuses: a request no project fits may be a question for the owner, who
+      // would never see it otherwise. The contact wrote the request the model read, and the model
+      // saw every project here, so its reason stays in this core's log.
+      this.#core.log('info', `contacts: the concierge opened no project for ${request.contact}'s request (${verdict.reason}); it waits for the owner`, { source: 'contacts' });
     }, (error: unknown) => {
       this.#core.log('warn', `contacts: the concierge did not decide ${request.contact}'s request (${messageOf(error)}); it waits for the owner`, { source: 'contacts' });
     }).finally(() => this.#deciding.delete(id)));
@@ -603,7 +601,7 @@ export class ContactStore implements LinkedContacts {
     return { ok: true };
   }
 
-  /** A contact's agent asks for an agent here. Kept for the owner, or decided at once for a trusted contact. */
+  /** A contact's agent asks for an agent here. Kept for the owner; a trusted contact's may open a project at once. */
   asked(coreId: string, payload: unknown, from: AgentContact): { id: string } {
     const ask = payload as { id?: unknown; text?: unknown; gitRemote?: unknown } | null;
     if (typeof ask?.id !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(ask.id)) throw invalidParams('ask.id: expected 1 to 100 letters, digits, - or _');

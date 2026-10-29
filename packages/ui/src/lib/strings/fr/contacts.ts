@@ -17,7 +17,7 @@ export const fr: Translation = {
     rename: 'Renommer {name}',
     nameLabel: 'Nom du contact',
     trusted: 'De confiance',
-    trustedTip: 'Ses demandes sont traitées sans vous : un projet dont le remote git correspond est partagé, sinon l\'agent concierge décide. La lecture des conversations n\'est jamais accordée ainsi.',
+    trustedTip: 'Ses demandes peuvent ouvrir un projet sans vous : celui dont le remote git correspond, sinon celui que choisit l\'agent concierge. Une demande qu\'il ne sait pas placer vous attend. La lecture des conversations n\'est jamais accordée ainsi.',
     youShare: 'Vous partagez avec {name}',
     theyShare: '{name} partage avec vous',
     nothingOpen: 'Rien pour l\'instant',
