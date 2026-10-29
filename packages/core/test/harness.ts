@@ -173,6 +173,8 @@ let stops = 0;
 export function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void> {
   const started = Date.now();
   const generation = stops;
+  // Capture the waiting fixture, before the timer loses its caller's stack.
+  const timeout = new Error('timed out waiting for a condition');
   return new Promise<void>((resolve, reject) => {
     const tick = (): void => {
       if (stops !== generation) return;
@@ -188,7 +190,7 @@ export function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<voi
         return;
       }
       if (Date.now() - started > timeoutMs) {
-        reject(new Error('timed out waiting for a condition'));
+        reject(timeout);
         return;
       }
       setTimeout(tick, 10);
