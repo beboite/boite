@@ -483,6 +483,11 @@ boite workflow output|templates|save|start
 boite help
 ```
 
+`threads ask` requests access to a contact's project. The remote Boite can
+answer automatically through a git remote match or its concierge; the answer
+identifies an automatic response separately from an explicit owner decision.
+Use `threads send <contact>/<thread-id> <text>` to message an agent conversation.
+
 The context flags, `--context light|neutral`, `--keep|--drop <parts>`,
 `--tools <Tool,...>` and `--rules <text>` or `--rules-file <path>`, start the
 thread without part of the user's setup ([context modes](context-modes.md)).

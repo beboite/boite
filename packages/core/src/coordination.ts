@@ -491,15 +491,16 @@ export class Coordination {
   }
 
   /**
-   * A contact decided a request this thread made (`collaboration.ask`): the
-   * thread reads it as a message from that contact, written by this core.
+   * A contact's owner or core decided a project request (`collaboration.ask`):
+   * this core writes the answer and preserves who made the decision.
    */
   contactAnswer(request: ContactRequest, name: string, threads: AgentContact[]): void {
     const threadId = request.from.threadId;
     const list = threads.slice(0, 20).map(entry => `${JSON.stringify(entry.title)} (${entry.machine.replace(/\s+/g, '-')}/${entry.threadId}${entry.status === 'idle' ? '' : `, ${entry.status}`})`);
+    const responder = request.decidedBy === 'owner' ? name : `${name}'s Boite${request.decidedBy === 'match' || request.decidedBy === 'concierge' ? ' automatically' : ''}`;
     const body = request.status === 'accepted'
-      ? `${name} opened its project ${JSON.stringify(request.project?.name ?? '')} to you. ${list.length ? `Its threads: ${list.join('; ')}.` : 'No thread of it can be reached yet.'} Write to one with boite threads send <contact>/<thread-id> <text>; boite threads shows them.`
-      : `${name} refused your request: ${request.reason ?? 'no reason given'}`;
+      ? `${responder} opened its project ${JSON.stringify(request.project?.name ?? '')} to you. ${list.length ? `Its threads: ${list.join('; ')}.` : 'No thread of it can be reached yet.'} Write to one with boite threads send <contact>/<thread-id> <text>; boite threads shows them.`
+      : `${responder} refused your request: ${request.reason ?? 'no reason given'}`;
     if (this.mailboxes.answer(request, name, body.slice(0, 4000))) return;
     const thread = this.core.journal.getThread(threadId);
     if (!thread || thread.archived) return;
