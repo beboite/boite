@@ -22,7 +22,7 @@ import { delegationConfig, stopDelegation } from './delegation';
 import { fakeCore } from './coordination';
 import type { FakeContext, FakeMethods } from './context';
 import { registerFakeWorktree, requireFakeCwd } from './worktrees';
-import { boundedMessageWindow, pageBytes, pageBytesProblem, projectMessage, resumeAnchor, snapshotOptionsProblem, type TransportOptions } from '@boite/contracts';
+import { boundedMessageWindow, listCursorProblem, pageBytes, pageBytesProblem, projectMessage, resumeAnchor, snapshotOptionsProblem, type TransportOptions } from '@boite/contracts';
 import { dropWaitingMove, fakeMoveNote } from './thread-move';
 import { cancelFamilySideQuestions, cancelSide, sideQuestionMethods } from './side-questions';
 
@@ -306,6 +306,19 @@ export function threadMethods(ctx: FakeContext) {
         .filter((t) => (params.projectId ? t.projectId === params.projectId : true))
         .filter((t) => (params.includeArchived ? true : !t.archived))
         .map((t) => structuredClone(toSummary(t)));
+    },
+    // The core's answer (`threads/list-changes.ts`): whole, or the rows changed since plus every row with a load.
+    'threads.listChanges': async (params) => {
+      const problem = params.since === undefined ? null : listCursorProblem(params.since);
+      if (problem) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `threads.listChanges.${problem.field}: expected ${problem.expected}`, data: problem });
+      const cursor = ctx.threadChanges.cursor();
+      const changed = params.since === undefined ? null : ctx.threadChanges.since(params.since);
+      const listed = [...ctx.threads.values()].filter(t => !t.archived);
+      if (changed === null) return { kind: 'full' as const, cursor, threads: listed.map(t => structuredClone(toSummary(t))) };
+      const asked = new Set(changed);
+      const threads = listed.filter(t => asked.has(t.id) || t.load != null).map(t => structuredClone(toSummary(t)));
+      const answered = new Set(threads.map(t => t.id));
+      return { kind: 'changes' as const, cursor, threads, removed: changed.filter(id => !answered.has(id)) };
     },
     'threads.create': async (params) => {
       // The core's creation receipts: asked again under its request id, a creation answers with the conversation it made.

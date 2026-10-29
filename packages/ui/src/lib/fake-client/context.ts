@@ -9,6 +9,7 @@ import {
   type ClientPreferences,
   type ExperimentId,
   type QuotaAlerts,
+  ChangeLog,
   DEFAULT_THREAD_DELETION_RETENTION_DAYS,
   DEFAULT_THREAD_DONE_RETENTION_DAYS,
   PROTOCOL_VERSION,
@@ -122,6 +123,8 @@ export interface FakeClientOptions {
   diagrams?: boolean;
   /** Seeds this many more threads at work, their load sampled every second: what `?fake=1&working=16` shows. */
   working?: number;
+  /** Seeds this many more threads at rest, a long sidebar (`working-seed.ts`). */
+  idle?: number;
   /** Seeds this many threads that work without end, what `?fake=1&load=16` streams (`load.ts`). */
   load?: number;
   /** Milliseconds between two ticks of that load, 100 unless `&loadtick=<ms>` says otherwise. */
@@ -320,6 +323,8 @@ export class FakeContext {
   readonly quotaResetsUsed: Record<string, number> = {};
   scheduler: SchedulerState;
   readonly core: CoreInfo;
+  /** `threads.listChanges`: a run of its own, like each start of a real core. */
+  readonly threadChanges = new ChangeLog(`run_fake_${Math.random().toString(36).slice(2, 10)}`);
   /** One phone already paired, so the devices list has a row to revoke. */
   sessions: PairedSession[] = [
     { id: 'ses-phone', client: { name: 'pwa', version: '2.0.0-beta.1' }, role: 'device', createdAt: T0, lastSeenAt: T0 + 600_000, current: false },
@@ -482,7 +487,7 @@ export class FakeContext {
       version: '2.0.0-beta.1',
       coreId,
       protocolVersion: PROTOCOL_VERSION,
-      features: { draftPreparation: true, attachmentUploads: true, threadSnapshots: true, chunkedAnswers: true, readingPages: true, messagePositions: true, deferredToolParts: true, deviceKeys: true, revealMachines: true, loadEvents: true, desktopUpdates: true, gatewayMove: true, projectBoard: true, settingsHome: true, sharedProjects: 1 },
+      features: { draftPreparation: true, attachmentUploads: true, threadSnapshots: true, chunkedAnswers: true, readingPages: true, messagePositions: true, deferredToolParts: true, deviceKeys: true, revealMachines: true, loadEvents: true, desktopUpdates: true, gatewayMove: true, projectBoard: true, settingsHome: true, sharedProjects: 1, listChanges: true },
       os: 'windows',
       channel: 'stable',
       pid: 4242,
@@ -538,6 +543,9 @@ export class FakeContext {
   }
 
   emit<E extends RpcEventName>(event: E, payload: RpcEvents[E]): void {
+    // The core counts what its clients hear of a summary (`threads/list-changes.ts`).
+    if (event === 'thread.created' || event === 'thread.updated') this.threadChanges.note((payload as RpcEvents['thread.updated']).id);
+    if (event === 'thread.removed') this.threadChanges.note((payload as RpcEvents['thread.removed']).threadId);
     this.composer.observe(this, event, payload);
     if (event === 'thread.removed') cancelSecretCards(this, (payload as RpcEvents['thread.removed']).threadId);
     if (event === 'thread.updated') {

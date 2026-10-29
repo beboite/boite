@@ -85,7 +85,7 @@ describe.skipIf(!native)('native protected extensions', () => {
     expect(handle.setPermissionMode).toBeUndefined();
     const result = await handle.done;
     if (result.status !== 'done') console.error(logs.join('\n'));
-    if (!readFileSync(join(root, 'answer.js'), 'utf8').includes('return 42')) console.error(JSON.stringify({logs, requests: api?.requests}));
+    if (!readFileSync(join(root, 'answer.js'), 'utf8').includes('return 42')) console.error(JSON.stringify({protocol, helper: process.env.BOITE_WINDOWS_SANDBOX_PATH, processes, logs, requests: api?.requests}));
     expect(result, logs.join('\n')).toMatchObject({status: 'done'});
     expect(readFileSync(join(root, 'answer.js'), 'utf8')).toContain('return 42');
     expect(changed).toContain('answer.js');
