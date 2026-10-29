@@ -317,6 +317,8 @@ test('a bot starts a thread in a project another machine entrusted to it, and he
   const deskName = desk.core.coordination.identity().name;
   const first = pc.core.journal.listMessages(id).find(m => m.role === 'user')!;
   expect(first.parts[0]).toMatchObject({ displayText: 'Sort the letters', startedBy: { threadId: self, title: agent().name, projectId: notes.id, project: 'Notes', machine: deskName } });
+  // The start answer comes once the first message is saved; the driver gets its prompt a moment later.
+  await waitFor(() => prompts.has(id));
   expect(prompts.get(id)?.[0]).toContain(`This thread was started by ${agent().name}, a bot of the user's on ${deskName}`);
   const line = desk.core.journal.listMessages(self).find(m => m.role === 'system' && m.parts.some(p => p.type === 'text' && p.started));
   expect(line?.parts[0]).toMatchObject({ started: { threadId: id, project: 'Notes', machine: pc.core.coordination.identity().name } });
