@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { lockedBy } from '../lib/policy';
   import type { TelemetryState } from '@boite/contracts';
   import tradeOffer from '../assets/onboarding/trade-offer.webm';
   import noThanks from '../assets/onboarding/no-thanks.webm';
   import InfoTip from './InfoTip.svelte';
+  import PolicyLock from './PolicyLock.svelte';
   import { openExternal } from '../lib/links';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -20,6 +22,8 @@
   const reduced = document.documentElement.dataset.motion === 'reduced' || (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
 
   let consent = $state<TelemetryState | null>(null);
+  /** The admin policy's ceiling: `off` locks both rows, `basic` the deal. */
+  const ceiling = $derived(lockedBy(store.policy, 'analytics') ? store.policy?.values.analytics ?? null : null);
   /** The client `consent` came from: a reconnect swaps it without re-running the read. */
   let consentFrom: Store['client'] = null;
   let busy = $state(false);
@@ -112,15 +116,16 @@
     <p class="intro" data-testid="telemetry-choice-notice">{strings.telemetry.choiceNotice}</p>
   {/if}
   <div class="rows">
-    <button class="row no" class:refused={refusing} disabled={busy || refusing || !consent} data-testid="onboarding-telemetry-basic" onclick={() => void enough()}>
+    <button class="row no" class:refused={refusing} disabled={busy || refusing || !consent || ceiling === 'off'} data-testid="onboarding-telemetry-basic" onclick={() => void enough()}>
       <span class="label">{strings.onboarding.privacy.basic}<small>{strings.onboarding.privacy.basicDefault}</small></span>
       <span class="hint">{strings.onboarding.privacy.basicHint}</span>
     </button>
-    <button class="row yes" disabled={busy || refusing} data-testid="onboarding-telemetry-enhanced" onclick={() => void deal()}>
+    <button class="row yes" disabled={busy || refusing || ceiling !== null} data-testid="onboarding-telemetry-enhanced" onclick={() => void deal()}>
       <span class="label">{strings.onboarding.privacy.deal}</span>
       <span class="hint">{strings.onboarding.privacy.dealHint}</span>
     </button>
   </div>
+  {#if ceiling !== null}<p class="note managed" data-testid="onboarding-telemetry-managed">{strings.policy.managed}<PolicyLock {store} keys={['analytics']} /></p>{/if}
   <p class="note">{strings.onboarding.privacy.optOut}
     <button class="link" disabled={busy || refusing} data-testid="onboarding-telemetry-off" onclick={() => void off()}><span class="ui-label">{strings.onboarding.privacy.offLabel}</span></button></p>
   <button class="link" disabled={refusing} onclick={() => void openExternal(DOC_URL)}><span class="ui-label">{strings.onboarding.privacy.doc}</span></button>

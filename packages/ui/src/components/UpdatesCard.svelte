@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { lockedBy } from '../lib/policy';
   import { ArrowRight, CircleArrowDown, ExternalLink, RefreshCw, RotateCw } from '@lucide/svelte';
   import { appUpdater, showAppUpdateUi, type AppUpdater, type UpdateChannel } from '../lib/app-update.svelte';
   import { appUpdateInstall } from '../lib/app-update-install.svelte';
@@ -7,6 +8,7 @@
   import { bytes, time } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import InfoTip from './InfoTip.svelte';
+  import PolicyLock from './PolicyLock.svelte';
 
   /**
    * Boite's updates in one card, nothing folded: the version this app runs
@@ -45,6 +47,8 @@
   /** The core this window's shell started: `autoInstallUpdates` is its setting. */
   const local = $derived(workspace.machines.find((machine) => machine.store.localCore)?.store);
   const autoShown = $derived(supported && local?.owner === true && local.settings !== null && local.settings !== undefined);
+  /** The admin policy of this computer decides the app's updates: `off` checks nothing, any value holds the automatic install. */
+  const appPolicy = $derived(lockedBy(local?.policy, 'updates.app') ? local?.policy?.values.updates?.app ?? null : null);
 
   async function toggleAuto(input: HTMLInputElement) {
     if (!local || !await local.saveSettings({ autoInstallUpdates: input.checked })) input.checked = local?.settings?.autoInstallUpdates === true;
@@ -86,7 +90,7 @@
     if (checking) return;
     checking = true;
     try {
-      if (supported) updater.check();
+      if (supported && appPolicy !== 'off') updater.check();
       await Promise.all(workspace.machines.filter((machine) => machine.store.connection === 'ready' && machine.store.owner).flatMap((machine) => [
         machine.store.loadHarnessUpdates(true),
         ...(machine.store.localCore ? [] : [machine.store.serverUpdater.load(true), machine.store.serverUpdater.loadDesktop()])
@@ -127,6 +131,7 @@
   <div class="line">
     <p class="status" class:offer={app?.phase === 'available' || app?.phase === 'ready'} class:error={app?.phase === 'error'} role="status" aria-live="polite" data-testid="app-update-status">
       <span>{status()}</span>
+      {#if appPolicy === 'off'}<PolicyLock store={local!} keys={['updates.app']} />{/if}
       {#if supported && updater.lastCheckedAt !== null && app!.phase !== 'checking'}<span class="subtle">{fill(strings.appUpdate.lastChecked, { time: time(updater.lastCheckedAt) })}</span>{/if}
       {#if found}<a class="changelog" href={`https://github.com/mtsu-dev/boite/releases/tag/v${encodeURIComponent(found)}`} target="_blank" rel="noopener noreferrer" data-testid="app-update-changelog"><span class="ui-label">{strings.appUpdate.changelog}</span><ExternalLink size={12} /></a>{/if}
     </p>
@@ -154,9 +159,9 @@
   {/if}
   {#if autoShown}
     <label class="auto" for="{uid}-auto-install" data-testid="app-update-auto">
-      <span class="ui-label-box"><span class="ui-label">{strings.appUpdate.autoInstall}</span><InfoTip topic={strings.appUpdate.autoInstall} text={strings.appUpdate.autoInstallHint} /></span>
+      <span class="ui-label-box"><span class="ui-label">{strings.appUpdate.autoInstall}</span><InfoTip topic={strings.appUpdate.autoInstall} text={strings.appUpdate.autoInstallHint} /><PolicyLock store={local!} keys={['updates.app']} /></span>
       <input id="{uid}-auto-install" type="checkbox" role="switch" data-testid="app-update-auto-switch"
-        checked={local!.settings?.autoInstallUpdates === true} disabled={local!.connection !== 'ready'}
+        checked={local!.settings?.autoInstallUpdates === true} disabled={local!.connection !== 'ready' || appPolicy !== null}
         onchange={(event) => void toggleAuto(event.currentTarget)} />
     </label>
   {/if}

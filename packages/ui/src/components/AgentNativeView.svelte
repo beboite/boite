@@ -11,7 +11,8 @@
    * types and paints natively. Nothing is captured or streamed. The agent keeps
    * driving the same webview through the core while it shows here.
    */
-  let { view, url }: { view: string; url: string } = $props();
+  /** `search` is the address template of the machine that hosts the tab, from its own policy; null for the default engine. */
+  let { view, url, search }: { view: string; url: string; search: string | null } = $props();
 
   let slot = $state<HTMLDivElement>();
   let preview = $state<string | null>(null);
@@ -37,7 +38,7 @@
 
   function go(event: SubmitEvent) {
     event.preventDefault();
-    const next = normalizeUrl(draft ?? '');
+    const next = normalizeUrl(draft ?? '', search);
     if (!next) { problem = strings.remoteBrowser.badAddress; return; }
     problem = ''; draft = null; loading = true;
     (document.activeElement as HTMLElement | null)?.blur?.();

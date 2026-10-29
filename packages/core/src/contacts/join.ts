@@ -30,6 +30,7 @@ function notFound(error: unknown): boolean {
 
 /** The guest's side: spends the link's token on its host, then keeps the host as a contact and dials it. */
 export async function joinContact(store: ContactStore, core: Core, link: string): Promise<Contact> {
+  core.policy.assert(core.policy.networkOff('contacts'), 'network.contacts');
   const invite = decodeInvite(link);
   const self = store.card();
   if (invite.coreId === self.coreId) throw invalidParams('link: this invitation is this core\'s own', { field: 'link' });
@@ -51,6 +52,7 @@ async function spendInvite(store: ContactStore, core: Core, invite: Invitation, 
     }
   }
   await checkTailnetName(invite.url, 'link.url');
+  core.policy.assert(core.policy.networkOff('contacts'), 'network.contacts');
   const nonce = randomUUID();
   const body = JSON.stringify({ nonce, at: Date.now(), token: invite.token, card: self });
   const signature = core.coordination.signature(Buffer.from(`${JOIN_INPUT}${body}`)).toString('base64');
@@ -74,6 +76,7 @@ async function spendInvite(store: ContactStore, core: Core, invite: Invitation, 
       : `could not reach ${invite.machine} at ${invite.url}: accept its Tailscale share, or ask for an invitation for another network, then join again`);
   }
   const raw = await boundedBody(response.body, JOIN_BODY_MAX).catch(() => '');
+  core.policy.assert(core.policy.networkOff('contacts'), 'network.contacts');
   if (response.headers.get('x-boite-signature') !== SEALED) throw refused(`${invite.machine} refused the join (${response.status}: ${raw.slice(0, 200)})`);
   let reply: { nonce?: unknown; card?: unknown; error?: unknown };
   try {
@@ -98,7 +101,7 @@ async function spendInvite(store: ContactStore, core: Core, invite: Invitation, 
 
 /** `POST /contacts/join`: a guest spends an invitation token and leaves its card. Every refusal is a 403 the server counts. */
 export async function joinRequest(store: ContactStore, core: Core, request: Request): Promise<Response> {
-  if (store.isClosed || request.method !== 'POST' || request.headers.has('origin')) return new Response('forbidden', { status: 403 });
+  if (store.isClosed || core.policy.networkOff('contacts') || request.method !== 'POST' || request.headers.has('origin')) return new Response('forbidden', { status: 403 });
   const guest = request.headers.get('x-boite-peer') ?? '';
   if (!/^[0-9a-f]{64}$/.test(guest)) return new Response('x-boite-peer: expected a core id', { status: 403 });
   if (request.headers.get('x-boite-signature') !== SEALED) return new Response('contacts exchange sealed requests only', { status: 400 });
@@ -122,6 +125,7 @@ export async function joinRequest(store: ContactStore, core: Core, request: Requ
     });
   };
   try {
+    core.policy.assert(core.policy.networkOff('contacts'), 'network.contacts');
     const card = checkCard(body.card, 'card');
     if (card.coreId !== guest) throw invalidParams('card.coreId: expected the core named by x-boite-peer');
     // A live invitation first: a caller without one leaves no nonce behind.

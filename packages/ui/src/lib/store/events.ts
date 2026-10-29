@@ -347,6 +347,7 @@ export function listen(ctx: StoreContext, client: Client): void {
     void accounts.readProxyQuotas(client);
     void s.refreshMemory();
   });
+  on('policy.changed', (policy) => { ctx.metadataRevision.policy++; s.policy = policy; });
   on('keybindings.updated', (keybindings) => {
     ctx.metadataRevision.keybindings++;
     s.keybindings = keybindings;

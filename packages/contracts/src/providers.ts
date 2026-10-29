@@ -1,3 +1,4 @@
+import type { PolicyRefusalData } from './policy';
 import type { AccountId, ProviderId, ThreadId, Timestamp } from './ids';
 
 // ---------------------------------------------------------------------------
@@ -437,6 +438,12 @@ export interface ProviderSummary {
    * on older cores, which read as on; read it through `providerEnabled`.
    */
   enabled?: boolean;
+  /**
+   * Set when the admin policy keeps this provider off (`providers.allow` or
+   * `providers.deny`): `enabled` is false and no switch turns it on. The
+   * provider stays listed so the user sees why.
+   */
+  policy?: PolicyRefusalData;
   /** The descriptor's `experimental`. Missing reads as false. */
   experimental?: boolean;
 }

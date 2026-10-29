@@ -133,6 +133,18 @@ test('a page that no longer reaches the previous one makes each branch ask again
   expect((await f.round()).gh).toBe(1);
 });
 
+test('a partial page cannot hide an older open pull request on a reused branch', async () => {
+  const f = await fixture(1);
+  f.change(world => {
+    Object.assign(world[0]!, { headRefName: 'topic-0', state: 'OPEN' });
+    world[249]!.headRefName = 'topic-0';
+  });
+  const first = await f.round(0);
+  expect(first.results).toEqual([{ number: 1, url: url(1), state: 'OPEN' }]);
+  expect(first.gh).toBe(2);
+  expect((await f.round()).gh).toBe(1);
+});
+
 test('a refresh reads the page and the branch again', async () => {
   const f = await fixture(1);
   await f.round(0);
