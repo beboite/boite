@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { ATTACHMENTS_PER_TURN, type Attachment, type ImageAttachment, type MessagePart, type ProviderDescriptor } from '@boite/contracts';
+import { ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, decodedBytes, type Attachment, type ImageAttachment, type MessagePart, type ProviderDescriptor } from '@boite/contracts';
 import { FileReferences, fileReference } from '../src/attachments.ts';
 import { continuationInput } from '../src/continuation.ts';
 import { Journal } from '../src/journal.ts';
@@ -63,6 +63,9 @@ function fullWalk(threadId: string, upTo: string | null, input: { prompt: string
       }
     }
   }
+  // Oldest out first until the history and the current attachments fit one turn's byte total.
+  const weigh = (list: Attachment[]): number => list.reduce((sum, one) => sum + decodedBytes(one.data), 0);
+  while (images.length && weigh(images) + weigh(input.attachments) > ATTACHMENTS_TOTAL_MAX_BYTES) images.shift();
   if (first.length === 0 && recent.length === 0) return input;
   const gap = omitted ? `\n[${omitted} older messages omitted between the opening and recent exchanges.]\n` : '\n';
   const imageNote = imageCount > 0 ? `\n${images.length} of ${imageCount} historical images follow, oldest to newest, then the current prompt's attachments. Other image placeholders are references only.\n` : '';
@@ -106,6 +109,8 @@ test('the bounded walks build the prompt and images the full walk built, byte fo
     ['thr_long', 'current', []], ['thr_long', null, []], ['thr_long', 'missing', [image('a.png')]], ['thr_long', 'turn-80', []],
     ['thr_long', 'turn-3', []], ['thr_long', 'turn-6', []], ['thr_long', 'turn-12', []], ['thr_long', 'current', Array.from({ length: ATTACHMENTS_PER_TURN - 1 }, (_, at) => image(`${at}.png`))],
     ['thr_long', 'current', Array.from({ length: ATTACHMENTS_PER_TURN }, (_, at) => image(`${at}.png`))],
+    // Room for two of the 40 KB history images: the byte total, not the count, bounds them.
+    ['thr_long', 'current', [{ kind: 'image', mimeType: 'image/png', data: Buffer.alloc(ATTACHMENTS_TOTAL_MAX_BYTES - 90_000).toString('base64'), name: 'heavy.png' }]],
     ['thr_short', 'current', []], ['thr_short', 'turn-0', []], ['thr_empty', null, []],
   ];
   for (const [threadId, upTo, attachments] of cases) {

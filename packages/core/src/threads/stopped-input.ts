@@ -1,4 +1,4 @@
-import { ATTACHMENTS_PER_TURN, type Attachment, type Message, type MessagePart, type TurnId } from '@boite/contracts';
+import { ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, decodedBytes, type Attachment, type Message, type MessagePart, type TurnId } from '@boite/contracts';
 import type { PartPlace } from '../continuation.ts';
 import type { Journal } from '../journal.ts';
 import { nativeCommandPrompt } from './operations.ts';
@@ -40,8 +40,15 @@ export function stoppedInput(
   if (messages.length === 0) return input;
   messages.reverse();
   const images = messages.flatMap(message => message.parts.filter(part => part.type === 'image'));
-  const slots = ATTACHMENTS_PER_TURN - input.attachments.filter(part => part.kind === 'image').length;
-  const kept = new Set(images.slice(Math.max(0, images.length - slots)));
+  // The newest images, within the count and the byte total the current attachments leave; older ones go as files.
+  const slots = ATTACHMENTS_PER_TURN - input.attachments.length;
+  let room = ATTACHMENTS_TOTAL_MAX_BYTES - input.attachments.reduce((sum, part) => sum + decodedBytes(part.data), 0);
+  const kept = new Set<(typeof images)[number]>();
+  for (const image of images.toReversed()) {
+    room -= decodedBytes(image.data);
+    if (kept.size >= slots || room < 0) break;
+    kept.add(image);
+  }
   const attachments: Attachment[] = [];
   const history = messages.map(message => {
     const parts = message.parts.map((part, partIndex) => {

@@ -311,7 +311,8 @@ started. An existing native session receives stopped user messages and accepted
 follow-ups in order, until a user turn completes. This survives a core restart
 without adding messages to the timeline or starting work by itself. Native
 commands and automatic turns do not consume this context. Historical images
-beyond the native attachment limit remain available as local files. A fresh
+beyond what the current request leaves of one turn's 50 images and 10 MB
+remain available as local files, oldest first. A fresh
 native session receives the conversation's journal history instead.
 
 Edits and forks with live follow-ups use the fresh-session transfer rules below.

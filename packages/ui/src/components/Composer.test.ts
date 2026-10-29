@@ -2252,6 +2252,262 @@ test('Ctrl+Z after deleting everything and a stray key brings back the text and 
   expect(chips()).toEqual([]);
 });
 
+test('a pasted copy over the byte total holds Send until its pictures are fitted', async ({ app: _app }) => {
+  const { copyImages } = await import('../lib/composer-clipboard');
+  const { browserCodec } = await import('../lib/image-prepare');
+  const { ATTACHMENTS_TOTAL_MAX_BYTES, decodedBytes } = await import('@boite/contracts');
+  // Thirty pictures of 400 KB, 12 MB together; the codec takes its time and brings each to 100 KB.
+  const heavy = Array.from({ length: 30 }, (_, at) => ({ kind: 'image' as const, mimeType: 'image/jpeg' as const, data: Buffer.alloc(400 * 1024, at).toString('base64'), name: `shot-${at}.jpg` }));
+  const decode = vi.spyOn(browserCodec, 'decode').mockImplementation(async () => ({
+    width: 1170, height: 2532, hasAlpha: () => false, close() {},
+    async encode(_width, _height, mimeType) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return new Blob([new Uint8Array(100 * 1024)], { type: mimeType });
+    }
+  }));
+  try {
+    const from = { text: heavy.map((_, at) => `[Image ${at + 1}]`).join(' '), attachments: heavy, queued: [], sending: false, paused: false };
+    const copied = clipboard();
+    expect(copyImages(copied, from, 0, from.text.length)).toBe(true);
+    await store.open('t-trace');
+    await waitFor(() => !store.busy);
+    const before = store.openThread!.messages.length;
+    await type('look ');
+    input().focus();
+    input().setSelectionRange(5, 5);
+    expect(clipboardEvent('paste', copied).defaultPrevented).toBe(true);
+    // Enter at once, while the box still weighs 12 MB, then a few more words while it waits: those were not in what Enter sent.
+    press('Enter');
+    const pressed = input().value;
+    await type(`${pressed} and more`);
+    const fitted = () => store.composerStates['t-trace']!.attachments.reduce((sum, one) => sum + decodedBytes(one.data), 0) <= ATTACHMENTS_TOTAL_MAX_BYTES;
+    await waitFor(fitted, 4000);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(store.openThread!.messages).toHaveLength(before);
+    expect(input().value).toBe(`${pressed} and more`);
+    // The box kept all of it; the next Enter sends all of it.
+    press('Enter');
+    await waitFor(() => (store.openThread?.messages.length ?? 0) > before, 4000);
+    const sent = store.openThread!.messages.filter((message) => message.role === 'user').at(-1)!.parts.filter((part) => part.type === 'image');
+    expect(sent).toHaveLength(30);
+    expect(sent.reduce((sum, part) => sum + decodedBytes(part.type === 'image' ? part.data : ''), 0)).toBeLessThanOrEqual(ATTACHMENTS_TOTAL_MAX_BYTES);
+    expect(store.openThread!.messages.filter((message) => message.role === 'user').at(-1)!.parts.find((part) => part.type === 'text')).toMatchObject({ text: expect.stringContaining('and more') });
+  } finally { decode.mockRestore(); }
+});
+
+test('Send pressed over the byte total goes by itself once the pictures are fitted', async ({ app: _app }) => {
+  const { copyImages } = await import('../lib/composer-clipboard');
+  const { browserCodec } = await import('../lib/image-prepare');
+  const heavy = Array.from({ length: 30 }, (_, at) => ({ kind: 'image' as const, mimeType: 'image/jpeg' as const, data: Buffer.alloc(400 * 1024, at).toString('base64'), name: `shot-${at}.jpg` }));
+  const decode = vi.spyOn(browserCodec, 'decode').mockImplementation(async () => ({
+    width: 1170, height: 2532, hasAlpha: () => false, close() {},
+    async encode(_width, _height, mimeType) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return new Blob([new Uint8Array(100 * 1024)], { type: mimeType });
+    }
+  }));
+  try {
+    const from = { text: heavy.map((_, at) => `[Image ${at + 1}]`).join(' '), attachments: heavy, queued: [], sending: false, paused: false };
+    const copied = clipboard();
+    expect(copyImages(copied, from, 0, from.text.length)).toBe(true);
+    await store.open('t-trace');
+    await waitFor(() => !store.busy);
+    const before = store.openThread!.messages.length;
+    await type('look ');
+    input().focus();
+    input().setSelectionRange(5, 5);
+    expect(clipboardEvent('paste', copied).defaultPrevented).toBe(true);
+    // One Enter while the box still weighs 12 MB, nothing typed after it.
+    press('Enter');
+    await waitFor(() => (store.openThread?.messages.length ?? 0) > before, 4000);
+    const sent = store.openThread!.messages.filter((message) => message.role === 'user');
+    expect(sent.at(-1)!.parts.filter((part) => part.type === 'image')).toHaveLength(30);
+    expect(sent.at(-1)!.parts.find((part) => part.type === 'text')).toMatchObject({ text: expect.stringContaining('look') });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(store.openThread!.messages.filter((message) => message.role === 'user')).toHaveLength(sent.length);
+    expect(input().value).toBe('');
+  } finally { decode.mockRestore(); }
+});
+
+test('thirty pasted screenshots over the byte total show at once, and Send pressed while they load sends them all, fitted', async ({ app: _app }) => {
+  const { browserCodec } = await import('../lib/image-prepare');
+  const { ATTACHMENTS_TOTAL_MAX_BYTES, decodedBytes } = await import('@boite/contracts');
+  // Each one prepared weighs 400 KB, 12 MB together; any lighter step the fit takes brings it to 100 KB.
+  const decode = vi.spyOn(browserCodec, 'decode').mockImplementation(async () => ({
+    width: 1170, height: 2532, hasAlpha: () => false, close() {},
+    async encode(_width, _height, mimeType, quality) {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      return new Blob([new Uint8Array((quality === 0.85 ? 400 : 100) * 1024)], { type: mimeType });
+    }
+  }));
+  // jsdom's 5 MB storage cannot back up the 10 MB the box holds before its fit; a browser keeps it in its journal.
+  const save = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {});
+  try {
+    await store.open('t-trace');
+    await waitFor(() => !store.busy);
+    const before = store.openThread!.messages.length;
+    await type('look ');
+    const files = Array.from({ length: 30 }, (_, at) => new File([new Uint8Array(1024)], `shot-${at}.jpg`, { type: 'image/jpeg' }));
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: { items: files.map(file => ({ kind: 'file', type: file.type, getAsFile: () => file })) } });
+    input().dispatchEvent(event);
+    const box = store.composerStates['t-trace']!;
+    expect(box.attachments).toHaveLength(30);
+    await waitFor(() => chips().length > 0);
+    expect(loaded()).toBe(false);
+    press('Enter');
+    await waitFor(() => (store.openThread?.messages.length ?? 0) > before, 8000);
+    const sent = store.openThread!.messages.filter((message) => message.role === 'user').at(-1)!;
+    const images = sent.parts.filter((part) => part.type === 'image');
+    expect(images).toHaveLength(30);
+    expect(images.reduce((sum, part) => sum + decodedBytes(part.type === 'image' ? part.data : ''), 0)).toBeLessThanOrEqual(ATTACHMENTS_TOTAL_MAX_BYTES);
+    expect(store.error).toBeNull();
+    expect(input().value).toBe('');
+  } finally { decode.mockRestore(); save.mockRestore(); }
+});
+
+test('a pasted copy that stays over the byte total at its smallest says to remove pictures, and keeps them', async ({ app: _app }) => {
+  const { copyImages } = await import('../lib/composer-clipboard');
+  const { browserCodec } = await import('../lib/image-prepare');
+  const heavy = Array.from({ length: 30 }, (_, at) => ({ kind: 'image' as const, mimeType: 'image/jpeg' as const, data: Buffer.alloc(400 * 1024, at).toString('base64'), name: `shot-${at}.jpg` }));
+  // Every encoding still weighs 400 KB: no size brings the box under 10 MB.
+  const decode = vi.spyOn(browserCodec, 'decode').mockImplementation(async () => ({
+    width: 1170, height: 2532, hasAlpha: () => false, close() {},
+    async encode(_width, _height, mimeType) { return new Blob([new Uint8Array(400 * 1024)], { type: mimeType }); }
+  }));
+  // jsdom's 5 MB storage cannot back up a 12 MB draft and would say so at any save; a browser keeps it in its journal.
+  const save = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {});
+  try {
+    const from = { text: heavy.map((_, at) => `[Image ${at + 1}]`).join(' '), attachments: heavy, queued: [], sending: false, paused: false };
+    const copied = clipboard();
+    expect(copyImages(copied, from, 0, from.text.length)).toBe(true);
+    await store.open('t-trace');
+    await waitFor(() => !store.busy);
+    input().focus();
+    expect(clipboardEvent('paste', copied).defaultPrevented).toBe(true);
+    const over = 'These files still weigh over 10 MB together, even with the pictures at their smallest: remove some before sending.';
+    await waitFor(() => store.error === over, 4000);
+    expect(store.composerStates['t-trace']!.attachments).toHaveLength(30);
+    // Enter then keeps the box and says it again, rather than sending what the core would refuse.
+    const before = await store.client!.call('threads.get', { threadId: 't-trace' });
+    store.error = null;
+    press('Enter');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(store.error).toBe(over);
+    expect(store.composerStates['t-trace']!.attachments).toHaveLength(30);
+    expect(store.composerStates['t-trace']!.queued).toHaveLength(0);
+    expect((await store.client!.call('threads.get', { threadId: 't-trace' })).messages).toEqual(before.messages);
+  } finally { decode.mockRestore(); save.mockRestore(); }
+});
+
+test('a send held by a fit is dropped when the composer moves to another thread meanwhile', async ({ app: _app }) => {
+  const { copyImages } = await import('../lib/composer-clipboard');
+  const { browserCodec } = await import('../lib/image-prepare');
+  const { ATTACHMENTS_TOTAL_MAX_BYTES, decodedBytes } = await import('@boite/contracts');
+  const heavy = Array.from({ length: 30 }, (_, at) => ({ kind: 'image' as const, mimeType: 'image/jpeg' as const, data: Buffer.alloc(400 * 1024, at).toString('base64'), name: `shot-${at}.jpg` }));
+  const decode = vi.spyOn(browserCodec, 'decode').mockImplementation(async () => ({
+    width: 1170, height: 2532, hasAlpha: () => false, close() {},
+    async encode(_width, _height, mimeType) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return new Blob([new Uint8Array(100 * 1024)], { type: mimeType });
+    }
+  }));
+  try {
+    await store.open('t-descriptors');
+    await waitFor(() => !store.busy);
+    await type('a draft for later');
+    const before = await store.client!.call('threads.get', { threadId: 't-descriptors' });
+    const from = { text: heavy.map((_, at) => `[Image ${at + 1}]`).join(' '), attachments: heavy, queued: [], sending: false, paused: false };
+    const copied = clipboard();
+    expect(copyImages(copied, from, 0, from.text.length)).toBe(true);
+    await store.open('t-trace');
+    await waitFor(() => !store.busy);
+    await type('look ');
+    input().focus();
+    input().setSelectionRange(5, 5);
+    expect(clipboardEvent('paste', copied).defaultPrevented).toBe(true);
+    press('Enter');
+    // Away before the pictures fit: the held send must not take the other thread's draft.
+    await store.open('t-descriptors');
+    const traced = store.composerStates['t-trace']!;
+    await waitFor(() => traced.attachments.reduce((sum, one) => sum + decodedBytes(one.data), 0) <= ATTACHMENTS_TOTAL_MAX_BYTES, 4000);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const after = await store.client!.call('threads.get', { threadId: 't-descriptors' });
+    expect(after.messages).toEqual(before.messages);
+    expect(input().value).toBe('a draft for later');
+    expect(traced.text.startsWith('look ')).toBe(true);
+  } finally { decode.mockRestore(); }
+});
+
+/** A question on t-trace the composer answers, pictures pasted over the byte total on a slow codec, and every answer recorded. */
+async function answerWhileFitting() {
+  const { copyImages } = await import('../lib/composer-clipboard');
+  const { browserCodec } = await import('../lib/image-prepare');
+  const { writeAnswer } = await import('../lib/question-reply.svelte');
+  const heavy = Array.from({ length: 30 }, (_, at) => ({ kind: 'image' as const, mimeType: 'image/jpeg' as const, data: Buffer.alloc(400 * 1024, at).toString('base64'), name: `shot-${at}.jpg` }));
+  vi.spyOn(browserCodec, 'decode').mockImplementation(async () => ({
+    width: 1170, height: 2532, hasAlpha: () => false, close() {},
+    async encode(_width, _height, mimeType) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return new Blob([new Uint8Array(100 * 1024)], { type: mimeType });
+    }
+  }));
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {});
+  await store.open('t-trace');
+  await store.send('question');
+  await waitFor(() => store.openThread?.status === 'waiting');
+  const question = store.pendingQuestions.find(item => item.threadId === 't-trace')!;
+  store.pendingQuestions = [...store.pendingQuestions, { ...question, id: `${question.id}-other` }];
+  writeAnswer(store, question.id);
+  const answers: { id: string; bytes: number; text: string }[] = [];
+  const { decodedBytes } = await import('@boite/contracts');
+  vi.spyOn(store, 'answerQuestion').mockImplementation(async (_thread, id, _options, text, attachments) => {
+    answers.push({ id, bytes: (attachments ?? []).reduce((sum, one) => sum + decodedBytes(one.data), 0), text: text ?? '' });
+    return true;
+  });
+  const from = { text: heavy.map((_, at) => `[Image ${at + 1}]`).join(' '), attachments: heavy, queued: [], sending: false, paused: false };
+  const copied = clipboard();
+  expect(copyImages(copied, from, 0, from.text.length)).toBe(true);
+  await type('see ');
+  input().focus();
+  input().setSelectionRange(4, 4);
+  expect(clipboardEvent('paste', copied).defaultPrevented).toBe(true);
+  const fitted = () => waitFor(() => store.composerStates['t-trace']!.attachments.reduce((sum, one) => sum + decodedBytes(one.data), 0) <= 10 * 1024 * 1024, 4000);
+  return { question, answers, fitted, writeAnswer };
+}
+
+test('a card answered while its pictures are fitted sends them once they fit', async ({ app: _app }) => {
+  const { sendAnswer } = await import('../lib/question-reply.svelte');
+  const { question, answers } = await answerWhileFitting();
+  // The card's Send, while the box still weighs 12 MB.
+  expect(await sendAnswer(store, question)).toBe(true);
+  expect(answers).toHaveLength(1);
+  expect(answers[0]!.id).toBe(question.id);
+  expect(answers[0]!.bytes).toBeLessThanOrEqual(10 * 1024 * 1024);
+});
+
+test('words typed while an answer waits for its pictures stay in the box, out of the answer', async ({ app: _app }) => {
+  const { sendAnswer } = await import('../lib/question-reply.svelte');
+  const { question, answers } = await answerWhileFitting();
+  const written = input().value;
+  const sending = sendAnswer(store, question);
+  await type(`${written} and later`);
+  expect(await sending).toBe(true);
+  expect(answers).toHaveLength(1);
+  expect(answers[0]!.text).toBe(written.trim());
+  expect(input().value).toBe(`${written} and later`);
+});
+
+test('another question chosen while the answer waits for its pictures does not take the draft', async ({ app: _app }) => {
+  const { question, answers, fitted, writeAnswer } = await answerWhileFitting();
+  press('Enter');
+  writeAnswer(store, `${question.id}-other`);
+  await fitted();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(answers).toEqual([]);
+  expect(store.composerStates['t-trace']!.attachments).toHaveLength(30);
+});
+
 test('Edit on a sent message over a long unsent draft is one undo step: Ctrl+Z gives the draft back as a plain draft', async ({ app: _app }) => {
   await store.open('t-trace');
   await send('the sent prompt');

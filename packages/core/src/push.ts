@@ -103,16 +103,16 @@ export class PushStore {
   private readonly off: () => void;
   private pending = new Set<Promise<unknown>>();
   private closed = false;
-  private keysPromise: Promise<Keys> | null = null;
+  #keysPromise: Promise<Keys> | null = null;
   /** By tag, the pushes held back while their thread is watched (`notify`). */
   private readonly held = new Map<string, { threadId: string; text: News; at: number }>();
-  private heldTimer: ReturnType<typeof setTimeout> | undefined;
+  #heldTimer: ReturnType<typeof setTimeout> | undefined;
   /** When each forwarded push arrived, by sender and id (`relayed`). */
-  private readonly forwards = new Map<string, number>();
-  private readonly offAttention: () => void;
+  readonly #forwards = new Map<string, number>();
+  readonly #offAttention: () => void;
 
   constructor(private readonly core: Core) {
-    this.offAttention = core.threads.focus.onAttention(report => this.attention(report));
+    this.#offAttention = core.threads.focus.onAttention(report => this.attention(report));
     this.off = core.bus.onAny((name, payload) => {
       if (name === 'sessions.updated' && (payload as RpcEvents['sessions.updated']).state === 'revoked') {
         this.remove((payload as RpcEvents['sessions.updated']).sessionId);
@@ -179,20 +179,20 @@ export class PushStore {
    * news happens, so a phone that subscribes mid-turn hears the next one.
    */
   private reachable(): boolean {
-    return Object.keys(this.subscriptions()).length > 0 || this.core.group.peers().length > 0;
+    return Object.keys(this.#subscriptions()).length > 0 || this.core.group.peers().length > 0;
   }
 
-  private subscriptions(): Record<string, Subscription> {
+  #subscriptions(): Record<string, Subscription> {
     return (this.core.journal.getSetting(SUBSCRIPTIONS) as Record<string, Subscription> | null) ?? {};
   }
 
-  private requireSession(sessionId: string | null): string {
+  #requireSession(sessionId: string | null): string {
     if (!sessionId || !this.core.journal.getSession(sessionId)) throw refused('push requires a paired device session');
     return sessionId;
   }
 
   private keys(): Promise<Keys> {
-    this.keysPromise ??= (async () => {
+    this.#keysPromise ??= (async () => {
       const existing = this.core.journal.getSetting(KEYS) as Keys | null;
       if (existing) return existing;
       const { default: webpush } = await import('web-push');
@@ -200,25 +200,25 @@ export class PushStore {
       // Secrets belong to private storage, never the append-only event payload.
       this.core.journal.setSetting(KEYS, generated);
       return generated;
-    })().catch(error => { this.keysPromise = null; throw error; });
-    return this.keysPromise;
+    })().catch(error => { this.#keysPromise = null; throw error; });
+    return this.#keysPromise;
   }
 
   async status(sessionId: string | null) {
-    const id = this.requireSession(sessionId);
-    const subscription = this.subscriptions()[id];
+    const id = this.#requireSession(sessionId);
+    const subscription = this.#subscriptions()[id];
     return { publicKey: (await this.keys()).publicKey, subscribed: Boolean(subscription), ...(subscription ? { kinds: subscription.kinds ?? [...NOTIFICATION_KINDS] } : {}) };
   }
 
   subscribe(sessionId: string | null, input: Subscription) {
-    const id = this.requireSession(sessionId);
+    const id = this.#requireSession(sessionId);
     // A device key subscribes on the machine whose page it installed, this one: the others send its notifications here from now on.
     const keyed = this.core.group.clients.deviceOf(id);
     // A pairing of the older kind gets its pushes through the machine it paired with (`deliverAll`): one here would come without the machine the thread is on.
     const home = keyed === undefined ? deviceElsewhere(this.core, id)?.home : undefined;
     if (home !== undefined) throw refused(`notifications of this device come through ${home.name}, the machine it was paired with: enable them there`);
     const subscription = validateSubscription(input);
-    const all = this.subscriptions();
+    const all = this.#subscriptions();
     // A new pairing of the same browser replaces its old delivery destination.
     for (const [key, previous] of Object.entries(all)) if (previous.endpoint === subscription.endpoint) delete all[key];
     all[id] = subscription;
@@ -232,9 +232,9 @@ export class PushStore {
 
   /** The kinds this device's subscription receives from now on: the subscription stays, only what reaches it changes. */
   setKinds(sessionId: string | null, params: RpcParams<'push.kinds'>) {
-    const id = this.requireSession(sessionId);
+    const id = this.#requireSession(sessionId);
     const kinds = validateKinds(params?.kinds, 'push.kinds');
-    const all = this.subscriptions();
+    const all = this.#subscriptions();
     const subscription = all[id];
     if (!subscription) throw refused('Enable notifications on this device first');
     all[id] = { ...subscription, kinds };
@@ -245,7 +245,7 @@ export class PushStore {
   }
 
   remove(sessionId: string) {
-    const all = this.subscriptions();
+    const all = this.#subscriptions();
     if (all[sessionId]) {
       delete all[sessionId];
       this.core.journal.append({ type: 'push.unsubscribed', threadId: null, version: 1, payload: { sessionId } }, () => {
@@ -255,7 +255,7 @@ export class PushStore {
     return { ok: true } as const;
   }
 
-  unsubscribe(sessionId: string | null) { return this.remove(this.requireSession(sessionId)); }
+  unsubscribe(sessionId: string | null) { return this.remove(this.#requireSession(sessionId)); }
 
   /**
    * What the app icon's badge says: the threads waiting for the user, the
@@ -301,8 +301,8 @@ export class PushStore {
 
   /** Sends the held pushes nobody is watching any more and wakes up when the next lease ends. Public for tests that move the clock. */
   releaseHeld() {
-    clearTimeout(this.heldTimer);
-    this.heldTimer = undefined;
+    clearTimeout(this.#heldTimer);
+    this.#heldTimer = undefined;
     if (this.closed) return;
     let next = Infinity;
     for (const [tag, held] of this.held) {
@@ -312,8 +312,8 @@ export class PushStore {
       this.deliverAll(held.threadId, held.text, tag);
     }
     if (next !== Infinity) {
-      this.heldTimer = setTimeout(() => this.releaseHeld(), Math.max(0, next - Date.now()) + 50);
-      this.heldTimer.unref?.();
+      this.#heldTimer = setTimeout(() => this.releaseHeld(), Math.max(0, next - Date.now()) + 50);
+      this.#heldTimer.unref?.();
     }
   }
 
@@ -321,7 +321,7 @@ export class PushStore {
     const { title: own, ...news } = text;
     const title = own ?? (threadId === null ? null : this.core.journal.getThread(threadId)?.title) ?? 'Boite';
     const badge = this.badge(threadId);
-    const subscriptions = this.subscriptions();
+    const subscriptions = this.#subscriptions();
     for (const [sessionId, subscription] of Object.entries(subscriptions)) {
       // The device turned this kind off: it stays subscribed and hears nothing of it.
       if (!wants(subscription, text.kind)) continue;
@@ -367,11 +367,11 @@ export class PushStore {
     if (sessionId === null) throw refused(`group.push device ${device} is not a device of this machine`);
     // A slow first address makes the sender try the others, and two of them can lead here: one push.
     const now = Date.now();
-    for (const [key, at] of this.forwards) if (now - at > FORWARD_IDS_MS) this.forwards.delete(key);
+    for (const [key, at] of this.#forwards) if (now - at > FORWARD_IDS_MS) this.#forwards.delete(key);
     const key = `${from.coreId}:${id}`;
-    if (this.forwards.has(key)) return { delivered: true };
-    this.forwards.set(key, now);
-    const subscription = this.subscriptions()[sessionId];
+    if (this.#forwards.has(key)) return { delivered: true };
+    this.#forwards.set(key, now);
+    const subscription = this.#subscriptions()[sessionId];
     if (this.closed || !subscription) return { delivered: false };
     // Received and dropped on purpose: the device turned this kind off.
     if (!wants(subscription, push.kind)) return { delivered: true };
@@ -411,14 +411,14 @@ export class PushStore {
       throw error;
     }
     if (this.closed || !this.core.journal.getSession(sessionId)) return;
-    const subscription = this.subscriptions()[sessionId];
+    const subscription = this.#subscriptions()[sessionId];
     // The policy may have turned push off while the keys were read.
     if (!subscription || this.core.policy.networkOff('push')) return;
     try {
       await this.send({ endpoint: subscription.endpoint, keys: subscription.keys }, JSON.stringify(payload), keys, createHash('sha256').update(payload.tag).digest('base64url').slice(0, 32));
     } catch (error) {
       const status = (error as { statusCode?: number }).statusCode;
-      const gone = (status === 404 || status === 410) && this.subscriptions()[sessionId]?.endpoint === subscription.endpoint;
+      const gone = (status === 404 || status === 410) && this.#subscriptions()[sessionId]?.endpoint === subscription.endpoint;
       if (gone) this.remove(sessionId);
       // Only the status and the push service's host: the endpoint path is the device's address.
       let service = 'unknown';
@@ -433,8 +433,8 @@ export class PushStore {
   }
 
   async test(sessionId: string | null) {
-    const id = this.requireSession(sessionId);
-    if (!this.subscriptions()[id]) throw refused('Enable notifications on this device first');
+    const id = this.#requireSession(sessionId);
+    if (!this.#subscriptions()[id]) throw refused('Enable notifications on this device first');
     await this.track(this.deliver(id, { title: 'Boite', body: 'Notifications are connected', label: 'connected', threadId: null, tag: 'test' }));
     return { ok: true } as const;
   }
@@ -442,8 +442,8 @@ export class PushStore {
   async close() {
     this.closed = true;
     this.off();
-    this.offAttention();
-    clearTimeout(this.heldTimer);
+    this.#offAttention();
+    clearTimeout(this.#heldTimer);
     this.held.clear();
     await Promise.allSettled([...this.pending]);
   }
