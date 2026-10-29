@@ -27,12 +27,12 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs
 import { join } from 'node:path';
 import { instructionsOf } from './history.ts';
 
-const DIRECTIVE = /\[(agents|command|command-failed|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block|limits|flood)\]/g;
+const DIRECTIVE = /\[(agents|command|command-failed|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block|limits|flood|cut)\]/g;
 const CHUNKS = 3;
 
 type Directive =
   | 'command' | 'command-failed' | 'approve' | 'thought' | 'summary' | 'usage' | 'late-context' | 'slow' | 'crash' | 'input' | 'async' | 'stream'
-  | 'elicit' | 'elicit-url' | 'permissions' | 'time' | 'hook-block' | 'agents' | 'limits' | 'flood';
+  | 'elicit' | 'elicit-url' | 'permissions' | 'time' | 'hook-block' | 'agents' | 'limits' | 'flood' | 'cut';
 
 let threadCounter = 0;
 let turnCounter = 0;
@@ -526,6 +526,17 @@ async function runTurn(turnId: string, text: string): Promise<void> {
           },
         });
         break;
+      case 'cut': {
+        // Killed in a command that wrote output the client has not redrawn yet (2026-10-29: a service stop).
+        itemCounter += 1;
+        const itemId = `item-${itemCounter}`;
+        notify('item/started', { item: commandItem(itemId, 'inProgress', null), threadId, turnId, startedAtMs: Date.now() });
+        await Bun.sleep(300);
+        notify('item/commandExecution/outputDelta', { threadId, turnId, itemId, delta: 'half done\n' });
+        setTimeout(() => process.exit(143), 20);
+        await new Promise<void>(() => undefined);
+        break;
+      }
       case 'crash':
         process.stderr.write(`${process.env['CODEX_FAKE_CRASH_ERROR'] ?? 'boom'}\n`);
         setTimeout(() => {
