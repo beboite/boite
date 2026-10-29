@@ -132,7 +132,10 @@ that path. See [desktop updates](updates.md) for installer behavior.
 A service manager must allow the grace and signal only the core to preserve
 running tools. systemd's default `KillMode=control-group` signals the agents
 immediately; eligible turns can still resume, but their tool calls are cut.
-[Server](server.md) owns the unit configuration.
+While the handoff runs, an error from an agent that dies (a process exit, no
+provider refusal) ends its turn as stopped, with no error part, so the turn
+resumes instead of reading as a crash. [Server](server.md) owns the unit
+configuration.
 
 ## Close fences
 

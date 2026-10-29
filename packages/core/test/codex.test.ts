@@ -611,6 +611,25 @@ describe('codex driver', () => {
     await waitFor(() => harness!.core.procs.liveCount(threadId) === 0);
   });
 
+  test('a Codex killed in a command during a restart handoff stops its turn without an error, its output kept', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    const core = harness!.core;
+    const running = client.next('message.part', event => event.threadId === threadId && event.part.type === 'tool' && event.part.status === 'running', 20000);
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('threads.subscribe', { threadId });
+    await client.call('turns.start', { threadId, prompt: '[cut]' });
+    await running;
+    // The grace waits for the command; the agent dies in it, then settles its tool after its failure.
+    void core.threads.handoff.begin(10_000);
+    const turn = await finished;
+    expect(turn.status).toBe('stopped');
+    expect(turn.error).toBeNull();
+    const parts = core.journal.listMessages(threadId).flatMap(message => message.state === 'error' ? [{ type: 'failed' }] : message.parts);
+    expect(parts.filter(part => part.type === 'error' || part.type === 'failed')).toEqual([]);
+    expect(parts.find(part => part.type === 'tool')).toMatchObject({ output: expect.stringContaining('half done') });
+  });
+
   test('an asynchronous question draws a card without waiting, and its answer steers the running turn', async () => {
     const client = await startCore();
     const threadId = await codexThread(client);
