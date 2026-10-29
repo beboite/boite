@@ -166,6 +166,8 @@ async function removeTree(path: string): Promise<void> {
 }
 
 export class PluginStore {
+  #core: Core;
+
   #recommended: PluginManifest[] | undefined;
   #updateSources: Record<string, UpdateSource> | undefined;
   /** The manifests `plugins.list` offers. Tests swap an entry to point an install at a fixture. */
@@ -178,23 +180,23 @@ export class PluginStore {
   allowLocalSources = false;
   /** Test seam: how an update source is read. The git path of `plugins.inspect` otherwise. */
   readUpdateSource = (source: UpdateSource): Promise<{ commit: string; text: string | null }> =>
-    fetchManifest(this.core, source.url, source.ref, { allowLocal: this.allowLocalSources, signal: this.shutdown.signal });
+    fetchManifest(this.#core, source.url, source.ref, { allowLocal: this.allowLocalSources, signal: this.#shutdown.signal });
 
-  private jobs = new Map<string, Job>();
-  private failures = new Map<string, string>();
-  private pending = new Map<string, Pending>();
-  private previews = new Map<string, Pending & { expiresAt: number }>();
-  private running = new Map<string, string>();
-  private exits = new Set<Promise<number>>();
-  private listings = new Map<string, Promise<PluginPool[]>>();
-  private cache = new Map<string, { pools: PluginPool[]; at: number }>();
-  private action: { id: string; provider: string } | null = null;
-  private inspecting = new Set<Promise<unknown>>();
-  private shutdown = new AbortController();
-  private sequence = 0;
-  private closing = false;
+  #jobs = new Map<string, Job>();
+  #failures = new Map<string, string>();
+  #pending = new Map<string, Pending>();
+  #previews = new Map<string, Pending & { expiresAt: number }>();
+  #running = new Map<string, string>();
+  #exits = new Set<Promise<number>>();
+  #listings = new Map<string, Promise<PluginPool[]>>();
+  #cache = new Map<string, { pools: PluginPool[]; at: number }>();
+  #action: { id: string; provider: string } | null = null;
+  #inspecting = new Set<Promise<unknown>>();
+  #shutdown = new AbortController();
+  #sequence = 0;
+  #closing = false;
   /** Install and uninstall hold a plugin alone; its commands share it. */
-  private lanes = new PluginLanes();
+  #lanes = new PluginLanes();
 
   /** Test seam: how long a download may receive nothing. */
   downloadIdleMs = DOWNLOAD_IDLE_MS;
@@ -206,22 +208,23 @@ export class PluginStore {
   /** Newer releases of recommended plugins, read from the update sources the list names. */
   readonly updates: PluginUpdateChecks;
 
-  constructor(private core: Core) {
+  constructor(core: Core) {
+    this.#core = core;
     this.updates = new PluginUpdateChecks({
       // The admin policy's `plugins.recommended: false` leaves every source unread.
-      source: (id) => (core.policy.recommendedPluginsOff() || this.recommendedManifest(id) === null ? null : this.updateSources[id] ?? null),
+      source: (id) => (core.policy.recommendedPluginsOff() || this.#recommendedManifest(id) === null ? null : this.updateSources[id] ?? null),
       ids: () => core.policy.recommendedPluginsOff() ? [] : this.recommended.map((manifest) => manifest.id).filter((id) => this.updateSources[id] !== undefined),
-      pinned: (id) => this.recommendedManifest(id),
+      pinned: (id) => this.#recommendedManifest(id),
       installed: (id) => {
         try {
-          const disk = this.onDisk(id);
+          const disk = this.#onDisk(id);
           return disk.kind === 'installed' ? disk.installed.version : null;
         } catch {
           return null;
         }
       },
       read: (source) => this.readUpdateSource(source),
-      changed: (id) => this.emit(id),
+      changed: (id) => this.#emit(id),
       log: (level, message) => core.log(level, message),
     });
     this.apps = new PluginApps({
@@ -230,11 +233,11 @@ export class PluginStore {
       ownerToken: () => core.token,
       log: (level, message) => core.log(level, message),
       installed: (id) => {
-        const disk = this.onDisk(id);
+        const disk = this.#onDisk(id);
         if (disk.kind !== 'installed' || !providesApp(disk.installed.manifest)) return null;
-        return { binary: disk.installed.binary, dir: this.directory(id) };
+        return { binary: disk.installed.binary, dir: this.#directory(id) };
       },
-      changed: (id) => this.emit(id),
+      changed: (id) => this.#emit(id),
     });
     this.gateways = new PluginGateways({
       procs: core.procs,
@@ -243,32 +246,32 @@ export class PluginStore {
       getSetting: (key) => core.journal.getSetting(key),
       setSetting: (key, value) => core.journal.setSetting(key, value),
       installed: (id) => {
-        const disk = this.onDisk(id);
+        const disk = this.#onDisk(id);
         if (disk.kind !== 'installed' || !providesGateway(disk.installed.manifest)) return null;
         return { binary: disk.installed.binary, executable: disk.installed.manifest.executable };
       },
-      changed: (id) => this.emit(id),
+      changed: (id) => this.#emit(id),
       moved: (id, port) => { if (id === DOUANE_PLUGIN) core.settings.followGateway(port); },
     });
   }
 
-  private root(): string {
-    return resolve(this.core.dataDir, 'plugins');
+  #root(): string {
+    return resolve(this.#core.dataDir, 'plugins');
   }
 
-  private directory(id: string): string {
-    const root = this.root();
+  #directory(id: string): string {
+    const root = this.#root();
     const dir = resolve(root, id);
     // A cancelled install can remove its directory while state is being polled.
     for (const path of [root, dir]) if (lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink()) throw refused(`plugin path ${path} must not be a symbolic link`);
     return dir;
   }
 
-  private binaryPath(dir: string, manifest: PluginManifest): string {
+  #binaryPath(dir: string, manifest: PluginManifest): string {
     return join(dir, process.platform === 'win32' ? `${manifest.executable}.exe` : manifest.executable);
   }
 
-  private recommendedManifest(id: string): PluginManifest | null {
+  #recommendedManifest(id: string): PluginManifest | null {
     return this.recommended.find((manifest) => manifest.id === id) ?? null;
   }
 
@@ -278,8 +281,8 @@ export class PluginStore {
    * The installed one only wins a tie, so a retry reinstalls it rather than
    * going back to an older pinned entry.
    */
-  private recommendedTarget(id: string, installed: Installed | null): PluginManifest | null {
-    const pinned = this.recommendedManifest(id);
+  #recommendedTarget(id: string, installed: Installed | null): PluginManifest | null {
+    const pinned = this.#recommendedManifest(id);
     if (pinned === null) return null;
     let best = installed?.origin === 'recommended' && installed.manifest.id === id ? installed.manifest : pinned;
     for (const candidate of [pinned, this.updates.offered(id)?.manifest ?? null]) {
@@ -289,9 +292,9 @@ export class PluginStore {
   }
 
   /** The id, when it names a recommended plugin or one this core has anything of. */
-  private known(id: unknown): string {
+  #known(id: unknown): string {
     const expected = `a plugin id from plugins.list: ${this.recommended.map((manifest) => manifest.id).join(', ')} or one added from a URL`;
-    if (isPluginId(id) && (this.recommendedManifest(id) !== null || this.pending.has(id) || this.jobs.has(id) || existsSync(join(this.root(), id)))) return id;
+    if (isPluginId(id) && (this.#recommendedManifest(id) !== null || this.#pending.has(id) || this.#jobs.has(id) || existsSync(join(this.#root(), id)))) return id;
     throw invalidParams(`unknown plugin ${String(id)}; expected ${expected}`, { field: 'id', expected });
   }
 
@@ -300,12 +303,12 @@ export class PluginStore {
    * not take the Plugins page with it: the state carries the file and what was
    * expected, and the page can still reinstall or remove.
    */
-  private onDisk(id: string): OnDisk {
-    const dir = this.directory(id);
+  #onDisk(id: string): OnDisk {
+    const dir = this.#directory(id);
     // An activation a stopped core left half done settles first, unless it is this core's own, still running.
-    if (this.lanes.rewrite(id) === null) {
+    if (this.#lanes.rewrite(id) === null) {
       try {
-        if (recoverActivation(dir) === 'restored') this.core.log('warn', `plugin ${id}: an update that did not finish was rolled back`);
+        if (recoverActivation(dir) === 'restored') this.#core.log('warn', `plugin ${id}: an update that did not finish was rolled back`);
       } catch (error) {
         return { kind: 'error', message: `${dir} holds an update that did not finish and could not be rolled back (${messageOf(error)}). Reinstall ${id}.` };
       }
@@ -326,21 +329,21 @@ export class PluginStore {
       if (error instanceof ManifestRefused) return { kind: 'rejected', rejected: error.rejected };
       throw error;
     }
-    const binary = this.binaryPath(dir, record.manifest);
+    const binary = this.#binaryPath(dir, record.manifest);
     if (!existsSync(binary)) return { kind: 'error', message: `${binary} is missing. Reinstall ${id}.` };
     return { kind: 'installed', installed: { ...record, binary } };
   }
 
   state(id: string): PluginState {
-    const recommended = this.recommendedManifest(id);
-    const disk = this.onDisk(id);
-    const job = this.jobs.get(id);
-    const pending = this.pending.get(id);
+    const recommended = this.#recommendedManifest(id);
+    const disk = this.#onDisk(id);
+    const job = this.#jobs.get(id);
+    const pending = this.#pending.get(id);
     const installed = disk.kind === 'installed' ? disk.installed : null;
     // What an install brings; the recommended list wins, then a URL add in progress.
-    const target = this.recommendedTarget(id, installed) ?? pending?.manifest ?? installed?.manifest ?? null;
+    const target = this.#recommendedTarget(id, installed) ?? pending?.manifest ?? installed?.manifest ?? null;
     const running = installed?.manifest ?? target;
-    const failure = this.failures.get(id) ?? (disk.kind === 'error' ? disk.message : null);
+    const failure = this.#failures.get(id) ?? (disk.kind === 'error' ? disk.message : null);
     return {
       id,
       name: target?.name ?? id,
@@ -358,21 +361,21 @@ export class PluginStore {
       commands: running ? commandsOf(running) : [],
       pools: running ? poolsOf(running) : [],
       rejected: disk.kind === 'rejected' ? disk.rejected : null,
-      app: running !== null && providesApp(running) ? this.apps.state(id, this.directory(id)) : null,
-      gateway: running !== null && providesGateway(running) ? this.gateways.state(id, this.directory(id)) : null,
+      app: running !== null && providesApp(running) ? this.apps.state(id, this.#directory(id)) : null,
+      gateway: running !== null && providesGateway(running) ? this.gateways.state(id, this.#directory(id)) : null,
       updates: recommended !== null ? this.updates.state(id) : null,
     };
   }
 
   /** The recommended plugins in their list order, then the URL ones by id. */
   list(): PluginState[] {
-    return this.ids().map((id) => this.state(id));
+    return this.#ids().map((id) => this.state(id));
   }
 
   /** Every plugin id the store knows: recommended, being installed or with an install on disk. */
-  private ids(): string[] {
-    const ids = new Set<string>([...this.pending.keys(), ...this.jobs.keys()]);
-    const root = this.root();
+  #ids(): string[] {
+    const ids = new Set<string>([...this.#pending.keys(), ...this.#jobs.keys()]);
+    const root = this.#root();
     if (existsSync(root)) {
       for (const entry of readdirSync(root, { withFileTypes: true })) {
         // `.fetch-*` is a repository `plugins.inspect` is reading.
@@ -384,24 +387,24 @@ export class PluginStore {
     return [...this.recommended.map((manifest) => manifest.id), ...[...ids].sort()];
   }
 
-  private emit(id: string): void {
+  #emit(id: string): void {
     try {
-      this.core.bus.emit('plugins.updated', this.state(id));
+      this.#core.bus.emit('plugins.updated', this.state(id));
     } catch (error) {
-      this.core.log('warn', `plugin ${id} state unreadable: ${messageOf(error)}`);
+      this.#core.log('warn', `plugin ${id} state unreadable: ${messageOf(error)}`);
     }
   }
 
   /** Installs a recommended plugin, or reinstalls a URL one from the manifest it recorded. */
   install(id: string): PluginState {
-    this.core.policy.assert(this.core.policy.pluginInstallsOff(), 'plugins.install', id);
-    this.known(id);
-    if (this.jobs.has(id)) return this.state(id);
-    const recommended = this.recommendedManifest(id);
+    this.#core.policy.assert(this.#core.policy.pluginInstallsOff(), 'plugins.install', id);
+    this.#known(id);
+    if (this.#jobs.has(id)) return this.state(id);
+    const recommended = this.#recommendedManifest(id);
     if (recommended !== null) {
       const target = () => {
-        const disk = this.onDisk(id);
-        return this.recommendedTarget(id, disk.kind === 'installed' ? disk.installed : null) ?? recommended;
+        const disk = this.#onDisk(id);
+        return this.#recommendedTarget(id, disk.kind === 'installed' ? disk.installed : null) ?? recommended;
       };
       // The pinned entry can be releases behind its source, and the periodic
       // checks read only installed plugins: the source is read first, so a
@@ -411,53 +414,53 @@ export class PluginStore {
         await Promise.race([this.updates.check([id]), Bun.sleep(INSTALL_SOURCE_WAIT_MS), aborted]);
         return target();
       };
-      return this.start(id, target(), null, 'recommended', latest);
+      return this.#start(id, target(), null, 'recommended', latest);
     }
-    const pending = this.pending.get(id);
-    if (pending !== undefined) return this.start(id, pending.manifest, pending.source, 'url');
-    const disk = this.onDisk(id);
-    if (disk.kind === 'installed' && disk.installed.source !== null) return this.start(id, disk.installed.manifest, disk.installed.source, 'url');
+    const pending = this.#pending.get(id);
+    if (pending !== undefined) return this.#start(id, pending.manifest, pending.source, 'url');
+    const disk = this.#onDisk(id);
+    if (disk.kind === 'installed' && disk.installed.source !== null) return this.#start(id, disk.installed.manifest, disk.installed.source, 'url');
     if (disk.kind === 'rejected') throw refused(`${id} was refused (${disk.rejected.message}). Remove it, then add it again from its URL.`, disk.rejected);
     throw refused(`${id} has no manifest to reinstall from. Remove it, then add it again from its URL.`);
   }
 
   /** `latest`, when given, may swap `manifest` for a newer one before the download starts. */
-  private start(id: string, manifest: PluginManifest, source: PluginSource | null, origin: Origin, latest?: (signal: AbortSignal) => Promise<PluginManifest>): PluginState {
-    if (this.closing) throw refused('Boite is shutting down.');
-    if (this.lanes.busy(id)) throw refused('Wait for the current plugin operation before installing.');
+  #start(id: string, manifest: PluginManifest, source: PluginSource | null, origin: Origin, latest?: (signal: AbortSignal) => Promise<PluginManifest>): PluginState {
+    if (this.#closing) throw refused('Boite is shutting down.');
+    if (this.#lanes.busy(id)) throw refused('Wait for the current plugin operation before installing.');
     const artifact = artifactFor(manifest);
     if (artifact === null) throw refused(`${id} has no binary for ${platformKey()}`);
-    this.failures.delete(id);
+    this.#failures.delete(id);
     // A first install that fails leaves nothing behind; an update that fails keeps the version that worked.
-    const fresh = this.onDisk(id).kind !== 'installed';
+    const fresh = this.#onDisk(id).kind !== 'installed';
     const controller = new AbortController();
     const job: Job = { controller, progress: 0, promise: Promise.resolve(), relaunch: false };
-    this.jobs.set(id, job);
-    job.promise = this.lanes.alone(id, 'install', () => (latest === undefined ? Promise.resolve(manifest) : latest(controller.signal))
+    this.#jobs.set(id, job);
+    job.promise = this.#lanes.alone(id, 'install', () => (latest === undefined ? Promise.resolve(manifest) : latest(controller.signal))
       .then((target) => {
         const found = target === manifest ? artifact : artifactFor(target);
         if (found === null) throw new Error(`${id} ${target.version} has no binary for ${platformKey()}`);
-        return this.download(id, target, source, origin, found, job);
+        return this.#download(id, target, source, origin, found, job);
       })
-      .then(() => { this.pending.delete(id); job.relaunch = true; })
+      .then(() => { this.#pending.delete(id); job.relaunch = true; })
       .catch(async (error: unknown) => {
-        if (!controller.signal.aborted) this.failures.set(id, messageOf(error));
-        if (fresh) await removeTree(this.directory(id)).catch(() => undefined);
-        if (fresh && controller.signal.aborted) this.pending.delete(id);
+        if (!controller.signal.aborted) this.#failures.set(id, messageOf(error));
+        if (fresh) await removeTree(this.#directory(id)).catch(() => undefined);
+        if (fresh && controller.signal.aborted) this.#pending.delete(id);
       })
       .finally(() => {
-        this.jobs.delete(id);
-        this.cache.delete(id);
-        this.emit(id);
-        if (job.relaunch) this.resumeApp(id);
+        this.#jobs.delete(id);
+        this.#cache.delete(id);
+        this.#emit(id);
+        if (job.relaunch) this.#resumeApp(id);
       }), 'Wait for the current plugin operation before installing.');
-    this.emit(id);
+    this.#emit(id);
     return this.state(id);
   }
 
-  private async download(id: string, manifest: PluginManifest, source: PluginSource | null, origin: Origin, artifact: PluginArtifact, job: Job): Promise<void> {
+  async #download(id: string, manifest: PluginManifest, source: PluginSource | null, origin: Origin, artifact: PluginArtifact, job: Job): Promise<void> {
     const signal = job.controller.signal;
-    const dir = this.directory(id);
+    const dir = this.#directory(id);
     mkdirSync(dir, { recursive: true });
     const temporary = join(dir, 'download.part');
     // An idle timer rather than a deadline on the whole transfer: a slow link that
@@ -495,7 +498,7 @@ export class PluginStore {
           if (size > DOWNLOAD_MAX_BYTES) throw new Error(`${id} download exceeds the 64 MB a plugin may take.`);
           chunks.push(chunk.value);
           const progress = Math.min(95, Math.floor(size / total * 95));
-          if (progress !== job.progress) { job.progress = progress; this.emit(id); }
+          if (progress !== job.progress) { job.progress = progress; this.#emit(id); }
         }
       } finally { clearTimeout(timer); clearTimeout(ceiling); void reader.cancel().catch(() => undefined); }
       const bytes = Buffer.concat(chunks);
@@ -504,7 +507,7 @@ export class PluginStore {
       await writeFile(temporary, bytes, { mode: 0o700 });
       if (process.platform !== 'win32') await chmod(temporary, 0o700);
       signal.throwIfAborted();
-      const previous = this.onDisk(id);
+      const previous = this.#onDisk(id);
       const installed = previous.kind === 'installed' ? previous.installed : null;
       // Windows locks a running executable: the app stops before its binary is replaced.
       if (installed !== null && providesApp(installed.manifest)) {
@@ -513,7 +516,7 @@ export class PluginStore {
       }
       // A gateway still serving would be cut off: it waits for its requests like an update, then stops.
       const ran = installed !== null && providesGateway(installed.manifest) && await this.gateways.drainForUpdate(id, manifest.version);
-      await this.activate(id, dir, installed, manifest, temporary, ran, JSON.stringify({ schema: 1, origin, source, installedAt: Date.now(), manifest }, null, 2));
+      await this.#activate(id, dir, installed, manifest, temporary, ran, JSON.stringify({ schema: 1, origin, source, installedAt: Date.now(), manifest }, null, 2));
       job.progress = 100;
     } finally {
       clearTimeout(timer);
@@ -530,8 +533,8 @@ export class PluginStore {
    * back, the previous gateway starts again, and the update fails with the
    * reason, keeping the version that worked.
    */
-  private async activate(id: string, dir: string, previous: Installed | null, manifest: PluginManifest, temporary: string, ran: boolean, record: string): Promise<void> {
-    const binary = this.binaryPath(dir, manifest);
+  async #activate(id: string, dir: string, previous: Installed | null, manifest: PluginManifest, temporary: string, ran: boolean, record: string): Promise<void> {
+    const binary = this.#binaryPath(dir, manifest);
     let activation: Activation | null = null;
     let why: string | null = null;
     try {
@@ -559,13 +562,13 @@ export class PluginStore {
    * downloaded or run; the preview is what the owner confirms.
    */
   async inspect(params: RpcParams<'plugins.inspect'>): Promise<PluginPreview> {
-    if (this.closing) throw refused('Boite is shutting down.');
+    if (this.#closing) throw refused('Boite is shutting down.');
     const url = normalizeSourceUrl(params.url, this.allowLocalSources);
     const ref = checkRef(params.ref);
-    const fetching = fetchManifest(this.core, url, ref, { allowLocal: this.allowLocalSources, signal: this.shutdown.signal });
-    this.inspecting.add(fetching);
+    const fetching = fetchManifest(this.#core, url, ref, { allowLocal: this.allowLocalSources, signal: this.#shutdown.signal });
+    this.#inspecting.add(fetching);
     let fetched: Awaited<typeof fetching>;
-    try { fetched = await fetching; } finally { this.inspecting.delete(fetching); }
+    try { fetched = await fetching; } finally { this.#inspecting.delete(fetching); }
     const source: PluginSource = { url, ref, commit: fetched.commit };
     const preview: PluginPreview = {
       previewId: null, source, manifest: null, rejected: null, artifact: null,
@@ -583,16 +586,16 @@ export class PluginStore {
       throw error;
     }
     const read: PluginPreview = { ...preview, manifest, artifact: artifactFor(manifest), commands: commandsOf(manifest) };
-    const conflict = this.conflict(manifest, url);
+    const conflict = this.#conflict(manifest, url);
     if (conflict !== null) return { ...read, rejected: conflict };
     if (read.artifact === null) {
       const published = Object.keys(manifest.artifacts).join(', ');
       return { ...read, rejected: refusal(PLUGIN_MANIFEST_FILE, 'artifacts', `an artifact for ${platformKey()}, this machine`, published).rejected };
     }
-    this.prunePreviews();
+    this.#prunePreviews();
     const previewId = newToken();
-    this.previews.set(previewId, { manifest, source, expiresAt: preview.expiresAt });
-    const disk = this.onDisk(manifest.id);
+    this.#previews.set(previewId, { manifest, source, expiresAt: preview.expiresAt });
+    const disk = this.#onDisk(manifest.id);
     return { ...read, previewId, replaces: disk.kind === 'installed' ? disk.installed.version : null };
   }
 
@@ -601,13 +604,13 @@ export class PluginStore {
    * the recommended plugin's; an id added from one URL is not taken over by
    * another. The same URL again is an update.
    */
-  private conflict(manifest: PluginManifest, url: string): PluginRejected | null {
+  #conflict(manifest: PluginManifest, url: string): PluginRejected | null {
     const found = manifest.id;
-    if (this.recommendedManifest(found) !== null) {
+    if (this.#recommendedManifest(found) !== null) {
       return refusal(PLUGIN_MANIFEST_FILE, 'id', `an id no recommended plugin uses (${this.recommended.map((entry) => entry.id).join(', ')})`, found).rejected;
     }
-    const pending = this.pending.get(found);
-    const disk = this.onDisk(found);
+    const pending = this.#pending.get(found);
+    const disk = this.#onDisk(found);
     const taken = pending?.source.url ?? (disk.kind === 'installed' ? disk.installed.source?.url ?? null : null);
     if (taken !== null && taken !== url) {
       return refusal(PLUGIN_MANIFEST_FILE, 'id', `an id not already used by the plugin from ${taken}`, found).rejected;
@@ -618,13 +621,13 @@ export class PluginStore {
     return null;
   }
 
-  private prunePreviews(): void {
+  #prunePreviews(): void {
     const now = Date.now();
-    for (const [key, preview] of this.previews) if (preview.expiresAt <= now) this.previews.delete(key);
-    while (this.previews.size >= PREVIEW_MAX) {
-      const oldest = this.previews.keys().next().value;
+    for (const [key, preview] of this.#previews) if (preview.expiresAt <= now) this.#previews.delete(key);
+    while (this.#previews.size >= PREVIEW_MAX) {
+      const oldest = this.#previews.keys().next().value;
       if (oldest === undefined) break;
-      this.previews.delete(oldest);
+      this.#previews.delete(oldest);
     }
   }
 
@@ -632,30 +635,30 @@ export class PluginStore {
   add(previewId: unknown): PluginState {
     const expected = 'a previewId plugins.inspect returned in the last 10 minutes';
     if (typeof previewId !== 'string') throw invalidParams(`plugin previewId must be ${expected}`, { field: 'previewId', expected });
-    const preview = this.previews.get(previewId);
+    const preview = this.#previews.get(previewId);
     if (preview === undefined || preview.expiresAt <= Date.now()) {
-      this.previews.delete(previewId);
+      this.#previews.delete(previewId);
       throw invalidParams(`plugin preview is unknown or expired; inspect the URL again`, { field: 'previewId', expected });
     }
-    this.previews.delete(previewId);
+    this.#previews.delete(previewId);
     const { manifest, source } = preview;
-    const conflict = this.conflict(manifest, source.url);
+    const conflict = this.#conflict(manifest, source.url);
     if (conflict !== null) throw refused(conflict.message, conflict);
-    if (this.lanes.busy(manifest.id)) throw refused('Wait for the current plugin operation before installing.');
-    const before = this.pending.get(manifest.id);
-    this.pending.set(manifest.id, { manifest, source });
+    if (this.#lanes.busy(manifest.id)) throw refused('Wait for the current plugin operation before installing.');
+    const before = this.#pending.get(manifest.id);
+    this.#pending.set(manifest.id, { manifest, source });
     try {
-      return this.start(manifest.id, manifest, source, 'url');
+      return this.#start(manifest.id, manifest, source, 'url');
     } catch (error) {
-      if (before === undefined) this.pending.delete(manifest.id);
-      else this.pending.set(manifest.id, before);
+      if (before === undefined) this.#pending.delete(manifest.id);
+      else this.#pending.set(manifest.id, before);
       throw error;
     }
   }
 
   async cancel(id: string): Promise<PluginState> {
-    this.known(id);
-    const job = this.jobs.get(id);
+    this.#known(id);
+    const job = this.#jobs.get(id);
     if (job !== undefined) {
       job.controller.abort();
       await job.promise;
@@ -665,39 +668,39 @@ export class PluginStore {
 
   /** Deletes the plugin's directory, the whole of what its install wrote. */
   async uninstall(id: string): Promise<PluginState> {
-    this.known(id);
+    this.#known(id);
     // Held before the first await: an install or a start asked for meanwhile is refused, not erased.
-    return this.lanes.alone(id, 'uninstall', async () => {
+    return this.#lanes.alone(id, 'uninstall', async () => {
       await this.apps.forget(id);
       // Its data directory stays: a gateway's sign-ins outlive its program.
       await this.gateways.forget(id);
-      await removeTree(this.directory(id));
-      this.pending.delete(id);
-      this.failures.delete(id);
-      this.cache.delete(id);
+      await removeTree(this.#directory(id));
+      this.#pending.delete(id);
+      this.#failures.delete(id);
+      this.#cache.delete(id);
       return this.state(id);
     }, 'Wait for the current plugin operation before uninstalling.').then((state) => {
-      this.core.bus.emit('plugins.updated', state);
+      this.#core.bus.emit('plugins.updated', state);
       return state;
     });
   }
 
   /** The installed plugin an account call runs, or the reason there is none. */
-  private usable(id: string): Installed {
-    if (this.closing) throw refused('Boite is shutting down.');
-    this.lanes.assertUsable(id);
-    const disk = this.onDisk(id);
+  #usable(id: string): Installed {
+    if (this.#closing) throw refused('Boite is shutting down.');
+    this.#lanes.assertUsable(id);
+    const disk = this.#onDisk(id);
     if (disk.kind === 'rejected') throw refused(`${id} was refused: ${disk.rejected.message}`, disk.rejected);
     if (disk.kind !== 'installed') throw refused(`Install ${id} first.`);
     return disk.installed;
   }
 
-  private async run(id: string, installed: Installed, args: string[]): Promise<string> {
-    if (this.closing) throw refused('Boite is shutting down.');
-    const threadId = `plugin:${id}:${++this.sequence}`;
-    const spawned = this.core.procs.spawn(threadId, installed.binary, args, { cwd: this.directory(id) });
-    this.running.set(threadId, id);
-    this.exits.add(spawned.exited);
+  async #run(id: string, installed: Installed, args: string[]): Promise<string> {
+    if (this.#closing) throw refused('Boite is shutting down.');
+    const threadId = `plugin:${id}:${++this.#sequence}`;
+    const spawned = this.#core.procs.spawn(threadId, installed.binary, args, { cwd: this.#directory(id) });
+    this.#running.set(threadId, id);
+    this.#exits.add(spawned.exited);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const read = async (stream: ReadableStream<Uint8Array>): Promise<string> => {
       const reader = stream.getReader(); const chunks: Uint8Array[] = []; let size = 0;
@@ -718,85 +721,85 @@ export class PluginStore {
       return stdout;
     } finally {
       clearTimeout(timer);
-      this.core.procs.killTree(threadId);
+      this.#core.procs.killTree(threadId);
       await spawned.exited;
-      this.running.delete(threadId);
-      this.exits.delete(spawned.exited);
+      this.#running.delete(threadId);
+      this.#exits.delete(spawned.exited);
     }
   }
 
   async accounts(id: string, refresh = false): Promise<PluginPool[]> {
-    this.known(id);
-    const installed = this.usable(id);
-    const listing = this.listings.get(id);
+    this.#known(id);
+    const installed = this.#usable(id);
+    const listing = this.#listings.get(id);
     if (listing !== undefined) return listing;
-    const cached = this.cache.get(id);
+    const cached = this.#cache.get(id);
     if (cached !== undefined && Date.now() - cached.at < (refresh ? 10_000 : 60_000)) return cached.pools;
-    const promise = this.lanes.shared(id, async () => {
+    const promise = this.#lanes.shared(id, async () => {
       const pools: PluginPool[] = [];
       for (const provider of poolsOf(installed.manifest)) {
-        pools.push(parsePluginPool(provider, await this.run(id, installed, [...POOL_COMMANDS.list(provider, refresh)]), installed.manifest.executable));
+        pools.push(parsePluginPool(provider, await this.#run(id, installed, [...POOL_COMMANDS.list(provider, refresh)]), installed.manifest.executable));
       }
-      this.cache.set(id, { pools, at: Date.now() });
+      this.#cache.set(id, { pools, at: Date.now() });
       return pools;
     });
-    this.listings.set(id, promise);
-    try { return await promise; } finally { this.listings.delete(id); }
+    this.#listings.set(id, promise);
+    try { return await promise; } finally { this.#listings.delete(id); }
   }
 
   blocksAccount(accountId: string): boolean {
-    if (this.action === null) return false;
-    const account = this.core.journal.getAccount(accountId);
-    return account?.providerId === this.action.provider && account.isolationDir === null;
+    if (this.#action === null) return false;
+    const account = this.#core.journal.getAccount(accountId);
+    return account?.providerId === this.#action.provider && account.isolationDir === null;
   }
 
   async accountAction(params: RpcParams<'plugins.accountAction'>): Promise<PluginPool[]> {
-    const id = this.known(params.id);
-    const installed = this.usable(id);
+    const id = this.#known(params.id);
+    const installed = this.#usable(id);
     const pools = poolsOf(installed.manifest);
     if (!pools.includes(params.provider)) throw invalidParams(`plugin provider must be one of ${pools.join(', ')}`, { field: 'provider' });
     if (!['add', 'switch', 'remove'].includes(params.action)) throw invalidParams('plugin action must be add, switch or remove', { field: 'action' });
     if (params.action !== 'add' && (typeof params.email !== 'string' || !/^[^\s@]+@[^\s@]+$/.test(params.email))) throw invalidParams('plugin email must be an email address', { field: 'email' });
     // One login change at a time across plugins: `blocksAccount` holds the scheduler for one provider.
-    if (this.action !== null || this.listings.has(id)) throw refused('Wait for the current plugin operation to finish.');
-    return this.lanes.shared(id, () => this.changeLogin(id, installed, params));
+    if (this.#action !== null || this.#listings.has(id)) throw refused('Wait for the current plugin operation to finish.');
+    return this.#lanes.shared(id, () => this.#changeLogin(id, installed, params));
   }
 
-  private async changeLogin(id: string, installed: Installed, params: RpcParams<'plugins.accountAction'>): Promise<PluginPool[]> {
-    this.action = { id, provider: params.provider };
+  async #changeLogin(id: string, installed: Installed, params: RpcParams<'plugins.accountAction'>): Promise<PluginPool[]> {
+    this.#action = { id, provider: params.provider };
     try {
-      const affected = this.core.journal.listThreads().filter((thread) => this.blocksAccount(thread.accountId));
-      if (this.core.scheduler.activeAccountIds().some((accountId) => this.blocksAccount(accountId))) throw refused('Stop this provider\'s default-account turns before changing its saved login.');
+      const affected = this.#core.journal.listThreads().filter((thread) => this.blocksAccount(thread.accountId));
+      if (this.#core.scheduler.activeAccountIds().some((accountId) => this.blocksAccount(accountId))) throw refused('Stop this provider\'s default-account turns before changing its saved login.');
       if (affected.some((thread) => threadActive(thread.status))) throw refused('Stop this provider\'s default-account turns before changing its saved login.');
-      for (const thread of affected) this.core.threads.releaseAgent(thread.id);
+      for (const thread of affected) this.#core.threads.releaseAgent(thread.id);
       const args = params.action === 'add' ? POOL_COMMANDS.add(params.provider)
         : params.action === 'switch' ? POOL_COMMANDS.switch(params.provider, params.email!)
         : POOL_COMMANDS.remove(params.provider, params.email!);
-      await this.run(id, installed, [...args]);
-      if (this.closing) throw refused('Boite is shutting down.');
-      this.cache.delete(id);
+      await this.#run(id, installed, [...args]);
+      if (this.#closing) throw refused('Boite is shutting down.');
+      this.#cache.delete(id);
       // The saved login changed hands: its last quota reading is someone else's now.
-      this.core.quotas.forget((accountId) => this.blocksAccount(accountId));
-      this.core.quotas.invalidate();
+      this.#core.quotas.forget((accountId) => this.blocksAccount(accountId));
+      this.#core.quotas.invalidate();
       // Announced whatever the status reads: a switch between two signed-in
       // logins leaves it at 'ok', yet the model lists belong to the old login.
-      for (const account of this.core.accounts.list()) if (this.blocksAccount(account.id)) this.core.accounts.check(account.id, true);
+      for (const account of this.#core.accounts.list()) if (this.blocksAccount(account.id)) this.#core.accounts.check(account.id, true);
       return await this.accounts(id);
     } finally {
-      this.action = null;
-      if (!this.closing) this.core.scheduler.onSettingsChanged();
+      this.#action = null;
+      if (!this.#closing) this.#core.scheduler.onSettingsChanged();
     }
   }
 
   /** Starts the plugin's desktop app and gateway it provides: at core start those that start with it, after an install those left enabled. */
-  private resumeApp(id: string, atStart = false): void {
-    if (this.closing) return;
+  #resumeApp(id: string, atStart = false): void {
+    if (this.#closing) return;
     try {
-      const disk = this.onDisk(id);
-      if (disk.kind === 'installed' && providesApp(disk.installed.manifest)) this.apps.resume(id, this.directory(id), atStart);
-      if (disk.kind === 'installed' && providesGateway(disk.installed.manifest)) this.gateways.resume(id, this.directory(id), atStart);
+      const disk = this.#onDisk(id);
+      if (disk.kind === 'installed' && providesApp(disk.installed.manifest)) this.apps.resume(id, this.#directory(id), atStart);
+      if (disk.kind === 'installed' && providesGateway(disk.installed.manifest)) this.gateways.resume(id, this.#directory(id), atStart);
     } catch (error) {
-      this.core.log('warn', `plugin ${id} app did not start: ${messageOf(error)}`);
+      this.#core.log('warn', `plugin ${id} app did not start: ${messageOf(error)}`);
     }
   }
 
@@ -808,61 +811,61 @@ export class PluginStore {
   startApps(): void {
     let ids: string[];
     try {
-      ids = this.ids();
+      ids = this.#ids();
     } catch (error) {
-      this.core.log('warn', `desktop apps did not start: ${messageOf(error)}`);
+      this.#core.log('warn', `desktop apps did not start: ${messageOf(error)}`);
       return;
     }
-    for (const id of ids) if (!this.jobs.has(id)) this.resumeApp(id, true);
+    for (const id of ids) if (!this.#jobs.has(id)) this.#resumeApp(id, true);
   }
 
   /** `plugins.autostart`: whether the plugin's desktop app and gateway start when the core starts. */
   async autostart(params: RpcParams<'plugins.autostart'>): Promise<PluginState> {
-    const id = this.known(params.id);
+    const id = this.#known(params.id);
     if (typeof params.autostart !== 'boolean') throw invalidParams('autostart must be true or false', { field: 'autostart', expected: 'true or false' });
-    const installed = this.usable(id);
+    const installed = this.#usable(id);
     const app = providesApp(installed.manifest);
     const gateway = providesGateway(installed.manifest);
     if (!app && !gateway) throw refused(`${id} provides no desktop app or gateway to start with Boite.`);
-    await this.lanes.shared(id, async () => {
-      if (app) await this.apps.setAutostart(id, this.directory(id), params.autostart);
-      if (gateway) await this.gateways.setAutostart(id, this.directory(id), params.autostart);
+    await this.#lanes.shared(id, async () => {
+      if (app) await this.apps.setAutostart(id, this.#directory(id), params.autostart);
+      if (gateway) await this.gateways.setAutostart(id, this.#directory(id), params.autostart);
     });
     return this.state(id);
   }
 
   /** `plugins.app`: start, stop or restart a desktop-app plugin. */
   async app(params: RpcParams<'plugins.app'>): Promise<PluginState> {
-    const id = this.known(params.id);
+    const id = this.#known(params.id);
     if (!['start', 'stop', 'restart'].includes(params.action)) {
       throw invalidParams('plugin app action must be start, stop or restart', { field: 'action', expected: 'start, stop or restart' });
     }
-    const installed = this.usable(id);
+    const installed = this.#usable(id);
     if (!providesApp(installed.manifest)) throw refused(`${id} provides no desktop app.`);
-    await this.lanes.shared(id, () => this.apps.control(id, this.directory(id), params.action));
+    await this.#lanes.shared(id, () => this.apps.control(id, this.#directory(id), params.action));
     return this.state(id);
   }
 
   /** `plugins.gateway`: start, stop or restart a gateway plugin. */
   async gateway(params: RpcParams<'plugins.gateway'>): Promise<PluginState> {
-    const id = this.known(params.id);
+    const id = this.#known(params.id);
     if (!['start', 'stop', 'restart'].includes(params.action)) {
       throw invalidParams('plugin gateway action must be start, stop or restart', { field: 'action', expected: 'start, stop or restart' });
     }
-    const installed = this.usable(id);
+    const installed = this.#usable(id);
     if (!providesGateway(installed.manifest)) throw refused(`${id} provides no gateway.`);
-    await this.lanes.shared(id, () => this.gateways.control(id, this.directory(id), params.action));
+    await this.#lanes.shared(id, () => this.gateways.control(id, this.#directory(id), params.action));
     return this.state(id);
   }
 
   /** At core start: the update checks of the recommended plugins that name a source. */
   startUpdateChecks(): void {
-    if (!this.closing) this.updates.start();
+    if (!this.#closing) this.updates.start();
   }
 
   /** `plugins.checkUpdates`: reads the update sources now and answers with the states they leave. */
   async checkUpdates(params: RpcParams<'plugins.checkUpdates'>): Promise<PluginState[]> {
-    if (this.closing) throw refused('Boite is shutting down.');
+    if (this.#closing) throw refused('Boite is shutting down.');
     const sourced = this.recommended.map((manifest) => manifest.id).filter((id) => this.updateSources[id] !== undefined);
     let ids = sourced;
     if (params?.id !== undefined) {
@@ -875,17 +878,17 @@ export class PluginStore {
   }
 
   async close(): Promise<void> {
-    this.closing = true;
+    this.#closing = true;
     const apps = this.apps.close();
     const gateways = this.gateways.close();
-    this.shutdown.abort();
+    this.#shutdown.abort();
     const checks = this.updates.close();
-    const jobs = [...this.jobs.values()];
+    const jobs = [...this.#jobs.values()];
     for (const job of jobs) job.controller.abort();
-    await Promise.all([...jobs.map((job) => job.promise), ...this.lanes.rewrites()]);
-    for (const threadId of this.running.keys()) this.core.procs.killTree(threadId);
-    await Promise.all(this.exits);
-    await Promise.all([...this.listings.values(), ...this.inspecting].map((pending) => pending.catch(() => undefined)));
+    await Promise.all([...jobs.map((job) => job.promise), ...this.#lanes.rewrites()]);
+    for (const threadId of this.#running.keys()) this.#core.procs.killTree(threadId);
+    await Promise.all(this.#exits);
+    await Promise.all([...this.#listings.values(), ...this.#inspecting].map((pending) => pending.catch(() => undefined)));
     await apps;
     await gateways;
     await checks;

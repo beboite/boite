@@ -10,6 +10,7 @@ import { LinkedPullRequests } from '../linked-pull-requests.ts';
 import { threadCapabilities } from './capabilities.ts';
 import { agentShape } from './agent-shape.ts';
 import { steerUser } from './user-steering.ts';
+import { startsAutoGoal } from '../composer-activity.ts';
 import { readToolOutput, readToolPart } from './records.ts';
 import { readMessageAttachment } from './attachment-read.ts';
 import { CreationRequests } from './creation-requests.ts';
@@ -221,7 +222,9 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     const attachments = await core.attachmentUploads.resolve(ctx.connection.id, params.attachments ?? [], params.attachmentIds);
     // A subagent put away as done takes a new prompt, as it takes a letter from its parent.
     const thread = core.threads.require(params.threadId);
-    const start = () => core.threads.startTurn(params.threadId, { prompt: params.prompt, attachments, previews: params.previewReferences ?? [] }, { kind: 'user', requestId: params.clientRequestId, sentFrom: promptOrigin(ctx.connection, core.clients.use(ctx.connection)) }, { expectedSelectionVersion: params.expectedSelectionVersion });
+    const preferences = core.clients.use(ctx.connection);
+    const autoGoal = startsAutoGoal(params.prompt, preferences?.experiments, core.settings.get().autoGoalMinChars) ? params.prompt : undefined;
+    const start = () => core.threads.startTurn(params.threadId, { prompt: params.prompt, attachments, previews: params.previewReferences ?? [] }, { kind: 'user', requestId: params.clientRequestId, sentFrom: promptOrigin(ctx.connection, preferences) }, { expectedSelectionVersion: params.expectedSelectionVersion, autoGoal });
     return core.delegation.retirements.revivable(thread) ? core.delegation.retirements.revive(thread, start) : start();
   });
   core.router.register('turns.stop', (params, ctx) => {

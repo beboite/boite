@@ -109,37 +109,40 @@ function refuseUnisolable(provider: ProviderDescriptor): void {
 }
 
 export class AccountStore {
-  private readonly checks = new Map<AccountId, Promise<Account>>();
-  private readonly logins = new Map<AccountId, LoginRun>();
-  private readonly removing = new Set<AccountId>();
+  readonly #core: Core;
+
+  readonly #checks = new Map<AccountId, Promise<Account>>();
+  readonly #logins = new Map<AccountId, LoginRun>();
+  readonly #removing = new Set<AccountId>();
   /** The share problems last logged per account, so a spawn repeats a warning only when it changed. */
-  private readonly shareLog = new Map<AccountId, string>();
+  readonly #shareLog = new Map<AccountId, string>();
 
   /** Checks, discovery, quota reads and resets: what removal stops and waits for. */
   readonly operations: AccountOperations;
 
-  constructor(private readonly core: Core) { this.operations = new AccountOperations(core); }
+  constructor(core: Core) {
+    this.#core = core; this.operations = new AccountOperations(core); }
 
   list(): Account[] {
-    return this.core.journal.listAccounts();
+    return this.#core.journal.listAccounts();
   }
 
   require(accountId: AccountId): Account {
-    const account = this.core.journal.getAccount(accountId);
+    const account = this.#core.journal.getAccount(accountId);
     if (account === null) throw notFound(`unknown account ${accountId}`, { accountId });
-    if (this.removing.has(accountId)) throw refused('this account is being removed', { accountId });
+    if (this.#removing.has(accountId)) throw refused('this account is being removed', { accountId });
     return account;
   }
 
   /** The top-level conversations that name this account: what removing it leaves without one. */
   threadCount(accountId: AccountId): number {
     this.require(accountId);
-    const row = this.core.journal.db.query('SELECT COUNT(*) AS count FROM threads WHERE account_id = ? AND parent_thread_id IS NULL').get(accountId) as { count: number };
+    const row = this.#core.journal.db.query('SELECT COUNT(*) AS count FROM threads WHERE account_id = ? AND parent_thread_id IS NULL').get(accountId) as { count: number };
     return row.count;
   }
 
   add(params: { providerId: ProviderId; label: string; useDefaultLocation?: boolean }): Account {
-    const provider = this.core.providers.require(params.providerId);
+    const provider = this.#core.providers.require(params.providerId);
     const id = newId('acc_');
     // A provider that is always isolated has no default location to fall back
     // on: its own login belongs to the user's IDE and is never Boite's to use.
@@ -147,7 +150,7 @@ export class AccountStore {
     if (!useDefault) refuseUnisolable(provider);
     let isolationDir: string | null = null;
     if (!useDefault) {
-      isolationDir = join(this.core.dataDir, 'accounts', id);
+      isolationDir = join(this.#core.dataDir, 'accounts', id);
       mkdirSync(isolationDir, { recursive: true });
     }
     const account: Account = {
@@ -159,9 +162,9 @@ export class AccountStore {
       identity: null,
       createdAt: Date.now(),
     };
-    this.core.journal.append({ type: 'account.added', threadId: null, version: 1, payload: account }, () => {
-      this.core.journal.putAccount(account);
-      if (useDefault) this.core.journal.deleteSetting(`account-default-removed:${provider.id}`);
+    this.#core.journal.append({ type: 'account.added', threadId: null, version: 1, payload: account }, () => {
+      this.#core.journal.putAccount(account);
+      if (useDefault) this.#core.journal.deleteSetting(`account-default-removed:${provider.id}`);
     });
     this.prepare(account, provider);
     return this.check(account.id, true);
@@ -170,8 +173,8 @@ export class AccountStore {
   async remove(accountId: AccountId): Promise<void> {
     const account = this.require(accountId);
     const checkAgentReferences = () => {
-      if (this.core.workforce.records.list('profile').some(agent => {
-        const config = this.core.workforce.resident.config(agent.id);
+      if (this.#core.workforce.records.list('profile').some(agent => {
+        const config = this.#core.workforce.resident.config(agent.id);
         return agent.selection.accountId === accountId || [...config.allowedRoutes, ...config.subagents.profiles].some(route => route.accountId === accountId);
       })) {
         throw refused('this account is used by a bot; choose another account in its settings first', { accountId });
@@ -180,45 +183,45 @@ export class AccountStore {
     // A conversation that only names the account keeps it by name and asks for
     // another one on its next send; a turn in flight is using the login itself.
     const checkActiveTurns = () => {
-      if (this.core.scheduler.activeAccountIds().includes(accountId)) {
+      if (this.#core.scheduler.activeAccountIds().includes(accountId)) {
         throw refused('this account is running a turn; stop it or wait for it before removing the account', { accountId });
       }
     };
     checkAgentReferences();
     checkActiveTurns();
     const directory = account.isolationDir;
-    if (directory !== null && ownIsolationDir(this.core.dataDir, account) === null) {
+    if (directory !== null && ownIsolationDir(this.#core.dataDir, account) === null) {
       throw refused('the account isolationDir must be its own directory under accounts', { accountId, field: 'isolationDir' });
     }
-    this.removing.add(accountId);
+    this.#removing.add(accountId);
     try {
-      await this.cancelLoginRun(accountId);
+      await this.#cancelLoginRun(accountId);
       await this.operations.drain(accountId);
-      await this.checks.get(accountId)?.catch(() => {});
+      await this.#checks.get(accountId)?.catch(() => {});
       checkAgentReferences();
       // Cancelling yields to RPC work; a turn may have started on this account.
       checkActiveTurns();
       // A warm agent of an idle conversation still holds the login and its directory.
-      for (const { id } of this.core.journal.db.query('SELECT id FROM threads WHERE account_id = ?').all(accountId) as { id: string }[]) {
-        this.core.threads.releaseAgent(id);
+      for (const { id } of this.#core.journal.db.query('SELECT id FROM threads WHERE account_id = ?').all(accountId) as { id: string }[]) {
+        this.#core.threads.releaseAgent(id);
       }
       if (directory !== null) {
         unshareProfile(directory);
         rmSync(directory, { recursive: true, force: true });
       }
-      this.core.journal.append(
+      this.#core.journal.append(
         { type: 'account.removed', threadId: null, version: 1, payload: { accountId } },
         () => {
-          this.core.journal.deleteAccount(accountId);
-          if (account.isolationDir === null) this.core.journal.setSetting(`account-default-removed:${account.providerId}`, true);
-          this.core.journal.deleteSetting(`account-auth-rejected:${accountId}`);
+          this.#core.journal.deleteAccount(accountId);
+          if (account.isolationDir === null) this.#core.journal.setSetting(`account-default-removed:${account.providerId}`, true);
+          this.#core.journal.deleteSetting(`account-auth-rejected:${accountId}`);
           // A stale grant would make every later agents.accounts.set refuse the whole list.
-          const grants = this.core.workforce.resident.grants();
-          if (grants.some(g => g.accountId === accountId)) this.core.journal.setSetting('agents:account-grants', grants.filter(g => g.accountId !== accountId));
+          const grants = this.#core.workforce.resident.grants();
+          if (grants.some(g => g.accountId === accountId)) this.#core.journal.setSetting('agents:account-grants', grants.filter(g => g.accountId !== accountId));
         },
       );
-      this.core.bus.emit('accounts.removed', { accountId });
-    } finally { this.removing.delete(accountId); }
+      this.#core.bus.emit('accounts.removed', { accountId });
+    } finally { this.#removing.delete(accountId); }
   }
 
   /**
@@ -230,18 +233,18 @@ export class AccountStore {
    */
   check(accountId: AccountId, announce = false): Account {
     const account = this.require(accountId);
-    const provider = this.core.providers.get(account.providerId);
-    let status = provider === undefined ? 'error' : this.sessionStatus(account, provider);
+    const provider = this.#core.providers.get(account.providerId);
+    let status = provider === undefined ? 'error' : this.#sessionStatus(account, provider);
     // A session file cannot overrule an authentication refusal from the agent.
-    if (status !== 'error' && this.core.journal.getSetting(`account-auth-rejected:${accountId}`) === true) status = 'unauthenticated';
+    if (status !== 'error' && this.#core.journal.getSetting(`account-auth-rejected:${accountId}`) === true) status = 'unauthenticated';
     if (!announce && status === account.status) return account;
     const next: Account = { ...account, status };
-    this.core.journal.append({ type: 'account.checked', threadId: null, version: 1, payload: next }, () => {
-      this.core.journal.putAccount(next);
+    this.#core.journal.append({ type: 'account.checked', threadId: null, version: 1, payload: next }, () => {
+      this.#core.journal.putAccount(next);
     });
     // Logged once stored, so the log never shows a change the journal refused.
-    if (status !== account.status) logAccountStatus(this.core, account, status);
-    this.core.bus.emit('accounts.updated', next);
+    if (status !== account.status) logAccountStatus(this.#core, account, status);
+    this.#core.bus.emit('accounts.updated', next);
     return next;
   }
 
@@ -250,69 +253,69 @@ export class AccountStore {
       throw invalidParams('label must contain 1 to 100 characters', { field: 'label', expected: '1 to 100 characters' });
     }
     const next = { ...this.require(accountId), label: label.trim() };
-    this.core.journal.append({ type: 'account.renamed', threadId: null, version: 1, payload: next }, () => this.core.journal.putAccount(next));
-    this.core.bus.emit('accounts.updated', next);
+    this.#core.journal.append({ type: 'account.renamed', threadId: null, version: 1, payload: next }, () => this.#core.journal.putAccount(next));
+    this.#core.bus.emit('accounts.updated', next);
     return next;
   }
 
   async verify(accountId: AccountId): Promise<Account> {
-    const pending = this.checks.get(accountId);
+    const pending = this.#checks.get(accountId);
     if (pending) return pending;
-    const promise = this.verifyConnection(accountId).finally(() => this.checks.delete(accountId));
-    this.checks.set(accountId, promise);
+    const promise = this.#verifyConnection(accountId).finally(() => this.#checks.delete(accountId));
+    this.#checks.set(accountId, promise);
     return promise;
   }
 
-  private async verifyConnection(accountId: AccountId): Promise<Account> {
+  async #verifyConnection(accountId: AccountId): Promise<Account> {
     const account = this.require(accountId);
-    const provider = this.core.providers.require(account.providerId);
-    if (activeSubscriptionProxy(this.core, provider)) return this.check(accountId);
+    const provider = this.#core.providers.require(account.providerId);
+    if (activeSubscriptionProxy(this.#core, provider)) return this.check(accountId);
     // The check starts the agent: for a provider turned off, the files answer alone.
-    if (!this.core.providers.enabled(provider.id)) return this.check(accountId);
+    if (!this.#core.providers.enabled(provider.id)) return this.check(accountId);
     if (provider.protocol !== 'codex-appserver' && provider.protocol !== 'claude-sdk') return this.check(accountId);
     const profile = profileFor(provider);
     const launch = resolveLaunch(profile);
     if (!launch) throw refused(`${provider.name} is not installed`, { accountId, field: 'executable' });
     let result: Pick<Account, 'status' | 'identity'>;
-    const operation = this.operations.open(accountId, provider.id, `check:${accountId}`, message => this.core.log('warn', `checking ${accountId}: ${message}`));
+    const operation = this.operations.open(accountId, provider.id, `check:${accountId}`, message => this.#core.log('warn', `checking ${accountId}: ${message}`));
     try {
       const read = provider.protocol === 'codex-appserver'
         ? (await import('./drivers/codex/auth.ts')).readCodexAccount
         : (await import('./drivers/claude/auth.ts')).readClaudeAccount;
       result = await read({ executable: launch.executable, args: [...launch.prefix, ...(profile?.launch?.args ?? [])],
-        cwd: account.isolationDir ?? this.core.dataDir, env: agentEnv(provider, this.accountEnv(account, provider)),
+        cwd: account.isolationDir ?? this.#core.dataDir, env: agentEnv(provider, this.accountEnv(account, provider)),
         spawnChild: (cmd, args, opts) => {
-          if (this.logins.get(accountId)?.cancelled) throw refused('Sign-in cancelled', { accountId });
+          if (this.#logins.get(accountId)?.cancelled) throw refused('Sign-in cancelled', { accountId });
           return operation.spawnChild(cmd, args, opts);
         }, onLine: () => {},
       });
     } catch (error) {
-      this.saveCheck(accountId, { status: 'error', identity: null });
+      this.#saveCheck(accountId, { status: 'error', identity: null });
       throw refused(`connection check failed: ${messageOf(error)}`, { accountId });
     } finally { await operation.close(); }
-    return this.saveCheck(accountId, result);
+    return this.#saveCheck(accountId, result);
   }
 
-  private saveCheck(accountId: AccountId, result: Pick<Account, 'status' | 'identity'>): Account {
+  #saveCheck(accountId: AccountId, result: Pick<Account, 'status' | 'identity'>): Account {
     const current = this.require(accountId);
-    if (result.status === 'ok') this.core.journal.deleteSetting(`account-auth-rejected:${accountId}`);
+    if (result.status === 'ok') this.#core.journal.deleteSetting(`account-auth-rejected:${accountId}`);
     if (current.status === result.status && current.identity === result.identity) return current;
     const next = { ...current, ...result };
-    this.core.journal.append({ type: 'account.checked', threadId: null, version: 1, payload: next }, () => this.core.journal.putAccount(next));
-    if (current.status !== result.status) logAccountStatus(this.core, current, result.status);
-    this.core.bus.emit('accounts.updated', next);
+    this.#core.journal.append({ type: 'account.checked', threadId: null, version: 1, payload: next }, () => this.#core.journal.putAccount(next));
+    if (current.status !== result.status) logAccountStatus(this.#core, current, result.status);
+    this.#core.bus.emit('accounts.updated', next);
     return next;
   }
 
   /** The native agent rejected this login, including during session preparation. */
   authenticationFailed(accountId: AccountId): void {
-    if (this.core.journal.isClosed() || this.removing.has(accountId) || !this.core.journal.getAccount(accountId)) return;
+    if (this.#core.journal.isClosed() || this.#removing.has(accountId) || !this.#core.journal.getAccount(accountId)) return;
     const current = this.require(accountId);
     // Once per sign-out: later rejected turns of an account already marked signed out add nothing.
-    const already = this.core.journal.getSetting(`account-auth-rejected:${accountId}`) === true && current.status === 'unauthenticated';
-    this.core.journal.setSetting(`account-auth-rejected:${accountId}`, true);
-    if (!already) this.core.logs.warn(`The agent rejected the login of account ${accountId}; it is marked signed out`, { source: 'accounts', event: 'account.auth-rejected', data: { accountId, providerId: current.providerId } });
-    this.saveCheck(accountId, { status: 'unauthenticated', identity: current.identity });
+    const already = this.#core.journal.getSetting(`account-auth-rejected:${accountId}`) === true && current.status === 'unauthenticated';
+    this.#core.journal.setSetting(`account-auth-rejected:${accountId}`, true);
+    if (!already) this.#core.logs.warn(`The agent rejected the login of account ${accountId}; it is marked signed out`, { source: 'accounts', event: 'account.auth-rejected', data: { accountId, providerId: current.providerId } });
+    this.#saveCheck(accountId, { status: 'unauthenticated', identity: current.identity });
   }
 
   /**
@@ -337,7 +340,7 @@ export class AccountStore {
     }
     if (provider.quirks?.includes('antigravity') === true) Object.assign(env, antigravityCertificates(currentOs(), process.env, existsSync));
     // OpenCode 2 compacts in the background by itself once asked to; a process started afterwards takes the change.
-    return openCodeBackgroundCompaction(provider.id, effectiveCompaction(this.core.settings.get(), thread).backgroundCompaction, { ...env, ...subscriptionProxyEnv(this.core, provider) });
+    return openCodeBackgroundCompaction(provider.id, effectiveCompaction(this.#core.settings.get(), thread).backgroundCompaction, { ...env, ...subscriptionProxyEnv(this.#core, provider) });
   }
 
   /**
@@ -352,8 +355,8 @@ export class AccountStore {
   prepare(account: Account, provider: ProviderDescriptor): ShareProblem[] {
     const profile = profileFor(provider);
     if (profile === undefined) return [];
-    if (Object.values(profile.env ?? {}).some((value) => value === browserNoopPath(this.core.dataDir))) {
-      this.writeBrowserNoop();
+    if (Object.values(profile.env ?? {}).some((value) => value === browserNoopPath(this.#core.dataDir))) {
+      this.#writeBrowserNoop();
     }
     const isolationDir = account.isolationDir;
     if (isolationDir === null) return [];
@@ -363,9 +366,9 @@ export class AccountStore {
       ? [...shareProfile(isolationDir, profile, provider.shared ?? []), ...shareKeys(isolationDir, profile, provider.sharedKeys ?? [])]
       : [];
     const said = problems.map((problem) => `${problem.path}: ${problem.message}`).join('; ');
-    if (said !== (this.shareLog.get(account.id) ?? '')) {
-      this.shareLog.set(account.id, said);
-      if (said.length > 0) this.core.log('warn', `accounts: ${account.label} (${provider.id}) does not share ${said}`);
+    if (said !== (this.#shareLog.get(account.id) ?? '')) {
+      this.#shareLog.set(account.id, said);
+      if (said.length > 0) this.#core.log('warn', `accounts: ${account.label} (${provider.id}) does not share ${said}`);
     }
     for (const [path, content] of Object.entries(provider.seedFiles ?? {})) {
       const target = join(isolationDir, path);
@@ -376,8 +379,8 @@ export class AccountStore {
     return problems;
   }
 
-  private writeBrowserNoop(): void {
-    const file = browserNoopPath(this.core.dataDir);
+  #writeBrowserNoop(): void {
+    const file = browserNoopPath(this.#core.dataDir);
     if (existsSync(file)) return;
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, browserNoopScript(), 'utf8');
@@ -385,19 +388,19 @@ export class AccountStore {
   }
 
   /** A sign-in starts the provider's program, which a provider turned off never does. */
-  private assertOn(provider: ProviderDescriptor, accountId: AccountId): void {
-    if (this.core.providers.enabled(provider.id)) return;
-    throw providerOffFailure(provider.name, this.core.providers.policyBlock(provider.id), { accountId, providerId: provider.id });
+  #assertOn(provider: ProviderDescriptor, accountId: AccountId): void {
+    if (this.#core.providers.enabled(provider.id)) return;
+    throw providerOffFailure(provider.name, this.#core.providers.policyBlock(provider.id), { accountId, providerId: provider.id });
   }
 
   /** Adopt existing CLI logins; guided sign-in creates its own isolated account. */
   ensureDefaults(): void {
     const known = new Set(this.list().map((account) => account.providerId));
-    for (const summary of this.core.providers.available()) {
-      if (known.has(summary.id) || this.core.journal.getSetting(`account-default-removed:${summary.id}`) === true) continue;
-      const provider = this.core.providers.require(summary.id);
+    for (const summary of this.#core.providers.available()) {
+      if (known.has(summary.id) || this.#core.journal.getSetting(`account-default-removed:${summary.id}`) === true) continue;
+      const provider = this.#core.providers.require(summary.id);
       if (provider.isolation?.alwaysIsolated !== true && provider.login !== undefined
-        && provider.login.terminal !== true && this.sessionStatus({ isolationDir: null }, provider) === 'unauthenticated') continue;
+        && provider.login.terminal !== true && this.#sessionStatus({ isolationDir: null }, provider) === 'unauthenticated') continue;
       this.add({ providerId: provider.id, label: 'Default', useDefaultLocation: true });
     }
   }
@@ -421,8 +424,8 @@ export class AccountStore {
    */
   login(accountId: AccountId): { ok: true } {
     const account = this.require(accountId);
-    const provider = this.core.providers.require(account.providerId);
-    this.assertOn(provider, accountId);
+    const provider = this.#core.providers.require(account.providerId);
+    this.#assertOn(provider, accountId);
     if (provider.login === undefined) {
       throw refused(`${provider.name} has no login command Boite can run`, {
         accountId,
@@ -436,14 +439,14 @@ export class AccountStore {
         { accountId, providerId: provider.id, field: 'isolationDir' },
       );
     }
-    if (this.logins.has(accountId) || this.core.terminals.has(loginThreadId(accountId))) {
+    if (this.#logins.has(accountId) || this.#core.terminals.has(loginThreadId(accountId))) {
       throw refused(`a login is already running for ${account.label}`, { accountId });
     }
 
     const isolationDir = account.isolationDir;
     mkdirSync(isolationDir, { recursive: true });
-    if (provider.protocol === 'codex-appserver') return this.codexLogin(account, provider);
-    if (provider.login.acp !== undefined) return this.acpLogin(account, provider, provider.login.acp.methodId);
+    if (provider.protocol === 'codex-appserver') return this.#codexLogin(account, provider);
+    if (provider.login.acp !== undefined) return this.#acpLogin(account, provider, provider.login.acp.methodId);
 
     const argv = provider.login.command;
     if (argv === undefined) throw refused('the login command is empty', { accountId, field: 'login.command' });
@@ -455,14 +458,14 @@ export class AccountStore {
 
     const [first, ...args] = command;
     if (first === undefined) throw refused('the login command is empty', { accountId, field: 'login.command' });
-    const executable = this.loginExecutable(provider, first);
+    const executable = this.#loginExecutable(provider, first);
 
     let spawned: SpawnedPipedProcess;
-    this.core.providers.installs.acquire(provider.id);
+    this.#core.providers.installs.acquire(provider.id);
     try {
-      spawned = this.core.procs.spawnPiped(loginThreadId(accountId), executable, args, { cwd: isolationDir, env });
+      spawned = this.#core.procs.spawnPiped(loginThreadId(accountId), executable, args, { cwd: isolationDir, env });
     } catch (error) {
-      this.core.providers.installs.release(provider.id);
+      this.#core.providers.installs.release(provider.id);
       throw refused(`the login command ${executable} did not start: ${messageOf(error)}`, {
         accountId,
         command: [executable, ...args].join(' '),
@@ -470,9 +473,9 @@ export class AccountStore {
     }
 
     const run: LoginRun = { spawned, acp: null, url: null, lastLine: '', done: Promise.resolve() };
-    this.logins.set(accountId, run);
-    this.emitLogin(accountId, 'running', '', run);
-    run.done = this.readLogin(accountId, run).finally(() => this.core.providers.installs.release(provider.id));
+    this.#logins.set(accountId, run);
+    this.#emitLogin(accountId, 'running', '', run);
+    run.done = this.#readLogin(accountId, run).finally(() => this.#core.providers.installs.release(provider.id));
     return { ok: true };
   }
 
@@ -486,8 +489,8 @@ export class AccountStore {
    */
   loginTerminal(accountId: AccountId, cols: number, rows: number): TerminalState {
     const account = this.require(accountId);
-    const provider = this.core.providers.require(account.providerId);
-    this.assertOn(provider, accountId);
+    const provider = this.#core.providers.require(account.providerId);
+    this.#assertOn(provider, accountId);
     const argv = provider.login?.command;
     if (provider.login?.terminal !== true || argv === undefined) {
       throw refused(`${provider.name} does not sign in from a terminal`, {
@@ -497,7 +500,7 @@ export class AccountStore {
         expected: true,
       });
     }
-    if (this.logins.has(accountId)) {
+    if (this.#logins.has(accountId)) {
       throw refused(`a login is already running for ${account.label}`, { accountId });
     }
     const id = loginThreadId(accountId);
@@ -508,18 +511,18 @@ export class AccountStore {
     for (const [key, value] of Object.entries(provider.login.env ?? {})) env[key] = place(value);
     const [first, ...args] = argv.map(place);
     if (first === undefined) throw refused('the login command is empty', { accountId, field: 'login.command' });
-    const starting = !this.core.terminals.has(id);
-    if (starting) this.core.providers.installs.acquire(provider.id);
+    const starting = !this.#core.terminals.has(id);
+    if (starting) this.#core.providers.installs.acquire(provider.id);
     try {
-      return this.core.terminals.open(id, {
+      return this.#core.terminals.open(id, {
         cwd: isolationDir ?? homePath(),
         env,
         cols,
         rows,
-        type: [this.loginExecutable(provider, first), ...args],
+        type: [this.#loginExecutable(provider, first), ...args],
         onExit: () => {
-          this.core.providers.installs.release(provider.id);
-          if (this.core.journal.isClosed()) return;
+          this.#core.providers.installs.release(provider.id);
+          if (this.#core.journal.isClosed()) return;
           try {
             this.check(accountId, true);
           } catch {
@@ -528,7 +531,7 @@ export class AccountStore {
         },
       });
     } catch (error) {
-      if (starting && !this.core.terminals.has(id)) this.core.providers.installs.release(provider.id);
+      if (starting && !this.#core.terminals.has(id)) this.#core.providers.installs.release(provider.id);
       throw error;
     }
   }
@@ -539,7 +542,7 @@ export class AccountStore {
    * descriptor's method id. Everything the agent writes outside the ndjson
    * stream, the Google sign-in link included, streams back as `account.login`.
    */
-  private acpLogin(account: Account, provider: ProviderDescriptor, methodId: string): { ok: true } {
+  #acpLogin(account: Account, provider: ProviderDescriptor, methodId: string): { ok: true } {
     const accountId = account.id;
     const profile = profileFor(provider);
     const launch = resolveLaunch(profile);
@@ -554,23 +557,23 @@ export class AccountStore {
 
     let acp: AcpLoginRun;
     let folders: ReturnType<typeof loginFolders> | null = null;
-    this.core.providers.installs.acquire(provider.id);
+    this.#core.providers.installs.acquire(provider.id);
     try {
-      folders = loginFolders(this.core, account, provider, loginThreadId(accountId));
+      folders = loginFolders(this.#core, account, provider, loginThreadId(accountId));
       acp = runAcpLogin({
         methodId,
         executable: launch.executable,
         args: [...launch.prefix, ...(profile?.launch?.args ?? [])],
-        cwd: account.isolationDir ?? this.core.dataDir,
+        cwd: account.isolationDir ?? this.#core.dataDir,
         env: { ...env, ...folders.env },
         catalogCwd: folders.catalogCwd,
-        spawnChild: (cmd, args, opts) => this.core.procs.spawnChild(loginThreadId(accountId), cmd, args, opts),
+        spawnChild: (cmd, args, opts) => this.#core.procs.spawnChild(loginThreadId(accountId), cmd, args, opts),
         onLine: (line) => {
-          this.onLoginLine(accountId, line);
+          this.#onLoginLine(accountId, line);
         },
       });
     } catch (error) {
-      this.core.providers.installs.release(provider.id);
+      this.#core.providers.installs.release(provider.id);
       void folders?.dispose();
       throw refused(`the ${provider.name} agent did not start: ${messageOf(error)}`, {
         accountId,
@@ -579,71 +582,71 @@ export class AccountStore {
     }
 
     const run: LoginRun = { spawned: null, acp, url: null, lastLine: '', done: Promise.resolve() };
-    this.logins.set(accountId, run);
-    this.emitLogin(accountId, 'running', '', run);
-    run.done = this.finishAcpLogin(accountId, run, acp, folders?.dispose).finally(() => this.core.providers.installs.release(provider.id));
+    this.#logins.set(accountId, run);
+    this.#emitLogin(accountId, 'running', '', run);
+    run.done = this.#finishAcpLogin(accountId, run, acp, folders?.dispose).finally(() => this.#core.providers.installs.release(provider.id));
     return { ok: true };
   }
 
-  private codexLogin(account: Account, provider: ProviderDescriptor): { ok: true } {
+  #codexLogin(account: Account, provider: ProviderDescriptor): { ok: true } {
     const profile = profileFor(provider);
     const launch = resolveLaunch(profile);
     if (!launch) throw refused(`${provider.name} is not installed`, { accountId: account.id });
     const run: LoginRun = { spawned: null, acp: null, url: null, lastLine: '', done: Promise.resolve() };
-    this.logins.set(account.id, run);
-    this.core.providers.installs.acquire(provider.id);
-    this.emitLogin(account.id, 'running', '', run);
+    this.#logins.set(account.id, run);
+    this.#core.providers.installs.acquire(provider.id);
+    this.#emitLogin(account.id, 'running', '', run);
     run.done = (async () => {
       try {
         const { runCodexLogin } = await import('./drivers/codex/auth.ts');
         // Cancellation may have arrived while the module loaded.
-        if (run.cancelled) { this.logins.delete(account.id); this.emitLogin(account.id, 'failed', 'Sign-in cancelled', run, 1); return; }
+        if (run.cancelled) { this.#logins.delete(account.id); this.#emitLogin(account.id, 'failed', 'Sign-in cancelled', run, 1); return; }
         const login = runCodexLogin({ executable: launch.executable, args: [...launch.prefix, ...(profile?.launch?.args ?? [])],
           cwd: account.isolationDir!, env: agentEnv(provider, this.accountEnv(account, provider)),
-          spawnChild: (cmd, args, opts) => this.core.procs.spawnChild(loginThreadId(account.id), cmd, args, opts),
-          onLine: line => this.onLoginLine(account.id, line),
+          spawnChild: (cmd, args, opts) => this.#core.procs.spawnChild(loginThreadId(account.id), cmd, args, opts),
+          onLine: line => this.#onLoginLine(account.id, line),
         });
         run.acp = login;
-        await this.finishAcpLogin(account.id, run, login);
+        await this.#finishAcpLogin(account.id, run, login);
       } catch (error) {
-        this.logins.delete(account.id);
-        this.emitLogin(account.id, 'failed', messageOf(error), run, 1);
-      } finally { this.core.providers.installs.release(provider.id); }
+        this.#logins.delete(account.id);
+        this.#emitLogin(account.id, 'failed', messageOf(error), run, 1);
+      } finally { this.#core.providers.installs.release(provider.id); }
     })();
     return { ok: true };
   }
 
   loginStates(): RpcEvents['account.login'][] {
-    return [...this.logins].map(([accountId, run]) => ({
+    return [...this.#logins].map(([accountId, run]) => ({
       accountId, state: 'running', output: run.lastLine, url: run.url, exitCode: null,
     }));
   }
 
   async loginCancel(accountId: AccountId): Promise<{ ok: true }> {
     this.require(accountId);
-    return this.cancelLoginRun(accountId);
+    return this.#cancelLoginRun(accountId);
   }
 
   /** Stop login and its final check, including while removal locks the account against new work. */
-  private async cancelLoginRun(accountId: AccountId): Promise<{ ok: true }> {
-    await this.core.terminals.close(loginThreadId(accountId));
-    const run = this.logins.get(accountId);
+  async #cancelLoginRun(accountId: AccountId): Promise<{ ok: true }> {
+    await this.#core.terminals.close(loginThreadId(accountId));
+    const run = this.#logins.get(accountId);
     if (run !== undefined) {
       run.cancelled = true;
-      const pids = this.core.procs.liveOf(loginThreadId(accountId)).map(process => process.pid);
-      this.core.procs.killTree(loginThreadId(accountId));
+      const pids = this.#core.procs.liveOf(loginThreadId(accountId)).map(process => process.pid);
+      this.#core.procs.killTree(loginThreadId(accountId));
       run.acp?.kill();
-      await this.core.procs.stopAndWait(`check:${accountId}`);
+      await this.#core.procs.stopAndWait(`check:${accountId}`);
       await run.done;
       // The login has closed, but on Windows its pid leaves the registry only
       // once the Job Object reports the exit: wait for that too. A sign-in
       // started again meanwhile runs in the same thread and is not waited for.
-      await this.core.procs.waitForExit(loginThreadId(accountId), pids);
+      await this.#core.procs.waitForExit(loginThreadId(accountId), pids);
     }
     return { ok: true };
   }
 
-  private async finishAcpLogin(accountId: AccountId, run: LoginRun, acp: AcpLoginRun, scratch?: () => Promise<void>): Promise<void> {
+  async #finishAcpLogin(accountId: AccountId, run: LoginRun, acp: AcpLoginRun, scratch?: () => Promise<void>): Promise<void> {
     let failure: string | null = null;
     try {
       await acp.done;
@@ -652,26 +655,26 @@ export class AccountStore {
     }
     const catalog = acp.catalog === undefined ? null : await acp.catalog;
     acp.kill();
-    this.core.procs.killTree(loginThreadId(accountId));
+    this.#core.procs.killTree(loginThreadId(accountId));
     await acp.exited;
     // Removing an unpacked agent takes seconds; the sign-in result does not wait for it.
     void scratch?.();
-    if (!this.core.journal.isClosed()) {
+    if (!this.#core.journal.isClosed()) {
       try {
-        const provider = this.core.providers.require(this.require(accountId).providerId);
+        const provider = this.#core.providers.require(this.require(accountId).providerId);
         if (!run.cancelled && provider.protocol === 'codex-appserver') {
           const checked = await this.verify(accountId);
           if (failure === null && checked.status !== 'ok') failure = 'Codex finished signing in but the account is not connected. Retry the connection.';
         } else {
           const checked = this.check(accountId, true);
-          if (!run.cancelled && failure === null && checked.status === 'ok' && catalog !== null) void publishLoginCatalog(this.core, checked, provider, catalog, loginThreadId(accountId));
+          if (!run.cancelled && failure === null && checked.status === 'ok' && catalog !== null) void publishLoginCatalog(this.#core, checked, provider, catalog, loginThreadId(accountId));
         }
       } catch (error) { failure ??= messageOf(error); }
     }
-    this.logins.delete(accountId);
+    this.#logins.delete(accountId);
     if (run.cancelled) failure = 'Sign-in cancelled';
     if (failure !== null) run.lastLine = failure;
-    this.emitLogin(accountId, failure === null ? 'done' : 'failed', run.lastLine, run, failure === null ? 0 : 1);
+    this.#emitLogin(accountId, failure === null ? 'done' : 'failed', run.lastLine, run, failure === null ? 0 : 1);
   }
 
   /**
@@ -687,9 +690,9 @@ export class AccountStore {
    * anything a redirect led to.
    */
   loginInput(accountId: AccountId, text: string): { ok: true } {
-    const run = this.logins.get(accountId);
+    const run = this.#logins.get(accountId);
     if (run === undefined) throw refused(`no login is running for ${accountId}`, { accountId });
-    if (this.core.providers.require(this.require(accountId).providerId).protocol === 'codex-appserver') {
+    if (this.#core.providers.require(this.require(accountId).providerId).protocol === 'codex-appserver') {
       throw refused('enter the displayed code on the Codex sign-in page', { accountId, field: 'text' });
     }
     if (run.acp !== null) {
@@ -714,7 +717,7 @@ export class AccountStore {
           { accountId, field: 'text', expected: `${expected.host}${expected.pathname}` },
         );
       }
-      void this.forwardCallback(accountId, pasted.toString());
+      void this.#forwardCallback(accountId, pasted.toString());
       return { ok: true };
     }
     const spawned = run.spawned;
@@ -729,32 +732,32 @@ export class AccountStore {
   }
 
   /** One GET on the loopback callback the agent is listening on. No redirect followed, no retry. */
-  private async forwardCallback(accountId: AccountId, url: string): Promise<void> {
+  async #forwardCallback(accountId: AccountId, url: string): Promise<void> {
     try {
       const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(CALLBACK_TIMEOUT_MS) });
-      this.onLoginLine(accountId, `the sign-in response was delivered (${response.status})`);
+      this.#onLoginLine(accountId, `the sign-in response was delivered (${response.status})`);
     } catch (error) {
-      this.onLoginLine(accountId, `the sign-in response was not delivered: ${messageOf(error)}`);
+      this.#onLoginLine(accountId, `the sign-in response was not delivered: ${messageOf(error)}`);
     }
   }
 
   /** Every login still running, killed with the core. */
   async closeLogins(): Promise<void> {
-    await Promise.all([...this.logins.keys()].map((accountId) => this.loginCancel(accountId)));
-    await Promise.allSettled([...this.checks.values()]);
+    await Promise.all([...this.#logins.keys()].map((accountId) => this.loginCancel(accountId)));
+    await Promise.allSettled([...this.#checks.values()]);
   }
 
   /** One line of a login's output, whichever form it takes. */
-  private onLoginLine(accountId: AccountId, line: string): void {
+  #onLoginLine(accountId: AccountId, line: string): void {
     line = stripAnsi(line).trim();
-    const run = this.logins.get(accountId);
+    const run = this.#logins.get(accountId);
     if (run === undefined || line.length === 0) return;
     run.lastLine = line;
     const link = URL_IN_OUTPUT.exec(line)?.[0] ?? null;
     // An agent may print its terms or privacy page before the sign-in link: the
     // first link stands only until one that looks like a sign-in shows up.
     if (link !== null && (run.url === null || (!SIGN_IN_LINK.test(run.url) && SIGN_IN_LINK.test(link)))) run.url = link;
-    this.emitLogin(accountId, 'running', line, run);
+    this.#emitLogin(accountId, 'running', line, run);
   }
 
   /**
@@ -762,7 +765,7 @@ export class AccountStore {
    * OS profile already resolved that same name to a real file, use the file: the
    * CLI here is an install the PATH does not always carry.
    */
-  private loginExecutable(provider: ProviderDescriptor, first: string): string {
+  #loginExecutable(provider: ProviderDescriptor, first: string): string {
     const profile = profileFor(provider);
     if (profile === undefined) return first;
     const named = profile.executable.some((candidate) => candidate.kind === 'path' && candidate.value === first);
@@ -770,43 +773,43 @@ export class AccountStore {
     return resolveExecutable(profile) ?? first;
   }
 
-  private emitLogin(
+  #emitLogin(
     accountId: AccountId,
     state: 'running' | 'done' | 'failed',
     output: string,
     run: LoginRun,
     exitCode: number | null = null,
   ): void {
-    if (this.core.journal.isClosed()) return;
-    logLoginState(this.core, this.core.journal.getAccount(accountId), state, output, exitCode, run.cancelled === true);
-    this.core.bus.emit('account.login', { accountId, state, output, url: run.url, exitCode });
+    if (this.#core.journal.isClosed()) return;
+    logLoginState(this.#core, this.#core.journal.getAccount(accountId), state, output, exitCode, run.cancelled === true);
+    this.#core.bus.emit('account.login', { accountId, state, output, url: run.url, exitCode });
   }
 
   /** stdout and stderr merged, one event per line, then the exit and a recheck. */
-  private async readLogin(accountId: AccountId, run: LoginRun): Promise<void> {
+  async #readLogin(accountId: AccountId, run: LoginRun): Promise<void> {
     const spawned = run.spawned;
     if (spawned === null) return;
     const onLine = (line: string): void => {
-      this.onLoginLine(accountId, line);
+      this.#onLoginLine(accountId, line);
     };
     await Promise.all([pumpLines(spawned.proc.stdout, onLine), pumpLines(spawned.proc.stderr, onLine)]);
     const exitCode = await spawned.exited;
-    if (this.core.journal.isClosed()) { this.logins.delete(accountId); return; }
+    if (this.#core.journal.isClosed()) { this.#logins.delete(accountId); return; }
     let failure = exitCode === 0 ? null : run.lastLine;
     try {
-      const provider = this.core.providers.require(this.require(accountId).providerId);
+      const provider = this.#core.providers.require(this.require(accountId).providerId);
       if (!run.cancelled && exitCode === 0 && provider.protocol === 'claude-sdk') {
         const checked = await this.verify(accountId);
         if (failure === null && checked.status !== 'ok') failure = 'The sign-in finished but the account is not connected. Retry the connection.';
       } else this.check(accountId, true);
     } catch (error) { failure ??= messageOf(error); }
-    this.logins.delete(accountId);
+    this.#logins.delete(accountId);
     if (run.cancelled) failure = 'Sign-in cancelled';
-    this.emitLogin(accountId, failure === null ? 'done' : 'failed', failure ?? run.lastLine, run, failure === null ? 0 : exitCode || 1);
+    this.#emitLogin(accountId, failure === null ? 'done' : 'failed', failure ?? run.lastLine, run, failure === null ? 0 : exitCode || 1);
   }
 
-  private sessionStatus(account: Pick<Account, 'isolationDir'>, provider: ProviderDescriptor): Account['status'] {
-    if (activeSubscriptionProxy(this.core, provider)) return 'ok';
+  #sessionStatus(account: Pick<Account, 'isolationDir'>, provider: ProviderDescriptor): Account['status'] {
+    if (activeSubscriptionProxy(this.#core, provider)) return 'ok';
     if (provider.auth.kind === 'none') return 'ok';
     // A profile may say where the login lives on its OS, or, with an empty list,
     // that it can live outside any file there: then a file still proves a login

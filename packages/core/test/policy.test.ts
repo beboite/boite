@@ -141,6 +141,23 @@ test('a bad value takes its key\'s strictest value, an unknown key is ignored, a
   expect(parsePolicy(JSON.stringify({ providers: { deny: ['OpenCode'] } }), '/x/policy.json').values).toEqual({ providers: { deny: ['opencode'] } });
 });
 
+test('locked keys keep false switches, enum values and empty lists distinct from unrestricted parents', () => {
+  const policy: AdminPolicy = {
+    analytics: 'basic', updates: { app: 'off', server: 'check', agents: 'auto' },
+    providers: { allow: [], deny: [] }, gateway: { allowedBaseUrls: [] },
+    quotaReads: false, plugins: { install: false, recommended: false }, issueReports: false,
+    dictation: 'local', previews: { remoteResources: false }, agentBrowser: { searchUrl: 'https://search.example/?q={query}' },
+    network: { lan: false, tailscaleServe: false, groups: false, contacts: false, push: false }, pullRequests: false,
+  };
+  expect(lockedKeys(policy)).toEqual(POLICY_KEYS.filter(key => key !== 'gateway' && key !== 'agentBrowser'));
+  expect(lockedKeys({ gateway: false, agentBrowser: false })).toEqual(['gateway', 'agentBrowser']);
+  expect(lockedKeys({
+    updates: {}, providers: {}, plugins: { install: true, recommended: true }, previews: { remoteResources: true },
+    gateway: true, agentBrowser: true, quotaReads: true, issueReports: true, pullRequests: true,
+    network: { lan: true, tailscaleServe: true, groups: true, contacts: true, push: true },
+  })).toEqual([]);
+});
+
 test('problems reach the log and the client, naming file, field and expected value', async () => {
   const { harness, client, policy } = await core({ dictation: 'cloud' } as never);
   const state = await client.call('policy.get', {});

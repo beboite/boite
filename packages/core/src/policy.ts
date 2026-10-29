@@ -203,24 +203,10 @@ export function parsePolicy(text: string | null, file: string): Parsed {
 
 /** The keys a policy's values lock, in `POLICY_KEYS` order. A `true` that restricts nothing locks nothing. */
 export function lockedKeys(values: AdminPolicy): PolicyKey[] {
-  const on = new Set<PolicyKey>();
-  if (values.analytics !== undefined) on.add('analytics');
-  for (const kind of ['app', 'server', 'agents'] as const) if (values.updates?.[kind] !== undefined) on.add(`updates.${kind}`);
-  if (values.providers?.allow !== undefined) on.add('providers.allow');
-  if (values.providers?.deny !== undefined) on.add('providers.deny');
-  if (values.gateway === false) on.add('gateway');
-  if (typeof values.gateway === 'object') on.add('gateway.allowedBaseUrls');
-  if (values.quotaReads === false) on.add('quotaReads');
-  if (values.plugins?.install === false) on.add('plugins.install');
-  if (values.plugins?.recommended === false) on.add('plugins.recommended');
-  if (values.issueReports === false) on.add('issueReports');
-  if (values.dictation !== undefined) on.add('dictation');
-  if (values.previews?.remoteResources === false) on.add('previews.remoteResources');
-  if (values.agentBrowser === false) on.add('agentBrowser');
-  if (typeof values.agentBrowser === 'object') on.add('agentBrowser.searchUrl');
-  for (const item of ['lan', 'tailscaleServe', 'groups', 'contacts', 'push'] as const) if (values.network?.[item] === false) on.add(`network.${item}`);
-  if (values.pullRequests === false) on.add('pullRequests');
-  return POLICY_KEYS.filter(key => on.has(key));
+  return POLICY_KEYS.filter(key => {
+    const value = key.split('.').reduce<unknown>((node, part) => isObject(node) ? node[part] : undefined, values);
+    return value === false || typeof value === 'string' || Array.isArray(value);
+  });
 }
 
 /** The policy at `file` now. A missing file is no policy; an unreadable one fails closed. */

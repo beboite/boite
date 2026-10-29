@@ -75,6 +75,7 @@ export function registerModules(core: Core): void {
   registerPushMethods(core);
   core.router.register('threads.activity.set', (params) => core.activity.set(params));
   core.router.register('threads.activity.control', (params) => core.activity.control(params));
+  core.router.register('threads.goal.track', (params) => core.activity.track(params.threadId));
   // Progress is for the window that asked: every other client would drop it on its requestId.
   core.router.register('quotas.list', (params, ctx) => core.quotas.list(params.refresh, params.requestId,
     (quota) => ctx.connection.sendEvent('quotas.progress', { requestId: params.requestId!, quota })));

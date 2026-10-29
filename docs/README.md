@@ -9,7 +9,7 @@
 - [Android client app](android.md): the APK that opens the phone UI and connects to an existing core.
 - [Headless server](server.md): run a core with Docker or without the desktop app.
 - [Android server](android-server.md): host a core and agents on a phone with Termux and the separate Boite Server app.
-- [Experiments](experiments.md): switches for unfinished features. Bots, contacts, reviewed goals and the project board remain experimental.
+- [Experiments](experiments.md): switches for unfinished features. Bots and contacts remain experimental.
 
 ## Everyday work
 
@@ -25,7 +25,8 @@
 - [Chat files and previews](chat-files.md): attachments, file links, inline previews and pages drawn in an answer.
 - [Diagrams and formulas](diagrams-and-formulas.md): Mermaid and LaTeX in messages.
 - [The thread terminal](terminal.md): shells under the chat and interactive sign-ins.
-- [The project board](board.md): experimental todo columns and reviewed `/goal2` work.
+- [Reviewed goals](goals.md): `/goal2`, its fresh reviewer and the checklist of the user's requests.
+- [The project board](board.md): todo columns and reviewed `/goal2` work.
 - [Usage](usage.md): tokens, API estimates, subscription limits and quota alerts.
 - [Prompt cache timer](prompt-cache.md): experimental cache-lifetime estimates and their limits.
 - [Voice dictation](voice.md): local Whisper, API transcription and microphone access.

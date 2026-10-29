@@ -145,7 +145,9 @@ export function providerCatalogMethods(ctx: FakeContext) {
       }
       ctx.providers.push({
         id, name: command.name, shortName: command.name, protocol: 'acp', source: 'user', available: true,
-        executable: command.command.includes('\\') ? command.command : `${DATA_DIR}\\demo\\${command.command}.exe`,
+        executable: checked.executable.kind === 'file'
+          ? checked.executable.value
+          : `${DATA_DIR}\\demo\\${checked.executable.value}${checked.executable.value.toLowerCase().endsWith('.exe') ? '' : '.exe'}`,
         models: [{ id: 'default', name: 'Agent default', default: true }],
         capabilities: { approvals: true, hooks: false, checkpoint: false, images: true, planMode: false, resume: true },
         login: false, alwaysIsolated: false, install: null, titles: false, enabled: true,

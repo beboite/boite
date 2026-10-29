@@ -42,6 +42,18 @@ test('adding a local ACP provider applies policy before returning, notifying or 
   expect((await client.call('providers.list', {})).loaded).toEqual(result.loaded);
 });
 
+test('a local ACP provider preserves Windows file paths and a searched executable suffix', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  for (const [name, command, expected] of [
+    ['Slash path', 'C:/tools/agent.exe', 'C:/tools/agent.exe'],
+    ['Backslash path', 'C:\\tools\\agent.exe', 'C:\\tools\\agent.exe'],
+    ['Search path', 'my-agent.exe', expect.stringMatching(/[\\/]demo[\\/]my-agent\.exe$/)],
+  ] as const) {
+    const result = await client.call('providers.addLocal', { name, command, args: [], env: {} });
+    expect.soft(result.loaded.find(provider => provider.id === result.providerId)?.executable).toEqual(expected);
+  }
+});
+
 test('the address bar searches where the policy says, the default otherwise', () => {
   const search = policySearch(policyFixture('managed'));
   expect(search).toBe('https://search.example.com/?q={query}');

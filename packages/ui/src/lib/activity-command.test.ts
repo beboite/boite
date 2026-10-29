@@ -1,8 +1,5 @@
-import { afterEach, expect, test } from 'vitest';
+import { expect, test } from 'vitest';
 import { activityCommand, isActivityCommand } from './activity-command';
-import { setExperiment } from './experiments';
-
-afterEach(() => setExperiment('goal2', false));
 
 test('goal and loop commands preserve text and parse duration units', () => {
   expect(activityCommand('/goal Ship the fix\nand verify it')).toEqual({ goal: { objective: 'Ship the fix\nand verify it' } });
@@ -19,10 +16,7 @@ test('empty commands and invalid loop intervals are refused before sending', () 
   }
 });
 
-test('/goal2 is a reviewed goal only while its experiment is on', () => {
-  expect(activityCommand('/goal2 Ship the fix')).toBeNull();
-  expect(isActivityCommand('/goal2 Ship the fix')).toBe(false);
-  setExperiment('goal2', true);
+test('/goal2 is a reviewed goal with no experiment on', () => {
   expect(activityCommand('/goal2 Ship the fix')).toEqual({ goal: { objective: 'Ship the fix', review: true } });
   expect(isActivityCommand('/goal2 Ship the fix')).toBe(true);
   expect(() => activityCommand('/goal2')).toThrow('Use /goal2 followed by an objective.');

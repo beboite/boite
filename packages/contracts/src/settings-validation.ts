@@ -92,6 +92,9 @@ export interface AutoCompact {
   moments: AutoCompactMoment[];
 }
 
+/** The bounds of `Settings.autoGoalMinChars`, and the length it reads as when missing. */
+export const AUTO_GOAL_MIN_CHARS = { min: 200, max: 20000, default: 1500 } as const;
+
 /** The bounds of `CacheKeepalive.hours`, and what the setting offers first. */
 export const CACHE_KEEPALIVE_HOURS = { min: 1, max: 24, default: 12 } as const;
 
@@ -278,6 +281,8 @@ const SETTING_RULES: { readonly [K in keyof Settings]-?: FieldRule<K> } = {
   threadMemoryCapMb: amount('threadMemoryCapMb') as FieldRule<'threadMemoryCapMb'>,
   agentMemoryBudgetPercent: value => typeof value === 'number' && Number.isInteger(value) && value >= 10 && value <= 90 ? value
     : refuse('agentMemoryBudgetPercent must be an integer between 10 and 90'),
+  autoGoalMinChars: value => typeof value === 'number' && Number.isInteger(value) && value >= AUTO_GOAL_MIN_CHARS.min && value <= AUTO_GOAL_MIN_CHARS.max ? value
+    : refuse(`autoGoalMinChars must be an integer between ${AUTO_GOAL_MIN_CHARS.min} and ${AUTO_GOAL_MIN_CHARS.max}`),
   memoryReserveMb: value => typeof value === 'number' && Number.isInteger(value) && (value === 0 || (value >= 256 && value <= 1048576)) ? value
     : refuse('memoryReserveMb must be 0 (auto) or an integer between 256 and 1048576 MB'),
   threadDoneRetentionDays: value => retentionDays(value) ? value as number
