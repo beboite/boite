@@ -74,39 +74,39 @@ export class AgentStore {
    * that thread and at midnight: a snapshot a second while an agent works
    * would otherwise sum the whole day each time. One entry per agent.
    */
-  private readonly todays = new Map<string, { since: number; today: AgentStatus['today'] }>();
+  readonly #todays = new Map<string, { since: number; today: AgentStatus['today'] }>();
   /** Agent threads by id, so a bus event about any other thread costs a map lookup. */
-  private readonly threads = new Map<string, string>();
-  private readonly off: () => void;
+  readonly #threads = new Map<string, string>();
+  readonly #off: () => void;
   constructor(readonly core: Core) {
     this.records = new AgentsRepository(core.journal); this.resident = new ResidentAgents(core, this.records); this.routines = new AgentRoutines(core);
     // Stewards became agents with projects; their grants have nothing left to grant.
     core.journal.db.query("DELETE FROM settings WHERE key LIKE 'steward:%'").run();
     migrateAgents(core, this);
-    for (const session of this.records.list('session')) this.threads.set(session.threadId, session.agentId);
+    for (const session of this.records.list('session')) this.#threads.set(session.threadId, session.agentId);
     this.entrusted = new AgentEntrustments(core, this);
     this.projects = new AgentProjects(core, this); this.group = new GroupBots(core, this); this.groupHost = new GroupBotHost(core); this.memory = new MemoryKeeper(core, this); this.settingCards = new AgentSettingCards(core, this);
     // The status of an agent follows its thread: a step, a card, a title, an answer.
-    this.off = core.bus.onAny((name, payload) => {
-      if (core.journal.isClosed() || this.threads.size === 0) return;
+    this.#off = core.bus.onAny((name, payload) => {
+      if (core.journal.isClosed() || this.#threads.size === 0) return;
       const threadId = (payload as { threadId?: unknown; id?: unknown } | null)?.threadId ?? (name === 'thread.updated' ? (payload as { id?: unknown }).id : undefined);
       if (typeof threadId !== 'string') return;
-      if (!this.threads.has(threadId)) {
+      if (!this.#threads.has(threadId)) {
         // A subagent's finished turn spends its bot's budget: the bot's sums are read again and clients told.
         if (name !== 'turn.finished') return;
         const root = rootThread(core, threadId);
-        if (!this.threads.has(root)) return;
-        this.todays.delete(root);
+        if (!this.#threads.has(root)) return;
+        this.#todays.delete(root);
         this.changed();
         return;
       }
-      if (name === 'thread.updated' && (payload as ThreadSummary).unread === false) this.readUp(threadId);
-      if (name.startsWith('turn.') || name === 'thread.updated' || name === 'thread.removed') this.todays.delete(threadId);
+      if (name === 'thread.updated' && (payload as ThreadSummary).unread === false) this.#readUp(threadId);
+      if (name.startsWith('turn.') || name === 'thread.updated' || name === 'thread.removed') this.#todays.delete(threadId);
       if (name === 'message.part' || name === 'thread.updated' || name === 'thread.removed' || name.startsWith('question.') || name.startsWith('permission.')) this.changed();
     });
   }
   close(): void {
-    this.off(); this.projects.close(); this.group.close(); this.groupHost.close(); this.memory.close(); this.settingCards.close();
+    this.#off(); this.projects.close(); this.group.close(); this.groupHost.close(); this.memory.close(); this.settingCards.close();
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
   }
@@ -128,19 +128,19 @@ export class AgentStore {
   }
 
   /** Read on every scheduler pass; `setLimits` is its only writer, so it is read from disk once. */
-  private held: Readonly<AgentsSnapshot['limits']> | null = null;
+  #held: Readonly<AgentsSnapshot['limits']> | null = null;
   limits(): AgentsSnapshot['limits'] {
-    if (this.held) return this.held;
+    if (this.#held) return this.#held;
     // Only the known key: limits stored by older cores also carry `backgroundConcurrency`.
     const stored = (this.core.journal.getSetting('agents:limits') as Partial<AgentsSnapshot['limits']> | undefined) ?? DEFAULT_LIMITS;
-    this.held = Object.freeze({ paused: stored.paused ?? DEFAULT_LIMITS.paused });
-    return this.held;
+    this.#held = Object.freeze({ paused: stored.paused ?? DEFAULT_LIMITS.paused });
+    return this.#held;
   }
   setLimits(value: AgentsSnapshot['limits']): AgentsSnapshot['limits'] {
     object(value, 'limits');
     const next = { paused: boolean(value.paused, 'paused') };
     this.core.journal.append({ type: 'agents.limits', threadId: null, version: 1, payload: next }, () => this.core.journal.setSetting('agents:limits', next));
-    this.held = Object.freeze({ ...next });
+    this.#held = Object.freeze({ ...next });
     this.changed();
     return next;
   }
@@ -149,22 +149,22 @@ export class AgentStore {
 
   /** The agent whose own thread this is; a subagent's thread has none (`resident.ownerOf` reads through to its parent). */
   agentOfThread(threadId: string): AgentProfile | null {
-    const agentId = this.threads.get(threadId);
+    const agentId = this.#threads.get(threadId);
     return agentId === undefined ? null : this.records.find('profile', agentId);
   }
   sessionOf(agentId: string): AgentSession | null {
     return this.records.list('session').find(session => session.agentId === agentId) ?? null;
   }
   /** The agent of a thread an agent calls from, or the refusal naming what was expected. */
-  private callerAgent(threadId: string, method: string): AgentProfile {
+  #callerAgent(threadId: string, method: string): AgentProfile {
     const agent = this.agentOfThread(threadId);
     if (!agent) throw refused(`${method}: ${threadId} is no bot's thread`, { field: 'threadId', expected: 'the thread of a bot' });
     return agent;
   }
   /** An agent named by the owner, or the one whose thread calls. */
-  private named(params: { threadId?: string; agentId?: string }, method: string): AgentProfile {
+  #named(params: { threadId?: string; agentId?: string }, method: string): AgentProfile {
     if (params.threadId !== undefined) {
-      const agent = this.callerAgent(params.threadId, method);
+      const agent = this.#callerAgent(params.threadId, method);
       if (params.agentId !== undefined && params.agentId !== agent.id) throw refused(`${method}: an agent acts for itself only`, { field: 'agentId' });
       return agent;
     }
@@ -176,11 +176,11 @@ export class AgentStore {
     const agent = this.records.get('profile', text(agentId, 'agentId', 160));
     const session = this.sessionOf(agent.id);
     if (session && this.core.journal.getThread(session.threadId)) return { threadId: session.threadId };
-    return { threadId: this.createThread(agent, session).threadId };
+    return { threadId: this.#createThread(agent, session).threadId };
   }
 
   /** One thread per agent, projectless, in its own folder of the data directory. */
-  private createThread(agent: AgentProfile, lost: AgentSession | null): AgentSession {
+  #createThread(agent: AgentProfile, lost: AgentSession | null): AgentSession {
     this.resident.brain(agent.id);
     const directory = join(this.core.dataDir, 'agent-workspaces', agent.id, `agent-${agent.id}`);
     mkdirSync(directory, { recursive: true });
@@ -190,8 +190,8 @@ export class AgentStore {
       const thread = this.core.threads.createAgentSession(agent, session.id, directory);
       return this.records.update('session', session.id, session.revision, { agentId: agent.id, threadId: thread.id });
     });
-    if (lost) this.threads.delete(lost.threadId);
-    this.threads.set(created.threadId, agent.id);
+    if (lost) this.#threads.delete(lost.threadId);
+    this.#threads.set(created.threadId, agent.id);
     if (agent.status === 'archived') this.core.threads.archive(created.threadId, true);
     this.core.bus.emit('thread.created', withLoad(this.core, this.core.threads.require(created.threadId)));
     try { this.core.delegation.configure(created.threadId, this.resident.config(agent.id).subagents); }
@@ -210,7 +210,7 @@ export class AgentStore {
   fact(agentId: string, fact: AgentFact): boolean { return this.core.agentRuntime.fact(agentId, fact); }
 
   /** Starts a wake now, or holds it until the thread is free or the pause ends, the agent's own included. */
-  private wakeSoon(agent: AgentProfile, key: string, label: string, prompt: string): void {
+  #wakeSoon(agent: AgentProfile, key: string, label: string, prompt: string): void {
     if (agent.status === 'archived') return;
     if (this.core.agentRuntime.wake(agent.id, { kind: 'event', label, prompt, requestId: `${key}-${agent.revision}-${agent.id.slice(-40)}` }) === null) this.core.agentRuntime.queue(agent.id, key, { label, prompt });
   }
@@ -252,15 +252,15 @@ export class AgentStore {
     const saved = previous === null ? this.records.create('profile', value) : this.records.update('profile', previous.id, integer(params.expectedRevision, 'expectedRevision', 1, Number.MAX_SAFE_INTEGER), value);
     this.group.profileChanged(previous, saved);
     if (previous === null) {
-      this.createThread(saved, null);
-      this.wakeSoon(saved, 'intro', 'Just created', INTRO_PROMPT);
-    } else this.edited(previous, saved);
+      this.#createThread(saved, null);
+      this.#wakeSoon(saved, 'intro', 'Just created', INTRO_PROMPT);
+    } else this.#edited(previous, saved);
     this.changed();
     return saved;
   }
 
   /** What an edit changes on the agent's thread: its title, route, archive state, and a turn about new instructions. */
-  private edited(previous: AgentProfile, saved: AgentProfile): void {
+  #edited(previous: AgentProfile, saved: AgentProfile): void {
     const threadId = this.sessionOf(saved.id)?.threadId;
     const thread = threadId ? this.core.journal.getThread(threadId) : null;
     if (thread) {
@@ -282,7 +282,7 @@ export class AgentStore {
     if (saved.status === 'archived') this.core.agentRuntime.forget(saved.id);
     if (previous.status !== saved.status) this.resident.enforce();
     if ((previous.projectIds ?? []).some(id => !(saved.projectIds ?? []).includes(id))) this.projects.forget(saved);
-    if (previous.instructions !== saved.instructions) this.wakeSoon(saved, 'instructions', 'Instructions changed', INSTRUCTIONS_PROMPT);
+    if (previous.instructions !== saved.instructions) this.#wakeSoon(saved, 'instructions', 'Instructions changed', INSTRUCTIONS_PROMPT);
   }
 
   // -- what the agent reads ---------------------------------------------------
@@ -322,19 +322,19 @@ export class AgentStore {
   /** The owner's or a device's read of any brain; an agent reads its own. */
   brainOf(params: RpcParams<'agents.brain.get'>): AgentBrain {
     object(params, 'params');
-    return this.resident.brain(this.named(params, 'agents.brain.get').id);
+    return this.resident.brain(this.#named(params, 'agents.brain.get').id);
   }
 
   noteMemory(params: RpcParams<'agents.memory.note'>): AgentBrain {
     object(params, 'params');
-    return this.memory.note(this.named(params, 'agents.memory.note'), params.text);
+    return this.memory.note(this.#named(params, 'agents.memory.note'), params.text);
   }
 
   // -- the desk ---------------------------------------------------------------
 
   watch(params: RpcParams<'agents.watch'>): AgentWatch | null | Promise<AgentWatch | null> {
     object(params, 'params');
-    const agent = this.named(params, 'agents.watch');
+    const agent = this.#named(params, 'agents.watch');
     // A thread of another machine of the group: that machine checks it is one of the bot's projects there.
     // Its id travels in the bot's lease, which takes ids of at most 128 characters.
     if (params.machine !== undefined) return this.group.watch(agent, text(params.machine, 'machine', 200), text(params.watchThreadId, 'watchThreadId', 128), params.watched === true);
@@ -350,7 +350,7 @@ export class AgentStore {
     }
     // The owner's watch is a grant of its own; the agent's holds while the thread's project is entrusted to it.
     this.projects.follow(agent.id, target.id, 'followed', params.threadId === undefined);
-    return this.watchesOf(agent.id).find(w => w.threadId === target.id) ?? null;
+    return this.#watchesOf(agent.id).find(w => w.threadId === target.id) ?? null;
   }
 
   /**
@@ -390,7 +390,7 @@ export class AgentStore {
   }
 
   /** The desk rows of an agent, from the threads themselves: its threads and their pull requests in one read each, then those of other machines as they last sent them. */
-  private watchesOf(agentId: string): AgentWatch[] {
+  #watchesOf(agentId: string): AgentWatch[] {
     const watches = this.projects.watchesOf(agentId);
     const linked = linkedPullRequests(this.core, watches.map(w => w.threadId));
     const agent = this.records.find('profile', agentId);
@@ -411,7 +411,7 @@ export class AgentStore {
   // -- status -----------------------------------------------------------------
 
   /** Why an agent cannot run, in a sentence that names the fix, or null. */
-  private problem(agent: AgentProfile): string | null {
+  #problem(agent: AgentProfile): string | null {
     let provider;
     try { provider = agentProvider(this.core, agent); } catch (error) { return messageOf(error); }
     const account = this.core.journal.getAccount(agent.selection.accountId);
@@ -427,7 +427,7 @@ export class AgentStore {
    * summary or description, else its name and what it acts on. While a card
    * holds the thread, what it waits on.
    */
-  private activity(thread: ThreadSummary): string | null {
+  #activity(thread: ThreadSummary): string | null {
     const ask = this.core.threads.listQuestions(thread.id)[0];
     const permission = this.core.threads.listPermissions(thread.id)[0];
     if (ask) return `Waiting for your answer: ${oneLine(ask.text)}`;
@@ -453,7 +453,7 @@ export class AgentStore {
   status(agent: AgentProfile, sessions: readonly AgentSession[] = this.records.list('session'), routines: readonly AgentRoutine[] = this.records.list('routine')): AgentStatus {
     const threadId = sessions.find(session => session.agentId === agent.id)?.threadId ?? null;
     const thread = threadId ? this.core.journal.getThread(threadId) : null;
-    const problem = this.problem(agent);
+    const problem = this.#problem(agent);
     const asks = thread ? this.core.threads.listQuestions(thread.id).length + this.core.threads.listPermissions(thread.id).length : 0;
     // A blocking card holds its turn; one asked without stopping waits for the user once the turn is over.
     const state: AgentStatus['state'] = agent.status === 'archived' ? 'archived'
@@ -468,9 +468,9 @@ export class AgentStore {
     let last: AgentStatus['last'] = null;
     let unread = 0;
     if (thread) {
-      Object.assign(today, this.today(thread.id, midnight()));
+      Object.assign(today, this.#today(thread.id, midnight()));
       today.costUsd = Math.round(today.costUsd * 10_000) / 10_000;
-      const answered = this.answered(thread.id);
+      const answered = this.#answered(thread.id);
       if (answered) {
         const said = finalText(this.core, answered);
         if (said) last = { text: said.slice(0, LAST_MAX), at: answered.finishedAt ?? answered.queuedAt };
@@ -478,7 +478,7 @@ export class AgentStore {
       if (thread.unread) unread = Math.max(1, (this.core.journal.getSetting(`${UNREAD}${thread.id}`) as number | undefined) ?? 0);
     }
     return {
-      agentId: agent.id, threadId, state, activity: thread && state !== 'archived' ? this.activity(thread) : null, problem,
+      agentId: agent.id, threadId, state, activity: thread && state !== 'archived' ? this.#activity(thread) : null, problem,
       nextWake: next ? { at: next.nextAt!, routineId: next.id, label: next.name } : null, unread, last, today,
       memory: this.memory.lastPass(agent.id),
     };
@@ -491,7 +491,7 @@ export class AgentStore {
     if (!thread?.unread || turn.quiet || operation === 'compact' || operation === 'keepalive' || (turn.status !== 'done' && turn.status !== 'error')) return;
     this.core.journal.setSetting(`${UNREAD}${turn.threadId}`, ((this.core.journal.getSetting(`${UNREAD}${turn.threadId}`) as number | undefined) ?? 0) + 1);
   }
-  private readUp(threadId: string): void {
+  #readUp(threadId: string): void {
     if (this.core.journal.getSetting(`${UNREAD}${threadId}`) !== undefined) this.core.journal.deleteSetting(`${UNREAD}${threadId}`);
   }
 
@@ -502,15 +502,15 @@ export class AgentStore {
    * still waiting in the queue counts once it starts. The cost is the
    * budget's (`agentSpend`): priced from usage, subagents included.
    */
-  private today(threadId: string, since: number): AgentStatus['today'] {
-    const held = this.todays.get(threadId);
+  #today(threadId: string, since: number): AgentStatus['today'] {
+    const held = this.#todays.get(threadId);
     if (held?.since === since) return { ...held.today };
     const counts = this.core.journal.db.query(`SELECT COUNT(*) AS turns,
       COALESCE(SUM(json_extract(execution, '$.operation') IN ('routine', 'event')), 0) AS wakes,
       COALESCE(SUM(COALESCE(quiet, 0) <> 0), 0) AS quiet
       FROM turns INDEXED BY turns_by_thread_queue WHERE thread_id = ? AND queued_at >= ? AND started_at IS NOT NULL`).get(threadId, since) as Omit<AgentStatus['today'], 'costUsd'>;
     const today = { ...counts, costUsd: agentSpend(this.core, threadId, since).costUsd };
-    this.todays.set(threadId, { since, today });
+    this.#todays.set(threadId, { since, today });
     return { ...today };
   }
   /**
@@ -519,7 +519,7 @@ export class AgentStore {
    * left to itself, SQLite picks `turns_by_status` and reads every done turn
    * of every thread.
    */
-  private answered(threadId: string): Turn | null {
+  #answered(threadId: string): Turn | null {
     const row = this.core.journal.db.query(`SELECT id FROM turns INDEXED BY turns_by_thread WHERE thread_id = ? AND status = 'done' AND COALESCE(quiet, 0) = 0
       AND COALESCE(json_extract(execution, '$.operation'), '') NOT IN ('compact', 'keepalive') ORDER BY rowid DESC LIMIT 1`).get(threadId) as { id: string } | null;
     return row ? this.core.journal.getTurn(row.id) : null;
@@ -530,7 +530,7 @@ export class AgentStore {
    * thread asks (`threadId`): no other agent, grant or entrustment.
    */
   snapshot(threadId?: string, desk?: string | null): AgentsSnapshot {
-    const own = threadId === undefined ? null : this.callerAgent(threadId, 'agents.snapshot');
+    const own = threadId === undefined ? null : this.#callerAgent(threadId, 'agents.snapshot');
     const profiles = own ? [own] : this.records.list('profile');
     const mine = (agentId: string) => !own || agentId === own.id;
     const sessions = this.records.list('session'), routines = this.records.list('routine');
@@ -540,7 +540,7 @@ export class AgentStore {
       sessions: sessions.filter(s => mine(s.agentId)),
       routines: routines.filter(r => mine(r.agentId)),
       status: profiles.map(agent => this.status(agent, sessions, routines)),
-      watches: profiles.filter(agent => own !== null || desk === undefined || agent.id === desk).flatMap(agent => this.watchesOf(agent.id)),
+      watches: profiles.filter(agent => own !== null || desk === undefined || agent.id === desk).flatMap(agent => this.#watchesOf(agent.id)),
       accountGrants: own ? [] : this.resident.grants(),
       limits: this.limits(),
       entrusted: this.entrusted.list().filter(e => mine(e.agentId)),

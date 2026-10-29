@@ -32,7 +32,7 @@ export class AgentsRepository {
   writes = 0;
   constructor(readonly journal: Journal) {}
 
-  private rows<K extends AgentEntityKind>(sql: string, ...params: (string | number)[]): AgentEntities[K][] {
+  #rows<K extends AgentEntityKind>(sql: string, ...params: (string | number)[]): AgentEntities[K][] {
     return (this.journal.db.query(sql).all(...params) as Row[]).map(row => JSON.parse(row.data) as AgentEntities[K]);
   }
 
@@ -59,12 +59,12 @@ export class AgentsRepository {
   /** Every record of a kind: a few profiles, their sessions and routines. */
   list<K extends AgentEntityKind>(kind: K): AgentEntities[K][] {
     checkKind(kind);
-    return this.rows<K>('SELECT data FROM agent_entities WHERE kind = ? ORDER BY created_at, rowid', kind);
+    return this.#rows<K>('SELECT data FROM agent_entities WHERE kind = ? ORDER BY created_at, rowid', kind);
   }
 
   /** The session whose thread this is, through `agent_session_thread`. */
   sessionOfThread(threadId: string): AgentSession | null {
-    return this.rows<'session'>("SELECT data FROM agent_entities INDEXED BY agent_session_thread WHERE kind = 'session' AND json_extract(data, '$.threadId') = ?", threadId)[0] ?? null;
+    return this.#rows<'session'>("SELECT data FROM agent_entities INDEXED BY agent_session_thread WHERE kind = 'session' AND json_extract(data, '$.threadId') = ?", threadId)[0] ?? null;
   }
 
   create<K extends AgentEntityKind>(kind: K, value: AgentDraft<AgentEntities[K]>): AgentEntities[K] {
@@ -76,7 +76,7 @@ export class AgentsRepository {
       db.query('INSERT INTO agent_entities (kind, id, revision, created_at, updated_at, data) VALUES (?, ?, ?, ?, ?, ?)')
         .run(kind, record.id, record.revision, now, now, JSON.stringify(record));
     });
-    this.prune(now);
+    this.#prune(now);
     return record;
   }
 
@@ -91,7 +91,7 @@ export class AgentsRepository {
           .run(record.revision, record.updatedAt, JSON.stringify(record), kind, id, expectedRevision);
         if (updated.changes !== 1) throw refused(`${kind} ${id}: revision changed`);
       });
-      this.prune(record.updatedAt);
+      this.#prune(record.updatedAt);
       return record;
     });
   }
@@ -114,15 +114,15 @@ export class AgentsRepository {
   }
 
   /** When the last pass dropped receipts and record events past `REQUEST_RETENTION_MS`. */
-  private pruned = 0;
+  #pruned = 0;
 
   /**
    * Once an hour, from whichever write comes first: every routine run adds
    * receipts and record events, and neither is read back after a month.
    */
-  private prune(now: number): void {
-    if (now - this.pruned <= HOUR) return;
-    this.pruned = now;
+  #prune(now: number): void {
+    if (now - this.#pruned <= HOUR) return;
+    this.#pruned = now;
     const cutoff = now - REQUEST_RETENTION_MS;
     this.journal.db.query('DELETE FROM agent_requests WHERE created_at < ?').run(cutoff);
     this.journal.db.query(PRUNE_RECORD_EVENTS).run(cutoff);
@@ -143,7 +143,7 @@ export class AgentsRepository {
       const now = Date.now();
       this.journal.db.query('INSERT INTO agent_requests (actor, request_id, fingerprint, result, created_at) VALUES (?, ?, ?, ?, ?)')
         .run(actor, requestId, fingerprint, JSON.stringify(result), now);
-      this.prune(now);
+      this.#prune(now);
       return result;
     });
   }
