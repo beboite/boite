@@ -79,40 +79,40 @@ export function setMuseStartupDeadlineForTests(ms: number | null): void {
  * setup closes the host.
  */
 export class MuseSession {
-  private protection: ReturnType<typeof protectedMuse> = null;
-  private replaces: string | null = null;
-  private child: SpawnedChild | null = null;
-  private rpc: MuseRpc | null = null;
-  private starting: Promise<void> | null = null;
+  #protection: ReturnType<typeof protectedMuse> = null;
+  #replaces: string | null = null;
+  #child: SpawnedChild | null = null;
+  #rpc: MuseRpc | null = null;
+  #starting: Promise<void> | null = null;
 
   /** The Muse session id: what `ctx.sessionId` stores and `session/resume` takes. */
-  private sessionId: string | null = null;
-  private readonly controls = new MuseControls();
-  private lastStderr = '';
-  private exitCode: number | null = null;
-  private exited: Promise<number | null> | null = null;
-  private processClosed: Promise<void> = Promise.resolve();
-  private idle: Timer | null = null;
-  private readonly retention = new SessionRetention();
+  #sessionId: string | null = null;
+  readonly #controls = new MuseControls();
+  #lastStderr = '';
+  #exitCode: number | null = null;
+  #exited: Promise<number | null> | null = null;
+  #processClosed: Promise<void> = Promise.resolve();
+  #idle: Timer | null = null;
+  readonly #retention = new SessionRetention();
   /** The turn waiting on the host's startup, which a stop ends by closing the host. */
-  private opening: MuseTurn | null = null;
-  private current: MuseTurn | null = null;
-  private killTree: (() => void) | null = null;
-  private quotaSink: SessionContext['quota'] | null = null;
-  private contextSink: SessionContext['context'] | null = null;
-  private logSink: SessionContext['log'] | null = null;
+  #opening: MuseTurn | null = null;
+  #current: MuseTurn | null = null;
+  #killTree: (() => void) | null = null;
+  #quotaSink: SessionContext['quota'] | null = null;
+  #contextSink: SessionContext['context'] | null = null;
+  #logSink: SessionContext['log'] | null = null;
   /**
    * The running turn's items, by id, for the deltas that name only the item.
    * Item ids are per turn: the map is emptied when a turn ends, and an item of
    * another turn is never recorded, so its deltas find nothing.
    */
-  private readonly items = new Map<string, { kind: string; revision: number }>();
-  private readonly approvals = new Map<string, OpenApproval>();
-  private readonly questions = new Map<string, OpenQuestion>();
-  private queue: Promise<void> = Promise.resolve();
-  private running = 0;
-  private closing = false;
-  private ended = false;
+  readonly #items = new Map<string, { kind: string; revision: number }>();
+  readonly #approvals = new Map<string, OpenApproval>();
+  readonly #questions = new Map<string, OpenQuestion>();
+  #queue: Promise<void> = Promise.resolve();
+  #running = 0;
+  #closing = false;
+  #ended = false;
 
   constructor(
     readonly key: string,
@@ -121,41 +121,41 @@ export class MuseSession {
   ) { }
 
   usable(key: string, warmMs: number): boolean {
-    return !this.ended && !this.closing && this.key === key && this.retention.reusable(warmMs, this.warmMs);
+    return !this.#ended && !this.#closing && this.key === key && this.#retention.reusable(warmMs, this.warmMs);
   }
 
   setViewed(viewed: boolean): void {
-    this.retention.setViewed(viewed);
-    this.clearIdle();
-    if (!viewed && !this.busy() && !this.ended) this.armIdle();
+    this.#retention.setViewed(viewed);
+    this.#clearIdle();
+    if (!viewed && !this.busy() && !this.#ended) this.#armIdle();
   }
 
   async prepare(ctx: SessionContext, forTurn = false): Promise<void> {
-    this.retention.prepare(forTurn);
-    this.clearIdle();
-    try { await this.start(ctx); }
-    catch (error) { this.drop(); throw error; }
+    this.#retention.prepare(forTurn);
+    this.#clearIdle();
+    try { await this.#start(ctx); }
+    catch (error) { this.#drop(); throw error; }
     finally {
       ctx.finishStartup?.();
-      if (!this.ended && !this.busy() && !this.retention.viewed) this.armIdle();
+      if (!this.#ended && !this.busy() && !this.#retention.viewed) this.#armIdle();
     }
   }
 
   busy(): boolean {
-    return this.running > 0;
+    return this.#running > 0;
   }
 
   attach(turn: MuseTurn, warmMs: number): void {
     this.warmMs = warmMs;
-    this.retention.beginTurn();
-    this.running += 1;
-    this.clearIdle();
-    this.queue = this.queue.then(async () => {
+    this.#retention.beginTurn();
+    this.#running += 1;
+    this.#clearIdle();
+    this.#queue = this.#queue.then(async () => {
       try {
-        await this.runTurn(turn);
+        await this.#runTurn(turn);
       } catch (error) {
         turn.fail(messageOf(error));
-        this.endTurn(turn, true);
+        this.#endTurn(turn, true);
       }
     });
   }
@@ -167,20 +167,20 @@ export class MuseSession {
   stopTurn(turn: MuseTurn): void {
     if (turn.settled) return;
     turn.markStopped();
-    if (this.opening === turn) {
+    if (this.#opening === turn) {
       // Nothing reached the model yet, and a host stuck in its startup answers
       // nothing else: closing it is the only stop there is.
-      this.closing = true;
-      this.drop();
+      this.#closing = true;
+      this.#drop();
       return;
     }
-    if (this.current !== turn) return;
+    if (this.#current !== turn) return;
     if (turn.compacting) {
       // A compaction has no turn to interrupt; the stop is the user's to take.
       turn.finish('cancelled', null);
       return;
     }
-    this.interrupt(turn);
+    this.#interrupt(turn);
   }
 
   /**
@@ -188,9 +188,9 @@ export class MuseSession {
    * refuses it, and the text waits for the next turn instead of starting one.
    */
   async steer(turn: MuseTurn, text: string, onAccepted?: () => void): Promise<boolean> {
-    const rpc = this.rpc;
-    const sessionId = this.sessionId;
-    if (rpc === null || sessionId === null || this.current !== turn || turn.turnId === null || turn.isStopped || turn.compacting) return false;
+    const rpc = this.#rpc;
+    const sessionId = this.#sessionId;
+    if (rpc === null || sessionId === null || this.#current !== turn || turn.turnId === null || turn.isStopped || turn.compacting) return false;
     try {
       await rpc.command('turn/steer', { sessionId, expectedTurnId: turn.turnId, input: inputOf(text, []) }, onAccepted);
       return true;
@@ -200,9 +200,9 @@ export class MuseSession {
     }
   }
 
-  private interrupt(turn: MuseTurn): void {
-    const rpc = this.rpc;
-    const sessionId = this.sessionId;
+  #interrupt(turn: MuseTurn): void {
+    const rpc = this.#rpc;
+    const sessionId = this.#sessionId;
     if (rpc === null || sessionId === null || turn.turnId === null) return;
     void rpc.command('turn/interrupt', { sessionId, turnId: turn.turnId }).catch((error: unknown) => {
       turn.ctx.log('warn', `muse: turn/interrupt failed: ${messageOf(error)}`);
@@ -211,7 +211,7 @@ export class MuseSession {
       if (turn.decided) return;
       turn.ctx.log('warn', `muse: the host did not confirm the stop in ${INTERRUPT_DEADLINE_MS / 1000} s, closing it`);
       turn.finish('cancelled', null);
-      this.closing = true;
+      this.#closing = true;
     }, INTERRUPT_DEADLINE_MS);
     deadline.unref?.();
     void turn.finished.then(() => {
@@ -220,59 +220,59 @@ export class MuseSession {
   }
 
   close(reason: string | null, ctx?: SessionContext): void {
-    if (this.ended) return;
-    this.closing = true;
+    if (this.#ended) return;
+    this.#closing = true;
     if (reason !== null && ctx !== undefined) ctx.log('warn', `muse session: ${reason}`);
-    this.drop();
+    this.#drop();
   }
 
   // -- the turn -------------------------------------------------------------
 
-  private async runTurn(turn: MuseTurn): Promise<void> {
+  async #runTurn(turn: MuseTurn): Promise<void> {
     // A turn stopped while it was queued, or during the host's startup, sends
     // nothing to the model.
     if (turn.isStopped) {
-      this.endStopped(turn);
+      this.#endStopped(turn);
       return;
     }
-    this.opening = turn;
+    this.#opening = turn;
     try {
-      await this.start(turn.ctx);
+      await this.#start(turn.ctx);
     } catch (error) {
       if (turn.isStopped) turn.finish('cancelled', null);
       else turn.fail(messageOf(error));
-      this.endTurn(turn, true);
+      this.#endTurn(turn, true);
       return;
     } finally {
-      this.opening = null;
+      this.#opening = null;
     }
     if (turn.isStopped) {
-      this.endStopped(turn);
+      this.#endStopped(turn);
       return;
     }
 
-    const rpc = this.rpc;
-    const sessionId = this.sessionId;
+    const rpc = this.#rpc;
+    const sessionId = this.#sessionId;
     if (rpc === null || sessionId === null) {
       turn.fail('the muse session went away before the turn');
-      this.endTurn(turn, true);
+      this.#endTurn(turn, true);
       return;
     }
 
     turn.sessionId = sessionId;
-    this.current = turn;
-    this.contextSink = turn.ctx.context;
-    this.quotaSink = turn.ctx.quota ?? null;
+    this.#current = turn;
+    this.#contextSink = turn.ctx.context;
+    this.#quotaSink = turn.ctx.quota ?? null;
     const ctx = turn.ctx;
     try {
       ctx.protectedExecution?.check();
-      await this.controls.align(rpc, sessionId, ctx, this.protection !== null);
+      await this.#controls.align(rpc, sessionId, ctx, this.#protection !== null);
       ctx.protectedExecution?.check();
       if (turn.isStopped) {
         // Stopped while the model or the mode was being set: no turn and no
         // compaction goes out, and the host stays warm.
-        this.current = null;
-        this.endStopped(turn);
+        this.#current = null;
+        this.#endStopped(turn);
         return;
       }
       if (turn.compacting) {
@@ -282,8 +282,8 @@ export class MuseSession {
         }
       } else {
         let prompt = ctx.prompt, attachments = ctx.attachments;
-        if (this.replaces !== null && this.replaces === ctx.sessionId) {
-          this.replaces = null;
+        if (this.#replaces !== null && this.#replaces === ctx.sessionId) {
+          this.#replaces = null;
           const carried = ctx.continuation?.();
           if (!carried) throw new Error('execution.muse.history: a protected cold start requires the captured conversation continuation');
           prompt = carried.prompt; attachments = carried.attachments;
@@ -301,114 +301,114 @@ export class MuseSession {
           ...(effort === null ? {} : { reasoningEffort: effort }),
         });
         if (typeof started.turnId === 'string' && started.turnId.length > 0) turn.turnId = started.turnId;
-        if (turn.isStopped) this.interrupt(turn);
+        if (turn.isStopped) this.#interrupt(turn);
       }
     } catch (error) {
-      const code = await exitWithin(this.exited, EXIT_GRACE_MS, this.processClosed);
+      const code = await exitWithin(this.#exited, EXIT_GRACE_MS, this.#processClosed);
       if (turn.isStopped) turn.finish('cancelled', null);
-      else turn.fail(code === undefined ? commandFailure(error) : this.exitSentence(code), code === undefined ? logMessageOf(error) : this.exitSentence(code, true));
-      this.current = null;
-      this.endTurn(turn, true);
+      else turn.fail(code === undefined ? commandFailure(error) : this.#exitSentence(code), code === undefined ? logMessageOf(error) : this.#exitSentence(code, true));
+      this.#current = null;
+      this.#endTurn(turn, true);
       return;
     }
 
     await turn.finished;
-    this.current = null;
-    this.endTurn(turn, turn.isStopped);
+    this.#current = null;
+    this.#endTurn(turn, turn.isStopped);
   }
 
-  private endStopped(turn: MuseTurn): void {
+  #endStopped(turn: MuseTurn): void {
     turn.finish('cancelled', null);
-    this.endTurn(turn, false);
+    this.#endTurn(turn, false);
   }
 
-  private endTurn(turn: MuseTurn, drop: boolean): void {
+  #endTurn(turn: MuseTurn, drop: boolean): void {
     turn.settle();
     // Turns run one at a time: what the map holds was this turn's.
-    this.items.clear();
-    this.running = Math.max(0, this.running - 1);
-    if (drop || this.closing || this.retention.idleMs(this.warmMs) <= 0) {
-      this.drop();
+    this.#items.clear();
+    this.#running = Math.max(0, this.#running - 1);
+    if (drop || this.#closing || this.#retention.idleMs(this.warmMs) <= 0) {
+      this.#drop();
       return;
     }
-    if (this.running === 0 && !this.retention.viewed) this.armIdle();
+    if (this.#running === 0 && !this.#retention.viewed) this.#armIdle();
   }
 
   // -- the process ----------------------------------------------------------
 
-  private start(ctx: SessionContext): Promise<void> {
-    if (this.starting === null) this.starting = noteReady(ctx, 'Muse', () => this.open(ctx), undefined, () => this.opening?.isStopped === true || this.closing || this.ended);
-    return this.starting;
+  #start(ctx: SessionContext): Promise<void> {
+    if (this.#starting === null) this.#starting = noteReady(ctx, 'Muse', () => this.#open(ctx), undefined, () => this.#opening?.isStopped === true || this.#closing || this.#ended);
+    return this.#starting;
   }
 
-  private async open(ctx: SessionContext): Promise<void> {
-    if (this.ended) throw new Error('the muse session was closed before it started');
+  async #open(ctx: SessionContext): Promise<void> {
+    if (this.#ended) throw new Error('the muse session was closed before it started');
     ctx.protectedExecution?.check();
-    this.quotaSink = ctx.quota ?? null;
-    this.contextSink = ctx.context;
-    this.logSink = ctx.log;
+    this.#quotaSink = ctx.quota ?? null;
+    this.#contextSink = ctx.context;
+    this.#logSink = ctx.log;
     const executable = museExecutable(ctx.provider);
     const posture = MODE_POSTURE[ctx.thread.permissionMode];
     const declared = profileFor(ctx.provider)?.launch?.args ?? [];
-    this.protection = protectedMuse(ctx, () => this.current ? {ctx: this.current.ctx, stopped: this.current.stopped} : null, declared);
-    const args = this.protection?.args ?? [...declared, ...museHostArgs(executable), ...posture.flags];
+    this.#protection = protectedMuse(ctx, () => this.#current ? {ctx: this.#current.ctx, stopped: this.#current.stopped} : null, declared);
+    const args = this.#protection?.args ?? [...declared, ...museHostArgs(executable), ...posture.flags];
     const child = ctx.spawnChild(executable, args, {
-      cwd: this.protection?.cwd ?? ctx.thread.cwd,
-      env: this.protection?.env ?? agentEnv(ctx.provider, ctx.accountEnv),
+      cwd: this.#protection?.cwd ?? ctx.thread.cwd,
+      env: this.#protection?.env ?? agentEnv(ctx.provider, ctx.accountEnv),
     });
-    this.child = child;
-    this.killTree = ctx.killTree ?? null;
+    this.#child = child;
+    this.#killTree = ctx.killTree ?? null;
     const rpc = new MuseRpc(child, {
       notification: (method, params) => {
-        if (this.child !== child) return;
-        this.onNotification(method, params);
+        if (this.#child !== child) return;
+        this.#onNotification(method, params);
       },
       log: (level, message, context) => {
-        if (this.child !== child) return;
+        if (this.#child !== child) return;
         ctx.log(level, message, context);
       },
-      fault: (reason) => { void this.transportFault(child, reason); },
+      fault: (reason) => { void this.#transportFault(child, reason); },
     });
-    this.rpc = rpc;
-    this.watch(child, ctx, rpc);
+    this.#rpc = rpc;
+    this.#watch(child, ctx, rpc);
 
-    const initialized = await this.within('initialize', handshake(rpc));
-    this.protection?.admit(initialized);
+    const initialized = await this.#within('initialize', handshake(rpc));
+    this.#protection?.admit(initialized);
 
-    if (ctx.sessionId !== null && !this.protection) {
-      const resumed = await this.within(
+    if (ctx.sessionId !== null && !this.#protection) {
+      const resumed = await this.#within(
         'session/resume',
         rpc.command<{ session: MuseSessionRecord }>('session/resume', {
           sessionId: ctx.sessionId,
           excludeItems: true,
         }),
       );
-      this.sessionId = this.controls.adopt(resumed.session);
+      this.#sessionId = this.#controls.adopt(resumed.session);
       return;
     }
 
     const model = modelOf(ctx);
-    if (this.protection) this.replaces = ctx.sessionId;
-    const created = await this.within(
+    if (this.#protection) this.#replaces = ctx.sessionId;
+    const created = await this.#within(
       'session/start',
       rpc.command<{ session: MuseSessionRecord }>('session/start', {
         sessionId: mintUuidV7(),
-        workspaceRoot: this.protection?.cwd ?? ctx.thread.cwd,
+        workspaceRoot: this.#protection?.cwd ?? ctx.thread.cwd,
         approvalMode: posture.approvalMode,
         ...(model === null ? {} : { modelId: model, providerId: META_PROVIDER }),
       }),
     );
-    this.protection?.ready(created.session, posture.approvalMode, model);
-    this.sessionId = this.controls.adopt(created.session);
+    this.#protection?.ready(created.session, posture.approvalMode, model);
+    this.#sessionId = this.#controls.adopt(created.session);
   }
 
   /** One startup step, or the host closed and a sentence naming the step it hung on. */
-  private within<T>(step: string, pending: Promise<T>): Promise<T> {
+  #within<T>(step: string, pending: Promise<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         reject(new Error(`the muse host did not answer ${step} within ${Math.round(startupDeadlineMs / 1000)} s`));
-        this.closing = true;
-        this.drop();
+        this.#closing = true;
+        this.#drop();
       }, startupDeadlineMs);
       timer.unref?.();
       pending.then(
@@ -424,157 +424,157 @@ export class MuseSession {
     });
   }
 
-  private watch(child: SpawnedChild, ctx: SessionContext, rpc: MuseRpc): void {
+  #watch(child: SpawnedChild, ctx: SessionContext, rpc: MuseRpc): void {
     // Refuse warm reuse immediately, without interrupting stdout drainage.
-    child.stdin.once('close', () => { if (this.child === child) this.closing = true; });
+    child.stdin.once('close', () => { if (this.#child === child) this.#closing = true; });
     let closed = (): void => undefined;
-    this.processClosed = new Promise<void>(resolve => { closed = resolve; });
+    this.#processClosed = new Promise<void>(resolve => { closed = resolve; });
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => {
-      if (this.child !== child) return;
+      if (this.#child !== child) return;
       for (const line of chunk.split(/\r?\n/)) {
         const text = line.trim();
         if (text.length === 0) continue;
-        this.lastStderr = text.slice(0, STDERR_MAX);
-        ctx.log('warn', `muse host: ${this.lastStderr}`, { kind: 'provider-output', event: 'provider.output' });
+        this.#lastStderr = text.slice(0, STDERR_MAX);
+        ctx.log('warn', `muse host: ${this.#lastStderr}`, { kind: 'provider-output', event: 'provider.output' });
       }
     });
-    this.exited = new Promise<number | null>((resolve) => {
+    this.#exited = new Promise<number | null>((resolve) => {
       child.once('exit', (code) => {
-        if (this.child === child) this.exitCode = code;
+        if (this.#child === child) this.#exitCode = code;
         resolve(code);
       });
       child.once('close', () => {
         closed();
-        if (this.child !== child) return;
-        const sentence = this.exitSentence(this.exitCode);
-        rpc.fail(sentence, this.exitSentence(this.exitCode, true));
-        this.failCurrent(sentence, this.exitSentence(this.exitCode, true));
-        if (!this.closing) this.drop();
+        if (this.#child !== child) return;
+        const sentence = this.#exitSentence(this.#exitCode);
+        rpc.fail(sentence, this.#exitSentence(this.#exitCode, true));
+        this.#failCurrent(sentence, this.#exitSentence(this.#exitCode, true));
+        if (!this.#closing) this.#drop();
       });
       child.once('error', (error) => {
         resolve(null);
         closed();
-        if (this.child !== child) return;
+        if (this.#child !== child) return;
         const sentence = `the muse host did not start: ${messageOf(error)}`;
         rpc.fail(sentence);
-        this.failCurrent(sentence, logMessageOf(error));
-        if (!this.closing) this.drop();
+        this.#failCurrent(sentence, logMessageOf(error));
+        if (!this.#closing) this.#drop();
       });
     });
   }
 
-  private async transportFault(child: SpawnedChild, reason: string): Promise<void> {
-    if (this.child !== child) return;
-    this.closing = true;
-    const code = await exitWithin(this.exited, EXIT_GRACE_MS, this.processClosed);
-    if (this.child !== child) return;
-    this.failCurrent(code === undefined ? reason : this.exitSentence(code), code === undefined ? reason : this.exitSentence(code, true));
-    this.drop();
+  async #transportFault(child: SpawnedChild, reason: string): Promise<void> {
+    if (this.#child !== child) return;
+    this.#closing = true;
+    const code = await exitWithin(this.#exited, EXIT_GRACE_MS, this.#processClosed);
+    if (this.#child !== child) return;
+    this.#failCurrent(code === undefined ? reason : this.#exitSentence(code), code === undefined ? reason : this.#exitSentence(code, true));
+    this.#drop();
   }
 
-  private failCurrent(reason: string, diagnostic: string): void {
-    const turn = this.current;
+  #failCurrent(reason: string, diagnostic: string): void {
+    const turn = this.#current;
     if (turn?.isStopped) turn.finish('cancelled', null);
     else turn?.fail(reason, diagnostic);
   }
 
-  private exitSentence(code: number | null, diagnostic = false): string {
+  #exitSentence(code: number | null, diagnostic = false): string {
     const head = `the muse host exited with code ${code === null ? 'unknown' : code}`;
-    return diagnostic || this.lastStderr.length === 0 ? head : `${head}: ${this.lastStderr}`;
+    return diagnostic || this.#lastStderr.length === 0 ? head : `${head}: ${this.#lastStderr}`;
   }
 
-  private drop(): void {
-    if (this.ended) return;
-    this.ended = true;
-    this.closing = true;
-    this.clearIdle();
-    try { this.protection?.close(this.processClosed); }
-    catch (error) { this.logSink?.('error', `muse: protected cleanup failed: ${logMessageOf(error)}`); }
-    this.protection = null;
+  #drop(): void {
+    if (this.#ended) return;
+    this.#ended = true;
+    this.#closing = true;
+    this.#clearIdle();
+    try { this.#protection?.close(this.#processClosed); }
+    catch (error) { this.#logSink?.('error', `muse: protected cleanup failed: ${logMessageOf(error)}`); }
+    this.#protection = null;
     // The running turn ends now, while the journal is still open, not from the
     // child's close event, which can fire after core shutdown closed it.
-    const turn = this.current;
-    this.current = null;
+    const turn = this.#current;
+    this.#current = null;
     endOnClose(turn, 'the muse session was closed');
-    for (const question of this.questions.values()) question.settle();
-    this.questions.clear();
-    this.approvals.clear();
-    this.items.clear();
-    this.rpc?.fail('the muse session was closed');
-    this.rpc = null;
-    const child = this.child;
-    this.child = null;
+    for (const question of this.#questions.values()) question.settle();
+    this.#questions.clear();
+    this.#approvals.clear();
+    this.#items.clear();
+    this.#rpc?.fail('the muse session was closed');
+    this.#rpc = null;
+    const child = this.#child;
+    this.#child = null;
     // The whole tree on Windows, so a shell a tool left running goes too.
-    releaseChild(child, this.killTree);
+    releaseChild(child, this.#killTree);
     this.onEnded(this);
   }
 
-  private armIdle(): void {
-    this.clearIdle();
-    this.idle = setTimeout(() => {
-      this.idle = null;
-      this.drop();
-    }, this.retention.idleMs(this.warmMs));
-    this.idle?.unref?.();
+  #armIdle(): void {
+    this.#clearIdle();
+    this.#idle = setTimeout(() => {
+      this.#idle = null;
+      this.#drop();
+    }, this.#retention.idleMs(this.warmMs));
+    this.#idle?.unref?.();
   }
 
-  private clearIdle(): void {
-    if (this.idle === null) return;
-    clearTimeout(this.idle);
-    this.idle = null;
+  #clearIdle(): void {
+    if (this.#idle === null) return;
+    clearTimeout(this.#idle);
+    this.#idle = null;
   }
 
   // -- what the host sends --------------------------------------------------
 
-  private onNotification(method: string, params: Record<string, unknown>): void {
+  #onNotification(method: string, params: Record<string, unknown>): void {
     // One host, one session: anything about another session is not this thread's.
-    if (typeof params['sessionId'] === 'string' && params['sessionId'] !== this.sessionId) return;
+    if (typeof params['sessionId'] === 'string' && params['sessionId'] !== this.#sessionId) return;
     switch (method) {
       case 'usage/changed': {
         const usage = museQuotaReading(params);
-        if (usage) this.quotaSink?.(usage.reading, usage.observedAt);
+        if (usage) this.#quotaSink?.(usage.reading, usage.observedAt);
         return;
       }
       case 'session/modelChanged':
-        if (typeof params['modelId'] === 'string') this.controls.modelId = params['modelId'];
+        if (typeof params['modelId'] === 'string') this.#controls.modelId = params['modelId'];
         return;
       case 'session/approvalModeChanged':
-        if (typeof params['mode'] === 'string') this.controls.approvalMode = params['mode'];
+        if (typeof params['mode'] === 'string') this.#controls.approvalMode = params['mode'];
         return;
       case 'session/contextUsage': {
         const used = params['usedTokens'];
         if (typeof used !== 'number') return;
         const window = params['windowTokens'];
-        this.contextSink?.({ tokens: used, window: typeof window === 'number' ? window : null });
+        this.#contextSink?.({ tokens: used, window: typeof window === 'number' ? window : null });
         return;
       }
       case 'session/closed': {
         // The host unloaded the session (its idle policy, a restart of it): this
         // host takes no more turns, and the next one resumes on a fresh host.
-        if (this.closing) return;
-        this.closing = true;
-        const turn = this.current;
+        if (this.#closing) return;
+        this.#closing = true;
+        const turn = this.#current;
         if (turn !== null) turn.fail(`Muse closed the session: ${textOf(params['reason']) || 'no reason given'}`);
-        else if (this.running === 0) this.drop();
+        else if (this.#running === 0) this.#drop();
         return;
       }
       default:
         break;
     }
 
-    const turn = this.current;
+    const turn = this.#current;
     if (turn === null) return;
     switch (method) {
       case 'item/started':
       case 'item/updated':
       case 'item/completed': {
         const item = params['item'] as MuseItem | undefined;
-        if (item !== undefined && typeof item.itemId === 'string') this.onItem(turn, item);
+        if (item !== undefined && typeof item.itemId === 'string') this.#onItem(turn, item);
         break;
       }
       case 'item/delta':
-        this.onDelta(turn, params);
+        this.#onDelta(turn, params);
         break;
       case 'turn/completed': {
         if (turn.compacting || params['turnId'] !== turn.turnId) break;
@@ -603,22 +603,22 @@ export class MuseSession {
       }
       case 'approval/requested':
       case 'approval/updated':
-        this.onApproval(turn, method, params as ApprovalParams);
+        this.#onApproval(turn, method, params as ApprovalParams);
         break;
       case 'approval/resolved': {
-        const open = this.approvals.get(textOf(params['approvalId']));
+        const open = this.#approvals.get(textOf(params['approvalId']));
         if (open === undefined) break;
-        this.approvals.delete(open.approvalId);
+        this.#approvals.delete(open.approvalId);
         open.external(textOf(params['decision']).startsWith('approved') ? 'allow' : 'deny');
         break;
       }
       case 'userInput/requested':
-        void this.onQuestions(turn, params);
+        void this.#onQuestions(turn, params);
         break;
       case 'userInput/settled': {
-        const open = this.questions.get(textOf(params['userInputId']));
+        const open = this.#questions.get(textOf(params['userInputId']));
         if (open === undefined) break;
-        this.questions.delete(textOf(params['userInputId']));
+        this.#questions.delete(textOf(params['userInputId']));
         open.settle();
         break;
       }
@@ -632,14 +632,14 @@ export class MuseSession {
     }
   }
 
-  private onItem(turn: MuseTurn, item: MuseItem): void {
+  #onItem(turn: MuseTurn, item: MuseItem): void {
     const revision = typeof item.revision === 'number' ? item.revision : 0;
-    const seen = this.items.get(item.itemId);
+    const seen = this.#items.get(item.itemId);
     if (seen !== undefined && seen.revision >= revision && revision > 0) return;
     const terminal = item.status !== undefined && item.status !== 'inProgress';
 
     if (item.kind === 'compaction') {
-      this.items.set(item.itemId, { kind: item.kind, revision });
+      this.#items.set(item.itemId, { kind: item.kind, revision });
       if (!terminal) return;
       if (item.outcome === 'failed') {
         const reason = item.reason ?? item.failureReason ?? 'Muse could not compact the context';
@@ -664,7 +664,7 @@ export class MuseSession {
 
     // Items of another turn (a queued one, a replay) are not this card's.
     if (item.turnId !== undefined && item.turnId !== null && item.turnId !== turn.turnId) return;
-    this.items.set(item.itemId, { kind: item.kind, revision });
+    this.#items.set(item.itemId, { kind: item.kind, revision });
     switch (item.kind) {
       case 'agentMessage':
         turn.appendSnapshot(item.itemId, 'text', 'text', item.text);
@@ -693,12 +693,12 @@ export class MuseSession {
     }
   }
 
-  private onDelta(turn: MuseTurn, params: Record<string, unknown>): void {
+  #onDelta(turn: MuseTurn, params: Record<string, unknown>): void {
     const itemId = textOf(params['itemId']);
     const delta = textOf(params['delta']);
     if (itemId.length === 0 || delta.length === 0) return;
     if (typeof params['turnId'] === 'string' && params['turnId'] !== turn.turnId) return;
-    const kind = this.items.get(itemId)?.kind;
+    const kind = this.#items.get(itemId)?.kind;
     const field = typeof params['field'] === 'string' ? params['field'] : 'text';
     if (kind === 'agentMessage' && field === 'text') turn.appendDelta(itemId, field, 'text', delta);
     else if (kind === 'reasoning' && (field === 'text' || field.startsWith('summary.'))) {
@@ -709,13 +709,13 @@ export class MuseSession {
 
   // -- approvals ------------------------------------------------------------
 
-  private onApproval(turn: MuseTurn, method: string, params: ApprovalParams): void {
+  #onApproval(turn: MuseTurn, method: string, params: ApprovalParams): void {
     const approvalId = params.approvalId;
     const requirement = params.currentRequirementId;
     if (typeof approvalId !== 'string' || requirement === undefined) return;
     if (typeof params.turnId === 'string' && params.turnId !== turn.turnId) return;
 
-    let open = this.approvals.get(approvalId);
+    let open = this.#approvals.get(approvalId);
     if (open === undefined) {
       // An update for an approval nobody asked about is a late persistence notice.
       if (method !== 'approval/requested') return;
@@ -738,7 +738,7 @@ export class MuseSession {
         external,
         externally,
       };
-      this.approvals.set(approvalId, open);
+      this.#approvals.set(approvalId, open);
     } else {
       open.requirement = requirement;
       if (params.availableChoices !== undefined) open.choices = params.availableChoices;
@@ -747,15 +747,15 @@ export class MuseSession {
 
     // A stage already decided, or a card already up for this stage, needs nothing new.
     if (open.asking || open.decidedStage === open.requirement.sourceIndex) return;
-    void this.decideApproval(turn, open);
+    void this.#decideApproval(turn, open);
   }
 
-  private async decideApproval(turn: MuseTurn, open: OpenApproval): Promise<void> {
+  async #decideApproval(turn: MuseTurn, open: OpenApproval): Promise<void> {
     open.asking = true;
     let answer: 'allow' | 'deny' | 'abort';
     if (turn.isStopped) {
       answer = 'abort';
-    } else if (turn.ctx.thread.permissionMode === 'yolo' || this.editAllowed(turn, open)) {
+    } else if (turn.ctx.thread.permissionMode === 'yolo' || this.#editAllowed(turn, open)) {
       answer = 'allow';
     } else {
       const { toolName, input, description } = approvalCardOf(open);
@@ -780,8 +780,8 @@ export class MuseSession {
     }
 
     const choice = choiceFor(open.choices, answer);
-    const rpc = this.rpc;
-    const sessionId = this.sessionId;
+    const rpc = this.#rpc;
+    const sessionId = this.#sessionId;
     open.asking = false;
     if (choice === null || rpc === null || sessionId === null) {
       turn.ctx.log('warn', `muse: no choice to send for approval ${open.approvalId} (${answer})`);
@@ -806,7 +806,7 @@ export class MuseSession {
    * without a card, once. Inside means after the links are followed, so a
    * junction in the folder pointing out of it still gets a card.
    */
-  private editAllowed(turn: MuseTurn, open: OpenApproval): boolean {
+  #editAllowed(turn: MuseTurn, open: OpenApproval): boolean {
     if (turn.ctx.thread.permissionMode !== 'acceptEdits') return false;
     if (open.protectedWrite || open.judgeEscalated) return false;
     const subject = open.subject;
@@ -826,10 +826,10 @@ export class MuseSession {
    * `userInput/answer`. A stop cancels the set with `userInput/cancel`, and a
    * set the host settled on its own (a timeout) is left alone.
    */
-  private async onQuestions(turn: MuseTurn, params: Record<string, unknown>): Promise<void> {
+  async #onQuestions(turn: MuseTurn, params: Record<string, unknown>): Promise<void> {
     const userInputId = textOf(params['userInputId']);
     const raw = params['questions'];
-    if (userInputId.length === 0 || !Array.isArray(raw) || this.questions.has(userInputId)) return;
+    if (userInputId.length === 0 || !Array.isArray(raw) || this.#questions.has(userInputId)) return;
     if (typeof params['turnId'] === 'string' && params['turnId'] !== turn.turnId) return;
     let settle: () => void = () => undefined;
     const settled = new Promise<null>((resolve) => {
@@ -837,7 +837,7 @@ export class MuseSession {
         resolve(null);
       };
     });
-    this.questions.set(userInputId, { settle, settled });
+    this.#questions.set(userInputId, { settle, settled });
 
     const answers: MuseAnswer[] = [];
     let cancelled = false;
@@ -855,7 +855,7 @@ export class MuseSession {
       const index = turn.takeIndex();
       turn.part(index, { type: 'question', questionId: ticket.questionId, ...ask, answer: null });
       const answer = await Promise.race([ticket, turn.stopped.then(() => null), settled]);
-      if (!this.questions.has(userInputId)) return;
+      if (!this.#questions.has(userInputId)) return;
       if (answer === null) {
         cancelled = true;
         break;
@@ -863,10 +863,10 @@ export class MuseSession {
       turn.part(index, { type: 'question', questionId: ticket.questionId, ...ask, answer });
       answers.push(answerOf(questionId, answer, options, ask.multiple));
     }
-    this.questions.delete(userInputId);
+    this.#questions.delete(userInputId);
 
-    const rpc = this.rpc;
-    const sessionId = this.sessionId;
+    const rpc = this.#rpc;
+    const sessionId = this.#sessionId;
     if (rpc === null || sessionId === null) return;
     try {
       if (cancelled) await rpc.command('userInput/cancel', { sessionId, userInputId });

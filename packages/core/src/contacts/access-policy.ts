@@ -32,25 +32,25 @@ export type AccessReason = 'normal-file' | 'host-override' | 'secret-file' | 'pa
 export class SharedAccess {
   readonly journal: SharedAccessJournal;
   readonly execution: SharedNativeExecution;
-  private readonly listeners = new Set<(event: SharedAccessEvent) => void>();
+  readonly #listeners = new Set<(event: SharedAccessEvent) => void>();
   constructor(readonly core: Core) {
     this.journal = new SharedAccessJournal(core.journal.db);
-    this.execution = new SharedNativeExecution(core, id => this.bound(id), binding => this.live(binding));
-    core.router.guard = (method, params, ctx) => this.rpc(method, params, ctx);
+    this.execution = new SharedNativeExecution(core, id => this.bound(id), binding => this.#live(binding));
+    core.router.guard = (method, params, ctx) => this.#rpc(method, params, ctx);
     core.sharedCompute.publishText = (record, value) => {
-      this.live(computeBinding(record));
+      this.#live(computeBinding(record));
       const classification = secretText(value);
-      this.record(this.context(computeBinding(record)), 'result', classification ? 'denied' : 'allowed', classification ? 'secret-content' : 'publication', classification, record.job.id);
+      this.record(this.#context(computeBinding(record)), 'result', classification ? 'denied' : 'allowed', classification ? 'secret-content' : 'publication', classification, record.job.id);
       return classification ? '[Shared file policy withheld credential-like result text]' : value;
     };
   }
-  onEvent(listener: (event: SharedAccessEvent) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+  onEvent(listener: (event: SharedAccessEvent) => void): () => void { this.#listeners.add(listener); return () => this.#listeners.delete(listener); }
   record(ctx: Pick<SharedPeerContext, 'shared' | 'source'>, action: SharedAccessAction, decision: SharedAccessEvent['decision'], reason: AccessReason, classification: SharedSecretClass | null = null, jobId: string | null = null): SharedAccessEvent {
     const actor: SharedProjectActor = ctx.source.kind === 'human' ? ctx.source : {...ctx.source, agent: 'shared agent'};
     const event: SharedAccessEvent = {id: `sae_${randomUUID()}`, sharedProjectId: ctx.shared.id, actor, action, decision, reason, classification, jobId, at: Date.now()};
     this.journal.put(event);
     // Enforcement and persistence complete before a reviewer is scheduled. Review failures cannot allow a read.
-    for (const listener of this.listeners) { try { listener(event); } catch { /* The deterministic gate already decided. */ } }
+    for (const listener of this.#listeners) { try { listener(event); } catch { /* The deterministic gate already decided. */ } }
     return event;
   }
   /** Only a journalled deterministic denial is local confirmation; model-supplied metadata is never confirmation. */
@@ -58,14 +58,14 @@ export class SharedAccess {
     const event = this.journal.event(id);
     return event?.sharedProjectId === sharedProjectId && event.decision === 'denied' && event.classification !== null;
   }
-  private context(record: AccessBinding): SharedPeerContext {
+  #context(record: AccessBinding): SharedPeerContext {
     const shared = this.core.sharedProjects.require(record.job.sharedProjectId);
     const {local, remote} = this.core.sharedProjects.endpoints(shared);
     return {shared, local, remote, peerId: record.job.source.project.ownerCoreId, source: record.actor ?? {kind: 'agent', project: record.job.source.project, threadId: record.job.source.threadId, address: record.job.source.address, agent: 'shared agent'}};
   }
-  private live(record: AccessBinding): void {
-    for (const binding of record.additional ?? []) this.live(binding);
-    const ctx = this.context(record);
+  #live(record: AccessBinding): void {
+    for (const binding of record.additional ?? []) this.#live(binding);
+    const ctx = this.#context(record);
     this.core.sharedProjects.assertActive(ctx.shared);
     const {index} = this.core.sharedProjects.endpoints(ctx.shared);
     if (record.compute) {
@@ -88,26 +88,26 @@ export class SharedAccess {
     const bindings = [...(primary ? [primary] : []), ...letters];
     return bindings.length ? {...bindings[0]!, additional: bindings.slice(1)} : null;
   }
-  private protected(threadId: string): boolean { return this.bound(threadId) !== null || letterScope(this.core, threadId).legacy; }
+  #protected(threadId: string): boolean { return this.bound(threadId) !== null || letterScope(this.core, threadId).legacy; }
   assertTurn(threadId: string): void {
     const record = this.bound(threadId);
-    if (!this.protected(threadId)) return;
-    if (record) this.live(record);
+    if (!this.#protected(threadId)) return;
+    if (record) this.#live(record);
     const thread = this.core.threads.require(threadId);
     const protocol = this.core.providers.require(thread.providerId).protocol;
     // Mail outside a shared project holds a native turn even beside a binding,
     // until the owner trusts that history (`threads.trustContactHistory`).
     if (protocol === 'echo' ? thread.permissionMode !== 'default' : !record || letterScope(this.core, threadId).legacy || !this.execution.support(protocol, thread.providerId, thread.permissionMode).supported) this.denyTool(threadId);
   }
-  contextThread(thread: ThreadSummary): ThreadSummary { return this.protected(thread.id) ? {...thread, contextMode: {...TOOL_FREE_CONTEXT}} : thread; }
+  contextThread(thread: ThreadSummary): ThreadSummary { return this.#protected(thread.id) ? {...thread, contextMode: {...TOOL_FREE_CONTEXT}} : thread; }
   assertScope(threadId: string, sharedProjectId: string): void {
     const record = this.bound(threadId);
     if (record && ![record, ...(record.additional ?? [])].some(binding => binding.job.sharedProjectId === sharedProjectId)) throw refused('shared file policy: expected this worker association');
   }
   denyTool(threadId: string): void {
     const record = this.bound(threadId);
-    if (!this.protected(threadId)) return;
-    if (record) this.record(this.context(record), 'tool', 'denied', 'unsupported-tool', null, record.job.id);
+    if (!this.#protected(threadId)) return;
+    if (record) this.record(this.#context(record), 'tool', 'denied', 'unsupported-tool', null, record.job.id);
     throw refused('shared file policy: this tool has no enforceable shared execution boundary');
   }
   /** Uploaded bytes have no captured host-file identity. Secret uploads must use authorized source publication. */
@@ -116,22 +116,22 @@ export class SharedAccess {
     if (letterScope(this.core, threadId).legacy) this.denyTool(threadId);
     const record = this.bound(threadId);
     if (!record) return;
-    this.live(record);
+    this.#live(record);
     for (const file of files) {
       const name = file.name ?? '';
       const foreign = /[\\/:\x00-\x1f]/.test(name) || /[. ]$/.test(name);
       const classification = foreign ? 'outside-project' : secretPath(name) ?? secretText(Buffer.from(file.data, 'base64').toString('utf8'));
       if (!classification) continue;
-      this.record(this.context(record), 'attachment', 'denied', foreign ? 'path-boundary' : 'secret-content', classification, record.job.id);
+      this.record(this.#context(record), 'attachment', 'denied', foreign ? 'path-boundary' : 'secret-content', classification, record.job.id);
       throw refused('shared file policy: secret uploads require publication from an exact authorized host source');
     }
   }
-  private rpc(method: RpcMethodName, params: unknown, ctx: RpcContext): void {
+  #rpc(method: RpcMethodName, params: unknown, ctx: RpcContext): void {
     if (ctx.connection.identity.principal !== 'agent') return;
     const id = ctx.connection.identity.threadId;
     const record = id ? this.bound(id) : null;
     const letters = id ? letterScope(this.core, id) : null;
-    if (record) this.live(record);
+    if (record) this.#live(record);
     if (method === 'collaboration.send' && id && (record || letters?.legacy)) {
       const to = (params as RpcParams<'collaboration.send'>).to;
       const peers = [...(letters?.peers ?? []), ...(record ? [record.job.source.project.ownerCoreId] : [])];
@@ -143,7 +143,7 @@ export class SharedAccess {
     if (!record) return;
     if (!WORKER_METHODS.has(method)) this.denyTool(record.threadId);
   }
-  private overridesFor(record: AccessBinding, file: PolicyFile, action: FileAction) {
+  #overridesFor(record: AccessBinding, file: PolicyFile, action: FileAction) {
     const current = this.core.sharedProjects.require(record.job.sharedProjectId);
     const {index} = this.core.sharedProjects.endpoints(current);
     return this.journal.overrides(current.id).find(o => o.value.revokedAt === null && o.value.expiresAt > Date.now() && o.value.actions.includes(action)
@@ -153,13 +153,13 @@ export class SharedAccess {
   /** Authorize before opening. Recheck the same inode and consent after awaits and at every ticket use. */
   file(threadId: string, path: string, action: FileAction = 'read', directory = false, quiet = false): SharedFilePermit | undefined {
     if (letterScope(this.core, threadId).legacy) this.denyTool(threadId);
-    return this.fileFor(this.bound(threadId), path, action, directory, quiet);
+    return this.#fileFor(this.bound(threadId), path, action, directory, quiet);
   }
-  private fileFor(record: AccessBinding | null, path: string, action: FileAction, directory = false, quiet = false, content: SharedSecretClass | null = null): SharedFilePermit | undefined {
+  #fileFor(record: AccessBinding | null, path: string, action: FileAction, directory = false, quiet = false, content: SharedSecretClass | null = null): SharedFilePermit | undefined {
     if (!record) return undefined;
-    this.live(record);
-    const additional = (record.additional ?? []).map(binding => this.fileFor(binding, path, action, directory, quiet, content)!);
-    const ctx = this.context(record), cwd = this.core.threads.require(record.threadId).cwd;
+    this.#live(record);
+    const additional = (record.additional ?? []).map(binding => this.#fileFor(binding, path, action, directory, quiet, content)!);
+    const ctx = this.#context(record), cwd = this.core.threads.require(record.threadId).cwd;
     let file: PolicyFile;
     const deny = (classification: SharedSecretClass, reason: AccessReason): never => {
       if (!quiet) this.record(ctx, action === 'publish' ? 'attachment' : 'file', 'denied', reason, classification, record.job.id);
@@ -167,16 +167,16 @@ export class SharedAccess {
     };
     try { file = policyFile(cwd, path, directory); }
     catch (error) { return deny(error instanceof PolicyPathError ? error.classification : 'outside-project', 'path-boundary'); }
-    if (file.classification && !this.overridesFor(record, file, action)) deny(file.classification, 'secret-file');
-    if (content && !this.overridesFor(record, file, action)) deny(content, 'secret-content');
+    if (file.classification && !this.#overridesFor(record, file, action)) deny(file.classification, 'secret-file');
+    if (content && !this.#overridesFor(record, file, action)) deny(content, 'secret-content');
     if (!quiet) this.record(ctx, action === 'publish' ? 'attachment' : 'file', 'allowed', file.classification ? 'host-override' : 'normal-file', file.classification, record.job.id);
     const check = (): void => {
       for (const permit of additional) permit.check();
-      this.live(record);
+      this.#live(record);
       let next: PolicyFile;
       try { next = policyFile(cwd, path, directory); } catch { deny('outside-project', 'path-boundary'); }
-      if (content && !this.overridesFor(record, file, action)) deny(content, 'secret-content');
-      if (next!.identity !== file.identity || next!.classification && !this.overridesFor(record, next!, action)) deny(next!.classification ?? 'outside-project', 'path-boundary');
+      if (content && !this.#overridesFor(record, file, action)) deny(content, 'secret-content');
+      if (next!.identity !== file.identity || next!.classification && !this.#overridesFor(record, next!, action)) deny(next!.classification ?? 'outside-project', 'path-boundary');
     };
     return {check, capture: () => {check(); return {path, identity: file.identity, content};}, opened: (real, stats) => {
       check();
@@ -185,13 +185,13 @@ export class SharedAccess {
       for (const permit of additional) permit.inspect(value);
       check();
       content ??= secretText(typeof value === 'string' ? value : Buffer.from(value).toString('utf8'));
-      if (content && !this.overridesFor(record, file, action)) deny(content, 'secret-content');
+      if (content && !this.#overridesFor(record, file, action)) deny(content, 'secret-content');
     }};
   }
   published(threadId: string, messageId: string, permits: (SharedFilePermit | undefined)[]): void {
     const record = this.bound(threadId);
     if (!record) return;
-    this.live(record);
+    this.#live(record);
     const files = permits.map(permit => {
       if (!permit?.capture) throw refused('shared file policy: published attachment has no captured source content policy');
       return permit.capture();
@@ -202,15 +202,15 @@ export class SharedAccess {
   /** Published copies retain their original host scope even after a restart. Unknown pre-policy copies fail closed. */
   publication(threadId: string, messageId: string): SharedFilePermit | undefined {
     const value = this.core.journal.getSetting(`shared-publication:${messageId}`) as Publication | null;
-    if (!value && !this.protected(threadId)) return undefined;
+    if (!value && !this.#protected(threadId)) return undefined;
     if (value?.threadId !== threadId || value.binding?.threadId !== threadId || !value.files?.length) throw refused('shared file policy: published attachment has no captured source authority');
     const compute = value.binding.job.id ? this.core.sharedCompute.journal.get(value.binding.job.id, 'host') : undefined;
     if (value.binding.job.id && !compute) throw refused('shared file policy: published job authority is unavailable');
     const record = {...value.binding, ...(compute ? {compute} : {})};
-    this.live(record);
+    this.#live(record);
     const permits = value.files.map(file => {
       if (file.content === undefined) throw refused('shared file policy: published attachment has no captured source content policy');
-      const permit = this.fileFor(record, file.path, 'publish', false, false, file.content)!;
+      const permit = this.#fileFor(record, file.path, 'publish', false, false, file.content)!;
       if (policyFile(this.core.threads.require(threadId).cwd, file.path).identity !== file.identity) throw refused('shared file policy: published source changed');
       return permit;
     });
@@ -226,12 +226,12 @@ export class SharedAccess {
     const page = this.journal.page(p.sharedProjectId, after);
     return {...page, verdicts: this.core.sharedReview.journal.verdicts(shared.id, page.events.map(event => event.id))};
   }
-  private owner(id: string) {
+  #owner(id: string) {
     const shared = this.core.sharedProjects.require(id);
     const {local} = this.core.sharedProjects.endpoints(shared);
     return {shared, source: {kind: 'human', project: local} as const};
   }
-  overrides(id: string): SharedFileOverride[] { this.owner(id); return this.journal.overrides(id).map(o => o.value); }
+  overrides(id: string): SharedFileOverride[] { this.#owner(id); return this.journal.overrides(id).map(o => o.value); }
   activeOverrides(id: string): number {
     const shared = this.core.sharedProjects.require(id), {index} = this.core.sharedProjects.endpoints(shared);
     if (shared.state !== 'active') return 0;
@@ -241,7 +241,7 @@ export class SharedAccess {
     }).length;
   }
   override(p: RpcParams<'sharedAccess.override'>): SharedFileOverride {
-    const ctx = this.owner(p.sharedProjectId); this.core.sharedProjects.assertActive(ctx.shared);
+    const ctx = this.#owner(p.sharedProjectId); this.core.sharedProjects.assertActive(ctx.shared);
     const input = p.override;
     if (!input || Object.keys(input).some(k => !['path', 'actions', 'jobId', 'reason', 'expiresAt'].includes(k))) throw invalidParams('override: expected path, actions, jobId, reason and expiresAt');
     if (!Array.isArray(input.actions) || !input.actions.length || new Set(input.actions).size !== input.actions.length || input.actions.some(a => a !== 'read' && a !== 'publish')) throw invalidParams('override.actions: expected read or publish; execute has no selective isolation boundary');
@@ -265,7 +265,7 @@ export class SharedAccess {
     return this.overrides(ctx.shared.id).find(o => o.id === result)!;
   }
   revokeOverride(p: RpcParams<'sharedAccess.revokeOverride'>): {ok: true} {
-    const ctx = this.owner(p.sharedProjectId);
+    const ctx = this.#owner(p.sharedProjectId);
     const found = this.journal.overrides(ctx.shared.id).find(o => o.value.id === p.overrideId);
     if (!found) throw refused('overrideId: expected a host override of this association');
     if (found.value.revokedAt === null) {

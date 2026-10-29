@@ -7,6 +7,10 @@ import { addUsage, emptyUsage, toSummary } from './shared';
 import { modelsOf, PROBED_PROTOCOLS, probe } from './provider-catalog';
 import type { FakeContext, FakeMethods } from './context';
 import { delegationProject } from './delegation-project';
+import { accountFor, memberModels, modelChoices } from './thread-models';
+import { childContext, childId, remoteAgent, sendThere, spawnThere, type DelegationRow } from './delegation-machine';
+import { fakeCore } from './coordination';
+import { fakeMember } from './requests';
 
 function delegationRoot(ctx: FakeContext, threadId: ThreadId): ThreadId {
   const thread = ctx.thread(threadId);
@@ -17,25 +21,6 @@ export function delegationConfig(ctx: FakeContext, rootId: ThreadId): Delegation
   const saved = ctx.delegationConfigs.get(rootId) ?? DEFAULT_DELEGATION_CONFIG;
   const pause = saved.paused && saved.pausedBy ? { pausedBy: saved.pausedBy, ...(saved.pausedAt === undefined ? {} : { pausedAt: saved.pausedAt }) } : {};
   return structuredClone({ enabled: saved.enabled, paused: saved.paused, ...pause, profiles: saved.profiles, anyModel: saved.anyModel !== false });
-}
-
-/** The account a parent's children use on a provider: the parent's own there, else the provider's first. */
-function accountFor(ctx: FakeContext, parent: Thread, providerId: string) {
-  return ctx.accounts.find(entry => entry.id === parent.accountId && entry.providerId === providerId) ?? ctx.accounts.find(entry => entry.providerId === providerId);
-}
-
-/** What the real core's catalog reads: every available provider's models on its first account, the parent's own first. */
-function modelChoices(ctx: FakeContext, parent: Thread): DelegationModelChoice[] {
-  return ctx.providers.filter(provider => provider.available && providerEnabled(provider)).flatMap(provider => {
-    const account = accountFor(ctx, parent, provider.id);
-    if (!account) return [];
-    return modelsOf(ctx, provider.id, account.id).filter(model => !model.legacy).map(model => ({
-      providerId: provider.id, providerName: provider.name, accountId: account.id, model: model.id, name: model.name,
-      efforts: model.effort?.levels.map(level => level.id) ?? [], defaultEffort: model.effort?.default ?? null,
-      speeds: model.speeds?.map(speed => ({ ...speed })) ?? [],
-      current: parent.providerId === provider.id && parent.model === model.id,
-    }));
-  });
 }
 
 /** The core's bound on a speed before it looks at any model: `text(speed, 'speed', 64)`. */
@@ -77,7 +62,8 @@ export function pickModel(ctx: FakeContext, parent: Thread, config: DelegationCo
   return { id: full(choice), name: choice.name, providerId: choice.providerId, accountId: choice.accountId, model: choice.model, effort: effort ?? choice.defaultEffort };
 }
 
-function delegatedAgent(ctx: FakeContext, row: { threadId: ThreadId; profileId: string; task: string }): DelegatedAgent {
+function delegatedAgent(ctx: FakeContext, row: DelegationRow, rootId: ThreadId): DelegatedAgent {
+  if (row.machine !== undefined) return remoteAgent(row, rootId, there => delegatedAgent(there, { threadId: row.threadId, profileId: row.profileId, task: row.task }, rootId));
   const thread = ctx.thread(row.threadId);
   const summary = toSummary(thread);
   const lastTurn = thread.turns.findLast(turn => turn.execution?.operation !== 'compact' && turn.execution?.operation !== 'keepalive') ?? null;
@@ -110,12 +96,14 @@ function delegationView(ctx: FakeContext, rootId: ThreadId, callerId = rootId): 
   ctx.thread(rootId);
   const rows = ctx.delegationAgents.get(rootId) ?? [];
   let usage = emptyUsage();
-  for (const row of rows) for (const turn of ctx.thread(row.threadId).turns) if (turn.usage) usage = addUsage(usage, turn.usage);
+  // As the core: a child on another machine spends there, and is not counted here.
+  for (const row of rows) if (row.machine === undefined) for (const turn of ctx.thread(row.threadId).turns) if (turn.usage) usage = addUsage(usage, turn.usage);
+  const agents = rows.map(row => delegatedAgent(ctx, row, rootId));
   return {
     rootThreadId: rootId,
-    settlement: rows.some(row => owesResult(ctx, row.threadId)) ? 'waiting_for_children' : 'settled',
+    settlement: agents.some(agent => (agent.lastTurn !== null && ['queued', 'running'].includes(agent.lastTurn.status)) || agent.thread.backgroundWait?.state === 'waiting') ? 'waiting_for_children' : 'settled',
     config: delegationConfig(ctx, rootId),
-    agents: rows.map(row => delegatedAgent(ctx, row)),
+    agents,
     nativeAgents: [...collectNativeAgents(ctx.thread(callerId).messages.flatMap(message => message.role === 'assistant' ? message.parts.map(part => ({ part, at: message.createdAt, turnId: message.turnId, turnStatus: ctx.thread(callerId).turns.find(turn => turn.id === message.turnId)?.status })) : []), ctx.thread(callerId).background), ...collectProcessAgents(ctx.processes.filter(record => record.threadId === callerId), ctx.processes.filter(record => record.threadId === callerId && record.exitedAt === null))],
     messages: structuredClone((ctx.delegationLetters.get(rootId) ?? []).filter(letter => callerId === rootId || letter.from.threadId === callerId || letter.to.threadId === callerId)),
     turnsUsed: ctx.delegationTurns.get(rootId) ?? 0,
@@ -128,22 +116,29 @@ export async function stopDelegation(ctx: FakeContext, rootId: ThreadId, agentId
   const selected = agentId ? rows.filter(row => row.threadId === agentId) : rows;
   if (agentId && selected.length === 0) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agentId must name a direct child' });
   // Nothing unfinished, nothing to stop: the team stays usable. Finished children are history.
-  if (!agentId && rows.some(row => threadActive(ctx.thread(row.threadId).status) || owesResult(ctx, row.threadId))) ctx.delegationConfigs.set(rootId, { ...delegationConfig(ctx, rootId), paused: true, pausedBy: 'stop', pausedAt: Date.now() });
+  // A child on another machine is stopped there, while the page reaches it.
+  const reached = (row: DelegationRow) => {
+    const owner = childContext(ctx, row);
+    return owner?.threads.has(row.threadId) ? owner : undefined;
+  };
+  if (!agentId && rows.some(row => { const owner = reached(row); return owner !== undefined && (threadActive(owner.thread(row.threadId).status) || owesResult(owner, row.threadId)); })) ctx.delegationConfigs.set(rootId, { ...delegationConfig(ctx, rootId), paused: true, pausedBy: 'stop', pausedAt: Date.now() });
   let stopped = 0;
   for (const row of selected) {
-    const thread = ctx.thread(row.threadId);
-    if (threadActive(thread.status) || owesResult(ctx, thread.id)) stopped += 1;
+    const owner = reached(row);
+    if (owner === undefined) continue;
+    const thread = owner.thread(row.threadId);
+    if (threadActive(thread.status) || owesResult(owner, thread.id)) stopped += 1;
     // Stopping ends its agent process, and the background work with it.
-    if (thread.background?.length) ctx.setBackground(thread, [], 'session-ended');
+    if (thread.background?.length) owner.setBackground(thread, [], 'session-ended');
     const queued = thread.turns.at(-1);
     if (queued?.status === 'queued') {
       queued.status = 'stopped';
-      queued.finishedAt = ctx.now();
-      ctx.scheduler.queued = ctx.scheduler.queued.filter(entry => entry.turnId !== queued.id);
+      queued.finishedAt = owner.now();
+      owner.scheduler.queued = owner.scheduler.queued.filter(entry => entry.turnId !== queued.id);
     }
-    await ctx.stopTurn(thread.id);
+    await owner.stopTurn(thread.id);
     thread.status = 'idle';
-    ctx.touch(thread);
+    owner.touch(thread);
   }
   return stopped;
 }
@@ -270,6 +265,7 @@ export function pumpDelegation(ctx: FakeContext, rootId: ThreadId): void {
   if (ctx.thread(rootId).archived || !config.enabled || config.paused) return;
   const rows = ctx.delegationAgents.get(rootId) ?? [];
   for (const row of rows) {
+    if (row.machine !== undefined) continue;
     const thread = ctx.thread(row.threadId);
     const turn = thread.turns.findLast(turn => turn.execution?.operation !== 'compact' && turn.execution?.operation !== 'keepalive');
     if (thread.status !== 'queued' || turn?.status !== 'queued') continue;
@@ -283,7 +279,7 @@ function directChildren(ctx: FakeContext, threadId: ThreadId, agentId?: ThreadId
   if (typeof threadId !== 'string' || !threadId || (agentId !== undefined && (typeof agentId !== 'string' || !agentId))) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'threadId and agentId: expected nonempty strings' });
   if (ctx.thread(threadId).parentThreadId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'threadId: expected the parent of direct delegated children' });
   const rows = ctx.delegationAgents.get(threadId) ?? [];
-  if (agentId !== undefined && !rows.some(row => row.threadId === agentId && ctx.thread(agentId).parentThreadId === threadId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agentId: expected a direct delegated child of threadId' });
+  if (agentId !== undefined && !rows.some(row => row.threadId === agentId && (row.machine !== undefined || ctx.thread(agentId).parentThreadId === threadId))) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agentId: expected a direct delegated child of threadId' });
   return agentId === undefined ? rows : rows.filter(row => row.threadId === agentId);
 }
 
@@ -310,7 +306,16 @@ function waitDelegation(ctx: FakeContext, params: RpcParams<'delegation.wait'>):
         resolve({ state: asks ? 'needs_input' : waiting ? 'waiting_for_children' : params.agentId && agents.some(agent => agent.settlement === 'result_available') ? 'result_available' : 'settled', timedOut: timedOut && !asks, agents });
       } catch (error) { cleanup(); reject(error); }
     };
-    subscriptions.push(ctx.bus.observe('turn.finished', () => inspect()), ctx.bus.observe('delegation.changed', () => inspect()), ctx.bus.observe('thread.removed', () => inspect()), ctx.bus.observe('thread.background', () => inspect()), ctx.bus.observe('question.asked', () => inspect()), ctx.bus.observe('permission.requested', () => inspect()));
+    // A card is filed just after its event is emitted: read the child once the emitter returns.
+    const later = () => queueMicrotask(() => inspect());
+    const watch = (bus: FakeContext['bus']) => subscriptions.push(bus.observe('turn.finished', () => inspect()), bus.observe('thread.background', () => inspect()), bus.observe('question.asked', later), bus.observe('permission.requested', later));
+    // A child on another machine finishes, asks and waits on that machine's bus.
+    for (const coreId of new Set(directChildren(ctx, params.threadId, params.agentId).flatMap(row => (row.machine ? [row.machine.coreId] : [])))) {
+      const there = fakeCore(coreId);
+      if (there) watch(there.bus);
+    }
+    watch(ctx.bus);
+    subscriptions.push(ctx.bus.observe('delegation.changed', () => inspect()), ctx.bus.observe('thread.removed', () => inspect()));
     subscriptions.push(ctx.bus.onState(state => {
       if (state !== 'ready') { cleanup(); reject(new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation.wait: connection closed' })); }
     }));
@@ -323,9 +328,12 @@ export function delegationMethods(ctx: FakeContext) {
   return {
     'delegation.wait': async params => waitDelegation(ctx, params),
     'delegation.result': async params => {
-      directChildren(ctx, params.threadId, params.agentId);
+      const [row] = directChildren(ctx, params.threadId, params.agentId);
       if (typeof params.turnId !== 'string' || !params.turnId) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'turnId: expected a nonempty string' });
-      const child = ctx.thread(params.agentId);
+      // A child on another machine is read from it now.
+      const owner = childContext(ctx, row!);
+      if (!owner?.threads.has(params.agentId)) throw new RpcFailure({ code: RpcErrorCode.Unavailable, message: `${row!.machine?.name ?? 'this machine'} did not answer; boite delegate list keeps its last result`, data: { field: 'machine' } });
+      const child = owner.thread(params.agentId);
       const turn = child.turns.find(turn => turn.id === params.turnId);
       if (!turn || ['queued', 'running'].includes(turn.status)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'turnId: expected a terminal turn of the named direct child' });
       const offset = params.offset === undefined ? 0 : params.offset, limit = params.limit === undefined ? 16_000 : params.limit;
@@ -338,8 +346,10 @@ export function delegationMethods(ctx: FakeContext) {
       const next = offset + Array.from(text).length;
       return { resultRef: { agentId: params.agentId, turnId: params.turnId }, text, offset, nextOffset: next < chars.length ? next : null, total: chars.length };
     },
-    'delegation.models': async ({ threadId }) => {
+    'delegation.models': async ({ threadId, machine }) => {
       const parent = ctx.thread(delegationRoot(ctx, threadId));
+      // That machine's models, under this conversation's own rule on which a subagent may take.
+      if (machine !== undefined) return { anyModel: delegationConfig(ctx, parent.id).anyModel !== false, choices: memberModels(ctx, parent, machine, 'delegation.models').choices, unavailable: [] };
       // The core's discover(): every agent-owned list nobody read yet is read first,
       // and a failed read is reported, never thrown. The fake's probe only clones
       // fixtures, so it cannot fail; this method skips the core's no-logged-in-account case.
@@ -388,24 +398,36 @@ export function delegationMethods(ctx: FakeContext) {
       if (params.worktree !== undefined && typeof params.worktree !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'worktree: expected true, false or absent' });
       if (params.project !== undefined && (typeof params.project !== 'string' || !params.project.trim() || params.project.length > 4096)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'project: expected 1 to 4096 characters' });
       const wantedProject = params.project?.trim();
-      const fingerprint = JSON.stringify([params.profileId ?? null, params.model ?? null, params.effort ?? null, params.speed ?? null, task, params.title ?? null, params.context ?? null, params.worktree === true, ...(wantedProject === undefined ? [] : [wantedProject])]);
+      // As the core: a bot's subagents stay on its machine, and the machine is part of the request.
+      if (params.machine !== undefined && parent.agentSessionId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation.spawn.machine: a bot\'s subagents run on its own machine', data: { field: 'machine' } });
+      const machine = params.machine === undefined ? undefined : fakeMember(ctx, params.machine, 'delegation.spawn');
+      const fingerprint = JSON.stringify([params.profileId ?? null, params.model ?? null, params.effort ?? null, params.speed ?? null, task, params.title ?? null, params.context ?? null, params.worktree === true, ...(wantedProject === undefined ? [] : [wantedProject]), ...(machine === undefined ? [] : [{ machine: machine.coreId }])]);
       const requestKey = `${parent.id}:${params.requestId}`;
       const prior = ctx.delegationRequests.get(requestKey);
       if (prior) {
         if (prior.fingerprint !== fingerprint) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'requestId already used for different content' });
-        const row = (ctx.delegationAgents.get(parent.id) ?? []).find(entry => entry.threadId === prior.threadId);
+        const row = (ctx.delegationAgents.get(parent.id) ?? []).find(entry => entry.threadId === prior.threadId && entry.machine?.coreId === prior.coreId);
         if (!row) throw ctx.notFound('delegated agent', prior.threadId);
-        return delegatedAgent(ctx, row);
+        return delegatedAgent(ctx, row, parent.id);
       }
       const config = delegationConfig(ctx, parent.id);
       if (parent.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot start delegation on an archived parent' });
       if (!config.enabled || config.paused) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation is disabled or paused' });
       const rows = ctx.delegationAgents.get(parent.id) ?? [];
+      if (machine !== undefined) {
+        const base = namedRoute(parent, config, params.profileId);
+        if (!base) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'unknown delegation profile' });
+        const row = spawnThere(ctx, parent, config, base, machine, params, task);
+        ctx.delegationAgents.set(parent.id, [...rows, row]);
+        ctx.delegationRequests.set(requestKey, { fingerprint, threadId: row.threadId, coreId: machine.coreId });
+        ctx.emit('delegation.changed', { threadId: parent.id });
+        return delegatedAgent(ctx, row, parent.id);
+      }
       const profile: ChildRoute | undefined = params.model !== undefined ? pickModel(ctx, parent, config, params.model, params.effort) : namedRoute(parent, config, params.profileId);
       if (!profile) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'unknown delegation profile' });
       const speed = pickSpeed(ctx, profile, params.speed);
       const contextMode = fakeContextMode(ctx.providers.find(entry => entry.id === profile.providerId) ?? { protocol: 'echo', name: profile.providerId }, params.context);
-      const id = `t-${++ctx.seq}`;
+      const id = childId(ctx, parent.id);
       const at = ctx.now();
       // As the core: a branch and folder of its own, refused outside a project; the fake has no git to make it with.
       const placement = delegationProject(ctx, parent, wantedProject);
@@ -440,7 +462,7 @@ export function delegationMethods(ctx: FakeContext) {
       ctx.delegationTurns.set(parent.id, (ctx.delegationTurns.get(parent.id) ?? 0) + 1);
       ctx.emit('thread.created', structuredClone(toSummary(child)));
       ctx.startTurn(id, task, [], 'delegation');
-      const agent = delegatedAgent(ctx, row);
+      const agent = delegatedAgent(ctx, row, parent.id);
       ctx.delegationRequests.set(requestKey, { fingerprint, threadId: id });
       ctx.emit('delegation.changed', { threadId: parent.id });
       return structuredClone(agent);
@@ -448,6 +470,8 @@ export function delegationMethods(ctx: FakeContext) {
     'delegation.send': async (params) => {
       if (params.requestId.startsWith('result:')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'requestId prefix result: is reserved' });
       const sender = ctx.thread(params.threadId);
+      const far = sender.parentThreadId ? undefined : (ctx.delegationAgents.get(sender.id) ?? []).find(row => row.threadId === params.toThreadId && row.machine !== undefined);
+      if (far) return sendThere(ctx, sender, far, params);
       const recipient = ctx.thread(params.toThreadId);
       const root = delegationRoot(ctx, sender.id);
       const direct = sender.parentThreadId ? recipient.id === sender.parentThreadId : recipient.parentThreadId === sender.id;

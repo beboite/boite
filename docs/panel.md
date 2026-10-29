@@ -99,6 +99,17 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 | Device   | one      | the simulators and emulators open in the thread, covered until Show, see [devices.md](devices.md) |
 | Window   | one      | the desktop window an agent watches with `boite window watch`, read-only and covered until Show, see [windows.md](windows.md) |
 
+A subagent started on another machine of the group (`delegate spawn
+--machine`, [delegation.md](delegation.md#on-another-machine-of-the-group))
+has a chip with that machine's icon and name beside its model, and shows the
+status, model and result that machine last reported. A click opens it on that
+machine's own connection in this window, never on the parent's machine, since
+thread ids are per machine. When this window is not connected to that machine,
+the row stays readable and opens nothing: a tooltip says why, and a phone,
+which has no hover, writes the reason under the row. The in-memory client draws
+both cases with `?fake=1&machines=1&team=1&remote=1&thread=t-trace&panel=agents`,
+and `remote=away` closes that machine's connection after the start.
+
 The launcher and the new-surface menu offer one Browser card, and `boite
 browse <url>` opens its page as a new tab of that same browser. Only `boite
 preview`, and `boite browse` of a local HTML file, which calls it, open a

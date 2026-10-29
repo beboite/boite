@@ -202,6 +202,7 @@ export { attachmentError, answerAttachmentError, decodedBytes } from './attachme
 export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, AUTO_GOAL_MIN_CHARS, BROWSER_ORIGINS_MAX, CACHE_KEEPALIVE_HOURS, MODEL_FAVORITES_MAX, checkSettingsPatch, compareModelFavorites, keepLaterFavorites, type AutoCompact, type AutoCompactMoment, type CacheKeepalive, type SettingsPatchCheck } from './settings-validation.ts';
 export { checkRpcParams, type RpcParamsCheck } from './rpc-params.ts';
 export { TITLE_MODEL_DEFAULTS, defaultTitleModel, newestModel } from './title-models.ts';
+export { ChangeLog, LIST_CHANGES_IDS, listCursorProblem } from './list-changes.ts';
 export { GOAL_TRACKER_DEFAULTS, GOAL_CHECKLIST_MAX_ITEMS, GOAL_CHECKLIST_SOURCE_MAX, GOAL_CHECKLIST_TEXT_MAX, defaultTrackerModel, trackerEffort, type GoalTrackerRule } from './goal-tracker.ts';
 export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS, AGENT_METHODS, SUBSCRIBED_EVENTS, accessRefusal, agentHearsEvent, deviceDiffRef, eventThreadId, mayHearEvent, type AccessRefusal, type Caller } from './access.ts';
 export {

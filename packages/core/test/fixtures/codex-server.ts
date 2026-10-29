@@ -18,6 +18,9 @@
  * ending the turn.
  * `CODEX_FAKE_NO_LIVE_SETTINGS=1` is a server with no `turn/settings/update`.
  * `CODEX_FAKE_SLOW_MODELS=<ms>` delays the answer to `model/list`.
+ * `CODEX_FAKE_SKILLS=<json>` is what `skills/list` lists for the folder, and
+ * each skill item of `turn/start` is logged as `skill <name> <path> text=<text>`.
+ * `CODEX_FAKE_SLOW_SKILLS=<ms>` delays that answer.
  *
  * The wire is copied from the real server on purpose: responses and
  * notifications carry no `jsonrpc` member, which is what the driver has to
@@ -27,12 +30,12 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs
 import { join } from 'node:path';
 import { instructionsOf } from './history.ts';
 
-const DIRECTIVE = /\[(agents|command|command-failed|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block|limits|flood)\]/g;
+const DIRECTIVE = /\[(agents|command|command-failed|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block|limits|flood|cut)\]/g;
 const CHUNKS = 3;
 
 type Directive =
   | 'command' | 'command-failed' | 'approve' | 'thought' | 'summary' | 'usage' | 'late-context' | 'slow' | 'crash' | 'input' | 'async' | 'stream'
-  | 'elicit' | 'elicit-url' | 'permissions' | 'time' | 'hook-block' | 'agents' | 'limits' | 'flood';
+  | 'elicit' | 'elicit-url' | 'permissions' | 'time' | 'hook-block' | 'agents' | 'limits' | 'flood' | 'cut';
 
 let threadCounter = 0;
 let turnCounter = 0;
@@ -526,6 +529,17 @@ async function runTurn(turnId: string, text: string): Promise<void> {
           },
         });
         break;
+      case 'cut': {
+        // Killed in a command that wrote output the client has not redrawn yet (2026-10-29: a service stop).
+        itemCounter += 1;
+        const itemId = `item-${itemCounter}`;
+        notify('item/started', { item: commandItem(itemId, 'inProgress', null), threadId, turnId, startedAtMs: Date.now() });
+        await Bun.sleep(300);
+        notify('item/commandExecution/outputDelta', { threadId, turnId, itemId, delta: 'half done\n' });
+        setTimeout(() => process.exit(143), 20);
+        await new Promise<void>(() => undefined);
+        break;
+      }
       case 'crash':
         process.stderr.write(`${process.env['CODEX_FAKE_CRASH_ERROR'] ?? 'boom'}\n`);
         setTimeout(() => {
@@ -587,6 +601,13 @@ function handle(method: string, raw: unknown): unknown {
       log(`account/rateLimitResetCredit/consume ${JSON.stringify(params)}`);
       if (process.env['CODEX_FAKE_RESET_ERROR']) throw new Error(process.env['CODEX_FAKE_RESET_ERROR']);
       return { outcome: 'reset' };
+    case 'skills/list':
+      log(`skills/list ${JSON.stringify(params)}`);
+    {
+      const listed = { data: [{ cwd: process.cwd(), errors: [], skills: JSON.parse(process.env['CODEX_FAKE_SKILLS'] ?? '[]') }] };
+      const slow = Number(process.env['CODEX_FAKE_SLOW_SKILLS'] ?? '0');
+      return slow > 0 ? new Promise((resolve) => setTimeout(() => resolve(listed), slow)) : listed;
+    }
     case 'hooks/list':
       log('hooks/list');
       // `CODEX_FAKE_HOOKS=1`: one hook the user never reviewed, one they did.
@@ -705,6 +726,7 @@ function handle(method: string, raw: unknown): unknown {
       log(`turn/start model=${textOf(params['model'])} effort=${textOf(params['effort'])}`);
       log(JSON.stringify({ serviceTier: params['serviceTier'] }));
       for (const url of imageUrlsOf(params)) log(`image ${url}`);
+      for (const skill of Array.isArray(params['input']) ? params['input'] : []) if (skill['type'] === 'skill') log(`skill ${skill['name']} ${skill['path']} text=${promptOf(params)}`);
       // After the response is written, never before: a real server answers the
       // request and streams the turn afterwards.
       setTimeout(() => {

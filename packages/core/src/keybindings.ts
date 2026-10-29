@@ -66,14 +66,17 @@ export function readKeybindings(path: string, text: string | null): Keybindings 
 export class KeybindingStore {
   readonly path: string;
   private current: Keybindings;
-  private watcher: FSWatcher | null = null;
+  #watcher: FSWatcher | null = null;
   private settle: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private readonly core: Core) {
+  readonly #core: Core;
+
+  constructor(core: Core) {
+    this.#core = core;
     this.path = join(core.dataDir, KEYBINDINGS_FILE);
-    this.current = this.read();
-    this.warn(this.current);
-    this.watch();
+    this.current = this.#read();
+    this.#warn(this.current);
+    this.#watch();
   }
 
   get(): Keybindings {
@@ -92,22 +95,22 @@ export class KeybindingStore {
       const parsed = parseChord(chord);
       if (!parsed.ok) throw invalidParams(`chord: ${parsed.reason}`);
     }
-    const entries = this.entries();
+    const entries = this.#entries();
     entries[command] = chord === null ? null : chord.trim().toLowerCase();
-    return this.write(entries);
+    return this.#write(entries);
   }
 
   /** Entries out of the file: one command, or all of them, which removes the file. */
   reset(command?: KeybindingCommand): Keybindings {
     if (command !== undefined && !KNOWN.has(command)) throw invalidParams(`command: "${command}" is not a command Boite has`);
-    const entries = this.entries();
+    const entries = this.#entries();
     if (command === undefined) for (const id of KEYBINDING_COMMANDS) delete entries[id];
     else delete entries[command];
-    return this.write(entries);
+    return this.#write(entries);
   }
 
   /** The file as an object, or a refusal: a file Boite cannot read is the user's to fix, never to overwrite. */
-  private entries(): Record<string, unknown> {
+  #entries(): Record<string, unknown> {
     if (!existsSync(this.path)) return {};
     let parsed: unknown;
     try {
@@ -123,7 +126,7 @@ export class KeybindingStore {
   }
 
   /** Written beside and renamed over, so the watcher and an open editor never see half a file. */
-  private write(entries: Record<string, unknown>): Keybindings {
+  #write(entries: Record<string, unknown>): Keybindings {
     if (Object.keys(entries).length === 0) rmSync(this.path, { force: true });
     else {
       const temp = `${this.path}.${process.pid}.tmp`;
@@ -134,18 +137,18 @@ export class KeybindingStore {
     // Read back now rather than on the watch, so the answer already holds the change.
     if (this.settle !== null) clearTimeout(this.settle);
     this.settle = null;
-    this.reload();
+    this.#reload();
     return this.get();
   }
 
   close(): void {
     if (this.settle !== null) clearTimeout(this.settle);
     this.settle = null;
-    this.watcher?.close();
-    this.watcher = null;
+    this.#watcher?.close();
+    this.#watcher = null;
   }
 
-  private read(): Keybindings {
+  #read(): Keybindings {
     if (!existsSync(this.path)) return readKeybindings(this.path, null);
     let text: string;
     try {
@@ -157,8 +160,8 @@ export class KeybindingStore {
     return readKeybindings(this.path, text);
   }
 
-  private warn(result: Keybindings): void {
-    for (const error of result.errors) this.core.log('warn', error);
+  #warn(result: Keybindings): void {
+    for (const error of result.errors) this.#core.log('warn', error);
   }
 
   /**
@@ -166,35 +169,35 @@ export class KeybindingStore {
    * yet cannot be, and an editor that saves by rename replaces the inode the
    * file watcher held. Every other name in the directory is ignored.
    */
-  private watch(): void {
+  #watch(): void {
     try {
-      this.watcher = watch(this.core.dataDir, { persistent: false }, (_event, filename) => {
+      this.#watcher = watch(this.#core.dataDir, { persistent: false }, (_event, filename) => {
         if (filename !== null && filename !== KEYBINDINGS_FILE) return;
-        this.schedule();
+        this.#schedule();
       });
-      this.watcher.on('error', (error) => {
-        this.core.log('warn', `${KEYBINDINGS_FILE}: the watch on ${this.core.dataDir} stopped (${error.message}); edits are read on the next start`);
+      this.#watcher.on('error', (error) => {
+        this.#core.log('warn', `${KEYBINDINGS_FILE}: the watch on ${this.#core.dataDir} stopped (${error.message}); edits are read on the next start`);
       });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      this.core.log('warn', `${KEYBINDINGS_FILE}: no watch on ${this.core.dataDir} (${detail}); edits are read on the next start`);
+      this.#core.log('warn', `${KEYBINDINGS_FILE}: no watch on ${this.#core.dataDir} (${detail}); edits are read on the next start`);
     }
   }
 
-  private schedule(): void {
+  #schedule(): void {
     if (this.settle !== null) clearTimeout(this.settle);
     this.settle = setTimeout(() => {
       this.settle = null;
-      this.reload();
+      this.#reload();
     }, SETTLE_MS);
   }
 
-  private reload(): void {
-    const next = this.read();
+  #reload(): void {
+    const next = this.#read();
     if (JSON.stringify(next) === JSON.stringify(this.current)) return;
     this.current = next;
-    this.warn(next);
-    this.core.bus.emit('keybindings.updated', structuredClone(next));
+    this.#warn(next);
+    this.#core.bus.emit('keybindings.updated', structuredClone(next));
   }
 }
 

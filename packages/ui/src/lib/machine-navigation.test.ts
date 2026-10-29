@@ -41,6 +41,8 @@ async function thread(client: FakeClient, store: Store, id: string, archived = f
   const ctx = fakeCore(client.core!.coreId!)!;
   ctx.threads.set(id, { ...structuredClone(ctx.thread('t-trace')), id, title: id,
     archived, turns: [], messages: [] });
+  // Counted as the core's `thread.created` would be, so the next read lists it.
+  ctx.threadChanges.note(id);
   await store.reload();
 }
 

@@ -104,19 +104,26 @@ export interface RelayBounds {
 }
 
 export class RelayHub implements RelaySink {
-  private readonly pipes = new Set<RelayPipe>();
-  private timer: ReturnType<typeof setInterval> | null = null;
+  readonly #pipes = new Set<RelayPipe>();
+  #timer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(private readonly core: Core, private readonly authenticate: RelayAuthenticator, private readonly bounds: RelayBounds) {}
+  readonly #core: Core;
+  readonly #authenticate: RelayAuthenticator;
+  readonly #bounds: RelayBounds;
+  constructor(core: Core, authenticate: RelayAuthenticator, bounds: RelayBounds) {
+    this.#core = core;
+    this.#authenticate = authenticate;
+    this.#bounds = bounds;
+  }
 
   /**
    * The addresses this machine reaches `coreId` at for a client, the one that
    * answered last first. Null when `coreId` is not another live member.
    */
   targets(coreId: string): string[] | null {
-    if (coreId === this.core.coordination.card().coreId) return null;
-    if (!this.core.group.peers().some((peer) => peer.coreId === coreId)) return null;
-    return ticketAddresses(this.core.group.routes(coreId) ?? []);
+    if (coreId === this.#core.coordination.card().coreId) return null;
+    if (!this.#core.group.peers().some((peer) => peer.coreId === coreId)) return null;
+    return ticketAddresses(this.#core.group.routes(coreId) ?? []);
   }
 
   /**
@@ -144,7 +151,7 @@ export class RelayHub implements RelaySink {
           signal: controller.signal,
         });
         clearTimeout(timer);
-        this.core.group.reached(path.coreId, target);
+        this.#core.group.reached(path.coreId, target);
         const headers = new Headers();
         for (const name of KEPT_HEADERS) {
           const value = upstream.headers.get(name);
@@ -167,50 +174,50 @@ export class RelayHub implements RelaySink {
    * answered there only over a link encrypted end to end.
    */
   pipe(coreId: string, peer: string | null, remote = false, encrypted = false): RelayPipe {
-    this.arm();
-    const pipe = new RelayPipe(this.core, this, coreId, peer, this.authenticate, this.bounds, remote, encrypted);
-    this.pipes.add(pipe);
+    this.#arm();
+    const pipe = new RelayPipe(this.#core, this, coreId, peer, this.#authenticate, this.#bounds, remote, encrypted);
+    this.#pipes.add(pipe);
     return pipe;
   }
 
   /** The counted peers of the relayed sockets whose key for this machine is not checked yet. */
   *waitingPeers(): Generator<string> {
-    for (const pipe of this.pipes) if (!pipe.authenticated && pipe.peer !== null) yield pipe.peer;
+    for (const pipe of this.#pipes) if (!pipe.authenticated && pipe.peer !== null) yield pipe.peer;
   }
 
   /** A session revoked here carries nobody any more: its relayed sockets close with it. */
   closeSession(sessionId: string): void {
-    for (const pipe of [...this.pipes]) if (pipe.sessionId === sessionId) pipe.close(1008, 'session revoked');
+    for (const pipe of [...this.#pipes]) if (pipe.sessionId === sessionId) pipe.close(1008, 'session revoked');
   }
 
   ended(pipe: RelayPipe): void {
-    this.pipes.delete(pipe);
-    if (this.pipes.size === 0) this.disarm();
+    this.#pipes.delete(pipe);
+    if (this.#pipes.size === 0) this.#disarm();
   }
 
   get size(): number {
-    return this.pipes.size;
+    return this.#pipes.size;
   }
 
   /** A machine that left the group, or that this one left, is carried to no more. */
   sweep(): void {
-    for (const pipe of [...this.pipes]) if (this.targets(pipe.coreId) === null) pipe.close(1001, 'no longer a machine of this group');
+    for (const pipe of [...this.#pipes]) if (this.targets(pipe.coreId) === null) pipe.close(1001, 'no longer a machine of this group');
   }
 
   closeAll(): void {
-    for (const pipe of [...this.pipes]) pipe.close(1001, 'core stopping');
-    this.disarm();
+    for (const pipe of [...this.#pipes]) pipe.close(1001, 'core stopping');
+    this.#disarm();
   }
 
-  private arm(): void {
-    if (this.timer !== null) return;
-    this.timer = setInterval(() => this.sweep(), SWEEP_MS);
-    this.timer.unref?.();
+  #arm(): void {
+    if (this.#timer !== null) return;
+    this.#timer = setInterval(() => this.sweep(), SWEEP_MS);
+    this.#timer.unref?.();
   }
 
-  private disarm(): void {
-    if (this.timer !== null) clearInterval(this.timer);
-    this.timer = null;
+  #disarm(): void {
+    if (this.#timer !== null) clearInterval(this.#timer);
+    this.#timer = null;
   }
 }
 
@@ -220,64 +227,73 @@ export class RelayHub implements RelaySink {
  * each frame goes straight through in both directions.
  */
 export class RelayPipe {
-  private socket: ServerWebSocket<RelaySocketData> | null = null;
-  private upstream: Upstream | null = null;
-  private queue: string[] = [];
-  private queued = 0;
-  private helloSeen = false;
-  private closed = false;
-  private helloTimer: ReturnType<typeof setTimeout> | null = null;
-  private congestionTimer: ReturnType<typeof setTimeout> | null = null;
+  #socket: ServerWebSocket<RelaySocketData> | null = null;
+  #upstream: Upstream | null = null;
+  #queue: string[] = [];
+  #queued = 0;
+  #helloSeen = false;
+  #closed = false;
+  #helloTimer: ReturnType<typeof setTimeout> | null = null;
+  #congestionTimer: ReturnType<typeof setTimeout> | null = null;
   /** The client's key for this machine was checked: from then on it no longer counts as waiting for its hello. */
   authenticated = false;
   /** The session that key belongs to, null for the owner's token: revoking it closes this pipe. */
   sessionId: string | null = null;
 
+  readonly #core: Core;
+  readonly #hub: RelayHub;
+  readonly #authenticate: RelayAuthenticator;
+  readonly #bounds: RelayBounds;
   constructor(
-    private readonly core: Core,
-    private readonly hub: RelayHub,
+    core: Core,
+    hub: RelayHub,
     readonly coreId: string,
     readonly peer: string | null,
-    private readonly authenticate: RelayAuthenticator,
-    private readonly bounds: RelayBounds,
+    authenticate: RelayAuthenticator,
+    bounds: RelayBounds,
     readonly remote = false,
     readonly encrypted = false,
-  ) {}
+  ) {
+    this.#core = core;
+    this.#hub = hub;
+    this.#authenticate = authenticate;
+    this.#bounds = bounds;
+  }
 
   attach(socket: ServerWebSocket<RelaySocketData>): void {
-    this.socket = socket;
-    this.helloTimer = setTimeout(() => {
+    this.#socket = socket;
+    this.#helloTimer = setTimeout(() => {
       if (!this.authenticated) this.close(4001, 'hello timed out');
-    }, this.bounds.helloTimeoutMs);
+    }, this.#bounds.helloTimeoutMs);
   }
 
   receive(raw: string | Buffer): void {
-    if (this.closed) return;
+    if (this.#closed) return;
     // Nothing larger than a hello is read from a socket nobody has authenticated, as on the server's own.
-    if (!this.helloSeen && (typeof raw === 'string' ? Buffer.byteLength(raw) : raw.length) > this.bounds.helloMaxBytes) {
+    if (!this.#helloSeen && (typeof raw === 'string' ? Buffer.byteLength(raw) : raw.length) > this.#bounds.helloMaxBytes) {
       this.close(4001, 'hello frame too large');
       return;
     }
     const text = typeof raw === 'string' ? raw : raw.toString();
-    if (!this.helloSeen) {
-      this.helloSeen = true;
-      void this.open(text);
+    if (!this.#helloSeen) {
+      this.#helloSeen = true;
+      void this.#open(text);
       return;
     }
-    if (this.upstream !== null && this.upstream.open) {
-      this.upstream.send(text);
+    if (this.#upstream !== null && this.#upstream.open) {
+      this.#upstream.send(text);
       return;
     }
-    this.queued += Buffer.byteLength(text);
-    if (this.queued > QUEUE_MAX_BYTES) {
+    this.#queued += Buffer.byteLength(text);
+    if (this.#queued > QUEUE_MAX_BYTES) {
       this.close(1009, 'too much sent before the other machine answered');
       return;
     }
-    this.queue.push(text);
+    this.#queue.push(text);
   }
 
   /** The client's hello: its key for this machine is checked and taken out, the rest goes to the other member. */
-  private async open(text: string): Promise<void> {
+  async #open(text: string): Promise<void> {
     let frame: { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: Record<string, unknown> };
     try {
       frame = JSON.parse(text) as typeof frame;
@@ -287,47 +303,47 @@ export class RelayPipe {
     }
     const id = typeof frame?.id === 'number' || typeof frame?.id === 'string' ? frame.id : null;
     if (frame?.method !== 'hello' || id === null || typeof frame.params !== 'object' || frame.params === null) {
-      this.refuse(id ?? 0, RpcErrorCode.Unauthorized, 'the first frame must be hello', 4001);
+      this.#refuse(id ?? 0, RpcErrorCode.Unauthorized, 'the first frame must be hello', 4001);
       return;
     }
     const { relay, ...rest } = frame.params;
     // A failure here is this machine's, not the other member's: never Unauthorized, which the client would take for its key there being revoked.
-    const holder = (typeof relay === 'string' && relay.length > 0 && relay.length <= 512) || (typeof relay === 'object' && relay !== null) ? this.authenticate(relay) : null;
+    const holder = (typeof relay === 'string' && relay.length > 0 && relay.length <= 512) || (typeof relay === 'object' && relay !== null) ? this.#authenticate(relay) : null;
     if (holder === null) {
-      this.refuse(id, RpcErrorCode.Refused, `${this.name()} carries to the other machines of its group only a client paired with it: hello relay must be this client's key for ${this.name()}, or its device signature for it`, 1008);
+      this.#refuse(id, RpcErrorCode.Refused, `${this.#name()} carries to the other machines of its group only a client paired with it: hello relay must be this client's key for ${this.#name()}, or its device signature for it`, 1008);
       return;
     }
     this.authenticated = true;
     this.sessionId = holder.sessionId;
-    if (this.helloTimer !== null) clearTimeout(this.helloTimer);
+    if (this.#helloTimer !== null) clearTimeout(this.#helloTimer);
     if (rest['protocolVersion'] !== PROTOCOL_VERSION) {
       // Said by the machine the client is talking to, so the client stops as it would there.
-      this.refuse(id, RpcErrorCode.InvalidParams, `protocolVersion must be ${PROTOCOL_VERSION}`, 4010);
+      this.#refuse(id, RpcErrorCode.InvalidParams, `protocolVersion must be ${PROTOCOL_VERSION}`, 4010);
       return;
     }
-    const targets = this.hub.targets(this.coreId);
+    const targets = this.#hub.targets(this.coreId);
     if (targets === null) {
-      this.refuse(id, RpcErrorCode.Unavailable, `that machine is no longer in the group of ${this.name()}`, 1013);
+      this.#refuse(id, RpcErrorCode.Unavailable, `that machine is no longer in the group of ${this.#name()}`, 1013);
       return;
     }
-    const upstream = await this.dial(targets);
-    if (this.closed) {
+    const upstream = await this.#dial(targets);
+    if (this.#closed) {
       upstream?.close();
       return;
     }
     if (upstream === null) {
-      this.refuse(id, RpcErrorCode.Unavailable, `${this.name()} could not reach that machine at any address it may carry a client to`, 1013);
+      this.#refuse(id, RpcErrorCode.Unavailable, `${this.#name()} could not reach that machine at any address it may carry a client to`, 1013);
       return;
     }
-    this.upstream = upstream;
+    this.#upstream = upstream;
     // What came before these were in place waits for them, a close included.
-    upstream.onMessage((text) => this.forward(text));
+    upstream.onMessage((text) => this.#forward(text));
     upstream.onClose((event) => this.close(SENDABLE(event.code) ? event.code : 1011, event.reason || 'the other machine closed the connection'));
-    if (this.closed) return;
+    if (this.#closed) return;
     upstream.send(JSON.stringify({ ...frame, params: rest }));
-    for (const queued of this.queue) upstream.send(queued);
-    this.queue = [];
-    this.queued = 0;
+    for (const queued of this.#queue) upstream.send(queued);
+    this.#queue = [];
+    this.#queued = 0;
   }
 
   /**
@@ -338,9 +354,9 @@ export class RelayPipe {
    * reconnect, and loads a fresh snapshot, rather than missing frames on a
    * socket that stays open.
    */
-  private forward(data: string): void {
-    const socket = this.socket;
-    if (this.closed || socket === null) return;
+  #forward(data: string): void {
+    const socket = this.#socket;
+    if (this.#closed || socket === null) return;
     const bytes = Buffer.byteLength(data);
     try {
       if (socket.getBufferedAmount() + bytes > OUTBOUND_MAX_BUFFERED_BYTES) {
@@ -352,67 +368,67 @@ export class RelayPipe {
         this.close(1013, 'connection dropped a frame; reconnect');
         return;
       }
-      if (sent < 0 || socket.getBufferedAmount() > 0) this.congested();
+      if (sent < 0 || socket.getBufferedAmount() > 0) this.#congested();
     } catch {
       this.close(1011, 'the connection dropped');
     }
   }
 
-  private congested(): void {
-    this.congestionTimer ??= setTimeout(() => this.close(1013, 'connection remained congested; reconnect'), this.bounds.congestionTimeoutMs ?? OUTBOUND_CONGESTION_TIMEOUT_MS);
+  #congested(): void {
+    this.#congestionTimer ??= setTimeout(() => this.close(1013, 'connection remained congested; reconnect'), this.#bounds.congestionTimeoutMs ?? OUTBOUND_CONGESTION_TIMEOUT_MS);
   }
 
   /** The client read some of what waited: the congestion clock starts again, or stops once nothing waits. */
   drained(): void {
-    if (this.closed) return;
-    if (this.congestionTimer !== null) clearTimeout(this.congestionTimer);
-    this.congestionTimer = null;
-    if ((this.socket?.getBufferedAmount() ?? 0) > 0) this.congested();
+    if (this.#closed) return;
+    if (this.#congestionTimer !== null) clearTimeout(this.#congestionTimer);
+    this.#congestionTimer = null;
+    if ((this.#socket?.getBufferedAmount() ?? 0) > 0) this.#congested();
   }
 
   /** The first address of the other member that opens a socket, or null. */
-  private async dial(targets: string[]): Promise<Upstream | null> {
+  async #dial(targets: string[]): Promise<Upstream | null> {
     for (const target of targets) {
-      if (this.closed) return null;
+      if (this.#closed) return null;
       // The other core deflates what it sends a client that is not on its loopback: offered, as Bun's client did.
       const headers = { [RELAYED_LINK_HEADER]: this.encrypted ? 'encrypted' : 'plain' };
       const opened = await TextSocket.connect(`${target.replace(/^http/, 'ws')}${RPC_PATH}`, DIAL_MS, { deflate: true, headers }).catch(() => null);
       if (opened !== null) {
-        this.core.group.reached(this.coreId, target);
+        this.#core.group.reached(this.coreId, target);
         return opened;
       }
     }
     return null;
   }
 
-  private name(): string {
-    return this.core.info().hostname ?? 'this machine';
+  #name(): string {
+    return this.#core.info().hostname ?? 'this machine';
   }
 
-  private refuse(id: number | string, code: number, message: string, closeCode: number): void {
+  #refuse(id: number | string, code: number, message: string, closeCode: number): void {
     try {
-      this.socket?.send(JSON.stringify({ jsonrpc: '2.0', id, error: { code, message } }));
+      this.#socket?.send(JSON.stringify({ jsonrpc: '2.0', id, error: { code, message } }));
     } catch (error) {
-      this.core.log('warn', `relay: ${messageOf(error)}`);
+      this.#core.log('warn', `relay: ${messageOf(error)}`);
     }
     this.close(closeCode, message.slice(0, 120));
   }
 
   /** Both sockets go, once, and the hub forgets the pipe. */
   close(code = 1000, reason = ''): void {
-    if (this.closed) return;
-    this.closed = true;
-    if (this.helloTimer !== null) clearTimeout(this.helloTimer);
-    if (this.congestionTimer !== null) clearTimeout(this.congestionTimer);
-    this.congestionTimer = null;
-    this.queue = [];
-    const upstream = this.upstream;
-    this.upstream = null;
+    if (this.#closed) return;
+    this.#closed = true;
+    if (this.#helloTimer !== null) clearTimeout(this.#helloTimer);
+    if (this.#congestionTimer !== null) clearTimeout(this.#congestionTimer);
+    this.#congestionTimer = null;
+    this.#queue = [];
+    const upstream = this.#upstream;
+    this.#upstream = null;
     if (upstream !== null) {
       // Its close comes back to `close`, which has already run.
       upstream.close(SENDABLE(code) ? code : 1000, reason.slice(0, 120));
     }
-    try { this.socket?.close(SENDABLE(code) ? code : 1011, reason.slice(0, 120)); } catch { /* already gone */ }
-    this.hub.ended(this);
+    try { this.#socket?.close(SENDABLE(code) ? code : 1011, reason.slice(0, 120)); } catch { /* already gone */ }
+    this.#hub.ended(this);
   }
 }

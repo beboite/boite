@@ -9,6 +9,7 @@ import {
   type ClientPreferences,
   type ExperimentId,
   type QuotaAlerts,
+  ChangeLog,
   DEFAULT_THREAD_DELETION_RETENTION_DAYS,
   DEFAULT_THREAD_DONE_RETENTION_DAYS,
   PROTOCOL_VERSION,
@@ -87,6 +88,9 @@ import { observeLog } from './logs';
 import { addGoalCard, agentTodos, followGoal, unlinkGoalCards } from './todos';
 import { applyPolicy, lockedSettingsOf, policyFixture } from './policy';
 import type { FakeWorktree } from './worktrees';
+import { workflowThere, type DelegationRow } from './delegation-machine';
+import { fakeCore } from './coordination';
+import { fakeMember } from './requests';
 
 /**
  * One handler per contract method; plugins, agents and workflows answer from
@@ -119,6 +123,8 @@ export interface FakeClientOptions {
   diagrams?: boolean;
   /** Seeds this many more threads at work, their load sampled every second: what `?fake=1&working=16` shows. */
   working?: number;
+  /** Seeds this many more threads at rest, a long sidebar (`working-seed.ts`). */
+  idle?: number;
   /** Seeds this many threads that work without end, what `?fake=1&load=16` streams (`load.ts`). */
   load?: number;
   /** Milliseconds between two ticks of that load, 100 unless `&loadtick=<ms>` says otherwise. */
@@ -238,10 +244,11 @@ export class FakeContext {
   readonly deletedThreads = new Map<ThreadId, { threads: Thread[]; archived: boolean[]; deletedAt: number }>();
   readonly coordination = new Map<ThreadId, CoordinationConfig>();
   readonly delegationConfigs = new Map<ThreadId, DelegationConfig>();
-  readonly delegationAgents = new Map<ThreadId, { threadId: ThreadId; profileId: string; task: string }[]>();
+  readonly delegationAgents = new Map<ThreadId, DelegationRow[]>();
   readonly delegationLetters = new Map<ThreadId, AgentLetter[]>();
   readonly delegationTurns = new Map<ThreadId, number>();
-  readonly delegationRequests = new Map<string, { fingerprint: string; threadId: ThreadId }>();
+  /** `coreId` names the member a child on another machine runs on. */
+  readonly delegationRequests = new Map<string, { fingerprint: string; threadId: ThreadId; coreId?: string }>();
   /** A child's own worktree, as `delegation.spawn` with `worktree` records it. */
   readonly delegationWorktrees = new Map<ThreadId, DelegationWorktree>();
   readonly delegationSendRequests = new Map<string, { fingerprint: string; letter: AgentLetter }>();
@@ -316,6 +323,8 @@ export class FakeContext {
   readonly quotaResetsUsed: Record<string, number> = {};
   scheduler: SchedulerState;
   readonly core: CoreInfo;
+  /** `threads.listChanges`: a run of its own, like each start of a real core. */
+  readonly threadChanges = new ChangeLog(`run_fake_${Math.random().toString(36).slice(2, 10)}`);
   /** One phone already paired, so the devices list has a row to revoke. */
   sessions: PairedSession[] = [
     { id: 'ses-phone', client: { name: 'pwa', version: '2.0.0-beta.1' }, role: 'device', createdAt: T0, lastSeenAt: T0 + 600_000, current: false },
@@ -419,6 +428,14 @@ export class FakeContext {
       },
       child: (root, profile, title, task) => workflowChild(this, root, profile, title, task),
       answer: (threadId, text, ok) => workflowAnswer(this, threadId, text, ok),
+      member: (query, field) => void fakeMember(this, query, field),
+      there: (root, profile, step, title, task) => workflowThere(this, root, delegationConfig(this, root.id), profile, step, title, task),
+      answerThere: (coreId, threadId, text, ok) => {
+        const there = fakeCore(coreId);
+        if (!there?.threads.has(threadId)) return null;
+        workflowAnswer(there, threadId, text, ok);
+        return there.thread(threadId).turns.at(-1)?.id ?? null;
+      },
       changed: (rootId, runId) => this.emitToThread(rootId, 'workflows.changed', { threadId: rootId, runId }),
       // The wall clock, as the team demo uses: a running step's elapsed time counts from it.
       now: () => Date.now() + this.workflowLag,
@@ -470,7 +487,7 @@ export class FakeContext {
       version: '2.0.0-beta.1',
       coreId,
       protocolVersion: PROTOCOL_VERSION,
-      features: { draftPreparation: true, attachmentUploads: true, threadSnapshots: true, chunkedAnswers: true, readingPages: true, messagePositions: true, deferredToolParts: true, deviceKeys: true, revealMachines: true, loadEvents: true, desktopUpdates: true, gatewayMove: true, projectBoard: true, settingsHome: true, sharedProjects: 1 },
+      features: { draftPreparation: true, attachmentUploads: true, threadSnapshots: true, chunkedAnswers: true, readingPages: true, messagePositions: true, deferredToolParts: true, deviceKeys: true, revealMachines: true, loadEvents: true, desktopUpdates: true, gatewayMove: true, projectBoard: true, settingsHome: true, sharedProjects: 1, listChanges: true },
       os: 'windows',
       channel: 'stable',
       pid: 4242,
@@ -526,6 +543,9 @@ export class FakeContext {
   }
 
   emit<E extends RpcEventName>(event: E, payload: RpcEvents[E]): void {
+    // The core counts what its clients hear of a summary (`threads/list-changes.ts`).
+    if (event === 'thread.created' || event === 'thread.updated') this.threadChanges.note((payload as RpcEvents['thread.updated']).id);
+    if (event === 'thread.removed') this.threadChanges.note((payload as RpcEvents['thread.removed']).threadId);
     this.composer.observe(this, event, payload);
     if (event === 'thread.removed') cancelSecretCards(this, (payload as RpcEvents['thread.removed']).threadId);
     if (event === 'thread.updated') {

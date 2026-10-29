@@ -124,6 +124,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
   core.router.register('threads.mergeBack', params => core.threads.branching.mergeBack(params));
   core.router.register('threads.fork', (params) => core.threads.fork(params.threadId, params.messageId, params.worktree === true));
   core.router.register('threads.list', (params) => core.threads.list(params));
+  core.router.register('threads.listChanges', (params) => core.threads.listLog.answer(params));
   core.router.register('drafts.prepare', (params, ctx) => core.drafts.prepare(ctx.connection.id, params));
   core.router.register('drafts.release', async (params, ctx) => {
     await core.drafts.release(ctx.connection.id, params.preparationId);

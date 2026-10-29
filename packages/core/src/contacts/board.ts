@@ -18,17 +18,17 @@ import { accessBinding, bindBoard } from './access-scopes.ts';
 
 export class SharedBoard {
   readonly journal: SharedBoardJournal;
-  private readonly flushing = new Map<string, Promise<void>>();
-  private readonly flushAgain = new Set<string>();
-  private readonly pulling = new Map<string, Promise<void>>();
-  private readonly pullTargets = new Map<string, number>();
-  private readonly pending = new Set<Promise<unknown>>();
-  private readonly needsPull = new Set<string>();
-  private readonly links = new Map<string, boolean>();
-  private readonly stopping = new Map<string, Promise<void>>();
-  private timer: ReturnType<typeof setTimeout> | null = null;
-  private closed = false;
-  private readonly off: () => void;
+  readonly #flushing = new Map<string, Promise<void>>();
+  readonly #flushAgain = new Set<string>();
+  readonly #pulling = new Map<string, Promise<void>>();
+  readonly #pullTargets = new Map<string, number>();
+  readonly #pending = new Set<Promise<unknown>>();
+  readonly #needsPull = new Set<string>();
+  readonly #links = new Map<string, boolean>();
+  readonly #stopping = new Map<string, Promise<void>>();
+  #timer: ReturnType<typeof setTimeout> | null = null;
+  #closed = false;
+  readonly #off: () => void;
   /** File protection installs a host-enforced admission gate. Only the no-tools echo route works by default. */
   guardStart: (ctx: SharedPeerContext, worker: SharedThreadRef) => void | Promise<void> = async (_ctx, worker) => {
     const thread = this.core.threads.require(worker.threadId);
@@ -41,34 +41,34 @@ export class SharedBoard {
 
   constructor(readonly core: Core) {
     this.journal = new SharedBoardJournal(core.journal.db);
-    for (const shared of core.sharedProjects.journal.all()) if (!this.authority(shared)) this.needsPull.add(shared.id);
-    core.sharedProjects.registerPeer('board.get', (p, ctx) => { this.check(ctx, true); return this.journal.delta(ctx.shared.id, this.cursor(p?.after, ctx.shared.id)); });
+    for (const shared of core.sharedProjects.journal.all()) if (!this.#authority(shared)) this.#needsPull.add(shared.id);
+    core.sharedProjects.registerPeer('board.get', (p, ctx) => { this.check(ctx, true); return this.journal.delta(ctx.shared.id, this.#cursor(p?.after, ctx.shared.id)); });
     core.sharedProjects.registerPeer('board.apply', (p, ctx, requestId) => {
       const command = boardCommand(p?.command);
       if (command.requestId !== requestId) throw invalidParams('command.requestId: expected the envelope operation id');
-      return this.authoritativeApply(ctx, command, boardWorkerInfo(p.workerInfo));
+      return this.#authoritativeApply(ctx, command, boardWorkerInfo(p.workerInfo));
     });
-    core.sharedProjects.registerPeer('board.progress', (p, ctx) => progressAtAuthority(this, ctx, this.progress(p)));
-    core.sharedProjects.registerPeer('board.stop', async (p, ctx) => { await this.stopClaim(ctx, p); return {stopped: true}; });
+    core.sharedProjects.registerPeer('board.progress', (p, ctx) => progressAtAuthority(this, ctx, this.#progress(p)));
+    core.sharedProjects.registerPeer('board.stop', async (p, ctx) => { await this.#stopClaim(ctx, p); return {stopped: true}; });
     core.sharedProjects.registerPeer('board.changed', async (p, ctx) => {
       this.check(ctx);
       if (!sameProject(ctx.shared.authority, ctx.remote) || ctx.source.kind !== 'human') throw refused('board.changed: expected the immutable authority');
       const revision = integer(p?.revision, 'board.changed.revision');
-      if (revision > this.journal.revision(ctx.shared.id)) await this.pull(this.ownerContext(ctx.shared), revision);
+      if (revision > this.journal.revision(ctx.shared.id)) await this.#pull(this.#ownerContext(ctx.shared), revision);
       return { ok: true };
     });
     core.sharedProjects.registerFlush(peerId => this.flush(peerId));
     core.sharedProjects.registerPolicyListener(id => this.reconcileAccess(id));
-    this.off = core.bus.onCommitted((name, payload) => {
-      if (this.closed) return;
-      if (name === 'thread.activity' || name === 'thread.updated' || name === 'thread.removed') this.follow((payload as {threadId?: string; id?: string}).threadId ?? (payload as {id: string}).id);
+    this.#off = core.bus.onCommitted((name, payload) => {
+      if (this.#closed) return;
+      if (name === 'thread.activity' || name === 'thread.updated' || name === 'thread.removed') this.#follow((payload as {threadId?: string; id?: string}).threadId ?? (payload as {id: string}).id);
       if (name === 'contacts.updated' || name === 'group.updated' || name === 'project.updated' || name === 'project.removed') {
         for (const contact of core.contacts.peers()) {
-          const linked = core.contacts.linkOf(contact.coreId) === 'connected', before = this.links.get(contact.coreId) ?? false;
-          this.links.set(contact.coreId, linked);
-          if (linked && !before) for (const shared of core.sharedProjects.journal.all(undefined, contact.coreId)) if (!this.authority(shared)) this.needsPull.add(shared.id);
+          const linked = core.contacts.linkOf(contact.coreId) === 'connected', before = this.#links.get(contact.coreId) ?? false;
+          this.#links.set(contact.coreId, linked);
+          if (linked && !before) for (const shared of core.sharedProjects.journal.all(undefined, contact.coreId)) if (!this.#authority(shared)) this.#needsPull.add(shared.id);
         }
-        this.schedule();
+        this.#schedule();
       }
     });
     // ActivityStore has already paused interrupted goals. Persist that new projection
@@ -78,12 +78,12 @@ export class SharedBoard {
       if (entry.kind === 'card' && entry.card.assignment && sameProject(entry.card.assignment.worker.project, core.sharedProjects.endpoints(shared).local)
         && (entry.card.assignment.state !== 'reserved' || core.activity.get(entry.card.assignment.worker.threadId).goal)) restored.add(entry.card.assignment.worker.threadId);
     }
-    for (const threadId of restored) this.follow(threadId);
+    for (const threadId of restored) this.#follow(threadId);
   }
-  private background(work: Promise<unknown>): void { this.pending.add(work); void work.catch(() => undefined).finally(() => this.pending.delete(work)); }
+  #background(work: Promise<unknown>): void { this.#pending.add(work); void work.catch(() => undefined).finally(() => this.#pending.delete(work)); }
   /** Permanent association revocation closes only core-tagged shared goals and their captured descendants. */
   reconcileAccess(id: string): void {
-    if (this.closed) return;
+    if (this.#closed) return;
     const shared = this.core.sharedProjects.require(id);
     if (shared.state === 'active' && shared.access.every(a => a.board && a.revokedAt === null)) return;
     for (const value of this.journal.pending(id)) this.journal.settle(id, value, {requestId: value.command.requestId, outcome: 'revoked', revision: this.journal.revision(id), card: null});
@@ -91,7 +91,7 @@ export class SharedBoard {
     for (const entry of this.journal.entries(id)) {
       if (entry.kind !== 'card' || !entry.card.assignment || !sameProject(entry.card.assignment.worker.project, local)) continue;
       const {claimId, worker} = entry.card.assignment;
-      const key = this.stopKey(id, entry.card.id, claimId);
+      const key = this.#stopKey(id, entry.card.id, claimId);
       if (!this.core.journal.getSetting(key)) this.core.journal.setSetting(key, {hash: fingerprint({cardId: entry.card.id, claimId, worker}), state: 'revoked'});
       const binding = this.core.journal.getSetting(`activity:shared:${worker.threadId}`) as {sharedProjectId?: string; claimId?: string} | null;
       const captured = new Set<string>();
@@ -109,29 +109,29 @@ export class SharedBoard {
       }
       for (const threadId of captured) {
         this.core.threads.stopTurn(threadId); this.core.threads.releaseAgent(threadId);
-        this.background(Promise.allSettled([this.core.scheduler.stopAndWait(threadId), this.core.procs.stopAndWait(threadId)]));
+        this.#background(Promise.allSettled([this.core.scheduler.stopAndWait(threadId), this.core.procs.stopAndWait(threadId)]));
       }
     }
     notifySharedTodos(this.core, local.projectId);
   }
-  private authority(shared: SharedProject): boolean { return sameProject(shared.authority, this.core.sharedProjects.endpoints(shared).local); }
+  #authority(shared: SharedProject): boolean { return sameProject(shared.authority, this.core.sharedProjects.endpoints(shared).local); }
   check(ctx: SharedPeerContext, authority = false): void {
     this.core.sharedProjects.assertPeer(ctx);
     if (!this.core.sharedProjects.require(ctx.shared.id).access.every(a => a.board)) throw refused('sharedBoard: both project owners must enable board access');
-    if (authority && !this.authority(ctx.shared)) throw refused('sharedBoard: only the immutable project authority applies operations');
+    if (authority && !this.#authority(ctx.shared)) throw refused('sharedBoard: only the immutable project authority applies operations');
   }
-  private ownerContext(shared: SharedProject): SharedPeerContext {
+  #ownerContext(shared: SharedProject): SharedPeerContext {
     const {local, remote} = this.core.sharedProjects.endpoints(shared);
     return {shared, local, remote, peerId: remote.ownerCoreId, source: {kind: 'human', project: local}};
   }
-  private queuedContext(shared: SharedProject, value: PendingBoardCommand): SharedPeerContext {
-    const ctx = this.ownerContext(shared);
+  #queuedContext(shared: SharedProject, value: PendingBoardCommand): SharedPeerContext {
+    const ctx = this.#ownerContext(shared);
     this.check(ctx);
     // Revalidate the persisted source, including its project's current communication setting.
     const actor = this.core.sharedProjects.actor(value.threadId, ctx.local, value.source.kind === 'human' ? {identity: {principal: 'owner'}} as Connection : undefined);
     return {...ctx, source: actor};
   }
-  private cursor(after: unknown, id: string): number {
+  #cursor(after: unknown, id: string): number {
     const value = after === undefined ? 0 : integer(after, 'after');
     if (value > this.journal.revision(id)) throw invalidParams('after: expected a revision at or below the board head');
     return value;
@@ -139,30 +139,30 @@ export class SharedBoard {
   changed(id: string): void {
     this.core.sharedProjects.notify(id, ['board']);
     notifySharedTodos(this.core, this.core.sharedProjects.endpoints(this.core.sharedProjects.require(id)).local.projectId);
-    this.schedule();
+    this.#schedule();
   }
-  private schedule(): void {
-    if (this.closed || this.timer) return;
-    this.timer = setTimeout(() => {
-      this.timer = null;
-      for (const contact of this.core.contacts.peers()) if (this.core.contacts.linkOf(contact.coreId) === 'connected') this.background(this.flush(contact.coreId));
+  #schedule(): void {
+    if (this.#closed || this.#timer) return;
+    this.#timer = setTimeout(() => {
+      this.#timer = null;
+      for (const contact of this.core.contacts.peers()) if (this.core.contacts.linkOf(contact.coreId) === 'connected') this.#background(this.flush(contact.coreId));
     }, 50);
-    this.timer.unref?.();
+    this.#timer.unref?.();
   }
   async get(p: RpcParams<'sharedBoard.get'>, connection?: Connection): Promise<SharedBoardPage> {
     let ctx = this.core.sharedProjects.scope(p, connection); this.check(ctx);
     let available = true;
-    if (!this.authority(ctx.shared)) {
-      try { await this.flushAssociation(ctx.shared.id); await this.pull(ctx); }
-      catch (error) { if (!this.offline(error)) throw error; available = false; }
+    if (!this.#authority(ctx.shared)) {
+      try { await this.#flushAssociation(ctx.shared.id); await this.#pull(ctx); }
+      catch (error) { if (!this.#offline(error)) throw error; available = false; }
     }
     ctx = this.core.sharedProjects.scope(p, connection); this.check(ctx);
-    if (p.after !== undefined) return {...this.journal.delta(ctx.shared.id, this.cursor(p.after, ctx.shared.id)), authorityAvailable: available};
+    if (p.after !== undefined) return {...this.journal.delta(ctx.shared.id, this.#cursor(p.after, ctx.shared.id)), authorityAvailable: available};
     const page = this.journal.snapshot(ctx.shared.id);
-    page.cards = this.optimistic(ctx.shared.id, page.cards);
+    page.cards = this.#optimistic(ctx.shared.id, page.cards);
     return {...page, authorityAvailable: available};
   }
-  private optimistic(id: string, cards: SharedBoardCard[]): SharedBoardCard[] {
+  #optimistic(id: string, cards: SharedBoardCard[]): SharedBoardCard[] {
     const projected = new Map(cards.map(card => [card.id, card]));
     for (const {command: c, source} of this.journal.pending(id)) {
       const old = projected.get(c.cardId);
@@ -177,13 +177,13 @@ export class SharedBoard {
     const ctx = this.core.sharedProjects.scope(p, connection); this.check(ctx);
     const command = boardCommand(p.command), value: PendingBoardCommand = {threadId: p.threadId, source: ctx.source, command};
     if (ctx.source.kind === 'agent' && (command.kind === 'remove' || command.kind === 'update' && command.status === 'done')) throw refused('sharedBoard: only the user confirms or removes a card');
-    if (command.kind === 'claim') this.localWorker(ctx, command.worker);
+    if (command.kind === 'claim') this.#localWorker(ctx, command.worker);
     this.journal.enqueue(ctx.shared.id, value);
     const settled = this.journal.result(ctx.shared.id, value);
     if (settled) return settled;
-    if (this.authority(ctx.shared)) {
+    if (this.#authority(ctx.shared)) {
       try {
-        const result = await this.authoritativeApply(ctx, command, command.kind === 'claim' ? this.workerInfo(command.worker) : undefined);
+        const result = await this.#authoritativeApply(ctx, command, command.kind === 'claim' ? this.#workerInfo(command.worker) : undefined);
         this.journal.settle(ctx.shared.id, value, result);
         return result;
       } catch (error) {
@@ -191,34 +191,34 @@ export class SharedBoard {
         throw error;
       }
     }
-    const work = this.flushAssociation(ctx.shared.id);
+    const work = this.#flushAssociation(ctx.shared.id);
     // The edit is durable before any network wait. A slow authority leaves an explicit queued receipt.
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try { await (command.kind === 'claim' ? work : Promise.race([work, new Promise<void>(resolve => { timeout = setTimeout(resolve, 100); })])); }
-    catch (error) { if (!this.offline(error)) throw error; }
+    catch (error) { if (!this.#offline(error)) throw error; }
     finally { if (timeout) clearTimeout(timeout); }
-    this.background(work);
+    this.#background(work);
     this.core.sharedProjects.scope(p, connection); this.check(ctx);
     const result = this.journal.result(ctx.shared.id, value);
     if (result) return result;
     this.core.sharedProjects.notify(ctx.shared.id, ['board']);
     notifySharedTodos(this.core, ctx.local.projectId);
-    const card = this.optimistic(ctx.shared.id, this.journal.snapshot(ctx.shared.id).cards).find(c => c.id === command.cardId) ?? null;
+    const card = this.#optimistic(ctx.shared.id, this.journal.snapshot(ctx.shared.id).cards).find(c => c.id === command.cardId) ?? null;
     return {requestId: command.requestId, outcome: 'queued', revision: this.journal.revision(ctx.shared.id), card};
   }
-  private offline(error: unknown): boolean { return !diskFull(error) && !(error instanceof PeerRefusal) && (!(error instanceof RpcFailure) || error.code === RpcErrorCode.Unavailable); }
-  private async pull(ctx: SharedPeerContext, minimum = 0): Promise<void> {
+  #offline(error: unknown): boolean { return !diskFull(error) && !(error instanceof PeerRefusal) && (!(error instanceof RpcFailure) || error.code === RpcErrorCode.Unavailable); }
+  async #pull(ctx: SharedPeerContext, minimum = 0): Promise<void> {
     const id = ctx.shared.id;
-    this.pullTargets.set(id, Math.max(minimum, this.pullTargets.get(id) ?? 0));
-    const existing = this.pulling.get(id);
+    this.#pullTargets.set(id, Math.max(minimum, this.#pullTargets.get(id) ?? 0));
+    const existing = this.#pulling.get(id);
     if (existing) return existing;
     // Install the shared promise before admission can throw; clear it before callers resume.
     const work = Promise.resolve().then(async () => {
       try {
         let more = true;
-        while (more && !this.closed) {
+        while (more && !this.#closed) {
           this.check(ctx);
-          const after = this.journal.revision(id), target = this.pullTargets.get(id) ?? 0;
+          const after = this.journal.revision(id), target = this.#pullTargets.get(id) ?? 0;
           const page = boardDelta(await this.core.sharedProjects.request(ctx, 'board.get', {after}), ctx.shared);
           this.check(ctx);
           if (page.from !== after) throw invalidParams('board.from: expected the requested cursor');
@@ -230,33 +230,33 @@ export class SharedBoard {
             notifySharedTodos(this.core, ctx.local.projectId);
           }
           if (!page.changes.length && after < target) throw invalidParams('board.changed.revision: authority did not provide its announced revision');
-          more = page.more || this.journal.revision(id) < (this.pullTargets.get(id) ?? 0);
+          more = page.more || this.journal.revision(id) < (this.#pullTargets.get(id) ?? 0);
         }
-      } finally { this.pulling.delete(id); this.pullTargets.delete(id); }
+      } finally { this.#pulling.delete(id); this.#pullTargets.delete(id); }
     });
-    this.pulling.set(id, work);
+    this.#pulling.set(id, work);
     return work;
   }
   async flush(peerId: string): Promise<void> {
     for (const shared of this.core.sharedProjects.journal.all(undefined, peerId)) {
-      try { await this.flushAssociation(shared.id); } catch { /* Durable queues retry on the existing Contacts reconnect/flush. */ }
+      try { await this.#flushAssociation(shared.id); } catch { /* Durable queues retry on the existing Contacts reconnect/flush. */ }
     }
   }
-  private async flushAssociation(id: string): Promise<void> {
-    const existing = this.flushing.get(id);
-    if (existing) { this.flushAgain.add(id); return existing; }
+  async #flushAssociation(id: string): Promise<void> {
+    const existing = this.#flushing.get(id);
+    if (existing) { this.#flushAgain.add(id); return existing; }
     const work = (async () => {
       try {
-        do { this.flushAgain.delete(id); await this.send(id); }
-        while (!this.closed && this.flushAgain.has(id));
-      } finally { this.flushing.delete(id); this.flushAgain.delete(id); }
+        do { this.#flushAgain.delete(id); await this.#send(id); }
+        while (!this.#closed && this.#flushAgain.has(id));
+      } finally { this.#flushing.delete(id); this.#flushAgain.delete(id); }
     })();
-    this.flushing.set(id, work);
+    this.#flushing.set(id, work);
     return work;
   }
-  private async send(id: string): Promise<void> {
-    if (this.closed) return;
-    const shared = this.core.sharedProjects.require(id), ctx = this.ownerContext(shared);
+  async #send(id: string): Promise<void> {
+    if (this.#closed) return;
+    const shared = this.core.sharedProjects.require(id), ctx = this.#ownerContext(shared);
     let sent = false;
     try { this.check(ctx); }
     catch {
@@ -265,13 +265,13 @@ export class SharedBoard {
     }
     for (const value of this.journal.pending(id)) {
       let source: SharedPeerContext;
-      try { source = this.queuedContext(shared, value); }
+      try { source = this.#queuedContext(shared, value); }
       catch { this.journal.settle(id, value, {requestId: value.command.requestId, outcome: 'revoked', revision: this.journal.revision(id), card: null}); continue; }
       let result: SharedBoardReceipt;
-      const workerInfo = value.command.kind === 'claim' ? this.workerInfo(value.command.worker) : undefined;
-      try { result = this.authority(shared) ? await this.authoritativeApply(source, value.command, workerInfo) : await this.core.sharedProjects.request(source, 'board.apply', {command: value.command, ...(workerInfo ? {workerInfo} : {})}, value.command.requestId); }
+      const workerInfo = value.command.kind === 'claim' ? this.#workerInfo(value.command.worker) : undefined;
+      try { result = this.#authority(shared) ? await this.#authoritativeApply(source, value.command, workerInfo) : await this.core.sharedProjects.request(source, 'board.apply', {command: value.command, ...(workerInfo ? {workerInfo} : {})}, value.command.requestId); }
       catch (error) {
-        if (this.offline(error)) throw error;
+        if (this.#offline(error)) throw error;
         this.journal.settle(id, value, {requestId: value.command.requestId, outcome: 'revoked', revision: this.journal.revision(id), card: null});
         continue;
       }
@@ -283,32 +283,32 @@ export class SharedBoard {
       sent = true;
     }
     for (const p of this.journal.pendingProgress(id)) {
-      const result = this.authority(shared) ? progressAtAuthority(this, ctx, p) : await this.core.sharedProjects.request(ctx, 'board.progress', p, fingerprint({card: p.cardId, claim: p.claimId, sequence: p.sequence}));
+      const result = this.#authority(shared) ? progressAtAuthority(this, ctx, p) : await this.core.sharedProjects.request(ctx, 'board.progress', p, fingerprint({card: p.cardId, claim: p.claimId, sequence: p.sequence}));
       if (result.outcome !== 'queued') this.journal.ackProgress(id, p);
     }
-    if (this.authority(shared)) {
+    if (this.#authority(shared)) {
       const revision = this.journal.revision(id);
       if (revision > this.journal.notified(id)) {
         await this.core.sharedProjects.request(ctx, 'board.changed', {revision});
         this.journal.notify(id, revision);
       }
-    } else if (sent || this.needsPull.has(id)) {
-      await this.pull(ctx);
-      this.needsPull.delete(id);
+    } else if (sent || this.#needsPull.has(id)) {
+      await this.#pull(ctx);
+      this.#needsPull.delete(id);
     }
   }
-  private localWorker(ctx: SharedPeerContext, worker: SharedThreadRef, reviewedStart = false): void {
+  #localWorker(ctx: SharedPeerContext, worker: SharedThreadRef, reviewedStart = false): void {
     if (!sameProject(worker.project, ctx.local) || ctx.source.kind === 'agent' && ctx.source.threadId !== worker.threadId) throw refused('worker: expected this host and the authenticated worker thread');
     const thread = this.core.threads.require(worker.threadId);
     if (thread.projectId !== ctx.local.projectId || thread.archived) throw refused('worker: expected an unarchived thread of this project');
     if (reviewedStart && thread.parentThreadId) throw refused('worker: a reviewed goal starts in a top-level thread');
   }
-  private workerInfo(worker: SharedThreadRef): {agent: string; machine: string} {
+  #workerInfo(worker: SharedThreadRef): {agent: string; machine: string} {
     const agent = this.core.coordination.describe(worker.threadId);
     return {agent: agent.agent ?? 'Agent', machine: agent.machine};
   }
-  private stopKey(id: string, cardId: string, claimId: string): string { return `shared-board-stop:${fingerprint([id, cardId, claimId])}`; }
-  private async authoritativeApply(ctx: SharedPeerContext, command: SharedBoardCommand, workerInfo?: {agent: string; machine: string}): Promise<SharedBoardReceipt> {
+  #stopKey(id: string, cardId: string, claimId: string): string { return `shared-board-stop:${fingerprint([id, cardId, claimId])}`; }
+  async #authoritativeApply(ctx: SharedPeerContext, command: SharedBoardCommand, workerInfo?: {agent: string; machine: string}): Promise<SharedBoardReceipt> {
     this.check(ctx, true);
     let stoppedClaim: string | undefined;
     if (command.kind === 'release') {
@@ -317,8 +317,8 @@ export class SharedBoard {
       if (assignment?.claimId === command.claimId) {
         if (ctx.source.kind === 'agent' && this.journal.actor(assignment.actor) !== this.journal.actor(ctx.source)) throw refused('claimId: only the claimant agent or a user releases a reservation');
         const p = {cardId: command.cardId, claimId: command.claimId, worker: assignment.worker};
-        const owner = this.ownerContext(ctx.shared);
-        if (sameProject(assignment.worker.project, ctx.local)) await this.stopClaim(owner, p);
+        const owner = this.#ownerContext(ctx.shared);
+        if (sameProject(assignment.worker.project, ctx.local)) await this.#stopClaim(owner, p);
         else {
           const result = await this.core.sharedProjects.request(owner, 'board.stop', p);
           if (result?.stopped !== true) throw refused('claimId: assigned host has not confirmed its execution stopped');
@@ -329,18 +329,18 @@ export class SharedBoard {
     return applyAtAuthority(this, ctx, command, workerInfo, stoppedClaim);
   }
   /** Host proof precedes release. Unknown/unreachable work remains assigned, with no lease expiry. */
-  private async stopClaim(ctx: SharedPeerContext, raw: SharedProjectPeerMethods['board.stop']['params']): Promise<void> {
+  async #stopClaim(ctx: SharedPeerContext, raw: SharedProjectPeerMethods['board.stop']['params']): Promise<void> {
     this.check(ctx);
     if (ctx.source.kind !== 'human' || !sameProject(ctx.source.project, ctx.shared.authority)) throw refused('board.stop: only the immutable authority requests a worker stop');
     const p = {cardId: text(raw?.cardId, 'cardId', 128), claimId: text(raw?.claimId, 'claimId', 100), worker: threadRef(raw?.worker)};
     if (!sameProject(p.worker.project, ctx.local)) throw refused('board.stop.worker: expected this exact worker host');
-    const key = this.stopKey(ctx.shared.id, p.cardId, p.claimId), hash = fingerprint(p);
+    const key = this.#stopKey(ctx.shared.id, p.cardId, p.claimId), hash = fingerprint(p);
     const saved = this.core.journal.getSetting(key) as {hash: string; state: string} | undefined;
     if (saved && saved.hash !== hash) throw refused('board.stop: this claim is bound to another worker');
     if (saved?.state === 'stopped') return;
-    const existing = this.stopping.get(key); if (existing) return existing;
+    const existing = this.#stopping.get(key); if (existing) return existing;
     const work = (async () => {
-      if (!this.authority(ctx.shared)) await this.pull(this.ownerContext(ctx.shared));
+      if (!this.#authority(ctx.shared)) await this.#pull(this.#ownerContext(ctx.shared));
       const entry = this.journal.entry(ctx.shared.id, p.cardId);
       if (entry?.kind !== 'card' || entry.card.assignment?.claimId !== p.claimId || fingerprint(entry.card.assignment.worker) !== fingerprint(p.worker)) throw refused('board.stop: expected the current exact claim');
       this.core.journal.setSetting(key, {hash, state: 'stopping'});
@@ -378,25 +378,25 @@ export class SharedBoard {
       this.check(ctx);
       this.core.journal.setSetting(key, {hash, state: 'stopped'});
     })();
-    this.stopping.set(key, work);
-    try { await work; } finally {this.stopping.delete(key);}
+    this.#stopping.set(key, work);
+    try { await work; } finally {this.#stopping.delete(key);}
   }
   async start(p: RpcParams<'sharedBoard.start'>, connection?: Connection): Promise<SharedBoardReceipt> {
     let ctx = this.core.sharedProjects.scope(p, connection); this.check(ctx);
     const cardId = text(p.cardId, 'cardId', 128), claimId = text(p.claimId, 'claimId', 100);
-    if (!this.authority(ctx.shared)) await this.pull(ctx);
+    if (!this.#authority(ctx.shared)) await this.#pull(ctx);
     ctx = this.core.sharedProjects.scope(p, connection); this.check(ctx);
     const entry = this.journal.entry(ctx.shared.id, cardId);
     const card = entry?.kind === 'card' ? entry.card : null;
     const assignment = card?.assignment;
     if (!assignment || assignment.claimId !== claimId || assignment.worker.threadId !== p.threadId) throw refused('worker: expected the current accepted claim and its reserved worker');
-    this.localWorker(ctx, assignment.worker, true);
-    const stopKey = this.stopKey(ctx.shared.id, cardId, claimId);
+    this.#localWorker(ctx, assignment.worker, true);
+    const stopKey = this.#stopKey(ctx.shared.id, cardId, claimId);
     if (this.core.journal.getSetting(stopKey)) throw refused('claimId: this worker claim is stopping or stopped');
     await this.guardStart(ctx, assignment.worker);
     ctx = this.core.sharedProjects.scope(p, connection); this.check(ctx);
     // A second authority read closes delayed guard admission after release/delete/revoke.
-    if (!this.authority(ctx.shared)) await this.pull(ctx);
+    if (!this.#authority(ctx.shared)) await this.#pull(ctx);
     const current = this.journal.entry(ctx.shared.id, cardId);
     if (current?.kind !== 'card' || current.card.assignment?.claimId !== claimId) throw refused('claimId: reservation changed during start admission');
     if (this.core.journal.getSetting(stopKey)) throw refused('claimId: this worker claim is stopping or stopped');
@@ -407,20 +407,20 @@ export class SharedBoard {
       this.core.activity.set({threadId: p.threadId, goal: {objective: current.card.text, review: true}}, {sharedProjectId: ctx.shared.id, cardId, claimId});
       return {ok: true};
     })));
-    this.follow(p.threadId);
-    try { await this.flushAssociation(ctx.shared.id); } catch (error) { if (!this.offline(error)) throw error; }
+    this.#follow(p.threadId);
+    try { await this.#flushAssociation(ctx.shared.id); } catch (error) { if (!this.#offline(error)) throw error; }
     return receipt(this, ctx, claimId, 'applied', cardId);
   }
   assertClaimOpen(sharedId: string, cardId: string, claimId: string): void {
-    if (this.core.journal.getSetting(this.stopKey(sharedId, cardId, claimId))) throw refused('compute.claim: reservation is stopping or stopped');
+    if (this.core.journal.getSetting(this.#stopKey(sharedId, cardId, claimId))) throw refused('compute.claim: reservation is stopping or stopped');
   }
-  private progress(p: BoardProgress): BoardProgress {
+  #progress(p: BoardProgress): BoardProgress {
     if (!p) throw invalidParams('board.progress: expected a journalled goal');
     return {cardId: text(p.cardId, 'cardId', 128), claimId: text(p.claimId, 'claimId', 100), worker: threadRef(p.worker), goal: boardGoal(p.goal), sequence: integer(p.sequence, 'sequence', 1), reviewPassedAt: p.reviewPassedAt === null ? null : integer(p.reviewPassedAt, 'reviewPassedAt')};
   }
-  private follow(threadId: string): void {
+  #follow(threadId: string): void {
     for (const shared of this.core.sharedProjects.journal.all()) {
-      const ctx = this.ownerContext(shared);
+      const ctx = this.#ownerContext(shared);
       if (shared.state !== 'active' || !shared.access.every(a => a.board)) continue;
       for (const entry of this.journal.entries(shared.id)) {
         if (entry.kind !== 'card' || !entry.card.assignment) continue;
@@ -433,7 +433,7 @@ export class SharedBoard {
         const previous = this.journal.progress(shared.id, entry.card.id);
         if (previous?.claimId === claimId && fingerprint({goal: previous.goal, reviewPassedAt: previous.reviewPassedAt}) === fingerprint({goal, reviewPassedAt})) continue;
         this.journal.putProgress(shared.id, {cardId: entry.card.id, claimId, worker, goal, reviewPassedAt, sequence: previous?.claimId === claimId ? previous.sequence + 1 : 1});
-        this.schedule();
+        this.#schedule();
       }
     }
   }
@@ -475,12 +475,12 @@ export class SharedBoard {
   }
   todos(projectId: string): Todo[] {
     return this.core.sharedProjects.journal.all(projectId).filter(shared => shared.state === 'active' && shared.access.every(a => a.board)).flatMap(shared =>
-      this.optimistic(shared.id, this.journal.snapshot(shared.id).cards).map(card => ({id: card.id, projectId, text: card.text, status: card.status, threadId: null, createdAt: card.createdAt, updatedAt: card.updatedAt,
+      this.#optimistic(shared.id, this.journal.snapshot(shared.id).cards).map(card => ({id: card.id, projectId, text: card.text, status: card.status, threadId: null, createdAt: card.createdAt, updatedAt: card.updatedAt,
         goalThreadId: card.assignment && sameProject(card.assignment.worker.project, this.core.sharedProjects.endpoints(shared).local) ? card.assignment.worker.threadId : null,
         ...(card.goal ? {goal: card.goal} : {}), shared: {sharedProjectId: shared.id, card}})));
   }
-  beginClose(): void { this.closed = true; this.off(); if (this.timer) clearTimeout(this.timer); this.timer = null; }
-  async close(): Promise<void> { this.beginClose(); await Promise.allSettled([...this.pending, ...this.flushing.values(), ...this.pulling.values(), ...this.stopping.values()]); }
+  beginClose(): void { this.#closed = true; this.#off(); if (this.#timer) clearTimeout(this.#timer); this.#timer = null; }
+  async close(): Promise<void> { this.beginClose(); await Promise.allSettled([...this.#pending, ...this.#flushing.values(), ...this.#pulling.values(), ...this.#stopping.values()]); }
 }
 
 export function registerSharedBoardMethods(core: Core): void {

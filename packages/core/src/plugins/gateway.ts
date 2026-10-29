@@ -128,32 +128,35 @@ export class PluginGateways {
   idleWaitMs = IDLE_WAIT_MS;
   idlePollMs = 1_000;
   relaunchDelaysMs: readonly number[] = RELAUNCH_DELAYS_MS;
-  private entries = new Map<string, Entry>();
-  private queues = new Map<string, Promise<void>>();
-  private closing = false;
+  #entries = new Map<string, Entry>();
+  #queues = new Map<string, Promise<void>>();
+  #closing = false;
 
-  constructor(private host: GatewayHost) {}
+  #host: GatewayHost;
 
-  private entry(id: string): Entry {
-    let entry = this.entries.get(id);
+  constructor(host: GatewayHost) {
+    this.#host = host;}
+
+  #entry(id: string): Entry {
+    let entry = this.#entries.get(id);
     if (entry === undefined) {
       entry = { status: 'stopped', pid: null, exitCode: null, error: null, startedAt: null, version: null, running: null, crashes: [], relaunch: null };
-      this.entries.set(id, entry);
+      this.#entries.set(id, entry);
     }
     return entry;
   }
 
   dataDir(id: string): string {
-    return gatewayDataDir(this.host.dataDir, id);
+    return gatewayDataDir(this.#host.dataDir, id);
   }
 
-  private portKey(id: string): string {
+  #portKey(id: string): string {
     return `gateway-port:${id}`;
   }
 
   /** The port it listens on, or will: the one remembered, Douane's default before any. */
   port(id: string): number {
-    const stored = this.host.getSetting(this.portKey(id));
+    const stored = this.#host.getSetting(this.#portKey(id));
     return typeof stored === 'number' && Number.isSafeInteger(stored) && stored > 0 && stored < 65536 ? stored : GATEWAY_PREFERRED_PORT;
   }
 
@@ -162,20 +165,20 @@ export class PluginGateways {
     return readRunChoice(join(pluginDir, GATEWAY_FILE)).enabled;
   }
 
-  private async setEnabled(pluginDir: string, enabled: boolean): Promise<void> {
+  async #setEnabled(pluginDir: string, enabled: boolean): Promise<void> {
     await writeRunChoice(join(pluginDir, GATEWAY_FILE), { enabled });
   }
 
   /** `plugins.autostart`: whether the core starts the gateway when it starts. Running or not, it stays as it is. */
   setAutostart(id: string, pluginDir: string, autostart: boolean): Promise<void> {
-    return this.serial(id, async () => {
+    return this.#serial(id, async () => {
       await writeRunChoice(join(pluginDir, GATEWAY_FILE), { autostart });
-      this.host.changed(id);
+      this.#host.changed(id);
     });
   }
 
   state(id: string, pluginDir: string): PluginGatewayState {
-    const entry = this.entries.get(id);
+    const entry = this.#entries.get(id);
     const { enabled, autostart } = readRunChoice(join(pluginDir, GATEWAY_FILE));
     return {
       enabled,
@@ -193,25 +196,25 @@ export class PluginGateways {
 
   /** Whether it answers right now. */
   running(id: string): boolean {
-    return this.entries.get(id)?.status === 'running';
+    return this.#entries.get(id)?.status === 'running';
   }
 
   /** The program run: the development one for Douane when set, else `candidate` or the installed binary. */
   private executable(id: string, candidate?: { binary: string; executable: string }): { binary: string; executable: string } | null {
-    const installed = candidate ?? this.host.installed(id);
+    const installed = candidate ?? this.#host.installed(id);
     const development = id === DOUANE_PLUGIN ? process.env[DOUANE_BINARY_ENV] : undefined;
     if (installed !== null && development) return { binary: development, executable: installed.executable };
     return installed;
   }
 
   /** The remembered port when it is free, Douane's default next, any free one last; remembered, and the proxy told. */
-  private choosePort(id: string): number {
+  #choosePort(id: string): number {
     const remembered = this.port(id);
     let port = remembered;
     if (!portFree(port)) port = port !== GATEWAY_PREFERRED_PORT && portFree(GATEWAY_PREFERRED_PORT) ? GATEWAY_PREFERRED_PORT : freePort();
-    if (this.host.getSetting(this.portKey(id)) !== port) this.host.setSetting(this.portKey(id), port);
-    if (port !== remembered) this.host.log('info', `${id}: port ${remembered} is taken; it listens on ${port}`, 'gateway.port');
-    this.host.moved(id, port);
+    if (this.#host.getSetting(this.#portKey(id)) !== port) this.#host.setSetting(this.#portKey(id), port);
+    if (port !== remembered) this.#host.log('info', `${id}: port ${remembered} is taken; it listens on ${port}`, 'gateway.port');
+    this.#host.moved(id, port);
     return port;
   }
 
@@ -221,7 +224,7 @@ export class PluginGateways {
    * executable starts each attempt from the file of the one it `replaces`,
    * which stays for a rollback to that release.
    */
-  private writeConfig(id: string, executable: string, port: number, replaces: string | null): string {
+  #writeConfig(id: string, executable: string, port: number, replaces: string | null): string {
     const dir = this.dataDir(id);
     mkdirSync(join(dir, 'auth'), { recursive: true });
     const file = join(dir, `${executable}.toml`);
@@ -243,7 +246,7 @@ export class PluginGateways {
    * the next one would open, so it is stopped first: only the process recorded
    * here, and only while its command line still names this configuration.
    */
-  private async stopOrphan(id: string, config: string): Promise<void> {
+  async #stopOrphan(id: string, config: string): Promise<void> {
     const file = join(this.dataDir(id), 'gateway.pid');
     let pid: unknown;
     try { pid = (JSON.parse(readFileSync(file, 'utf8')) as { pid?: unknown }).pid; }
@@ -254,19 +257,19 @@ export class PluginGateways {
       if (!readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').includes(config)) return;
       process.kill(pid, 'SIGTERM');
       for (let waited = 0; waited < 5_000 && existsSync(`/proc/${pid}`); waited += 50) await Bun.sleep(50);
-      this.host.log('warn', `${id}: stopped pid ${pid}, left running by a previous core`, 'gateway.orphan-stopped');
+      this.#host.log('warn', `${id}: stopped pid ${pid}, left running by a previous core`, 'gateway.orphan-stopped');
     } catch { /* gone already */ }
   }
 
   /** Reads the stream line by line into the core log; Boite never sends a gateway's output to a client. */
-  private async drain(id: string, stream: ReadableStream<Uint8Array>, last: { line: string }): Promise<void> {
+  async #drain(id: string, stream: ReadableStream<Uint8Array>, last: { line: string }): Promise<void> {
     const decoder = new TextDecoder();
     let pending = '';
     const emit = (raw: string): void => {
       const line = stripAnsi(raw).trim().slice(0, LOG_LINE_MAX);
       if (!line) return;
       if (/\bERROR\b|error:/.test(line)) last.line = line.slice(0, 300);
-      this.host.log(/\bERROR\b/.test(line) ? 'error' : /\bWARN\b/.test(line) ? 'warn' : 'info', `${id}: ${line}`, 'gateway.output');
+      this.#host.log(/\bERROR\b/.test(line) ? 'error' : /\bWARN\b/.test(line) ? 'warn' : 'info', `${id}: ${line}`, 'gateway.output');
     };
     try {
       for await (const chunk of stream) {
@@ -290,42 +293,42 @@ export class PluginGateways {
    * with the executable name of the release it `replaces`.
    */
   async launch(id: string, relaunch = true, candidate?: { binary: string; executable: string; replaces: string | null }): Promise<boolean> {
-    if (this.closing) return false;
-    const entry = this.entry(id);
+    if (this.#closing) return false;
+    const entry = this.#entry(id);
     if (entry.running !== null) return entry.status === 'running';
     this.clock.clearTimeout(entry.relaunch);
     entry.relaunch = null;
     const program = this.executable(id, candidate);
     if (program === null) {
       Object.assign(entry, { status: 'stopped', error: null });
-      this.host.changed(id);
+      this.#host.changed(id);
       return false;
     }
     const config = join(this.dataDir(id), `${program.executable}.toml`);
-    await this.stopOrphan(id, config);
-    if (this.closing || entry.running !== null) return entry.status === 'running';
-    const port = this.choosePort(id);
-    this.writeConfig(id, program.executable, port, candidate?.replaces ?? null);
+    await this.#stopOrphan(id, config);
+    if (this.#closing || entry.running !== null) return entry.status === 'running';
+    const port = this.#choosePort(id);
+    this.#writeConfig(id, program.executable, port, candidate?.replaces ?? null);
     const threadId = `plugin:${id}:gateway`;
     let spawned: SpawnedProcess;
     try {
       const [cmd, prefix] = launchOf(program.binary);
-      spawned = this.host.procs.spawn(threadId, cmd, [...prefix, '--config', config], { cwd: this.dataDir(id), env: gatewayEnv(process.env), agentRoot: false });
+      spawned = this.#host.procs.spawn(threadId, cmd, [...prefix, '--config', config], { cwd: this.dataDir(id), env: gatewayEnv(process.env), agentRoot: false });
     } catch (error) {
       Object.assign(entry, { status: 'crashed', error: `${id} could not start: ${messageOf(error)}` });
-      this.host.log('warn', entry.error!, 'gateway.spawn-failed');
-      this.host.changed(id);
+      this.#host.log('warn', entry.error!, 'gateway.spawn-failed');
+      this.#host.changed(id);
       return false;
     }
     const last = { line: '' };
-    void this.drain(id, spawned.proc.stdout, last);
-    void this.drain(id, spawned.proc.stderr, last);
+    void this.#drain(id, spawned.proc.stdout, last);
+    void this.#drain(id, spawned.proc.stderr, last);
     const running: Running = { threadId, pid: spawned.record.pid, exited: spawned.exited, relaunch };
     Object.assign(entry, { status: 'starting', pid: running.pid, error: null, version: null, startedAt: this.clock.now(), running });
     try { writeFileSync(join(this.dataDir(id), 'gateway.pid'), `${JSON.stringify({ pid: running.pid, config })}\n`); } catch { /* only the orphan check reads it */ }
     let exitCode: number | null = null;
     void spawned.exited.then((code) => { exitCode = code; this.exited(id, running, code, last.line); });
-    this.host.changed(id);
+    this.#host.changed(id);
     const deadline = Date.now() + this.readyMs;
     while (Date.now() < deadline && entry.running === running && exitCode === null) {
       try {
@@ -335,8 +338,8 @@ export class PluginGateways {
           // Started: from here an exit is a crash like any other, relaunched.
           Object.assign(running, { relaunch: true });
           Object.assign(entry, { status: 'running', error: null, version: typeof body.version === 'string' && body.version ? body.version.slice(0, 80) : null });
-          this.host.log('info', `${id} ${entry.version ?? ''} listens on 127.0.0.1:${port}`, 'gateway.started');
-          this.host.changed(id);
+          this.#host.log('info', `${id} ${entry.version ?? ''} listens on 127.0.0.1:${port}`, 'gateway.started');
+          this.#host.changed(id);
           return true;
         }
       } catch { /* not listening yet */ }
@@ -345,29 +348,29 @@ export class PluginGateways {
     if (entry.running === running && exitCode === null) {
       // Alive and silent: stopped like a crash, so the backoff applies. The reason is set first, for `exited` to read.
       entry.error = `${id} did not answer /health within ${Math.round(this.readyMs / 1000)} s`;
-      this.host.procs.killTree(threadId);
+      this.#host.procs.killTree(threadId);
       await spawned.exited;
     }
     return false;
   }
 
   private exited(id: string, running: Running, code: number, lastError: string): void {
-    const entry = this.entries.get(id);
+    const entry = this.#entries.get(id);
     if (entry === undefined || entry.running !== running) return;
     const silent = entry.status === 'starting' && entry.error?.includes('/health') === true;
     Object.assign(entry, { running: null, pid: null, startedAt: null, exitCode: code, version: null });
     rmSync(join(this.dataDir(id), 'gateway.pid'), { force: true });
-    if (this.closing) return;
+    if (this.#closing) return;
     if (code === 0 && !silent) {
       Object.assign(entry, { status: 'stopped', error: null, crashes: [] });
-      this.host.changed(id);
+      this.#host.changed(id);
       return;
     }
     const why = silent ? entry.error! : `${id} exited with code ${code}${lastError ? ` (${lastError})` : ''}`;
     if (!running.relaunch) {
       Object.assign(entry, { status: 'crashed', error: why });
-      this.host.log('warn', why, 'gateway.start-failed');
-      this.host.changed(id);
+      this.#host.log('warn', why, 'gateway.start-failed');
+      this.#host.changed(id);
       return;
     }
     const now = this.clock.now();
@@ -376,52 +379,52 @@ export class PluginGateways {
     if (delay === undefined) {
       entry.status = 'crashed';
       entry.error = `${why}; it failed ${entry.crashes.length} times in ${CRASH_WINDOW_MS / 60_000} minutes. Start it again from Settings > Plugins.`;
-      this.host.log('warn', entry.error, 'gateway.crashed');
+      this.#host.log('warn', entry.error, 'gateway.crashed');
     } else {
       entry.status = 'starting';
       entry.error = `${why}; starting it again in ${delay / 1000} s.`;
-      this.host.log('info', entry.error, 'gateway.exited');
+      this.#host.log('info', entry.error, 'gateway.exited');
       entry.relaunch = this.clock.setTimeout(() => { entry.relaunch = null; void this.launch(id); }, delay);
     }
-    this.host.changed(id);
+    this.#host.changed(id);
   }
 
   /** Kills the gateway and waits for it, leaving status `stopped`. */
   async kill(id: string): Promise<void> {
-    const entry = this.entries.get(id);
+    const entry = this.#entries.get(id);
     if (entry === undefined) return;
     this.clock.clearTimeout(entry.relaunch);
     entry.relaunch = null;
     const running = entry.running;
     Object.assign(entry, { running: null, pid: null, startedAt: null, status: 'stopped', error: null, version: null });
     if (running !== null) {
-      this.host.procs.killTree(running.threadId);
+      this.#host.procs.killTree(running.threadId);
       entry.exitCode = await running.exited;
       rmSync(join(this.dataDir(id), 'gateway.pid'), { force: true });
     }
-    this.host.changed(id);
+    this.#host.changed(id);
   }
 
   /** `plugins.app` on a gateway: start enables and launches, stop disables and kills, restart does both. */
   control(id: string, pluginDir: string, action: 'start' | 'stop' | 'restart'): Promise<void> {
-    return this.serial(id, async () => {
+    return this.#serial(id, async () => {
       if (action === 'stop') {
-        await this.setEnabled(pluginDir, false);
+        await this.#setEnabled(pluginDir, false);
         await this.kill(id);
         return;
       }
-      await this.setEnabled(pluginDir, true);
+      await this.#setEnabled(pluginDir, true);
       if (action === 'restart') await this.kill(id);
-      this.entry(id).crashes = [];
+      this.#entry(id).crashes = [];
       await this.launch(id);
     });
   }
 
-  private serial(id: string, work: () => Promise<void>): Promise<void> {
-    const run = (this.queues.get(id) ?? Promise.resolve()).then(work);
+  #serial(id: string, work: () => Promise<void>): Promise<void> {
+    const run = (this.#queues.get(id) ?? Promise.resolve()).then(work);
     const settled = run.catch(() => undefined);
-    this.queues.set(id, settled);
-    void settled.then(() => { if (this.queues.get(id) === settled) this.queues.delete(id); });
+    this.#queues.set(id, settled);
+    void settled.then(() => { if (this.#queues.get(id) === settled) this.#queues.delete(id); });
     return run;
   }
 
@@ -429,10 +432,10 @@ export class PluginGateways {
   resume(id: string, pluginDir: string, atStart = false): void {
     const choice = readRunChoice(join(pluginDir, GATEWAY_FILE));
     if (!(atStart ? choice.autostart : choice.enabled)) return;
-    const entry = this.entry(id);
+    const entry = this.#entry(id);
     if (entry.running !== null || entry.relaunch !== null) return;
     entry.crashes = [];
-    void this.serial(id, async () => { await this.launch(id); });
+    void this.#serial(id, async () => { await this.launch(id); });
   }
 
   /**
@@ -441,13 +444,13 @@ export class PluginGateways {
    * Returns whether it ran, so the update starts the new release after.
    */
   async drainForUpdate(id: string, version: string): Promise<boolean> {
-    const entry = this.entries.get(id);
+    const entry = this.#entries.get(id);
     if (entry?.running == null) return false;
     entry.status = 'updating';
     entry.error = `${id} ${version} starts once the requests in flight end`;
-    this.host.changed(id);
+    this.#host.changed(id);
     const deadline = Date.now() + this.idleWaitMs;
-    while (Date.now() < deadline && entry.running !== null && !this.closing) {
+    while (Date.now() < deadline && entry.running !== null && !this.#closing) {
       try {
         const response = await fetch(`http://127.0.0.1:${this.port(id)}/admin/api/summary`, { signal: AbortSignal.timeout(5_000), redirect: 'error' });
         const body = await response.json() as { in_flight?: unknown };
@@ -455,21 +458,21 @@ export class PluginGateways {
       } catch { /* read again */ }
       await Bun.sleep(this.idlePollMs);
     }
-    if (Date.now() >= deadline) this.host.log('warn', `${id}: requests still in flight after ${Math.round(this.idleWaitMs / 60_000)} minutes; updating anyway`, 'gateway.update-busy');
+    if (Date.now() >= deadline) this.#host.log('warn', `${id}: requests still in flight after ${Math.round(this.idleWaitMs / 60_000)} minutes; updating anyway`, 'gateway.update-busy');
     await this.kill(id);
     return true;
   }
 
   /** Before an uninstall deletes the binary. */
   forget(id: string): Promise<void> {
-    return this.serial(id, async () => {
+    return this.#serial(id, async () => {
       await this.kill(id);
-      this.entries.delete(id);
+      this.#entries.delete(id);
     });
   }
 
   async close(): Promise<void> {
-    this.closing = true;
-    await Promise.all([...this.entries.keys()].map((id) => this.kill(id)));
+    this.#closing = true;
+    await Promise.all([...this.#entries.keys()].map((id) => this.kill(id)));
   }
 }
