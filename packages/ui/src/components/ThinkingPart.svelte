@@ -3,7 +3,7 @@
   import { Brain, ChevronRight } from '@lucide/svelte';
   import { renderMarkdown } from '../lib/markdown';
   import { workspace } from '../lib/workspace.svelte';
-  import { ParagraphScan } from '../lib/message-display';
+  import { ParagraphScan, pendingDrawing } from '../lib/message-display';
   import { strings } from '../lib/strings';
   import { elapsed } from '../lib/format';
   import { ThoughtTitleScan } from '../lib/tool-groups';
@@ -39,7 +39,7 @@
   const scan = new ParagraphScan();
   const content = $derived.by(() => {
     const blocks = scan.blocks(text, live);
-    return { blocks, pending: live ? scan.pending(text) : '' };
+    return { blocks, pending: pendingDrawing(live ? scan.pending(text) : '') };
   });
 </script>
 
@@ -66,9 +66,10 @@
     <div>
       {#if built}
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-        <div class="body" data-testid="thinking-text" use:richMarkdown={{ onenlarge: viewers ? item => { viewers.open({ items: [item], index: 0 }); viewers.release(item.src); } : undefined }} onclick={event => workspace.followThreadLink(event, store, threadId)}>
+        <div class="body" data-testid="thinking-text" use:richMarkdown={{ onenlarge: viewers ? item => { viewers.open({ items: [item], index: 0 }); viewers.release(item.src); } : undefined, viewBlock: store ? html => store.viewBlock(html) : undefined }} onclick={event => workspace.followThreadLink(event, store, threadId)}>
           {#each content.blocks as block, index (index)}<div class="paragraph">{@html renderMarkdown(block)}</div>{/each}
-          {#if content.pending}<div class="paragraph">{content.pending}</div>{/if}
+          {#if content.pending.text}<div class="paragraph">{content.pending.text}</div>{/if}
+          {#if content.pending.drawing}<div class="drawing-pending" role="status" aria-label={strings.chat.drawingPending}></div>{/if}
         </div>
       {/if}
     </div>

@@ -1,5 +1,6 @@
 import type { Message, MessagePart, MoveNotice, ThreadLink, ThreadSummary } from '@boite/contracts';
-import { FenceScan, openFence } from './fences';
+import { QUOTE } from './markdown';
+import { FenceScan, fenceLanguage, openFence } from './fences';
 
 /** Older cores journalled the whole goal instruction as a user message. */
 export function visibleUserText(text: string): string {
@@ -132,7 +133,7 @@ export class ParagraphScan {
   #result: string[] | null = null;
 
   /** The unfinished paragraph, for disclosures that show live text without parsing it. */
-  pending(text: string): string { return text.slice(this.#start).trim(); }
+  pending(text: string): string { return blockText(text.slice(this.#start)); }
 
   blocks(text: string, live: boolean): string[] {
     if (!text.startsWith(this.#read)) {
@@ -161,6 +162,49 @@ export class ParagraphScan {
     this.#result = tail ? [...this.#done, tail] : [...this.#done];
     return this.#result;
   }
+}
+
+/** The fences `lib/rich-markdown.ts` draws, or a formula on lines of its own (`lib/markdown.ts`). */
+const DRAWN = new Set(['mermaid', 'math', 'view']);
+const DISPLAY_MATH = /^(?:\$\$|\\\[)/;
+
+/**
+ * The paragraph an answer is still writing (`ParagraphScan.pending`), cut
+ * where a diagram, a formula or a view opens outside another fence: what is
+ * written of it would show as source, then jump to a drawing, so a placeholder
+ * stands there (`drawing`) until its paragraph is complete.
+ */
+export function pendingDrawing(tail: string): { text: string; drawing: boolean } {
+  const lines = tail.split(/\r?\n/);
+  const at = drawingLine(lines);
+  return at < 0 ? { text: tail, drawing: false } : { text: lines.slice(0, at).join('\n').trimEnd(), drawing: true };
+}
+
+/**
+ * The first of `lines` where a drawing opens, or -1. They are read as
+ * `renderMarkdown` reads them: a fence under the shared grammar, and a quote as a
+ * document of its own once its marks are off, so what is held back is what
+ * it draws.
+ */
+function drawingLine(lines: string[]): number {
+  const fences = new FenceScan();
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!;
+    const inside = fences.inside;
+    const fence = fences.line(line);
+    if (inside) {
+      continue;
+    } else if ((fence && DRAWN.has(fenceLanguage(openFence(line)!).toLowerCase())) || (!fence && DISPLAY_MATH.test(line.trim()))) {
+      return index;
+    } else if (!fence && QUOTE.test(line)) {
+      let end = index;
+      while (end < lines.length && QUOTE.test(lines[end]!)) end++;
+      const inner = drawingLine(lines.slice(index, end).map(text => QUOTE.exec(text)![1]!));
+      if (inner >= 0) return index + inner;
+      index = end - 1;
+    }
+  }
+  return -1;
 }
 
 /** The core's line for a move the agent asked for itself (`boite thread move`), drawn as a marker, not a message. */

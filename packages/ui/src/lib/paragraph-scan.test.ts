@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
-import { ParagraphScan, paragraphBlocks, visibleAnswer } from './message-display';
+import { renderMarkdown } from './markdown';
+import { ParagraphScan, paragraphBlocks, pendingDrawing, visibleAnswer } from './message-display';
 
 const PIECES = ['word ', 'two words ', '\n', '\n\n', '\r\n', '\r\n\r\n', '```', '```ts\n', '~~~', '````\n', '  ', '\t', '[BOITE_GOAL_COMPLETE]', '[BOITE_GOAL_', 'x'];
 
@@ -54,4 +55,32 @@ test('a marker check looks at the last line only and keeps the fenced case', () 
   expect(visibleAnswer(`\`\`\`\n${long}\n[BOITE_GOAL_COMPLETE]`)).toBe(`\`\`\`\n${long}\n[BOITE_GOAL_COMPLETE]`);
   expect(visibleAnswer(`${long}\n[BOITE_GOAL_COMPLETE] and more`)).toBe(`${long}\n[BOITE_GOAL_COMPLETE] and more`);
   expect(visibleAnswer(`${long}\n  [BOITE_GOAL_BLOCKED]\f`)).toBe(`${long}\n`);
+});
+
+test('a paragraph being written stops where a diagram, a formula or a view opens, outside another fence', () => {
+  expect(pendingDrawing('Here it is:\n```view\n<svg viewBox="0 0 10')).toEqual({ text: 'Here it is:', drawing: true });
+  expect(pendingDrawing('```mermaid\nflowchart LR\n  A --> B\n```')).toEqual({ text: '', drawing: true });
+  expect(pendingDrawing('So\n$$\n\\int_0^1')).toEqual({ text: 'So', drawing: true });
+  expect(pendingDrawing('So \\[x')).toEqual({ text: 'So \\[x', drawing: false });
+  // A fence shown as code stays code until a matching closing line.
+  expect(pendingDrawing('```html\n<p>Hi</p>')).toEqual({ text: '```html\n<p>Hi</p>', drawing: false });
+  expect(pendingDrawing('```md\nquoted\n```view\n<p>')).toEqual({ text: '```md\nquoted\n```view\n<p>', drawing: false });
+  expect(pendingDrawing('```md\nquoted\n```\n```view\n<p>')).toEqual({ text: '```md\nquoted\n```', drawing: true });
+  // The shared fence grammar accepts up to three spaces, tilde fences and longer runs.
+  expect(pendingDrawing('Steps:\n   ```view\n<p>')).toEqual({ text: 'Steps:', drawing: true });
+  expect(renderMarkdown('   ```view\n<p>Hi</p>\n   ```')).toContain('md-view');
+  for (const fence of ['~~~view', '````view', '```view title']) {
+    expect(pendingDrawing(`Here:\n${fence}\n<p>`)).toEqual({ text: 'Here:', drawing: true });
+  }
+  const quotedCode = '````md\n```\n~~~view\n<p>';
+  expect(pendingDrawing(quotedCode)).toEqual({ text: quotedCode, drawing: false });
+  const indented = '    ```view\n<p>';
+  const scan = new ParagraphScan();
+  scan.blocks(indented, true);
+  expect(pendingDrawing(scan.pending(indented))).toEqual({ text: indented, drawing: false });
+  expect(pendingDrawing('```Mermaid\nflowchart LR')).toEqual({ text: '', drawing: true });
+  expect(renderMarkdown('```Mermaid\nflowchart LR\n```')).toContain('md-mermaid');
+  // A quote is drawn as a document of its own, so a view opened in it is held back from its first line.
+  expect(pendingDrawing('Look:\n> Here:\n> ```view\n> <svg')).toEqual({ text: 'Look:\n> Here:', drawing: true });
+  expect(renderMarkdown('> ```view\n> <p>Hi</p>\n> ```')).toContain('md-view');
 });
