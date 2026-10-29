@@ -29,23 +29,44 @@ export function linkedPullRequestUrls(journal: Journal, threadId: string, reposi
   return urls;
 }
 
+/** Where an open pull request's head lives: `host/owner/name`, lowercase, and the branch there. */
+export interface LinkedHead {
+  repository: string;
+  branch: string;
+}
+
 /**
- * The head branches of the open PRs that live conversations linked, as last
- * read from GitHub. Archived and deleted conversations claim nothing.
+ * The heads of the open PRs that live conversations linked, as last read
+ * from GitHub. Archived and deleted conversations claim nothing. A head whose
+ * repository GitHub no longer names (a deleted fork) stands for the base
+ * repository: the claim stays on the side of keeping.
  */
-export function openLinkedBranches(journal: Journal): Set<string> {
+export function openLinkedHeads(journal: Journal): LinkedHead[] {
   const rows = journal.db.query(`SELECT settings.value AS value FROM settings JOIN threads ON settings.key = '${PREFIX}' || threads.id
     WHERE threads.archived = 0 AND threads.id NOT IN (SELECT thread_id FROM thread_deletions)`).all() as { value: string }[];
-  const branches = new Set<string>();
+  const heads: LinkedHead[] = [];
   for (const { value } of rows) {
     let stored: unknown;
     try { stored = JSON.parse(value); } catch { continue; }
     if (!Array.isArray(stored)) continue;
-    for (const entry of stored as { state?: unknown; head?: unknown }[]) {
-      if (entry?.state === 'OPEN' && typeof entry.head === 'string' && entry.head.length > 0) branches.add(entry.head);
+    for (const entry of stored as Partial<LinkedPullRequest>[]) {
+      if (entry?.state !== 'OPEN' || typeof entry.head !== 'string' || entry.head.length === 0) continue;
+      let address: ReturnType<typeof pullRequestAddress>;
+      try { address = pullRequestAddress(entry.url as string); } catch { continue; }
+      const owner = typeof entry.headRepository === 'string' && entry.headRepository.length > 0 ? entry.headRepository : address.repository;
+      heads.push({ repository: `${address.host}/${owner}`.toLowerCase(), branch: entry.head });
     }
   }
-  return branches;
+  return heads;
+}
+
+/**
+ * Whether one of `heads` is this local branch: the same name in a repository
+ * the checkout fetches from (`remotes`, as `host/owner/name`). Null remotes,
+ * a checkout whose remotes could not be read, keep every head of that name.
+ */
+export function claimsBranch(heads: readonly LinkedHead[], branch: string, remotes: ReadonlySet<string> | null): boolean {
+  return heads.some(head => head.branch === branch && (remotes === null || remotes.has(head.repository)));
 }
 
 /** Explicit links belong to the conversation, including when its checkout moves. */
@@ -97,15 +118,17 @@ export class LinkedPullRequests {
     });
   }
   /** A watch already read this state from GitHub. All surfaces share that answer. */
-  observe(threadId: string, url: string, state: LinkedPullRequest['state']): Promise<LinkedPullRequest[]> {
+  observe(threadId: string, url: string, state: LinkedPullRequest['state'], head?: Pick<LinkedPullRequest, 'head' | 'headRepository'>): Promise<LinkedPullRequest[]> {
     return this.serialize(threadId, async () => {
       const list = this.stored(threadId);
       const key = url.toLowerCase();
-      if (!list.some(pr => pr.url.toLowerCase() === key && (pr.state !== state || pr.error))) return list;
+      // A head GitHub renamed moves the branch the link claims; an empty answer changes nothing.
+      const moved = (pr: LinkedPullRequest) => (head?.head ? pr.head !== head.head : false) || (head?.headRepository ? pr.headRepository !== head.headRepository : false);
+      if (!list.some(pr => pr.url.toLowerCase() === key && (pr.state !== state || pr.error || moved(pr)))) return list;
       return this.save(threadId, list.map(pr => {
         if (pr.url.toLowerCase() !== key) return pr;
         const { error: _error, ...known } = pr;
-        return { ...known, state, checkedAt: Date.now() };
+        return { ...known, state, ...(head?.head ? { head: head.head } : {}), ...(head?.headRepository ? { headRepository: head.headRepository } : {}), checkedAt: Date.now() };
       }));
     });
   }

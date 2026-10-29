@@ -6,6 +6,7 @@
  */
 
 import { closeSync, constants, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
+import * as fs from 'node:fs';
 import * as fsPromises from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -518,6 +519,26 @@ describe('writeLandsInside', () => {
         expect(writeLandsInside(root, 'dangling.txt')).toBe(false);
       }
     } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  test('a file its owner may not read lies where its parent resolves, a link that cannot be resolved stays refused', () => {
+    const root = harness.dataDir;
+    writeFileSync(join(root, 'locked.txt'), 'x');
+    const outside = mkdtempSync(join(tmpdir(), 'boite-outside-'));
+    const linkMade = linked(join(outside, 'secret.txt'), join(root, 'locked-link.txt'));
+    // Bun on macOS opens a path to resolve it, so mode 000 answers EACCES there.
+    const real = fs.realpathSync;
+    const spy = spyOn(fs, 'realpathSync').mockImplementation(((path: string, options?: unknown) => {
+      if (String(path).includes('locked')) throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+      return real(path, options as never);
+    }) as typeof fs.realpathSync);
+    try {
+      expect(writeLandsInside(root, 'locked.txt')).toBe(true);
+      if (linkMade) expect(writeLandsInside(root, 'locked-link.txt')).toBe(false);
+    } finally {
+      spy.mockRestore();
       rmSync(outside, { recursive: true, force: true });
     }
   });

@@ -1,6 +1,8 @@
 import { appendFileSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { BRANCH_NAME_MAX, type Project, type ThreadId, type WorktreeStorage } from '@boite/contracts';
+import { CheckoutReservations } from './checkouts.ts';
+import { withVacantCheckout } from './checkout-removal.ts';
 import type { Core } from './core.ts';
 import { folderGone, messageOf, refused } from './errors.ts';
 import { newId } from './ids.ts';
@@ -39,6 +41,39 @@ export function worktreeRoot(projectPath: string, storage?: WorktreeStorage, pro
   return join(projectPath, '.boite', 'worktrees');
 }
 
+/**
+ * Runs `work` alone among the registration commands of one repository: every
+ * `worktree add`, `list`, `remove` and `prune` of its linked checkouts and of
+ * the sweep goes through here. Git exposes a partial registration (an empty
+ * `commondir`) before an add completes, and a list or another add that reads
+ * it then fails. `timeoutMs` bounds the wait and the work together; `work`
+ * gets what is left of it.
+ */
+export async function withRegistration<T>(cwd: string, work: (remainingMs: number | undefined) => Promise<T>, options: { timeoutMs?: number; assertActive?: () => void; what?: () => string } = {}): Promise<T> {
+  const { timeoutMs, assertActive } = options;
+  const key = realpathSync(gitCommonDirOf(cwd) ?? cwd);
+  const previous = registrations.get(key) ?? Promise.resolve();
+  const release = Promise.withResolvers<void>();
+  const tail = previous.then(() => release.promise);
+  registrations.set(key, tail);
+  const started = performance.now();
+  const expired = () => refused(`${options.what?.() ?? 'a worktree registration'} did not finish within ${timeoutMs} ms`, { cwd });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    if (timeoutMs === undefined) await previous;
+    else await Promise.race([previous, new Promise<never>((_, reject) => {timer = setTimeout(() => reject(expired()), timeoutMs);})]);
+    clearTimeout(timer);
+    const remaining = timeoutMs === undefined ? undefined : timeoutMs - (performance.now() - started);
+    if (remaining !== undefined && remaining <= 0) throw expired();
+    assertActive?.();
+    return await work(remaining);
+  } finally {
+    clearTimeout(timer); release.resolve();
+    // A timed-out waiter still sits behind its predecessor until that owner exits.
+    void tail.then(() => {if (registrations.get(key) === tail) registrations.delete(key);});
+  }
+}
+
 export interface PlacedWorktree {
   branch: string;
   path: string;
@@ -58,6 +93,9 @@ interface WorktreePreparation {
  * may carry work nobody merged yet, and deleting it is a decision for a person.
  */
 export class Worktrees {
+  /** The checkouts a removal is deleting right now; see `CheckoutReservations`. */
+  readonly reservations = new CheckoutReservations();
+
   constructor(private readonly core: Core) {}
 
   /** Whether a repository's config names `checkout.workers`, by project path, read once. */
@@ -292,7 +330,7 @@ export class Worktrees {
    * clean up must not replace it. What it could not remove goes to the log with
    * the path, so the user can finish the job himself.
    */
-  async remove(threadId: ThreadId, project: Project, placed: PlacedWorktree, timeoutMs?: number): Promise<boolean> {
+  async remove(threadId: ThreadId, project: Project, placed: PlacedWorktree, timeoutMs?: number, retiringThreadId?: ThreadId): Promise<boolean> {
     const deadline = timeoutMs === undefined ? undefined : performance.now() + timeoutMs;
     const remaining = () => {
       if (deadline === undefined) return undefined;
@@ -316,8 +354,10 @@ export class Worktrees {
     }
     const checkoutOwned = timeoutMs === undefined || await this.checkoutBranch(threadId, project.path, placed.path, remaining()) === placed.branch;
     if (checkoutOwned) {
-      const removed = await this.registeredGit(threadId, project.path,
-        ['worktree', 'remove', '--force', ...(timeoutMs === undefined ? [] : ['--force']), placed.path], remaining());
+      const removed = await withRegistration(project.path, () => withVacantCheckout(this.core, project, placed.path,
+        () => this.git(threadId, project.path,
+          ['worktree', 'remove', '--force', ...(timeoutMs === undefined ? [] : ['--force']), placed.path], remaining()), [], retiringThreadId),
+      { timeoutMs: remaining() });
       if (removed.code !== 0) {
         this.core.log('warn', `could not remove the worktree ${placed.path}: ${removed.stderr.trim() || `exit ${removed.code}`}`);
         if (timeoutMs === undefined || existsSync(placed.path)) return false;
@@ -373,7 +413,9 @@ export class Worktrees {
 
   private async branchExists(threadId: ThreadId, cwd: string, branch: string, timeoutMs?: number): Promise<boolean> {
     const result = await this.git(threadId, cwd, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], timeoutMs);
-    return result.code === 0;
+    // 1 is git's "no such ref"; anything else is a git that could not look, and a name it never checked is not free.
+    if (result.code === 0 || result.code === 1) return result.code === 0;
+    throw refused(`cannot tell whether branch ${branch} exists in ${cwd}: ${result.stderr.trim().split('\n')[0] || `exit ${result.code}`}`, { cwd, branch });
   }
 
   /** Local exclusions keep nested checkouts out of status without editing .gitignore. */
@@ -395,29 +437,8 @@ export class Worktrees {
     } catch (error) { throw refused(`cannot exclude worktrees in ${file}: ${messageOf(error)}`); }
   }
 
-  /** Git exposes a partial registration before commondir is readable by another add/list. */
-  private async registeredGit(threadId: ThreadId, cwd: string, args: string[], timeoutMs?: number, assertActive?: () => void): Promise<{ code: number; stderr: string; stdout: string }> {
-    const key = realpathSync(gitCommonDirOf(cwd) ?? cwd);
-    const previous = registrations.get(key) ?? Promise.resolve();
-    const release = Promise.withResolvers<void>();
-    const tail = previous.then(() => release.promise);
-    registrations.set(key, tail);
-    const started = performance.now();
-    const expired = () => refused(`git ${args.join(' ')} did not finish within ${timeoutMs} ms`, { cwd, args });
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      if (timeoutMs === undefined) await previous;
-      else await Promise.race([previous, new Promise<never>((_, reject) => {timer = setTimeout(() => reject(expired()), timeoutMs);})]);
-      clearTimeout(timer);
-      const remaining = timeoutMs === undefined ? undefined : timeoutMs - (performance.now() - started);
-      if (remaining !== undefined && remaining <= 0) throw expired();
-      assertActive?.();
-      return await this.git(threadId, cwd, args, remaining);
-    } finally {
-      clearTimeout(timer); release.resolve();
-      // A timed-out waiter still sits behind its predecessor until that owner exits.
-      void tail.then(() => {if (registrations.get(key) === tail) registrations.delete(key);});
-    }
+  private registeredGit(threadId: ThreadId, cwd: string, args: string[], timeoutMs?: number, assertActive?: () => void): Promise<{ code: number; stderr: string; stdout: string }> {
+    return withRegistration(cwd, (remaining) => this.git(threadId, cwd, args, remaining), { timeoutMs, assertActive, what: () => `git ${args.join(' ')}` });
   }
 
   private async git(threadId: ThreadId, cwd: string, args: string[], timeoutMs?: number, input?: string, indexFile?: string): Promise<{ code: number; stderr: string; stdout: string }> {
