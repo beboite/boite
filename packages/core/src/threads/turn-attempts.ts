@@ -144,15 +144,17 @@ export class TurnAttempts {
 
   async run(queued: Turn, state: TurnAttemptState, target: TurnAttemptTarget, permissions: LivePermissions): Promise<TurnResult> {
     const { threadId, turnId } = state;
-    const { provider, account, driver } = target;
+    const { provider, driver } = target;
+    const accountId = target.account.id;
     if (this.#stopRequested.has(threadId)) return { status: 'stopped', sessionId: state.thread.sessionId, usage: null };
     try {
       const protection = this.core.sharedAccess.execution.prepare(threadId);
       if (protection) await protection;
       const checkpoint = this.threads.codeCheckpoints.begin(state.thread, turnId);
       if (checkpoint && driver.prepare) {
-        const context = this.threads.contexts.makeSessionContext(state.thread, provider, account);
+        const account = this.core.accounts.require(accountId);
         assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), account);
+        const context = this.threads.contexts.makeSessionContext(state.thread, provider, account);
         void driver.prepare(context, { forTurn: true }).catch(error => {
           if (!this.#stopRequested.has(threadId)) this.core.log('warn', `preparing the turn failed: ${String(error)}`, { source: provider.id, threadId, event: 'provider.prepareFailed' });
         });
@@ -199,6 +201,8 @@ export class TurnAttempts {
       // The resumed session already holds what the first attempt took from the thread.
       const continuing = afterCapacity && wroteBefore;
       afterCapacity = false;
+      // Preparation, capacity waits and lost-session retries can all outlive an admin edit or sign-out.
+      const account = this.core.accounts.require(accountId);
       const context = this.threads.contexts.makeContext(state.thread, provider, account, state.running, note || continuing ? { memory: '', deferred: '', letters: '' } : carried, note?.prompt);
       // Whether this attempt writes anything but an error: the agent's session then holds work a new try must not repeat.
       let wrote = false;
@@ -231,7 +235,6 @@ export class TurnAttempts {
         source: 'turns', event: 'turn.attempt.started', threadId, turnId, providerId: provider.id, ...(state.thread.model ? { model: state.thread.model } : {}),
         data: { attempt, why, protocol: provider.protocol, accountId: account.id, resume: state.thread.sessionId !== null, permissionMode: permissions.mode, effort: state.thread.effort ?? null, speed: state.thread.speed ?? null },
       }));
-      // Preparation, capacity waits and lost-session retries can all outlive an admin edit.
       assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), account);
       const handle = driver.startTurn(context);
       this.handles.set(threadId, handle);

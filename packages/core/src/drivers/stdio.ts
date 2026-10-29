@@ -20,12 +20,12 @@ interface Pending {
 
 /** Framing and request lifetime only: the adapter owns its protocol envelopes. */
 export class StdioTransport<Id extends string | number> {
-  readonly #pending = new Map<Id, Pending>();
+  private readonly pending = new Map<Id, Pending>();
   #closed = false;
   #drainingStdout = false;
   #drainTimer: ReturnType<typeof setTimeout> | undefined;
 
-  readonly #child: SpawnedChild;
+  private readonly child: SpawnedChild;
   readonly #label: string;
   readonly #handlers: {
       message(message: Record<string, unknown>): void;
@@ -42,7 +42,7 @@ export class StdioTransport<Id extends string | number> {
       fault?(reason: string): void;
     },
   ) {
-    this.#child = child;
+    this.child = child;
     this.#label = label;
     this.#handlers = handlers;
     const lines = new LineSplitter(line => this.#onLine(line), {
@@ -67,7 +67,7 @@ export class StdioTransport<Id extends string | number> {
       }
       let timer: ReturnType<typeof setTimeout> | undefined;
       const cancel = () => this.take(id)?.reject(new Error(`${this.#label}: request cancelled`));
-      this.#pending.set(id, {
+      this.pending.set(id, {
         method, onAccepted: options.onAccepted, resolve: resolve as (value: unknown) => void, reject,
         cleanup: () => { clearTimeout(timer); options.signal?.removeEventListener('abort', cancel); },
       });
@@ -81,15 +81,15 @@ export class StdioTransport<Id extends string | number> {
   }
 
   take(id: Id): Pending | undefined {
-    const entry = this.#pending.get(id);
-    if (entry !== undefined) { this.#pending.delete(id); entry.cleanup(); }
+    const entry = this.pending.get(id);
+    if (entry !== undefined) { this.pending.delete(id); entry.cleanup(); }
     return entry;
   }
 
   write(payload: unknown): void {
     if (this.#closed || this.#drainingStdout) return;
     try {
-      this.#child.stdin.write(`${JSON.stringify(payload)}\n`, error => {
+      this.child.stdin.write(`${JSON.stringify(payload)}\n`, error => {
         if (error) this.#break('stdin write failed');
       });
     } catch {
@@ -103,7 +103,7 @@ export class StdioTransport<Id extends string | number> {
     clearTimeout(this.#drainTimer);
     this.#drainTimer = undefined;
     this.#drainingStdout = false;
-    for (const id of this.#pending.keys()) {
+    for (const id of this.pending.keys()) {
       const error = new Error(reason);
       this.take(id)?.reject(diagnostic === undefined ? error : withLogDiagnostic(error, diagnostic));
     }
