@@ -127,8 +127,8 @@ export class Composer {
     if (!state || !thread || state.sending || !state.queued.length || this.blocked(threadId) || thread.status === 'waiting' || thread.status === 'queued') return;
     const head = state.queued[0]!.request;
     if (head?.failed !== undefined || (head && thread.status === 'running')) return;
-    state.paused = false;
     if (!this.ctx.sync.admitQueue()) return;
+    state.paused = false;
     await this.ctx.sync.sendNow(threadId);
   }
 

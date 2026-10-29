@@ -176,6 +176,7 @@ export class FakeClient implements ObservableClient {
     peer.#ctx.threads.clear();
     for (const [id, thread] of this.#ctx.threads) peer.#ctx.threads.set(id, structuredClone(thread));
     peer.#ctx.projects.splice(0, peer.#ctx.projects.length, ...structuredClone(this.#ctx.projects));
+    peer.#ctx.seq = Math.max(peer.#ctx.seq, this.#ctx.seq);
     return peer;
   }
 

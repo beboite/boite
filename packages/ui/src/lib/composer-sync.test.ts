@@ -418,6 +418,9 @@ test('a synchronized public draft can switch to incognito and deliver without re
   const publicId = desk.store.draft!.id!;
   await vi.waitFor(async () => expect((await recordOf(desk.client, 'drafts', publicId))?.value?.input.text).toBe('Public draft'));
   desk.store.setDraftIncognito(true);
+  const privateId = desk.store.draft!.id!;
+  await vi.waitFor(async () => expect((await recordOf(desk.client, 'drafts', privateId))?.value).toMatchObject({ draft: { incognito: true }, input: { text: 'Public draft' } }));
+  expect(putsOf(desk, privateId)).not.toContainEqual(['composer.put', expect.objectContaining({ value: null })]);
   desk.store.editComposerText('draft', 'Private continuation');
   desk.store.queuePrompt('draft', { text: 'Private continuation', attachments: [] }, { choice: desk.store.defaultChoice() });
   desk.store.composerStates.draft!.text = '';
@@ -444,6 +447,8 @@ test.each(['toggle', 'project'])('a private draft becomes durable through %s und
   else desk.store.setDraftProject(desk.store.projects.find(entry => entry.kind !== 'drafts')!.id);
   const publicId = desk.store.draft!.id!;
   expect(publicId).not.toBe(privateId);
+  await vi.waitFor(async () => expect((await recordOf(phone.client, 'drafts', publicId))?.value?.input.text).toBe('Private before changing mode'));
+  expect(putsOf(desk, publicId)).not.toContainEqual(['composer.put', expect.objectContaining({ value: null })]);
   desk.store.editComposerText('draft', 'Public after changing mode');
   await vi.waitFor(async () => expect((await recordOf(phone.client, 'drafts', publicId))?.value?.input.text).toBe('Public after changing mode'));
   await vi.waitFor(async () => expect((await recordOf(desk.client, 'drafts', privateId))?.value ?? null).toBeNull());
@@ -901,6 +906,27 @@ test('an old core refuses queue admission before the UI clears the input', async
   expect(desk.store.composerStates['t-trace']).toMatchObject({ text: 'Keep these words', queued: [] });
   expect(desk.store.error).toMatch(/update/i);
   expect(called(desk, 'turns.start')).toHaveLength(0);
+  // A paused queue restored by the journal stays paused if Send now is also refused.
+  const restored = desk.store.composerStates['t-trace']!;
+  restored.queued.push({ id: 'restored-old-core', text: 'Keep the restored queue', attachments: [] });
+  restored.paused = true;
+  await desk.store.sendQueuedNow('t-trace');
+  expect(restored.paused).toBe(true);
+  expect(restored.queued.map(entry => entry.text)).toEqual(['Keep the restored queue']);
+  expect(called(desk, 'composer.put')).toHaveLength(0);
+});
+
+test('editing a draft stash after leaving its draft never publishes an inputs/draft record', async () => {
+  const desk = await device('stale-draft', new FakeClient({ delayMs: 0 }));
+  desk.store.draft = null;
+  desk.store.composerStates.draft = { text: '', attachments: [], sending: false, paused: true, queued: [
+    { id: 'take-back', text: 'Take this back', attachments: [] },
+    { id: 'keep-stashed', text: 'Keep this stashed', attachments: [] },
+  ] };
+  desk.store.removeQueued('draft', 0);
+  await quiet();
+  expect(desk.store.composerStates.draft.queued.map(entry => entry.text)).toEqual(['Keep this stashed']);
+  expect(called(desk, 'composer.put', params => params.section === 'inputs' && params.id === 'draft')).toHaveLength(0);
 });
 
 
