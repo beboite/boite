@@ -411,6 +411,13 @@ up. `TimeoutStopSec=60` covers that wait. An agent that restarts the unit from
 one of its own commands uses `--no-block`, or its command is the tool call the
 core waits 30 seconds for.
 
+A launcher that moves each agent into a cgroup of its own (`systemd-run
+--scope` under a capped slice) must not bind that scope to the unit with
+`PartOf=` or `BindsTo=`: systemd then stops every agent the moment the unit
+stops, and the grace cuts every tool call. Clean such scopes in the unit's
+`ExecStopPost=`, which runs once the core has exited. An agent killed during
+the grace still ends its turn as stopped, and its thread resumes.
+
 The data directory is `~/.local/share/boite2` on the stable channel and
 `~/.local/share/boite2-dev` on the dev one, or whatever `--data-dir` or
 `BOITE_DATA_DIR` names: the journal, the accounts, `core.json` with the core

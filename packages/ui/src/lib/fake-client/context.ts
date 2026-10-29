@@ -88,6 +88,9 @@ import { observeLog } from './logs';
 import { addGoalCard, agentTodos, followGoal, unlinkGoalCards } from './todos';
 import { applyPolicy, lockedSettingsOf, policyFixture } from './policy';
 import type { FakeWorktree } from './worktrees';
+import { workflowThere, type DelegationRow } from './delegation-machine';
+import { fakeCore } from './coordination';
+import { fakeMember } from './requests';
 
 /**
  * One handler per contract method; plugins, agents and workflows answer from
@@ -242,10 +245,11 @@ export class FakeContext {
   readonly deletedThreads = new Map<ThreadId, { threads: Thread[]; archived: boolean[]; deletedAt: number }>();
   readonly coordination = new Map<ThreadId, CoordinationConfig>();
   readonly delegationConfigs = new Map<ThreadId, DelegationConfig>();
-  readonly delegationAgents = new Map<ThreadId, { threadId: ThreadId; profileId: string; task: string }[]>();
+  readonly delegationAgents = new Map<ThreadId, DelegationRow[]>();
   readonly delegationLetters = new Map<ThreadId, AgentLetter[]>();
   readonly delegationTurns = new Map<ThreadId, number>();
-  readonly delegationRequests = new Map<string, { fingerprint: string; threadId: ThreadId }>();
+  /** `coreId` names the member a child on another machine runs on. */
+  readonly delegationRequests = new Map<string, { fingerprint: string; threadId: ThreadId; coreId?: string }>();
   /** A child's own worktree, as `delegation.spawn` with `worktree` records it. */
   readonly delegationWorktrees = new Map<ThreadId, DelegationWorktree>();
   readonly delegationSendRequests = new Map<string, { fingerprint: string; letter: AgentLetter }>();
@@ -425,6 +429,14 @@ export class FakeContext {
       },
       child: (root, profile, title, task) => workflowChild(this, root, profile, title, task),
       answer: (threadId, text, ok) => workflowAnswer(this, threadId, text, ok),
+      member: (query, field) => void fakeMember(this, query, field),
+      there: (root, profile, step, title, task) => workflowThere(this, root, delegationConfig(this, root.id), profile, step, title, task),
+      answerThere: (coreId, threadId, text, ok) => {
+        const there = fakeCore(coreId);
+        if (!there?.threads.has(threadId)) return null;
+        workflowAnswer(there, threadId, text, ok);
+        return there.thread(threadId).turns.at(-1)?.id ?? null;
+      },
       changed: (rootId, runId) => this.emitToThread(rootId, 'workflows.changed', { threadId: rootId, runId }),
       // The wall clock, as the team demo uses: a running step's elapsed time counts from it.
       now: () => Date.now() + this.workflowLag,

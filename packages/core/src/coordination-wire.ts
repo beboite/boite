@@ -12,8 +12,8 @@ import { openResponse, SEALED, unpack, type Sealing } from './group/seal.ts';
 export type Operation = 'directory' | 'deliver' | 'receipt' | 'search' | 'read' | 'group.sync' | 'group.push' | 'contact.sync' | 'contact.ask' | 'contact.answer' | 'contact.project' | 'contact.route'
   /** Between members of a group, for a contact one of them is linked to (`contacts/members.ts`). */
   | 'relay.project' | 'relay.mirror' | 'relay.in' | 'relay.out'
-  /** Between members of a group: a thread one starts on another, and the setting that lets it (`threads/group-spawn.ts`). */
-  | 'thread.start' | 'setting.read' | 'setting.changed'
+  /** Between members of a group: a thread one starts on another, the models it can run on there, and the setting that lets it (`threads/group-spawn.ts`). */
+  | 'thread.start' | 'delegation.catalog' | 'delegation.start' | 'delegation.report' | 'delegation.letter' | 'delegation.read' | 'delegation.stop' | 'setting.read' | 'setting.changed'
   /** Between members of a group: a bot of one looks after projects of another, which hears it while its `groupBots` is on (`agents/group-host.ts`). */
   | BotOperation;
 /** What a bot's core asks the machine whose projects it looks after, and the events that machine sends back. */

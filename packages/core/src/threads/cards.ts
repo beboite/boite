@@ -74,14 +74,17 @@ interface PendingQuestion {
  * asynchronous ones included. Each map has this one owner.
  */
 export class ThreadCards {
-  private readonly permissions = new Map<RequestId, PendingPermission>();
-  private readonly announced = new Map<string, { seq: number; value: unknown }>();
-  private announcements = 0;
+  readonly #permissions = new Map<RequestId, PendingPermission>();
+  readonly #announced = new Map<string, { seq: number; value: unknown }>();
+  #announcements = 0;
   readonly questions = new Map<RequestId, PendingQuestion>();
   /** Where each open asynchronous card is drawn, so its answer can be written back after its turn ended. */
   readonly asyncCards = new Map<RequestId, { threadId: ThreadId; messageId: MessageId; partIndex: number; part: Extract<MessagePart, { type: 'question' }> }>();
 
-  constructor(private readonly core: Core, private readonly threads: ThreadStore) {}
+  readonly #core: Core;
+
+  constructor(core: Core, private readonly threads: ThreadStore) {
+    this.#core = core;}
 
   /**
    * The requests still waiting for an answer, oldest first. Answering one or
@@ -89,7 +92,7 @@ export class ThreadCards {
    * to show, whether it was subscribed when the request fired or not.
    */
   listPermissions(threadId?: ThreadId): PermissionRequest[] {
-    const pending = [...this.permissions.values()].map((entry) => entry.request);
+    const pending = [...this.#permissions.values()].map((entry) => entry.request);
     const scoped = threadId === undefined ? pending : pending.filter((r) => r.threadId === threadId);
     return scoped.sort((a, b) => a.createdAt - b.createdAt);
   }
@@ -107,9 +110,9 @@ export class ThreadCards {
    * turn is running again. A secret card holds the turn the same way.
    */
   waitingOn(threadId: ThreadId): boolean {
-    for (const entry of this.permissions.values()) if (entry.request.threadId === threadId) return true;
+    for (const entry of this.#permissions.values()) if (entry.request.threadId === threadId) return true;
     for (const entry of this.questions.values()) if (entry.request.threadId === threadId && entry.request.async !== true) return true;
-    return this.core.secrets.waiting(threadId);
+    return this.#core.secrets.waiting(threadId);
   }
 
   /** How many questions asked without stopping still wait on the user: the row says it needs them. */
@@ -120,23 +123,23 @@ export class ThreadCards {
   }
 
   /** An asynchronous card came or went: the status did not move, so the row is sent by itself. */
-  private asyncChanged(threadId: ThreadId): void {
-    const thread = this.core.journal.getThread(threadId);
-    if (thread !== null) this.core.bus.emit('thread.updated', withLoad(this.core, thread));
+  #asyncChanged(threadId: ThreadId): void {
+    const thread = this.#core.journal.getThread(threadId);
+    if (thread !== null) this.#core.bus.emit('thread.updated', withLoad(this.#core, thread));
   }
 
   answerPermission(params: { requestId: RequestId; decision: 'allow' | 'deny' }, by = 'user'): void {
-    const pending = this.permissions.get(params.requestId);
+    const pending = this.#permissions.get(params.requestId);
     if (pending === undefined) throw notFound(`unknown permission request ${params.requestId}`, params);
-    this.permissions.delete(params.requestId);
+    this.#permissions.delete(params.requestId);
     const threadId = pending.request.threadId;
-    logCard(this.core, pending.request, 'permission.decided', `Permission for ${pending.request.toolName} ${params.decision === 'allow' ? 'allowed' : 'denied'} by ${by}`, { decision: params.decision, by });
-    this.core.journal.append(
+    logCard(this.#core, pending.request, 'permission.decided', `Permission for ${pending.request.toolName} ${params.decision === 'allow' ? 'allowed' : 'denied'} by ${by}`, { decision: params.decision, by });
+    this.#core.journal.append(
       { type: 'permission.resolved', threadId, version: 1, payload: { ...params } },
       () => undefined,
     );
-    this.core.bus.emit('permission.resolved', { requestId: params.requestId, threadId, decision: params.decision });
-    markRunning(this.core, threadId);
+    this.#core.bus.emit('permission.resolved', { requestId: params.requestId, threadId, decision: params.decision });
+    markRunning(this.#core, threadId);
     pending.resolve(params.decision);
   }
 
@@ -159,15 +162,15 @@ export class ThreadCards {
       throw refused('the question belongs to another thread', { ...params, expected: request.threadId });
     }
     this.questions.delete(request.id);
-    logCard(this.core, request, 'question.skipped', `Question skipped by ${by}`, { async: request.async === true, by });
-    this.core.journal.append(
+    logCard(this.#core, request, 'question.skipped', `Question skipped by ${by}`, { async: request.async === true, by });
+    this.#core.journal.append(
       { type: 'question.answered', threadId: request.threadId, version: 1, payload: { questionId: request.id, answer: null } },
       () => undefined,
     );
-    this.core.bus.emit('question.answered', { questionId: request.id, threadId: request.threadId, answer: null });
-    this.foldAsyncCard(request.id, null);
-    if (request.async !== true) markRunning(this.core, request.threadId);
-    else this.asyncChanged(request.threadId);
+    this.#core.bus.emit('question.answered', { questionId: request.id, threadId: request.threadId, answer: null });
+    this.#foldAsyncCard(request.id, null);
+    if (request.async !== true) markRunning(this.#core, request.threadId);
+    else this.#asyncChanged(request.threadId);
     pending.resolve(null);
   }
 
@@ -211,25 +214,25 @@ export class ThreadCards {
     }
     const badFiles = answerAttachmentError(files);
     if (badFiles !== null) throw refused(badFiles.message, { questionId: request.id, ...badFiles.data });
-    this.core.sharedAccess.uploads(request.threadId, files);
+    this.#core.sharedAccess.uploads(request.threadId, files);
     if (params.optionIds.length === 0 && text.length === 0 && files.length === 0) {
       throw refused('an answer needs an option or some text', { questionId: request.id });
     }
 
     const answer: QuestionAnswer = text.length > 0 ? { optionIds: params.optionIds, text } : { optionIds: params.optionIds };
-    if (files.length > 0) answer.attachments = attachToAnswer(this.core.dataDir, answer, files);
+    if (files.length > 0) answer.attachments = attachToAnswer(this.#core.dataDir, answer, files);
     if (request.async === true) {
-      this.settleAsync(pending, answer, by);
+      this.#settleAsync(pending, answer, by);
       return;
     }
-    this.recordAnswer(request, answer, by);
-    markRunning(this.core, request.threadId);
+    this.#recordAnswer(request, answer, by);
+    markRunning(this.#core, request.threadId);
     pending.resolve(answer);
   }
 
-  private recordAnswer(request: QuestionRequest, answer: QuestionAnswer, by: string): void {
+  #recordAnswer(request: QuestionRequest, answer: QuestionAnswer, by: string): void {
     this.questions.delete(request.id);
-    this.core.journal.append(
+    this.#core.journal.append(
       {
         type: 'question.answered',
         threadId: request.threadId,
@@ -238,18 +241,18 @@ export class ThreadCards {
       },
       () => undefined,
     );
-    this.core.bus.emit('question.answered', { questionId: request.id, threadId: request.threadId, answer });
-    logCard(this.core, request, 'question.answered', `Question answered by ${by} with ${answer.optionIds.length} options${answer.text ? ' and text' : ''}`, { options: answer.optionIds.length, text: Boolean(answer.text), async: request.async === true, by });
+    this.#core.bus.emit('question.answered', { questionId: request.id, threadId: request.threadId, answer });
+    logCard(this.#core, request, 'question.answered', `Question answered by ${by} with ${answer.optionIds.length} options${answer.text ? ' and text' : ''}`, { options: answer.optionIds.length, text: Boolean(answer.text), async: request.async === true, by });
   }
 
   /** An asynchronous card answered: folded where it was drawn, and the answer goes to the agent as a message. */
-  private settleAsync(pending: PendingQuestion, answer: QuestionAnswer, by: string): void {
+  #settleAsync(pending: PendingQuestion, answer: QuestionAnswer, by: string): void {
     const request = pending.request;
-    this.recordAnswer(request, answer, by);
-    this.foldAsyncCard(request.id, answer);
-    this.asyncChanged(request.threadId);
+    this.#recordAnswer(request, answer, by);
+    this.#foldAsyncCard(request.id, answer);
+    this.#asyncChanged(request.threadId);
     pending.resolve(answer);
-    const text = request.agentSetting === undefined ? answerTextOf(request, answer) : this.core.workforce.settingCards.answerText(request.agentSetting, answer);
+    const text = request.agentSetting === undefined ? answerTextOf(request, answer) : this.#core.workforce.settingCards.answerText(request.agentSetting, answer);
     this.threads.deferred.deliverAnswer(request.threadId, `> ${request.text}\n\n${text}`);
   }
 
@@ -260,8 +263,8 @@ export class ThreadCards {
    * when the value moves, so a paired phone cannot answer "applied".
    */
   requestSetting(params: SettingRequestParams): { questionId: RequestId; setting: SettingAsk } | Promise<{ questionId: RequestId; setting: SettingAsk }> {
-    if (params.machine !== undefined) return this.requestMachineSetting(params);
-    return this.drawSetting(params, this.core.settings.get(), null);
+    if (params.machine !== undefined) return this.#requestMachineSetting(params);
+    return this.#drawSetting(params, this.#core.settings.get(), null);
   }
 
   /**
@@ -274,41 +277,41 @@ export class ThreadCards {
    * last value heard is kept, numbered, for a card whose read crossed it.
    */
   machineSettingChanged(peer: CoordinationPeer, key: string, value: unknown): void {
-    this.announced.set(`${peer.coreId}:${key}`, { seq: ++this.announcements, value });
+    this.#announced.set(`${peer.coreId}:${key}`, { seq: ++this.#announcements, value });
     this.settle(request => (request.setting === undefined ? null : settledMachineSetting(request.setting, peer.coreId, key, value)), `${peer.name}'s settings`);
   }
 
-  private async requestMachineSetting(params: SettingRequestParams): Promise<{ questionId: RequestId; setting: SettingAsk }> {
+  async #requestMachineSetting(params: SettingRequestParams): Promise<{ questionId: RequestId; setting: SettingAsk }> {
     this.threads.require(params.threadId);
     if (typeof params.machine !== 'string' || params.machine.trim().length === 0 || params.machine.length > 128) throw invalidParams('settings.request.machine: expected a machine name or core id');
     if (!isMachineSetting(params.key)) throw refused(`${String(params.key)} is this machine's own; a card for another machine asks about ${MACHINE_SETTINGS.join(', ')}`, { field: 'key', expected: MACHINE_SETTINGS });
-    const peer = memberNamed(this.core, params.machine, 'settings.request');
-    const since = this.announcements;
+    const peer = memberNamed(this.#core, params.machine, 'settings.request');
+    const since = this.#announcements;
     let read: { value?: unknown };
-    try { read = (await this.core.coordination.request(peer, 'setting.read', { key: params.key })) as { value?: unknown }; }
+    try { read = (await this.#core.coordination.request(peer, 'setting.read', { key: params.key })) as { value?: unknown }; }
     catch (error) {
       if (error instanceof PeerRefusal) throw refused(`Boite on ${peer.name} cannot answer about ${params.key}: ${error.message}; the owner updates it in Settings, Machines and updates`, { field: 'machine' });
       throw unavailable(`${peer.name} did not answer: ${messageOf(error)}`, { field: 'machine' });
     }
     // The owner flipped it while the read was on its way back: the announcement, newer, is what that machine has.
-    const late = this.announced.get(`${peer.coreId}:${params.key}`);
+    const late = this.#announced.get(`${peer.coreId}:${params.key}`);
     const value = late !== undefined && late.seq > since ? late.value : read?.value;
-    return this.drawSetting(params, { ...this.core.settings.get(), [params.key]: value as Settings[typeof params.key] }, { coreId: peer.coreId, name: peer.name });
+    return this.#drawSetting(params, { ...this.#core.settings.get(), [params.key]: value as Settings[typeof params.key] }, { coreId: peer.coreId, name: peer.name });
   }
 
-  private drawSetting(params: SettingRequestParams, settings: Settings, machine: SettingMachine | null): { questionId: RequestId; setting: SettingAsk } {
+  #drawSetting(params: SettingRequestParams, settings: Settings, machine: SettingMachine | null): { questionId: RequestId; setting: SettingAsk } {
     const thread = this.threads.require(params.threadId);
     if (thread.archived) throw refused('cannot ask on an archived thread', { threadId: thread.id });
     const open = [...this.questions.values()].flatMap(entry => (entry.request.threadId === thread.id && entry.request.setting ? [entry.request.setting] : []));
     const checked = checkSettingRequest(params, settings, patch => {
       try {
-        return { ok: true, patch: this.core.settings.normalize(patch) };
+        return { ok: true, patch: this.#core.settings.normalize(patch) };
       } catch (error) {
         if (!(error instanceof RpcFailure)) throw error;
         const field = (error.data as { field?: unknown } | undefined)?.field;
         return { ok: false, message: error.message, field: typeof field === 'string' ? field : 'value' };
       }
-    }, open, this.core.clients.current(), machine);
+    }, open, this.#core.clients.current(), machine);
     if (!checked.ok) throw refused(checked.message, checked.data);
     const { reason, setting, options } = checked;
     const { questionId } = this.drawAsync(thread, { text: reason, options, allowText: false, multiple: false, async: true, setting });
@@ -338,7 +341,7 @@ export class ThreadCards {
       if (!this.questions.has(pending.request.id)) continue;
       const answer = pick(pending.request);
       if (answer === 'close') this.skipQuestion({ threadId: pending.request.threadId, questionId: pending.request.id }, by);
-      else if (answer !== null) this.settleAsync(pending, answer, by);
+      else if (answer !== null) this.#settleAsync(pending, answer, by);
     }
   }
 
@@ -373,30 +376,30 @@ export class ThreadCards {
 
   /** An asynchronous card drawn in the running turn, or under the last one, in a message of its own. */
   drawAsync(thread: ThreadSummary, ask: QuestionAsk): { questionId: RequestId } {
-    const turn = this.core.journal.runningTurn(thread.id) ?? this.core.journal.lastTurn(thread.id);
+    const turn = this.#core.journal.runningTurn(thread.id) ?? this.#core.journal.lastTurn(thread.id);
     if (turn === null) throw refused('the thread has no turn to ask in yet', { threadId: thread.id });
     const ticket = this.askQuestion(thread, turn, ask);
     const part: Extract<MessagePart, { type: 'question' }> = { type: 'question', questionId: ticket.questionId, ...ask, answer: null };
     const message: Message = { id: newId('msg_'), threadId: thread.id, turnId: turn.id, role: 'assistant', parts: [part], state: 'complete', createdAt: Date.now() };
-    this.core.journal.append({ type: 'message.started', threadId: thread.id, version: 1, payload: message }, () => this.core.journal.putMessage(message));
-    this.core.bus.emit('message.started', message);
-    this.core.bus.emit('message.completed', { threadId: thread.id, messageId: message.id, state: 'complete' });
+    this.#core.journal.append({ type: 'message.started', threadId: thread.id, version: 1, payload: message }, () => this.#core.journal.putMessage(message));
+    this.#core.bus.emit('message.started', message);
+    this.#core.bus.emit('message.completed', { threadId: thread.id, messageId: message.id, state: 'complete' });
     this.asyncCards.set(ticket.questionId, { threadId: thread.id, messageId: message.id, partIndex: 0, part });
     return { questionId: ticket.questionId };
   }
 
   /** The answered card, written back where it was drawn, whichever turn that was. */
-  private foldAsyncCard(questionId: RequestId, answer: QuestionAnswer | null): void {
+  #foldAsyncCard(questionId: RequestId, answer: QuestionAnswer | null): void {
     const card = this.asyncCards.get(questionId);
     if (card === undefined) return;
     this.asyncCards.delete(questionId);
     const threadId = card.threadId;
     const part: MessagePart = { ...card.part, answer };
-    this.core.journal.append(
+    this.#core.journal.append(
       { type: 'message.part', threadId, version: 1, payload: { messageId: card.messageId, partIndex: card.partIndex, part } },
-      () => this.core.journal.setMessagePart(card.messageId, card.partIndex, part),
+      () => this.#core.journal.setMessagePart(card.messageId, card.partIndex, part),
     );
-    this.core.bus.emit('message.part', { threadId, messageId: card.messageId, partIndex: card.partIndex, part });
+    this.#core.bus.emit('message.part', { threadId, messageId: card.messageId, partIndex: card.partIndex, part });
   }
 
   requestPermission(
@@ -408,7 +411,7 @@ export class ThreadCards {
   ): PermissionTicket {
     // A thread that must run no tool (a memory pass, `TOOL_FREE_CONTEXT`) gets none, whatever its driver let through.
     if (thread.contextMode?.tools?.length === 0) {
-      this.core.logs.info(`Permission for ${toolName} denied: this conversation runs no tool`, { source: 'permissions', event: 'permission.denied', threadId: thread.id, turnId: turn.id, data: { tool: toolName } });
+      this.#core.logs.info(`Permission for ${toolName} denied: this conversation runs no tool`, { source: 'permissions', event: 'permission.denied', threadId: thread.id, turnId: turn.id, data: { tool: toolName } });
       return Object.assign(Promise.resolve('deny' as const), { requestId: newId('req_'), withdraw: () => undefined });
     }
     const request: PermissionRequest = {
@@ -424,16 +427,16 @@ export class ThreadCards {
     const promise = new Promise<'allow' | 'deny'>((done) => {
       resolve = done;
     });
-    this.permissions.set(request.id, { request, resolve });
-    this.core.journal.append(
+    this.#permissions.set(request.id, { request, resolve });
+    this.#core.journal.append(
       { type: 'permission.requested', threadId: thread.id, version: 1, payload: request },
       () => undefined,
     );
-    markRunning(this.core, thread.id);
-    this.core.bus.emit('permission.requested', request);
-    this.core.logs.debug(`Permission requested for ${toolName}`, { source: 'permissions', event: 'permission.requested', threadId: thread.id, turnId: turn.id, requestId: request.id, data: { tool: toolName, permissionMode: thread.permissionMode } });
+    markRunning(this.#core, thread.id);
+    this.#core.bus.emit('permission.requested', request);
+    this.#core.logs.debug(`Permission requested for ${toolName}`, { source: 'permissions', event: 'permission.requested', threadId: thread.id, turnId: turn.id, requestId: request.id, data: { tool: toolName, permissionMode: thread.permissionMode } });
     const withdraw = (): void => {
-      if (this.permissions.has(request.id)) this.answerPermission({ requestId: request.id, decision: 'deny' }, 'the agent, which withdrew it');
+      if (this.#permissions.has(request.id)) this.answerPermission({ requestId: request.id, decision: 'deny' }, 'the agent, which withdrew it');
     };
     return Object.assign(promise, { requestId: request.id, withdraw });
   }
@@ -458,15 +461,15 @@ export class ThreadCards {
       resolve = done;
     });
     this.questions.set(request.id, { request, resolve });
-    this.core.journal.append(
+    this.#core.journal.append(
       { type: 'question.asked', threadId: thread.id, version: 1, payload: request },
       () => undefined,
     );
     // Nobody waits on an asynchronous card: the thread keeps its status.
-    if (ask.async !== true) markRunning(this.core, thread.id);
-    else this.asyncChanged(thread.id);
-    this.core.bus.emit('question.asked', request);
-    this.core.logs.debug(`Question asked with ${ask.options.length} options${ask.async === true ? ', without stopping the turn' : ''}`, { source: 'permissions', event: 'question.asked', threadId: thread.id, turnId: turn.id, requestId: request.id, data: { options: ask.options.length, async: ask.async === true, allowText: ask.allowText, multiple: ask.multiple } });
+    if (ask.async !== true) markRunning(this.#core, thread.id);
+    else this.#asyncChanged(thread.id);
+    this.#core.bus.emit('question.asked', request);
+    this.#core.logs.debug(`Question asked with ${ask.options.length} options${ask.async === true ? ', without stopping the turn' : ''}`, { source: 'permissions', event: 'question.asked', threadId: thread.id, turnId: turn.id, requestId: request.id, data: { options: ask.options.length, async: ask.async === true, allowText: ask.allowText, multiple: ask.multiple } });
     return Object.assign(promise, { questionId: request.id });
   }
 
@@ -478,9 +481,9 @@ export class ThreadCards {
    */
   restoreAsyncQuestions(): number {
     let restored = 0;
-    for (const request of this.core.journal.openAsyncQuestions()) {
-      if (this.questions.has(request.id) || this.core.journal.getThread(request.threadId)?.archived !== false) continue;
-      for (const message of this.core.journal.walkTurnMessages(request.threadId, request.turnId, { blobs: false })) {
+    for (const request of this.#core.journal.openAsyncQuestions()) {
+      if (this.questions.has(request.id) || this.#core.journal.getThread(request.threadId)?.archived !== false) continue;
+      for (const message of this.#core.journal.walkTurnMessages(request.threadId, request.turnId, { blobs: false })) {
         const partIndex = message.parts.findIndex(part => part.type === 'question' && part.questionId === request.id && (part.answer ?? null) === null);
         if (partIndex < 0) continue;
         const part = message.parts[partIndex] as Extract<MessagePart, { type: 'question' }>;
@@ -495,9 +498,9 @@ export class ThreadCards {
   }
 
   /** An asynchronous card closed without an answer is written down, or the next start would open it again. */
-  private closeUnanswered(request: QuestionRequest): void {
+  #closeUnanswered(request: QuestionRequest): void {
     if (request.async !== true) return;
-    this.core.journal.append(
+    this.#core.journal.append(
       { type: 'question.answered', threadId: request.threadId, version: 1, payload: { questionId: request.id, answer: null } },
       () => undefined,
     );
@@ -515,38 +518,38 @@ export class ThreadCards {
       if (pending.request.async === true && !all) continue;
       this.questions.delete(id);
       this.asyncCards.delete(id);
-      this.closeUnanswered(pending.request);
+      this.#closeUnanswered(pending.request);
       asyncGone ||= pending.request.async === true;
-      logCard(this.core, pending.request, 'question.cancelled', `Question cancelled because ${CLEARED_BECAUSE[reason]}`, { async: pending.request.async === true, by: 'the core', reason });
-      this.core.bus.emit('question.answered', { questionId: id, threadId, answer: null });
+      logCard(this.#core, pending.request, 'question.cancelled', `Question cancelled because ${CLEARED_BECAUSE[reason]}`, { async: pending.request.async === true, by: 'the core', reason });
+      this.#core.bus.emit('question.answered', { questionId: id, threadId, answer: null });
       pending.resolve(null);
     }
-    if (asyncGone) this.asyncChanged(threadId);
+    if (asyncGone) this.#asyncChanged(threadId);
   }
 
   /** The agent gave up waiting on one card by itself: it goes like a cancelled one. */
   withdrawQuestion(threadId: ThreadId, questionId: QuestionTicket['questionId']): void {
     const pending = this.questions.get(questionId);
     if (pending === undefined || pending.request.threadId !== threadId) return;
-    logCard(this.core, pending.request, 'question.withdrawn', 'Question withdrawn by the agent before an answer', { async: pending.request.async === true });
+    logCard(this.#core, pending.request, 'question.withdrawn', 'Question withdrawn by the agent before an answer', { async: pending.request.async === true });
     this.questions.delete(questionId);
     this.asyncCards.delete(questionId);
-    this.closeUnanswered(pending.request);
-    this.core.bus.emit('question.answered', { questionId, threadId, answer: null });
-    if (pending.request.async !== true) markRunning(this.core, threadId);
-    else this.asyncChanged(threadId);
+    this.#closeUnanswered(pending.request);
+    this.#core.bus.emit('question.answered', { questionId, threadId, answer: null });
+    if (pending.request.async !== true) markRunning(this.#core, threadId);
+    else this.#asyncChanged(threadId);
     pending.resolve(null);
   }
 
   /** The turn ended with a card still open: it is denied, and every client is told so. */
   clearPermissionsOf(threadId: ThreadId, reason: CardClearReason = 'turn end'): void {
-    for (const [id, pending] of [...this.permissions]) {
+    for (const [id, pending] of [...this.#permissions]) {
       if (pending.request.threadId !== threadId) continue;
-      this.permissions.delete(id);
-      logCard(this.core, pending.request, 'permission.decided', `Permission for ${pending.request.toolName} denied because ${CLEARED_BECAUSE[reason]}`, { decision: 'deny', by: 'the core', reason });
+      this.#permissions.delete(id);
+      logCard(this.#core, pending.request, 'permission.decided', `Permission for ${pending.request.toolName} denied because ${CLEARED_BECAUSE[reason]}`, { decision: 'deny', by: 'the core', reason });
       // Without this the card stays on screen with live buttons, and pressing
       // one answers `unknown permission request`.
-      this.core.bus.emit('permission.resolved', { requestId: id, threadId, decision: 'deny' });
+      this.#core.bus.emit('permission.resolved', { requestId: id, threadId, decision: 'deny' });
       pending.resolve('deny');
     }
   }
@@ -558,9 +561,9 @@ export class ThreadCards {
   askInstructions(thread: ThreadSummary, provider: ProviderDescriptor, turn: Turn, prompt: string): string {
     if (thread.sessionId !== null || turn.execution?.operation || nativeCommandPrompt(prompt)) return '';
     if (provider.protocol === 'codex-appserver' || provider.protocol === 'echo') return '';
-    if (this.core.settings.get().asyncQuestions === false) return '';
+    if (this.#core.settings.get().asyncQuestions === false) return '';
     // Boite's guide already teaches the command in the same prompt.
-    if (this.core.brain.config().boiteGuide !== false) return '';
+    if (this.#core.brain.config().boiteGuide !== false) return '';
     return ASK_INSTRUCTIONS;
   }
 }

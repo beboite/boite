@@ -20,20 +20,20 @@ interface ToolEntry {
  * to, one part per tool item, one part per approval and per question.
  */
 export class MuseTurn {
-  private messageId: MessageId | null = null;
-  private nextIndex = 0;
-  private textIndex: number | null = null;
-  private thinkingIndex: number | null = null;
-  private readonly tools = new Map<string, ToolEntry>();
+  #messageId: MessageId | null = null;
+  #nextIndex = 0;
+  #textIndex: number | null = null;
+  #thinkingIndex: number | null = null;
+  readonly #tools = new Map<string, ToolEntry>();
   /** Per item and field, the text already drawn: a snapshot only adds what is past it. */
-  private readonly surfaces = new Map<string, string>();
+  readonly #surfaces = new Map<string, string>();
 
-  private status: TurnResult['status'] = 'done';
-  private error: string | null = null;
-  private diagnosticError: string | undefined;
-  private resolve: (result: TurnResult) => void = () => undefined;
-  private decide: () => void = () => undefined;
-  private wake: () => void = () => undefined;
+  #status: TurnResult['status'] = 'done';
+  #error: string | null = null;
+  #diagnosticError: string | undefined;
+  #resolve: (result: TurnResult) => void = () => undefined;
+  #decide: () => void = () => undefined;
+  #wake: () => void = () => undefined;
 
   readonly done: Promise<TurnResult>;
   /** Resolves the moment the outcome is known, before anything is journalled. */
@@ -54,13 +54,13 @@ export class MuseTurn {
   constructor(readonly ctx: TurnContext) {
     this.sessionId = ctx.sessionId;
     this.done = new Promise<TurnResult>((resolve) => {
-      this.resolve = resolve;
+      this.#resolve = resolve;
     });
     this.finished = new Promise<void>((resolve) => {
-      this.decide = resolve;
+      this.#decide = resolve;
     });
     this.stopped = new Promise<void>((resolve) => {
-      this.wake = resolve;
+      this.#wake = resolve;
     });
   }
 
@@ -70,19 +70,19 @@ export class MuseTurn {
 
   markStopped(): void {
     this.isStopped = true;
-    this.wake();
+    this.#wake();
   }
 
   /** The turn's outcome as `turn/completed` states it. */
   finish(terminal: string, error: string | null): void {
     if (this.decided) return;
-    if (terminal === 'cancelled') this.status = 'stopped';
+    if (terminal === 'cancelled') this.#status = 'stopped';
     else if (terminal !== 'completed') {
       this.fail(error ?? `the muse turn ended ${terminal}`);
       return;
     }
     this.decided = true;
-    this.decide();
+    this.#decide();
   }
 
   endStopped(): void {
@@ -92,84 +92,84 @@ export class MuseTurn {
   fail(reason: string, diagnostic?: string): void {
     if (this.decided) return;
     this.decided = true;
-    this.status = 'error';
-    this.error = reason;
-    this.diagnosticError = diagnostic;
+    this.#status = 'error';
+    this.#error = reason;
+    this.#diagnosticError = diagnostic;
     this.part(this.takeIndex(), { type: 'error', message: reason });
-    this.decide();
+    this.#decide();
   }
 
   settle(): void {
     if (this.settled) return;
     this.settled = true;
     this.decided = true;
-    this.wake();
-    this.decide();
-    if (this.messageId !== null) {
-      this.ctx.emit.complete(this.messageId, this.status === 'error' ? 'error' : 'complete');
+    this.#wake();
+    this.#decide();
+    if (this.#messageId !== null) {
+      this.ctx.emit.complete(this.#messageId, this.#status === 'error' ? 'error' : 'complete');
     }
-    this.resolve({
-      status: this.status,
+    this.#resolve({
+      status: this.#status,
       sessionId: this.sessionId,
       usage: this.usage ?? this.observed,
-      error: this.error ?? undefined,
-      ...(this.diagnosticError === undefined ? {} : { diagnosticError: this.diagnosticError }),
+      error: this.#error ?? undefined,
+      ...(this.#diagnosticError === undefined ? {} : { diagnosticError: this.#diagnosticError }),
     });
   }
 
   // -- parts ----------------------------------------------------------------
 
-  private message(): MessageId {
-    if (this.messageId === null) this.messageId = this.ctx.emit.startMessage('assistant');
-    return this.messageId;
+  #message(): MessageId {
+    if (this.#messageId === null) this.#messageId = this.ctx.emit.startMessage('assistant');
+    return this.#messageId;
   }
 
   part(index: number, part: MessagePart): void {
-    this.ctx.emit.part(this.message(), index, part);
+    this.ctx.emit.part(this.#message(), index, part);
   }
 
   takeIndex(): number {
-    this.textIndex = null;
-    this.thinkingIndex = null;
-    const index = this.nextIndex;
-    this.nextIndex += 1;
+    this.#textIndex = null;
+    this.#thinkingIndex = null;
+    const index = this.#nextIndex;
+    this.#nextIndex += 1;
     return index;
   }
 
-  private writeText(text: string): void {
+  #writeText(text: string): void {
     if (text.length === 0) return;
-    if (this.textIndex === null) {
-      const index = this.nextIndex;
-      this.nextIndex += 1;
-      this.textIndex = index;
-      this.thinkingIndex = null;
+    if (this.#textIndex === null) {
+      const index = this.#nextIndex;
+      this.#nextIndex += 1;
+      this.#textIndex = index;
+      this.#thinkingIndex = null;
       this.part(index, { type: 'text', text: '' });
     }
-    this.ctx.emit.delta(this.message(), this.textIndex, text);
+    this.ctx.emit.delta(this.#message(), this.#textIndex, text);
   }
 
-  private writeThinking(text: string): void {
+  #writeThinking(text: string): void {
     if (text.length === 0) return;
-    if (this.thinkingIndex === null) {
-      const index = this.nextIndex;
-      this.nextIndex += 1;
-      this.thinkingIndex = index;
-      this.textIndex = null;
+    if (this.#thinkingIndex === null) {
+      const index = this.#nextIndex;
+      this.#nextIndex += 1;
+      this.#thinkingIndex = index;
+      this.#textIndex = null;
       this.part(index, { type: 'thinking', text: '' });
     }
-    this.ctx.emit.delta(this.message(), this.thinkingIndex, text);
+    this.ctx.emit.delta(this.#message(), this.#thinkingIndex, text);
   }
 
-  private write(kind: 'text' | 'thinking', text: string): void {
-    if (kind === 'text') this.writeText(text);
-    else this.writeThinking(text);
+  #write(kind: 'text' | 'thinking', text: string): void {
+    if (kind === 'text') this.#writeText(text);
+    else this.#writeThinking(text);
   }
 
   /** An `item/delta`: appended as it comes, and remembered so the next snapshot skips it. */
   appendDelta(itemId: string, field: string, kind: 'text' | 'thinking', delta: string): void {
     const key = `${itemId}:${field}`;
-    this.surfaces.set(key, (this.surfaces.get(key) ?? '') + delta);
-    this.write(kind, delta);
+    this.#surfaces.set(key, (this.#surfaces.get(key) ?? '') + delta);
+    this.#write(kind, delta);
   }
 
   /**
@@ -180,15 +180,15 @@ export class MuseTurn {
   appendSnapshot(itemId: string, field: string, kind: 'text' | 'thinking', text: string | undefined): void {
     if (text === undefined || text.length === 0) return;
     const key = `${itemId}:${field}`;
-    const drawn = this.surfaces.get(key) ?? '';
+    const drawn = this.#surfaces.get(key) ?? '';
     if (text.length <= drawn.length || !text.startsWith(drawn)) return;
-    this.surfaces.set(key, text);
-    this.write(kind, text.slice(drawn.length));
+    this.#surfaces.set(key, text);
+    this.#write(kind, text.slice(drawn.length));
   }
 
   /** Every item notification redraws the same card, found by item id. */
   upsertTool(itemId: string, view: ToolView): void {
-    const entry = this.tools.get(itemId) ?? {
+    const entry = this.#tools.get(itemId) ?? {
       index: this.takeIndex(),
       name: view.name,
       input: null,
@@ -199,7 +199,7 @@ export class MuseTurn {
     if (view.input !== undefined) entry.input = view.input;
     if (view.output !== null) entry.output = view.output;
     entry.status = view.status;
-    this.tools.set(itemId, entry);
+    this.#tools.set(itemId, entry);
     this.part(entry.index, {
       type: 'tool',
       toolId: itemId,

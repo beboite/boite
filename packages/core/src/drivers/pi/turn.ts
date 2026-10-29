@@ -16,18 +16,18 @@ interface ToolEntry {
  * part, one part per tool call.
  */
 export class PiTurn {
-  private messageId: MessageId | null = null;
-  private nextIndex = 0;
-  private textIndex: number | null = null;
-  private thinkingIndex: number | null = null;
-  private readonly tools = new Map<string, ToolEntry>();
+  #messageId: MessageId | null = null;
+  #nextIndex = 0;
+  #textIndex: number | null = null;
+  #thinkingIndex: number | null = null;
+  readonly #tools = new Map<string, ToolEntry>();
 
-  private status: TurnResult['status'] = 'done';
-  private error: string | null = null;
-  private diagnosticError: string | undefined;
-  private resolve: (result: TurnResult) => void = () => undefined;
-  private decide: () => void = () => undefined;
-  private wake: () => void = () => undefined;
+  #status: TurnResult['status'] = 'done';
+  #error: string | null = null;
+  #diagnosticError: string | undefined;
+  #resolve: (result: TurnResult) => void = () => undefined;
+  #decide: () => void = () => undefined;
+  #wake: () => void = () => undefined;
 
   readonly done: Promise<TurnResult>;
   /** Resolves the moment the outcome is known, before anything is journalled. */
@@ -60,13 +60,13 @@ export class PiTurn {
   constructor(readonly ctx: TurnContext) {
     this.sessionId = ctx.sessionId;
     this.done = new Promise<TurnResult>((resolve) => {
-      this.resolve = resolve;
+      this.#resolve = resolve;
     });
     this.finished = new Promise<void>((resolve) => {
-      this.decide = resolve;
+      this.#decide = resolve;
     });
     this.stopped = new Promise<void>((resolve) => {
-      this.wake = resolve;
+      this.#wake = resolve;
     });
   }
 
@@ -76,7 +76,7 @@ export class PiTurn {
 
   markStopped(): void {
     this.isStopped = true;
-    this.wake();
+    this.#wake();
   }
 
   /**
@@ -96,14 +96,14 @@ export class PiTurn {
    */
   settleRun(): void {
     if (this.decided) return;
-    if (this.error === null && this.pendingError !== null && !this.isStopped) {
-      this.error = this.pendingError;
-      this.part(this.takeIndex(), { type: 'error', message: this.error });
+    if (this.#error === null && this.pendingError !== null && !this.isStopped) {
+      this.#error = this.pendingError;
+      this.part(this.takeIndex(), { type: 'error', message: this.#error });
     }
-    if (this.error !== null) this.status = 'error';
-    else if (this.isStopped) this.status = 'stopped';
+    if (this.#error !== null) this.#status = 'error';
+    else if (this.isStopped) this.#status = 'stopped';
     this.decided = true;
-    this.decide();
+    this.#decide();
   }
 
   /** A stopped turn whose run never settled: it ends as one that did. */
@@ -115,30 +115,30 @@ export class PiTurn {
   fail(reason: string, diagnostic?: string): void {
     if (this.decided) return;
     this.decided = true;
-    this.status = 'error';
-    if (this.error === null) {
-      this.error = reason;
-      this.diagnosticError = diagnostic;
+    this.#status = 'error';
+    if (this.#error === null) {
+      this.#error = reason;
+      this.#diagnosticError = diagnostic;
       this.part(this.takeIndex(), { type: 'error', message: reason });
     }
-    this.decide();
+    this.#decide();
   }
 
   settle(): void {
     if (this.settled) return;
     this.settled = true;
     this.decided = true;
-    this.wake();
-    this.decide();
-    if (this.messageId !== null) {
-      this.ctx.emit.complete(this.messageId, this.status === 'error' ? 'error' : 'complete');
+    this.#wake();
+    this.#decide();
+    if (this.#messageId !== null) {
+      this.ctx.emit.complete(this.#messageId, this.#status === 'error' ? 'error' : 'complete');
     }
-    this.resolve({
-      status: this.status,
+    this.#resolve({
+      status: this.#status,
       sessionId: this.sessionId,
       usage: this.usage,
-      error: this.error ?? undefined,
-      ...(this.diagnosticError === undefined ? {} : { diagnosticError: this.diagnosticError }),
+      error: this.#error ?? undefined,
+      ...(this.#diagnosticError === undefined ? {} : { diagnosticError: this.#diagnosticError }),
       promptCache: this.cacheLife,
       ...(this.requestAt === null ? {} : { cacheAt: this.requestAt }),
     });
@@ -170,51 +170,51 @@ export class PiTurn {
 
   // -- parts ----------------------------------------------------------------
 
-  private message(): MessageId {
-    if (this.messageId === null) this.messageId = this.ctx.emit.startMessage('assistant');
-    return this.messageId;
+  #message(): MessageId {
+    if (this.#messageId === null) this.#messageId = this.ctx.emit.startMessage('assistant');
+    return this.#messageId;
   }
 
   part(index: number, part: MessagePart): void {
-    this.ctx.emit.part(this.message(), index, part);
+    this.ctx.emit.part(this.#message(), index, part);
   }
 
   takeIndex(): number {
-    this.textIndex = null;
-    this.thinkingIndex = null;
-    const index = this.nextIndex;
-    this.nextIndex += 1;
+    this.#textIndex = null;
+    this.#thinkingIndex = null;
+    const index = this.#nextIndex;
+    this.#nextIndex += 1;
     return index;
   }
 
   writeText(text: string): void {
     if (text.length === 0) return;
-    if (this.textIndex === null) {
-      const index = this.nextIndex;
-      this.nextIndex += 1;
-      this.textIndex = index;
-      this.thinkingIndex = null;
+    if (this.#textIndex === null) {
+      const index = this.#nextIndex;
+      this.#nextIndex += 1;
+      this.#textIndex = index;
+      this.#thinkingIndex = null;
       this.part(index, { type: 'text', text: '' });
     }
-    this.ctx.emit.delta(this.message(), this.textIndex, text);
+    this.ctx.emit.delta(this.#message(), this.#textIndex, text);
   }
 
   /** The reasoning deltas, which the UI folds. Their own part, like the text. */
   writeThinking(text: string): void {
     if (text.length === 0) return;
-    if (this.thinkingIndex === null) {
-      const index = this.nextIndex;
-      this.nextIndex += 1;
-      this.thinkingIndex = index;
-      this.textIndex = null;
+    if (this.#thinkingIndex === null) {
+      const index = this.#nextIndex;
+      this.#nextIndex += 1;
+      this.#thinkingIndex = index;
+      this.#textIndex = null;
       this.part(index, { type: 'thinking', text: '' });
     }
-    this.ctx.emit.delta(this.message(), this.thinkingIndex, text);
+    this.ctx.emit.delta(this.#message(), this.#thinkingIndex, text);
   }
 
   /** `tool_execution_start` opens the part, `tool_execution_end` replaces it. */
   upsertTool(toolCallId: string, view: ToolView): void {
-    const entry = this.tools.get(toolCallId) ?? {
+    const entry = this.#tools.get(toolCallId) ?? {
       index: this.takeIndex(),
       name: view.name,
       input: null,
@@ -225,7 +225,7 @@ export class PiTurn {
     if (view.input !== undefined) entry.input = view.input;
     if (view.output !== null) entry.output = view.output;
     entry.status = view.status;
-    this.tools.set(toolCallId, entry);
+    this.#tools.set(toolCallId, entry);
     this.part(entry.index, {
       type: 'tool',
       toolId: toolCallId,

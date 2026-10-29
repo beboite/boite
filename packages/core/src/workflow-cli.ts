@@ -45,6 +45,10 @@ Fields of a step:
             "boolean", "any", [shape], or { "key": shape }
   worktree  optional: true runs the step in a git worktree of its own,
             branched from your HEAD; the summary names its branch to merge
+  machine   optional: another machine of the group (as delegate spawn --machine);
+            the step runs there in the project named like yours, model and
+            effort from that machine's list; it returns output as a json block
+  project   optional, with machine: one of that machine's projects
 A path reads a step's output (or its answer when it has none). On a fanned-out
 step, "review.bugs" collects the bugs of every item into one list.
 

@@ -25,7 +25,7 @@ import { thrown } from './settle.ts';
 /** The fake Codex app-server: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.meta.url));
 /** The fixture's environment switches a test may set; every one is cleared after it. */
-const FAKE_SWITCHES = ['CODEX_FAKE_NO_LIVE_SETTINGS', 'CODEX_FAKE_FORK_ERROR', 'CODEX_FAKE_FORK_SAME', 'CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT', 'CODEX_FAKE_RESET_CREDITS', 'CODEX_FAKE_RESET_ERROR', 'CODEX_FAKE_SLOW_MODELS', 'CODEX_FAKE_ARCHIVED', 'CODEX_FAKE_MCP', 'CODEX_FAKE_CONFIG_READ_ERROR', 'CODEX_FAKE_GRACE', 'CODEX_FAKE_CONFIG_READ_HANG'];
+const FAKE_SWITCHES = ['CODEX_FAKE_NO_LIVE_SETTINGS', 'CODEX_FAKE_FORK_ERROR', 'CODEX_FAKE_FORK_SAME', 'CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT', 'CODEX_FAKE_RESET_CREDITS', 'CODEX_FAKE_RESET_ERROR', 'CODEX_FAKE_SLOW_MODELS', 'CODEX_FAKE_ARCHIVED', 'CODEX_FAKE_MCP', 'CODEX_FAKE_CONFIG_READ_ERROR', 'CODEX_FAKE_GRACE', 'CODEX_FAKE_CONFIG_READ_HANG', 'CODEX_FAKE_SKILLS', 'CODEX_FAKE_SLOW_SKILLS'];
 
 test('native collaboration is journalled and appears in Team without using Boite delegation', async () => {
   const client = await startCore();
@@ -609,6 +609,25 @@ describe('codex driver', () => {
     expect(fakeLog().split('\n').filter(line => line === 'initialize')).toHaveLength(1);
     expect(fakeLog().match(/^turn\/start /gm)).toHaveLength(1);
     await waitFor(() => harness!.core.procs.liveCount(threadId) === 0);
+  });
+
+  test('a Codex killed in a command during a restart handoff stops its turn without an error, its output kept', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    const core = harness!.core;
+    const running = client.next('message.part', event => event.threadId === threadId && event.part.type === 'tool' && event.part.status === 'running', 20000);
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('threads.subscribe', { threadId });
+    await client.call('turns.start', { threadId, prompt: '[cut]' });
+    await running;
+    // The grace waits for the command; the agent dies in it, then settles its tool after its failure.
+    void core.threads.handoff.begin(10_000);
+    const turn = await finished;
+    expect(turn.status).toBe('stopped');
+    expect(turn.error).toBeNull();
+    const parts = core.journal.listMessages(threadId).flatMap(message => message.state === 'error' ? [{ type: 'failed' }] : message.parts);
+    expect(parts.filter(part => part.type === 'error' || part.type === 'failed')).toEqual([]);
+    expect(parts.find(part => part.type === 'tool')).toMatchObject({ output: expect.stringContaining('half done') });
   });
 
   test('an asynchronous question draws a card without waiting, and its answer steers the running turn', async () => {
@@ -1906,6 +1925,41 @@ test('a persistent agent\'s memory pass on Codex runs read-only, asks nothing, a
   const launched = (await client.call('trace.get', { threadId: child.id })).find(process => process.commandLine?.includes('app-server') || process.commandLine?.includes('codex-server'));
   for (const flag of ['features.hooks=false', 'features.plugins=false', 'features.apps=false', 'project_doc_max_bytes=0', 'web_search="disabled"']) expect(launched?.commandLine).toContain(flag);
   expect(harness!.core.agents.authenticate(harness!.core.agents.tokenFor(child.id))).toBeNull();
+});
+
+test('Codex skills are the thread\'s slash commands, and /name sends the skill to Codex', async () => {
+  process.env['CODEX_FAKE_SKILLS'] = JSON.stringify([
+    { name: 'standup', description: 'Write the daily standup from the git log.', interface: { shortDescription: 'Daily standup' }, path: '/skills/standup/SKILL.md', scope: 'user', enabled: true },
+    { name: 'retired', description: 'Turned off in Codex.', path: '/skills/retired/SKILL.md', scope: 'user', enabled: false },
+    { name: 'two words', description: 'Not a command token.', path: '/skills/two/SKILL.md', scope: 'repo', enabled: true },
+  ]);
+  const client = await startCore();
+  const threadId = await codexThread(client);
+  const listed = client.next('thread.commands', (event) => event.threadId === threadId, 10000);
+  const first = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+  await client.call('turns.start', { threadId, prompt: 'hello' });
+  expect((await listed).commands).toEqual([{ name: 'standup', description: 'Daily standup', hint: null }]);
+  expect((await first).status).toBe('done');
+  expect(fakeLog()).not.toContain('skill standup');
+
+  const second = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+  await client.call('turns.start', { threadId, prompt: '/standup since monday' });
+  expect((await second).status).toBe('done');
+  expect(fakeLog()).toContain('skill standup /skills/standup/SKILL.md text=$standup since monday\n');
+  expect((await client.call('threads.get', { threadId })).commands.map((command) => command.name)).toEqual(['standup']);
+});
+
+test('a stop while /name waits for the skills list never sends the prompt', async () => {
+  process.env['CODEX_FAKE_SLOW_SKILLS'] = '1500';
+  const client = await startCore();
+  const threadId = await codexThread(client);
+  const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+  await client.call('turns.start', { threadId, prompt: '/standup' });
+  await waitFor(() => fakeLog().includes('skills/list'));
+  await client.call('turns.stop', { threadId });
+  expect((await finished).status).toBe('stopped');
+  await Bun.sleep(1700);
+  expect(fakeLog()).not.toContain('turn/start');
 });
 
 describe('codex hooks', () => {

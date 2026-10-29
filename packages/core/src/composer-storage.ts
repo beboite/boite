@@ -25,7 +25,9 @@ export class ComposerStorage {
   readonly #pendingAssets = new Map<string, Set<string>>();
   readonly #connections = new Set<string>();
   readonly queued = new Map<string, Pick<ComposerRecord, 'section' | 'id'>>();
-  constructor(private readonly core: Core) {
+  readonly #core: Core;
+
+  constructor(core: Core) { this.#core = core;
     core.journal.collectComposerAssets = assets => this.#collectAssets(assets);
     // No client can still be uploading here. Messages already own their bytes;
     // only live composer references retain an uploaded composer asset.
@@ -39,7 +41,7 @@ export class ComposerStorage {
 
   list(ownerId?: string): ComposerRecord[] {
     const memory = [...this.#privateRecords.values()].filter(record => ownerId === undefined || this.owner(record)?.id === ownerId);
-    return [...(this.core.journal.db.query('SELECT * FROM composer_records ORDER BY section, id').all() as Row[]).map(row => this.#decode(row)), ...memory].map(record => structuredClone(record));
+    return [...(this.#core.journal.db.query('SELECT * FROM composer_records ORDER BY section, id').all() as Row[]).map(row => this.#decode(row)), ...memory].map(record => structuredClone(record));
   }
 
   owner(record: Pick<ComposerRecord, 'section' | 'id'>): Connection | undefined { return this.#privateOwners.get(recordKey(record.section, record.id)); }
@@ -62,7 +64,7 @@ export class ComposerStorage {
   get(section: ComposerRecord['section'], id: string): ComposerRecord {
     const memory = this.#privateRecords.get(recordKey(section, id));
     if (memory) return structuredClone(memory);
-    const row = this.core.journal.db.query('SELECT * FROM composer_records WHERE section = ? AND id = ?').get(section, id) as Row | null;
+    const row = this.#core.journal.db.query('SELECT * FROM composer_records WHERE section = ? AND id = ?').get(section, id) as Row | null;
     return row ? this.#decode(row) : { section, id, revision: 0, updatedAt: 0, value: null };
   }
 
@@ -73,7 +75,7 @@ export class ComposerStorage {
   privateMode(section: ComposerRecord['section'], id: string, value: ComposerValue | null): boolean {
     return this.#privateRecords.has(recordKey(section, id)) || value?.draft?.incognito === true ||
       value?.input.queued.some(item => item.request?.start?.incognito) === true ||
-      (section === 'inputs' && this.core.journal.getThread(id)?.incognito === true);
+      (section === 'inputs' && this.#core.journal.getThread(id)?.incognito === true);
   }
 
   save(section: ComposerRecord['section'], id: string, value: ComposerValue | null, owner?: Connection): ComposerRecord {
@@ -88,7 +90,7 @@ export class ComposerStorage {
       this.#track(connection);
       this.#privateOwners.set(recordKey(section, id), connection);
       this.#privateRecords.set(recordKey(section, id), record);
-    } else this.core.journal.db.query(`INSERT INTO composer_records VALUES (?, ?, ?, ?, ?)
+    } else this.#core.journal.db.query(`INSERT INTO composer_records VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(section,id) DO UPDATE SET revision=excluded.revision, updated_at=excluded.updated_at, value=excluded.value`)
       .run(section, id, record.revision, record.updatedAt, value === null ? null : JSON.stringify(value));
     if (value?.input.queued.length) this.queued.set(recordKey(section, id), { section, id });
@@ -101,7 +103,7 @@ export class ComposerStorage {
     if (previous.value) this.#collectAssets(this.references(previous.value).map(reference => reference.assetId).filter(assetId => !references.includes(assetId)));
     const privateOwner = this.#privateOwners.get(recordKey(section, id));
     if (privateOwner) privateOwner.sendEvent('composer.updated', structuredClone(record));
-    else this.core.bus.emit('composer.updated', structuredClone(record));
+    else this.#core.bus.emit('composer.updated', structuredClone(record));
     return record;
   }
 
@@ -111,7 +113,7 @@ export class ComposerStorage {
     this.#track(owner);
     const assetId = `${incognito ? 'private-' : ''}${digest(incognito ? [owner.id, attachment] : attachment)}`;
     if (incognito) { this.#privateAssets.set(assetId, structuredClone(attachment)); this.#privateAssetOwners.set(assetId, owner.id); }
-    else this.core.journal.db.query('INSERT OR IGNORE INTO composer_assets VALUES (?, ?, ?, ?, ?, ?)').run(assetId, JSON.stringify(attachment), attachment.kind, attachment.mimeType, attachment.name, decodedBytes(attachment.data));
+    else this.#core.journal.db.query('INSERT OR IGNORE INTO composer_assets VALUES (?, ?, ?, ?, ?, ?)').run(assetId, JSON.stringify(attachment), attachment.kind, attachment.mimeType, attachment.name, decodedBytes(attachment.data));
     const pending = this.#pendingAssets.get(assetId) ?? new Set<string>();
     pending.add(owner.id); this.#pendingAssets.set(assetId, pending);
     return { assetId };
@@ -151,20 +153,20 @@ export class ComposerStorage {
       if (!id.startsWith('private-')) { stored.push(id); continue; }
       this.#privateAssets.delete(id); this.#privateAssetOwners.delete(id);
     }
-    collectStoredComposerAssets(this.core.journal.db, stored);
+    collectStoredComposerAssets(this.#core.journal.db, stored);
   }
 
   readAsset(assetId: string): Attachment {
     const memory = this.#privateAssets.get(assetId);
     if (memory) return structuredClone(memory);
-    const row = this.core.journal.db.query('SELECT attachment FROM composer_assets WHERE id = ?').get(assetId) as { attachment: string } | null;
+    const row = this.#core.journal.db.query('SELECT attachment FROM composer_assets WHERE id = ?').get(assetId) as { attachment: string } | null;
     if (!row) throw notFound('composer.assetId: expected an uploaded attachment');
     return JSON.parse(row.attachment);
   }
 
   getAsset(assetId: string, ownerId?: string): Attachment {
     const memory = [...this.#privateRecords.values()].some(record => (ownerId === undefined || this.owner(record)?.id === ownerId) && record.value && this.references(record.value).some(attachment => attachment.assetId === assetId));
-    const stored = typeof assetId === 'string' && this.core.journal.db.query(`SELECT 1 FROM composer_records r
+    const stored = typeof assetId === 'string' && this.#core.journal.db.query(`SELECT 1 FROM composer_records r
       WHERE EXISTS (SELECT 1 FROM json_each(r.value, '$.input.attachments') a WHERE json_extract(a.value, '$.assetId') = ?1)
       OR EXISTS (SELECT 1 FROM json_each(r.value, '$.input.queued') q, json_each(q.value, '$.attachments') a WHERE json_extract(a.value, '$.assetId') = ?1) LIMIT 1`).get(assetId);
     if (typeof assetId !== 'string' || (!memory && !stored)) {
@@ -184,7 +186,7 @@ export class ComposerStorage {
         if (reference.assetId.startsWith('private-') && this.#privateAssetOwners.get(reference.assetId) !== ownerId) throw notFound('composer.assetId: expected a private attachment uploaded by this connection');
         const privateAsset = this.#privateAssets.get(reference.assetId);
         const metadata = privateAsset ? { kind: privateAsset.kind, mime_type: privateAsset.mimeType, name: privateAsset.name, bytes: decodedBytes(privateAsset.data) }
-          : this.core.journal.db.query('SELECT kind, mime_type, name, bytes FROM composer_assets WHERE id = ?').get(reference.assetId) as { kind: string; mime_type: string; name: string | null; bytes: number } | null;
+          : this.#core.journal.db.query('SELECT kind, mime_type, name, bytes FROM composer_assets WHERE id = ?').get(reference.assetId) as { kind: string; mime_type: string; name: string | null; bytes: number } | null;
         if (!metadata) throw notFound('composer.assetId: expected an uploaded attachment');
         if (metadata.kind !== reference.kind || metadata.name !== reference.name || metadata.mime_type !== reference.mimeType) throw invalidParams('composer.attachment: metadata must match the uploaded attachment');
         bytes += metadata.bytes;
@@ -194,12 +196,12 @@ export class ComposerStorage {
   }
 
   delivery(id: string): Delivery | null {
-    return this.#privateDeliveries.get(id) ?? this.core.journal.db.query('SELECT * FROM composer_deliveries WHERE id = ?').get(id) as Delivery | null;
+    return this.#privateDeliveries.get(id) ?? this.#core.journal.db.query('SELECT * FROM composer_deliveries WHERE id = ?').get(id) as Delivery | null;
   }
 
   reserve(delivery: Delivery, privateMode: boolean): void {
     if (privateMode) this.#privateDeliveries.set(delivery.id, delivery);
-    else this.core.journal.db.query(`INSERT INTO composer_deliveries VALUES (?, ?, ?, ?, ?, ?, ?)
+    else this.#core.journal.db.query(`INSERT INTO composer_deliveries VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET status=excluded.status, thread_id=excluded.thread_id`)
       .run(delivery.id, delivery.section, delivery.record_id, delivery.status, delivery.thread_id, delivery.request_id, delivery.fingerprint);
   }
@@ -207,11 +209,11 @@ export class ComposerStorage {
   status(id: string, status: Delivery['status'], threadId?: string): void {
     const memory = this.#privateDeliveries.get(id);
     if (memory) { memory.status = status; if (threadId !== undefined) memory.thread_id = threadId; }
-    else this.core.journal.db.query('UPDATE composer_deliveries SET status = ?, thread_id = COALESCE(?, thread_id) WHERE id = ?').run(status, threadId ?? null, id);
+    else this.#core.journal.db.query('UPDATE composer_deliveries SET status = ?, thread_id = COALESCE(?, thread_id) WHERE id = ?').run(status, threadId ?? null, id);
   }
 
   release(id: string): void {
     this.#privateDeliveries.delete(id);
-    this.core.journal.db.query('DELETE FROM composer_deliveries WHERE id = ?').run(id);
+    this.#core.journal.db.query('DELETE FROM composer_deliveries WHERE id = ?').run(id);
   }
 }

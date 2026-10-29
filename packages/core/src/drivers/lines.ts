@@ -38,15 +38,20 @@ export interface LineSplitterOptions {
 }
 
 export class LineSplitter {
-  private pieces: string[] = [];
-  private pending = 0;
-  private discarding = false;
+  #pieces: string[] = [];
+  #pending = 0;
+  #discarding = false;
   private readonly maxLine: number;
 
+  readonly #onLine: (line: string) => void;
+  readonly #options: LineSplitterOptions;
+
   constructor(
-    private readonly onLine: (line: string) => void,
-    private readonly options: LineSplitterOptions = {},
+    onLine: (line: string) => void,
+    options: LineSplitterOptions = {},
   ) {
+    this.#onLine = onLine;
+    this.#options = options;
     this.maxLine = options.maxLine ?? Number.POSITIVE_INFINITY;
   }
 
@@ -55,50 +60,50 @@ export class LineSplitter {
     for (let at = chunk.indexOf('\n'); at >= 0; at = chunk.indexOf('\n', start)) {
       const piece = chunk.slice(start, at);
       start = at + 1;
-      if (this.discarding) {
+      if (this.#discarding) {
         // The tail of a line already reported as too long.
-        this.discarding = false;
+        this.#discarding = false;
         continue;
       }
-      if (this.pending + piece.length > this.maxLine && this.options.keepHead !== true) {
-        this.reset();
-        this.options.onOverflow?.();
+      if (this.#pending + piece.length > this.maxLine && this.#options.keepHead !== true) {
+        this.#reset();
+        this.#options.onOverflow?.();
         continue;
       }
-      const line = this.pieces.length === 0 ? piece : this.pieces.join('') + piece;
-      this.reset();
-      this.emit(line);
+      const line = this.#pieces.length === 0 ? piece : this.#pieces.join('') + piece;
+      this.#reset();
+      this.#emit(line);
     }
-    if (this.discarding || start >= chunk.length) return;
+    if (this.#discarding || start >= chunk.length) return;
     const rest = start === 0 ? chunk : chunk.slice(start);
-    this.pieces.push(rest);
-    this.pending += rest.length;
-    if (this.pending > this.maxLine) {
-      const head = this.options.keepHead === true ? this.pieces.join('') : null;
-      this.reset();
-      this.discarding = true;
-      this.options.onOverflow?.();
-      if (head !== null) this.emit(head);
+    this.#pieces.push(rest);
+    this.#pending += rest.length;
+    if (this.#pending > this.maxLine) {
+      const head = this.#options.keepHead === true ? this.#pieces.join('') : null;
+      this.#reset();
+      this.#discarding = true;
+      this.#options.onOverflow?.();
+      if (head !== null) this.#emit(head);
     }
   }
 
   /** The end of the stream: a last line with no newline after it still counts. */
   end(): void {
-    if (this.pieces.length === 0) return;
-    const line = this.pieces.join('');
-    this.reset();
-    this.emit(line);
+    if (this.#pieces.length === 0) return;
+    const line = this.#pieces.join('');
+    this.#reset();
+    this.#emit(line);
   }
 
-  private reset(): void {
-    this.pieces = [];
-    this.pending = 0;
+  #reset(): void {
+    this.#pieces = [];
+    this.#pending = 0;
   }
 
-  private emit(raw: string): void {
+  #emit(raw: string): void {
     const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
     if (line.trim().length === 0) return;
-    this.onLine(line);
+    this.#onLine(line);
   }
 }
 

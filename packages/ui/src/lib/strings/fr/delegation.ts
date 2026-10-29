@@ -46,6 +46,8 @@ export const fr: Translation = {
     resumeAgentHint: 'Demander à ce sous-agent de vérifier comment son travail en arrière-plan s’est terminé et de finir sa tâche',
     resumeAgentText: 'Ton travail en arrière-plan ({what}) s’est arrêté sans te réveiller : {reason}. Vérifie comment il s’est terminé, puis finis ta tâche.',
     activeSection: 'En cours',
-    finishedSection: 'Terminés'
+    finishedSection: 'Terminés',
+    runsOn: 'Tourne sur {machine}',
+    machineAway: "{machine} n'est pas connectée ici. Connectez-la dans Réglages, Machines et mises à jour pour ouvrir ce sous-agent."
   }
 };

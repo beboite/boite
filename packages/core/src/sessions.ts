@@ -88,28 +88,31 @@ export function hashToken(token: string): string {
 }
 
 export class SessionStore {
-  private readonly grants = new Map<string, Grant>();
+  readonly #grants = new Map<string, Grant>();
   /** Keyed by grant. */
-  private readonly deliveries = new Map<string, Delivery>();
+  readonly #deliveries = new Map<string, Delivery>();
   /** Grants a device key redeemed, by grant: the same device asking again, after a lost answer, is answered the same. */
-  private readonly redeemed = new Map<string, { deviceId: string; role: PairingRole; expiresAt: number }>();
+  readonly #redeemed = new Map<string, { deviceId: string; role: PairingRole; expiresAt: number }>();
 
-  constructor(private readonly core: Core) {}
+  readonly #core: Core;
+
+  constructor(core: Core) {
+    this.#core = core;}
 
   /** A fresh grant, good for one exchange within `GRANT_TTL_MS`. */
   grant(now = Date.now(), role: PairingRole = 'device'): PairingGrant {
     if (!PAIRING_ROLES.includes(role)) {
       throw refused(`pairing.grant role must be ${PAIRING_ROLES.join(' or ')}, got ${String(role)}`, { role });
     }
-    this.sweep(now);
+    this.#sweep(now);
     const grant = newToken();
     const expiresAt = now + GRANT_TTL_MS;
-    this.grants.set(grant, { expiresAt, role });
+    this.#grants.set(grant, { expiresAt, role });
     return { url: this.pairingUrl(grant), grant, role, expiresAt };
   }
 
   pairingUrl(grant: string): string {
-    return `${this.core.settings.get().publicUrl ?? this.core.reachableUrl()}/?${GRANT_QUERY_PARAM}=${grant}`;
+    return `${this.#core.settings.get().publicUrl ?? this.#core.reachableUrl()}/?${GRANT_QUERY_PARAM}=${grant}`;
   }
 
   /**
@@ -122,18 +125,18 @@ export class SessionStore {
     // Before anything is spent: a bad nonce leaves the grant as it was.
     const problem = nonce === null ? null : nonceProblem(nonce);
     if (problem !== null) throw invalidParams(problem, { field: 'nonce', min: NONCE_MIN, max: NONCE_MAX });
-    this.sweep(now);
-    const known = this.grants.get(grant);
+    this.#sweep(now);
+    const known = this.#grants.get(grant);
     if (known === undefined) {
-      const delivery = this.deliveries.get(grant);
+      const delivery = this.#deliveries.get(grant);
       if (delivery !== undefined && nonce !== null && timingSafeEqual(delivery.nonceHash, nonceHash(nonce))) {
         return { id: delivery.id, token: delivery.token, role: delivery.role };
       }
       throw unauthorized('the pairing link was already used, expired, or never issued');
     }
-    this.grants.delete(grant);
+    this.#grants.delete(grant);
     const session = this.issue(known.role, client, now);
-    if (nonce !== null) this.deliveries.set(grant, { nonceHash: nonceHash(nonce), ...session, expiresAt: known.expiresAt });
+    if (nonce !== null) this.#deliveries.set(grant, { nonceHash: nonceHash(nonce), ...session, expiresAt: known.expiresAt });
     return session;
   }
 
@@ -146,15 +149,15 @@ export class SessionStore {
   redeem(grant: string, deviceId: string, nonce: string | null = null, now = Date.now()): PairingRole {
     const problem = nonce === null ? null : nonceProblem(nonce);
     if (problem !== null) throw invalidParams(problem, { field: 'nonce', min: NONCE_MIN, max: NONCE_MAX });
-    this.sweep(now);
-    const known = this.grants.get(grant);
+    this.#sweep(now);
+    const known = this.#grants.get(grant);
     if (known === undefined) {
-      const done = this.redeemed.get(grant);
+      const done = this.#redeemed.get(grant);
       if (done !== undefined && done.deviceId === deviceId) return done.role;
       throw unauthorized('the pairing link was already used, expired, or never issued');
     }
-    this.grants.delete(grant);
-    this.redeemed.set(grant, { deviceId, role: known.role, expiresAt: known.expiresAt });
+    this.#grants.delete(grant);
+    this.#redeemed.set(grant, { deviceId, role: known.role, expiresAt: known.expiresAt });
     return known.role;
   }
 
@@ -165,8 +168,8 @@ export class SessionStore {
   issue(role: PairingRole, client: ClientIdentity, now = Date.now()): { id: string; token: string; role: PairingRole } {
     const token = newToken();
     const id = newId('ses_');
-    this.core.journal.append({ type: 'session.created', threadId: null, version: 1, payload: { id, client, role } }, () => {
-      this.core.journal.putSession({
+    this.#core.journal.append({ type: 'session.created', threadId: null, version: 1, payload: { id, client, role } }, () => {
+      this.#core.journal.putSession({
         id,
         token_hash: hashToken(token),
         client_name: client.name,
@@ -176,64 +179,64 @@ export class SessionStore {
         last_seen_at: now,
       });
     });
-    this.core.bus.emit('sessions.updated', { sessionId: id, state: 'created' });
+    this.#core.bus.emit('sessions.updated', { sessionId: id, state: 'created' });
     return { id, token, role };
   }
 
   /** The session a token opens, or null. Touches `lastSeenAt` on a hit. */
   authenticate(token: string, now = Date.now()): { id: string; role: PairingRole } | null {
-    const row = this.core.journal.getSessionByHash(hashToken(token));
+    const row = this.#core.journal.getSessionByHash(hashToken(token));
     if (row === null) return null;
     // The phone holds its key: the grant is spent for good.
-    this.forgetDelivery(row.id);
-    this.core.journal.touchSession(row.id, now);
+    this.#forgetDelivery(row.id);
+    this.#core.journal.touchSession(row.id, now);
     return { id: row.id, role: row.role };
   }
 
   list(current: string | null): PairedSession[] {
-    return this.core.journal.listSessions().map((row) => ({
+    return this.#core.journal.listSessions().map((row) => ({
       id: row.id,
       client: { name: row.client_name, version: row.client_version },
       role: row.role,
       createdAt: row.created_at,
       lastSeenAt: row.last_seen_at,
       current: row.id === current,
-      ...(this.core.group.issuedFor(row.id) !== undefined ? { group: true } : {}),
+      ...(this.#core.group.issuedFor(row.id) !== undefined ? { group: true } : {}),
     }));
   }
 
   revoke(sessionId: string): void {
-    if (this.core.journal.getSession(sessionId) === null) {
+    if (this.#core.journal.getSession(sessionId) === null) {
       throw refused(`unknown session ${sessionId}`, { sessionId });
     }
     // First: a device of the group is revoked on every member, and that is written before its session goes.
-    this.core.group.sessionRevoking(sessionId);
-    this.core.journal.append({ type: 'session.revoked', threadId: null, version: 1, payload: { id: sessionId } }, () => {
-      this.core.journal.deleteSession(sessionId);
+    this.#core.group.sessionRevoking(sessionId);
+    this.#core.journal.append({ type: 'session.revoked', threadId: null, version: 1, payload: { id: sessionId } }, () => {
+      this.#core.journal.deleteSession(sessionId);
     });
-    this.core.fileTickets.forgetAll();
-    this.forgetDelivery(sessionId);
+    this.#core.fileTickets.forgetAll();
+    this.#forgetDelivery(sessionId);
     // The sockets first, so the event never reaches the client it is about.
-    this.core.subscribers.closeSession(sessionId);
-    this.core.bus.emit('sessions.updated', { sessionId, state: 'revoked' });
-    this.core.group.sessionRevoked(sessionId);
+    this.#core.subscribers.closeSession(sessionId);
+    this.#core.bus.emit('sessions.updated', { sessionId, state: 'revoked' });
+    this.#core.group.sessionRevoked(sessionId);
   }
 
-  private sweep(now: number): void {
-    for (const [grant, entry] of this.grants) {
-      if (entry.expiresAt <= now) this.grants.delete(grant);
+  #sweep(now: number): void {
+    for (const [grant, entry] of this.#grants) {
+      if (entry.expiresAt <= now) this.#grants.delete(grant);
     }
-    for (const [grant, entry] of this.deliveries) {
-      if (entry.expiresAt <= now) this.deliveries.delete(grant);
+    for (const [grant, entry] of this.#deliveries) {
+      if (entry.expiresAt <= now) this.#deliveries.delete(grant);
     }
-    for (const [grant, entry] of this.redeemed) {
-      if (entry.expiresAt <= now) this.redeemed.delete(grant);
+    for (const [grant, entry] of this.#redeemed) {
+      if (entry.expiresAt <= now) this.#redeemed.delete(grant);
     }
   }
 
-  private forgetDelivery(sessionId: string): void {
-    for (const [grant, entry] of this.deliveries) {
-      if (entry.id === sessionId) this.deliveries.delete(grant);
+  #forgetDelivery(sessionId: string): void {
+    for (const [grant, entry] of this.#deliveries) {
+      if (entry.id === sessionId) this.#deliveries.delete(grant);
     }
   }
 }

@@ -15,13 +15,28 @@
  * A bot also names a thread of a project another machine of the group
  * entrusted to it as `<machine>/<thread-id>`; that machine checks it again.
  */
-import type { AgentWatch, PermissionRequest, Project, ProjectThreadDetail, ProjectThreadRow, QuestionRequest, RpcParams, ThreadSummary } from '@boite/contracts';
+import type { AgentSpawn, AgentWatch, PermissionRequest, Project, ProjectThreadDetail, ProjectThreadRow, QuestionRequest, RpcParams, ThreadSummary } from '@boite/contracts';
 import type { CoreClient } from './client.ts';
 import { contactLine, NO_CONTACT } from './agents-cli.ts';
 import { requiredText, Usage, type Parsed } from './cli-args.ts';
 
 type Printer = (lines: string[], value: unknown) => void;
 export type Caller = 'owner' | 'agent';
+
+/** The thread an agent started, with the address that reaches it on its machine. */
+export function spawnedLines(spawned: AgentSpawn, machine: string | undefined, persistent: boolean): string[] {
+  const ref = machine === undefined ? spawned.thread.id : `${machine}/${spawned.thread.id}`;
+  return [
+    `thread: ${spawned.thread.id}`, `title: ${spawned.thread.title}`, `project: ${spawned.project}`,
+    ...(machine === undefined ? [] : [`machine: ${machine}`]), `cwd: ${spawned.thread.cwd}`,
+    ...(spawned.thread.branch ? [`branch: ${spawned.thread.branch}`] : []),
+    `agent: ${spawned.thread.providerId} ${spawned.thread.model ?? 'default'}`,
+    `address: ${spawned.address.coreId}/${spawned.address.threadId}`,
+    persistent
+      ? `It is on your desk; each turn it ends wakes you with an event, so do not poll. boite thread send ${ref} <text> steers it.`
+      : 'Its first answer comes back to you as a message; do not poll. boite threads send <address> <text> steers it.',
+  ];
+}
 
 /** Commands this file answers, with the words that follow them. */
 export const CONTROL_COMMANDS = ['threads', 'thread', 'questions', 'answer', 'permissions', 'allow', 'deny'] as const;
@@ -476,7 +491,8 @@ export async function ownerThreadNew(client: CoreClient, parsed: Parsed, rest: s
   const model = parsed.model ?? base.model ?? undefined;
   const created = await client.call('threads.create', {
     projectId: project.id, providerId: base.providerId, accountId: base.accountId, title: parsed.title ?? prompt.trim().split('\n')[0]!.slice(0, 80),
-    ...(model === undefined ? {} : { model }), effort: parsed.model === undefined ? base.effort : null, permissionMode: base.permissionMode,
+    ...(model === undefined ? {} : { model }), effort: parsed.effort ?? (parsed.model === undefined ? base.effort : null), permissionMode: base.permissionMode,
+    ...(parsed.speed === undefined ? {} : { speed: parsed.speed }),
     ...(parsed.worktree ? { worktree: {} } : {}), ...(context === undefined ? {} : { context: context as RpcParams<'threads.create'>['context'] }),
   });
   const turn = await client.call('turns.start', { threadId: created.id, prompt, clientRequestId: parsed.requestId ?? crypto.randomUUID() });

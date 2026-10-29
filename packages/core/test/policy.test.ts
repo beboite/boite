@@ -227,6 +227,11 @@ test('analytics: off sends nothing to the relay, consent and deletions included;
   const launch = spyOn(telemetry as unknown as { launch: () => void }, 'launch');
   telemetry.policyChanged();
   expect(launch).not.toHaveBeenCalled();
+  // A moved ceiling does reach the hook: the negative assertion above must observe the real launch path.
+  file.write({ analytics: 'basic' });
+  host.policy.reload();
+  telemetry.policyChanged();
+  expect(launch).toHaveBeenCalledTimes(1);
 
   const { client } = await core({ analytics: 'basic' });
   await refusedBy(client.call('telemetry.configure', { mode: 'enhanced' }), 'analytics');
