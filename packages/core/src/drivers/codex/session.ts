@@ -40,6 +40,7 @@ import {
   STDERR_MAX,
 } from './protocol.ts';
 import { CodexRpc } from './rpc.ts';
+import { CodexSkillCommands } from './skills.ts';
 import { resumeThread, ThreadLostError } from './resume.ts';
 import { threadConfig } from './config.ts';
 import { updateTurnSettings } from './live-settings.ts';
@@ -99,6 +100,8 @@ export class CodexSession {
   private running = 0;
   /** `agentMessage` items that are asynchronous questions: drawn as cards, their text deltas dropped. */
   private readonly asyncItems = new Set<string>();
+  /** Codex's skills as the thread's commands: a leading `/name` sends one as a skill item. */
+  private readonly skills = new CodexSkillCommands(() => this.rpc);
   private closing = false;
   private ended = false;
   /** This app-server has no `turn/settings/update`: an older codex, or the feature refused. */
@@ -204,7 +207,7 @@ export class CodexSession {
 
   async steer(turn: CodexTurn, text: string, attachments: TurnContext['attachments'] = []): Promise<boolean> {
     if (this.current !== turn || turn.settled || turn.isStopped || !this.rpc || !this.threadId || !turn.turnId) return false;
-    await this.rpc.request('turn/steer', { threadId: this.threadId, expectedTurnId: turn.turnId, input: [{ type: 'text', text, text_elements: [] }, ...imageInputsOf(attachments)] });
+    await this.rpc.request('turn/steer', { threadId: this.threadId, expectedTurnId: turn.turnId, input: [...this.skills.steer(text), ...imageInputsOf(attachments)] });
     return true;
   }
 
@@ -273,9 +276,10 @@ export class CodexSession {
       if (ctx.turn.execution?.operation === 'compact') {
         await rpc.request('thread/compact/start', { threadId });
       } else {
+        const input = await this.skills.turn(ctx.prompt);
         const started = await rpc.request<{ turn: CodexTurnRecord }>('turn/start', {
           threadId,
-          input: [{ type: 'text', text: ctx.prompt, text_elements: [] }, ...imageInputsOf(ctx.attachments)],
+          input: [...input, ...imageInputsOf(ctx.attachments)],
           ...(model === null ? {} : { model }),
           ...(ctx.thread.effort === null ? {} : { effort: ctx.thread.effort }),
           serviceTier: ctx.thread.speed ?? "default",
@@ -337,6 +341,7 @@ export class CodexSession {
     const rpc = await this.initialize(ctx, executable, profile?.launch?.args ?? []);
     rpc.notify('initialized', {});
     void this.reportSkippedHooks(rpc, ctx);
+    this.skills.opened(rpc, ctx);
     const policy = MODE_POLICY[ctx.thread.permissionMode];
     const model = modelOf(ctx);
     // A context mode without MCP turns the user's servers off by name.
@@ -570,6 +575,7 @@ export class CodexSession {
       return;
     }
     if (method === 'hook/completed') return this.onHook(params['run'] as CodexHookRun | undefined);
+    if (method === 'skills/changed') return this.skills.changed(this.opener);
     if (method === 'account/rateLimits/updated') {
       if (this.spentWindows.note(params['rateLimits']) && this.current !== null) this.current.spentWindowResetsAt = this.spentWindows.latest();
       this.rateLimits.updated(params);

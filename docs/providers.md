@@ -407,9 +407,15 @@ right after `session/new` or `session/load`, before any turn; the driver keeps
 the thread's latest `TurnContext` outside the running turn for exactly that
 window, since the update carries no turn of its own to report through. pi asks
 once per process, right after it comes up, with the `get_commands` RPC
-command. Codex has no such listing in the app-server protocol the driver
-speaks, so `codex.ts` reports none, and `muse.ts` reads none from Muse's
-session protocol either.
+command. Codex has no command listing, so its skills stand in for one: the
+driver asks `skills/list` for the thread's folder once per process and again
+on `skills/changed`, and lists the enabled skills whose name is one command
+token, the first of a name winning. A prompt that opens on `/name` of a listed
+skill waits up to 5 s for that first list, then goes to `turn/start` (or
+`turn/steer`) the way Codex's own composer sends a skill: the text with
+`$name` in place of `/name`, plus a `{ type: 'skill', name, path }` item. A
+Codex without `skills/list` is one log line and an empty menu. `muse.ts`
+reads no commands from Muse's session protocol.
 
 ## Inside an OS profile
 
