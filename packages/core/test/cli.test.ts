@@ -140,9 +140,14 @@ test('threads reach each other by a short address, find by chat, read and wait f
   // with a turn instead. The CLI reaches its wait late here, as it did on a loaded macOS runner.
   const coordination = harness.core.coordination;
   const wait = coordination.wait.bind(coordination);
-  const late = spyOn(coordination, 'wait').mockImplementation(async (...args) => { await Bun.sleep(500); return wait(...args); });
-  const waiting = () => (coordination as unknown as { waiters: Map<string, unknown> }).waiters.has(threadId);
-  const answering = waitFor(waiting, 10_000).then(() => coordination.send({ threadId: other, to: self, text: 'Restart it, I am done.', requestId: 'answer' }));
+  let waiting = false;
+  const late = spyOn(coordination, 'wait').mockImplementation(async (...args) => {
+    await Bun.sleep(500);
+    const result = wait(...args);
+    waiting = true;
+    return result;
+  });
+  const answering = waitFor(() => waiting, 10_000).then(() => coordination.send({ threadId: other, to: self, text: 'Restart it, I am done.', requestId: 'answer' }));
   const sent = await boite(['threads', 'send', other, 'May I restart staging?', '--wait', '--timeout', '10']);
   await answering;
   late.mockRestore();
