@@ -34,6 +34,43 @@ test('an agent named on the way in opens alone: the default agent of the visit g
   }
 });
 
+for (const previousBot of [false, true]) test(`a background reload preserves a pending bot selection (previous bot: ${previousBot})`, async ({ ready }) => {
+  setExperiment('resident-agents', true);
+  let page: ReturnType<typeof mount> | null = null;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  try {
+    const { store, client } = await ready({ delayMs: 0, agentsDemo: true });
+    const view = AgentsView.of(store);
+    await view.refresh();
+    const rows = agentRows(view.snapshot);
+    if (previousBot) await openAgent(store, rows[0]!.profile.id);
+    else await store.open('t-trace');
+    const named = rows.at(-1)!.profile;
+    const call = client.call.bind(client);
+    let opening = false;
+    vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+      if (method === 'agents.open') { opening = true; await gate; }
+      return call(method, params);
+    });
+    store.showAgents(named.id);
+    page = mount(AgentsPage, { target: document.body, props: { store } });
+    flushSync();
+    await vi.waitFor(() => expect(opening).toBe(true));
+    await store.reload();
+    release();
+    await vi.waitFor(() => expect(agentOfThread(view.snapshot, store.openThread?.id)?.id).toBe(named.id));
+    flushSync();
+    expect(document.querySelector('[data-testid="agent-header"]')?.textContent).toContain(named.name);
+    expect(document.querySelector('.agents-main [data-testid="composer-input"]')).not.toBeNull();
+    expect(document.querySelector('.agents-main .agent-empty')).toBeNull();
+  } finally {
+    release();
+    if (page) await unmount(page);
+    setExperiment('resident-agents', false);
+  }
+});
+
 test('an open settings sheet stays open while the snapshot and the thread row change under it', async ({ ready }) => {
   setExperiment('resident-agents', true);
   let page: ReturnType<typeof mount> | null = null;

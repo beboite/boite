@@ -133,7 +133,7 @@ export class Store {
     return this.#ctx.client;
   }
   get clientGeneration(): number { return this.#ctx.clientGeneration; }
-  get navigationGeneration(): number { return this.#ctx.threads.openGeneration; }
+  get navigationGeneration(): number { return this.#ctx.threads.navigationGeneration; }
   get shared() { return this.#ctx.shared; }
   get serverUpdater() { return this.#ctx.serverUpdater; }
 
