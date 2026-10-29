@@ -27,6 +27,12 @@ export interface Client {
   readonly state: ClientState;
   /** Who the core took this client for on the last hello; null before one. */
   readonly principal: Principal | null;
+  /**
+   * How far the core's clock runs ahead of this device's, in milliseconds,
+   * measured on the last hello; zero or absent when unknown. An elapsed time
+   * counted from a core timestamp adds it to `Date.now()`.
+   */
+  readonly clockOffset?: number;
   close(): void;
 }
 
@@ -43,6 +49,8 @@ export interface Session {
 export interface ObservableClient extends Client {
   readonly core: CoreInfo | null;
   onState(handler: (state: ClientState) => void): () => void;
+  /** A later measure of `clockOffset` that moved by a second or more, on the same connection. */
+  onClockOffset?(handler: (offset: number) => void): () => void;
 }
 
 /** The slice of the browser WebSocket this client uses. A test supplies its own. */

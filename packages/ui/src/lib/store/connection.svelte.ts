@@ -59,6 +59,8 @@ function askToFollowLink(url: string): Promise<boolean> {
 export class Connection {
   connection = $state<ClientState>('idle');
   core = $state<CoreInfo | null>(null);
+  /** How far the core's clock runs ahead of this device's (`Client.clockOffset`). */
+  clockOffset = $state(0);
   /** Owner on the core token, session on a paired one; what decides who may pair a phone. */
   principal = $state<Principal | null>(null);
   /** The address of the core this UI talks to; null on the fake client. */
@@ -364,6 +366,7 @@ export class Connection {
     this.ctx.workbench.tracedThreadId = null;
     this.principal = null;
     this.core = null;
+    this.clockOffset = 0;
     this.attachEndpoint(endpoint);
     await s.connect();
     await s.openWhereLeft();
@@ -438,6 +441,7 @@ export class Connection {
       const core = await client.connect();
       if (!this.ctx.currentClient(client, generation)) return;
       this.core = core;
+      this.clockOffset = client.clockOffset ?? 0;
       // Before the landing: a draft it opens unfolds its project over the restored folds.
       this.ctx.projects.restoreFolds();
       if (this.localCore) noteThisComputer(core.hostname);
@@ -446,7 +450,7 @@ export class Connection {
       this.pairingRequired = false;
       void this.#handOverKey(client, core);
       void s.reload();
-      await Promise.all([this.ctx.drafts.start(), this.reloading?.essential]);
+      await Promise.all([this.ctx.drafts.start().then(() => this.ctx.currentClient(client, generation) ? this.ctx.sync.resync() : undefined), this.reloading?.essential]);
     } catch (error) {
       if (!this.ctx.currentClient(client, generation)) return;
       this.connection = client.state;
@@ -630,7 +634,7 @@ export class Connection {
         if (read) read.unread = false;
         const listed = new Set(s.threads.map(t => s.threadKey(t.id)));
         const stale = unlistedPanels(s.machineId, listed, s.openThread ? s.threadKey(s.openThread.id) : null);
-        rightPanel.prune(key => stale(key) && !rightPanel.drafts.get(key)?.size);
+        rightPanel.prune(key => stale(key) && !rightPanel.documents.drafted(key));
         work.settle(s.threads.length > 0 || onboardingSeen());
       }, () => threadRead.cancel()),
       slice(client.call('providers.list', {}), value => {
@@ -661,7 +665,7 @@ export class Connection {
     try {
       await Promise.all([essential, ...secondary]);
       if (!current()) return;
-      void s.loadHarnessUpdates();
+      void s.loadHarnessUpdates().then(() => { if (current()) return s.freshenHarnessUpdates(); });
       // Beside the lists, not among them: the machines of the group are connected once it answers.
       void s.loadGroup();
       void s.refreshMemory();

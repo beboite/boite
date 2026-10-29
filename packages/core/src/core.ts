@@ -75,6 +75,7 @@ import type { SecretVault } from './platform/types.ts';
 import { SecretStore } from './secrets/store.ts';
 import { ServerUpdates, type ServerUpdateOptions } from './server-update.ts';
 import { DesktopUpdates } from './desktop-update.ts';
+import { Composer } from './composer.ts';
 
 export { CORE_VERSION } from './version.ts';
 
@@ -171,6 +172,7 @@ export class Core {
   readonly scheduler: Scheduler;
   readonly threads: ThreadStore;
   readonly drafts: DraftPreparations;
+  readonly composer: Composer;
   readonly attachmentUploads: AttachmentUploads;
   readonly quotas: QuotaStore;
   readonly plugins: PluginStore;
@@ -379,6 +381,9 @@ export class Core {
     this.plugins = new PluginStore(this);
     this.sessions = new SessionStore(this);
     this.worktrees = new Worktrees(this);
+    // No thread row lands and no process starts in a checkout a removal holds, whichever path asks (`checkouts.ts`).
+    this.journal.admitThread = (thread) => this.worktrees.reservations.admit(thread);
+    this.procs.admitCwd = (cwd) => this.worktrees.reservations.assertFree(cwd, 'a process');
     this.keybindings = new KeybindingStore(this);
     this.imports = new ImportStore(this);
     // The journal erased the incognito conversations the last core left behind; their transcripts follow.
@@ -416,6 +421,7 @@ export class Core {
     this.linkedPullRequests = new LinkedPullRequests(this, (threadId, url, refresh) => this.pullRequests.detail(threadId, url, refresh));
     this.pullRequestWatches = new PullRequestWatches(this, (threadId, args) => this.pullRequests.gh(threadId, args), options.pullRequestWatches);
     registerModules(this);
+    this.composer = new Composer(this);
     phase('startup.stores-ready', 'Stores and RPC handlers ready', { methods: this.router.methods().length });
     this.#onShutdown = options.onShutdown;
     this.router.register('core.shutdown', () => {
@@ -436,8 +442,8 @@ export class Core {
     // left running or queued is closed here, or nothing ever would.
     const interrupted = this.threads.agentState.backgroundHistory.interruptLive();
     const recovered = this.threads.recoverStuckTurns();
-    // After recovery: a thread a usage limit stopped resumes at its window's reset, across restarts.
-    this.threads.limitResumes.start();
+    // After recovery: a resume planned before the previous core stopped, a usage limit's among them, goes on.
+    this.threads.resumes.start();
     // Watched limits are read on their own, so an alert reaches a phone with no window open.
     this.quotas.alerts.start();
     // What a dead core cut, and any resume planned before it died, goes on (`threads/auto-continue.ts`).
@@ -451,6 +457,7 @@ export class Core {
     });
     queueMicrotask(() => this.threads.titles.recover());
     this.agentRuntime = new AgentRuntime(this);
+    queueMicrotask(() => this.composer.start());
     this.brain.start();
     this.mergedPrArchive = new MergedPrArchive(this, this.pullRequests);
     this.mergedPrArchive.start();
@@ -502,13 +509,14 @@ export class Core {
       version: this.version,
       ...(this.bundleHash ? { bundleHash: this.bundleHash } : {}),
       protocolVersion: PROTOCOL_VERSION,
-      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true, messagePositions: true, deferredToolParts: true, deviceKeys: true, draftPreparation: true, attachmentUploads: true, revealMachines: true, loadEvents: true, desktopUpdates: true, gatewayMove: true, projectBoard: true, settingsHome: true },
+      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true, messagePositions: true, deferredToolParts: true, deviceKeys: true, draftPreparation: true, attachmentUploads: true, composerPersistence: true, revealMachines: true, loadEvents: true, desktopUpdates: true, gatewayMove: true, projectBoard: true, settingsHome: true },
       coreId: this.coordination.card().coreId,
       hostname: machineName(),
       os: currentOs(),
       channel: this.channel,
       pid: process.pid,
       startedAt: this.startedAt,
+      now: Date.now(),
       endpoint: { ...this.endpoint },
       dataDir: this.dataDir,
       trace: this.procs.capability(),
@@ -546,7 +554,7 @@ export class Core {
     this.threads.autoCompact.close();
     this.threads.backgroundCompact.close();
     this.threads.cacheKeepalive.close();
-    this.threads.limitResumes.close();
+    this.threads.resumes.close();
     this.threads.autoContinue.close();
     this.quotas.alerts.close();
     this.#drainPromise = this.agentRuntime.close().then(() => this.scheduler.drain(timeoutMs));
@@ -565,6 +573,7 @@ export class Core {
   get stopping(): boolean { return this.#stopping; }
 
   async close(): Promise<void> {
+    this.composer.stop();
     const closingAt = performance.now();
     await this.browser.close();
     this.devices.stop();
@@ -579,7 +588,7 @@ export class Core {
     this.threads.autoCompact.close();
     this.threads.backgroundCompact.close();
     this.threads.cacheKeepalive.close();
-    this.threads.limitResumes.close();
+    this.threads.resumes.close();
     this.threads.autoContinue.close();
     await this.threads.codeCheckpoints.close();
     await this.agentRuntime.close();
@@ -612,6 +621,7 @@ export class Core {
       for (const threadId of this.threads.agentState.background.keys()) this.threads.agentState.cancelBackground(threadId);
     }
     shutdownDrivers();
+    await this.composer.close();
     this.secrets.stop();
     await this.accounts.closeLogins();
     await this.terminals.closeAll();

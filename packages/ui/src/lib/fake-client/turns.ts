@@ -2,7 +2,7 @@
 import { effectiveCompaction, previewPrompt, RpcErrorCode, threadActive, type AgentLetter, type Attachment, type Message, type MessagePart, type PreviewReference, type Thread, type ThreadId, type Turn, type TurnInFlightData, type Usage } from '@boite/contracts';
 import { decodedBytes } from '../attachments';
 import { RpcFailure } from '../client';
-import { DIFF_NEW, DIFF_OLD, DIFF_PATH, DOC_TEXT, DOC_TITLE, IMAGE_BASE64, ASYNC_QUESTION_OPTIONS, ASYNC_QUESTION_TEXT, SETTING_MARKERS, SPAWN_MARKER, AGENT_SETTING_MARKER, AGENT_SETTING_REASON } from './conversation';
+import { DIFF_NEW, DIFF_OLD, DIFF_PATH, DOC_TEXT, DOC_TITLE, IMAGE_BASE64, ASYNC_QUESTION_OPTIONS, ASYNC_QUESTION_TEXT, SETTING_MARKERS, SPAWN_MARKER, AGENT_SETTING_MARKER, AGENT_SETTING_REASON, AGENT_MODEL_MARKER, AGENT_MODEL_REASON } from './conversation';
 import { requestAgentSetting } from './agent-settings';
 import { FAKE_CONTEXT_FLOOR, FAKE_CONTEXT_PER_TURN, FAKE_CONTEXT_WINDOW } from './providers';
 import { addUsage, chunkText, ECHO_COMMANDS, emptyUsage, SHOUT, toSummary } from './shared';
@@ -284,6 +284,13 @@ const TURN_MARKERS: TurnMarker[] = [
       } catch { /* already entrusted, or already asked */ }
     }
   } },
+  { matches: prompt => prompt.includes(AGENT_MODEL_MARKER), run: (ctx, thread, turn) => {
+    const agent = ctx.agents.liveProfiles()[0];
+    if (!agent) return;
+    try {
+      requestAgentSetting(ctx, thread, turn, { threadId: thread.id, agent: agent.id, key: 'model', value: 'opencode/default', reason: AGENT_MODEL_REASON });
+    } catch { /* already on it, or already asked */ }
+  } },
   { matches: prompt => prompt.includes('[background]'), run: (ctx, thread, _turn, message) => backgroundShell(ctx, thread, message) },
   { matches: prompt => prompt.includes('[monitor]'), run: (ctx, thread, _turn, message) => backgroundShell(ctx, thread, message, 'monitor') },
   { matches: prompt => prompt.includes('[tool-stream]'), run: (ctx, thread, _turn, message) => streamToolInput(ctx, thread, message) },
@@ -358,7 +365,8 @@ function finishTurn(ctx: FakeContext, thread: Thread, turn: Turn, message: Messa
     outputTokens: Math.max(1, Math.ceil(modelPrompt.length / 4)),
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
-    costUsdEquivalent: Math.round(modelPrompt.length * 0.02) / 1000
+    costUsdEquivalent: Math.round(modelPrompt.length * 0.02) / 1000,
+    buckets: 1
   };
   turn.status = record.cancelled ? 'stopped' : 'done';
   turn.finishedAt = ctx.now();

@@ -36,6 +36,8 @@ export interface CoreInfo {
     draftPreparation?: boolean;
     /** Connection-owned attachment uploads resolved by turns.start. */
     attachmentUploads?: boolean;
+    /** Durable per-record composer CAS, shared assets and core-owned queue delivery. */
+    composerPersistence?: boolean;
     /** `ui.reveal` takes `coreId` on a thread or an agent target and opens it on that machine. An older core drops the field and opens this core's. */
     revealMachines?: boolean;
     /** A load sample reaches a client whose hello `accepts` `thread.load` as that event alone, not as a whole `thread.updated` row. */
@@ -60,6 +62,11 @@ export interface CoreInfo {
   channel: Channel;
   pid: number;
   startedAt: Timestamp;
+  /**
+   * The core's clock when it answered. A client compares it with its own to
+   * count elapsed times from the core's timestamps; an older core omits it.
+   */
+  now?: Timestamp;
   /** Bind address, possibly a wildcard. `pairing.grant` gives the link a phone opens. */
   endpoint: { host: string; port: number };
   dataDir: string;

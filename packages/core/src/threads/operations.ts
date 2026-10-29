@@ -10,3 +10,4 @@ export function systemOperation(operation: string | undefined): operation is key
   return operation === 'coordination' || operation === 'delegation' || operation === 'background' || operation === 'resume' || operation === 'pull-request'
     || operation === 'routine' || operation === 'event';
 }
+

@@ -103,8 +103,15 @@ trusts.
 `update` picks the newest GitHub release of its channel whose `latest.json`
 carries that target, checks the Minisign signature against the same public
 key and unpacks it beside the running release, which keeps serving meanwhile.
-It then stops the core, switches `current` and starts it again; a new core
-that never answers puts the previous release back. Until a stable release carries
+Before it stops the core it reads what `current`, `bin/bun` and the controller
+point at and writes the `boite` command. It then stops the core, moves the
+release into place, switches the three and starts it again. When a step fails
+or the new core never answers, every one goes back to its exact previous
+target, the replaced copy of a reinstalled version included, and the previous
+core starts again. A core counts as answering only when `/health` reports the
+PID the supervisor launched and the version of the release it runs: another
+Boite on the same port is not mistaken for it, in `start`, `status` or an
+update. Until a stable release carries
 the target, the stable channel answers that none does and names the nightly
 one.
 

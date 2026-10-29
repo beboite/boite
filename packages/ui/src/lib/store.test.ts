@@ -1977,12 +1977,12 @@ describe('Store', () => {
       await store.open(next!.id);
       if (reason === 'pr-merged') {
         expect(rightPanel.threads[key]).toBeDefined();
-        expect(rightPanel.drafts.get(key)?.get(file.id)).toBe('unsaved edit');
+        expect(rightPanel.documents.get(key, file.path!)?.draft).toBe('unsaved edit');
         expect(store.composerStates[shown!.id]).toMatchObject({ text: 'unsent prompt', paused: true });
         expect(destroy).not.toHaveBeenCalled();
       } else {
         expect(rightPanel.threads[key]).toBeUndefined();
-        expect(rightPanel.drafts.has(key)).toBe(false);
+        expect(rightPanel.documents.drafted(key)).toBe(false);
         expect(store.composerStates[shown!.id]).toBeUndefined();
         expect(destroy.mock.calls.map(([id]) => id)).toEqual([view.id]);
       }

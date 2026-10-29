@@ -11,6 +11,8 @@ export type TurnExecution = Pick<ThreadSummary,
 > & {
   sessionGeneration: number;
   selectionVersion: number;
+  /** A server-owned queued prompt keeps its captured effort and speed while the next picker changes. */
+  frozenSelection?: true;
   /**
    * `background`: the agent resumed on its own after background work it
    * started finished; the turn carries no prompt of the user's.
@@ -110,9 +112,12 @@ export function requestStarts(turns: readonly Pick<Turn, 'id' | 'queuedAt' | 'st
   return starts;
 }
 
+/** The thread statuses that mean one of its turns is still under way. */
+export const ACTIVE_THREAD_STATUSES: readonly ThreadStatus[] = ['queued', 'running', 'waiting'];
+
 /** A thread status that means one of its turns is still under way. */
 export function threadActive(status: ThreadStatus): boolean {
-  return status === 'queued' || status === 'running' || status === 'waiting';
+  return ACTIVE_THREAD_STATUSES.includes(status);
 }
 
 /**

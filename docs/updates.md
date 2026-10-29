@@ -196,7 +196,11 @@ silently moved.
 ## Download and restart
 
 The first automatic check starts eight seconds after the desktop UI mounts,
-then repeats every six hours. The card's Check for updates button checks at
+then repeats every six hours. Showing or focusing the window checks again when
+the last check is more than 15 minutes old, so a release published since
+appears without waiting for the timer; the same rule asks each connected
+machine to check its Boite and its agents
+(`packages/ui/src/lib/update-freshness.ts`). The card's Check for updates button checks at
 once; it stays in the card during a check, disabled, and only makes way for
 the download progress and the install action. Checks and downloads run one at
 a time. A release found is announced at once and downloads only when asked:

@@ -1,7 +1,9 @@
 import { ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, PREVIEW_REFERENCES_PER_TURN, type Attachment, type Message, type MessageId, type PreviewReference } from '@boite/contracts';
 import { isActivityCommand } from './activity-command';
 import { attachedBytes } from './attachments';
+import { readExperiments } from './experiments';
 import { promptText } from './message-display';
+import { secureId } from './secure-id';
 import type { Store } from './store.svelte';
 
 /** One input's state in the store: its text, attachments and the prompts queued behind a running turn. */
@@ -35,7 +37,8 @@ export function returnPrompt(state: ComposerState, text: string, attachments: At
     state.previewReferences = previewReferences;
     return;
   }
-  state.queued.unshift({ text, attachments, ...(previewReferences.length ? { previewReferences } : {}) });
+  // Its own id and experiments from the start, as `queuePrompt` gives: a put already on its way cannot then merge it away.
+  state.queued.unshift({ id: secureId(), text, attachments, experiments: readExperiments(), ...(previewReferences.length ? { previewReferences } : {}) });
   state.paused = true;
 }
 

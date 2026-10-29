@@ -23,7 +23,7 @@ export class AgentEntrustments {
   constructor(private readonly core: Core, private readonly store: AgentStore) {
     core.activity.onGoal(event => this.ended(event));
     // Both sources stop with the core: activity closes first and the journal guard covers the bus.
-    core.bus.onAny((name, payload) => {
+    core.bus.onCommitted((name, payload) => {
       if (core.journal.isClosed()) return;
       try {
         if (name === 'thread.updated' && (payload as { archived?: boolean }).archived) this.drop((payload as { id: string }).id);
@@ -104,7 +104,7 @@ export class AgentEntrustments {
     const what = `Entrusted thread ${entry.threadId}, titled ${quoted(thread?.title ?? '')}: goal ${EVENTS[event.outcome]}.`;
     if (event.outcome === 'stopped') this.core.agentRuntime.line(entry.agentId, what);
     // The news of a met goal is the entrustment's last word: it reaches the bot though the grant ended with it.
-    else this.core.agentRuntime.fact(entry.agentId, { key: `goal:${entry.threadId}:${event.outcome}:${Date.now()}`, text: `${what}\nIts final answer: ${quoted(event.text.slice(0, ANSWER_LIMIT))}`, threadIds: over ? [] : [entry.threadId] });
+    else this.core.agentRuntime.fact(entry.agentId, { key: `goal:${entry.threadId}:${event.outcome}:${Date.now()}`, text: `${what}\nIts final answer: ${quoted(event.text.slice(0, ANSWER_LIMIT))}`, threadIds: over ? [] : [entry.threadId], urgent: true });
     this.store.changed();
   }
 

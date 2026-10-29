@@ -3,6 +3,13 @@ import type { ProcessPlatform, ProcessSample } from './platform/types.ts';
 
 export const RESOURCE_WATCH_MS = 6000;
 
+/** A Bun child's own counters, null once Bun has none. Bun reports cpuTime in microseconds, as BigInt on Windows. */
+export function bunUsage(proc: { resourceUsage(): { cpuTime: { total: number | bigint }; maxRSS: number | bigint } | undefined }): { cpuMs: number; peakMemoryBytes: number } | null {
+  const usage = proc.resourceUsage();
+  if (!usage) return null;
+  return { cpuMs: Math.round(Number(usage.cpuTime.total) / 1000), peakMemoryBytes: Number(usage.maxRSS) };
+}
+
 /** Detailed OS counters are collected only while at least one visible client asks. */
 export class ResourceWatches {
   private readonly leases = new Map<string, number>();

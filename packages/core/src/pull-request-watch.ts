@@ -91,7 +91,7 @@ export class PullRequestWatches {
       // A restart reads each watch again soon, a few seconds apart.
       for (const record of records) this.#runtime.set(runtimeKey(threadId, record.url), { nextReadAt: Date.now() + 2_000 * ++stagger, failures: 0, paused: null, reading: false, detail: null, rules: null });
     }
-    this.#unsubscribe = core.bus.onAny((name, payload) => {
+    this.#unsubscribe = core.bus.onCommitted((name, payload) => {
       if (this.#closed) return;
       if (name === 'thread.removed') this.#endWith((payload as { threadId: ThreadId }).threadId);
       else if (name === 'thread.updated') {
@@ -251,7 +251,7 @@ export class PullRequestWatches {
       const remarks = remarksDue ? await this.#shared(memo, `remarks ${record.url}`, () => this.#remarks(threadId, record)) : null;
       // A stop or an unwatch that landed during the reads wins.
       if (this.#find(threadId, record.url) !== record) return 'OPEN';
-      await this.core.linkedPullRequests.observe(threadId, record.url, 'OPEN');
+      await this.core.linkedPullRequests.observe(threadId, record.url, 'OPEN', { head: read.branch ?? '', headRepository: read.headRepository ?? '' });
       if (this.#find(threadId, record.url) !== record) return 'OPEN';
       const { changes, next } = evaluate(record.memory, detail, remarks);
       runtime.detail = read;
@@ -366,10 +366,10 @@ export class PullRequestWatches {
     if (!due.length || this.core.stopping) return;
     const thread = this.core.journal.getThread(threadId);
     if (!thread || thread.archived) return;
-    if (['queued', 'running', 'waiting'].includes(thread.status) || this.core.threads.runner.handles.has(threadId)) return;
+    if (this.core.threads.isBusy(threadId)) return;
     const { text, label } = wakeMessage(due.map(record => ({ number: record.number, url: record.url, changes: record.pending })));
     try {
-      this.core.threads.startTurn(threadId, text, [], undefined, 'pull-request', undefined, undefined, label);
+      this.core.threads.startTurn(threadId, { prompt: text, display: label }, { kind: 'pull-request' });
     } catch (error) {
       // Tried again after another interval, never in a tight loop.
       for (const record of due) record.pendingSince = now + this.#timing.intervalMs - this.#timing.coalesceMs;

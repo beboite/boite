@@ -22,7 +22,7 @@ export class SharedNativeExecution {
     private readonly check: (binding: AccessBinding) => void) {
     core.sharedProjects.registerPolicyListener(() => this.reconcile());
     core.sharedCompute.registerChanged(() => this.reconcile());
-    core.bus.onAny((name) => {
+    core.bus.onCommitted((name) => {
       if (name === 'sharedProjects.changed' || name === 'thread.updated') this.reconcile();
     });
   }

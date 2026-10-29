@@ -1,9 +1,10 @@
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomUUID, sign } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { defaultCoordinationConfig } from '@boite/contracts';
-import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentTranscript, ContactRequest, CoordinationBridgeResponse, CoordinationConfig, CoordinationPeer, CoordinationView, RpcParams } from '@boite/contracts';
-import { checkMatchExtras, checkRemoteContact, checkTranscript, searchContacts, searchWords, transcript } from './coordination-lookup.ts';
+import { threadActive, defaultCoordinationConfig } from '@boite/contracts';
+import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentTranscript, ContactRequest, CoordinationBridgeResponse, CoordinationConfig, CoordinationPeer, CoordinationView, RpcParams, ThreadStatus } from '@boite/contracts';
+import { checkRemoteContact } from './coordination-lookup.ts';
+import { CoordinationLookups } from './coordination-directory.ts';
 import { PeerDesk } from './coordination-peer.ts';
 import { CoordinationBridge } from './coordination-bridge.ts';
 import { dropGroupRead, groupPeers } from './coordination-group.ts';
@@ -14,7 +15,6 @@ import { checkTailnetName } from './contacts/invite.ts';
 import { outgoingContact, incomingContact } from './contacts/human-letters.ts';
 import {protectLetters} from './contacts/letter-scopes.ts';
 import type { Connection } from './router.ts';
-import { projectCoordination } from './contacts/project-coordination.ts';
 import { pack, SEALED } from './group/seal.ts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unavailable } from './errors.ts';
@@ -28,6 +28,8 @@ const HOUR = 3_600_000;
 export const LETTER_RETENTION_MS = 30 * 24 * HOUR;
 /** Marks a pause the core applied by itself, as opposed to the owner's in Communication settings. */
 const AUTO_PAUSE_PREFIX = 'coordination-autopause:';
+/** Letters one hook, steer or wake hands over. */
+const BATCH = 4;
 /** The sweep's idle probes, each one read on the status index: letters it still has work for. */
 export const SWEEP_PROBES = [
   "SELECT 1 FROM coordination_letters WHERE status IN ('queued', 'received') LIMIT 1",
@@ -42,6 +44,7 @@ type Row = { data: string; fingerprint: string | null };
 export class Coordination {
   readonly bridge = new CoordinationBridge();
   readonly mailboxes: ContactMailboxes;
+  private readonly lookups: CoordinationLookups;
   private key: ReturnType<typeof createPrivateKey> | null = null;
   private publicKey = '';
   private coreId = '';
@@ -50,11 +53,13 @@ export class Coordination {
   private readonly localWaits = new Set<() => void>();
   private readonly pending = new Set<Promise<unknown>>();
   private readonly delivering = new Set<string>();
+  /** The letters `admit` let through, while their sink records them. */
+  private admitting: Set<string> | null = null;
   /** Answers other cores' signed requests. */
   private readonly desk: PeerDesk;
   private readonly attempts = new Map<string, number>();
   /** Agents blocked in `collaboration.wait`, by thread. */
-  private readonly waiters = new Map<string, Set<{ from: AgentAddress | null; done: (letters: AgentLetter[]) => void }>>();
+  private readonly waiters = new Map<string, Set<{ from: AgentAddress | null; done: (letters: AgentLetter[]) => void; fail: (error: unknown) => void }>>();
   private ticking = false;
   private readonly timer: ReturnType<typeof setInterval>;
   private readonly off: () => void;
@@ -64,6 +69,10 @@ export class Coordination {
   /** `threadJsonChecked`: the core already validated visible thread JSON at this start. */
   constructor(private readonly core: Core, threadJsonChecked = false) {
     this.mailboxes = new ContactMailboxes(core);
+    this.lookups = new CoordinationLookups(core, {
+      selfId: () => this.self('').coreId, config: threadId => this.config(threadId), trusted: () => this.trusted(), localReach: threadId => this.localReach(threadId),
+      contact: (threadId, resident) => this.contact(threadId, resident), checkLookupAccess: (threadId, remote) => this.checkLookupAccess(threadId, remote), mailboxes: this.mailboxes,
+    });
     this.desk = new PeerDesk(core, {
       closed: () => this.closed, selfId: () => this.self('').coreId, trusted: () => this.trusted(), peers: () => this.peers(), signature: input => this.signature(input),
       directory: () => this.localDirectory(), contactDirectory: coreId => this.contactDirectory(coreId), receive: (letter, peer) => this.mailboxes.receive(letter, peer) ?? this.receive(letter, peer), received: id => this.find(id, 'in') ?? this.mailboxes.received(id),
@@ -78,11 +87,11 @@ export class Coordination {
     const interrupted = core.journal.db.query(`SELECT id, status, rowid FROM threads WHERE id NOT IN (SELECT thread_id FROM thread_deletions)
       AND (? IS NULL OR rowid <= ?) AND (status IN ('queued', 'running', 'waiting') OR rowid = ?
         OR id IN (SELECT thread_id FROM coordination_letters WHERE status IN ('queued', 'received', 'uncertain')))
-      ORDER BY rowid`).all(invalidConfig?.rowid ?? null, invalidConfig?.rowid ?? null, invalidConfig?.rowid ?? null) as { id: string; status: string; rowid: number }[];
+      ORDER BY rowid`).all(invalidConfig?.rowid ?? null, invalidConfig?.rowid ?? null, invalidConfig?.rowid ?? null) as { id: string; status: ThreadStatus; rowid: number }[];
     for (const thread of interrupted) {
       if (thread.rowid === invalidConfig?.rowid) core.journal.getSetting(invalidConfig.key);
       const pending = core.journal.db.query("SELECT 1 FROM coordination_letters WHERE thread_id = ? AND (status IN ('queued', 'received') OR (status = 'uncertain' AND json_extract(data, '$.error') = 'Queued for provider delivery')) LIMIT 1").get(thread.id);
-      if (pending || ['queued', 'running', 'waiting'].includes(thread.status)) this.pause(thread.id, 'restart');
+      if (pending || threadActive(thread.status)) this.pause(thread.id, 'restart');
     }
     // A thread that finishes a turn can take its waiting letters now, not at the next sweep.
     this.off = core.bus.onAny((name, payload) => {
@@ -225,6 +234,11 @@ export class Coordination {
     const reason = this.core.journal.getSetting(`${AUTO_PAUSE_PREFIX}${threadId}`);
     return Boolean(reason) && reason !== 'stop';
   }
+  /** The owner trusted the contact mail a held wake refused: a failure's pause ends, Stop's and the owner's stay, and the letters go again. */
+  resumeTrusted(threadId: string): void {
+    this.resumeForAgent(threadId);
+    this.kick(threadId);
+  }
   private resumeForAgent(threadId: string): void {
     if (this.wakesForAgent(threadId)) this.resumeForUser(threadId);
   }
@@ -296,102 +310,11 @@ export class Coordination {
       });
     }
   }
-  async directory(threadId: string): Promise<{ agents: AgentContact[]; unavailable: string[] }> {
-    const thread = this.core.threads.require(threadId);
-    const config = this.config(threadId);
-    if (thread.archived || config.mode === 'off') return { agents: [], unavailable: [] };
-    const agents = this.localReach(threadId).filter(a => a.threadId !== threadId);
-    const unavailable: string[] = [];
-    if (config.remote) {
-      const found = await Promise.all(this.trusted().map(async peer => {
-        try {
-          const remote = await projectCoordination(this.core, threadId, peer, 'directory', {}) as AgentContact[];
-          if (!this.trusted().some(p => p.coreId === peer.coreId)) throw new Error('peer revoked');
-          if (!Array.isArray(remote) || remote.length > 100) throw new Error('invalid remote directory');
-          return { peer, contacts: remote.map(a => checkRemoteContact(a, peer)) };
-        } catch { return { peer, contacts: null }; }
-      }));
-      for (const result of found) {
-        if (result.contacts === null || !this.trusted().some(peer => peer.coreId === result.peer.coreId)) unavailable.push(result.peer.name);
-        else agents.push(...result.contacts);
-      }
-      agents.push(...await this.mailboxes.directory(threadId));
-    }
-    // Permissions may change while a remote directory is in flight.
-    this.checkLookupAccess(threadId, config.remote);
-    const reachable = new Set(this.localReach(threadId).map(contact => contact.threadId));
-    const localCoreId = this.self('').coreId;
-    return { agents: agents.filter(contact => contact.coreId !== localCoreId || reachable.has(contact.threadId)), unavailable };
-  }
-  /** Every contact this thread may reach on each trusted machine, in parallel; a machine that fails is named, not fatal. */
-  private async remoteAll<T>(threadId: string, operation: 'search' | 'read', payload: unknown, check: (answer: unknown, peer: CoordinationPeer) => T, peers = this.trusted()): Promise<{ results: T[]; unavailable: string[] }> {
-    const config = this.config(threadId);
-    if (!config.remote || config.mode === 'off') return { results: [], unavailable: [] };
-    const found = await Promise.all(peers.map(async peer => {
-      try {
-        const answer = await projectCoordination(this.core, threadId, peer, operation, payload);
-        if (!this.trusted().some(p => p.coreId === peer.coreId)) throw new Error('peer revoked');
-        return { peer, result: check(answer, peer), failed: null };
-      } catch (error) { return { peer, result: null, failed: error instanceof PeerRefusal ? `${peer.name} (${error.message})` : peer.name }; }
-    }));
-    this.checkLookupAccess(threadId, true);
-    // A peer that answered early may have been revoked while another one was pending.
-    for (const entry of found) {
-      if (!this.trusted().some(peer => peer.coreId === entry.peer.coreId)) {
-        entry.result = null;
-        entry.failed = entry.peer.name;
-      }
-    }
-    return { results: found.flatMap(entry => entry.result === null ? [] : [entry.result]), unavailable: found.flatMap(entry => entry.failed === null ? [] : [entry.failed]) };
-  }
+  directory(threadId: string): Promise<{ agents: AgentContact[]; unavailable: string[] }> { return this.lookups.directory(threadId); }
   /** Contacts here and on trusted machines whose fields or chat contain every word of the query. */
-  async search(threadId: string, query: string): Promise<{ matches: AgentMatch[]; unavailable: string[] }> {
-    const words = searchWords(query);
-    const config = this.config(threadId);
-    if (this.core.threads.require(threadId).archived || config.mode === 'off') return { matches: [], unavailable: [] };
-    const own = this.localReach(threadId).filter(a => a.threadId !== threadId);
-    const matches = searchContacts(this.core.journal.db, own, words);
-    const remote = await this.remoteAll(threadId, 'search', { words }, (answer, peer) => {
-      if (!Array.isArray(answer) || answer.length > 100) throw new Error('invalid remote search');
-      return answer.map(match => ({ ...checkRemoteContact(match, peer), ...checkMatchExtras(match) }));
-    });
-    const routed = config.remote ? await this.mailboxes.search(threadId, words) : [];
-    this.checkLookupAccess(threadId, config.remote);
-    const reachable = new Set(this.localReach(threadId).map(contact => contact.threadId));
-    const trusted = new Set(this.trusted().map(peer => peer.coreId));
-    const remoteMatches = remote.results.flat();
-    return {
-      matches: [...matches.filter(match => reachable.has(match.threadId)), ...remoteMatches.filter(match => trusted.has(match.coreId)), ...routed],
-      unavailable: [...new Set([...remote.unavailable, ...remoteMatches.filter(match => !trusted.has(match.coreId)).map(match => match.machine)])],
-    };
-  }
+  search(threadId: string, query: string): Promise<{ matches: AgentMatch[]; unavailable: string[] }> { return this.lookups.search(threadId, query); }
   /** Another reachable contact's conversation, text and tool names only. */
-  async read(threadId: string, target: AgentAddress, limit = 30, before?: number): Promise<AgentTranscript> {
-    const to = address(target, 'target');
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw invalidParams('limit: expected 1 to 100');
-    if (before !== undefined && !Number.isSafeInteger(before)) throw invalidParams('before: expected a timestamp');
-    const config = this.config(threadId);
-    const resident = to.coreId === this.self('').coreId && this.core.workforce.projects.over(threadId, to.threadId) !== null;
-    if (this.core.threads.require(threadId).archived || (config.mode === 'off' && !resident)) throw refused('coordination is disabled for this thread');
-    if (to.coreId === this.self('').coreId) {
-      const contact = (resident ? this.contact(to.threadId, true) : undefined) ?? this.localReach(threadId).find(a => same(a, to)) ?? (to.threadId === threadId ? this.contact(threadId) : undefined);
-      if (!contact) throw refused(`target: ${to.threadId} is not a contact this thread may reach; see boite threads`);
-      return { contact, ...transcript(this.core.journal.db, to.threadId, limit, before, id => this.core.journal.streamingMessage(id)) };
-    }
-    const peer = this.trusted().find(p => p.coreId === to.coreId);
-    if (!config.remote) throw refused('cross-machine coordination is disabled for this thread');
-    if (!peer) return this.mailboxes.read(threadId, to.coreId, { threadId: to.threadId, limit, ...(before === undefined ? {} : { before }) });
-    const { results, unavailable } = await this.remoteAll(threadId, 'read', { threadId: to.threadId, limit, ...(before === undefined ? {} : { before }) }, (answer, from) => {
-      const raw = answer as { contact?: AgentContact } | null;
-      const contact = checkRemoteContact(raw?.contact as AgentContact, from);
-      if (contact.threadId !== to.threadId) throw new Error('transcript of another thread');
-      return { contact, ...checkTranscript(answer) };
-    }, [peer]);
-    this.checkLookupAccess(threadId, true);
-    if (!this.trusted().some(current => current.coreId === peer.coreId)) throw refused('target.coreId: machine permission revoked');
-    if (!results[0]) throw refused(`${unavailable[0] ?? peer.name} did not answer the read`);
-    return results[0];
-  }
+  read(threadId: string, target: AgentAddress, limit = 30, before?: number): Promise<AgentTranscript> { return this.lookups.read(threadId, target, limit, before); }
   /**
    * Blocks until an incoming message (from `from` when given) arrives or the
    * timeout passes. What it returns counts as delivered: the agent read it in
@@ -403,11 +326,12 @@ export class Coordination {
     const sender = from === undefined ? null : address(from, 'from');
     const ready = this.claim(threadId, sender);
     if (ready.length > 0 || timeoutMs === 0) return Promise.resolve({ letters: ready });
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
       const set = this.waiters.get(threadId) ?? new Set();
       this.waiters.set(threadId, set);
       let off: (() => void) | undefined;
-      const waiter = { from: sender, done: (letters: AgentLetter[]) => { clearTimeout(timer); off?.(); set.delete(waiter); if (set.size === 0) this.waiters.delete(threadId); resolve({ letters }); } };
+      const leave = () => { clearTimeout(timer); off?.(); set.delete(waiter); if (set.size === 0) this.waiters.delete(threadId); };
+      const waiter = { from: sender, done: (letters: AgentLetter[]) => { leave(); resolve({ letters }); }, fail: (error: unknown) => { leave(); reject(error); } };
       const timer = setTimeout(() => waiter.done([]), timeoutMs);
       set.add(waiter);
       // A departed CLI cannot read tool output; its waiter must leave the next letter for provider delivery.
@@ -416,23 +340,23 @@ export class Coordination {
   }
   /** Received letters for this thread, from one sender or any, marked delivered. */
   private claim(threadId: string, from: AgentAddress | null): AgentLetter[] {
-    const letters = this.rows("thread_id = ? AND direction = 'in' AND status = 'received' ORDER BY created_at", threadId)
-      .map(r => JSON.parse(r.data) as AgentLetter)
-      .filter(letter => letter.expiresAt > Date.now() && this.mayReceive(letter) && (from === null || same(letter.from, from)));
-    if (letters.length > 0) this.restoreProject(threadId);
-    for (const letter of letters) this.update(letter, 'delivered');
-    return withRelations(this.core, this.self('').coreId, threadId, letters.map(letter => ({ ...letter, status: 'delivered' as const })));
+    return this.admit(threadId, this.ready(threadId, Infinity, from), batch => {
+      if (batch.length > 0) this.restoreProject(threadId);
+      for (const letter of batch) this.update(letter, 'delivered');
+      return withRelations(this.core, this.self('').coreId, threadId, batch.map(letter => ({ ...letter, status: 'delivered' as const })));
+    }, () => this.ready(threadId, Infinity, from, true));
   }
-  /** A waiting agent takes the letter that just arrived; true when one did. */
-  private handToWaiter(letter: AgentLetter): boolean {
+  /**
+   * A waiting agent takes the letter that just arrived, with what else it may read now. Mail held from
+   * one waiter may still reach the next; a fault fails the waiter that read, never the letter's sender.
+   */
+  private handToWaiter(letter: AgentLetter): void {
     for (const waiter of this.waiters.get(letter.to.threadId) ?? []) {
       if (waiter.from !== null && !same(waiter.from, letter.from)) continue;
-      const letters = this.claim(letter.to.threadId, waiter.from);
-      if (letters.length === 0) return false;
-      waiter.done(letters);
-      return true;
+      let letters: AgentLetter[];
+      try { letters = this.claim(letter.to.threadId, waiter.from); } catch (error) { waiter.fail(error); continue; }
+      if (letters.length > 0) return waiter.done(letters);
     }
-    return false;
   }
   async send(params: RpcParams<'collaboration.send'>, human = false, connection?: Connection): Promise<AgentLetter> {
     const to = address(params.to, 'to');
@@ -490,8 +414,8 @@ export class Coordination {
     // It may hear back from that contact for a while, even outside the projects opened to it.
     if (contact) this.core.contacts.reach.noteSent(from.threadId, contact.coreId);
     this.core.threads.runner.noteMail(from.threadId, letter.createdAt);
-    // The thread's turns now report back to the agent that wrote to it.
-    if (resident) this.core.workforce.projects.follow(resident.id, to.threadId);
+    // The thread's turns now report back to the agent that wrote to it, waking it only once it watches the thread.
+    if (resident) this.core.workforce.projects.follow(resident.id, to.threadId, 'touched');
     this.changed(from.threadId);
     if (to.coreId === from.coreId) {
       try { this.receive(letter); } catch (error) { this.update(letter, 'rejected', messageOf(error)); }
@@ -543,8 +467,10 @@ export class Coordination {
     this.core.threads.runner.noteMail(threadId, letter.createdAt);
     this.resumeForAgent(threadId);
     this.update(letter, 'received');
-    if (!this.handToWaiter(letter)) this.kick(threadId);
-    return this.find(letter.id, 'in') ?? letter;
+    this.handToWaiter(letter);
+    const current = this.find(letter.id, 'in');
+    if (current?.status === 'received') this.kick(threadId);
+    return current ?? letter;
   }
   private rows(where: string, ...params: (string | number)[]): Row[] { return this.core.journal.db.query(`SELECT data, fingerprint FROM coordination_letters WHERE ${where}`).all(...params) as Row[]; }
   private find(id: string, direction: string): AgentLetter | null {
@@ -555,6 +481,8 @@ export class Coordination {
     this.core.journal.db.query('INSERT INTO coordination_letters (id, thread_id, direction, status, created_at, request_id, fingerprint, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(letter.id, threadId, direction, letter.status, letter.createdAt, requestId, fingerprint, JSON.stringify(letter));
   }
   private update(letter: AgentLetter, status: AgentLetter['status'], error: string | null = null): void {
+    const before = letter.to.coreId === this.coreId && (letter.status === 'received' || letter.status === 'uncertain' && letter.error === 'Queued for provider delivery');
+    if (before && (status === 'delivered' || status === 'uncertain') && !this.admitting?.has(letter.id)) throw new Error(`coordination: letter ${letter.id} reaches its agent only through admit`);
     const next = { ...letter, status, error };
     this.core.journal.append({ type: 'coordination.status', threadId: letter.to.coreId === this.self('').coreId ? letter.to.threadId : letter.from.threadId, version: 1, payload: { id: letter.id, status, error } }, () => {
       // Each endpoint retains its own send or receipt time when acknowledgement metadata arrives.
@@ -626,17 +554,54 @@ export class Coordination {
   take(threadId: string, turnId: string): string | null {
     // Off and paused hold ordinary letters through mayReceive; a persistent agent's still pass.
     if (this.delivering.has(threadId)) return null;
-    const letters = this.inbox(threadId);
+    const letters = this.ready(threadId, BATCH);
     if (!letters.length) return null;
-    protectLetters(this.core, threadId, letters);
-    this.restoreProject(threadId);
-    const prompt = letterPrompt(letters, senderContext(this.core, this.self('').coreId, threadId));
-    this.core.threads.noteCoordination(threadId, turnId, prompt);
-    for (const letter of letters) this.update(letter, 'delivered');
-    return prompt;
+    return this.admit(threadId, letters, batch => {
+      if (!batch.length) return null;
+      this.restoreProject(threadId);
+      const prompt = letterPrompt(batch, senderContext(this.core, this.self('').coreId, threadId));
+      this.core.threads.noteCoordination(threadId, turnId, prompt);
+      for (const letter of batch) this.update(letter, 'delivered');
+      return prompt;
+    }, () => this.ready(threadId, BATCH, null, true));
   }
-  private inbox(threadId: string): AgentLetter[] {
-    return this.rows("thread_id = ? AND direction = 'in' AND status = 'received' ORDER BY created_at LIMIT 4", threadId).map(r => JSON.parse(r.data) as AgentLetter).filter(letter => letter.expiresAt > Date.now() && this.mayReceive(letter));
+  /**
+   * The oldest received letters this thread may take now, only its local mail
+   * when `local`. Held ones (paused, off, no longer permitted) stay in the inbox
+   * and never hide those behind them.
+   */
+  private ready(threadId: string, limit: number, from: AgentAddress | null = null, local = false): AgentLetter[] {
+    const letters: AgentLetter[] = [];
+    // Its own statement: a cached one left half read at the limit breaks the next selection.
+    const statement = this.core.journal.db.prepare("SELECT data FROM coordination_letters WHERE thread_id = ? AND direction = 'in' AND status = 'received' ORDER BY created_at");
+    try {
+      for (const row of statement.iterate(threadId) as Iterable<Row>) {
+        const letter = JSON.parse(row.data) as AgentLetter;
+        if (letter.expiresAt > Date.now() && !(local && letter.contact) && (from === null || same(letter.from, from)) && this.mayReceive(letter)) letters.push(letter);
+        if (letters.length >= limit) break;
+      }
+    } finally { statement.finalize(); }
+    return letters;
+  }
+  /**
+   * The one way a letter reaches its agent: a wait's tool output, a hook, a
+   * steer or a wake. Contact mail gets its file protection first. Mail this
+   * turn cannot protect stays in the inbox, where the turn's end kicks it
+   * again, and `consume` gets the local mail `local` selects in its place, so
+   * held contact letters never fill the batch; without `local` the whole batch
+   * is refused. `update` refuses to deliver any letter `consume` was not given here.
+   */
+  private admit<T>(threadId: string, letters: AgentLetter[], consume: (batch: AgentLetter[]) => T, local?: (refusal: RpcFailure) => AgentLetter[], starting = false): T {
+    let batch = letters;
+    try { protectLetters(this.core, threadId, batch, starting); } catch (error) {
+      // Only a policy refusal holds mail back; anything else is a fault to report.
+      if (!local || !(error instanceof RpcFailure) || !batch.some(letter => letter.contact)) throw error;
+      batch = local(error);
+    }
+    const outer = this.admitting;
+    this.admitting = new Set(batch.map(letter => letter.id));
+    // The sink records its whole batch or nothing: a fault on one letter leaves none marked as read.
+    try { return this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => consume(batch))()); } finally { this.admitting = outer; }
   }
   private inProject(letter: AgentLetter): boolean {
     if (letter.from.coreId !== this.self('').coreId || letter.to.coreId !== this.coreId) return false;
@@ -665,10 +630,11 @@ export class Coordination {
     if (sender.mode === 'off') return false;
     return this.inProject(letter) || (recipient.remote && sender.remote);
   }
-  queuedCancelled(threadId: string): void {
+  /** A wake that never reached its provider puts its letters back, those it had already claimed for `turnId` too. */
+  queuedCancelled(threadId: string, turnId?: string): void {
     for (const row of this.rows("thread_id = ? AND direction = 'in' AND status = 'uncertain'", threadId)) {
       const letter = JSON.parse(row.data) as AgentLetter;
-      if (letter.error === 'Queued for provider delivery') this.update(letter, 'received');
+      if (letter.error === 'Queued for provider delivery' || turnId && letter.error === `Awaiting provider turn ${turnId}`) this.update(letter, 'received');
     }
   }
   /** Recheck a queued batch immediately before it crosses the provider boundary. */
@@ -676,10 +642,12 @@ export class Coordination {
     const letters = this.rows("thread_id = ? AND direction = 'in' AND status = 'uncertain'", threadId)
       .map(row => JSON.parse(row.data) as AgentLetter).filter(letter => letter.error === 'Queued for provider delivery');
     if (!letters.length || this.closed || letters.some(letter => letter.expiresAt <= Date.now() || !this.mayReceive(letter))) return false;
-    protectLetters(this.core, threadId, letters);
-    this.restoreProject(threadId);
-    for (const letter of letters) this.update(letter, 'uncertain', `Awaiting provider turn ${turnId}`);
-    return true;
+    // The wake was scheduled for this batch: it crosses whole or not at all.
+    return this.admit(threadId, letters, () => {
+      this.restoreProject(threadId);
+      for (const letter of letters) this.update(letter, 'uncertain', `Awaiting provider turn ${turnId}`);
+      return true;
+    }, undefined, true);
   }
   private async steer(threadId: string, prompt: string): Promise<{ submitted: boolean } | null> {
     if (this.closed) return null;
@@ -703,18 +671,22 @@ export class Coordination {
     const thread = this.core.journal.getThread(threadId);
     // A thread whose last turn failed wakes like an idle one: each letter starts at most one turn, so a failing provider cannot loop.
     if (!thread || thread.archived || thread.status === 'waiting' || thread.status === 'queued') return;
-    const letters = this.inbox(threadId);
-    if (!letters.length) return;
+    const ready = this.ready(threadId, BATCH);
+    if (!ready.length) return;
     this.delivering.add(threadId);
+    const prompt = (batch: AgentLetter[]) => letterPrompt(batch, senderContext(this.core, this.self('').coreId, threadId));
+    const local = () => this.ready(threadId, BATCH, null, true);
     try {
-      protectLetters(this.core, threadId, letters);
-      const prompt = letterPrompt(letters, senderContext(this.core, this.self('').coreId, threadId));
       if (thread.status === 'running') {
-        if (!this.core.threads.canSteer(threadId)) return;
-        this.restoreProject(threadId);
-        for (const letter of letters) this.update(letter, 'uncertain', 'Awaiting provider acknowledgement');
+        const letters = this.admit(threadId, ready, batch => {
+          if (!batch.length || !this.core.threads.canSteer(threadId)) return null;
+          this.restoreProject(threadId);
+          for (const letter of batch) this.update(letter, 'uncertain', 'Awaiting provider acknowledgement');
+          return batch;
+        }, local);
+        if (!letters) return;
         try {
-          const result = await this.steer(threadId, prompt);
+          const result = await this.steer(threadId, prompt(letters));
           if (result === null || this.closed || this.core.journal.isClosed()) return;
           for (const letter of letters) {
             const current = this.find(letter.id, 'in');
@@ -728,12 +700,16 @@ export class Coordination {
           }
         }
       } else {
+        let held: RpcFailure | null = null;
         // One transaction records the wake, message states and scheduled turn.
-        this.core.journal.db.transaction(() => {
-          for (const letter of letters) this.update(letter, 'uncertain', 'Queued for provider delivery');
+        const woke = this.admit(threadId, ready, batch => batch.length > 0 && this.core.journal.db.transaction(() => {
+          for (const letter of batch) this.update(letter, 'uncertain', 'Queued for provider delivery');
           this.core.journal.db.query('INSERT INTO coordination_wakes VALUES (?, ?)').run(threadId, Date.now());
-          this.core.threads.startTurn(threadId, prompt, [], undefined, 'coordination');
-        })();
+          this.core.threads.startTurn(threadId, prompt(batch), { kind: 'coordination' });
+          return true;
+        })(), refusal => { held = refusal; return local(); });
+        // No turn of an idle thread ends to retry its refused contact mail: the refusal pauses coordination until the owner's trust or message.
+        if (!woke && held) throw held;
       }
     } catch (error) {
       // A persistent agent that is paused or out of budget: its letters wait in the inbox for it.

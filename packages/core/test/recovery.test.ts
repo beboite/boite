@@ -97,10 +97,15 @@ describe('crash recovery', () => {
       expect(harness.core.threads.get(threadId).status).toBe('idle');
     } finally { await harness.stop(); }
   });
-  test('a turn left running by a dead core is an error on the next start', async () => {
+  test('a turn left running by a dead core is an error on the next start, like a live failure', async () => {
     const harness = await startTestCore();
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
+    const live = await echoThread(harness, client, 'live failure');
+    const failed = client.next('turn.finished', (turn) => turn.threadId === live.threadId, 10000);
+    await client.call('turns.start', { threadId: live.threadId, prompt: '[error]' });
+    expect((await failed).status).toBe('error');
+    await waitFor(() => harness.core.journal.getThread(live.threadId)?.status === 'error');
 
     const started = client.next('turn.started', (turn) => turn.threadId === threadId, 10000);
     const turn = await client.call('turns.start', { threadId, prompt: '[sleep:60000] never lands' });
@@ -119,7 +124,9 @@ describe('crash recovery', () => {
       expect(recovered?.error).toContain('The core stopped');
       expect(recovered?.error).toContain('while this turn was running');
       expect(recovered?.finishedAt).not.toBeNull();
-      expect(thread.status).toBe('idle');
+      // One meaning of a failure: delegation, bots and the client read the same status either way.
+      expect(thread.status).toBe(next.threads.get(live.threadId).status);
+      expect(thread.status).toBe('error');
 
       const last = lastMessage(thread.messages);
       expect(last?.turnId).toBe(turn.id);
@@ -174,7 +181,7 @@ describe('crash recovery', () => {
       const other = next.threads.get(running.threadId);
       expect(other.turns[0]?.status).toBe('error');
       expect(other.turns[0]?.error).toContain('while this turn was running');
-      expect(other.status).toBe('idle');
+      expect(other.status).toBe('error');
     } finally {
       await next.close();
       await removeDir(harness.dataDir);

@@ -11,7 +11,7 @@
  * reads their `--json` answers. docs/android-server.md.
  */
 import { spawn, spawnSync, type ChildProcess, type SpawnSyncReturns } from 'node:child_process';
-import { createHash, createPublicKey, verify, type KeyObject } from 'node:crypto';
+import { createHash, createPublicKey, randomUUID, verify, type KeyObject } from 'node:crypto';
 import {
   chmodSync, closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, readlinkSync,
   realpathSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync, writeSync,
@@ -437,7 +437,7 @@ async function ensureRuntime(bun: Runtime, say: (line: string) => void): Promise
   return binary;
 }
 
-interface Prepared { staging: string; release: Release; runtime: string }
+export interface Prepared { staging: string; release: Release; runtime: string; controller: Uint8Array }
 
 /** Downloads, checks and unpacks a release beside the running one, which keeps serving meanwhile. */
 async function prepareRelease(source: { offer: Offer } | { bundle: string }, say: (line: string) => void): Promise<Prepared> {
@@ -463,24 +463,54 @@ async function prepareRelease(source: { offer: Offer } | { bundle: string }, say
   for (const required of ['core/main.js', 'ui/index.html', 'boite-server.ts']) {
     if (!existsSync(join(staging, required))) throw new Error(`the bundle of ${release.version} has no ${required}`);
   }
-  return { staging, release, runtime: await ensureRuntime(release.bun, say) };
+  return { staging, release, runtime: await ensureRuntime(release.bun, say), controller: readFileSync(join(staging, 'boite-server.ts')) };
 }
 
-/** Moves a prepared release into place and points `current`, Bun and this controller at it. The core must be stopped. */
-function activateRelease({ staging, release, runtime }: Prepared): Release {
-  const dir = join(PATHS.releases, release.version);
-  const aside = `${dir}.replaced-${process.pid}`;
-  mkdirSync(PATHS.bin, { recursive: true, mode: 0o700 });
-  // Reinstalling a version: the old copy steps aside until the new one is in place.
-  if (existsSync(dir)) renameSync(dir, aside);
-  renameSync(staging, dir);
-  relink(join(PATHS.bin, 'bun'), runtime);
-  relink(PATHS.current, dir);
-  // The controller comes with the release it runs.
-  writeFileSync(`${PATHS.controller}.tmp`, readFileSync(join(dir, 'boite-server.ts')));
-  renameSync(`${PATHS.controller}.tmp`, PATHS.controller);
-  rmSync(aside, { recursive: true, force: true });
-  return readRelease(dir);
+/** Where the installed generation is selected: the release directories, `current`, the Bun link and this controller. */
+export type Layout = Pick<typeof PATHS, 'releases' | 'current' | 'bin' | 'controller'>;
+/** The changes an activation makes and undoes, so a test can fail any one of them. */
+export const FILES = {
+  rename: renameSync,
+  link: relink,
+  unlink: (file: string) => rmSync(file, { force: true }),
+  write: (file: string, bytes: Uint8Array) => { writeFileSync(`${file}.tmp`, bytes); renameSync(`${file}.tmp`, file); },
+};
+
+const targetOf = (link: string) => { try { return readlinkSync(link); } catch { return null; } };
+const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
+
+/**
+ * Moving a prepared release into place, as one transaction planned before the core stops: `apply` points `current`,
+ * Bun and this controller at it, `rollback` puts each back exactly (a reinstall's replaced copy too), `commit` keeps it.
+ */
+export function planActivation({ staging, release, runtime, controller }: Prepared, layout: Layout = PATHS, files = FILES) {
+  const dir = join(layout.releases, release.version);
+  const aside = `${dir}.replaced-${randomUUID()}`;
+  const bun = join(layout.bin, 'bun');
+  const before = { bun: targetOf(bun), current: targetOf(layout.current), controller: existsSync(layout.controller) ? readFileSync(layout.controller) : null };
+  const back = (link: string, target: string | null) => () => target === null ? files.unlink(link) : files.link(link, target);
+  const undo: (() => void)[] = [];
+  const step = (change: () => void, revert: () => void) => { change(); undo.push(revert); };
+  const rollback = () => {
+    const failed: string[] = [];
+    for (const revert of undo.splice(0).reverse()) {
+      try { revert(); } catch (error) { failed.push(messageOf(error)); }
+    }
+    if (failed.length) throw new Error(`the previous installation is only partly back: ${failed.join('; ')}`);
+  };
+  const apply = (): Release => {
+    mkdirSync(layout.bin, { recursive: true, mode: 0o700 });
+    // Reinstalling a version: the old copy steps aside until the new one has started.
+    if (existsSync(dir)) step(() => files.rename(dir, aside), () => files.rename(aside, dir));
+    step(() => files.rename(staging, dir), () => files.rename(dir, staging));
+    step(() => files.link(bun, runtime), back(bun, before.bun));
+    step(() => files.link(layout.current, dir), back(layout.current, before.current));
+    // The controller comes with the release it runs.
+    const previous = before.controller;
+    step(() => files.write(layout.controller, controller), () => previous === null ? files.unlink(layout.controller) : files.write(layout.controller, previous));
+    return readRelease(dir);
+  };
+  return { apply, rollback, commit: () => { undo.length = 0; rmSync(aside, { recursive: true, force: true }); } };
 }
 
 /** Keeps the current release and the one before it, for `rollback`. */
@@ -632,7 +662,7 @@ function signIn(args: Args, say: (line: string) => void): { ok: true; agent: str
     return { ok: true, agent, signedIn: coreSignIns(release, true)[agent] === 'ok' };
   } catch (error) {
     // The login went through all the same: the core reads it when it starts again.
-    say(`Boite did not answer: ${error instanceof Error ? error.message : String(error)}`);
+    say(`Boite did not answer: ${messageOf(error)}`);
     return { ok: true, agent, signedIn: null };
   }
 }
@@ -745,15 +775,30 @@ export function coreEnv(release: Release, config = readConfig(), name = config.n
   return env;
 }
 
-async function health(url: string): Promise<{ version: string; pid: number } | null> {
+/** What `/health` at `url` answers, unread: `judgeCoreHealth` decides whose answer it is. */
+async function health(url: string): Promise<unknown> {
   try {
     const response = await fetch(`${url}/health`, { signal: AbortSignal.timeout(3000) });
-    if (!response.ok) return null;
-    const body = await response.json() as { ok?: unknown; version?: unknown; pid?: unknown };
-    return body.ok === true ? { version: String(body.version), pid: Number(body.pid) } : null;
+    return response.ok ? await response.json() : null;
   } catch {
     return null;
   }
+}
+
+/** Null when a `/health` answer comes from the launched core (its PID, its release's version), else why not: another Boite may hold the port. */
+export function judgeCoreHealth(expected: { pid: number; version: string }, answer: unknown): string | null {
+  const body = answer !== null && typeof answer === 'object' ? answer as { ok?: unknown; pid?: unknown; version?: unknown } : null;
+  if (body?.ok !== true) return 'no core answers';
+  if (body.pid !== expected.pid) return `the answer comes from process ${JSON.stringify(body.pid)}, not the core started as ${expected.pid}`;
+  if (body.version !== expected.version) return `the core answers as ${JSON.stringify(body.version)}, not ${expected.version}`;
+  return null;
+}
+
+/** Null once the core `state` records answers as itself and still runs after the probe, else why not. */
+export async function coreReadiness(core: CoreRecord | undefined, ask = health, running: (core: CoreRecord) => boolean = alive): Promise<string | null> {
+  if (!core || !running(core)) return 'no core runs';
+  const verdict = judgeCoreHealth(core, await ask(probeUrl(core.host, core.port)));
+  return verdict ?? (running(core) ? null : `core ${core.pid} exited while it answered`);
 }
 
 /** The address this phone itself reaches the core on. */
@@ -821,7 +866,7 @@ async function supervise(): Promise<void> {
       }
       line(`core exited with ${await exited}`);
     } catch (error) {
-      line(`core did not start: ${error instanceof Error ? error.message : String(error)}`);
+      line(`core did not start: ${messageOf(error)}`);
     }
     child = null;
     writeJson(PATHS.state, { supervisor: self });
@@ -856,19 +901,22 @@ function tail(file: string, lines: number): string[] {
   }
 }
 
-/** Waits for the core to answer; false once `gone` says the supervisor has exited and none runs. */
-async function waitHealthy(timeoutMs: number, gone: () => boolean): Promise<boolean> {
+/** Waits for the launched core to answer as itself; why not once `gone` says the supervisor has exited and none runs, or at the deadline. */
+async function waitHealthy(timeoutMs: number, gone: () => boolean): Promise<string | null> {
   const deadline = Date.now() + timeoutMs;
+  let reason = 'no core started';
   while (Date.now() < deadline) {
     const state = readState();
     if (alive(state.core)) {
-      if (await health(probeUrl(state.core.host, state.core.port))) return true;
+      const verdict = await coreReadiness(state.core);
+      if (verdict === null) return null;
+      reason = verdict;
     } else if (gone() && !alive(state.supervisor)) {
-      return false;
+      return reason;
     }
     await sleep(500);
   }
-  return false;
+  return reason;
 }
 
 /** Starts the supervisor unless it runs, then waits for the core to answer unless `wait` is false. */
@@ -891,9 +939,8 @@ async function startServer(wait = true): Promise<void> {
     supervisor.unref();
     gone = () => exited;
   }
-  if (wait && !await waitHealthy(90_000, gone)) {
-    throw new Error(`the core did not answer within 90 s; the end of ${PATHS.log}:\n${tail(PATHS.log, 15).join('\n')}`);
-  }
+  const reason = wait ? await waitHealthy(90_000, gone) : null;
+  if (reason !== null) throw new Error(`the core did not answer within 90 s (${reason}); the end of ${PATHS.log}:\n${tail(PATHS.log, 15).join('\n')}`);
 }
 
 async function stopServer(): Promise<void> {
@@ -941,7 +988,7 @@ async function status(agents = true): Promise<Status> {
   const state = readState();
   const core = alive(state.core) ? state.core : null;
   const probe = core ? probeUrl(core.host, core.port) : null;
-  const healthy = probe !== null && await health(probe) !== null;
+  const healthy = core !== null && await coreReadiness(core) === null;
   let accounts: Record<string, SignIn> | null = null;
   if (agents && healthy && release) {
     try { accounts = coreSignIns(release, false); } catch { /* Shown as not known. */ }
@@ -990,26 +1037,30 @@ async function update(args: Args, say: (line: string) => void): Promise<Record<s
     source = { offer };
   }
   const prepared = await prepareRelease(source, say);
-  const previous = before && before.version !== prepared.release.version ? before : null;
+  // Everything that can fail without touching what runs comes before the core stops.
+  const activation = planActivation(prepared);
+  writeCliShim();
   const wasRunning = alive(readState().supervisor) || alive(readState().core);
   if (wasRunning) await stopServer();
-  const installed = activateRelease(prepared);
-  writeCliShim();
-  if (wasRunning) {
+  let installed: Release | null = null;
+  try {
+    installed = activation.apply();
+    if (wasRunning) await startServer();
+  } catch (error) {
+    const failed = `Boite ${prepared.release.version} ${installed ? 'did not start' : 'could not be installed'}`;
+    const previous = before?.version ?? 'no installation';
+    say(`${failed}, going back to ${previous}`);
     try {
-      await startServer();
-    } catch (error) {
-      if (!previous) throw error;
-      // The new core never answered: the previous release goes back in place.
-      say(`Boite ${installed.version} did not start, going back to ${previous.version}`);
-      await stopServer();
-      relink(PATHS.current, previous.dir);
-      relink(join(PATHS.bin, 'bun'), join(PATHS.runtime, `bun-${previous.bun.version}`, 'bun'));
-      writeFileSync(PATHS.controller, readFileSync(join(previous.dir, 'boite-server.ts')));
-      await startServer();
-      throw new Error(`Boite ${installed.version} did not start; ${previous.version} runs again. ${error instanceof Error ? error.message : String(error)}`);
+      if (installed) await stopServer();
+      activation.rollback();
+      if (wasRunning) await startServer();
+    } catch (recovery) {
+      throw new Error(`${failed}, and going back to ${previous} failed: ${messageOf(recovery)}. ${messageOf(error)}`);
     }
+    throw new Error(`${failed}; ${before ? `${previous} ${wasRunning ? 'runs' : 'is in place'} again` : 'nothing else was installed'}. ${messageOf(error)}`);
   }
+  activation.commit();
+  const previous = before && before.version !== installed.version ? before : null;
   pruneReleases([installed.dir, ...(previous ? [previous.dir] : [])]);
   return { ok: true, version: installed.version, previous: previous?.version ?? null, changed: true };
 }
@@ -1171,7 +1222,7 @@ async function main(argv: string[]): Promise<void> {
 if (import.meta.main) {
   const argv = process.argv.slice(2);
   main(argv).catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = messageOf(error);
     if (argv.includes('--json')) process.stdout.write(`${JSON.stringify({ ok: false, error: message })}\n`);
     else process.stderr.write(`boite-server: ${message}\n`);
     process.exit(1);

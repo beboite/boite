@@ -26,6 +26,7 @@
   import { workspace } from '../lib/workspace.svelte';
   import DoneThreadNotice from './DoneThreadNotice.svelte';
   import WorktreeGoneNotice from './WorktreeGoneNotice.svelte';
+  import ContactHoldNotice from './ContactHoldNotice.svelte';
 
   /** `locked`: the conversation reads but takes nothing more, said in place of the composer (an archived agent's). */
   let { store, locked = null }: { store: Store; locked?: string | null } = $props();
@@ -183,6 +184,7 @@
     {#if thread}<ThreadRecovery {store} /><ThreadRetry {store} />{/if}
     {#if store.openProject?.missing === true && !thread?.agentSessionId}<FolderGoneNotice {store} project={store.openProject} />{/if}
     {#if thread?.worktreeRemoved}<WorktreeGoneNotice removal={thread.worktreeRemoved} archived={thread.archived} />{/if}
+    {#if thread?.contactHold && !thread.archived}<ContactHoldNotice {store} threadId={thread.id} contacts={thread.contactHold.contacts} />{/if}
     <!-- Right on the composer, so the band of tasks rises by this bar's height alone, whatever notice stands above. -->
     {#if thread}<div bind:offsetHeight={agentDockRoom}><AgentDock {store} threadId={thread.id} /></div>{/if}
     {#if locked}<p class="locked" data-testid="chat-locked">{locked}</p>

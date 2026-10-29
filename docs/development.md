@@ -27,11 +27,14 @@ with mode `0600`; the owner requests a phone link through Settings or
 `pairing.grant`. Stop the scratch core before removing its directory.
 
 One core holds `<dataDir>/core.lock`. Another refuses to start on the same data.
-A dead holder can be replaced. Linux compares the holder's start key (boot id
-and start ticks) with the one in the lock, so a stepped wall clock never frees
-it; Windows compares process start time to reject a reused PID more than two
-seconds newer than the lock; macOS retains a lock while its recorded PID is
-alive.
+The operating system holds the lock (`flock` on Linux and macOS, `LockFileEx`
+on Windows, `packages/core/src/platform/`) and drops it when its holder dies,
+so a dead holder never blocks a start and two starts never both get in. The
+file's record (PID, start time, Linux start key, `osLock`) names the holder in
+the refusal only. A record without `osLock` comes from a core older than the
+OS lock: Linux compares its start key (boot id and start ticks), Windows
+rejects a reused PID more than two seconds newer than the record, and macOS
+retains it while its PID is alive.
 
 | Option | Meaning |
 | --- | --- |
@@ -424,13 +427,14 @@ merged, non-fork PR from the same repository with the exact branch tip. The
 proof takes the checkout's current branch from `git status`, not the thread's
 recorded starting branch. The repository's cached fetch remotes identify origin,
 then explicitly linked URLs are read directly with `gh pr view`, even when they
-are absent from the repository list. Every linked PR is checked before accepting
+are absent from the repository's page. Every linked PR is checked before accepting
 a merge: another open linked PR keeps the conversation visible. A linked merge
 needs the exact tip but may have another head name, because agents often push
 `HEAD:fix/...`.
 
-Without a linked proof, the repository's newest 200 PRs are shared with sidebar
-discovery. Its branch needs exactly one local PR; unrelated fork branches do not
+Without a linked proof, the repository's page, its 100 PRs updated last, is
+shared with sidebar discovery; only that read counts as evidence, never what
+earlier pages taught. Its branch needs exactly one local PR; unrelated fork branches do not
 count. A full page requires a branch-specific query and a complete result before
 archiving. `git status` runs only when a merged PR could match. A negative proof
 retries after one minute even when the thread has not changed, so an external
@@ -639,7 +643,10 @@ live in `fake-client.parity.test.ts`. A fake path below a directory named
    domain is a file there, an `export *` and one line in each `extends`.
    A branch cut before the split, still editing the single `index.ts`, runs
    `bun scripts/migrate/split-contracts.ts` once `git merge origin/main`
-   stops: it replays its edits onto the domain files.
+   stops: it replays its edits onto the domain files. A rule for its params
+   in `RPC_PARAMS` (`packages/contracts/src/rpc-params.ts`) runs in the router
+   and the in-memory client before either handler, and refuses a bad field
+   with `InvalidParams` and `{ field }`; `settings.set` has one so far.
 2. Register the core handler in the domain's `register*Methods` function.
    For `threads.*`, use `registerThreadMethods` in
    `packages/core/src/threads/rpc.ts`, called by `packages/core/src/modules.ts`.
@@ -650,9 +657,9 @@ live in `fake-client.parity.test.ts`. A fake path below a directory named
    assembled in `fake-client.ts`; agent, plugin and workflow classes handle
    their own methods. A missing map entry fails `bun run check`.
    `packages/ui/src/lib/client.ts` already has a generic `call` method.
-4. Keep owner-only methods out of `DEVICE_METHODS` in
-   `packages/contracts/src/access.ts` and `AGENT_METHODS` in
-   `packages/core/src/access.ts`. Document the reason beside any permission.
+4. Keep owner-only methods out of `DEVICE_METHODS` and `AGENT_METHODS` in
+   `packages/contracts/src/access.ts`; the core and the in-memory client apply
+   the same `accessRefusal`. Document the reason beside any permission.
 5. Test the result and access boundary with a temporary core. Follow
    `packages/core/test/thread-remove.test.ts` for a paired-device refusal.
    The test client in `packages/core/src/client.ts` exposes `error.rpc.code`;
@@ -895,18 +902,30 @@ quoting a performance figure and include its command and date.
 
 ## Architecture checks
 
-`bun run check` includes `bun run check:architecture`; the latter uses Bun's
-parser without workspace dependencies. `bun test scripts/architecture` covers
-cycle detection, resolution, boundaries and source sizes. Runtime-import scope
+`bun run check` includes `bun run check:architecture`; it reads imports with
+Bun's transpiler and the `<script>` blocks of Svelte components with the UI's
+own `svelte/compiler`, so a component's imports are edges of the graph and a
+cycle through a component fails. `bun test scripts/architecture` covers
+cycle detection, resolution, boundaries and source sizes. The roots it reads
+are `ROOTS` in `scripts/architecture/inventory.ts`; a missing root fails rather
+than narrowing the check. Runtime-import scope
 and exclusions are documented in
 [architecture](architecture.md#module-boundaries-and-complexity).
 
-Production TypeScript, JavaScript and Svelte files have a 900-line ceiling.
-Existing exceptions in `scripts/architecture/size-budget.json` may shrink.
+Production TypeScript, JavaScript, Svelte, Rust, Kotlin and Java files have a
+900-line ceiling; tests, declarations and a Rust module's `tests.rs` do not
+count. Two files above it have an allowance in
+`scripts/architecture/size-budget.json` that may only shrink:
+
+- `apps/android-server/termux/boite-server.ts`: the Termux controller ships as
+  one file, which `install.sh` fetches alone and an update copies alone. It
+  splits once the bootstrap carries a directory.
+- `apps/shell/src-tauri/src/browser.rs`: the shell's browser surfaces, above
+  the ceiling before Rust entered the check.
+
 `--write-size-budget` lowers or removes allowances; it never raises them.
 `--rebaseline-size-budget` can raise them for a reviewed integration of branches
-written before the limits existed. Exempt contract, client and string tables
-have an explicit reason in that file.
+written before the limits existed. Nothing is exempt.
 
 `bun run audit:complexity --json` produces an advisory comparison for TypeScript,
 JavaScript and Svelte scripts, excluding Rust. A high score requires review of
@@ -1025,6 +1044,18 @@ clients, blocking questions and finished turns do not show typing. The dots
 pause on hidden pages and become static under reduced motion.
 `tests/e2e/chat-context.test.ts` checks these transitions and phone layout.
 
+Inline Markdown uses markdown-it with raw HTML disabled. Emphasis can wrap
+links and code, nest, and use underscores. Link labels retain inline formatting;
+balanced destinations, titles, escapes, entities and hard line breaks follow
+CommonMark. Boite adds file and thread links after parsing that structure,
+keeps formulas opaque, and turns remote images into links without fetching them.
+Automatic paths keep underscores literal. Windows destinations identified by a
+root or an unescaped separator preserve backslashes; other destinations retain
+CommonMark escapes and entity decoding.
+Block parsing and streaming boundaries remain in Boite's renderer.
+`tests/e2e/markdown.test.ts` covers these formats at desktop and phone widths;
+`tests/e2e/diagrams.test.ts` checks diagrams and formulas.
+
 Received agent mail appears on the right with the user accent; sent agent mail
 appears on the left with a neutral surface. Owner prompts keep the user style.
 The letter's creation time shows its age in the app's language, updates every
@@ -1102,6 +1133,21 @@ source over 50 MB is refused before decoding, since a phone's canvas would not
 hold it. So twenty iPhone screenshots, 2 to 4 MB each as PNG, fit one turn at
 around 400 KB each.
 
+None of this holds the box. A pasted, dropped or picked file shows at once as
+a loading tile, a picture with its `[Image N]` at the caret, and the box keeps
+taking keys while the file is read (`receiveFiles`, `lib/composer-attachments.ts`).
+The reduction runs in a worker (`lib/image-prepare.worker.ts`, `OffscreenCanvas`)
+and falls back to the page where a browser has neither. Files of one composer
+settle in the order they came, each into its placeholder's place, its undo
+steps included. A placeholder is never saved, synced or uploaded; when a sync
+conflict moves the words to a new draft, the file lands in that draft instead
+(`followRead`, `lib/draft-attachments.ts`). Send pressed meanwhile waits on a
+spinner and goes once every file is ready, in the box it was pressed in; typing
+on, or a sync that swaps the box, cancels it. A refused file drops its tile
+and its reference, in the box and in its undo steps, and says why. A file past
+the twenty, from the same drop or a later one, waits for one of them to be
+refused, and is refused itself only once they are all read.
+
 The Claude driver fits every prompt image to the same edge again before it
 goes in (`drivers/claude/images.ts`, Bun's image codec, same format), because
 an image can reach a prompt without passing the composer: a client that sends
@@ -1119,7 +1165,8 @@ The core validates bytes and writes sanitized, content-addressed copies under
 `<dataDir>/attachments/`. Copies survive resume and are currently not removed
 by archive or project removal. A copy the core wrote or compared is not read
 again while its size, mtime and inode stay the same; an agent's edit changes
-them, and the next reference gets a fresh copy. Timeline cards download those copies. Composer
+them, and the next reference gets a fresh copy. A different size rejects the
+old copy without reading its contents. Timeline cards download those copies. Composer
 `[Image N]` references follow attachment order, preview inline and renumber after
 removal. A tile opens its picture large above the box; a second click on the
 tile, or a click on the large picture, puts it away. Copying or cutting a reference carries its picture
@@ -1149,6 +1196,11 @@ The shell resolves symlinks, checks thread containment and rejects browsed-webvi
 callers. Remote cores, browsers and phones retain preview/download behavior.
 Published snapshots from `boite attach` use the separate safe download/open rules
 in [CLI](cli.md); they do not authorize executing an uploaded file.
+
+File tickets and compressed view copies open without waiting for a FIFO writer
+on POSIX, then check the opened handle's type. A ticket body truncated after its
+size was checked errors instead of completing with fewer bytes than advertised.
+Download names use RFC 8187 encoding for both file and byte tickets.
 
 Inline text previews use the conversation's vertical scroll, including when
 the pointer is over the file contents. Long lines scroll horizontally inside

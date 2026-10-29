@@ -17,9 +17,9 @@ test('lines keep their breaks and a trailing break adds no empty line', () => {
 test('an inline code span needs a run of backticks nothing else touches', () => {
   expect(renderMarkdown('`a` `b`')).toBe('<p><code>a</code> <code>b</code></p>');
   expect(renderMarkdown('x``a`b``y')).toBe('<p>x<code>a`b</code>y</p>');
-  // What the lookbehind form gave for runs that touch, kept as it was.
-  expect(renderMarkdown('`a``b`')).toBe('<p><code>a`</code>b`</p>');
-  expect(renderMarkdown('```a`')).toBe('<p><code>`</code>a`</p>');
+  // CommonMark pairs equal-length runs and keeps unmatched delimiters literal.
+  expect(renderMarkdown('`a``b`')).toBe('<p><code>a``b</code></p>');
+  expect(renderMarkdown('```a`')).toBe('<p>```a`</p>');
 });
 
 test('a table cell keeps an escaped pipe', () => {

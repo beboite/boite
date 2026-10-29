@@ -91,6 +91,20 @@ handshake does not finish within twelve seconds can be retried from Machines.
 Once the machine has said hello, loading its lists is waited for however long
 it takes on a slow link; the connection is never dropped for it.
 
+Each machine keeps its own clock. The hello's answer carries the core's
+(`CoreInfo.now`), and the client takes the difference from the middle of the
+round trip as that machine's `clockOffset`. A running turn's counters (working
+for, compaction elapsed) count the core's timestamps against the device's
+clock plus that offset, so a desktop 11 seconds behind its server no longer
+shows "Elapsed: 0s" for the first 11 seconds. Each liveness probe's `hello`
+measures it again, so a device that sets its clock right on a live socket,
+back from sleep, follows within one probe; a change under a second is
+round-trip noise and is ignored. The middle of a trip is off by at most half
+of it: a sample no more precise than the current offset replaces it only when
+their two ranges cannot meet, so slow probes held behind an upload never swap
+one guess for another, while a clock set right still shows. An older core
+sends no clock and the offset stays zero.
+
 The client detects silent remote sockets (`packages/ui/src/lib/ws-client.ts`).
 On a remote host, 25 seconds without any frame sends a `hello`, which the core
 answers on an open connection with its info and nothing else. That `hello`
@@ -346,13 +360,19 @@ a green underlined number. A card that has that row also names the thread's
 worktree branch there; a branch alone does not add the row. The phone list
 always has a second line and appends the branch to it. Connecting another machine leaves cards without project or PR metadata
 at their single-machine height. No placeholder appears when there is no PR. PR
-metadata comes from the execution machine's `gh pr list`, using the branch
+metadata comes from the execution machine's `gh`, using the branch
 associated with the thread. A shared checkout's current branch alone does not
 identify a thread's PR. Non-repositories and detached checkouts have no PR.
 Lookups share the common Git directory across worktrees: `git remote -v` is
-cached for five minutes and the newest 200 PRs for 15 seconds; a failed read is
-kept 15 seconds. The merged-PR archive reads the same two caches.
-A missing branch gets its own lookup only when that list was full. At most two
+cached for five minutes. Each GitHub repository has one page, the 100 PRs
+updated last (`gh api graphql`, one rate-limit point), kept 15 seconds; a
+failed read is kept 15 seconds. The merged-PR archive reads the same two caches.
+Badges and linked PRs answer from the pages: a branch or a link the pages never
+showed gets its own `gh pr list --head` or `gh pr view` once, then the pages
+carry its changes. That holds while each page reaches back past the newest
+change of the previous one, with five minutes of overlap; after a gap, or on
+Refresh PR, the branch is read alone again. Rounds cost one `gh` per
+repository, whatever the number of threads. At most two
 commands run at once, each with a ten-second deadline through `procs` as
 `pull-request:<threadId>`. Folded projects defer lookups until opened. A client
 asks again every 15 seconds while the thread works and once a minute at rest,
@@ -368,57 +388,36 @@ offline. When the machine is back, the reconnect reopens the thread, reads its
 team, workflows and coordination, then sends the outbox.
 
 The outbox is the thread's queue with a request on each entry
-(`OutboxRequest` in `store/composer.svelte.ts`): a `clientRequestId` drawn when
-the prompt is written, and the model, effort and speed it was written with.
-The drafts journal keeps it per machine with the unsent text, in IndexedDB
-and its localStorage backup, attachments included, so it survives closing the
-app. Each entry is its own turn and goes through the composer's own send path,
-in order, never steered into a running turn. The core answers a
-`clientRequestId` it already took with that turn, so an entry whose answer was
-lost is not sent twice. A refusal from the core marks the entry as failed with
-its reason and holds the entries written after it; Send again retries it under
-the same id, and the cross removes it. A tap takes it back into the box, and
-sending it from there draws a new id. A thread that moved to another model
-meanwhile is put back on the written one first; a choice for another agent or
-account is ignored. A machine offline since the app
-started has no cards to open: the client keeps no copy of the thread list.
+(`OutboxRequest` in `store/composer.svelte.ts`), a stable ID and the agent,
+account, model, effort and speed chosen when it was written. The device's
+IndexedDB journal and text backup retain input until synchronization succeeds.
+The owning core then stores the queue and broadcasts its revised record to
+owner and paired devices. Once accepted, it runs without the app open. Each
+outbox entry starts its own turn, in order; it is never steered into a running
+turn. Execution uses the captured selection without replacing the current
+picker. Permissions and blocking questions still hold delivery.
 
-A new conversation waits the same way. Send on a draft of a machine that is
-offline puts the prompt in the draft's own queue with a request id and the
-chips' choice, and the box says the conversation starts when the machine
-reconnects. The draft's row in the sidebar shows a clock and the prompt, and
-its tooltip names the machine it waits for. Its menu has **Cancel the start**,
-which puts the words back in the box, where they wait as an ordinary draft;
-the cross on the queued prompt removes it. The queue is kept on the device
-like an outbox, so it survives closing the app. When the machine is back, the
-client starts each queued draft in the order it was sent: `threads.create`
-under the prompt's request id (`clientRequestId`), then the draft's queue
-becomes the new conversation's outbox, which sends it under the same ids. The
-core answers a creation it already made under that id with the conversation
-it made (`packages/core/src/threads/creation-requests.ts`, kept for an hour in
-memory), so a creation whose answer the link lost is not made twice. The draft
-goes unless its box holds new text, and a draft on screen gives way to its
-conversation. A refusal stays on the queued prompt with its reason and Send
-again. A start on its way can be neither deleted nor taken back, since the
-core may already hold the conversation. The thread's outbox is written to the
-device before the draft leaves it, so a crash between the two leaves the prompt
-in both, which the core takes once under its ids, never in neither. The first
-start writes down the project and the worktree and incognito switches it asked
-for, and a retry asks for exactly that, since the core answers a request id
-that may already hold its conversation only when the parameters match. Once
-asked, a start the core did not refuse is retried until it lands and is no
-longer taken back or removed from the queue, only deleted with its draft: the
-same words sent again under a new id could make a second conversation. A
-refusal made nothing, so a refused start can be taken back, edited or sent
-again, and its next ask reads the draft afresh. The exception is a refusal
-about the request id itself (`field: 'clientRequestId'`): the core holds a
-conversation under that id, so the start keeps what it asked and stays locked.
-When that conversation was deleted since (`reason: 'deleted'`), nothing holds
-the id any more: the start unlocks, and Send again goes under a fresh id. A start
-that gets no answer on a live link, or finds no drafts project, is tried again
-15 seconds later rather than at once. A start taken back before it was ever
-asked, then sent again, goes at once under its new id. An incognito draft is never kept on the
-device, so it still waits for its machine before it can be sent
+Ordinary follow-ups typed during a running turn use the same server storage,
+but retain native steering at tool boundaries and Send now. Delivery receipts
+prevent a stale cache from replaying consumed entries. A refused or ambiguous
+submission pauses the queue with its reason; unconfirmed delivery is never
+retried automatically. Taking an entry back into the box and sending it again
+creates a new request. A machine offline since the app started has no cards to
+open: the client keeps no copy of the thread list.
+
+A new conversation waits the same way. Sending a draft while its core is
+offline keeps its first prompt and captured selection on the device. A client
+must reconnect to synchronize that input. After the core accepts it, it creates
+the conversation and transfers the queue and draft deletion in one transaction;
+a restart cannot create a second conversation from that accepted draft. New
+text typed while creation was pending remains a draft. The sidebar's clock
+and tooltip identify a pending start and its machine. Cancel the start returns
+an unsent prompt to the box; an in-flight start remains locked while its result
+is unknown.
+
+Incognito drafts and replies stay in client memory, with no durable upload or
+cross-device synchronization. Older cores without `composerPersistence` keep
+the client-owned outbox and draft launch path
 (`packages/ui/src/lib/store/draft-launch.svelte.ts`).
 
 Archiving or restoring a project of a machine that is offline still works: the

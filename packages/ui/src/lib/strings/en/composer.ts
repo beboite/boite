@@ -4,6 +4,8 @@ export const strings = {
     /** Above the box while a sent message is being edited. */
     editing: 'Editing a sent message: sending replaces it and everything after it',
     editingQueued: 'Send or remove the queued messages before replacing a sent message.',
+    draftCleared: 'Draft cleared',
+    draftReplaced: 'Draft replaced',
     editUnavailable: "This thread's provider is unavailable. Reconnect it before editing a sent message.",
     filesUnavailable: 'The messages were rewound, but this edit has no complete file backup. The code could not be restored.',
     filesBusy: 'The messages were rewound. Another agent is still working in this folder, so the files were left as they are.',
@@ -31,6 +33,7 @@ export const strings = {
     placeholderOffline: '{machine} is offline: messages wait here and go out when it reconnects',
     placeholderOfflineDraft: '{machine} is offline: the conversation starts when it reconnects',
     send: 'Send',
+    sendWhenLoaded: 'Sends once the files are ready',
     stop: 'Stop',
     queued: 'Sent after the next tool, or when the turn ends',
     /** A refused send held the pending messages until the user sends again. */
@@ -98,6 +101,7 @@ export const strings = {
     imagePreview: 'Preview {image}',
     imagePreviewClose: 'Close image preview',
     attachPending: 'Reload to recover',
+    attachLoading: 'Loading',
     /** The last tile of a full strip: how many more it hides, and folding them back. */
     attachMore: 'Show {count} more',
     attachLess: 'Show fewer',

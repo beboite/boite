@@ -34,7 +34,7 @@ export class ArtifactPreviews {
   }
 
   open(threadId: string, path: string): { url: string; port: number; path: string } {
-    this.unlisten ??= this.core.bus.onAny((name) => {
+    this.unlisten ??= this.core.bus.onCommitted((name) => {
       if (name !== 'thread.updated' && name !== 'thread.removed') return;
       for (const [key, preview] of this.previews) {
         try {

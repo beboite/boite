@@ -85,6 +85,10 @@ export class MuseTurn {
     this.decide();
   }
 
+  endStopped(): void {
+    this.finish('cancelled', null);
+  }
+
   fail(reason: string, diagnostic?: string): void {
     if (this.decided) return;
     this.decided = true;

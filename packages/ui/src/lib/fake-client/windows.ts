@@ -77,8 +77,8 @@ export function windowsMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
     streamed.delete(threadId);
     if (watches.delete(threadId)) changed(threadId);
   };
-  ctx.bus.on('thread.updated', thread => { if (thread.archived) release(thread.id); });
-  ctx.bus.on('thread.removed', ({ threadId }) => release(threadId));
+  ctx.bus.observe('thread.updated', thread => { if (thread.archived) release(thread.id); });
+  ctx.bus.observe('thread.removed', ({ threadId }) => release(threadId));
 
   const active = (threadId: string): Thread => {
     const thread = ctx.thread(threadId);

@@ -1,4 +1,5 @@
 import { secureId } from '../secure-id';
+import { FakeComposerState } from './composer';
 import type { FakeArchiveState, MergedPrFixture } from './merged-pr-archive';
 /** The state one fake core keeps, and the plumbing every domain module shares. */
 import { observeProgress } from './progress';
@@ -82,7 +83,7 @@ import { startTurn, stopTurn } from './turns';
 import { FakeWorkflows } from './workflows';
 import { initialDesktopUpdate, initialServerUpdate } from './server-update';
 import { observeLog } from './logs';
-import { followGoal } from './todos';
+import { agentTodos, followGoal } from './todos';
 import type { FakeWorktree } from './worktrees';
 
 /**
@@ -93,6 +94,8 @@ import type { FakeWorktree } from './worktrees';
 export type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}` | `agents.${string}` | `workflows.${string}` | `resident.${string}`>]: (params: RpcParams<M>) => Promise<RpcResult<M>> };
 
 export interface FakeClientOptions {
+  /** Explicit peer clients share one core's composer records and attachment assets. */
+  composerState?: FakeComposerState;
   /** Milliseconds between two streamed chunks. Tests pass 0. */
   delayMs?: number;
   /** Exhausted quotas with banked resets and credits for visual checks. */
@@ -134,7 +137,7 @@ export interface FakeClientOptions {
   windowsDemo?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
-  /** Explicit thread-bound token fixture; agent methods otherwise fail closed. */
+  /** The thread an agent's token names; with none, every agent call fails closed, as on the core. */
   agentThreadId?: ThreadId;
   /** A link nobody encrypts (plain HTTP from another machine): no secret value travels on it; `?fake=1&plainLink=1` sets it. */
   plainLink?: boolean;
@@ -176,10 +179,12 @@ function tokenStream(): number | undefined {
 type Rest<F> = F extends (ctx: FakeContext, ...rest: infer R) => unknown ? R : never;
 
 export class FakeContext {
+  readonly composer: FakeComposerState;
   hasProtectedInput(threadId: ThreadId): boolean {
     return this.bus.protectAllThreads || this.bus.protectedThreadIds.has(threadId);
   }
-  readonly agentThreadId: ThreadId | null;
+  /** The thread an agent's token names; `becomes('agent', id)` moves it. */
+  agentThreadId: ThreadId | null;
   readonly logs: CoreLogRecord[] = [];
   readonly logRunId = secureId();
   logSequence = 0;
@@ -327,10 +332,11 @@ export class FakeContext {
   readonly harnessUpdates: HarnessUpdate[] = initialHarnessUpdates();
 
   constructor(options: FakeClientOptions = {}) {
+    this.composer = options.composerState ?? new FakeComposerState();
     this.quotaExtras = options.quotaExtras ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('quotaExtras') === '1');
     this.brainLinkPermission = options.brainLinkPermission ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('brainLinkPermission') === '1');
     this.plainLink = options.plainLink ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('plainLink') === '1');
-    this.bus = new FakeBus(options.principal ?? 'owner');
+    this.bus = new FakeBus(options.principal ?? 'owner', { threadId: () => this.agentThreadId, projectOf: id => this.threads.get(id)?.projectId ?? null, visibleTodos: (id, todos) => agentTodos(this, id, todos) });
     this.agents = new FakeAgents(revision => {
       this.emit('agents.changed', { revision });
       // As the core: a change to any agent may answer a card, settled once per burst after it commits.
@@ -484,6 +490,7 @@ export class FakeContext {
   }
 
   emit<E extends RpcEventName>(event: E, payload: RpcEvents[E]): void {
+    this.composer.observe(this, event, payload);
     if (event === 'thread.removed') cancelSecretCards(this, (payload as RpcEvents['thread.removed']).threadId);
     if (event === 'thread.updated') {
       const thread = payload as RpcEvents['thread.updated'];

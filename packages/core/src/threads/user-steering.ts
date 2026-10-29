@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { previewPrompt, previewReferencesError, type Message, type MessagePart, type RpcParams, type ThreadCapabilityReason, type Turn } from '@boite/contracts';
+import { previewPrompt, previewReferencesError, type Message, type MessagePart, type RpcParams, type SentFrom, type ThreadCapabilityReason, type Turn } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { prepareAttachments } from '../attachments.ts';
 import { messageOf, refused } from '../errors.ts';
@@ -23,7 +23,7 @@ export function userSteeringUnavailable(core: Core, threads: ThreadStore, thread
 }
 
 /** User input keeps its own provenance and receipt while sharing the active provider turn. */
-export async function steerUser(core: Core, threads: ThreadStore, params: RpcParams<'turns.steer'>): Promise<{ accepted: boolean }> {
+export async function steerUser(core: Core, threads: ThreadStore, params: RpcParams<'turns.steer'>, sentFrom: SentFrom | null = null): Promise<{ accepted: boolean }> {
   const { threadId, turnId, prompt, clientRequestId, expectedSelectionVersion } = params;
   const thread = threads.require(threadId);
   if (core.stopping || thread.archived) throw refused('user steering requires an active, unarchived conversation');
@@ -56,7 +56,7 @@ export async function steerUser(core: Core, threads: ThreadStore, params: RpcPar
   const text = previewPrompt(expanded, expandedReferences);
   const prepared = prepareAttachments(core.dataDir, { prompt: text, attachments });
   const message: Message = { id: newId('msg_'), threadId, turnId, role: 'user', state: 'complete', createdAt: Date.now(), parts: [
-    { type: 'text', text, ...(references.length ? { displayText: expanded, previewReferences: structuredClone(expandedReferences) } : {}) },
+    { type: 'text', text, ...(sentFrom ? { sentFrom } : {}), ...(references.length ? { displayText: expanded, previewReferences: structuredClone(expandedReferences) } : {}) },
     ...attachments.map((attachment): MessagePart => attachment.kind === 'file'
       ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name }
       : { type: 'image', mimeType: attachment.mimeType, data: attachment.data, alt: attachment.name }),

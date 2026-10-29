@@ -6,11 +6,43 @@ import {Bus} from '../src/bus.ts';
 import {Journal} from '../src/journal.ts';
 import {ProcRegistry} from '../src/procs.ts';
 
+// Only fixed case/run IDs, captured PIDs and phase states enter these diagnostics.
+// The two runs per case bound the snapshot; no output, command paths or environment are logged.
+function contractPhases(caseId: string) {
+  const started = performance.now();
+  type Status = 'pending' | 'fulfilled' | 'rejected';
+  type Wait = 'exit' | 'stdout' | 'stderr';
+  type RunState = {pid: number} & Record<Wait, Status>;
+  const runs = new Map<string, RunState>();
+  const phase = (name: string, runId?: string, status?: string) => {
+    console.error('[windows-contract-phase]', JSON.stringify({caseId, phase: name,
+      ms: Math.round((performance.now() - started) * 100) / 100, runId, status,
+      runs: Array.from(runs, ([id, state]) => ({id, ...state}))}));
+  };
+  return {
+    phase,
+    launched(id: string, pid: number) {
+      // Track the original waits, including those still pending at cleanup.
+      const waits: RunState = {pid, exit: 'pending', stdout: 'pending', stderr: 'pending'};
+      runs.set(id, waits);
+      phase('launched', id);
+      return <T>(wait: Wait, promise: Promise<T>): Promise<T> => promise.then(value => {
+        waits[wait] = 'fulfilled'; phase(wait, id, 'fulfilled'); return value;
+      }, error => {
+        waits[wait] = 'rejected'; phase(wait, id, 'rejected'); throw error;
+      });
+    },
+  };
+}
+
 test('diagnostic nonce parsing refuses overlong input without writing beyond its caller buffer', async () => {
+  const phases = contractPhases('nonce');
   const scratch = mkdtempSync(join(tmpdir(), 'boite-live-fence-contracts-'));
   const journal = new Journal(join(scratch, 'journal.db')), procs = new ProcRegistry(journal, new Bus());
   try {
+    phases.phase('compiler-selection-start');
     const compiler = process.platform === 'win32' ? Bun.which('gcc') || Bun.which('clang') : Bun.which('cc');
+    phases.phase('compiler-selection-complete', undefined, compiler ? 'found' : 'missing');
     if (!compiler) throw new Error('Diagnostic nonce contract harness requires a C compiler');
     const header = readFileSync(join(import.meta.dir, '../../../tests/diagnostics/windows-debug-map/live-root-fence.h'), 'utf8');
     // Compile the actual diagnostic parser, with the Windows environment API replaced by its buffer contract.
@@ -45,30 +77,53 @@ int main(void) {
 }
 `);
     const run = async (id: string, command: string, args: string[]) => {
-      const child = procs.spawnPiped(id, command, args, {cwd: scratch, agentRoot: false}); child.proc.stdin.end();
-      const [code, out, err] = await Promise.all([child.exited, new Response(child.proc.stdout).text(), new Response(child.proc.stderr).text()]);
+      phases.phase('launch-intent', id);
+      const child = procs.spawnPiped(id, command, args, {cwd: scratch, agentRoot: false});
+      const observe = phases.launched(id, child.proc.pid);
+      child.proc.stdin.end();
+      const [code, out, err] = await Promise.all([observe('exit', child.exited),
+        observe('stdout', new Response(child.proc.stdout).text()), observe('stderr', new Response(child.proc.stderr).text())]);
       expect(code, err).toBe(0); return out;
     };
     await run('compile-fence-nonce', compiler, ['-std=c11', '-O0', '-Wall', '-Wextra', '-Werror', source, '-o', binary]);
     expect((await run('run-fence-nonce', binary, [])).trim()).toBe('LIVE_FENCE nonce=32 rejected=33,34,empty,nonhex canary=intact');
-  } finally {await procs.killAll(); await procs.close(); journal.close(); rmSync(scratch, {recursive: true, force: true});}
+  } finally {
+    phases.phase('finally-enter');
+    await procs.killAll(); phases.phase('kill-all-complete');
+    await procs.close(); phases.phase('registry-close-complete');
+    journal.close(); rmSync(scratch, {recursive: true, force: true});
+    phases.phase('cleanup-complete');
+  }
 }, 20000);
 
 test('production Null scheduler grows, replays queued traps and validates native outputs', async () => {
+  const phases = contractPhases('production-null');
   const scratch = mkdtempSync(join(tmpdir(), 'boite-production-null-contracts-'));
   const journal = new Journal(join(scratch, 'journal.db')), procs = new ProcRegistry(journal, new Bus());
   try {
+    phases.phase('compiler-selection-start');
     const compiler = process.platform === 'win32' ? Bun.which('gcc') || Bun.which('clang') : Bun.which('cc');
+    phases.phase('compiler-selection-complete', undefined, compiler ? 'found' : 'missing');
     if (!compiler) throw new Error('Production Null contract harness requires a C compiler');
     const binary = join(scratch, process.platform === 'win32' ? 'contracts.exe' : 'contracts');
     const run = async (id: string, command: string, args: string[]) => {
-      const child = procs.spawnPiped(id, command, args, {cwd: scratch, agentRoot: false}); child.proc.stdin.end();
-      const [code, out, err] = await Promise.all([child.exited, new Response(child.proc.stdout).text(), new Response(child.proc.stderr).text()]);
+      phases.phase('launch-intent', id);
+      const child = procs.spawnPiped(id, command, args, {cwd: scratch, agentRoot: false});
+      const observe = phases.launched(id, child.proc.pid);
+      child.proc.stdin.end();
+      const [code, out, err] = await Promise.all([observe('exit', child.exited),
+        observe('stdout', new Response(child.proc.stdout).text()), observe('stderr', new Response(child.proc.stderr).text())]);
       expect(code, err).toBe(0); return out;
     };
     await run('compile-production-contracts', compiler, ['-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
       '-I' + join(import.meta.dir, '../src/platform/windows'), join(import.meta.dir, 'fixtures/protected-null-contracts.c'), '-o', binary]);
     expect((await run('run-production-contracts', binary, [])).trim()).toBe(
       'PROTECTED_NULL growth=300 queued-replay=1 terminating-workers=2 balanced=1 cancellation=1 output-spans=1 qos-snapshot=1 create-abi=1');
-  } finally {await procs.killAll(); await procs.close(); journal.close(); rmSync(scratch, {recursive: true, force: true});}
+  } finally {
+    phases.phase('finally-enter');
+    await procs.killAll(); phases.phase('kill-all-complete');
+    await procs.close(); phases.phase('registry-close-complete');
+    journal.close(); rmSync(scratch, {recursive: true, force: true});
+    phases.phase('cleanup-complete');
+  }
 }, 20000);

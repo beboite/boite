@@ -94,7 +94,7 @@ export function seedAgentsDemo(ctx: FakeContext): void {
     icons.updatedAt = now - 30 * MINUTE;
     const pr = (number: number, state: 'open' | 'merged', checks: 'passing' | 'failing' | null) => ({ number, url: `https://github.com/example/boite/pull/${number}`, state, checks });
     ctx.agents.seedWatch({ agentId: nova.agent.id, threadId: fix.id, origin: 'started', since: fix.createdAt, stalledSince: null, pullRequest: pr(482, 'open', 'failing') });
-    ctx.agents.seedWatch({ agentId: nova.agent.id, threadId: flaky.id, origin: 'started', since: flaky.createdAt, stalledSince: null, pullRequest: null });
+    ctx.agents.seedWatch({ agentId: nova.agent.id, threadId: flaky.id, origin: 'touched', since: flaky.createdAt, stalledSince: null, pullRequest: null });
     ctx.agents.seedWatch({ agentId: nova.agent.id, threadId: migrate.id, origin: 'entrusted', since: migrate.createdAt, stalledSince: now - 24 * MINUTE, pullRequest: null });
     ctx.agents.seedWatch({ agentId: nova.agent.id, threadId: icons.id, origin: 'followed', since: icons.createdAt, stalledSince: null, pullRequest: null });
     ctx.agents.seedWatch({ agentId: nova.agent.id, threadId: notes.id, origin: 'started', since: notes.createdAt, stalledSince: null, pullRequest: pr(479, 'merged', null) });

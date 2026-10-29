@@ -190,8 +190,21 @@ The compaction is the turn `threads.compact` schedules, with
 `Automatic compaction`), its divider says `auto`, and it sends no notification.
 A threshold below what the agent keeps after compacting makes every turn end
 compact again. The timers live in memory: a core restart drops them, and the
-next finished turn arms a new one. The in-memory client implements `turn-end`
-and the independent token limit; it has no background work or prompt cache.
+next finished turn arms a new one.
+
+A thread can sit idle above its token limit: it went quiet before the owner
+lowered the limit, or a restart dropped its timer. When a client shows it
+(`threads.focus`), the core compacts it at once under the same checks, while
+the user reads and types, instead of letting the next prompt wait for the
+agent's own blocking compaction. A background copy cannot help there, since
+one starts only below the limit. As after a turn, a last turn that stopped or
+failed is left to the user (a cache keepalive ping does not count as the last
+turn), and a compaction never chains into another: when
+the last turn is one, even still over the limit, a look starts nothing. An ACP agent names its `compact` command only once its session is
+prepared, so that announcement, on a shown thread, is checked the same way. A prompt that crosses the
+limit by itself is compacted by the agent before it is sent, as above. The in-memory client implements `turn-end`
+and the independent token limit after a turn, not when a thread is shown; it
+has no background work or prompt cache.
 
 When a merged PR moves a conversation to Done, its last prompt can finish,
 but a compaction turn is stopped. If the provider announces native compaction
@@ -200,7 +213,8 @@ after Done, that turn is stopped too. The history already written is kept.
 ### Background compaction
 
 `Settings.backgroundCompaction` is an experiment, off by default, that the
-owner turns on under Settings, Experiments (an agent asks with
+owner turns on under Settings, Experiments, for the machine picked above the
+card, the one that runs the thread (an agent asks with
 `boite settings request backgroundCompaction true --why "..."`). It works
 with the token limit above and does nothing without one. Like `deviceStream`,
 it stays on its machine: the group's settings do not carry it.
@@ -364,21 +378,64 @@ and the user follow the work.
 
 ## Durable drafts
 
-Unsent input is device-local, scoped to each core and data directory. New
-conversations keep a draft per project; existing conversations keep their own
-reply. IndexedDB uses strict transaction durability, with a synchronous text
-backup in `localStorage` on each keystroke. The journal writes 800 ms after
+The owning core stores unsent input and pending prompts in SQLite. Owner and
+paired-device clients share new-conversation drafts and each thread's reply
+through revised `composer` records. Compare-and-swap rejects stale writes;
+tombstones keep a cleared record from reappearing after reconnect. Concurrent
+text is retained as a separate draft instead of overwritten.
+
+Typing sends only the changed record, coalesced over 400 ms. Attachments upload
+once as content-addressed assets; records and broadcasts carry their IDs and
+metadata. Other devices fetch bytes when that composer opens. The core validates
+metadata and byte limits without reading attachment bodies on each text edit.
+
+IndexedDB remains the device's offline cache and migration source, with strict
+transaction durability and a synchronous text backup in `localStorage` on each
+keystroke. The journal writes 800 ms after
 typing pauses and at least every five seconds while it continues. Attachments,
 failed backups, explicit flush, page hiding and navigation flush immediately.
-A local core changing port retains the same drafts.
+A local core changing port retains the same drafts. When attachment bytes push
+the backup past the `localStorage` quota, the backup keeps the text and
+attachment IDs; the journal supplies the bytes, and missing ones restore as
+placeholders. A prompt that left the box but has no core answer yet stays in
+the journal: a thread's prompt as an outbox entry under its `turns.start`
+request ID, a new conversation's as its draft. A crash before the answer
+brings it back without a duplicate turn: the owning core reads the receipt of
+that request ID, drops the entry when it already took it and starts it once
+when it never did.
 
-Queued input restores paused. The durable record includes attachments and page
-references. Storage errors keep input in memory and show the reason. Reads and
+Accepted queues run on the core without an open client, including after restart
+when delivery is known to be safe. Unconfirmed provider submissions stay held.
+Provider, account, model, effort and speed stay captured; permission modes follow
+the thread's current selection, including for queued input.
+Queued commands retain the enqueueing app's experiments, so a reviewed goal
+keeps its meaning after a restart or another device changes its preferences.
+A restored ordinary queue whose previous acceptance cannot be proved stays
+paused until explicitly resumed.
+Input written while the core is unreachable stays on the device until a client
+reconnects and synchronizes it. Incognito input stays in client memory and uses
+the client delivery path; older cores retain device-local persistence.
+
+Undoable deletion retains core input. Permanent deletion erases reply records
+and linked delivery receipts, and reconnecting clients discard their stale
+reply caches. Delivered draft launches retain a deduplication receipt with no
+thread link or content fingerprint, so an old cache cannot launch them again.
+
+The durable record includes attachments and page references. Storage errors
+keep input in memory and show the reason. Reads and
 writes have a three-second deadline; a failed read cannot overwrite unread
 durable drafts. Once readable, the text backup merges with them. Missing
 attachment bytes keep removable placeholders and their IDs through text edits;
 removed IDs stay removed after recovery. Send waits for unreadable attachments
-to become available or be explicitly removed.
+to become available or be explicitly removed. When the core refuses a record
+over the per-message attachment limits, the device keeps it and shows why; the
+next edit tries again.
+
+Edit on a sent message, recall and the composer's other replacements are one
+undo step, and undo restores the edit marker. On a touch screen, where there is
+no Ctrl+Z, a box emptied in one edit or replaced by Edit shows a short Undo
+toast. A retry whose resend fails leaves text typed meanwhile in the box and
+holds the prompt at the head of the queue.
 
 Asynchronous creation and send retain the original core, thread and draft
 identity. Accepted work does not select a thread after newer navigation or
