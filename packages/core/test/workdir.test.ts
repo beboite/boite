@@ -5,16 +5,19 @@
  * temporary directory the harness removes.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
+import * as fs from 'node:fs';
+import * as fsPromises from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { FILE_MAX_BYTES, FILE_ROUTE, FILE_TICKET_TTL_MS } from '@boite/contracts';
 import { connect, type CoreClient } from '../src/client.ts';
 import { createExclusiveFile, languageOf, mediaOf, openHeldDirectory, writeLandsInside } from '../src/workdir.ts';
 import { echoThread, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
-import { thrown } from './settle.ts';
+import { rejection, thrown } from './settle.ts';
 
 let harness: TestCore;
 let client: CoreClient;
@@ -157,6 +160,7 @@ describe('files.read', () => {
   });
 
   test('an unknown or expired ticket is a 404 that says nothing about the file', async () => {
+    writeFileSync(join(harness.dataDir, 'shot.png'), picture());
     const stale = harness.core.fileTickets.mint(join(harness.dataDir, 'shot.png'), 'image/png', Date.now() - FILE_TICKET_TTL_MS - 1);
     const expired = await fetch(`${harness.url}${FILE_ROUTE}/${stale}`);
     expect(expired.status).toBe(404);
@@ -257,6 +261,123 @@ describe('byte tickets', () => {
     // Read before each expiry, it keeps the same address well past the first ten minutes.
     for (const at of [1, 2, 3]) expect(tickets.bytes(ticket, at * (FILE_TICKET_TTL_MS - 1))).not.toBeNull();
     expect(tickets.bytes(ticket, 4 * FILE_TICKET_TTL_MS)).toBeNull();
+  });
+});
+
+describe('download responses', () => {
+  test.each(['disk', 'bytes'])('%s tickets encode filename attributes, including ranged downloads', async kind => {
+    const path = join(harness.dataDir, 'download.bin');
+    const data = Buffer.from('0123456789');
+    writeFileSync(path, data);
+    for (const [name, encoded] of [["a'b(c)*.txt", 'a%27b%28c%29%2A.txt'], ['café!.txt', 'caf%C3%A9!.txt']]) {
+      const ticket = kind === 'disk'
+        ? harness.core.fileTickets.mint(path, 'application/octet-stream', Date.now(), name)
+        : harness.core.fileTickets.mintBytes(name!, () => ({ data, mime: 'application/octet-stream', name }));
+      for (const range of [null, 'bytes=2-4']) {
+        const response = await fetch(`${harness.url}${FILE_ROUTE}/${ticket}`, { headers: range ? { range } : {} });
+        expect(response.status).toBe(range ? 206 : 200);
+        expect(response.headers.get('content-disposition')).toBe(`attachment; filename*=UTF-8''${encoded}`);
+        expect(await response.text()).toBe(range ? '234' : '0123456789');
+      }
+    }
+  });
+
+  test('HTTP rejects a ticket body truncated after its handle was checked', async () => {
+    const path = join(harness.dataDir, 'shrinking.bin');
+    writeFileSync(path, Buffer.alloc(200_000, 65));
+    const tickets = harness.core.fileTickets;
+    const ticket = tickets.mint(path, 'application/octet-stream');
+    const original = tickets.open.bind(tickets);
+    const opened: fsPromises.FileHandle[] = [];
+    let resume!: () => void;
+    const receiving = new Promise<void>(resolve => { resume = resolve; });
+    tickets.open = async (asked, now) => {
+      const result = await original(asked, now);
+      if (asked === ticket && result) {
+        opened.push(result.handle);
+        const read = result.handle.read.bind(result.handle);
+        result.handle.read = (async (buffer: Buffer, offset: number, length: number, position: number) => {
+          if (position > 0) await receiving;
+          return read(buffer, offset, length, position);
+        }) as typeof result.handle.read;
+      }
+      return result;
+    };
+    try {
+      const response = await fetch(`${harness.url}${FILE_ROUTE}/${ticket}`, { signal: AbortSignal.timeout(2000) });
+      expect(response.status).toBe(200);
+      expect(response.headers.get('accept-ranges')).toBe('bytes');
+      const reader = response.body!.getReader();
+      expect((await reader.read()).done).toBe(false);
+      truncateSync(path, 100_000);
+      resume();
+      const drain = async () => { while (!(await reader.read()).done) { /* Read through the transport failure. */ } };
+      const { reason } = await rejection(drain());
+      expect(reason).toBeInstanceOf(Error);
+      expect((reason as Error).name).not.toBe('TimeoutError');
+      expect(opened).toHaveLength(1);
+      expect((await rejection(opened[0]!.stat())).reason).toMatchObject({ code: 'EBADF' });
+    } finally {
+      resume();
+      tickets.open = original;
+      await Promise.all(opened.map(handle => handle.close()));
+    }
+  });
+
+  (process.platform === 'win32' ? test.skip : test).each(['file', 'gzip'])('a %s ticket rejects a FIFO without waiting for a writer', async kind => {
+    const path = join(harness.dataDir, 'page.html');
+    const page = '<!doctype html><p>synthetic view</p>';
+    writeFileSync(path, page);
+    const copy = path + '.gz';
+    writeFileSync(copy, Bun.gzipSync(Buffer.from(page)));
+    const tickets = harness.core.fileTickets;
+    const ticket = tickets.mint(path, 'text/html', Date.now(), 'page.html', undefined, kind === 'gzip');
+    const url = `${harness.url}/${kind === 'gzip' ? 'view' : 'file'}/${ticket}`;
+    const request = () => fetch(url, { headers: { 'accept-encoding': 'gzip' }, decompress: false });
+    const normal = await request();
+    expect(normal.status).toBe(200);
+    expect(kind === 'gzip' ? new TextDecoder().decode(Bun.gunzipSync(new Uint8Array(await normal.arrayBuffer()))) : await normal.text()).toBe(page);
+
+    const target = kind === 'gzip' ? copy : path;
+    rmSync(target);
+    execFileSync('mkfifo', [target]);
+    const open = spyOn(fsPromises, 'open');
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const pending = request();
+    let writer: number | undefined;
+    try {
+      const response = await Promise.race([
+        pending,
+        new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), 1000); }),
+      ]);
+      // A failing implementation must still release its blocked open and close the returned handles.
+      if (response === null) writer = openSync(target, constants.O_RDWR | constants.O_NONBLOCK);
+      const settled = response ?? await pending;
+      expect(settled.status).toBe(kind === 'gzip' ? 200 : 404);
+      expect(await settled.text()).toBe(kind === 'gzip' ? page : 'unknown or expired ticket');
+      const handles = await Promise.all(open.mock.results.flatMap((result, index) =>
+        open.mock.calls[index]?.[0] === target && result.type === 'return' ? [result.value] : []));
+      expect(handles).toHaveLength(1);
+      for (const handle of handles) expect((await rejection(handle.stat())).reason).toMatchObject({ code: 'EBADF' });
+      expect(response).not.toBeNull();
+      if (kind === 'file') expect(tickets.resolve(ticket)).toBeNull();
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      if (writer !== undefined) closeSync(writer);
+      open.mockRestore();
+    }
+  });
+
+  (process.platform === 'win32' ? test.skip : test)('a gzip view copy replaced with a link falls back to the original page', async () => {
+    const path = join(harness.dataDir, 'page.html');
+    writeFileSync(path, '<p>original</p>');
+    const other = join(harness.dataDir, 'other.gz');
+    writeFileSync(other, Bun.gzipSync(Buffer.from('<p>other</p>')));
+    if (!linked(other, path + '.gz')) return;
+    const ticket = harness.core.fileTickets.mint(path, 'text/html', Date.now(), 'page.html', undefined, true);
+    const response = await fetch(`${harness.url}/view/${ticket}`, { headers: { 'accept-encoding': 'gzip' } });
+    expect(response.headers.get('content-encoding')).toBeNull();
+    expect(await response.text()).toBe('<p>original</p>');
   });
 });
 
@@ -398,6 +519,26 @@ describe('writeLandsInside', () => {
         expect(writeLandsInside(root, 'dangling.txt')).toBe(false);
       }
     } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  test('a file its owner may not read lies where its parent resolves, a link that cannot be resolved stays refused', () => {
+    const root = harness.dataDir;
+    writeFileSync(join(root, 'locked.txt'), 'x');
+    const outside = mkdtempSync(join(tmpdir(), 'boite-outside-'));
+    const linkMade = linked(join(outside, 'secret.txt'), join(root, 'locked-link.txt'));
+    // Bun on macOS opens a path to resolve it, so mode 000 answers EACCES there.
+    const real = fs.realpathSync;
+    const spy = spyOn(fs, 'realpathSync').mockImplementation(((path: string, options?: unknown) => {
+      if (String(path).includes('locked')) throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+      return real(path, options as never);
+    }) as typeof fs.realpathSync);
+    try {
+      expect(writeLandsInside(root, 'locked.txt')).toBe(true);
+      if (linkMade) expect(writeLandsInside(root, 'locked-link.txt')).toBe(false);
+    } finally {
+      spy.mockRestore();
       rmSync(outside, { recursive: true, force: true });
     }
   });

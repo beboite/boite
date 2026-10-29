@@ -1,9 +1,20 @@
+import { sharedProjectMethods } from './fake-client/shared-projects';
+import { sharedLookupMethods } from './fake-client/shared-lookup';
+import { sharedBoardMethods } from './fake-client/shared-board';
+import { sharedComputeMethods, setSharedRepository, setSharedNativeExecution, finishSharedCompute } from './fake-client/shared-compute';
+import { sharedAccessMethods } from './fake-client/shared-access';
+import { sharedLetterMethods } from './fake-client/shared-letters';
+import { sharedState, sharedContact, reconcileShared, refusedShared } from './fake-client/shared-state';
 import { startupMethods, resetStartup } from './fake-client/startup';
+import { composerMethods } from './fake-client/composer';
+import { holdContactMail } from './fake-client/contact-hold';
 import { seedWorking } from './fake-client/working-seed';
 import { sweepMergedPrFixtures, type MergedPrFixture } from './fake-client/merged-pr-archive';
 import {
   RPC_CHUNK_BYTES,
   RpcErrorCode,
+  accessRefusal,
+  checkRpcParams,
   type CoreInfo,
   type CoreLogContext,
   type ExperimentId,
@@ -45,12 +56,11 @@ import { providerCatalogMethods } from './fake-client/provider-catalog';
 import { providerInstallMethods } from './fake-client/provider-installs';
 import { RELEASES } from './fake-client/providers';
 import { clearRequestsOf, requestMethods } from './fake-client/requests';
-import { secretMethods } from './fake-client/secrets';
+import { closeSecrets, secretMethods } from './fake-client/secrets';
 import { resourceMethods } from './fake-client/resources';
 import { seed } from './fake-client/seed';
 import { settingsMethods } from './fake-client/settings';
 import { gatewayMoveMethods } from './fake-client/gateway-move';
-import { DEVICE_METHODS } from './fake-client/shared';
 import { speechMethods } from './fake-client/speech';
 import { terminalMethods } from './fake-client/terminals';
 import { capabilityMethods } from './fake-client/capabilities';
@@ -109,6 +119,7 @@ export class FakeClient implements ObservableClient {
     this.#ctx = ctx;
     this.#methods = this.#answer(ctx);
     this.#missing = new Set(options.missing ?? []);
+    ctx.core.features = { ...ctx.core.features, composerPersistence: !this.#missing.has('composer.list') };
     this.#agentSettings = agentSettingMethods(ctx);
     registerCore(ctx);
     seed(ctx);
@@ -120,7 +131,7 @@ export class FakeClient implements ObservableClient {
     this.#stopWorking = seedWorking(ctx, options.working ?? 0);
     if (options.watchDemo) {
       const at = Date.now();
-      const watch = (number: number) => ({ url: `https://github.com/beboite/boite/pull/${number}`, repository: 'beboite/boite', number, since: at - 600_000 });
+      const watch = (number: number) => ({ url: `https://github.com/mtsu-dev/boite/pull/${number}`, repository: 'mtsu-dev/boite', number, since: at - 600_000 });
       ctx.thread('t-trace').pullRequestWatches = [
         { ...watch(512), paused: null, seen: { checkedAt: at - 30_000, head: '3e535df', base: 'main', checks: { total: 26, running: 4, failed: 1 }, conflicting: false } },
         { ...watch(498), paused: { reason: 'rate-limit', until: at + 240_000, message: 'API rate limit exceeded' }, seen: { checkedAt: at - 300_000, head: '2f257f4', base: 'main', checks: { total: 26, running: 0, failed: 0 }, conflicting: true } },
@@ -158,6 +169,11 @@ export class FakeClient implements ObservableClient {
     return this.#ctx.bus.state;
   }
 
+  /** A second device connected to this fake core's shared composer. */
+  composerPeer(options: Omit<FakeClientOptions, 'composerState'> = {}): FakeClient {
+    return new FakeClient({ ...options, composerState: this.#ctx.composer });
+  }
+
   get core(): CoreInfo | null {
     return this.#ctx.bus.state === 'ready' ? this.#ctx.core : null;
   }
@@ -172,13 +188,15 @@ export class FakeClient implements ObservableClient {
   }
 
   /**
-   * Turns this client into a paired device, or back into the owner, in the
-   * spirit of `drop` and `restore`: the boundary is the core's, so a test can
-   * cross it without a second socket. `hello` and every later call answer as
-   * the new principal from here on.
+   * Turns this client into a paired device, an agent, or back into the owner,
+   * in the spirit of `drop` and `restore`: the boundary is the core's, so a
+   * test can cross it without a second socket. `hello` and every later call
+   * answer as the new principal from here on. An agent speaks for the thread
+   * its token names, `threadId` or the one the client was built with.
    */
-  becomes(principal: Principal): void {
+  becomes(principal: Principal, threadId?: ThreadId): void {
     this.#ctx.bus.principal = principal;
+    if (threadId !== undefined) this.#ctx.agentThreadId = threadId;
   }
 
   setBrainLinkPermission(denied: boolean): void {
@@ -216,6 +234,13 @@ export class FakeClient implements ObservableClient {
     this.#ctx.touch(thread);
   }
 
+  /** What the core says of a thread whose history read contact mail outside a shared project. */
+  holdForContactMail(threadId: ThreadId, contacts: string[]): void {
+    const thread = this.#ctx.threads.get(threadId);
+    if (!thread) throw new Error(`no fake thread ${threadId}`);
+    holdContactMail(this.#ctx, threadId, contacts);
+  }
+
   setMergedPrFixture(threadId: ThreadId, fixture: MergedPrFixture): void {
     this.#ctx.mergedPrFixtures.set(threadId, fixture);
   }
@@ -251,8 +276,10 @@ export class FakeClient implements ObservableClient {
 
   close(): void {
     const ctx = this.#ctx;
+    ctx.composer.detach(ctx);
     this.#stopWorking();
     closeSideQuestions(ctx);
+    closeSecrets(ctx);
     this.#stopLoad();
     ctx.agents.close();
     unregisterCore(ctx);
@@ -311,15 +338,14 @@ export class FakeClient implements ObservableClient {
       throw new RpcFailure({ code: RpcErrorCode.Internal, message: 'connection changed before RPC dispatch' });
     }
     if (this.#missing.has(method)) throw new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: `unknown method ${method}` });
-    // The fixture has no thread-bound agent token; do not widen this scoped read.
-    if (bus.principal === 'agent' && (method === 'threads.capabilities' || method === 'threads.mergeBack')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} requires a thread-bound agent identity` });
-    if (bus.principal === 'agent' && (method === 'core.logs' || method === 'projects.setAutoArchiveMergedPr' || method === 'projects.setAutoRemoveWorktrees' || method === 'quotas.reset')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is not one of the agent's methods` });
-    // The router's gate, word for word: deny by default, `hello` before it.
-    if (bus.principal === 'session' && method !== 'hello' && !DEVICE_METHODS.has(method)) {
-      throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is for the owner only` });
+    // The router's gate, word for word: `hello` before it, then who may call what, then the method's params rule.
+    if (method !== 'hello') {
+      const refusal = accessRefusal(method, { principal: bus.principal, threadId: this.#ctx.agentThreadId }, params);
+      if (refusal) throw new RpcFailure({ code: RpcErrorCode.Refused, message: refusal.message, data: refusal.data });
     }
-    if (bus.principal === 'session' && method === 'git.diff' && ![undefined, '', 'HEAD'].includes((params as RpcParams<'git.diff'>).ref)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'git.diff: paired devices compare the working tree with HEAD only' });
-    if (bus.principal === 'session' && (method === 'quotas.list' || method === 'subscriptionProxy.quotas') && (params as { refresh?: unknown }).refresh === true) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method}: paired devices read the last reading; refresh must be false or absent` });
+    const checked = checkRpcParams(method, params);
+    if (!checked.ok) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: checked.message, data: { field: checked.field } });
+    params = checked.params as RpcParams<M>;
     const result = await bus.hold(this.#dispatch(method, params)) as RpcResult<M>;
     if (this.#ctx.rttMs > 0) {
       // An answer still on its way back when the socket changed never arrives.
@@ -353,6 +379,18 @@ export class FakeClient implements ObservableClient {
     const thread = this.#ctx.thread(threadId);
     thread.load = { processes, cpuPercent: 12, memoryBytes: 48 * 1024 * 1024 };
     this.#ctx.emit('thread.load', { threadId, load: structuredClone(thread.load) });
+  }
+
+  /** Explicit deterministic Git fixture, separate from any RPC input. */
+  setSharedNativeExecution(available: boolean): void { setSharedNativeExecution(this.#ctx, available); }
+  setSharedRepository(projectId: string, repository: string, head: string): void { setSharedRepository(this.#ctx, projectId, repository, head); }
+  finishSharedCompute(jobId: string, text: string): void { finishSharedCompute(this.#ctx, jobId, text); }
+  get sharedSubscriptions() { return [...sharedState(this.#ctx).subscriptions.values()].map(p => ({...p})); }
+  setContactConnected(coreId: string, connected: boolean): void {
+    const contact = sharedContact(this.#ctx, coreId);
+    if (!contact) throw refusedShared('coreId: expected a contact');
+    contact.link = connected ? 'connected' : 'offline';
+    reconcileShared(this.#ctx);
   }
 
   /** The desktop app on the fake machine reporting its experiments, as the core's book announces a change. */
@@ -456,6 +494,7 @@ export class FakeClient implements ObservableClient {
   #answer(ctx: FakeContext): FakeMethods {
     const threads = threadMethods(ctx);
     const projects = projectMethods(ctx);
+    const coordination = coordinationMethods(ctx);
     const methods: FakeMethods = {
       'core.restart': async () => ({ ok: true as const }),
       'core.shutdown': async () => { ctx.agents.close(); await Promise.all([...ctx.threads.keys()].map(id => ctx.stopTurn(id))); setTimeout(() => this.close(), 25); return { ok: true }; },
@@ -463,6 +502,7 @@ export class FakeClient implements ObservableClient {
         return { core: ctx.core, principal: ctx.bus.principal };
       },
       ...brainMethods(ctx),
+      ...composerMethods(ctx, () => methods),
       ...logMethods(ctx),
       ...serverUpdateMethods(ctx),
       ...retryMethods(ctx),
@@ -490,7 +530,13 @@ export class FakeClient implements ObservableClient {
       ...gatewayMoveMethods(ctx),
       ...speechMethods(ctx),
       ...delegationMethods(ctx),
-      ...coordinationMethods(ctx),
+      ...coordination,
+      ...sharedProjectMethods(ctx),
+      ...sharedLookupMethods(ctx),
+      ...sharedBoardMethods(ctx),
+      ...sharedComputeMethods(ctx),
+      ...sharedAccessMethods(ctx),
+      ...sharedLetterMethods(ctx, coordination),
       ...groupMethods(ctx),
       ...contactMethods(ctx),
       ...todoMethods(ctx),

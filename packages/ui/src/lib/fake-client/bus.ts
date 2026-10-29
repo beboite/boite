@@ -1,10 +1,12 @@
 /** The socket's side of the fake: its state, the event handlers, thread subscriptions and the calls it holds. */
-import { DEVICE_EVENTS, RpcErrorCode, previewToolPart, type Principal, type RpcEventName, type RpcEvents, type ThreadId, type TransportOptions } from '@boite/contracts';
+import { RpcErrorCode, SUBSCRIBED_EVENTS, agentHearsEvent, eventThreadId, mayHearEvent, previewToolPart, type Principal, type RpcEventName, type RpcEvents, type ThreadId, type Todo, type TransportOptions } from '@boite/contracts';
 import { RpcFailure, droppedFailure, type ClientState, type EventHandler } from '../client';
 
 export class FakeBus {
   state: ClientState = 'idle';
   readonly handlers = new Map<string, Set<(payload: unknown) => void>>();
+  /** The fake core's own listeners, which `observe` adds. */
+  readonly observers = new Map<string, Set<(payload: unknown) => void>>();
   readonly stateHandlers = new Set<(state: ClientState) => void>();
   /** What the core has this socket subscribed to: what `emitToThread` reads. */
   readonly subscribed = new Set<ThreadId>();
@@ -19,7 +21,12 @@ export class FakeBus {
   /** The calls the socket is holding, so `drop()` can reject them from underneath. */
   readonly pending = new Set<{ reject: (error: RpcFailure) => void }>();
 
-  constructor(public principal: Principal) {}
+  /**
+   * `agent` is the thread an agent's token names, how to read a thread's
+   * project and which cards of a board that agent reads: what the core's
+   * broadcast narrows an agent socket's events to.
+   */
+  constructor(public principal: Principal, private readonly agent: { threadId(): ThreadId | null; projectOf(threadId: ThreadId): string | null; visibleTodos(threadId: ThreadId, todos: Todo[]): Todo[] } = { threadId: () => null, projectOf: () => null, visibleTodos: (_, todos) => todos }) {}
 
   onState(handler: (state: ClientState) => void): () => void {
     this.stateHandlers.add(handler);
@@ -31,6 +38,23 @@ export class FakeBus {
     if (!set) {
       set = new Set();
       this.handlers.set(event, set);
+    }
+    const erased = handler as (payload: unknown) => void;
+    set.add(erased);
+    return () => {
+      set.delete(erased);
+    };
+  }
+
+  /**
+   * A listener of the fake core itself (`delegation.wait`, the browser's tabs):
+   * it hears every event the core emits, whatever this socket may hear.
+   */
+  observe<E extends RpcEventName>(event: E, handler: EventHandler<E>): () => void {
+    let set = this.observers.get(event);
+    if (!set) {
+      set = new Set();
+      this.observers.set(event, set);
     }
     const erased = handler as (payload: unknown) => void;
     set.add(erased);
@@ -53,13 +77,22 @@ export class FakeBus {
 
   /** What reaches the app's handlers once the core has emitted an event. */
   deliver<E extends RpcEventName>(event: E, payload: RpcEvents[E]): void {
+    for (const handler of [...(this.observers.get(event) ?? [])]) handler(payload);
     // A socket that is down carries nothing. Everything the core emitted
     // during the gap is lost, which is what `reload()` exists to repair.
     if (this.state !== 'ready') return;
     // Provider output and other live diagnostics belong only to the owner.
     if (event === 'core.log' && this.principal !== 'owner') return;
-    // The core's `mayReceiveEvent`: a paired device hears only the device events.
-    if (this.principal === 'session' && !DEVICE_EVENTS.has(event)) return;
+    // The core's `mayReceiveEvent`: a paired device hears only the device events, an agent only its own.
+    if (!mayHearEvent(event, this.principal)) return;
+    const agentThreadId = this.agent.threadId();
+    if (this.principal === 'agent' && !agentHearsEvent(event, payload, agentThreadId, this.agent.projectOf)) return;
+    if (SUBSCRIBED_EVENTS.has(event) && !this.subscribed.has(eventThreadId(payload) ?? '')) return;
+    // An agent's board leaves out the shared cards its source may not reach, as `todos.list` does.
+    if (event === 'todos.updated' && this.principal === 'agent' && agentThreadId !== null) {
+      const board = payload as RpcEvents['todos.updated'];
+      payload = { ...board, todos: this.agent.visibleTodos(agentThreadId, board.todos) } as RpcEvents[E];
+    }
     if (event === 'message.part' && (this.transport.compactTools || this.transport.compactToolParts)) {
       const live = payload as RpcEvents['message.part'];
       if (live.part.type === 'tool') payload = { ...live, part: previewToolPart(live.part, { inputs: !!this.transport.compactToolParts }) } as RpcEvents[E];

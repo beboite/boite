@@ -58,7 +58,7 @@ The page is for the owner, on the desktop and on a phone connected as owner
 - Report a problem: a title, a description and the "include anonymized logs"
   switch. The preview is the body `diagnostics.issue` drafts with `submit:
   false`. When the core's machine has `gh` signed in, the issue is created on
-  `beboite/boite` and its link shown. Otherwise GitHub's form opens in the
+  `mtsu-dev/boite` and its link shown. Otherwise GitHub's form opens in the
   system browser, prefilled with a shorter body, and the page names the export
   file to drag into it.
 - Agents can read anonymized logs: the `agentLogAccess` setting, on unless the

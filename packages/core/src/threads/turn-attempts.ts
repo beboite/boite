@@ -4,10 +4,12 @@ import { releaseThread } from '../drivers/index.ts';
 import type { Driver, TurnContext, TurnHandle, TurnResult } from '../drivers/types.ts';
 import type { Resume } from '../providers/update-resume.ts';
 import type { ThreadStore } from '../threads.ts';
-import { totalTokens } from '../usage.ts';
+import { sumUsage, totalTokens } from '../usage.ts';
 import { LivePermissions } from './live-permissions.ts';
 import { LiveSettings } from './live-settings.ts';
-import { saveThread, setThreadStatus, withLoad } from './records.ts';
+import { saveThread, withLoad } from './records.ts';
+import { markRunning } from './lifecycle.ts';
+import { RESUME_TEXT, modeRestartPrompt } from './resume-text.ts';
 import type { CarriedInput } from './turn-context.ts';
 
 /** The current attempt snapshots, shared with live controls and final settlement. */
@@ -40,7 +42,7 @@ export const STOP_DEADLINE_ERROR = 'The agent did not stop in time; its processe
  */
 export const CAPACITY_RETRY = { delaysMs: [30_000, 120_000, 300_000] };
 /** What a try after capacity sends when the attempt before it had already written something. */
-export const CAPACITY_CONTINUE_PROMPT = 'The model was at capacity and your previous attempt stopped partway through. Continue the current task from where it stopped. Do not repeat completed work.';
+export const CAPACITY_CONTINUE_PROMPT = RESUME_TEXT.capacity.prompt;
 
 type RetryOutcome = 'retry' | 'stop' | 'cancel';
 
@@ -77,6 +79,8 @@ export class TurnAttempts {
 
   open(state: TurnAttemptState): LivePermissions {
     const { threadId } = state;
+    this.stopRequested.delete(threadId);
+    this.preparing.add(threadId);
     const permissions = new LivePermissions(state.thread.permissionMode, handle => {
       this.threads.cards.clearPermissionsOf(threadId, 'mode change');
       this.threads.cards.clearQuestionsOf(threadId, false, 'mode change');
@@ -106,33 +110,60 @@ export class TurnAttempts {
   changeSettings(threadId: ThreadId, selection: Pick<ThreadSummary, 'accountId' | 'model' | 'effort' | 'speed'>): void {
     const live = this.liveSettings.get(threadId);
     if (live === undefined) return;
+    if (live.state.running.execution?.frozenSelection) return;
     if (selection.accountId !== live.state.thread.accountId || selection.model !== live.state.thread.model) return;
     live.settings.change({ effort: selection.effort, speed: selection.speed ?? null });
   }
 
-  changePermissionMode(threadId: ThreadId, mode: PermissionMode): void {
-    this.livePermissions.get(threadId)?.change(mode);
+  changePermissionMode(threadId: ThreadId, mode: PermissionMode, before: ThreadSummary, next: ThreadSummary): void {
+    const state = this.liveSettings.get(threadId)?.state;
+    const modeOnly = before.providerId === next.providerId && before.accountId === next.accountId && before.model === next.model
+      && before.effort === next.effort && (before.speed ?? null) === (next.speed ?? null);
+    const permissions = this.livePermissions.get(threadId);
+    if (!permissions) {
+      // Queued turns have no native controller yet. Retain only an unbroken
+      // mode-only version chain; startup will pass the live mode to the driver.
+      if (modeOnly) for (const turn of this.core.journal.listTurnsFor(threadId, [])) {
+        if (turn.status !== 'queued' || !turn.execution || (turn.execution.selectionVersion ?? 0) !== (before.selectionVersion ?? 0)) continue;
+        turn.execution = { ...turn.execution, permissionMode: mode, selectionVersion: next.selectionVersion ?? 0 };
+        this.core.journal.putTurn(turn);
+      }
+      return;
+    }
+    permissions.change(mode, () => {
+      const execution = state?.running.execution;
+      // Mode is live; other picker changes, including a change and return, stay fenced.
+      if (!modeOnly || !state || !execution || (execution.selectionVersion ?? 0) !== (before.selectionVersion ?? 0)) return;
+      state.thread.selectionVersion = next.selectionVersion;
+      state.running.execution = { ...execution, selectionVersion: next.selectionVersion ?? 0 };
+      this.core.journal.putTurn(state.running);
+      const current = this.core.journal.getThread(threadId);
+      if (current) this.core.bus.emit('thread.updated', current);
+    });
   }
 
   async run(queued: Turn, state: TurnAttemptState, target: TurnAttemptTarget, permissions: LivePermissions): Promise<TurnResult> {
     const { threadId, turnId } = state;
     const { provider, account, driver } = target;
-    this.stopRequested.delete(threadId);
-    this.preparing.add(threadId);
-    const checkpoint = this.threads.codeCheckpoints.begin(state.thread, turnId);
-    if (checkpoint && driver.prepare) {
-      const context = this.threads.contexts.makeSessionContext(state.thread, provider, account);
-      void driver.prepare(context, { forTurn: true }).catch(error => {
-        if (!this.stopRequested.has(threadId)) this.core.log('warn', `preparing the turn failed: ${String(error)}`, { source: provider.id, threadId, event: 'provider.prepareFailed' });
-      });
-    }
-    try { if (checkpoint) await checkpoint; }
-    catch (error) {
+    if (this.stopRequested.has(threadId)) return { status: 'stopped', sessionId: state.thread.sessionId, usage: null };
+    try {
+      const protection = this.core.sharedAccess.execution.prepare(threadId);
+      if (protection) await protection;
+      const checkpoint = this.threads.codeCheckpoints.begin(state.thread, turnId);
+      if (checkpoint && driver.prepare) {
+        const context = this.threads.contexts.makeSessionContext(state.thread, provider, account);
+        void driver.prepare(context, { forTurn: true }).catch(error => {
+          if (!this.stopRequested.has(threadId)) this.core.log('warn', `preparing the turn failed: ${String(error)}`, { source: provider.id, threadId, event: 'provider.prepareFailed' });
+        });
+      }
+      if (checkpoint) await checkpoint;
+    } catch (error) {
       releaseThread(threadId);
+      void this.core.procs.protection.revoke(threadId).catch(() => {});
       this.core.procs.killTree(threadId);
+      if (this.stopRequested.has(threadId)) return { status: 'stopped', sessionId: state.thread.sessionId, usage: null };
       throw error;
-    }
-    this.preparing.delete(threadId);
+    } finally { this.preparing.delete(threadId); }
     if (this.stopRequested.has(threadId)) return { status: 'stopped', sessionId: state.thread.sessionId, usage: null };
 
     // Keep consumed input so a retry on a fresh session sends it too.
@@ -154,6 +185,13 @@ export class TurnAttempts {
     let afterCapacity = false;
     for (;;) {
       attempt += 1;
+      // A retry or delayed provider preparation cannot outlive shared host consent.
+      this.core.sharedCompute?.assertTurn(threadId);
+      this.core.sharedAccess?.assertTurn(threadId);
+      const protection = this.core.sharedAccess.execution.prepare(threadId);
+      if (protection) await protection;
+      // Preparation can yield while the user changes modes. Read it only
+      // once the native context and handle can be constructed without yielding.
       state.thread.permissionMode = permissions.mode;
       const note = afterUpdate;
       afterUpdate = null;
@@ -180,7 +218,7 @@ export class TurnAttempts {
         // Shown once the context is built, so a fresh session's history does not carry it twice.
         this.threads.noteSystem(threadId, turnId, note.prompt, note.label, 'turn.resumedAfterUpdate');
       } else if (resumed && state.thread.sessionId !== null) {
-        context.prompt = `Continue the current task from where it stopped. The user changed the permission mode to ${permissions.mode}. Do not repeat completed work. Retain subsequent instructions already in the conversation.\n\nRequest for reference:\n${context.prompt}`;
+        context.prompt = modeRestartPrompt(permissions.mode, context.prompt);
       }
       // A later attempt resumes a session that already holds the earlier ones, refused or not.
       if (attempt > 1 && state.thread.sessionId !== null) context.sessionBefore = sessionAfter(context.sessionBefore, usage, totals);
@@ -232,7 +270,7 @@ export class TurnAttempts {
       if (result.status === 'error' && result.refusal?.kind === 'capacity' && capacityTries < CAPACITY_RETRY.delaysMs.length && !this.core.stopping) {
         const delay = CAPACITY_RETRY.delaysMs[capacityTries]!;
         capacityTries += 1;
-        usage = sumUsage(usage, result.usage);
+        usage = sumAttempts(usage, result.usage);
         this.keepSession(state, result);
         const outcome = await this.waitToRetry(state, capacityTries, delay, provider);
         if (outcome === 'stop') {
@@ -244,7 +282,7 @@ export class TurnAttempts {
           result = { ...result, usage: null };
           break;
         }
-        setThreadStatus(this.core, threadId, 'running');
+        markRunning(this.core, threadId);
         afterCapacity = true;
         because = `retry ${capacityTries} of ${CAPACITY_RETRY.delaysMs.length} after the model was at capacity`;
         continue;
@@ -252,7 +290,7 @@ export class TurnAttempts {
       // Stopped between two tool calls for an agent update: the same turn
       // waits for it, then goes on in the same session.
       if (this.pausing.delete(threadId) && result.status === 'stopped') {
-        usage = sumUsage(usage, result.usage);
+        usage = sumAttempts(usage, result.usage);
         this.keepSession(state, result);
         const resume = await this.pause(threadId, turnId, provider);
         if (resume === null) {
@@ -265,17 +303,24 @@ export class TurnAttempts {
         continue;
       }
       if (!permissions.restarting || result.status === 'done') break;
-      usage = sumUsage(usage, result.usage);
+      usage = sumAttempts(usage, result.usage);
       this.keepSession(state, result);
       this.threads.cards.clearPermissionsOf(threadId, 'mode change');
       this.threads.cards.clearQuestionsOf(threadId, false, 'mode change');
-      setThreadStatus(this.core, threadId, 'running');
+      markRunning(this.core, threadId);
       resumed = true;
       because = 'after a permission mode change';
     }
-    result = { ...result, usage: sumUsage(usage, result.usage), ...(totals ? { agentTotals: totals } : {}) };
+    // The drivers hand over canonical buckets: the turn records that it holds them.
+    const spent = sumAttempts(usage, result.usage);
+    result = { ...result, usage: spent === null ? null : { ...spent, buckets: 1 }, ...(totals ? { agentTotals: totals } : {}) };
     if (state.running.execution) state.running.execution = { ...state.running.execution, permissionMode: state.thread.permissionMode };
     return result;
+  }
+
+  /** A preparation process killed by an accepted Stop can reject before run starts. */
+  preparationStopped(threadId: ThreadId): boolean {
+    return this.preparing.has(threadId) && this.stopRequested.has(threadId);
   }
 
   close(threadId: ThreadId): void {
@@ -353,7 +398,7 @@ export class TurnAttempts {
     state.thread = { ...state.thread, sessionId: result.sessionId ?? state.thread.sessionId, sessionResumeAt: null };
     if (state.running.execution) state.running = { ...state.running, execution: { ...state.running.execution, sessionId: state.thread.sessionId, sessionResumeAt: null } };
     const current = this.core.journal.getThread(state.threadId);
-    if (current && (current.sessionGeneration ?? 0) === (state.thread.sessionGeneration ?? 0)) {
+    if (current && current.providerId === state.thread.providerId && current.accountId === state.thread.accountId && (current.sessionGeneration ?? 0) === (state.thread.sessionGeneration ?? 0)) {
       saveThread(this.core, { ...current, sessionId: state.thread.sessionId, sessionResumeAt: null }, 'thread.updated');
     }
   }
@@ -451,6 +496,7 @@ export class TurnAttempts {
   }
 
   stopRunning(threadId: ThreadId): boolean {
+    void this.core.procs.protection.revoke(threadId).catch(() => {});
     const waiting = this.retryWaits.get(threadId);
     if (waiting !== undefined) {
       this.stopRequested.add(threadId);
@@ -534,14 +580,8 @@ function sessionAfter(before: TurnContext['sessionBefore'], usage: Usage | null,
 }
 
 /** Native attempts belong to one visible turn, including their reported usage. */
-function sumUsage(left: Usage | null, right: Usage | null): Usage | null {
+function sumAttempts(left: Usage | null, right: Usage | null): Usage | null {
   if (!left) return right;
   if (!right) return left;
-  return {
-    inputTokens: left.inputTokens + right.inputTokens,
-    outputTokens: left.outputTokens + right.outputTokens,
-    cacheReadTokens: left.cacheReadTokens + right.cacheReadTokens,
-    cacheWriteTokens: left.cacheWriteTokens + right.cacheWriteTokens,
-    costUsdEquivalent: left.costUsdEquivalent === null && right.costUsdEquivalent === null ? null : (left.costUsdEquivalent ?? 0) + (right.costUsdEquivalent ?? 0),
-  };
+  return sumUsage(left, right);
 }

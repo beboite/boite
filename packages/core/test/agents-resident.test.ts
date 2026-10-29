@@ -43,7 +43,7 @@ test('default route must be allowed; account grants restrict identity and child 
 test('a runtime saved by an older core still loads, and its retired keys are gone', async () => {
   h.core.journal.setSetting(`agents:runtime:${agent.id}`, { ...policy(), compactAfterTurns: 12, maxRunMinutes: 10 });
   const read = await client.call('agents.runtime.get', { agentId: agent.id });
-  expect(read).toEqual({ ...policy(), defaultRoute: current().selection });
+  expect(read).toEqual({ ...policy(), eventWakes: false, defaultRoute: current().selection });
   expect(await thrown(client.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: current().revision, config: { ...policy(), dailyBudgetUsd: -1 } }))).toThrow('dailyBudgetUsd');
 });
 

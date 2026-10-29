@@ -36,6 +36,8 @@ export interface CoreInfo {
     draftPreparation?: boolean;
     /** Connection-owned attachment uploads resolved by turns.start. */
     attachmentUploads?: boolean;
+    /** Durable per-record composer CAS, shared assets and core-owned queue delivery. */
+    composerPersistence?: boolean;
     /** `ui.reveal` takes `coreId` on a thread or an agent target and opens it on that machine. An older core drops the field and opens this core's. */
     revealMachines?: boolean;
     /** A load sample reaches a client whose hello `accepts` `thread.load` as that event alone, not as a whole `thread.updated` row. */
@@ -46,6 +48,10 @@ export interface CoreInfo {
     gatewayMove?: boolean;
     /** `todos.update` takes `goalThreadId`, a card carries its goal, and a paired device reads and moves cards: the project board. */
     projectBoard?: boolean;
+    /** Shared-project version 1 RPCs and scoped invalidations; absent until all enforcing handlers exist. */
+    sharedProjects?: 1;
+    /** contacts.sendHuman preserves a contact's human provenance without owner authority. */
+    contactHumanLetters?: 1;
     /** `group.settingsHome` and `Group.settingsHome`: one member's settings, chosen for the whole group, that the others follow. */
     settingsHome?: boolean;
   };
@@ -56,6 +62,11 @@ export interface CoreInfo {
   channel: Channel;
   pid: number;
   startedAt: Timestamp;
+  /**
+   * The core's clock when it answered. A client compares it with its own to
+   * count elapsed times from the core's timestamps; an older core omits it.
+   */
+  now?: Timestamp;
   /** Bind address, possibly a wildcard. `pairing.grant` gives the link a phone opens. */
   endpoint: { host: string; port: number };
   dataDir: string;

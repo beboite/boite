@@ -51,6 +51,13 @@ export const strings = {
     reopenNamedThread: 'Move "{title}" to Recent',
     doneNotice: 'This thread is done. Move it to Recent to continue.',
     /** Above the composer, or the done notice, of a thread whose worktree Boite removed. */
+    contactHold: {
+      title: 'Contact mail holds this thread',
+      body: 'Its history holds messages from {contacts}, sent outside a shared project. Boite cannot bound what that mail asks, so it refuses every turn here.',
+      trust: 'Trust this history',
+      trustTip: 'The agent then runs with its usual tools and reads that mail like the rest of its history.',
+      ownerOnly: 'Trust it from the computer that runs this Boite.'
+    },
     worktreeGone: {
       title: 'Worktree removed',
       merged: 'Boite removed this thread\'s worktree {when}, after #{number} was merged.',
@@ -81,6 +88,8 @@ export const strings = {
     projectMenu: 'Project actions',
     copyPath: 'Copy path',
     manageProject: 'Manage project',
+    renameProject: 'Rename project',
+    projectName: 'Project name',
     worktreeDefault: 'Worktree by default',
     autoArchiveMergedPr: 'Hide merged PR conversations',
     autoRemoveWorktrees: 'Remove settled worktrees',

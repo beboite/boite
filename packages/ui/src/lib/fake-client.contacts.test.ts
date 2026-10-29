@@ -36,6 +36,23 @@ async function routedClients() {
   return { source: source!, gateway: gateway!, outside: outside! };
 }
 
+test('updating a contact preserves both local and group project offers and notifies the recipient', async () => {
+  const {gateway, outside} = await routedClients();
+  await gateway.call('contacts.grant', {coreId: 'core-outside', projectId: 'p-boite'});
+  await gateway.call('contacts.grant', {coreId: 'core-outside', machine: 'core-source', projectId: 'p-boite'});
+  const offered = (await outside.call('contacts.get', {})).contacts.find(contact => contact.coreId === 'core-gateway')!.offers;
+  expect(offered.map(offer => offer.sharedProject)).toEqual([
+    {ownerCoreId: 'core-gateway', coreId: 'core-gateway', projectId: 'p-boite'},
+    {ownerCoreId: 'core-gateway', coreId: 'core-source', projectId: 'p-boite'},
+  ]);
+  let events = 0; outside.on('contacts.updated', () => {events++;});
+  for (const update of [{name: 'Renamed contact'}, {trusted: true}]) {
+    await gateway.call('contacts.update', {coreId: 'core-outside', ...update});
+    expect((await outside.call('contacts.get', {})).contacts.find(contact => contact.coreId === 'core-gateway')!.offers).toEqual(offered);
+  }
+  expect(events).toBe(2);
+});
+
 test('a group contact keeps both sides of its exchange in the initiating conversation', async () => {
   const { source, gateway, outside } = await routedClients();
   expect((await source!.call('collaboration.contacts', { threadId: 't-trace' })).map(contact => contact.coreId)).toContain('core-outside');
@@ -50,6 +67,8 @@ test('a group contact keeps both sides of its exchange in the initiating convers
   const mine = (await source!.call('collaboration.get', { threadId: 't-trace' })).messages;
   expect(mine.map(letter => letter.id)).toEqual([sent.id, answer.id]);
   expect(mine[1]).toMatchObject({ from: { coreId: 'core-outside', threadId: 't-trace' }, to: { coreId: 'core-source', threadId: 't-trace' }, status: 'delivered' });
+  // As the core: routed contact mail outside a shared project holds the recipient.
+  expect((await source!.call('threads.get', { threadId: 't-trace' })).contactHold).toEqual({ contacts: [mine[1]!.contact!.name] });
   expect((await gateway!.call('collaboration.get', { threadId: 't-trace' })).messages).toEqual([]);
   const asked = await source!.call('collaboration.ask', { threadId: 't-trace', contact: 'outside', text: 'An agent for the notes project' });
   expect(asked.from.coreId).toBe('core-source');
@@ -90,6 +109,8 @@ test('an expired routed letter updates the initiating sender copy', async () => 
   const sent = await source.call('collaboration.send', { threadId: 't-trace', to: { coreId: 'core-outside', threadId: 't-trace' }, text: 'Deliver before expiry', requestId: 'routed-expiry' });
   expect(sent.status).toBe('received');
   const changed: string[] = [];
+  // The core sends a thread's team changes to the clients subscribed to it.
+  await source.call('threads.subscribe', { threadId: 't-trace' });
   source.on('collaboration.changed', event => { changed.push(event.threadId); });
   const clock = vi.spyOn(fakeCore('core-outside')!, 'now').mockReturnValue(sent.expiresAt + 1);
   try {

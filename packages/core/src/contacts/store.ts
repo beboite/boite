@@ -16,8 +16,8 @@
  * threads of the projects opened to it, each with its own coordination
  * settings, and a thread that wrote to it in the last 7 days.
  */
-import { randomUUID, verify } from 'node:crypto';
-import type { AgentContact, Contact, ContactGrant, ContactInvite, ContactOffer, ContactRequest, ContactSettings, ContactsState, ContactTailscale, CoordinationBridgeResponse, CoordinationPeer, ModelTier, RpcEvents, RpcParams, RpcResult } from '@boite/contracts';
+import { randomUUID } from 'node:crypto';
+import type { AgentContact, AgentLetter, Contact, ContactGrant, ContactInvite, ContactOffer, ContactRequest, ContactSettings, ContactsState, ContactTailscale, CoordinationBridgeResponse, CoordinationPeer, ModelTier, RpcEvents, RpcParams, RpcResult } from '@boite/contracts';
 import { text } from '../coordination-letter.ts';
 import type { BridgeRoute } from '../coordination-bridge.ts';
 import { PeerRefusal, ROUTE } from '../coordination-wire.ts';
@@ -39,6 +39,8 @@ import { ContactReach } from './reach.ts';
 import { checkTier } from './tier.ts';
 import { fingerprintWords } from './words.ts';
 import { TextSocket } from '../ws-client.ts';
+import { contactHello, HELLO_INPUT, type ContactSocketData } from './link-hello.ts';
+import { checkedContactOffers, contactOffers } from './offers.ts';
 
 export { CONTACT_JOIN_ROUTE } from './join.ts';
 export const CONTACT_LINK_ROUTE = '/coordination/contact/link';
@@ -51,7 +53,6 @@ const MAX_CONTACTS = 32;
 const MAX_PENDING = 32;
 const DECIDED_KEPT = 50;
 const SKEW_MS = 60_000;
-const HELLO_INPUT = 'boite-contact-hello\n';
 const TICK_MS = 1000;
 /** How long the upgrade to a host may take before the link counts as failed. */
 const LINK_DIAL_MS = 8000;
@@ -72,8 +73,6 @@ interface StoredContact extends Omit<Contact, 'link'> {
  */
 type StoredRequest = ContactRequest & { pendingSend?: true; remoteId?: string };
 type Frame = { t: 'req'; id: string; body: string; signature: string } | { t: 'res'; id: string; status: number; body: string; signature: string };
-/** What the server keeps on a contact's link socket. */
-export interface ContactSocketData { contact: { coreId: string; routeId: string } }
 /** What a contact reads when the concierge refuses: never the model's own words. */
 const CONCIERGE_REFUSAL = 'Nothing on this Boite fits this request.';
 
@@ -99,7 +98,8 @@ export class ContactStore implements LinkedContacts {
   /** Join and hello nonces already used, until they would be stale anyway. */
   private readonly nonces = new Map<string, number>();
   private readonly backoff = new SyncBackoff(TICK_MS, 60_000);
-  private readonly flushing = new Set<string>();
+  /** Contacts with a flush in flight; true once a change during it asked for another, run when it ends. */
+  private readonly flushing = new Map<string, boolean>();
   private readonly deciding = new Set<string>();
   private readonly pending = new Set<Promise<unknown>>();
   /** Cores this one is joining right now: each holds a contact slot until its join ends. */
@@ -175,6 +175,10 @@ export class ContactStore implements LinkedContacts {
   }
 
   private requests(): StoredRequest[] { return (this.core.journal.getSetting(REQUESTS) as StoredRequest[] | undefined) ?? []; }
+  /** Only this core mints request-answer letters; peer-origin contact letters remain forbidden. */
+  ownsAnswer(letter: AgentLetter): boolean {
+    return letter.origin === 'contact' && this.has(letter.from.coreId) && this.requests().some(r => r.direction === 'out' && r.status !== 'pending' && r.coreId === letter.from.coreId && r.id === letter.from.threadId && r.from.threadId === letter.to.threadId);
+  }
 
   /** Every pending request and what is still to send, then the last decided ones. */
   private saveRequests(requests: StoredRequest[]): void {
@@ -225,7 +229,7 @@ export class ContactStore implements LinkedContacts {
   isRelayPeer(peer: CoordinationPeer): boolean { return this.relayPeers.has(peer); }
 
   /** The relayed copies changed. */
-  reset(): void { this.peerCache = null; }
+  reset(): void { this.peerCache = null; this.changed(); }
 
   /** A signed message sealed to a contact, or null for a core that is not one. */
   sealFor(coreId: string, plaintext: string): ({ body: string } & Sealing) | null {
@@ -246,8 +250,16 @@ export class ContactStore implements LinkedContacts {
     return this.list().some(contact => contact.role === 'host') || this.liveInvites().length > 0;
   }
 
-  linkOf(coreId: string): Contact['link'] { const contact = this.find(coreId); return contact ? this.linkState(contact) : 'offline'; }
-
+  granted(coreId: string): string[] { return this.reach.granted(coreId); }
+  mayReach(coreId: string, threadId: string): boolean { return this.reach.mayReach(coreId, threadId); }
+  mayRead(coreId: string, threadId: string): boolean { return this.reach.mayRead(coreId, threadId); }
+  noteSent(threadId: string, coreId: string): void { this.reach.noteSent(threadId, coreId); }
+  checkSendTier(threadId: string, coreId?: string): void { this.reach.checkSendTier(threadId, coreId); }
+  checkAttestedTier(agent: string | undefined, coreId?: string): void { this.reach.checkAttestedTier(agent, coreId); }
+  linkOf(coreId: string): Contact['link'] {
+    const contact = this.find(coreId);
+    return contact ? this.linkState(contact) : this.members.relayedOf(coreId).some(entry => entry.link === 'connected') ? 'connected' : 'offline';
+  }
   private linkState(contact: StoredContact): Contact['link'] {
     if (contact.role === 'host') return this.hosted.has(contact.coreId) ? 'connected' : 'offline';
     return this.dialed.get(contact.coreId)?.state ?? (this.started && !this.closed ? 'connecting' : 'offline');
@@ -270,6 +282,9 @@ export class ContactStore implements LinkedContacts {
     const contacts = this.list();
     const found = contacts.find(contact => contact.coreId === wanted)
       ?? contacts.filter(contact => contact.name.toLowerCase() === wanted || contact.name.replace(/\s+/g, '-').toLowerCase() === wanted)[0];
+    const relayed = found ? undefined : this.members.relayed().find(entry => entry.coreId === wanted || entry.name.toLowerCase() === wanted || entry.name.replace(/\s+/g, '-').toLowerCase() === wanted);
+    const via = relayed ? this.core.group.peers().find(peer => peer.coreId === relayed.via) : undefined;
+    if (via) throw refused(`contact: ${relayed!.name} is linked to ${via.name}; ask it from a thread there`, { field: 'contact' });
     if (!found) throw invalidParams(`contact: ${value} is not one of this core's contacts; see boite threads contacts`, { field: 'contact' });
     return found;
   }
@@ -365,7 +380,7 @@ export class ContactStore implements LinkedContacts {
     for (let n = 2; taken.has(name.toLowerCase()); n += 1) name = `${card.machine} ${n}`;
     const contact: StoredContact = {
       coreId: card.coreId, name, machine: card.machine, fingerprint: fingerprintWords(this.core.coordination.card().publicKey, card.publicKey),
-      role, ...(url === undefined ? {} : { url }), trusted: false, grants: [], offers: [], lastSeenAt: null, addedAt: Date.now(),
+      role, ...(url === undefined ? {} : { url }), trusted: false, grants: [], offers: [], lastSeenAt: null, addedAt: Date.now(), syncPending: 1,
       publicKey: card.publicKey, box: card.box,
     };
     this.save([...contacts, contact]);
@@ -388,7 +403,14 @@ export class ContactStore implements LinkedContacts {
     return this.view(contact);
   }
 
-  /** A project of this core, or of another member of the group (`machine`), which is asked for it first. */
+  private policyKey(coreId: string, projectId: string): string { return `contact-policy-revoked:${JSON.stringify([coreId, projectId])}`; }
+  policyRevoked(coreId: string, projectId: string): boolean { return this.core.journal.getSetting(this.policyKey(coreId, projectId)) === true; }
+  restoreForOwner(coreId: string, projectId: string): void { this.core.journal.deleteSetting(this.policyKey(coreId, projectId)); }
+  revokeForPolicy(params: RpcParams<'contacts.revoke'>): void {
+    this.core.journal.setSetting(this.policyKey(params.coreId, params.projectId), true);
+    if (this.has(params.coreId)) this.revoke(params);
+    else { this.reach.closed(params.coreId, [params.projectId]); this.reset(); }
+  }
   async grant(params: RpcParams<'contacts.grant'>): Promise<Contact> {
     if (params.readThreads !== undefined && typeof params.readThreads !== 'boolean') throw invalidParams('readThreads: expected a boolean', { field: 'readThreads' });
     const member = this.members.member(params.machine);
@@ -406,10 +428,12 @@ export class ContactStore implements LinkedContacts {
     return this.view(contact);
   }
 
-  private grantHere(params: Omit<RpcParams<'contacts.grant'>, 'machine'>): Contact {
+  private grantHere(params: Omit<RpcParams<'contacts.grant'>, 'machine'>, automatic = false): Contact {
     const project = typeof params.projectId === 'string' ? this.core.journal.getProject(params.projectId) : null;
     if (!project || project.archived) throw invalidParams('projectId: expected an unarchived project of this core', { field: 'projectId' });
+    if (automatic && this.policyRevoked(params.coreId, project.id)) throw refused('projectId: policy-revoked access requires an explicit owner grant');
     const contact = this.mutate(params.coreId, entry => {
+      if (!automatic) this.core.journal.deleteSetting(this.policyKey(params.coreId, project.id));
       const existing = entry.grants.find(grant => grant.projectId === project.id && !grant.machine);
       if (existing) existing.readThreads = params.readThreads ?? existing.readThreads;
       else entry.grants.push({ projectId: project.id, readThreads: params.readThreads ?? false, grantedAt: Date.now() });
@@ -436,6 +460,9 @@ export class ContactStore implements LinkedContacts {
     this.flush(contact.coreId);
     return this.view(contact);
   }
+
+  /** A member no longer opens these of its projects to a contact another member holds, or none (`null`). */
+  projectsClosed(coreId: string, projectIds: string[] | null): void { this.reach.closed(coreId, projectIds); }
 
   remove(coreId: string): { ok: true } {
     const contact = this.find(coreId);
@@ -476,7 +503,7 @@ export class ContactStore implements LinkedContacts {
       const project = typeof projectId === 'string' ? this.core.journal.getProject(projectId) : null;
       if (!project || project.archived) throw invalidParams('projectId: expected the unarchived project to open', { field: 'projectId' });
       // An existing read grant stays as the owner set it; a new grant never reads conversations.
-      this.grantHere({ coreId: request.coreId, projectId: project.id });
+      this.grantHere({ coreId: request.coreId, projectId: project.id }, decidedBy !== 'owner');
       Object.assign(request, { status: 'accepted', project: { id: project.id, name: project.name.slice(0, 200) }, decidedBy, decidedAt: now, pendingSend: true });
     } else {
       const why = reason === undefined || reason === null || reason === '' ? 'The owner declined this request.' : text(reason, 'reason', 500);
@@ -497,10 +524,12 @@ export class ContactStore implements LinkedContacts {
       .map(project => ({ id: project.id, name: project.name.slice(0, 200), ...(() => { const remote = gitRemoteOf(project.path); return remote ? { gitRemote: remote } : {}; })() }));
     if (request.gitRemote) {
       const matches = projects.filter(project => project.gitRemote === request.gitRemote);
-      if (matches.length === 1) { this.settle(id, true, matches[0]!.id, undefined, 'match'); return; }
+      if (matches.length === 1) { if (!this.policyRevoked(request.coreId, matches[0]!.id)) this.settle(id, true, matches[0]!.id, undefined, 'match'); return; }
     }
+    const allowed = projects.filter(project => !this.policyRevoked(request.coreId, project.id));
+    if (!allowed.length) return;
     this.deciding.add(id);
-    this.background(this.concierge.decide(this.requestView(request), projects).then(verdict => {
+    this.background(this.concierge.decide(this.requestView(request), allowed).then(verdict => {
       const current = this.requests().find(entry => entry.id === id);
       if (current?.status !== 'pending' || !this.find(current.coreId)?.trusted) return;
       if (verdict.accept) { this.settle(id, true, verdict.projectId, undefined, 'concierge'); return; }
@@ -520,15 +549,15 @@ export class ContactStore implements LinkedContacts {
     this.core.threads.require(threadId);
     const config = this.core.coordination.config(threadId);
     if (config.mode === 'off' || !config.remote) return [];
-    const own = this.available();
-    const relayed = this.members.relayed().filter((entry, index, all) => !own.some(contact => contact.coreId === entry.coreId) && all.findIndex(other => other.coreId === entry.coreId) === index)
-      .map(entry => ({ name: entry.name, coreId: entry.coreId, projects: entry.offers, link: entry.link }));
-    return [...own, ...relayed];
+    return this.available();
   }
 
   /** Public summaries only, also carried to another member of this owner's group. */
   available(): RpcResult<'collaboration.contacts'> {
-    return this.list().map(contact => ({ name: contact.name, coreId: contact.coreId, projects: contact.offers.map(offer => offer.name), link: this.linkState(contact) }));
+    const own = this.list().map(contact => ({ name: contact.name, coreId: contact.coreId, projects: contact.offers.map(offer => offer.name), link: this.linkState(contact) }));
+    const relayed = this.members.relayed().filter((entry, index, all) => !own.some(contact => contact.coreId === entry.coreId) && all.findIndex(other => other.coreId === entry.coreId) === index)
+      .map(entry => ({ name: entry.name, coreId: entry.coreId, projects: entry.offers, link: entry.link }));
+    return [...own, ...relayed];
   }
 
   ask(params: RpcParams<'collaboration.ask'>): ContactRequest {
@@ -537,7 +566,7 @@ export class ContactStore implements LinkedContacts {
     if (!config.remote) throw refused('threadId: cross-machine coordination is disabled for this thread', { field: 'threadId' });
     if (config.paused) throw refused('coordination paused by the owner');
     const contact = this.named(params.contact);
-    this.reach.checkSendTier(params.threadId);
+    this.checkSendTier(params.threadId);
     return this.askFrom(from, contact.coreId, params.text, gitRemoteOf(this.core.threads.require(params.threadId).cwd) ?? undefined);
   }
 
@@ -554,7 +583,7 @@ export class ContactStore implements LinkedContacts {
       ...(gitRemote ? { gitRemote } : {}), createdAt: Date.now(), status: 'pending', pendingSend: true,
     };
     this.saveRequests([...requests, request]);
-    this.reach.noteSent(from.threadId, contact.coreId);
+    this.noteSent(from.threadId, contact.coreId);
     this.changed();
     this.flush(contact.coreId);
     return this.requestView(request);
@@ -564,14 +593,12 @@ export class ContactStore implements LinkedContacts {
 
   /** The projects the contact opened to this core. */
   synced(coreId: string, payload: unknown): { ok: true } {
-    const offers = (payload as { offers?: unknown } | null)?.offers;
-    if (!Array.isArray(offers) || offers.length > 256) throw invalidParams('sync.offers: expected up to 256 projects');
-    const checked: ContactOffer[] = offers.map((offer: Partial<ContactOffer>, index) => ({
-      projectId: text(offer?.projectId, `sync.offers[${index}].projectId`, 128), name: text(offer?.name, `sync.offers[${index}].name`, 200),
-    }));
+    const checked = checkedContactOffers(coreId, payload);
     const contact = this.find(coreId);
-    if (contact && JSON.stringify(contact.offers) !== JSON.stringify(checked)) {
-      this.mutate(coreId, entry => { entry.offers = checked; });
+    const rawCaps = (payload as { capabilities?: { sharedProjects?: unknown; humanLetters?: unknown } }).capabilities;
+    const capabilities = { ...(rawCaps?.sharedProjects === 1 ? { sharedProjects: 1 as const } : {}), ...(rawCaps?.humanLetters === 1 ? { humanLetters: 1 as const } : {}) };
+    if (contact && (JSON.stringify(contact.offers) !== JSON.stringify(checked) || JSON.stringify(contact.capabilities) !== JSON.stringify(capabilities))) {
+      this.mutate(coreId, entry => { entry.offers = checked; entry.capabilities = capabilities; });
       this.members.mark(this.members.holdersOf(coreId));
     }
     return { ok: true };
@@ -630,21 +657,15 @@ export class ContactStore implements LinkedContacts {
 
   // -- Telling the contact: grants, asks and answers, retried until heard.
 
-  private offersFor(contact: StoredContact): ContactOffer[] {
-    return contact.grants.flatMap(grant => {
-      if (grant.machine) return [{ projectId: grant.projectId, name: grant.name ?? grant.projectId }];
-      const project = this.core.journal.getProject(grant.projectId);
-      return project && !project.archived ? [{ projectId: project.id, name: project.name.slice(0, 200) }] : [];
-    });
-  }
-
   private flush(coreId: string): void {
-    if (this.closed || !this.started || this.flushing.has(coreId) || !this.linked(coreId)) return;
-    this.flushing.add(coreId);
-    this.background(this.tell(coreId).finally(() => this.flushing.delete(coreId)));
+    if (this.closed || !this.started || !this.linked(coreId)) return;
+    if (this.flushing.has(coreId)) { this.flushing.set(coreId, true); return; }
+    this.flushing.set(coreId, false);
+    this.background(this.tell(coreId).finally(() => { const again = this.flushing.get(coreId); this.flushing.delete(coreId); if (again) this.flush(coreId); }));
   }
 
   private async tell(coreId: string): Promise<void> {
+    await this.core.sharedProjects.flush(coreId);
     const peer = (): CoordinationPeer => {
       const found = this.peers().find(entry => entry.coreId === coreId);
       if (!found) throw new Error('no longer a contact');
@@ -654,7 +675,7 @@ export class ContactStore implements LinkedContacts {
     if (!contact) return;
     if (contact.syncPending) {
       const version = contact.syncPending;
-      try { await this.core.coordination.request(peer(), 'contact.sync', { offers: this.offersFor(contact) }); }
+      try { await this.core.coordination.request(peer(), 'contact.sync', { offers: contactOffers(this.core, contact), capabilities: { sharedProjects: 1, humanLetters: 1 } }); }
       catch (error) { if (!(error instanceof PeerRefusal)) throw error; }
       if (this.find(coreId)?.syncPending === version) this.mutate(coreId, entry => { delete entry.syncPending; });
     }
@@ -684,6 +705,8 @@ export class ContactStore implements LinkedContacts {
       this.changed();
       if (refusedAsk) this.core.coordination.contactAnswer(this.requestView(current), this.find(coreId)?.name ?? current.contact, []);
     }
+    // A grant can change while this flush awaited sync/answers; send its queued revision now.
+    await this.core.sharedProjects.flush(coreId);
   }
 
   // -- Join: the host's side.
@@ -706,28 +729,7 @@ export class ContactStore implements LinkedContacts {
 
   // -- The link: the host's side.
 
-  /**
-   * Checks the hello a guest dials with, before the upgrade: signed by the
-   * contact's key, to this core, current and never seen. A Response is the
-   * refusal to send back.
-   */
-  hello(request: Request): ContactSocketData['contact'] | Response {
-    if (this.closed || request.headers.has('origin')) return new Response('forbidden', { status: 403 });
-    const guest = request.headers.get('x-boite-peer') ?? '';
-    const contact = this.find(guest);
-    if (!contact || contact.role !== 'host') return new Response('not a contact that dials this core', { status: 403 });
-    try {
-      const hello = Buffer.from(request.headers.get('x-boite-hello') ?? '', 'base64url').toString('utf8');
-      const signature = request.headers.get('x-boite-signature') ?? '';
-      if (!hello || !verify(null, Buffer.from(`${HELLO_INPUT}${hello}`), contact.publicKey, Buffer.from(signature, 'base64'))) throw refused('signature: expected the contact\'s key to sign the hello');
-      const parsed = JSON.parse(hello) as { v?: unknown; from?: unknown; to?: unknown; at?: unknown; nonce?: unknown };
-      if (parsed.v !== 1 || parsed.from !== guest || parsed.to !== this.core.coordination.card().coreId) throw refused('hello: expected v 1, from the dialling contact, to this core');
-      this.fresh(guest, typeof parsed.nonce === 'string' && parsed.nonce.length <= 100 ? parsed.nonce : '', parsed.at);
-    } catch (error) {
-      return new Response(error instanceof RpcFailure ? error.message : 'invalid hello', { status: 403 });
-    }
-    return { coreId: guest, routeId: `contact:${randomUUID()}` };
-  }
+  hello(request: Request): ContactSocketData['contact'] | Response { return contactHello(this.core, this, request); }
 
   /** The guest's socket is open: it becomes the bridge route for that contact, replacing an older one. */
   attach(data: ContactSocketData['contact'], socket: LinkSocket): void {
@@ -746,7 +748,7 @@ export class ContactStore implements LinkedContacts {
       },
     };
     this.core.coordination.bridge.register(data.coreId, true, route);
-    this.mutate(data.coreId, entry => { entry.lastSeenAt = Date.now(); });
+    this.mutate(data.coreId, entry => { entry.lastSeenAt = Date.now(); entry.syncPending = (entry.syncPending ?? 0) + 1; });
     this.members.mark(this.members.holdersOf(data.coreId));
     this.flush(data.coreId);
   }
@@ -795,7 +797,7 @@ export class ContactStore implements LinkedContacts {
       link.socket = socket;
       link.state = 'connected';
       this.backoff.heard(coreId);
-      if (this.has(coreId)) this.mutate(coreId, entry => { entry.lastSeenAt = Date.now(); });
+      if (this.has(coreId)) this.mutate(coreId, entry => { entry.lastSeenAt = Date.now(); entry.syncPending = (entry.syncPending ?? 0) + 1; });
       this.members.mark(this.members.holdersOf(coreId));
       this.flush(coreId);
       socket.onMessage(text => { this.background(this.serve(coreId, socket, text)); });

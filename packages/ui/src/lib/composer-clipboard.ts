@@ -1,6 +1,7 @@
 import type { Attachment } from '@boite/contracts';
 import type { ComposerState } from './composer-queue';
 import { imageLabel, imageTextParts } from './composer-images';
+import { isLoading } from './draft-attachments';
 
 /**
  * `[Image 2]` copied out of one prompt brings its picture along. The text goes
@@ -29,7 +30,8 @@ export function referencedImages(text: string, attachments: Attachment[], start:
   for (const part of imageTextParts(text, attachments)) {
     const from = at;
     at += part.text.length;
-    if (!part.attachment || from < start || at > end) continue;
+    // A picture still being read has no bytes to carry: its reference copies as text.
+    if (!part.attachment || isLoading(part.attachment) || from < start || at > end) continue;
     images.set(Number(/\d+/.exec(part.text)![0]), part.attachment);
   }
   return images;

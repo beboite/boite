@@ -1,4 +1,4 @@
-import { afterEach, expect, setSystemTime, test } from 'bun:test';
+import { afterEach, expect, setSystemTime, spyOn, test } from 'bun:test';
 import { GROUP_INVITE_PREFIX, type CoordinationConfig } from '@boite/contracts';
 import { createHash } from 'node:crypto';
 import { connect } from '../src/client.ts';
@@ -1150,10 +1150,18 @@ test('a recorded request sent again and again never spends the member\'s allowan
   // A request turned away for the quota is remembered too: recorded and sent again once the minute is over, it spends nothing of the next.
   const rates = (a.core.coordination as unknown as { desk: { rates: Map<string, { since: number; count: number }> } }).desk.rates;
   rates.set(id(b), { since: Date.now(), count: 120 });
-  const fresh = JSON.stringify({ from: id(b), to: id(a), at: Date.now(), nonce: crypto.randomUUID(), operation: 'directory', payload: {} });
+  const fresh = JSON.stringify({ from: id(b), to: id(a), at: Date.now(), nonce: crypto.randomUUID(), operation: 'group.sync', payload: {} });
   const over = b.core.group.sealFor(id(a), pack(fresh, b.core.coordination.signature(Buffer.from(fresh)).toString('base64')))!;
   const late = () => fetch(`${a.url}/agent-messages`, { method: 'POST', body: over.body, headers: { 'x-boite-peer': id(b), 'x-boite-signature': SEALED } });
-  expect((await late()).status).toBe(429);
+  const receive = spyOn(a.core.group, 'receive');
+  let limited: Response;
+  try {limited = await late(); expect(receive).not.toHaveBeenCalled();}
+  finally {receive.mockRestore();}
+  expect(limited.status).toBe(429);
+  expect(limited.headers.get('x-boite-signature')).toBe(SEALED);
+  const refusal = await limited.text();
+  expect(() => settle(a.url, a.core.coordination.card().publicKey, JSON.parse(fresh).nonce,
+    limited.status, refusal, limited.headers.get('x-boite-signature')!, over)).toThrow('peer request failed');
   rates.set(id(b), { since: Date.now(), count: 0 });
   expect((await late()).status).toBe(403);
   expect(rates.get(id(b))!.count).toBe(0);

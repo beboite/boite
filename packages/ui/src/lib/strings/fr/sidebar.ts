@@ -43,6 +43,13 @@ export const fr: Translation = {
     reopenThread: 'Remettre dans Récent',
     reopenNamedThread: 'Remettre « {title} » dans Récent',
     doneNotice: 'Cette conversation est terminée. Remettez-la dans Récent pour continuer.',
+    contactHold: {
+      title: 'Courrier d’un contact : conversation bloquée',
+      body: 'Son historique contient des messages de {contacts}, envoyés hors d’un projet partagé. Boite ne peut pas borner ce qu’ils demandent, il refuse donc tout tour ici.',
+      trust: 'Faire confiance à cet historique',
+      trustTip: 'L’agent retrouve ses outils habituels et lit ce courrier comme le reste de son historique.',
+      ownerOnly: 'Faites-lui confiance depuis l’ordinateur qui fait tourner cette Boite.'
+    },
     worktreeGone: {
       title: 'Worktree supprimé',
       merged: 'Boite a supprimé le worktree de cette conversation {when}, après la fusion de #{number}.',
@@ -73,6 +80,8 @@ export const fr: Translation = {
     projectMenu: 'Actions du projet',
     copyPath: 'Copier le chemin',
     manageProject: 'Gérer le projet',
+    renameProject: 'Renommer le projet',
+    projectName: 'Nom du projet',
     worktreeDefault: 'Worktree par défaut',
     autoArchiveMergedPr: 'Masquer les conversations des PR mergées',
     autoRemoveWorktrees: 'Supprimer les worktrees terminés',

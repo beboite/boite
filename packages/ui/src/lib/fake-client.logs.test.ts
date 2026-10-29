@@ -105,10 +105,10 @@ test('fake diagnostics: summary, export and issue for the owner; report for the 
     for (const params of [[], { thread: 'x' }]) await expect(client.call('diagnostics.summary', params as never)).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams });
 
     const draft = await client.call('diagnostics.issue', { title: 'The window froze', description: 'It froze while C:\\Users\\you\\code was open.' });
-    expect(draft).toMatchObject({ repository: 'beboite/boite', url: null, gh: 'missing', error: null });
+    expect(draft).toMatchObject({ repository: 'mtsu-dev/boite', url: null, gh: 'missing', error: null });
     expect(draft.body).toContain('### What happened');
     expect(draft.body).not.toContain('C:\\Users\\you');
-    expect(draft.prefillUrl.startsWith('https://github.com/beboite/boite/issues/new?')).toBe(true);
+    expect(draft.prefillUrl.startsWith('https://github.com/mtsu-dev/boite/issues/new?')).toBe(true);
     expect(draft.exportPath).toMatch(/boite-diagnostics-.*\.txt$/);
     const withoutLogs = await client.call('diagnostics.issue', { title: 'The window froze', description: 'Again.', includeLogs: false });
     expect(withoutLogs.exportPath).toBeNull();
@@ -135,11 +135,11 @@ test('fake diagnostics: summary, export and issue for the owner; report for the 
     await expect(client.call('diagnostics.report', { records: [{ level: 'info', at: 1, source: 's', event: 'e', message: 'm' }] })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
     // The owner's raw history is never an agent's, with or without a thread.
     for (const params of [{}, { threadId: 'any-thread' }]) await expect(client.call('core.logs', params)).rejects.toMatchObject({ code: RpcErrorCode.Refused });
-    await expect(client.call('diagnostics.summary', {})).rejects.toMatchObject({ code: RpcErrorCode.Refused, message: expect.stringMatching(/its own thread/) });
+    await expect(client.call('diagnostics.summary', {})).rejects.toMatchObject({ code: RpcErrorCode.Refused, message: expect.stringMatching(/is for thread none/) });
     client.becomes('owner');
     await client.call('settings.set', { agentLogAccess: false });
-    client.becomes('agent');
-    await expect(client.call('diagnostics.logs', { limit: 10 })).rejects.toMatchObject({ code: RpcErrorCode.Refused, message: expect.stringMatching(/turned off agent access/) });
+    client.becomes('agent', 't-trace');
+    await expect(client.call('diagnostics.logs', { threadId: 't-trace', limit: 10 })).rejects.toMatchObject({ code: RpcErrorCode.Refused, message: expect.stringMatching(/turned off agent access/) });
     client.becomes('owner');
     expect((await client.call('diagnostics.logs', { limit: 5, minLevel: 'error' })).every(record => record.level === 'error')).toBe(true);
   } finally { client.close(); }

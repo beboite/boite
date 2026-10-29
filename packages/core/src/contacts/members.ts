@@ -5,8 +5,9 @@
  * The linked machine answers for them. It asks the member that holds the
  * project and hands the contact that member's threads under its own core id,
  * each thread id followed by `~` and the first 16 characters of the member's
- * core id. The contact keeps talking to the one machine it knows, and never
- * learns of the member: neither its name nor its address nor its key.
+ * core id. Legacy lookups keep the member name, address and key private.
+ * Explicit shared-project associations additionally disclose canonical endpoint
+ * fingerprints and their accepted directory labels, without forwarding owner RPC.
  *
  * The member keeps a copy of each contact it was opened to (`relayed`), with
  * the grants on its own projects, the owner's model tier and what the contact
@@ -16,13 +17,18 @@
  * contact's current copy too, so a member that missed a push answers from
  * what is true now.
  */
-import type { AgentAddress, AgentContact, AgentLetter, Contact, CoordinationPeer, ModelTier } from '@boite/contracts';
+import type { AgentAddress, AgentContact, AgentLetter, Contact, ContactCapabilities, ContactOffer, CoordinationPeer, ModelTier } from '@boite/contracts';
 import { address, text } from '../coordination-letter.ts';
 import { checkMatchExtras, checkRemoteContact, checkTranscript } from '../coordination-lookup.ts';
 import { PeerRefusal, type Operation } from '../coordination-wire.ts';
 import type { Core } from '../core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unavailable } from '../errors.ts';
 import { checkTier } from './tier.ts';
+import { projectRoute } from './project-relay.ts';
+import { projectRef } from './project-policy.ts';
+import { memberThreadId } from './member-address.ts';
+import { memberAdmission, projectAdmission } from './admission.ts';
+export { memberThreadId } from './member-address.ts';
 
 const MIRROR = 'contacts:relayed';
 const MIRROR_PENDING = 'contacts:relayed-pending';
@@ -31,7 +37,7 @@ const PREFIX = 16;
 /** A relayed request must come back before the contact's own request to this core times out (5 s). */
 const RELAY_MS = 3500;
 /** What a contact may ask of a member's threads, through the machine it is linked to. */
-const RELAYED: readonly Operation[] = ['directory', 'search', 'read', 'deliver', 'receipt'];
+const RELAYED: readonly Operation[] = ['directory', 'search', 'read', 'deliver', 'receipt', 'contact.project'];
 
 /** A contact as the member it was opened to keeps it. */
 export interface RelayedEntry {
@@ -43,16 +49,20 @@ export interface RelayedEntry {
   offers: string[];
   /** The member's own projects opened to the contact. */
   grants: { projectId: string; readThreads: boolean }[];
+  capabilities?: ContactCapabilities;
+  projectOffers?: ContactOffer[];
 }
 /** `via`: the member of the group the contact is linked to. */
-export type RelayedContact = RelayedEntry & { via: string };
+export type RelayedContact = RelayedEntry & { via: string; admission: string };
 
 /** What the linked machine reads of its contacts. */
 export interface LinkedContacts {
-  find(coreId: string): { coreId: string; name: string; offers: { name: string }[]; grants: { projectId: string; readThreads: boolean; machine?: string }[] } | undefined;
+  find(coreId: string): { coreId: string; name: string; offers: ContactOffer[]; capabilities?: ContactCapabilities; grants: { projectId: string; readThreads: boolean; machine?: string }[] } | undefined;
   list(): { coreId: string; grants: { machine?: string }[] }[];
   linkOf(coreId: string): Contact['link'];
   settings(): { minTier: ModelTier };
+  /** The member dropped grants or the whole contact: its replies and pending letters follow. */
+  projectsClosed(coreId: string, projectIds: string[] | null): void;
   /** The copies changed: peers are listed again. */
   reset(): void;
   /** Starts the contacts' timer, which retries the pushes. */
@@ -65,7 +75,6 @@ function within<T>(job: Promise<T>, ms: number, what: string): Promise<T> {
 }
 
 /** A member's thread as the contact addresses it: on the linked machine. */
-export function memberThreadId(memberId: string, threadId: string): string { return `${threadId}${MARK}${memberId.slice(0, PREFIX)}`; }
 
 export class ContactMembers {
   private readonly pushing = new Set<string>();
@@ -124,6 +133,7 @@ export class ContactMembers {
     return {
       coreId: contact.coreId, name: contact.name, minTier: this.contacts.settings().minTier, link: this.contacts.linkOf(contact.coreId),
       offers: contact.offers.map(offer => offer.name),
+      capabilities: contact.capabilities, projectOffers: contact.offers,
       grants: contact.grants.filter(grant => grant.machine === memberId).map(grant => ({ projectId: grant.projectId, readThreads: grant.readThreads })),
     };
   }
@@ -132,11 +142,35 @@ export class ContactMembers {
   private async ask(member: CoordinationPeer, contactId: string, operation: Operation, payload: unknown): Promise<unknown> {
     const contact = this.entry(contactId, member.coreId);
     if (!contact) throw refused('no longer a contact');
-    try { return await within(this.core.coordination.request(member, 'relay.in', { contact, operation, payload }), RELAY_MS, member.name); }
+    const admission = () => {
+      const entry = this.entry(contactId, member.coreId);
+      if (!entry) throw refused('no longer a contact');
+      const {link: _link, ...policy} = entry;
+      return JSON.stringify([memberAdmission(this.core, member.coreId), this.core.contacts.find(contactId)?.addedAt, policy]);
+    };
+    const before = admission();
+    let changed = false;
+    // A revoked permission cannot authorize an old response when the owner later
+    // restores the same values. Observe policy changes throughout this await.
+    const off = this.core.bus.onAny(name => {
+      if (name !== 'contacts.updated' && name !== 'group.updated') return;
+      try { if (admission() !== before) changed = true; }
+      catch { changed = true; }
+    });
+    try {
+      const answer = await within(this.core.coordination.request(member, 'relay.in', { contact, operation, payload }), RELAY_MS, member.name);
+      if (changed || admission() !== before) throw refused('relay: contact, member admission or project permissions changed during request');
+      return answer;
+    }
     catch (error) {
+      if (error instanceof RpcFailure) throw error;
       if (error instanceof PeerRefusal) throw refused(error.message);
       throw new Error(messageOf(error));
-    }
+    } finally { off(); }
+  }
+
+  requestProject(member: CoordinationPeer, contactId: string, payload: unknown): Promise<unknown> {
+    return this.ask(member, contactId, 'contact.project', payload);
   }
 
   /** A member's thread under this core's id. */
@@ -144,27 +178,25 @@ export class ContactMembers {
     return { ...entry, coreId: this.selfId(), threadId: memberThreadId(member.coreId, entry.threadId), machine: this.core.info().hostname ?? 'Boite' };
   }
 
-  /** Each holder's threads open to the contact; a member that does not answer just lists none. */
-  async directory(contactId: string): Promise<AgentContact[]> {
-    const found = await Promise.all(this.holders(contactId).map(async member => {
-      try {
-        const answer = await this.ask(member, contactId, 'directory', {});
-        if (!Array.isArray(answer) || answer.length > 100) throw new Error('invalid directory');
-        return answer.map(entry => this.outward(checkRemoteContact(entry as AgentContact, member), member));
-      } catch (error) { this.warn(member, error); return []; }
-    }));
-    return found.flat();
+  /** Each holder's threads open to the contact, and how many holders did not answer. */
+  directory(contactId: string): Promise<{ entries: AgentContact[]; unavailable: number }> {
+    return this.gather(contactId, 'directory', {}, (entry, member) => checkRemoteContact(entry as AgentContact, member));
   }
 
-  async search(contactId: string, words: string[]): Promise<AgentContact[]> {
+  search(contactId: string, words: string[]): Promise<{ entries: AgentContact[]; unavailable: number }> {
+    return this.gather(contactId, 'search', { words }, (match, member) => ({ ...checkRemoteContact(match as AgentContact, member), ...checkMatchExtras(match as { matched?: unknown; excerpts?: unknown }) }));
+  }
+
+  /** One list from every holder: a member that fails or answers badly is counted, never read as an empty list. */
+  private async gather(contactId: string, operation: 'directory' | 'search', payload: unknown, check: (entry: unknown, member: CoordinationPeer) => AgentContact): Promise<{ entries: AgentContact[]; unavailable: number }> {
     const found = await Promise.all(this.holders(contactId).map(async member => {
       try {
-        const answer = await this.ask(member, contactId, 'search', { words });
-        if (!Array.isArray(answer) || answer.length > 100) throw new Error('invalid search');
-        return answer.map(match => this.outward({ ...checkRemoteContact(match as AgentContact, member), ...checkMatchExtras(match as { matched?: unknown; excerpts?: unknown }) }, member));
-      } catch (error) { this.warn(member, error); return []; }
+        const answer = await this.ask(member, contactId, operation, payload);
+        if (!Array.isArray(answer) || answer.length > 100) throw new Error(`invalid ${operation}`);
+        return answer.map(entry => this.outward(check(entry, member), member));
+      } catch (error) { this.warn(member, error); return null; }
     }));
-    return found.flat();
+    return { entries: found.flatMap(list => list ?? []), unavailable: found.filter(list => list === null).length };
   }
 
   async read(contactId: string, at: { member: CoordinationPeer; threadId: string }, payload: { limit?: unknown; before?: unknown }): Promise<unknown> {
@@ -214,7 +246,7 @@ export class ContactMembers {
     const request = raw as { contact?: unknown; operation?: unknown; payload?: unknown } | null;
     const contactId = text(request?.contact, 'relay.contact', 100);
     const operation = request?.operation as Operation;
-    if (!RELAYED.includes(operation)) throw invalidParams('relay.operation: expected directory, search, read, deliver or receipt');
+    if (!RELAYED.includes(operation)) throw invalidParams('relay.operation: expected directory, search, read, deliver, receipt or contact.project');
     if (!this.contacts.find(contactId)) throw refused('relay.contact: not a contact of this machine any more');
     // The member's copy may be behind a revoke it missed: this core's grants decide, and the copy is pushed again.
     if (!this.holdersOf(contactId).includes(member.coreId)) {
@@ -224,6 +256,17 @@ export class ContactMembers {
     const peer = this.core.contacts.peers().find(entry => entry.coreId === contactId && !this.core.contacts.isRelayPeer(entry));
     if (!peer) throw refused('relay.contact: not a contact of this machine any more');
     let payload = request?.payload;
+    if (operation === 'contact.project') {
+      const route = projectRoute(payload), self = this.selfId();
+      if (!route || route.source.ownerCoreId !== self || route.source.coreId !== member.coreId || route.target.ownerCoreId !== contactId
+        || !this.contacts.find(contactId)?.grants.some(g => g.machine === member.coreId && g.projectId === route.source.projectId)) throw refused('route.source: expected this member current granted endpoint');
+      const admission = projectAdmission(this.core, contactId, member.coreId, route.source.projectId);
+      let answer: unknown;
+      try { answer = await this.core.coordination.request(peer, operation, payload); }
+      catch (error) { if (error instanceof PeerRefusal) throw refused(error.message); throw error; }
+      if (projectAdmission(this.core, contactId, member.coreId, route.source.projectId) !== admission) throw refused('route.source: member or project grant changed during request');
+      return answer;
+    }
     let from: AgentAddress | null = null;
     if (operation === 'deliver') {
       const letter = payload as AgentLetter;
@@ -315,8 +358,10 @@ export class ContactMembers {
   relayed(): RelayedContact[] {
     const stored = this.stored();
     if (stored.length === 0) return stored;
-    const members = new Set(this.members().map(peer => peer.coreId));
-    return stored.filter(entry => members.has(entry.via));
+    return stored.filter(entry => {
+      try { return entry.admission === memberAdmission(this.core, entry.via); }
+      catch { return false; }
+    });
   }
   /** The copies of this contact, one for each member it is linked to. */
   relayedOf(coreId: string): RelayedContact[] { return this.relayed().filter(entry => entry.coreId === coreId); }
@@ -328,11 +373,14 @@ export class ContactMembers {
   }
 
   /** A request of this core's agent for a relayed contact, sent through the member it is linked to. */
-  async send(contact: CoordinationPeer, operation: Operation, payload: unknown): Promise<unknown> {
-    const via = this.via(contact.coreId);
-    if (!via) throw unavailable(`${contact.name} is linked to a machine that left this group`);
-    const contactId = contact.coreId;
+  async send(via: CoordinationPeer, contactId: string, operation: Operation, payload: unknown): Promise<unknown> {
     if (!RELAYED.includes(operation)) throw refused(`${operation}: ask from ${via.name}, the machine linked to that contact`);
+    if (operation === 'contact.project') {
+      const route = projectRoute(payload);
+      const gateway = route && this.members().find(p => p.coreId === route.source.ownerCoreId && this.relayedOf(contactId).some(e => e.via === p.coreId && e.grants.some(g => g.projectId === route.source.projectId)));
+      if (!gateway) throw refused('route.source: expected a currently admitted gateway for this endpoint');
+      via = gateway;
+    }
     return this.core.coordination.request(via, 'relay.out', { contact: contactId, operation, payload });
   }
 
@@ -345,6 +393,8 @@ export class ContactMembers {
     return {
       coreId: text(raw.coreId, `${field}.coreId`, 100), name: text(raw.name, `${field}.name`, 100), minTier: checkTier(raw.minTier, `${field}.minTier`), link: raw.link!,
       offers: raw.offers.map((name, index) => text(name, `${field}.offers[${index}]`, 200)),
+      capabilities: { ...(raw.capabilities?.sharedProjects === 1 ? {sharedProjects: 1} : {}), ...(raw.capabilities?.humanLetters === 1 ? {humanLetters: 1} : {}) },
+      projectOffers: Array.isArray(raw.projectOffers) ? raw.projectOffers.slice(0, 256).map(o => ({projectId: text(o.projectId, 'relay.offer.projectId', 128), name: text(o.name, 'relay.offer.name', 200), ...(o.sharedProject ? {sharedProject: projectRef(o.sharedProject)} : {})})) : [],
       grants: raw.grants.map((grant, index) => {
         if (typeof grant?.readThreads !== 'boolean') throw invalidParams(`${field}.grants[${index}].readThreads: expected a boolean`);
         return { projectId: text(grant.projectId, `${field}.grants[${index}].projectId`, 128), readThreads: grant.readThreads };
@@ -379,16 +429,17 @@ export class ContactMembers {
   private replace(via: string, entries: RelayedEntry[], whole: boolean): void {
     const before = this.stored();
     const kept = before.filter(entry => entry.via !== via || (!whole && !entries.some(next => next.coreId === entry.coreId)));
-    const next = [...kept, ...entries.filter(entry => entry.grants.length > 0).map(entry => ({ ...entry, via }))];
+    const admission = memberAdmission(this.core, via);
+    const next = [...kept, ...entries.filter(entry => entry.grants.length > 0).map(entry => ({ ...entry, via, admission }))];
     if (JSON.stringify(before) === JSON.stringify(next)) return;
     this.core.journal.setSetting(MIRROR, next);
     this.contacts.reset();
     // What the member no longer opens: its replies end and its letters go nowhere.
     for (const old of before.filter(entry => entry.via === via)) {
       const now = next.find(entry => entry.via === via && entry.coreId === old.coreId);
-      if (!now) { if (whole || entries.some(entry => entry.coreId === old.coreId)) this.core.contacts.reach.closed(old.coreId, null); continue; }
+      if (!now) { if (whole || entries.some(entry => entry.coreId === old.coreId)) this.contacts.projectsClosed(old.coreId, null); continue; }
       const dropped = old.grants.filter(grant => !now.grants.some(kept => kept.projectId === grant.projectId)).map(grant => grant.projectId);
-      if (dropped.length > 0) this.core.contacts.reach.closed(old.coreId, dropped);
+      if (dropped.length > 0) this.contacts.projectsClosed(old.coreId, dropped);
     }
   }
 

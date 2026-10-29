@@ -134,6 +134,7 @@ export class Store {
   }
   get clientGeneration(): number { return this.#ctx.clientGeneration; }
   get navigationGeneration(): number { return this.#ctx.threads.openGeneration; }
+  get shared() { return this.#ctx.shared; }
   get serverUpdater() { return this.#ctx.serverUpdater; }
 
   // -------------------------------------------------------------------------
@@ -170,6 +171,7 @@ export class Store {
     listen(ctx, client);
     ctx.off.push(modelFavorites.register(ctx.models.favoritesTarget));
     ctx.off.push(ctx.composer.watchQueues());
+    ctx.off.push(ctx.sync.watch());
     ctx.off.push(ctx.draftStartup.watch());
     ctx.off.push(watchIncognito(ctx));
     // Each machine hears about this window's own failures. Unit tests drive
@@ -179,6 +181,7 @@ export class Store {
 
   detach(): void {
     const ctx = this.#ctx;
+    ctx.shared.reset();
     ctx.requests.resetSecrets();
     ctx.clientGeneration++;
     ctx.settings.brainCommands = [];
@@ -189,6 +192,7 @@ export class Store {
     ctx.serverUpdater.reset();
     ctx.terminals.dropSessions();
     ctx.drafts.stop();
+    ctx.sync.stop();
     ctx.workbench.resetMemory();
     ctx.delegation.coordinationEpoch++;
     this.coordination = null;
@@ -222,6 +226,7 @@ export class Store {
   set connection(value) { this.#ctx.connection.connection = value; }
   get core() { return this.#ctx.connection.core; }
   set core(value) { this.#ctx.connection.core = value; }
+  get clockOffset() { return this.#ctx.connection.clockOffset; }
   get principal() { return this.#ctx.connection.principal; }
   set principal(value) { this.#ctx.connection.principal = value; }
   get endpointUrl() { return this.#ctx.connection.endpointUrl; }
@@ -482,11 +487,14 @@ export class Store {
   checkAccount(...args: Parameters<Accounts['checkAccount']>) { return this.#ctx.accounts.checkAccount(...args); }
   reloadProviders(...args: Parameters<Accounts['reloadProviders']>) { return this.#ctx.accounts.reloadProviders(...args); }
   loadHarnessUpdates(...args: Parameters<Accounts['loadHarnessUpdates']>) { return this.#ctx.accounts.loadHarnessUpdates(...args); }
+  freshenHarnessUpdates(...args: Parameters<Accounts['freshenHarnessUpdates']>) { return this.#ctx.accounts.freshenHarnessUpdates(...args); }
   updateHarness(...args: Parameters<Accounts['updateHarness']>) { return this.#ctx.accounts.updateHarness(...args); }
   skipHarnessUpdate(...args: Parameters<Accounts['skipHarnessUpdate']>) { return this.#ctx.accounts.skipHarnessUpdate(...args); }
   installProvider(...args: Parameters<Accounts['installProvider']>) { return this.#ctx.accounts.installProvider(...args); }
   cancelInstall(...args: Parameters<Accounts['cancelInstall']>) { return this.#ctx.accounts.cancelInstall(...args); }
   uninstallProvider(...args: Parameters<Accounts['uninstallProvider']>) { return this.#ctx.accounts.uninstallProvider(...args); }
+  addLocalProvider(...args: Parameters<Accounts['addLocalProvider']>) { return this.#ctx.accounts.addLocalProvider(...args); }
+  removeLocalProvider(...args: Parameters<Accounts['removeLocalProvider']>) { return this.#ctx.accounts.removeLocalProvider(...args); }
 
   // -------------------------------------------------------------------------
   // Projects and the draft: store/projects.svelte.ts
@@ -512,6 +520,7 @@ export class Store {
   addProject(...args: Parameters<Projects['addProject']>) { return this.#ctx.projects.addProject(...args); }
   addProjects(...args: Parameters<Projects['addProjects']>) { return this.#ctx.projects.addProjects(...args); }
   removeProject(...args: Parameters<Projects['removeProject']>) { return this.#ctx.projects.removeProject(...args); }
+  renameProject(...args: Parameters<Projects['renameProject']>) { return this.#ctx.projects.renameProject(...args); }
   refreshProjects() { return this.#ctx.projects.refreshProjects(); }
   archiveProject(...args: Parameters<Projects['archiveProject']>) { return this.#ctx.projects.archiveProject(...args); }
   projectIconUrl(...args: Parameters<Projects['projectIconUrl']>) { return this.#ctx.projects.projectIconUrl(...args); }
@@ -603,6 +612,7 @@ export class Store {
   rename(...args: Parameters<Threads['rename']>) { return this.#ctx.threads.rename(...args); }
   retitle(...args: Parameters<Threads['retitle']>) { return this.#ctx.threads.retitle(...args); }
   pin(...args: Parameters<Threads['pin']>) { return this.#ctx.threads.pin(...args); }
+  trustContactHistory(...args: Parameters<Threads['trustContactHistory']>) { return this.#ctx.threads.trustContactHistory(...args); }
   move(...args: Parameters<Threads['move']>) { return this.#ctx.threads.move(...args); }
   cancelMove(...args: Parameters<Threads['cancelMove']>) { return this.#ctx.threads.cancelMove(...args); }
   archive(...args: Parameters<Threads['archive']>) { return this.#ctx.threads.archive(...args); }

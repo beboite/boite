@@ -3,8 +3,9 @@
 Changes land through squash-merged pull requests. The repository's merge policy
 requires every check a pull request reports ([check names](#check-names)),
 `PR title` included, forbids direct pushes, force pushes and
-deletion of `main`, and permits admin bypass only when merging a PR. CODEOWNERS
-requests reviews; approval is not required. The `release tags` policy protects
+deletion of `main`, and permits admin bypass only when merging a PR. No review
+is requested or required: the repository has no CODEOWNERS, whose automatic
+requests mailed the owner every event of each contributor's pull request. The `release tags` policy protects
 `v*` tags from movement and deletion while allowing their creation.
 
 `PR title` runs `scripts/ci/pr-title.ts` on title edits. The squash title is
@@ -19,18 +20,24 @@ it, two pull requests green on their own can break `main` together: the ruleset
 does not require an up-to-date branch, and requiring one would rerun every open
 pull request's CI after each merge.
 
-`ci` and `PR title` also run on `merge_group`. A group runs `ci` in `pr` mode
-against its `main` base: the same path rules, skips and platforms as a pull
-request, with the diff covering every pull request ahead of it. `Bundle size`
-skips there, since it compares a pull request with its base. A group's `PR
+`ci` and `PR title` also run on `merge_group`. A group runs `ci` in `queue`
+mode against its `main` base: the same path rules as a pull request, with the
+diff covering every pull request ahead of it, and the Windows, macOS, desktop,
+E2E, stress, Docker and APK jobs a pull request run leaves out
+([pull request runs](#pull-request-runs)). `Bundle size` skips there, since it
+compares a pull request with its base. A group's `PR
 title` checks the squash title of its last commit, the one `main` receives.
-The queue builds up to five groups at once, each on top of the ones ahead of
-it, without waiting to fill a group. Pull requests land in queue order: one
-whose group passed waits for those ahead of it. A failed group removes its pull
-request and rebuilds the groups behind it without that one; so do checks that
-have not reported within 60 minutes. A green `ci` run takes about 12 minutes
-(2026-10-20): that is the shortest time from entering the queue to landing, and
-waits or rebuilds add to it.
+The queue builds up to three groups at once, each on top of the ones ahead of
+it, without waiting to fill a group: with five, the full matrices shared the
+organization's 20 hosted runners and groups timed out (2026-10-28). Pull
+requests land in queue order: one whose group passed waits for those ahead of
+it. A failed group removes its pull request and rebuilds the groups behind it
+without that one; so do checks that have not reported within 120 minutes.
+GitHub does not cancel the `ci` runs of a group it drops: they hold their
+runners until they finish, so cancel a `merge_group` run whose
+`gh-readonly-queue/main/pr-<n>-<sha>` branch no longer exists. A green `ci` run
+takes about 12 minutes (2026-10-20): that is the shortest time from entering
+the queue to landing, and waits or rebuilds add to it.
 
 An agent merges with `gh pr merge <number> --squash --match-head-commit <sha>`:
 the pull request enters the queue once its own checks pass, and lands when its
@@ -63,19 +70,28 @@ dependency is required too.
 | Dependencies, shared builds, other workflows and unknown paths | All checks |
 | Release or manual full run | All checks, except jobs the caller replaces through explicit inputs |
 
+Contacts changes exercise the core/fake contract scenarios plus the real
+three-core `shared-cores.test.ts` and browser `shared-collaboration.test.ts`
+fixtures. A local Linux run verifies path and admission logic but does not
+replace the native Windows process/file checks selected by CI. Fixture-only
+echo execution must not be reported as external-provider sandbox coverage.
+
 A pull request whose selection includes desktop also runs [Bundle growth](#bundle-growth).
 
-The changes job always installs frozen dependencies, runs `bun audit`, local
+The changes job always installs frozen dependencies, runs `bun audit` (with
+the ignored advisories named and justified in `ci.yml`), local
 link checks, `bun test scripts/ci ./bench ./apps/shell/scripts`, architecture
 checks and their tests, translation validation and the no-em-dash UI copy
 rule (`bun run check:copy`). Changes to workflows,
 composite actions or `scripts/ci/` also run checksum-verified actionlint 1.7.12.
 
 Architecture checks reject runtime dependency cycles, forbidden package imports
-and production files above 900 lines. Existing oversized files have ratcheting
-limits in `scripts/architecture/size-budget.json` from 2026-09-25. Contracts,
-the in-memory client and UI string tables are exempt. Complexity reporting is
-advisory. Missing translations warn on PRs and nightlies; the release version
+and production files above 900 lines. The graph reads TypeScript, JavaScript and
+the scripts of Svelte components; the size check also reads the Rust of the
+shell and the launcher and the Kotlin and Java of both Android apps
+([development](development.md#architecture-checks)). Two files have a
+ratcheting allowance in `scripts/architecture/size-budget.json`: no file is
+exempt. Complexity reporting is advisory. Missing translations warn on PRs and nightlies; the release version
 job requires every sentence ([language](language.md)).
 
 The focused telemetry job runs `bun test packages/core/test/telemetry.test.ts`
@@ -112,12 +128,12 @@ reports its own name (`Desktop`), never the inner ones. So:
   the ruleset requires every job of each needs chain (`Plan and repository
   checks`, `Build UI`).
 
-`bun scripts/ci/required-checks.ts` prints the names a ready pull request
-reports. Its tests pin all of them, refuse a matrix or an expression in a name
-(the draft expression aside, see [draft pull requests](#draft-pull-requests)), and check each written-out job against
+`bun scripts/ci/required-checks.ts` prints the names a pull request
+reports. Its tests pin all of them, refuse a matrix or an expression in a name,
+and check each written-out job against
 `CORE_ALL` and `PORTABLE_ALL`. On main and in a release, the `Ruleset check
 names` job runs it with `--live`, which reads the rules for `main`
-(`repos/beboite/boite/rules/branches/main`, public) and fails on a check the
+(`repos/mtsu-dev/boite/rules/branches/main`, public) and fails on a check the
 ruleset lacks or one no pull request reports. No job needs it: the tests still
 run, and once the ruleset matches, a rerun of that job alone turns the run
 green. Pull requests skip it, so it is not required. `--ruleset <file>`
@@ -132,8 +148,8 @@ compares with saved `gh api` output instead.
 
 ### Run modes and platforms
 
-PRs against any branch use `pr` mode and compare with their base; so do merge
-queue groups, against their `main` base. Main pushes
+PRs against any branch use `pr` mode and compare with their base; merge queue
+groups use `queue` mode against their `main` base. Main pushes
 use `warm`: they run affected core and E2E suites too, add Linux ARM64 and macOS
 Intel desktop legs, and save caches. A push event does not prove that an
 equivalent PR tree passed. A main push compares with the last main commit whose
@@ -141,10 +157,10 @@ CI passed, not with the previous push, so the changes of a cancelled or failed
 run are tested again. A green main commit therefore has every suite passing on
 a tree no later change affected, as far as the path rules above hold; the
 nightly publishes on that. Without an answer from the API, the run selects every
-check. Tags, reusable full calls and manual runs use `full`. PR portable
+check. Tags, reusable full calls and manual runs use `full`. Queue portable
 desktop legs are Linux x64 and macOS ARM64; warm/full runs use both
 architectures of each OS. The core suite follows the same rule for its Intel
-Mac: a PR runs it on Linux x64/ARM64, Windows and macOS ARM64, and warm/full
+Mac: a group runs it on Linux x64/ARM64, Windows and macOS ARM64, and warm/full
 runs add `Core tests (macOS x64)` on `macos-15-intel` (`coreRunners` in
 `changes.ts`). That job took 322 to 409 s a PR on a scarce runner (2026-10-17);
 an Intel-only core failure now shows on the main push.
@@ -170,7 +186,9 @@ desktop leg took 14.0 minutes and the Apple Silicon one 8.1 (nightly run
 37234148865, the longest job of that run).
 
 Core changes run the full core suite on Windows, Linux x64/ARM64 and macOS
-ARM64 in every mode, and on Intel macOS outside PRs. The two Linux core jobs
+ARM64 in the queue, on main and in full runs, and on Intel macOS outside the
+queue; a pull request runs it on Linux x64, plus Windows for protection
+inputs ([pull request runs](#pull-request-runs)). The two Linux core jobs
 then install `xvfb` and `libxcomposite1` with apt and run
 `packages/core/test/window-capture-x11.test.ts` alone under `xvfb-run` at
 1280x1024x24: the X11 backend of `boite window` lists, captures and fails on
@@ -245,53 +263,135 @@ the summary with its time, and the tests listed are those seen before. Bun
 gives no list of open handles and no stack of a test that awaits: its
 inspector answers only when the JavaScript thread is free.
 
-### Draft pull requests
+### Pull request runs
 
-A draft pull request runs `draft` mode: the changes job, the Linux x64 core
-suite, type checks and UI tests, and the focused telemetry and E2E type checks,
-each only when its paths changed. Windows, macOS, desktop packages, E2E,
-stress, Docker and the APKs wait: their checks skip.
+A pull request, draft or ready, runs `pr` mode: the changes job, the Linux x64
+core suite, type checks and UI tests, `Bundle size`, and the focused telemetry
+and E2E type checks, each only when its paths changed. Protection code,
+protected fixtures and shared toolchain inputs also select the existing
+`Core tests (Windows x64)` job.
+It builds the userspace sandbox helper, runs the opt-in native protection fixture
+and keeps the ordinary Windows core suite. No extra required check name is added.
+Other pull requests leave Windows out. macOS, desktop packages, E2E, stress,
+Docker and the APKs skip: the [merge queue](#merge-queue) runs them on top of
+`main`.
 
-A skip passes in a ruleset, so a draft must not satisfy it:
+The Windows job also archives `windows-null-access-matrix`: a standalone,
+opt-in comparison of host and LPAC NUL opens with four requested access masks.
+It derives the frozen historical v1 helper in
+`tests/diagnostics/windows-protected-reference.c` and preserves that reference's
+admission probe. Its non-blocking result reports experiment completeness;
+the native production suites still decide acceptance.
+It also compares the captured Null descriptor with duplicated host and LPAC
+tokens using AccessCheck; an added package ACE exists only in memory.
+These DACL verdicts do not demonstrate a device open or cover the full SACL
+and driver checks.
+The same capture tests a named suffix under the real Null device, using NT and
+Win32 opens in both host and LPAC phases. It records device characteristics and
+checks EOF and discarded writes on successful Null opens. A complete refusal
+is diagnostic evidence; it does not admit a tool or replace the original probe.
 
-- The planning job reports `Plan and repository checks (draft)` and the
-  reusable workflows `Desktop (draft) / Linux x64` and so on. Only a job that
-  runs or a caller evaluates its name: a skipped job reports the expression
-  itself, so the other jobs keep their fixed names.
-- After `ready_for_review`, the required planning name stays expected until
-  the `pr` run creates it, then pending until it ends.
-- A rerun keeps its event, so an old draft run rerun once the pull request is
-  ready, or a fork's draft run approved after it, would put skips back under
-  the required names. The planning job's first step reads the pull request's
-  draft flag. Still a draft: the other jobs skip as usual, even when the
-  repository checks fail. No longer a draft, no answer from GitHub, or
-  planning failed before that step: every other job runs only to fail with
-  "rerun the latest ready run instead". A cancelled run reports its pending
-  jobs `cancelled`, not skipped, which blocks as well.
-- `converted_to_draft` cancels a full run in progress and fails `Plan and
-  repository checks` at once, so that run's earlier planning success cannot
-  merge next to skips; the next push runs the draft checks.
-- A pull request reopened as a draft over a partial full run is the one case
-  left: its draft run puts skips back next to that run's planning success. A
-  draft cannot merge, and marking it ready runs a full run whose planning
-  replaces that success before anything else.
+The separate `windows-lpac-parent-spike` artifact records a process-broker
+prerequisite under SDK and MinGW. An opt-in fixture tests host-created children
+with an LPAC parent, the same job and kernel child-process restrictions.
+Its non-blocking result decides only this attribute combination, including
+parent identity, inherited client handles and the child's own creation refusal.
+It neither brokers NUL nor changes the blocking production admission probe.
 
-`PR title` reports the same name in both modes. CodeRabbit reviews drafts
-(`.coderabbit.yaml`).
+The opt-in `windows-null-broker-spike` artifact tests a different primitive:
+the host opens the fixed real Null device afresh for each request and duplicates
+only that handle into a captured LPAC process. A task-local debugger adapter
+exercises ordinary native and Bun callers, ordinary descendants, file modes,
+denials, output-pointer failures and cleanup. It requires an exact verified
+x64 ntdll image and startup site; an unsupported image or partial capture leaves
+the experiment incomplete. Both compiler outcomes must agree. This diagnostic
+always reports `productionAccepted=false`; its non-blocking CI step does not
+replace the blocking native production protection tests. The production v2 helper has
+its own explicitly linked Null broker module; diagnostic reference hashes never
+attest that production executable. Required useful-tool, provider/shared and
+Muse MSP scenarios execute with both SDK and MinGW helpers. The Windows core
+job has a 30-minute budget for both matrices and the general suite. A run on
+2026-10-27 spent nearly eight minutes in setup/diagnostics, then exceeded its
+old 15-minute budget during the second provider matrix. Individual scenario
+deadlines and all admission checks remain unchanged. Shared Git fixtures set
+their synthetic identity in each repository, including the commit consumer,
+and ignore host system/global Git configuration.
+Once the helpers build, provider preparation and both provider matrices run
+even if protected-tools tests fail. A failed preparation still blocks those
+matrices; cancellation stops them. Each test step retains its failing exit code.
+The setup ACL root contains only the private view, runtime and home. Synthetic
+host files and the process journal stay outside that subtree so inherited ACL
+changes cannot invalidate the host control or prevent journal cleanup. The same
+native host-path read must succeed both before and after setup.
+Console auxiliaries require kernel-event file identity against the system
+reference and an independently captured hash. They retain LPAC, startup, event
+and cleanup evidence; workload-child requirements never count them. A job-drain
+record must precede any accepted auxiliary exit with code 125. Completed calls
+and outstanding scenarios remain in the manifest if a later prerequisite fails.
+The adapter snapshots a validated security-quality-of-service descriptor into
+host-local storage for the fixed Null open. Invalid output spans pass through
+to the original syscall under the captured LPAC token, without a host open or
+remote write. Pointer admission still requires matching statuses for both
+transports, unchanged sentinels, zero handle growth and a successful valid open.
+The x64 adapter decodes `EaLength` as a 32-bit `ULONG`; unused upper stack-slot
+bytes cannot reject an ordinary call. It records both halves of that slot to
+attribute a remaining rejection. Bun stage markers and forwarded-exception
+context locate runtime failures without suppressing application exceptions or
+relaxing workload admission.
+Credential non-inheritance is checked with a complete handle-table snapshot of
+the caller and a live stdout-handle control. The candidate must equal the
+captured parent handle and be absent at that instant; a numeric collision or
+incomplete query leaves the experiment incomplete. This avoids issuing invalid
+handle I/O under a debugger, which can raise an application exception.
+The breakaway control accepts either an access-denied creation or a completed
+fixed-image probe whose kernel binding proves that it stayed in the private
+LPAC job. A successful creation flag alone proves neither escape nor confinement.
+Probe children retain all token, image, startup, event and handle checks; they
+cannot replace the ordinary workload children. Expiry requires an automatic
+stop request after the deadline while the scope was live, followed by actual
+session cleanup and zero live processes. The observer waits for that cleanup
+within its existing deadline rather than stopping at the first empty process
+count. Raw `NtSuspendThread` status identifies a failed suspension. An exact
+`STATUS_THREAD_IS_TERMINATING` parks the untouched breakpoint owner using
+[`DBG_REPLY_LATER`](https://learn.microsoft.com/en-us/windows/win32/api/debugapi/nf-debugapi-continuedebugevent).
+The owner resumes only after every terminating sibling's real thread-exit event
+has been continued; its replay is decoded again before any trap removal.
+Successful sibling suspensions remain held until the trap is rearmed. A failed
+park, an unexpected status or a missing exit/replay still drains the job within
+the existing deadline. Failed suspensions never count as held or retired threads.
 
-Of the 5,632 runner minutes spent by the 86 pull request runs started on
-2026-10-18 between 12:34 and 21:35 UTC, 2,476 went to runs a newer push
-cancelled, a median 9.8 minutes after the push they tested: the time a review
-bot takes to answer. A green full run
-cost 86 runner minutes; a draft run of the same core change costs about 11,
-all on Linux.
+A skip passes in a ruleset, so a pull request's run satisfies every required
+name and the pull request can enter the queue. The group's run reports the same
+names on its own commit, and gates the merge on them. There only the path rules
+skip a job: `changes.ts` gives a group the `queue` plan whatever its pull
+requests' draft flags, and no job condition in `ci.yml` reads the event or the
+draft flag, `Bundle size` and `Ruleset check names` aside
+(`required-checks.test.ts`). A Windows, macOS, desktop or E2E failure therefore
+shows first in the queue, which removes the pull request.
+
+Marking a draft ready starts no run, nor does a conversion to draft: a draft's
+run already reports what a ready one would. mtsu-patrol reviews once the pull
+request is ready.
+
+Until 2026-10-28 a ready pull request ran the full matrix, then its merge group
+ran it again. GitHub Free allows the organization 20 concurrent jobs: with 20 or
+more ready pull requests open, jobs waited up to 47 minutes for a runner. On
+2026-10-28 a pull request run cost 12 to 16 runner minutes, all on Linux, and a
+full run 91 to 108 (9 runs of that day). Each pull request now pays the full
+matrix once, in the queue, instead of twice. Of the 5,632 runner minutes spent
+by the 86 pull request runs started on 2026-10-18 between 12:34 and 21:35 UTC,
+2,476 went to runs a newer push cancelled, a median 9.8 minutes after the push
+they tested: the time a review bot takes to answer.
 
 An agent's pull request flow:
 
 1. `gh pr create --draft`.
-2. Fix the draft's CI failures and review findings, batching pushes.
-3. `gh pr ready <number>` once the draft's checks pass and the threads are answered.
-4. After that, push only for a full-run failure or a new finding.
+2. Fix the draft's CI failures in one push.
+3. `gh pr ready <number>` once the draft's checks pass.
+4. After that, one push per round: wait for the head's CI run and
+   mtsu-patrol's review, then fix everything they found together.
+5. `gh pr merge <number> --squash --match-head-commit <sha>`. A failure the
+   queue finds removes the pull request: fix it, push, and merge again.
 
 ## Build cost
 
@@ -394,7 +494,12 @@ A pull request is checked twice:
   editing it, rerun the failed jobs (`gh run rerun <run-id> --failed`).
 - Against a ceiling: the sizes `bundle-size.yml` kept for the newest published
   nightly or release, plus 2 %. A reason does not lift it; only publishing
-  does, so a pull request over it waits for the next nightly or shrinks.
+  does. A pull request fails it only for what it adds: when its base is
+  already above the ceiling, the measure fails only if the pull request grows
+  it, and otherwise the job summary lists it under "Above the ceiling before
+  this pull request". That debt is main's: after measuring each main commit,
+  `bundle-size.yml` runs `budgets.ts ceiling` and fails while main is above
+  the ceiling, until the next nightly publishes or a change shrinks it.
 
 The job summary shows each measure, its base, the growth and the ceiling.
 Reproduce a measurement with `bun run build:ui && bun run build:core &&
@@ -572,14 +677,18 @@ repository's custom domain, `APP_ORIGIN` in the contracts
 ([phone](phone.md#the-app-on-its-own-address)). It packs the site itself so
 `/.well-known/assetlinks.json` ships, which `upload-pages-artifact` would leave
 out as a hidden folder. Pages must use GitHub Actions as its source, and the
-domain's DNS names `beboite.github.io`.
+domain's DNS names `mtsu-dev.github.io`.
 
 ## Pull request reviews
 
-`.coderabbit.yaml` enables advisory reviews and chat replies, drafts included
-(`auto_review.drafts`), and skips generated artifacts. CodeRabbit is not a
-required check. Its installed App, plan eligibility and quotas are external
-prerequisites.
+mtsu-patrol reviews each ready head; it is not a required check.
+`.coderabbit.yaml` turns CodeRabbit's automatic reviews and chat replies off:
+its free quota left most pull requests with a limit notice instead of a review.
+
+A review with no critical or major finding is the last one: the push that
+only answers it needs no second review. mtsu-patrol skips a push of at most
+150 changed lines after such a review (a setting in its panel) and says so in
+its summary.
 
 Follow the [PR rules](../AGENTS.md#follow-through-on-pull-requests): inspect CI
 and review findings together, verify and group fixes before pushing, and report
@@ -639,7 +748,8 @@ dispatching publication on the same published tag.
 The registry is `ghcr.io/<owner>/<repository>/boite-server`. Anonymous pulls
 require public GHCR package visibility. Publishing uses `GITHUB_TOKEN`, without
 a registry-password secret. CI does not contact a production host or migrate
-Boite Legacy's separate `ghcr.io/beboite/boite-server` package.
+Boite Legacy's separate `ghcr.io/beboite/boite-server` package. Images published
+before the move to `mtsu-dev` stay under `ghcr.io/beboite/boite/boite-server`.
 
 ## Automatic changelog
 
@@ -655,7 +765,7 @@ cover the tables, commit ranges, grouping and announcements.
 `.github/topics.json` holds the GitHub topics. Review it before applying:
 
 ```sh
-gh api repos/beboite/boite/topics --method PUT --input .github/topics.json
+gh api repos/mtsu-dev/boite/topics --method PUT --input .github/topics.json
 ```
 
 This changes topics only; the About description is separate repository metadata.

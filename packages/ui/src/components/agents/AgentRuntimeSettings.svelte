@@ -22,7 +22,7 @@
    * reads the core and merges instead of writing on the revision blindly.
    */
   let base: { config: AgentRuntimeConfig; revision: number; behind: boolean } | null = null;
-  const FIELDS = ['defaultRoute', 'allowedRoutes', 'subagents', 'autoMemory', 'dailyBudgetUsd'] as const;
+  const FIELDS = ['defaultRoute', 'allowedRoutes', 'subagents', 'autoMemory', 'eventWakes', 'dailyBudgetUsd'] as const;
   /** Equal values whatever the order of their keys: the core writes a route's keys in its own order. */
   const canon = (value: unknown) => JSON.stringify(value, (_key, v: unknown) => v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v);
   const same = (a: unknown, b: unknown) => canon(a) === canon(b);
@@ -36,7 +36,7 @@
       const { permissionMode: _mode, ...rest } = r as R & { permissionMode?: unknown };
       return { ...rest, ...(r.name === undefined ? {} : { name: r.name.trim() }), effort: r.effort ?? null };
     };
-    return { ...value, defaultRoute: { ...value.defaultRoute, effort: value.defaultRoute.effort ?? null }, allowedRoutes: value.allowedRoutes.map(route), subagents: { ...value.subagents, profiles: value.subagents.profiles.map(route) }, autoMemory: value.autoMemory !== false, dailyBudgetUsd: value.dailyBudgetUsd ?? null } as AgentRuntimeConfig;
+    return { ...value, defaultRoute: { ...value.defaultRoute, effort: value.defaultRoute.effort ?? null }, allowedRoutes: value.allowedRoutes.map(route), subagents: { ...value.subagents, profiles: value.subagents.profiles.map(route) }, autoMemory: value.autoMemory !== false, eventWakes: value.eventWakes === true, dailyBudgetUsd: value.dailyBudgetUsd ?? null } as AgentRuntimeConfig;
   }
   /** Read from the data, not the form: a card leaving the page has no form left to ask. */
   function problem(): string | null {
@@ -191,6 +191,7 @@
 
     <fieldset class="card" disabled={locked}>
       <h2>{labels.engine}<SaveStatus {save} at="engine" /></h2>
+      <label class="switch-row"><span class="text">{labels.eventWakes}<span class="hint">{labels.eventWakesHint}</span></span><input type="checkbox" role="switch" checked={config.eventWakes === true} onchange={event => { if (config) { config.eventWakes = event.currentTarget.checked; save.change('engine'); } }} data-testid="agent-event-wakes" /></label>
       <!-- Missing on configurations saved before it existed: on. -->
       <label class="switch-row"><span class="text">{labels.autoMemory}<span class="hint">{labels.autoMemoryHint}</span></span><input type="checkbox" role="switch" checked={config.autoMemory !== false} onchange={event => { if (config) { config.autoMemory = event.currentTarget.checked; save.change('engine'); } }} data-testid="agent-auto-memory" /></label>
       <!-- Blank is no cap: the user's own messages always run, only its wakes stop for the day. -->

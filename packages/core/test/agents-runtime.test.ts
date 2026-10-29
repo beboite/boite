@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import type { AgentRoutine } from '@boite/contracts';
+import type { AgentRoutine, Turn } from '@boite/contracts';
 import { mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { CoreClient } from '../src/client.ts';
+import { connect, type CoreClient } from '../src/client.ts';
+import { runCli } from '../src/cli.ts';
 import { notifiesOnFinish } from '@boite/contracts';
-import { isAgentHeld } from '../src/agents/runtime.ts';
-import { agentGuide, BOT_GUIDE } from '../src/agent-guide.ts';
+import { AgentRuntime, EVENT_PROMPT_MAX, eventPrompt, isAgentHeld, NOTICES_PER_HOUR } from '../src/agents/runtime.ts';
+import { agentSpend, rootThread } from '../src/agents/spend.ts';
+import { agentGuide, BOT_GUIDE, OWN_SETTINGS } from '../src/agent-guide.ts';
+import { DELEGATION_WORDS } from '../src/delegation/guide.ts';
 import { agentContext } from '../src/agents/context.ts';
 import { costing, makeAgent, scripted, settled, turnsOf } from './agent-fixture.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
@@ -45,6 +48,9 @@ test('a bot\'s Boite guide is the thread guide less the project-bound commands, 
     expect(bot).not.toContain(projectBound);
   }
   for (const own of ['[quiet]', 'boite bot remember', 'boite bot schedule', 'boite bot watch|unwatch', 'boite settings bot request', '--open <url>', 'boite thread send <id> <text>', 'boite answer <id> <ask-id> <option-or-text>']) expect(BOT_GUIDE).toContain(own);
+  // A bot proposes a setting that stopped fitting on its own, not only when asked: none of five real bots drew a card in about 970 turns.
+  for (const when of ['When one no longer fits, propose the change yourself', 'eventWakes false', 'Never work around a setting']) expect(OWN_SETTINGS).toContain(when);
+  expect(DELEGATION_WORDS.test(OWN_SETTINGS)).toBe(false);
 
   // The test core starts with the Boite guide off; a bot first meets it on.
   await client.call('brain.configure', { path: null, enabled: false, boiteGuide: true });
@@ -196,6 +202,62 @@ test('past its daily budget a wake is skipped with one line, and the user\'s mes
   expect((await client.call('agents.snapshot', {})).status[0]!.today.costUsd).toBe(1);
 });
 
+test('a Codex bot\'s budget prices turns that report no cost at the model\'s rates and counts its subagents\' turns', async () => {
+  const driver = scripted(() => ({ text: 'Done.' })); restore = driver.restore;
+  const { agent, threadId } = await makeAgent(h, client);
+  const runtime = await client.call('agents.runtime.get', { agentId: agent.id });
+  await client.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: h.core.workforce.records.get('profile', agent.id).revision, config: { ...runtime, dailyBudgetUsd: 1 } });
+  const bot = h.core.threads.require(threadId);
+  const child = { ...bot, id: 'thr_budget_child', title: 'Subagent', parentThreadId: bot.id, agentSessionId: undefined };
+  h.core.journal.putThread(child);
+  // Codex reports tokens and no cost. At gpt-6.1-sol rates: 150k uncached
+  // input $0.30, 100k cache reads $0.01, 29k output $0.29.
+  const now = Date.now();
+  const spend = (id: string, thread: typeof bot): Turn => {
+    const turn: Turn = { id, threadId: thread.id, status: 'done', queuedAt: now - 2000, startedAt: now - 1900, finishedAt: now - 1000, error: null,
+      usage: { inputTokens: 150_000, outputTokens: 29_000, cacheReadTokens: 100_000, cacheWriteTokens: 0, costUsdEquivalent: null, buckets: 1 },
+      execution: { providerId: 'codex', accountId: thread.accountId, model: 'gpt-6.1-sol', effort: null, speed: null, permissionMode: thread.permissionMode, sessionId: null, sessionGeneration: 0, selectionVersion: 0 } };
+    h.core.journal.putTurn(turn);
+    return turn;
+  };
+  spend('trn_budget_own', bot);
+  spend('trn_budget_child', child);
+  h.core.bus.emit('thread.updated', bot);
+  const saved = await routine(agent.id);
+  due(saved.id);
+  await waitFor(() => read(saved.id).lastOutcome !== undefined && read(saved.id).lastOutcome !== null);
+  expect(read(saved.id).lastOutcome).toBe('skipped');
+  expect(lines(threadId).filter(text => text.startsWith('Skipped Routine') && text.includes("today's turns cost $1.20, past the daily budget of $1.00"))).toHaveLength(1);
+  expect((await client.call('agents.snapshot', {})).status[0]!.today.costUsd).toBeCloseTo(1.2, 6);
+  // A subagent's finished turn tells clients the bot's status changed, with the new total.
+  // The skip's throttled agents.changed goes out first, so the subagent's turn emits at once and alone.
+  const throttle = h.core.workforce as unknown as { timer: unknown; last: number };
+  await waitFor(() => throttle.timer === null && Date.now() >= throttle.last + 1_000, 3000);
+  let changes = 0;
+  const off = h.core.bus.onAny(name => { if (name === 'agents.changed') changes += 1; });
+  h.core.bus.emit('turn.finished', spend('trn_budget_child_2', child));
+  off();
+  expect(changes).toBe(1);
+  expect((await client.call('agents.snapshot', {})).status[0]!.today.costUsd).toBeCloseTo(1.8, 6);
+});
+
+test('a bot\'s spend reaches a grandchild, falls back to the reported cost off the price list, and leaves out other threads and earlier turns', async () => {
+  const { threadId } = await makeAgent(h, client);
+  const bot = h.core.threads.require(threadId);
+  const child = { ...bot, id: 'thr_spend_child', parentThreadId: bot.id, agentSessionId: undefined };
+  const grandchild = { ...child, id: 'thr_spend_grandchild', parentThreadId: child.id };
+  const stranger = { ...child, id: 'thr_spend_stranger', parentThreadId: undefined };
+  for (const thread of [child, grandchild, stranger]) h.core.journal.putThread(thread);
+  // After the introduction turn.
+  const since = Date.now() + 1;
+  const spend = (id: string, threadId: string, costUsd: number, queuedAt = since + 1000) => h.core.journal.putTurn({ id, threadId, status: 'done', queuedAt, startedAt: queuedAt + 1, finishedAt: queuedAt + 2, error: null, usage: costing(costUsd) });
+  spend('trn_spend_grandchild', grandchild.id, 0.25);
+  spend('trn_spend_stranger', stranger.id, 4);
+  spend('trn_spend_earlier', child.id, 8, since - 1000);
+  expect(agentSpend(h.core, bot.id, since)).toEqual({ costUsd: 0.25, unpriced: 0 });
+  expect(rootThread(h.core, grandchild.id)).toBe(bot.id);
+});
+
 test('a turn the core starts by itself meets the pause and the budget: held with one line, then run; the user\'s messages and a resume are not held', async () => {
   const driver = scripted(() => ({ text: 'Done.', usage: costing(0.5) })); restore = driver.restore;
   const { agent, threadId } = await makeAgent(h, client);
@@ -213,9 +275,9 @@ test('a turn the core starts by itself meets the pause and the budget: held with
   const held = () => lines(threadId).filter(text => text.startsWith('Held the turn its background work asked for'));
   expect(held()).toEqual(['Held the turn its background work asked for: bots are paused. It runs once bots resume.']);
   // Every other way the core starts a turn by itself meets the same gate.
-  for (const [operation, requestId] of [['coordination'], ['delegation'], ['pull-request'], ['resume', 'auto-continue_trn_x']] as const) {
+  for (const origin of [{ kind: 'coordination' }, { kind: 'delegation' }, { kind: 'goal-check' }, { kind: 'pull-request' }, { kind: 'resume', reason: 'carry-on', requestId: 'auto-continue_trn_x' }] as const) {
     let error: unknown = null;
-    try { h.core.threads.startTurn(threadId, 'autonomous', [], undefined, operation, undefined, requestId); } catch (caught) { error = caught; }
+    try { h.core.threads.startTurn(threadId, 'autonomous', origin); } catch (caught) { error = caught; }
     expect(isAgentHeld(error)).toBe(true);
   }
   await Bun.sleep(10);
@@ -256,9 +318,9 @@ test('facts gather into one event turn once the thread is free and the first is 
   const { agent, threadId } = await makeAgent(h, client);
   await client.call('turns.start', { threadId, prompt: 'Hold on' });
   await waitFor(() => h.core.threads.require(threadId).status === 'running');
-  expect(h.core.agentRuntime.fact(agent.id, { key: 'turn:one', text: 'Thread one finished.', delay: 0 })).toBe(true);
-  expect(h.core.agentRuntime.fact(agent.id, { key: 'turn:two', text: 'Thread two finished.', delay: 0 })).toBe(true);
-  expect(h.core.agentRuntime.fact(agent.id, { key: 'turn:two', text: 'again' })).toBe(false);
+  expect(h.core.agentRuntime.fact(agent.id, { urgent: true, key: 'turn:one', text: 'Thread one finished.', delay: 0 })).toBe(true);
+  expect(h.core.agentRuntime.fact(agent.id, { urgent: true, key: 'turn:two', text: 'Thread two finished.', delay: 0 })).toBe(true);
+  expect(h.core.agentRuntime.fact(agent.id, { urgent: true, key: 'turn:two', text: 'again' })).toBe(false);
   await Bun.sleep(700);
   expect(turnsOf(h, threadId).filter(t => t.execution?.operation === 'event')).toHaveLength(1);
   driver.release();
@@ -268,6 +330,249 @@ test('facts gather into one event turn once the thread is free and the first is 
   expect(line.parts[0]).toMatchObject({ displayText: '2 project events' });
   expect(line.parts[0]!.type === 'text' && line.parts[0]!.text).toContain('- [turn:one] Thread one finished.\n- [turn:two] Thread two finished.');
   expect(h.core.agentRuntime.facts(agent.id)).toEqual([]);
+});
+
+test('a paired device lands an outside event on a bot: it wakes it with default settings, the same key replaces a pending one, an agent token is refused', async () => {
+  const driver = scripted(() => ({ text: '[quiet] read it' })); restore = driver.restore;
+  const { agent, threadId } = await makeAgent(h, client);
+  const events = () => turnsOf(h, threadId).filter(t => t.execution?.operation === 'event');
+  const before = events().length;
+  const { grant } = await client.call('pairing.grant', {});
+  const session = h.core.sessions.exchange(grant, { name: 'ci-runner', version: '1' });
+  const device = await connect(h.url, session.token);
+  const bot = await connect(h.url, h.core.agents.tokenFor(threadId));
+  try {
+    expect(await device.call('agents.event', { agent: 'Ada', key: 'ci', text: 'FIRST build failed' })).toEqual({ agentId: agent.id, key: 'external:ci' });
+    // The CLI from another host: the device's own token, the bot by name.
+    let err = '';
+    expect(await runCli(['bot', 'event', 'Ada', '--key', 'ci', 'SECOND build failed on main', '--core', h.url], { out: () => undefined, err: s => { err += s; }, env: { BOITE_TOKEN: session.token }, cwd: h.dataDir })).toBe(0);
+    expect(err).toBe('');
+    expect(h.core.agentRuntime.facts(agent.id).map(f => f.key)).toEqual(['external:ci']);
+    expect(await bot.call('agents.event', { agent: agent.id, text: 'from inside' }).catch(error => error)).toMatchObject({ rpc: { message: 'agents.event is not one of the agent\'s methods' } });
+    expect(await device.call('agents.event', { agent: 'Ada', key: 'bad key!', text: 'x' }).catch(error => error)).toMatchObject({ rpc: { data: { field: 'key' } } });
+  } finally { device.close(); bot.close(); }
+  const pending = (h.core.agentRuntime as unknown as { pending: Map<string, { facts: { notBefore: number }[] }> }).pending.get(agent.id)!;
+  for (const fact of pending.facts) fact.notBefore = 0;
+  await waitFor(() => events().length === before + 1 && settled(h, threadId));
+  const prompt = driver.prompts.get(threadId)!.at(-1)!;
+  expect(prompt).toContain('"SECOND build failed on main"');
+  expect(prompt).toContain('"ci-runner"');
+  expect(prompt).not.toContain('FIRST');
+  expect(h.core.agentRuntime.facts(agent.id)).toEqual([]);
+  // Quoting escapes a control character into six: the wake it makes stays under the cap, its quote still JSON.
+  const noise = await connect(h.url, session.token);
+  try { await noise.call('agents.event', { agent: 'Ada', key: 'noise', text: '\u0001'.repeat(EVENT_PROMPT_MAX) }); } finally { noise.close(); }
+  const fact = h.core.agentRuntime.facts(agent.id).find(f => f.key === 'external:noise')!;
+  expect(eventPrompt([fact]).length).toBeLessThanOrEqual(EVENT_PROMPT_MAX);
+  expect(JSON.parse(/you: ("(?:[^"\\]|\\.)*")/.exec(fact.text)![1]!)).toMatch(/^\u0001{2000,}$/);
+  expect(fact.text).toEndWith(`of ${EVENT_PROMPT_MAX} characters)`);
+  // A device names itself: a long control-heavy name is cut too, and the text still lands whole.
+  const named = h.core.sessions.exchange((await client.call('pairing.grant', {})).grant, { name: '\u0001'.repeat(3000), version: '1' });
+  const loud = await connect(h.url, named.token);
+  try { await loud.call('agents.event', { agent: 'Ada', key: 'loud', text: 'x' }); } finally { loud.close(); }
+  const signed = h.core.agentRuntime.facts(agent.id).find(f => f.key === 'external:loud')!;
+  expect(eventPrompt([signed]).length).toBeLessThanOrEqual(EVENT_PROMPT_MAX);
+  expect(JSON.parse(/device ("(?:[^"\\]|\\.)*")/.exec(signed.text)![1]!)).toMatch(/^\u0001{10,}$/);
+  expect(signed.text).toContain('(name cut by Boite at ');
+  expect(signed.text).toContain(' of 3000 characters)');
+  expect(signed.text).toEndWith('you: "x"');
+  // A plain text whose wake ends just under the cap lands whole, with no cut note.
+  const near = await connect(h.url, session.token);
+  try {
+    await near.call('agents.event', { agent: 'Ada', key: 'near', text: 'a' });
+    const room = EVENT_PROMPT_MAX - eventPrompt([h.core.agentRuntime.facts(agent.id).find(f => f.key === 'external:near')!]).length + 1;
+    await near.call('agents.event', { agent: 'Ada', key: 'near', text: 'a'.repeat(room - 2) });
+  } finally { near.close(); }
+  const whole = h.core.agentRuntime.facts(agent.id).find(f => f.key === 'external:near')!;
+  expect(eventPrompt([whole]).length).toBe(EVENT_PROMPT_MAX - 2);
+  expect(whole.text).not.toContain('cut by Boite');
+});
+
+test('scheduled-only bots retain facts across runtime restart and failed admission, then deliver once with a routine', async () => {
+  const driver = scripted(() => ({ text: 'Caught up.' })); restore = driver.restore;
+  const { agent, threadId } = await makeAgent(h, client);
+  const config = await client.call('agents.runtime.get', { agentId: agent.id });
+  await client.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: agent.revision, config: { ...config, eventWakes: false } });
+  const runtime = () => h.core.agentRuntime as unknown as Omit<AgentRuntime, 'tick'> & { tick(): void };
+  const events = () => turnsOf(h, threadId).filter(t => t.execution?.operation === 'event');
+  const before = events().length;
+  expect(runtime().fact(agent.id, { urgent: false, key: 'saved:0', text: 'MARKER_0', threadIds: [], delay: 0 })).toBe(true);
+  runtime().tick();
+  expect(events()).toHaveLength(before);
+  for (let i = 1; i < 65; i++) expect(runtime().fact(agent.id, { urgent: false, key: `saved:${i}`, text: `MARKER_${i} ${'x'.repeat(300)}`, threadIds: [], delay: 0 })).toBe(true);
+  runtime().fact(agent.id, { urgent: false, key: 'revoked', text: 'REVOKED_FACT', threadIds: ['thr_inaccessible'], delay: 0 });
+  await runtime().close();
+  // Reconstruct from the durable journal, as startup does, with no event wake.
+  (h.core as { agentRuntime: AgentRuntime }).agentRuntime = new AgentRuntime(h.core);
+  runtime().tick();
+  expect(runtime().facts(agent.id)).toHaveLength(66);
+  expect(events()).toHaveLength(before);
+  const wake = { kind: 'routine' as const, label: 'Morning', prompt: 'Catch up on the projects.' };
+  const begin = h.core.threads.startTurn;
+  h.core.threads.startTurn = () => { throw new Error('Admission unavailable'); };
+  try { expect(runtime().attempt(agent, wake)).toEqual({ held: 'failed' }); }
+  finally { h.core.threads.startTurn = begin; }
+  expect(runtime().facts(agent.id)).toHaveLength(66);
+  await client.call('turns.start', { threadId, prompt: 'Direct question still works.' });
+  await waitFor(() => settled(h, threadId));
+  expect(runtime().facts(agent.id)).toHaveLength(66);
+  const saved = await routine(agent.id);
+  due(saved.id);
+  runtime().tick();
+  await waitFor(() => read(saved.id).lastOutcome === 'done');
+  const message = h.core.journal.listMessages(threadId).find(m => m.turnId === read(saved.id).lastTurnId && m.role === 'system')!;
+  const text = message.parts[0]?.type === 'text' ? message.parts[0].text : '';
+  expect(text).toContain('MARKER_0');
+  expect(text).toContain('MARKER_64');
+  expect(text).not.toContain('REVOKED_FACT');
+  expect(runtime().facts(agent.id)).toHaveLength(0);
+  const next = runtime().attempt(agent, wake).turn!;
+  expect(h.core.journal.listMessages(threadId).find(m => m.turnId === next.id && m.role === 'system')!.parts[0]).toMatchObject({ text: wake.prompt });
+  await waitFor(() => settled(h, threadId));
+  runtime().tick();
+  expect(events()).toHaveLength(before);
+}, 15_000);
+
+test('deferred arrivals leave the automatic event allowance available after re-enabling wakes', async () => {
+  const { agent, threadId } = await makeAgent(h, client);
+  const config = await client.call('agents.runtime.get', { agentId: agent.id });
+  const save = (eventWakes: boolean) => client.call('agents.runtime.configure', {
+    agentId: agent.id, expectedRevision: h.core.workforce.records.get('profile', agent.id).revision, config: { ...config, eventWakes },
+  });
+  await save(false);
+  for (let i = 0; i < NOTICES_PER_HOUR; i++) h.core.agentRuntime.fact(agent.id, { urgent: false, key: `deferred:${i}`, text: `Deferred ${i}.`, threadIds: [] });
+  expect(h.core.agentRuntime.start(agent, { kind: 'routine', label: 'Morning', prompt: 'Catch up.' })).toBeDefined();
+  await waitFor(() => settled(h, threadId));
+  expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(0);
+  await save(true);
+  for (let i = 0; i < NOTICES_PER_HOUR; i++) {
+    expect(h.core.agentRuntime.fact(agent.id, { urgent: false, key: `automatic:${i}`, text: `Automatic ${i}.`, threadIds: [] })).toBe(true);
+  }
+  expect(h.core.agentRuntime.fact(agent.id, { urgent: false, key: 'over-cap', text: 'Over cap.', threadIds: [] })).toBe(false);
+  expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(NOTICES_PER_HOUR);
+});
+
+test('re-enabling event wakes drains a deferred backlog in bounded batches without replay after restart', async () => {
+  const driver = scripted(ctx => ({ text: 'Seen.', hold: ctx.prompt.includes('BACKLOG_0') })); restore = driver.restore;
+  const { agent, threadId } = await makeAgent(h, client);
+  const config = await client.call('agents.runtime.get', { agentId: agent.id });
+  const save = (eventWakes: boolean) => client.call('agents.runtime.configure', {
+    agentId: agent.id, expectedRevision: h.core.workforce.records.get('profile', agent.id).revision, config: { ...config, eventWakes },
+  });
+  const tick = () => (h.core.agentRuntime as unknown as { tick(): void }).tick();
+  const events = () => turnsOf(h, threadId).filter(t => t.execution?.operation === 'event');
+  await save(false);
+  const now = Date.now;
+  const arrived = now();
+  // Facts in one burst share a timestamp; each batch must still have its own receipt.
+  Date.now = () => arrived;
+  try {
+    for (let i = 0; i < 5; i++) h.core.agentRuntime.fact(agent.id, { urgent: false, key: `backlog:${i}`, text: `BACKLOG_${i} ${'x'.repeat(6000)}`, threadIds: [], delay: 0 });
+  } finally { Date.now = now; }
+  const before = events().length;
+  await save(true);
+  const delivered: string[] = [];
+  for (const remaining of [4, 3, 0]) {
+    tick();
+    if (remaining === 4) {
+      await waitFor(() => driver.held.length === 1);
+      expect(h.core.agentRuntime.fact(agent.id, { urgent: false, key: 'new-live', text: 'NEW_LIVE', threadIds: [], delay: 0 })).toBe(true);
+      const keys = ['backlog:2', 'backlog:3', 'backlog:4', 'new-live'];
+      expect(h.core.agentRuntime.facts(agent.id).map(f => f.key)).toEqual(keys);
+      const persisted = h.core.journal.getSetting(`agents:pending:${agent.id}`) as { facts: { key: string }[] };
+      expect(persisted.facts.map(f => f.key)).toEqual(keys);
+      driver.release();
+    }
+    await h.core.agentRuntime.close();
+    expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(remaining);
+    await waitFor(() => settled(h, threadId));
+    const turn = events().at(-1)!;
+    const message = h.core.journal.listMessages(threadId).find(m => m.turnId === turn.id && m.role === 'system')!;
+    const prompt = message.parts[0]?.type === 'text' ? message.parts[0].text : '';
+    expect(prompt.length).toBeLessThanOrEqual(EVENT_PROMPT_MAX);
+    delivered.push(...(prompt.match(/BACKLOG_\d|NEW_LIVE|RESTART_LIVE/g) ?? []));
+    // The remainder is durable and each new batch starts after a reconstructed runtime.
+    expect(h.core.journal.getSetting(`agents:pending:${agent.id}`)).toEqual(remaining ? expect.objectContaining({ facts: expect.any(Array) }) : undefined);
+    (h.core as { agentRuntime: AgentRuntime }).agentRuntime = new AgentRuntime(h.core);
+    expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(remaining);
+    if (remaining === 4) {
+      // Protection must also survive the runtime reconstruction, before the next lot starts.
+      expect(h.core.agentRuntime.fact(agent.id, { urgent: false, key: 'restart-live', text: 'RESTART_LIVE', threadIds: [], delay: 0 })).toBe(true);
+      const keys = ['backlog:2', 'backlog:3', 'backlog:4', 'new-live', 'restart-live'];
+      expect(h.core.agentRuntime.facts(agent.id).map(f => f.key)).toEqual(keys);
+      const persisted = h.core.journal.getSetting(`agents:pending:${agent.id}`) as { facts: { key: string }[] };
+      expect(persisted.facts.map(f => f.key)).toEqual(keys);
+    }
+  }
+  expect(delivered).toEqual(['BACKLOG_0', 'BACKLOG_1', 'BACKLOG_2', 'BACKLOG_3', 'BACKLOG_4', 'NEW_LIVE', 'RESTART_LIVE']);
+  expect(events()).toHaveLength(before + 3);
+  tick();
+  expect(events()).toHaveLength(before + 3);
+});
+
+test('routine fact consumption rolls back before any driver starts and commits before delivery, without request replay', async () => {
+  const delivered: { prompt: string; inTransaction: boolean }[] = [];
+  const driver = scripted(ctx => {
+    delivered.push({ prompt: ctx.prompt, inTransaction: h.core.journal.db.inTransaction });
+    return { text: 'Seen.' };
+  }); restore = driver.restore;
+  const { agent, threadId } = await makeAgent(h, client);
+  const config = await client.call('agents.runtime.get', { agentId: agent.id });
+  await client.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: agent.revision, config: { ...config, eventWakes: false } });
+  h.core.agentRuntime.fact(agent.id, { urgent: false, key: 'durable', text: 'DURABLE_FACT', threadIds: [], delay: 0 });
+  const before = turnsOf(h, threadId).length;
+  const calls = delivered.length;
+  const remove = h.core.journal.deleteSetting;
+  h.core.journal.deleteSetting = key => {
+    if (key === `agents:pending:${agent.id}`) throw new Error('Storage unavailable');
+    return remove.call(h.core.journal, key);
+  };
+  const wake = { kind: 'routine' as const, label: 'Morning', prompt: 'Review the news.', requestId: 'routine-durable' };
+  try { expect(h.core.agentRuntime.attempt(agent, wake)).toEqual({ held: 'failed' }); }
+  finally { h.core.journal.deleteSetting = remove; }
+  expect(delivered).toHaveLength(calls);
+  expect(turnsOf(h, threadId)).toHaveLength(before);
+  expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(1);
+  expect(h.core.journal.getSetting(`agents:pending:${agent.id}`)).toMatchObject({ facts: [{ key: 'durable' }] });
+  expect(h.core.journal.turnRequest(threadId, wake.requestId)).toBeNull();
+  await h.core.agentRuntime.close();
+  (h.core as { agentRuntime: AgentRuntime }).agentRuntime = new AgentRuntime(h.core);
+  expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(1);
+  const turn = h.core.agentRuntime.attempt(agent, wake).turn!;
+  await waitFor(() => settled(h, threadId));
+  expect(delivered.at(-1)).toEqual({ prompt: expect.stringContaining('DURABLE_FACT'), inTransaction: false });
+  expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(0);
+  expect(h.core.journal.getSetting(`agents:pending:${agent.id}`)).toBeUndefined();
+  h.core.agentRuntime.fact(agent.id, { urgent: false, key: 'later', text: 'LATER_FACT', threadIds: [], delay: 0 });
+  expect(h.core.agentRuntime.attempt(agent, wake).turn?.id).toBe(turn.id);
+  expect(h.core.agentRuntime.facts(agent.id).map(f => f.key)).toEqual(['later']);
+  expect(delivered).toHaveLength(calls + 1);
+  expect(turnsOf(h, threadId)).toHaveLength(before + 1);
+});
+
+test('urgent facts still spend facts skipped for budget or failed admission, without a later retry', async () => {
+  const driver = scripted(() => ({ text: 'Seen.', usage: costing(0.5) })); restore = driver.restore;
+  const { agent, threadId } = await makeAgent(h, client);
+  const config = await client.call('agents.runtime.get', { agentId: agent.id });
+  const save = (dailyBudgetUsd: number | null) => client.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: h.core.workforce.records.get('profile', agent.id).revision, config: { ...config, dailyBudgetUsd } });
+  const tick = () => (h.core.agentRuntime as unknown as { tick(): void }).tick();
+  const before = turnsOf(h, threadId).length;
+  await save(0.4);
+  h.core.agentRuntime.fact(agent.id, { urgent: true, key: 'budget', text: 'Over budget.', delay: 0, threadIds: [] });
+  tick();
+  expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(0);
+  await save(null);
+  tick();
+  expect(turnsOf(h, threadId)).toHaveLength(before);
+  const begin = h.core.threads.startTurn;
+  h.core.threads.startTurn = () => { throw new Error('Admission unavailable'); };
+  try {
+    h.core.agentRuntime.fact(agent.id, { urgent: true, key: 'failed', text: 'Failed admission.', delay: 0, threadIds: [] });
+    tick();
+    expect(h.core.agentRuntime.facts(agent.id)).toHaveLength(0);
+  } finally { h.core.threads.startTurn = begin; }
+  tick();
+  expect(turnsOf(h, threadId)).toHaveLength(before);
 });
 
 test('changed instructions wake the agent once to review its routines', async () => {

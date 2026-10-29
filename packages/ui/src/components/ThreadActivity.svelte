@@ -8,8 +8,7 @@
   import { permissionSentence } from '../lib/tool-summary';
   import { dockRoom, questionDock } from '../lib/question-dock.svelte';
   import { ignoreQuestions, releaseWaiting, replyOf, repliesOf, sendAnswer, writeAnswer } from '../lib/question-reply.svelte';
-  import QuestionCard from './QuestionCard.svelte';
-  import SecretCard from './SecretCard.svelte';
+  import Deferred, { parts } from './Deferred.svelte';
   import InfoTip from './InfoTip.svelte';
   import { openQuestionPage } from '../lib/question-page';
   import SettingRequestCard from './SettingRequestCardLoader.svelte';
@@ -51,7 +50,7 @@
   });
 
   function secretPart(request: SecretRequest): Extract<MessagePart, { type: 'secret_request' }> {
-    return { type: 'secret_request', requestId: request.id, name: request.name, reason: request.reason, placeholder: request.placeholder, replace: request.replace, status: request.status, ref: request.ref, expiresAt: request.expiresAt };
+    return { type: 'secret_request', requestId: request.id, name: request.name, reason: request.reason, placeholder: request.placeholder, status: request.status, ref: request.ref, expiresAt: request.expiresAt };
   }
   let waits = $derived(store.pendingPermissions.filter((request) => children.has(request.threadId)));
   let shownId = $state<string | null>(null);
@@ -242,7 +241,8 @@
                   {@render fromChild(child, 'activity-subagent-question')}
                 {/if}
                 {#if question.secret}
-                <SecretCard {store} threadId={question.threadId} part={secretPart(question.secret)} docked />
+                {@const secret = secretPart(question.secret)}
+                <Deferred part={parts.SecretCard}>{#snippet children(SecretCard)}<SecretCard {store} threadId={question.threadId} part={secret} docked />{/snippet}</Deferred>
                 {:else if question.agentSetting}
                 <AgentSettingCard
                   {store}
@@ -266,7 +266,7 @@
                   respond={(optionId) => store.answerQuestion(question.threadId, question.id, [optionId])}
                 />
                 {:else}
-                <QuestionCard
+                <Deferred part={parts.QuestionCard}>{#snippet children(QuestionCard)}<QuestionCard
                   text={question.text}
                   options={question.options}
                   allowText={question.allowText}
@@ -283,7 +283,7 @@
                   onwrite={child ? undefined : () => writeAnswer(store, question.id)}
                   page={question.open?.url}
                   onopen={() => openQuestionPage(store, question.threadId, question.id)}
-                />
+                />{/snippet}</Deferred>
                 {/if}
               </div>
             {/each}
@@ -316,7 +316,7 @@
         <div class="activity-row" class:finished={entry.status === 'complete'} data-testid="activity-{kind}" data-blocked={waiting || undefined}>
           {#if waiting}<Hand size={16} />{:else if kind === 'goal'}<Target size={16} />{:else}<Repeat size={16} />{/if}
           <!-- A phone keeps the short word: the review line under it already says the goal is reviewed. -->
-          <span class="kind ui-label">{#if kind === 'goal' && review}<span class="wide">{strings.activity.goal2}</span><span class="narrow">{strings.activity.goal}</span>{:else}{kind === 'goal' ? strings.activity.goal : strings.activity.loop}{/if}</span>
+          <span class="kind ui-label" data-auto={kind === 'goal' && goal?.auto ? '' : undefined}>{#if kind === 'goal' && review}<span class="wide">{goal?.auto ? strings.activity.autoGoal : strings.activity.goal2}</span><span class="narrow">{goal?.auto ? strings.activity.autoGoalShort : strings.activity.goal}</span>{:else}{kind === 'goal' ? strings.activity.goal : strings.activity.loop}{/if}</span>
           <span class="objective" title={'objective' in entry ? entry.objective : entry.prompt}>
             {#if 'objective' in entry}{entry.objective}{:else}{iteration(entry.iterations, entry.maxIterations)}{/if}
           </span>

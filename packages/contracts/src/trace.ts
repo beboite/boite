@@ -21,6 +21,9 @@ export interface ProcessRecord {
   ioBytes: number | null;
 }
 
+/** The exit code a process gets on Windows when Boite ends it or its job. */
+export const KILL_EXIT_CODE = 9;
+
 /**
  * The most recent processes `trace.get` returns when no limit is given, and
  * all a client keeps of a thread's trace as `process.*` events arrive.

@@ -87,12 +87,13 @@ async function summary(threadId: string): Promise<ThreadSummary> {
 }
 
 /** `gh pr list` answers this merged pull request for any branch it is asked about. */
-function mergedPullRequest(branch: string, sha: string): { calls: () => number } {
+function mergedPullRequest(branch: string, sha: string, during?: () => void): { calls: () => number } {
   let calls = 0;
   const spawn = harness.core.procs.spawn.bind(harness.core.procs);
   const replacement = spyOn(harness.core.procs, 'spawn').mockImplementation((scope, command, args, options) => {
     if (command !== 'gh') return spawn(scope, command, args, options);
     calls++;
+    during?.();
     const pr = { number: 12, url: 'https://github.com/example/repo/pull/12', state: 'MERGED', headRefName: branch, headRefOid: sha, headRepository: { name: 'repo' }, headRepositoryOwner: { login: 'example' }, isCrossRepository: false, mergedAt: '2026-10-15T10:00:00Z' };
     return spawn(scope, process.execPath, ['-e', `console.log(${JSON.stringify(JSON.stringify([pr]))})`], options);
   });
@@ -114,6 +115,17 @@ describe('settled worktree cleanup', () => {
     journal.putThread({ ...journal.getThread(thread.id)!, status: 'idle' });
     expect(await cleanup.run()).toEqual([expect.objectContaining({ projectId: project.id, branch: thread.branch, reason: 'pr-merged' })]);
     expect(existsSync(thread.cwd)).toBe(false);
+  });
+
+  test('keeps a worktree whose conversation is restored while the merge proof is read', async () => {
+    const project = await repoProject();
+    const thread = await worktreeThread(project, 'Restored meanwhile');
+    const sha = commitWork(thread.cwd);
+    await client.call('threads.archive', { threadId: thread.id });
+    const gh = mergedPullRequest(thread.branch!, sha, () => harness.core.journal.putThread({ ...harness.core.journal.getThread(thread.id)!, archived: false }));
+    expect(await cleanup.run()).toEqual([]);
+    expect(gh.calls()).toBeGreaterThan(0);
+    expect(existsSync(thread.cwd)).toBe(true);
   });
 
   test('removes an archived thread\'s clean worktree with its branch, and the restored thread says so', async () => {
@@ -240,6 +252,37 @@ describe('settled worktree cleanup', () => {
     expect((await later.run()).map((entry) => entry.branch)).toEqual(['boite/linked']);
     await later.close();
     expect(existsSync(linked)).toBe(false);
+  });
+
+  test('an open pull request claims a worktree only from a repository the project fetches', async () => {
+    const project = await repoProject();
+    git(project.path, 'remote', 'add', 'fork', 'git@github.com:me/repo.git');
+    const account = (await client.call('accounts.list', {})).find((entry) => entry.providerId === 'echo');
+    if (account === undefined) throw new Error('no echo account');
+    const worker = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, title: 'Worker' });
+    const link = (url: string, head: string, headRepository: string) => ({
+      url, repository: url.split('/').slice(3, 5).join('/'), number: Number(url.split('/').pop()), title: 'work', state: 'OPEN', draft: false,
+      head, base: 'main', headRepository, checkedAt: Date.now(),
+    });
+    const worktrees = Object.fromEntries(['unrelated', 'forked', 'unnamed'].map((slug) => {
+      const path = join(worktreeRoot(project.path), slug);
+      git(project.path, 'worktree', 'add', '-q', '-b', `boite/${slug}`, path);
+      ageGitFiles(path);
+      return [slug, path];
+    }));
+    harness.core.journal.setSetting(`linked-pull-requests:${worker.id}`, [
+      // Another repository's branch of the same name claims nothing here.
+      link('https://github.com/other/unrelated/pull/1', 'boite/unrelated', 'other/unrelated'),
+      // A pull request from the project's fork, and one whose head repository GitHub no longer names.
+      link('https://github.com/example/repo/pull/2', 'boite/forked', 'me/repo'),
+      link('https://github.com/example/repo/pull/3', 'boite/unnamed', ''),
+    ]);
+    const hourly = new WorktreeCleanup(harness.core, { graceMs: 3_600_000, startDelayMs: 3_600_000 });
+    expect((await hourly.run()).map((entry) => entry.branch)).toEqual(['boite/unrelated']);
+    await hourly.close();
+    expect(existsSync(worktrees.unrelated!)).toBe(false);
+    expect(existsSync(worktrees.forked!)).toBe(true);
+    expect(existsSync(worktrees.unnamed!)).toBe(true);
   });
 
   test('the project policy is on by default, owner only, and refuses anything but a boolean', async () => {

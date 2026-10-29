@@ -29,7 +29,7 @@ export async function readConfig(rpc: CodexRpc, cwd: string): Promise<CodexConfi
  * also turns off every MCP server, for a process that runs no turn (a fork's
  * setup); one that cannot list them starts them as configured.
  */
-export async function threadConfig(rpc: CodexRpc, cwd: string, log: (level: 'info' | 'warn' | 'error', message: string) => void, serversOff = false): Promise<Record<string, unknown>> {
+export async function threadConfig(rpc: CodexRpc, cwd: string, log: (level: 'info' | 'warn' | 'error', message: string) => void, serversOff = false, mandatory = false): Promise<Record<string, unknown>> {
   try {
     const config = await readConfig(rpc, cwd);
     const servers = serversOff ? mcpServersOff(config) : null;
@@ -37,6 +37,7 @@ export async function threadConfig(rpc: CodexRpc, cwd: string, log: (level: 'inf
     const base = typeof config.mcp_optional_startup_grace_ms === 'number' ? rest : THREAD_CONFIG;
     return servers === null ? base : { ...base, mcp_servers: servers };
   } catch (error) {
+    if (mandatory) throw new Error(`execution.codex.config: cannot enumerate and disable configured MCP servers (${messageOf(error)})`);
     log('info', `codex: config/read failed (${messageOf(error)}); the MCP startup grace is ${THREAD_CONFIG.mcp_optional_startup_grace_ms} ms`);
     return THREAD_CONFIG;
   }

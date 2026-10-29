@@ -106,3 +106,16 @@ test('a shortcut is recorded from the keys pressed, a taken one asks first, and 
   expect(press({ key: 'p', ctrlKey: true, altKey: true })).toBe(true);
   expect(store.bindings.pin.text).toBe(null);
 });
+
+test('the checklist model sits with the conversation settings on General, with no experiment on', async ({ app: _app }) => {
+  expect(window.localStorage.getItem('boite.experiments')).toBeNull();
+  query<HTMLButtonElement>('[data-testid=nav-settings]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings-tab-general]') !== null);
+  query<HTMLButtonElement>('[data-testid=settings-tab-general]').click();
+  await waitFor(() => document.querySelector('[data-testid=goal-tracker]') !== null);
+  const tracker = query('[data-testid=goal-tracker]');
+  expect(tracker.closest('#settings-conversations')?.querySelector('[data-testid=setting-title-model]')).not.toBeNull();
+  expect(query('[data-testid=goal-tracker-model]').textContent).toContain('Automatic');
+  query<HTMLButtonElement>('[data-testid=settings-back]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings]') === null);
+});

@@ -29,6 +29,67 @@ const SHOP = `<!doctype html><title>Shop</title>
 <div id="cover" style="position:absolute;left:0;top:400px;width:200px;height:60px;background:#ccc">Cover</div>
 <p id="note">Free delivery</p>`;
 
+// A page that loads its data from an API with a credential, as most sites do: `browser network` finds the call.
+const APP = `<!doctype html><title>App</title>
+<button id="load" onclick="fetch('/api/items?page=2&token=abc123', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer s3cret-value' }, body: JSON.stringify({ query: 'shoes', password: 'hunter2' }) }).then(r => r.json()).then(d => document.title = 'loaded ' + d.items.length)">Load</button>`;
+
+/**
+ * How long a sleeping tab's step that missed its time is still listened to
+ * (`LATE_MS` in `browser/sleep.ts`): its late answer, or the timeout that says
+ * none came, is heard within it.
+ */
+const SLEEP_LATE_MS = 30_000;
+/** A call a stalled sleep step failed: its probe and its late answer arrive after the call's own failure. */
+const STALLED_CALL = / failed: the browser did not answer \S+ within \d+ seconds/;
+
+/**
+ * The causes of the calls that failed unexpectedly: a client only gets "Something went wrong".
+ * A stalled sleep step says what it was only after its call failed, so the
+ * core stays up until each one did, for `SLEEP_LATE_MS` at most.
+ */
+export class CoreFailures {
+  readonly lines: string[] = [];
+  /** Failed calls whose stalled step has not reported yet: only a report heard after the call answers it. */
+  #calls = 0;
+  /** Stalled steps still owed a late answer. */
+  #owed = 0;
+  /** Late answers heard before their step's probe reported, which can take 1 s more than the answer. */
+  #early = 0;
+  #heard = () => {};
+  #timer: ReturnType<typeof setTimeout> | undefined;
+
+  constructor(private windowMs = SLEEP_LATE_MS, private wait = (ms: number) => new Promise<void>(resolve => { this.#timer = setTimeout(resolve, ms); })) {}
+
+  record(message: string, event: unknown): void {
+    // What a sleeping tab's stalled step turned out to be explains a wake that failed (`browser/sleep.ts`).
+    // A step's call fails before its probe and its late answer report, and a freeze that stalled fails no call.
+    if (event === 'rpc.failed') { if (STALLED_CALL.test(message)) this.#calls++; }
+    else if (event === 'browser.sleep-stalled') {
+      if (this.#calls > 0) this.#calls--;
+      if (this.#early > 0) this.#early--; else this.#owed++;
+    } else if (event === 'browser.sleep-late') {
+      if (this.#owed > 0) this.#owed--; else this.#early++;
+    } else return;
+    this.lines.push(message);
+    this.#heard();
+  }
+
+  /** False when the window ended before every stalled step's probe and late answer arrived. */
+  async settle(): Promise<boolean> {
+    const waiting = () => this.#calls > 0 || this.#owed > 0 || this.#early > 0;
+    if (!waiting()) return true;
+    let ended = false;
+    const end = this.wait(this.windowMs).then(() => { ended = true; });
+    try {
+      while (waiting() && !ended) await Promise.race([end, new Promise<void>(resolve => { this.#heard = resolve; })]);
+    } finally {
+      clearTimeout(this.#timer);
+      this.#heard = () => {};
+    }
+    return !waiting();
+  }
+}
+
 export const DOWNLOAD_SCRIPT = '#!/bin/sh\necho downloaded\n';
 export const DOWNLOAD_PROGRAM = Buffer.concat([Buffer.from('MZ'), Buffer.alloc(126)]);
 
@@ -53,11 +114,20 @@ export function createBrowserFixture() {
       agents.set(path, request.headers.get('user-agent'));
       if (path === '/') return new Response(PAGE, { headers: { 'content-type': 'text/html' } });
       if (path === '/shop') return new Response(SHOP, { headers: { 'content-type': 'text/html' } });
+      if (path === '/app') return new Response(APP, { headers: { 'content-type': 'text/html' } });
+      if (path === '/api/items') return (request.method === 'POST' ? request.json() as Promise<{ query?: string }> : Promise.resolve({ query: undefined }))
+        .then(body => Response.json({ items: ['red', 'blue'], query: body.query ?? null, next: 'cursor-2', sessionToken: 'tok-999' }));
+      if (path === '/go') return Response.redirect(`http://127.0.0.1:${site.port}/shop`, 302);
+      if (path === '/sign-in') return new Response(null, { status: 302, headers: { location: '/app?access_token=tok-777&page=2' } });
+      if (path === '/api/fail') return Response.json({ error: 'the shelf is empty' }, { status: 500 });
+      // A reply longer than network detail shows, sent as text after a space.
+      if (path === '/api/huge') return new Response('z'.repeat(3_000_000), { headers: { 'content-type': 'text/plain' } });
+      if (path === '/api/big') return new Response(` ${JSON.stringify({ sessionToken: 'tok-big', rows: 'y'.repeat(60_000) })}`, { headers: { 'content-type': 'text/plain' } });
       if (path === '/later') return later.response.then(() => new Response('released'));
       if (path === '/later/done') { later.complete(); return new Response('done'); }
       if (path === '/sent') return new Response(`<title>Sent</title><h1>Thanks ${new URL(request.url).searchParams.get('name')}</h1>`, { headers: { 'content-type': 'text/html' } });
       // A sign-in popup: it answers its opener, and closes itself on a click.
-      if (path === '/popup') return new Response('<title>Popup</title>popup<button id="shut" onclick="window.close()">Done</button><script>if (opener) opener.postMessage("hello from " + location.search, "*")</script>', { headers: { 'content-type': 'text/html' } });
+      if (path === '/popup') return new Response('<title>Popup</title>popup<button id="shut" onclick="if(event.isTrusted)window.close()">Done</button><script>if (opener) opener.postMessage("hello from " + location.search, "*")</script>', { headers: { 'content-type': 'text/html' } });
       // Files a page offers for download: a script, and a program that names itself a picture.
       if (path === '/files') return new Response('<title>Files</title><a id="script" href="/download/tool.sh?token=secret">Script</a> <a id="saved" href="/download/notes.txt" download>Notes</a>', { headers: { 'content-type': 'text/html' } });
       // A frame of another site, so in another process, that downloads as soon as it loads.
@@ -82,28 +152,30 @@ export function createBrowserFixture() {
   let harness: TestCore, owner: CoreClient, agent: CoreClient, threadId: string;
   let opened: { harness?: TestCore; owner?: CoreClient; agent?: CoreClient } = {};
   const hosts = new Set<() => Promise<void>>();
-  /** The causes of the calls that failed unexpectedly: a client only gets "Something went wrong". */
-  let failures: string[] = [];
+  let failures = new CoreFailures();
   beforeEach(async () => {
     later.release();
     later = laterGate();
     opened = {};
-    failures = [];
+    failures = new CoreFailures();
     opened.harness = harness = await startTestCore();
     const record = harness.core.logs.record.bind(harness.core.logs);
     harness.core.logs.record = (level, message, context = {}, at) => {
-      // What a sleeping tab's stalled step turned out to be explains a wake that failed (`browser/sleep.ts`).
-      if (context.event === 'rpc.failed' || context.event === 'browser.sleep-stalled' || context.event === 'browser.sleep-late') failures.push(message);
+      failures.record(message, context.event);
       record(level, message, context, at);
     };
     opened.owner = owner = await harness.connect();
     ({ threadId } = await echoThread(harness, owner));
     opened.agent = agent = await connect(harness.url, harness.core.agents.tokenFor(threadId), { client: { name: 'boite-cli', version: 'test' } });
   });
+  // The 60 s a browser shutdown hook gets (docs/development.md), after up to `SLEEP_LATE_MS` for a stalled sleep step's late answer.
   afterEach(async () => {
     later.release();
-    for (const failure of failures) console.error(`core: ${failure}`);
     const errors: unknown[] = [];
+    try {
+      if (!await failures.settle()) failures.lines.push(`a stalled sleep step's page did not answer within ${SLEEP_LATE_MS / 1000} s of the test's end`);
+    } catch (error) { errors.push(error); }
+    for (const failure of failures.lines) console.error(`core: ${failure}`);
     for (const close of hosts) {
       try { await close(); } catch (error) { errors.push(error); }
     }
@@ -111,7 +183,7 @@ export function createBrowserFixture() {
     try { opened.owner?.close(); } catch (error) { errors.push(error); }
     try { await opened.harness?.stop(); } catch (error) { errors.push(error); }
     if (errors.length) throw new AggregateError(errors, 'browser fixture cleanup failed');
-  });
+  }, 60_000 + SLEEP_LATE_MS);
 
   const evaluate = async (expression: string, tabId?: string) =>
     (await agent.call('browser.command', { threadId, ...(tabId ? { tabId } : {}), action: { kind: 'evaluate', expression } })).value;

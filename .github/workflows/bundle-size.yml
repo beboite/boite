@@ -3,7 +3,8 @@ name: bundle size
 # Measures every main commit for pull requests to compare with
 # (docs/ci.md#bundle-growth). One light job, never cancelled by the next push,
 # so a pull request's base almost always has its `bundle-sizes` artifact and
-# no pull request builds its base again.
+# no pull request builds its base again. Then it fails when main is above the
+# published ceiling: pull requests are charged only for growth they add.
 
 on:
   push:
@@ -11,6 +12,8 @@ on:
 
 permissions:
   contents: read
+  # The published builds' measurements from main's earlier runs.
+  actions: read
 
 concurrency:
   group: bundle-size-${{ github.sha }}
@@ -36,3 +39,7 @@ jobs:
           path: .artifacts/bundle-sizes/bundle-sizes.json
           if-no-files-found: error
           retention-days: 90
+      - name: Check the published ceiling
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun scripts/ci/budgets.ts ceiling .artifacts/bundle-sizes/bundle-sizes.json

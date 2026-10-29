@@ -106,7 +106,10 @@ test('the app answers the core as a browser: a target is a webview, its session 
   // Its page closing it is the shell's destroyed surface: the core hears a closed page.
   shell.emit({ type: 'destroyed', id: 'agent-popup-1-0' });
   await settle();
-  expect(core.replies('work')).toContainEqual({ method: 'Target.targetDestroyed', params: { targetId: 'agent-popup-1-0' } });
+  expect(core.replies('work').filter(reply => reply.params?.targetId === 'agent-popup-1-0')).toEqual([
+    { method: 'Target.detachedFromTarget', params: { sessionId: 'agent-popup-1-0', targetId: 'agent-popup-1-0' } },
+    { method: 'Target.targetDestroyed', params: { targetId: 'agent-popup-1-0' } },
+  ]);
   // One whose opener the relay does not drive is closed at once.
   shell.emit({ type: 'popup', id: 'agent-gone', popup: 'agent-popup-1-1', url: 'about:blank' });
   expect(shell.destroyed).toContain('agent-popup-1-1');
@@ -138,7 +141,7 @@ test('the app answers the core as a browser: a target is a webview, its session 
   expect(shell.destroyed).toContain(popup.params.targetInfo.targetId);
 });
 
-test('network events reach the core cut to what it reads: the address of a request, and only failed responses', async () => {
+test('network events reach the core cut to what it reads: the address of a request, only failed responses, and the method, headers and status of an API call', async () => {
   const shell = fakeBridge(), core = fakeClient();
   const relay = new BrowserHostRelay(core.client, shell.bridge);
   await relay.start();
@@ -147,10 +150,19 @@ test('network events reach the core cut to what it reads: the address of a reque
   page('Network.requestWillBeSent', { requestId: 'r1', request: { url: 'https://example.com/a.js', headers: { cookie: 'sid=1' } }, initiator: { stack: { callFrames: [] } } });
   page('Network.responseReceived', { requestId: 'r1', response: { status: 200, statusText: 'OK', url: 'https://example.com/a.js', headers: {} } });
   page('Network.responseReceived', { requestId: 'r2', response: { status: 404, statusText: 'Not Found', url: 'https://example.com/missing', headers: { server: 'x' } } });
+  // A call the page makes to its server, which `browser network` shows: its body stays in the webview until the core asks.
+  page('Network.requestWillBeSent', { requestId: 'r3', type: 'Fetch', documentURL: 'https://example.com/', request: { url: 'https://example.com/api', method: 'POST', headers: { 'content-type': 'application/json' }, postData: '{"q":1}', hasPostData: true }, initiator: { stack: { callFrames: [] } } });
+  page('Network.responseReceived', { requestId: 'r3', type: 'Fetch', response: { status: 200, statusText: 'OK', url: 'https://example.com/api', mimeType: 'application/json', headers: { 'content-type': 'application/json' }, timing: {} } });
+  page('Network.loadingFinished', { requestId: 'r3', encodedDataLength: 42, timestamp: 1 });
+  // A script's or an image's end is no call's: it stays in the app.
+  page('Network.loadingFinished', { requestId: 'r1', encodedDataLength: 900, timestamp: 1 });
   await settle(); await settle();
   expect(core.replies('work').filter(reply => String(reply.method).startsWith('Network.'))).toEqual([
     { method: 'Network.requestWillBeSent', params: { requestId: 'r1', request: { url: 'https://example.com/a.js' } }, sessionId: targetId },
     { method: 'Network.responseReceived', params: { requestId: 'r2', response: { status: 404, statusText: 'Not Found', url: 'https://example.com/missing' } }, sessionId: targetId },
+    { method: 'Network.requestWillBeSent', params: { requestId: 'r3', type: 'Fetch', documentURL: 'https://example.com/', request: { url: 'https://example.com/api', method: 'POST', headers: { 'content-type': 'application/json' }, hasPostData: true } }, sessionId: targetId },
+    { method: 'Network.responseReceived', params: { requestId: 'r3', type: 'Fetch', response: { status: 200, statusText: 'OK', url: 'https://example.com/api', mimeType: 'application/json', headers: { 'content-type': 'application/json' } } }, sessionId: targetId },
+    { method: 'Network.loadingFinished', params: { requestId: 'r3', encodedDataLength: 42 }, sessionId: targetId },
   ]);
   relay.stop();
 });

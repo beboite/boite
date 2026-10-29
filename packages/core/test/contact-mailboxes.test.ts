@@ -1,5 +1,5 @@
-import { afterEach, expect, test } from 'bun:test';
-import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { afterEach, expect, spyOn, test } from 'bun:test';
+import { echoThread, holdAccountTurns, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
 import { ContactMailboxes } from '../src/contacts/mailboxes.ts';
 
@@ -26,6 +26,21 @@ async function routed() {
   return { a, b, c, ai, bi, ci, ac, source, recipient };
 }
 
+test('gateway discovery retains direct admissions when its local summaries also contain a relay', async () => {
+  const {a, b, ai, ci, source} = await routed();
+  const relay = {coreId: 'e'.repeat(64), name: 'Another gateway relay', projects: [], link: 'connected' as const};
+  const local = [...b.core.contacts.available(), relay];
+  const available = spyOn(b.core.contacts, 'available').mockReturnValue(local);
+  try {
+    const peer = b.core.group.peers().find(peer => peer.coreId === ai)!;
+    const answer = await b.core.coordination.mailboxes.handle(peer, {action: 'contacts', from: a.core.coordination.describe(source)}) as {coreId: string; admission: number}[];
+    expect(answer.find(entry => entry.coreId === ci)?.admission).toBe(b.core.contacts.find(ci)!.addedAt);
+    expect(answer.some(entry => entry.coreId === relay.coreId)).toBe(false);
+    expect(b.core.contacts.available()).toContain(relay);
+    expect((await a.core.coordination.mailboxes.contacts(source)).some(entry => entry.coreId === ci)).toBe(true);
+  } finally {available.mockRestore();}
+}, 30000);
+
 test('a group contact route keeps letters and the wake on the initiating core without a gateway thread', async () => {
   const { a, b, c, ai, bi, ci, ac, source, recipient } = await routed();
   const contacts = await ac.call('collaboration.contacts', { threadId: source });
@@ -41,7 +56,12 @@ test('a group contact route keeps letters and the wake on the initiating core wi
   const incoming = c.core.coordination.get(recipient).messages.find(letter => letter.id === sent.id)!;
   expect(incoming.from).toMatchObject({ coreId: bi, title: 'Actual initiating thread', agent: sent.from.agent });
   expect(incoming.from.threadId).toMatch(/^cmb_/);
+  const resume = holdAccountTurns(a);
   const response = await c.core.coordination.send({ threadId: recipient, to: incoming.from, replyTo: incoming.id, text: 'Port 8080.', requestId: 'routed-answer' });
+  try {
+    // The gateway polls before the initiating core can submit its queued wake.
+    await waitFor(() => b.core.coordination.mailboxes.received(response.id)?.status === 'uncertain');
+  } finally { resume(); }
   await waitFor(() => a.core.coordination.get(source).messages.some(letter => letter.id === response.id && letter.status === 'delivered'), 12000);
   const returned = a.core.coordination.get(source).messages.find(letter => letter.id === response.id)!;
   expect(returned).toMatchObject({ from: { coreId: ci, threadId: recipient }, to: { coreId: ai, threadId: source }, replyTo: sent.id, contact: { coreId: ci }, text: 'Port 8080.' });
@@ -50,6 +70,108 @@ test('a group contact route keeps letters and the wake on the initiating core wi
   await waitFor(() => c.core.coordination.get(recipient).messages.find(letter => letter.id === response.id)?.status === 'delivered', 10000);
   expect(b.core.journal.listThreads()).toHaveLength(0);
   expect(a.core.coordination.trusted().some(peer => peer.coreId === ci)).toBe(false);
+}, 30000);
+
+test('older uncertain mailbox receipts do not block a new routed reply', async () => {
+  const { a, b, c, ci, ac, source, recipient } = await routed();
+  const sources = [source];
+  for (let i = 0; i < 4; i++) sources.push((await echoThread(a, ac, `Initiating thread ${i}`)).threadId);
+  const resume = holdAccountTurns(a);
+  const responses: { id: string }[] = [];
+  try {
+    for (const [i, threadId] of sources.entries()) {
+      const sent = await a.core.coordination.send({ threadId, to: { coreId: ci, threadId: recipient }, text: `Question ${i}`, requestId: `fair-question-${i}` });
+      await waitFor(() => c.core.coordination.get(recipient).messages.some(letter => letter.id === sent.id));
+      const incoming = c.core.coordination.get(recipient).messages.find(letter => letter.id === sent.id)!;
+      const response = await c.core.coordination.send({ threadId: recipient, to: incoming.from, replyTo: incoming.id, text: `Answer ${i}`, requestId: `fair-answer-${i}` });
+      responses.push(response);
+      if (i < 4) await waitFor(() => b.core.coordination.mailboxes.received(response.id)?.status === 'uncertain');
+    }
+    // All four earlier wakes remain held while the fifth reply crosses the gateway.
+    await waitFor(() => a.core.coordination.get(sources[4]!).messages.some(letter => letter.id === responses[4]!.id));
+    expect(responses.slice(0, 4).every(response => b.core.coordination.mailboxes.received(response.id)?.status === 'uncertain')).toBe(true);
+  } finally { resume(); }
+  await waitFor(() => responses.every(response => c.core.coordination.get(recipient).messages.find(letter => letter.id === response.id)?.status === 'delivered'), 12000);
+  expect(sources.map(threadId => a.core.coordination.get(threadId).wakes)).toEqual([1, 1, 1, 1, 1]);
+}, 30000);
+
+test('forwarding a mailbox backlog bounds deserialization and retries older failures while new replies wait', async () => {
+  const { a, b, c, ai, ci, source, recipient } = await routed();
+  const sent = await a.core.coordination.send({ threadId: source, to: { coreId: ci, threadId: recipient }, text: 'Create a return route.', requestId: 'batch-question' });
+  await waitFor(() => c.core.coordination.get(recipient).messages.some(letter => letter.id === sent.id));
+  const incoming = c.core.coordination.get(recipient).messages.find(letter => letter.id === sent.id)!;
+  await b.core.coordination.mailboxes.close();
+  const response = await c.core.coordination.send({ threadId: recipient, to: incoming.from, replyTo: incoming.id, text: 'A pending reply.', requestId: 'batch-answer' });
+  await waitFor(() => b.core.coordination.mailboxes.received(response.id) !== null);
+  const row = b.core.journal.db.query('SELECT mailbox, data FROM contact_route_letters WHERE id = ? AND direction = ?').get(response.id, 'in') as { mailbox: string; data: string };
+  const template = JSON.parse(row.data);
+  const payloads = new Set<string>([row.data]);
+  b.core.journal.db.transaction(() => {
+    for (let i = 1; i < 128; i++) {
+      const id = `backlog-${i}`;
+      const data = JSON.stringify({ ...template, wire: { ...template.wire, id, status: 'uncertain' }, canonical: { ...template.canonical, id } });
+      b.core.journal.db.query('INSERT INTO contact_route_letters VALUES (?, ?, ?, ?)').run(id, row.mailbox, 'in', data);
+      payloads.add(data);
+    }
+  })();
+  const attempted: string[] = [];
+  const retrying = Promise.withResolvers<void>();
+  let held: string | null = null;
+  const request = b.core.coordination.request.bind(b.core.coordination);
+  b.core.coordination.request = async (peer, operation, payload) => {
+    const p = payload as { action?: string; letter?: { id: string } };
+    if (peer.coreId === ai && operation === 'contact.route' && p.action === 'return') {
+      attempted.push(p.letter!.id);
+      if (p.letter!.id === held) await retrying.promise;
+      throw new Error('The initiating core is temporarily unreachable');
+    }
+    return request(peer, operation, payload);
+  };
+  const mailboxes = new ContactMailboxes(b.core);
+  (b.core.coordination as unknown as { mailboxes: ContactMailboxes }).mailboxes = mailboxes;
+  let parsed = 0;
+  const parse = JSON.parse;
+  const queries = spyOn(b.core.journal.db, 'query');
+  let selections: string[] = [];
+  const parsing = spyOn(JSON, 'parse').mockImplementation((data, reviver) => {
+    if (payloads.has(data)) parsed++;
+    return parse(data, reviver);
+  });
+  try {
+    mailboxes.tick();
+    selections = queries.mock.calls.map(([sql]) => sql).filter(sql => sql.startsWith('SELECT') && sql.includes('contact_route_letters'));
+    expect(attempted).toHaveLength(4);
+    expect(parsed).toBe(4);
+    expect(selections).toHaveLength(2);
+    for (const [i, sql] of selections.entries()) {
+      const plan = b.core.journal.db.query(`EXPLAIN QUERY PLAN ${sql}`).all(...(i === 0 ? ['[]'] : ['[]', 4])) as { detail: string }[];
+      expect(plan.some(row => row.detail.includes('TEMP B-TREE'))).toBe(false);
+    }
+    const first = [...attempted];
+    await new Promise(resolve => setImmediate(resolve));
+    held = first[0]!;
+    attempted.length = 0;
+    parsed = 0;
+    mailboxes.tick();
+    expect(attempted).toHaveLength(4);
+    expect(parsed).toBe(4);
+    expect(attempted).toContain(first[0]!);
+    expect(attempted.filter(id => !first.includes(id))).toHaveLength(3);
+    // A retry still in flight cannot occupy the reserved slot on the next tick.
+    await new Promise(resolve => setImmediate(resolve));
+    attempted.length = 0;
+    parsed = 0;
+    mailboxes.tick();
+    expect(attempted).toHaveLength(4);
+    expect(parsed).toBe(4);
+    expect(attempted).toContain(first[1]!);
+    expect(attempted).not.toContain(first[0]!);
+    expect(attempted.filter(id => !first.includes(id))).toHaveLength(3);
+  } finally {
+    parsing.mockRestore(); queries.mockRestore();
+    retrying.resolve();
+    await mailboxes.close();
+  }
 }, 30000);
 
 test('a routed ask returns its decision to the initiating thread, including after an automatic pause', async () => {
@@ -213,4 +335,40 @@ test('a remembered gateway gives way once it stops offering the contact and anot
   gone.core.contacts.remove(ci);
   await a.core.coordination.mailboxes.contacts(source);
   expect(a.core.coordination.mailboxes.route(source, ci)?.via).toBe(other.core.coordination.card().coreId);
+}, 30000);
+
+test('routed lookups name a silent gateway or a contact missing machines, never an empty answer', async () => {
+  const { a, b, c, bi, ci, source, recipient } = await routed();
+  const gateway = a.core.group.peers().find(peer => peer.coreId === bi)!.name;
+  const listed = (agents: { coreId: string; threadId: string }[]) => agents.some(agent => agent.coreId === ci && agent.threadId === recipient);
+  const handle = spyOn(b.core.coordination.mailboxes, 'handle').mockRejectedValue(new Error('gateway busy'));
+  try {
+    // Never heard from is not "no route": the send names the member that did not answer.
+    expect(await thrown(a.core.coordination.send({ threadId: source, to: { coreId: ci, threadId: recipient }, text: 'Hello', requestId: crypto.randomUUID() }))).toThrow(`${gateway} did not answer`);
+    const directory = await a.core.coordination.directory(source);
+    expect(listed(directory.agents)).toBe(false);
+    expect(directory.unavailable).toEqual([gateway]);
+    expect((await a.core.coordination.search(source, 'External contact worker')).unavailable).toEqual([gateway]);
+    // The whole member is down: its own directory fails too, and it is still named once.
+    const down = spyOn(b.core.coordination as unknown as { localDirectory(): unknown }, 'localDirectory').mockImplementation(() => { throw new Error('offline'); });
+    try {
+      expect((await a.core.coordination.directory(source)).unavailable).toEqual([gateway]);
+      expect((await a.core.coordination.search(source, 'External contact worker')).unavailable).toEqual([gateway]);
+    } finally { down.mockRestore(); }
+  } finally { handle.mockRestore(); }
+  const whole = await a.core.coordination.directory(source);
+  expect(listed(whole.agents)).toBe(true);
+  expect(whole.unavailable).toEqual([]);
+  // The contact answers, but two machines of its own group did not: its threads stay listed beside that notice.
+  const name = (await a.core.coordination.mailboxes.contacts(source)).find(entry => entry.coreId === ci)!.name;
+  const members = c.core.contacts.members;
+  const held = [spyOn(members, 'directory').mockResolvedValue({ entries: [], unavailable: 2 }), spyOn(members, 'search').mockResolvedValue({ entries: [], unavailable: 2 })];
+  try {
+    const partial = await a.core.coordination.directory(source);
+    expect(listed(partial.agents)).toBe(true);
+    expect(partial.unavailable).toEqual([`${name} (2 of its machines did not answer)`]);
+    const search = await a.core.coordination.search(source, 'External contact worker');
+    expect(listed(search.matches)).toBe(true);
+    expect(search.unavailable).toEqual([`${name} (2 of its machines did not answer)`]);
+  } finally { for (const spy of held) spy.mockRestore(); }
 }, 30000);

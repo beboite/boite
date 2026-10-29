@@ -100,11 +100,16 @@ test('phone choices, folder browsing and overlay dismissal never focus a text fi
   await shiftTab();
   expect(await page.evaluate(`document.activeElement?.matches('[data-testid=diagnostics-report-dialog] .actions .ghost')`)).toBe(true);
   await tap('[data-testid=diagnostics-report-dialog] .actions .ghost');
+  // Settle both phone history entries before the next test changes viewport and navigates.
+  await page.evaluate('__boiteTest.workspace.active.showSettings()');
+  await page.waitFor(`!document.querySelector('[data-testid=diagnostics-report-dialog]') && !history.state?.boiteOverlay`);
   expect(page.errors()).toEqual([]);
 }, 30_000);
 
 test('landscape touch devices browse models without opening the keyboard', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 844, height: 390, deviceScaleFactor: 1, mobile: true });
+  // Resizing removes mobile settings and pops its history entry before this reload.
+  await page.waitFor(`!document.querySelector('.mobile-settings') && !history.state?.boiteOverlay`);
   await page.navigate(url);
   await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
   expect(await page.evaluate(typing)).toBe(false);

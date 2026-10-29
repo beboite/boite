@@ -3,15 +3,18 @@
   import CompactionSettings from './CompactionSettings.svelte';
   import CacheKeepaliveSettings from './CacheKeepaliveSettings.svelte';
   import DeviceStreamSettings from './DeviceStreamSettings.svelte';
-  import GoalTrackerSetting from './GoalTrackerSetting.svelte';
-  import { untrack } from 'svelte';
+  import AutoGoalSetting from './AutoGoalSetting.svelte';
+  import { untrack, type Snippet } from 'svelte';
   import { EXPERIMENT_IDS, canFollowDesktop, desktopExperiments, followsDesktop, readExperiments, setExperiment, setFollowDesktop, subscribeExperiments, type ExperimentId } from '../lib/experiments';
   import { experimentCopy } from '../lib/experiment-copy';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
-  /** The switches of this device; with a store, the core's experiments below them. */
-  let { store }: { store?: Store } = $props();
+  /**
+   * The switches of this device, with the Automatic goals threshold of `store`, this
+   * window's machine; then the experiments of `target`, the machine `bar` picks.
+   */
+  let { store, target = store, bar }: { store?: Store; target?: Store; bar?: Snippet } = $props();
   const uid = $props.id();
 
   let copy = $derived(experimentCopy());
@@ -66,12 +69,11 @@
           onchange={(event) => toggle(id, event.currentTarget.checked)}
         />
       </label>
-      <!-- Only the owner sets the machine's checklist model: a paired device's save would be refused. -->
-      {#if id === 'goal2' && enabled.includes(id) && store?.settings && store.owner}
-        <GoalTrackerSetting {store} />
-      {/if}
+      <!-- Its threshold is the core's, under the switch while it is on. -->
+      {#if id === 'auto-goal' && store && enabled.includes(id)}<AutoGoalSetting {store} />{/if}
     {/each}
   </section>
 
-  {#if store}<CacheKeepaliveSettings {store} /><CompactionSettings {store} backgroundOnly /><DeviceStreamSettings {store} />{/if}
+  {#if target && bar}{@render bar()}{/if}
+  {#if target}<CacheKeepaliveSettings store={target} /><CompactionSettings store={target} backgroundOnly /><DeviceStreamSettings store={target} />{/if}
 </div>

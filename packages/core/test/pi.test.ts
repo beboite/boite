@@ -454,6 +454,7 @@ describe('pi driver', () => {
       outputTokens: 4,
       cacheReadTokens: 2,
       cacheWriteTokens: 1,
+      buckets: 1,
       costUsdEquivalent: 0.03,
     });
   });

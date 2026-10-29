@@ -316,7 +316,8 @@ export function registerAgentMethods(core: Core): void {
     core.agents.forget(threadId, removed);
     core.subscribers.closeAgents(threadId);
   };
-  core.bus.onAny((name, payload) => {
+  // Committed events only: a rolled-back archive or removal keeps the thread's windows, agent and sockets.
+  core.bus.onCommitted((name, payload) => {
     if (name === 'thread.removed') shut((payload as { threadId: ThreadId }).threadId, true);
     if (name === 'thread.updated') {
       const thread = payload as ThreadSummary;

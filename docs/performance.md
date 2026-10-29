@@ -232,11 +232,14 @@ history; selection yields every eight rows and shares a scheduler snapshot only
 within that synchronous group. Family, input, result and checkout guards remain
 fresh after asynchronous validation and immediately before the archive write.
 Large retained families and unindexed branch-holder checks can still cost more.
-Proofs share one `git remote -v` and one `gh pr list` per repository with the
+Proofs share one `git remote -v` and one page of PRs per repository with the
 sidebar badges, and a thread without a merged PR waits 5 minutes, then up to
 an hour, before its next proof. Four unmerged worktree threads cost 2 processes
 on the first pass and none on the next ones, against 12 and then 8 a minute
 before ([bench/results/2026-10-15-perf-git.md](../bench/results/2026-10-15-perf-git.md)).
+Those counts hold for a repository with fewer than 100 PRs, whose page is
+complete. On a full page, a thread whose branch the page does not show also
+walks its checkout's status and reads its branch alone before a proof.
 
 Short git reads (30 seconds or less) share eight slots per core; a read waits
 for a free one before its git starts, and the wait does not count against its
@@ -944,8 +947,10 @@ limits expensive work while streaming, typing and scrolling:
 - Wheel listeners are passive: they release bottom following without
   cancelling browser scrolling. `MessageList.test.ts` guards the listener
   options.
-- Icon shapes and locale date formatters are reused. Markdown links are found
-  in one pass over a line, however many `[` it holds. Finished Markdown markup
+- Icon shapes and locale date formatters are reused. The Markdown regression
+  suite checks malformed links on lines of 32,000 characters. Inline link
+  lookahead skips unfinished labels when no closing bracket or destination
+  parenthesis remains. Finished Markdown markup
   has a four-million-character cache bound, highlighted code a
   two-million-character one shared by every view of the same text. A diff
   document's rows are computed once per whitespace mode and kept with it.
@@ -958,6 +963,24 @@ limits expensive work while streaming, typing and scrolling:
   comes back at the same position. Skipped content advances no animation, so
   E2E captures wait through `settleAnimations()`, which ignores it. The "phone
   streaming behind list" scenario measures it.
+
+### Composer synchronization
+
+The core persists changed composer records independently of message history.
+Typing coalesces over 400 ms; attachment bytes upload separately once, and
+subsequent puts and broadcasts contain metadata only. Asset validation reads
+stored kind, MIME type, name and byte count without loading the body. Queue
+wakeups use an index of records with pending prompts, targeted by thread.
+
+On 2026-10-27, `bun test tests/e2e/composer-persistence.test.ts
+tests/e2e/chat-steering.test.ts` passed both production-UI scenarios. The first
+used a real core, desktop browser and paired phone-width browser. Adding a
+1 MiB file and making 100 text edits at 10 ms intervals sent one asset upload
+and five composer puts containing 2,000 bytes total. None of those puts carried
+attachment bytes. Scheduling can change the put count; this measures wire
+payload, not network framing or a before/after latency comparison. The same
+test verifies that queues drain with both browsers closed and that drafts and
+consumed state survive a core restart.
 
 ### A long turn is many rows
 

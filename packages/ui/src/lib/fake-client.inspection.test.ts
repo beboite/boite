@@ -1,4 +1,5 @@
 import { expect, test } from 'vitest';
+import { RpcErrorCode } from '@boite/contracts';
 import { FakeClient } from './fake-client';
 import { FakeContext } from './fake-client/context';
 import { seed } from './fake-client/seed';
@@ -30,8 +31,13 @@ test('capability reads agree for owner and paired device and refuse an unscoped 
     const owner = await client.call('threads.capabilities', { threadId });
     client.becomes('session');
     expect(await client.call('threads.capabilities', { threadId })).toEqual(owner);
+    // As on the core: an agent reads its own thread's controls and no other's.
     client.becomes('agent');
-    await expect(client.call('threads.capabilities', { threadId })).rejects.toThrow('thread-bound agent identity');
+    await expect(client.call('threads.capabilities', { threadId })).rejects.toThrow(`is for thread none, not thread ${threadId}`);
+    client.becomes('agent', threadId);
+    expect(await client.call('threads.capabilities', { threadId })).toEqual(owner);
+    client.becomes('agent', threads[1]!.id);
+    await expect(client.call('threads.capabilities', { threadId })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
   } finally { client.close(); }
 });
 
@@ -44,7 +50,7 @@ test('fake journal inspection is bounded and owner only', async () => {
     expect(JSON.stringify(first)).not.toContain('parts');
     await expect(client.call('journal.inspect',{limit:501})).rejects.toThrow();
     client.becomes('session'); await expect(client.call('journal.inspect',{})).rejects.toThrow('owner');
-    client.becomes('agent'); await expect(client.call('journal.inspect',{})).rejects.toThrow('owner');
+    client.becomes('agent'); await expect(client.call('journal.inspect',{})).rejects.toThrow("not one of the agent's methods");
   } finally { client.close(); }
 });
 test('fake detects terminal streaming messages without returning their text', async () => {

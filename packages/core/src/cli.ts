@@ -24,6 +24,7 @@ import { workflowCommand } from './workflow-cli.ts';
 import { DELEGATE_ACTIONS, delegateCommand } from './delegate-cli.ts';
 import { browserCommand, BROWSER_HELP } from './browser-cli.ts';
 import { browserRun } from './browser-run.ts';
+import { browserRecipe } from './browser-recipe.ts';
 import { deviceCommand } from './device-cli.ts';
 import { WINDOW_REQUEST_TIMEOUT_MS, windowCommand } from './window-cli.ts';
 import { secretCommand } from './secret-cli.ts';
@@ -128,9 +129,10 @@ ${CONTROL_HELP}
   settings bot request <key> <value> --why <text>
                                  a card asking the user to change one, for you
                                  or --bot <name>: name Ada, status paused,
-                                 projects +boite -old (+<machine>/<name> for a
-                                 project of another machine of the group),
-                                 instructions with
+                                 model codex/gpt-6.1-sol (<provider>/<model>,
+                                 any provider), projects +boite -old
+                                 (+<machine>/<name> for a project of another
+                                 machine of the group), instructions with
                                  --instructions-file <path>; the outcome
                                  arrives as a message (applied, changed, refused)
   settings bot create <name>     create the bot the user asked for, at once,
@@ -145,6 +147,8 @@ ${CONTROL_HELP}
   todo list                      the project's todo list
   todo add <text>                add a card for the user
   todo claim <id>                mark a card finished, awaiting the user
+  goal track                     a reviewed goal and checklist on the user's
+                                 last prompt (the Automatic goals experiment)
   threads find <words>           locate threads by words of their chat, title,
                                  project, branch or model
   threads read <thread>          its conversation (--last <n>, --before <ms>)
@@ -166,6 +170,10 @@ ${CONTROL_HELP}
   bot watch|unwatch <thread-id>  put a thread of its projects on its desk, or
                                  take one off; <machine>/<thread-id> for a
                                  project another machine entrusted to it
+  bot event <bot> <text>         wake a bot with an event from outside Boite
+                                 (--key <key>: a later event with the same key
+                                 replaces it while it waits); from a terminal
+                                 as the owner, or --core with a paired device
   --request-id <id>              reuse to retry threads send|reply or delegate spawn|send
   delegate models                models, reasoning levels and speeds a subagent can use
   delegate spawn <brief>         start a subagent on one bounded job; its result
@@ -210,7 +218,8 @@ ${CONTROL_HELP}
   --core <url>                   another core, with its token in BOITE_TOKEN
                                  (an owner token, or a paired device's session)
   --thread <id> --data-dir <dir> --channel <stable|dev>
-                                 drive a thread from outside it, as the owner`;
+                                 drive a thread from outside it, as the owner
+  --                             ends Boite's flags: the words after it are the command's`;
 
 const STATUS_LETTER: Record<GitChange['status'], string> = {
   added: 'A',
@@ -423,7 +432,9 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     },
     browser: async () => {
       if (rest[0] === 'help') { print([BROWSER_HELP], { help: BROWSER_HELP }); return; }
-      const result = rest[0] === 'run' ? await browserRun(rest.slice(1), io, client, threadId) : await browserCommand(rest, io, client, threadId);
+      const result = rest[0] === 'run' ? await browserRun(rest.slice(1), io, client, threadId)
+        : rest[0] === 'recipe' ? await browserRecipe(rest.slice(1), io, client, threadId)
+        : await browserCommand(rest, io, client, threadId);
       print(result.lines, result.value);
     },
     device: async () => {
@@ -457,6 +468,12 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       print([`server: ${state.currentVersion}`, `update: ${state.phase}`, ...(state.version ? [`version: ${state.version}`] : []), ...(state.error ? [`error: ${state.error}`] : [])], state);
     },
     bot: async () => {
+      if (rest[0] === 'event') {
+        if (rest.length < 3) throw new Usage('bot event needs a bot and the text: boite bot event <bot> [--key <key>] <text>');
+        const sent = await client.call('agents.event', { agent: rest[1]!, text: rest.slice(2).join(' '), ...(parsed.key === undefined ? {} : { key: parsed.key }) });
+        print([`event: ${sent.key} for ${sent.agentId}`, 'It wakes the bot once its thread is free; a later event with the same key replaces it until then.'], sent);
+        return;
+      }
       const result = await botCommand(client, threadId, rest);
       print([JSON.stringify(result)], result);
     },
@@ -693,9 +710,14 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
           const text = JSON.stringify(reading.key === 'projects' && Array.isArray(value) ? value.map(id => reading.choices?.find(choice => choice.id === id)?.label ?? id) : value ?? null);
           return rest[1] === undefined ? clipped(text) : text;
         };
+        // Every provider's models make a long list: the full view cuts it, `settings bot model` shows it whole.
+        const choices = (reading: (typeof shown)[number]): string => {
+          const text = (reading.choices ?? []).map(choice => choice.label === choice.id ? choice.id : `${choice.label} (${choice.id})`).join(', ');
+          return rest[1] === undefined ? clipped(text, 600) : text;
+        };
         print([
           `bot: ${read.agentName} (${read.agentId})`,
-          ...shown.map(reading => `${reading.key} ${named(reading, reading.value)}${reading.choices?.length ? `\n    choices: ${reading.choices.map(choice => choice.label === choice.id ? choice.id : `${choice.label} (${choice.id})`).join(', ')}` : ''}`),
+          ...shown.map(reading => `${reading.key} ${named(reading, reading.value)}${reading.choices?.length ? `\n    choices: ${choices(reading)}` : ''}`),
         ], rest[1] === undefined ? read : shown[0]);
         return;
       }
@@ -761,6 +783,13 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         const todo = await client.call('todos.update', { threadId, todoId: want(1, 'a todo id'), status: 'claimed' });
         print([todoRow(todo)], todo);
       } else throw new Usage(`todo: unknown action ${action}`);
+    },
+    goal: async () => {
+      const action = want(0, 'track');
+      if (action !== 'track') throw new Usage(`goal: unknown action ${action}`);
+      const activity = await client.call('threads.goal.track', { threadId });
+      // This turn is the goal's first: its claim counts, so the agent learns the marker here.
+      print([`goal: reviewed, tracking the user's last prompt (${activity.goal?.objective.length ?? 0} characters)`, 'when it is done and verified, end this turn with [BOITE_GOAL_COMPLETE] alone on its last line; a reviewer then checks it'], activity);
     },
   };
   const handler = command !== undefined && Object.hasOwn(commands, command) ? commands[command] : undefined;

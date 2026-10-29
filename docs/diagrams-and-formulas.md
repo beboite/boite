@@ -84,12 +84,26 @@ Copying a selection that holds a drawn formula or diagram puts the source as
 written on the clipboard: `\(E = mc^2\)` rather than the drawn MathML, and a
 diagram as its ```` ```mermaid ```` block.
 
+## What the agent is told
+
+One line of the session guide (`CHAT_VISUALS` in
+`packages/core/src/agent-guide.ts`) makes these blocks the first choice for a
+visual: a diagram, a chart or a formula needs no command and no help
+to read. It names the Mermaid headers worth knowing (`flowchart`,
+`sequenceDiagram`, `xychart-beta` for bars and lines, `pie`, `gantt`,
+`timeline`, `quadrantChart`, `sankey-beta`, `mindmap`) and the TeX delimiters,
+and asks for a picture whenever one explains better than text. It asks for
+quoted `xychart-beta` labels: Pele rejects a bare label with an accent, such
+as `x-axis [Jan, Fév]`. Only a
+simulator, an animation or a custom page goes to `boite view`
+([chat files](chat-files.md#what-the-agent-is-told)).
+
 ## Limits
 
 - Mermaid features Pele does not implement are reported as a parse error with
   the code shown.
 - Links (`click`) and images in a diagram are never drawn.
 - A single `$…$` is never math. Agents are told to write `$$…$$` or `\(…\)`
-  (`packages/core/src/agent-guide.ts`).
+  (`CHAT_VISUALS`).
 - An interactive or animated picture belongs to `boite view`
   ([chat files](chat-files.md#inline-views)).

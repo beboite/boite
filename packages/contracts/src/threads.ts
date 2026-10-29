@@ -153,6 +153,15 @@ export interface ForkOrigin {
 }
 
 export interface ThreadSummary {
+  /**
+   * The thread, or a conversation it continues, read contact mail sent
+   * outside a shared project. That mail has no captured file authority, so
+   * the core refuses every turn and tool until the owner trusts the history
+   * (`threads.trustContactHistory`). Names the contacts it came from. Every
+   * `threads.get` carries it, null when nothing holds the thread; a
+   * `thread.updated` carries it only when the hold changed. Absent on older cores.
+   */
+  contactHold?: { contacts: string[] } | null;
   /** Date marked done, or automatically archived after a PR merge. Cleared on restore or manual archive. */
   doneAt?: Timestamp | null;
   /**
@@ -436,8 +445,10 @@ export interface ThreadActivity {
   /**
    * `blocked`: the agent ended a goal turn with `[BOITE_GOAL_BLOCKED]` and
    * waits for the user. The goal is paused; the user's next message resumes it.
+   * `auto`: the core started this reviewed goal by itself, from a long prompt
+   * or `boite goal track` (the `auto-goal` experiment, `docs/goals.md`).
    */
-  goal: { objective: string; status: 'active' | 'paused' | 'complete'; iterations: number; error: string | null; dismissed?: boolean; blocked?: boolean; review?: GoalReview; checklist?: GoalChecklist } | null;
+  goal: { objective: string; status: 'active' | 'paused' | 'complete'; iterations: number; error: string | null; dismissed?: boolean; blocked?: boolean; review?: GoalReview; checklist?: GoalChecklist; auto?: true } | null;
   loop: { prompt: string; intervalMs: number; maxIterations?: number | null; status: 'active' | 'paused' | 'complete'; iterations: number; nextRunAt: number | null; error: string | null; history?: ActivityIteration[] } | null;
   tasks: AgentTask[];
   tasksDismissed?: boolean;
@@ -549,6 +560,13 @@ export interface ThreadsRpcMethods {
    */
   'threads.activity.set': { params: { threadId: ThreadId; goal?: { objective: string; review?: boolean } | null; loop?: { prompt: string; intervalMs: number; maxIterations?: number | null } | null; attachments?: Attachment[] }; result: ThreadActivity };
   'threads.activity.control': { params: { threadId: ThreadId; kind: 'goal' | 'loop'; action: 'pause' | 'resume' | 'remove' | 'complete' }; result: ThreadActivity };
+  /**
+   * `boite goal track`: an automatic reviewed goal on the thread whose
+   * objective is the user's last prompt, verbatim. Refused while the
+   * `auto-goal` experiment is off on the desktop app, while a goal or loop is
+   * under way, and when that prompt already started one.
+   */
+  'threads.goal.track': { params: { threadId: ThreadId }; result: ThreadActivity };
   /** The agent's task list, whole, as the tasks surface shows it. */
   'threads.tasks.set': { params: { threadId: ThreadId; tasks: AgentTask[] }; result: ThreadActivity };
   'threads.tasks.get': { params: { threadId: ThreadId }; result: AgentTask[] };
@@ -751,6 +769,13 @@ export interface ThreadsRpcMethods {
   /** Pin or unpin (`pinned: false`) a thread. An archived thread keeps its pin for when it comes back. */
   'threads.pin': { params: { threadId: ThreadId; pinned?: boolean }; result: ThreadSummary };
   'threads.markRead': { params: { threadId: ThreadId }; result: { ok: true } };
+  /**
+   * Owner only. Accept the contact mail outside a shared project that the
+   * thread's history consumed (`Thread.contactHold`), so its turns and tools
+   * run again. Mail of a shared project keeps its captured boundary, and a
+   * later letter outside one holds the thread again.
+   */
+  'threads.trustContactHistory': { params: { threadId: ThreadId }; result: { ok: true } };
   /** Only subscribed threads stream message events to this connection. */
   'threads.subscribe': { params: { threadId: ThreadId }; result: { ok: true } };
   'threads.unsubscribe': { params: { threadId: ThreadId }; result: { ok: true } };

@@ -100,7 +100,7 @@ test('a granted project is all a contact sees: letters cross both ways, an ungra
   await hostClient.call('contacts.grant', { coreId: guestId, projectId: open.id });
   // The host announces what it opened, down the link.
   await waitFor(() => guest.core.contacts.find(hostId)?.offers.some(offer => offer.name === 'alpha') === true, 10000);
-  expect((await guestClient.call('contacts.get', {})).contacts[0]?.offers).toEqual([{ projectId: open.id, name: 'alpha' }]);
+  expect((await guestClient.call('contacts.get', {})).contacts[0]?.offers).toEqual([{ projectId: open.id, name: 'alpha', sharedProject: {ownerCoreId:hostId,coreId:hostId,projectId:open.id} }]);
   const contacts = await guest.core.contacts.forThread(guestThread);
   expect(contacts).toEqual([{ name: guest.core.contacts.find(hostId)!.name, coreId: hostId, projects: ['alpha'], link: 'connected' }]);
 
@@ -130,6 +130,28 @@ test('a granted project is all a contact sees: letters cross both ways, an ungra
   await hostClient.call('contacts.grant', { coreId: guestId, projectId: open.id, readThreads: true });
   expect((await guest.core.coordination.read(guestThread, { coreId: hostId, threadId: hostOpen })).contact.threadId).toBe(hostOpen);
   expect(await thrown(guest.core.coordination.read(guestThread, { coreId: hostId, threadId: hostClosed }))).toThrow('not a thread of a project opened to you');
+}, 30000);
+
+test('a grant made while the contact sync is in flight reaches the contact without waiting for the periodic flush', async () => {
+  const { host, guest, guestClient, hostId, guestId } = await linked();
+  await waitFor(() => host.core.contacts.find(guestId)?.capabilities?.humanLetters === 1);
+  const first = await project(guest, guestClient, 'first');
+  const second = await project(guest, guestClient, 'second');
+  // Hold the sync that carries the first grant, so the second lands while it is in flight.
+  const gate = Promise.withResolvers<void>();
+  let holding = false;
+  const request = guest.core.coordination.request.bind(guest.core.coordination);
+  guest.core.coordination.request = async (peer, operation, payload) => {
+    if (operation === 'contact.sync' && !holding && (payload as { offers: unknown[] }).offers.length === 1) { holding = true; await gate.promise; }
+    return request(peer, operation, payload);
+  };
+  restore = () => { guest.core.coordination.request = request; };
+  await guestClient.call('contacts.grant', { coreId: hostId, projectId: first.id });
+  await waitFor(() => holding);
+  await guestClient.call('contacts.grant', { coreId: hostId, projectId: second.id });
+  gate.resolve();
+  // The periodic flush runs every 30 seconds; the second grant must not wait for it.
+  await waitFor(() => host.core.contacts.find(guestId)?.offers.length === 2);
 }, 30000);
 
 test('model tiers: a sender below its own owner\'s tier cannot write, and a letter whose attested model is below the recipient\'s tier is refused', async () => {
@@ -310,8 +332,10 @@ test('revoke rejects letters waiting for the closed project, queued wakes includ
   // A second letter already handed to a provider wake.
   const queued = await send('The dev server one.');
   await waitFor(() => letters(host, hostThread).find(entry => entry.id === queued.id)?.status === 'received', 10000);
-  (host.core.coordination as unknown as { update(letter: AgentLetter, status: string, error: string): void })
-    .update(letters(host, hostThread).find(entry => entry.id === queued.id)!, 'uncertain', 'Queued for provider delivery');
+  // Only `admit`, which protects the letter first, may hand it over.
+  const desk = host.core.coordination as unknown as { admit(threadId: string, letters: AgentLetter[], consume: () => void): void; update(letter: AgentLetter, status: string, error: string): void };
+  const entry = letters(host, hostThread).find(entry => entry.id === queued.id)!;
+  desk.admit(hostThread, [entry], () => desk.update(entry, 'uncertain', 'Queued for provider delivery'));
   await hostClient.call('contacts.revoke', { coreId: guestId, projectId: open.id });
   for (const id of [letter.id, queued.id]) expect(letters(host, hostThread).find(entry => entry.id === id)).toMatchObject({ status: 'rejected', error: 'Project closed to this contact' });
   expect(host.core.coordination.prepareWake(hostThread, 'turn_late')).toBe(false);

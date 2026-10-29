@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -83,6 +83,35 @@ test('a trail event written under an id freed by a deletion is still pruned afte
   } finally { journal.close(); }
 });
 
+test('an asynchronous question nobody answered outlives the retention of its events and an upgrade', () => {
+  const file = join(dir, 'journal.db');
+  const day = 86_400_000, now = 100 * day, askedAt = now - 31 * day;
+  const ask = (journal: Journal, id: string, async: boolean) => journal.append(
+    { type: 'question.asked', threadId: 'thr_a', version: 1, ts: askedAt, payload: { id, threadId: 'thr_a', ...(async ? { async: true } : {}), text: id } },
+    () => undefined);
+  let journal = new Journal(file);
+  try {
+    ask(journal, 'open', true);
+    ask(journal, 'answered', true);
+    ask(journal, 'blocking', false);
+    journal.append({ type: 'question.answered', threadId: 'thr_a', version: 1, ts: askedAt, payload: { questionId: 'answered', answer: null } }, () => undefined);
+    while (pruneEventsOnce(journal, now));
+    expect(journal.db.query("SELECT COUNT(*) AS n FROM events WHERE type LIKE 'question.%'").get()).toEqual({ n: 0 });
+  } finally { journal.close(); }
+  journal = new Journal(file);
+  try {
+    expect(journal.openAsyncQuestions().map(question => question.id)).toEqual(['open']);
+    // A journal from before the projection reads its pending cards from the events it still has.
+    journal.db.exec("DROP TABLE pending_questions; PRAGMA user_version = 44; INSERT INTO events (thread_id, ts, type, version, payload) VALUES ('thr_b', 1, 'question.asked', 1, '{\"id\":\"older\",\"threadId\":\"thr_b\",\"async\":true}')");
+  } finally { journal.close(); }
+  journal = new Journal(file);
+  try {
+    expect(journal.openAsyncQuestions().map(question => question.id)).toEqual(['older']);
+    journal.deleteThreads(['thr_b']);
+    expect(journal.openAsyncQuestions()).toEqual([]);
+  } finally { journal.close(); }
+});
+
 test('opening a journal builds no planner statistics; the retention ticks build them one ANALYZE at a time', () => {
   const journal = new Journal(join(dir, 'journal.db'));
   try {
@@ -92,11 +121,24 @@ test('opening a journal builds no planner statistics; the retention ticks build 
     expect(stats()).toEqual([]);
     const pending = journal.staleStatistics(true);
     expect(pending).toContain('ANALYZE "main"."events"');
+    expect(pending).not.toContain('ANALYZE "main"."shared_project_outbox"');
     expect(() => journal.analyze('DROP TABLE events')).toThrow('expected an ANALYZE statement');
     for (const statement of pending) journal.analyze(statement);
     expect(stats()).toContain('events');
     // Nothing left stale, after the migration or after a quiet day.
     expect(journal.staleStatistics(true)).toEqual([]);
     expect(journal.staleStatistics()).toEqual([]);
+    // An empty outbox cannot retain statistics, but its first row must make it eligible.
+    journal.db.query("INSERT INTO shared_project_outbox(contact_id, association_id, data) VALUES ('fixture', 'fixture', '{}')").run();
+    // Older system SQLite does not list never-analyzed tables in PRAGMA optimize.
+    const query = journal.db.query.bind(journal.db);
+    const legacy = spyOn(journal.db, 'query').mockImplementation(sql =>
+      query(sql.startsWith('PRAGMA optimize=') ? 'SELECT NULL WHERE 0' : sql));
+    let populated: string[];
+    try { populated = journal.staleStatistics(true); } finally { legacy.mockRestore(); }
+    expect(populated).toContain('ANALYZE "main"."shared_project_outbox"');
+    for (const statement of populated) journal.analyze(statement);
+    expect(stats()).toContain('shared_project_outbox');
+    expect(journal.staleStatistics(true)).toEqual([]);
   } finally { journal.close(); }
 });

@@ -4,7 +4,7 @@
   import { diffPrefs, setDiffPref } from '../lib/diff-prefs.svelte';
   import { fill, strings } from '../lib/strings';
   import { codeLanguage, highlightCode } from '../lib/code-highlight';
-  import { whenIdle } from '../lib/prefetch';
+  import { whenIdle } from '../lib/idle';
   import { boxWidth } from '../lib/box-width';
 
   let {

@@ -14,6 +14,19 @@ const plan: WorkflowPlan = {
   ]
 };
 
+test.each([undefined, {maxSteps: 24}])('a mixed fake workflow retains ordinary slots without blocking shared work with limits %j', limits => {
+  const ctx = new FakeContext({delayMs: 0}); seed(ctx);
+  try {
+    let run!: WorkflowRun;
+    ctx.workflows.hold(() => {run = ctx.workflows.start('t-trace', {name: 'Mixed slots', ...(limits ? {limits} : {}), steps: [
+      ...Array.from({length: 5}, (_, i) => ({id: `local${i}`, task: 'Ordinary work'})),
+      {id: 'remote', task: 'Shared work', compute: {sharedProjectId: 'shared', host: {ownerCoreId: 'a'.repeat(64), coreId: 'b'.repeat(64), projectId: 'project'}, profileId: 'conversation', baseCommit: 'c'.repeat(40)}},
+    ]}, 'mixed-slots', undefined, 'user');});
+    expect(run.nodes.filter(n => n.id.startsWith('local')).flatMap(n => n.instances).filter(i => i.status === 'running')).toHaveLength(3);
+    expect(run.nodes.find(n => n.id === 'remote')!.instances[0]!.status).toBe('running');
+  } finally {ctx.workflows.close();}
+});
+
 async function until<T>(read: () => Promise<T>, done: (value: T) => boolean): Promise<T> {
   for (let i = 0; i < 400; i++) {
     const value = await read();
@@ -161,7 +174,7 @@ test('Mark done stops a paused run, as the core does', async ({ createClient }) 
 test('an agent saves new templates but never replaces a saved one', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0, delegationDemo: true });
   const saved = await client.call('workflows.templates.save', { threadId: 't-trace', name: 'Lexer', plan });
-  client.becomes('agent');
+  client.becomes('agent', 't-trace');
   await expect(client.call('workflows.templates.save', { threadId: 't-trace', name: 'Lexer', plan })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
   await expect(client.call('workflows.templates.save', { threadId: 't-trace', name: 'Other', plan, templateId: saved.id })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
   expect((await client.call('workflows.templates.save', { threadId: 't-trace', name: 'Other', plan })).id).not.toBe(saved.id);

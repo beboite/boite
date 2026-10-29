@@ -716,9 +716,9 @@ descriptor uses additional fields available to other providers:
 `quirks: ["antigravity"]` folds a tool call's command, working directory and
 output under one spelling and draws an `interaction_` permission request as the
 agent's own question; its modes are `default`, `auto_edit` and `yolo`, with no
-plan mode. A `start_subagent` call (titled `Running start_subagent` or `Run
-start_subagent?`, without `_meta.is_mcp_tool_call`) carries the batch it
-launched as `nativeAgents`, listed in Subagents: the call returns once the batch
+plan mode. An `invoke_subagent` call (titled `Running invoke_subagent` or `Run
+invoke_subagent?`; agents before 1.4.1 name it `start_subagent`; without
+`_meta.is_mcp_tool_call`) carries the batch it launched as `nativeAgents`, listed in Subagents: the call returns once the batch
 is launched, its output is the launch's description, and the agent reports no
 child ids, names, models or results, so the batch stays running while the turn
 runs and reads unknown after it; only a failed launch is final, with its error.
@@ -841,6 +841,43 @@ it covers model discovery, a file-reading tool, cold resume, plan mode, stop
 and another turn while a version 1 database is locked and its plugin API is
 incompatible. It needs no login or external model. Windows and macOS remain
 unchecked by this run.
+
+## A local ACP command
+
+The Providers page has a Local ACP command card for any agent that speaks ACP
+over stdio: a name, the command that starts it, its arguments one per field and
+its environment variables. `providers.addLocal` checks each field
+(`checkLocalAcpCommand` in `packages/contracts/src/local-acp.ts`, which the
+in-memory client runs too) and refuses with the field it names (`name`,
+`command`, `args[1]`, `env.KEY`), which the form marks.
+
+- The id comes from the name: lowercase letters, digits and dashes. A name
+  whose id a provider already has, or whose `<id>.json` already exists, is
+  refused; nothing is overwritten.
+- The command is a program on PATH or an absolute path. A relative path is
+  refused, and so is a program this machine cannot start; on Windows a `.cmd`,
+  `.bat` or `.ps1` launcher is refused with the program to enter instead.
+- Arguments go to the program as written, one argument per field, with no shell
+  and no quoting. `{home}` and the other load-time tokens expand as in any
+  descriptor.
+- Environment values are saved in plain text in the provider file. An API key
+  belongs in the agent's own sign-in. A variable named `__proto__` is refused:
+  the descriptor loader builds a plain object, which drops that key.
+
+The core writes an ordinary user descriptor to `<dataDir>/providers/<id>.json`
+(`localAcpDescriptor` in `packages/core/src/providers/local-command.ts`) and
+reloads, so the loader, the ACP driver and `providers.dryRun` treat it like a
+file written by hand. It has no login and no isolation: the default account
+starts the agent with its own sign-in and settings. Its only model is
+`default`, which leaves the agent on the model it is configured with until the
+models probe reads the agent's list. A file that fails to load is deleted again
+and the refusal is returned.
+
+The provider's details offer Remove provider. `providers.removeLocal` refuses a
+shipped provider and a provider with a turn running, releases its warm
+processes and deletes the file. Accounts and threads stay, and come back when
+the same name is added again. Both methods are the owner's; there is no edit,
+only remove and add.
 
 ## Turning a provider off
 
@@ -1038,6 +1075,60 @@ rewritten. ACP and Muse use their native unrestricted mode and Boite accepts
 remaining approval requests; ACP has no standard hook-disable call. Antigravity
 uses its permission-skip flag. Questions seeking input still ask for real
 answers; YOLO does not invent form values or complete a device sign-in.
+
+Protected shared work adds an immutable file/tool capability to the host-selected
+mode and account. Claude removes native tools and user MCP/plugins/hooks and
+provides only in-process protected tools. Codex disables alternate execution
+features and MCP servers, applies a granular filesystem root deny and offline
+profile, and provides host dynamic tools. `boite_exec` runs project commands
+through the OS boundary; job-only `boite_commit` uses fixed trusted Git operations.
+Default/acceptEdits require host approval, bypass/YOLO retain automatic approvals,
+and plan/dontAsk refuse mediated commands. Restricted context tool lists expose
+no generic command tool. Native mode changes retire/re-admit the capability.
+The protected fingerprint participates in warm identity. Codex cold protected
+starts replay through a fresh native thread because `thread/resume` cannot
+replace dynamic tools. Ordinary local sessions keep the mappings below.
+See [protected shared execution](contacts.md#native-linux-tool-execution) for
+host prerequisites and the deterministic native driver proof.
+
+OpenCode 1.19.3 uses its native ACP plugin hooks to deny every
+non-core tool and command, plus a core-only remote MCP server. It supports only
+its native default/build and plan modes. Other versions need a verified hook
+path and bundled SDK inventory before admission. Other ACP implementations, including
+OpenCode 2, cannot obtain this capability by advertising ACP permission support.
+Private discovery retains the selected API/OAuth account and JSON provider/model
+selection, including normalized JSONC and custom configuration files. Only SDKs
+bundled by this native version may load; external SDK imports, legacy TOML and
+remote-configuration credentials are refused explicitly. User plugins, MCP,
+commands and project configuration cannot follow the protected session.
+An explicit protected model must appear in the native catalogue or the selected
+account's injected provider and be confirmed by ACP before a prompt. Missing,
+refused or unconfirmed selections stop the turn without API traffic. Warm
+turns recheck the current native model, including announced drift; choosing
+the native default remains a separate selection. Ordinary local ACP keeps its
+existing best-effort model preference.
+
+pi 1.4.0 uses its own extension API: builtins, discovered extensions, MCP, skills,
+prompts and project context are disabled, and a core extension registers only
+protected tools and rejects other tool calls. Selected native account
+authentication remains available to trusted provider control; model selection
+is captured privately. Command-valued keys/headers and executable environment
+preloads are refused before launch. Only YOLO and bypass modes
+are admitted, because pi RPC has no native approval mode. The descriptor keeps
+`capabilities.approvals: false`. ACP/pi fingerprints distinguish ordinary and
+protected warm sessions, and every warm turn checks revocation before prompting.
+Protected pi cold starts use a new private transcript and the core's captured
+continuation instead of reopening ordinary or differently scoped native history.
+The forced shared-turn context suppresses native resources while captured host
+tool permissions control the protected tools. An actual host tool-free context
+exposes neither native nor protected tools.
+
+Muse 1.4.13 now supplies a verified mandatory MCP-only native registry gate;
+its protected adapter uses the same OS executor and preserves selected native
+account/model/approval semantics. Older Muse 1.3.0 remains refused because its
+native file reads bypass its shell sandbox and its toolsets cannot retain only
+MCP tools. Installed native production regressions cover both cases without
+live inference. The exact release and gate are described under [Muse Code](#muse-code).
 
 - Claude takes a changed mode in place through the SDK's `setPermissionMode`,
   sent before the next prompt and only when the mode moved. Claude can also move
@@ -1243,7 +1334,10 @@ differ from what the session was given, the session gets
 
 The CLI's end releases the registration, not the turn's: a warm or viewed
 session keeps its CLI across turns, and the servers it started with it. The
-core then closes each server's stdin and kills it after 3 seconds. A server
+core then closes each server's stdin and, after 3 seconds, stops it with what
+it started. The core reads a server's stdout as lines of at most 16 MiB
+through the drivers' shared `LineSplitter`; a longer line fails every call the
+server owed and stops it the same way. A server
 whose command, arguments or environment hold a `${...}` reference stays with
 the CLI, which expands it. Set `BOITE_LAZY_MCP=0` in the core's environment
 to give the CLI the servers as configured.
@@ -1256,12 +1350,22 @@ are bounded to 16 * 1024 * 1024 UTF-16 code units. A final line without a newlin
 is processed before EOF. Non-JSON or invalid object records produce a fixed
 protocol diagnostic without copying their raw output into diagnostic logs.
 
-Oversized stdout, failed reads/writes, closed pipes or a throwing message handler
+Oversized stdout, failed reads/writes, stdout closure or a throwing message handler
 close the transport and reject all pending requests once. The session marks
 that captured child non-reusable, gives its exit diagnostic a 500 ms grace and
 settles any active notification-driven turn even if the prompt response already
 arrived. User Stop wins over a subsequent fault or exit. Callbacks from a retired
 child cannot mutate a replacement; unrelated sessions continue running.
+
+A clean stdin close makes the captured session non-reusable and refuses new
+writes while already sent requests can still receive stdout responses, including
+the final record at EOF. Their existing cancellation and expiry remain active.
+Drainage ends at stdout EOF/close, an
+explicit failure, a read/write error or the existing 500 ms exit grace, whichever
+comes first. Stdout termination or drain expiry invokes the session fault
+callback; with a live child and stdout that never closes, requests settle after
+500 ms and session
+teardown can take a further 500 ms for its exit diagnostic.
 
 Request cancellation and explicit expiry remove the pending request, so late
 responses cannot update its result. Prompts and reported active model runs have
@@ -1366,6 +1470,23 @@ process here goes through `procs.spawnChild`. The driver refuses a host whose
     tool, then answer ok>"`, alternated with and without
     `-c 'run.reminder_roster={}'`, took 24.1 s and 25.1 s with the reminders and
     14.8 s and 16.3 s without.
+
+Protected shared Muse sessions require native 1.4.13 and MSP fingerprint
+`sha256:7fddaf646dbc317e5fcac0785e135eb04df14fbb0db1863089dfd6da21730e5b`.
+`drivers/muse/protected.ts` writes a private native configuration with only
+`mcp__boite_protected__boite_exec` and `mcp__boite_protected__boite_commit` in
+`run.toolset`. The native registry rejects forged calls to other tools; a
+required MCP failure or unresolved name stops run preparation before inference.
+The native host reads selected auth through its private config root and retains
+its account refresh, model, transport and approval semantics. Only model tool
+commands enter the common offline OS executor. Native discovery sees an empty
+workspace and core-owned HOME/XDG roots, including foreign `CODEX_HOME` and
+Claude/plugin discovery roots. External hooks/MCP/plugins and experimental
+environment overrides are excluded. Native shell and writes are also
+disabled. Protected cold starts create a new private session and use the core's
+captured continuation; ordinary local resume is unchanged. Native 1.3.0 and
+unverified versions/fingerprints remain refused. These guarantees depend on the
+verified native registry gate, not its shell sandbox or a permission callback.
 
 ### pi
 

@@ -139,15 +139,16 @@ test('a model picked after another writer changed the agent keeps that writer\'s
   const { client, view, agent } = await open();
   const config = await client.call('agents.runtime.get', { agentId: agent().id });
   // Another window saves the background settings while this card is open.
-  await client.call('agents.runtime.configure', { agentId: agent().id, expectedRevision: agent().revision, config: { ...config, autoMemory: false, dailyBudgetUsd: 37 } });
+  await client.call('agents.runtime.configure', { agentId: agent().id, expectedRevision: agent().revision, config: { ...config, autoMemory: false, eventWakes: true, dailyBudgetUsd: 37 } });
   await view.refresh();
   await idle();
   await pick('claude-sonnet-5-5');
   await idle();
   const saved = await client.call('agents.runtime.get', { agentId: agent().id });
-  expect([saved.defaultRoute.model, saved.autoMemory, saved.dailyBudgetUsd]).toEqual(['claude-sonnet-5-5', false, 37]);
+  expect([saved.defaultRoute.model, saved.autoMemory, saved.eventWakes, saved.dailyBudgetUsd]).toEqual(['claude-sonnet-5-5', false, true, 37]);
   expect(status()?.dataset.state).toBe('saved');
   expect(document.querySelector<HTMLInputElement>('[data-testid=agent-auto-memory]')!.checked).toBe(false);
+  expect(document.querySelector<HTMLInputElement>('[data-testid=agent-event-wakes]')!.checked).toBe(true);
 });
 
 test('a route name cleared just before the card closes is never sent', async () => {

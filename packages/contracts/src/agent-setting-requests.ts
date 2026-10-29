@@ -1,11 +1,11 @@
-import type { AgentProfile, AgentRuntimeConfig } from './agents.ts';
+import type { AgentProfile, AgentRuntimeConfig, AgentSelection } from './agents.ts';
 import type { QuestionAnswer, QuestionOption, RequestId, ThreadId } from './index.ts';
 import { SETTING_REASON_MAX, sameSetting } from './setting-requests.ts';
 
 /*
  * A thread, or a persistent agent about itself or another bot, asking the user
  * to change one of a bot's settings: rename it, rewrite its instructions,
- * pause it, entrust it a project, run it on another model, give it a daily
+ * pause it, entrust it a project, run it on another model or provider, give it a daily
  * budget. The same flow as a settings card (setting-requests.ts): a card asked
  * without stopping, whose Apply is the owner's (`agents.settings.apply`). The
  * core settles the card once the value moves, from the card or from the
@@ -14,7 +14,7 @@ import { SETTING_REASON_MAX, sameSetting } from './setting-requests.ts';
  */
 
 /** The settings a card may propose, each drawn where the agent's settings show it. */
-export const AGENT_SETTING_KEYS = ['name', 'domain', 'instructions', 'avatar', 'status', 'projects', 'model', 'effort', 'autoMemory', 'subagents', 'dailyBudget'] as const;
+export const AGENT_SETTING_KEYS = ['name', 'domain', 'instructions', 'avatar', 'status', 'projects', 'model', 'effort', 'autoMemory', 'eventWakes', 'subagents', 'dailyBudget'] as const;
 export type AgentSettingKey = (typeof AGENT_SETTING_KEYS)[number];
 
 export function isAgentSettingKey(key: unknown): key is AgentSettingKey {
@@ -44,7 +44,7 @@ export interface AgentSettingAsk {
   /** The agent's name when the card was asked: a thread has no agents snapshot to read it from. */
   agentName: string;
   key: AgentSettingKey;
-  /** The proposed value: text, a status, project ids sorted, a model id, an effort or null, a boolean, dollars a day or null. */
+  /** The proposed value: text, a status, project ids sorted, a model as `<provider>/<model>`, an effort or null, a boolean, dollars a day or null. */
   value: unknown;
   /** The value when the card was asked. It settles once the setting leaves it. */
   previous: unknown;
@@ -54,6 +54,12 @@ export interface AgentSettingAsk {
    * core knew them: the client lists only its own machine's projects.
    */
   labels?: Record<string, string>;
+  /**
+   * On a `model` card, its value and previous name the provider
+   * (`<provider>/<model>`). A card drawn before cards named the provider
+   * lacks it and holds model ids of the agent's provider.
+   */
+  modelRefs?: true;
 }
 
 /** One choice a setting offers, as `agents.settings.read` lists it. */
@@ -98,9 +104,24 @@ export interface AgentSettingContext {
   projects: readonly AgentSettingChoice[];
   /** The bots not archived: a name is taken while another of them holds it. */
   bots: readonly Pick<AgentProfile, 'id' | 'name'>[];
-  /** The model as `agents.profile.save` would keep it, the agent's policy included. */
+  /**
+   * The model as `agents.profile.save` would keep it, the agent's policy
+   * included, as `<provider>/<model>`: a model id of the agent's provider, or
+   * `<provider>/<model>` of another installed one.
+   */
   model: (model: string) => Checked<string>;
   effort: (effort: string | null) => Checked<string | null>;
+}
+
+/** A model as a card names it, `<provider>/<model>`; null runs on the provider's default. */
+export function agentModelRef(selection: Pick<AgentSelection, 'providerId' | 'model'>): string | null {
+  return selection.model === null ? null : `${selection.providerId}/${selection.model}`;
+}
+
+/** The provider and model of a `<provider>/<model>` reference: a provider id holds no slash, a model id may (`opencode/glm-5.3`). */
+export function agentModelRoute(ref: string): { providerId: string; model: string } {
+  const slash = ref.indexOf('/');
+  return { providerId: ref.slice(0, slash), model: ref.slice(slash + 1) };
 }
 
 /** The value a setting has now; projects sorted, so two lists compare by their ids. */
@@ -112,9 +133,10 @@ export function agentSettingValue(profile: AgentProfile, config: AgentRuntimeCon
     case 'avatar':
     case 'status': return profile[key];
     case 'projects': return [...(profile.projectIds ?? [])].sort();
-    case 'model': return profile.selection.model;
+    case 'model': return agentModelRef(profile.selection);
     case 'effort': return profile.selection.effort;
     case 'autoMemory': return config.autoMemory !== false;
+    case 'eventWakes': return config.eventWakes === true;
     case 'subagents': return config.subagents.enabled;
     case 'dailyBudget': return config.dailyBudgetUsd ?? null;
   }
@@ -194,6 +216,7 @@ export function normalizeAgentSetting(key: AgentSettingKey, raw: unknown, ctx: A
     case 'model': return typeof raw === 'string' && raw.trim() ? ctx.model(raw.trim()) : { ok: false, message: 'model: expected a model id' };
     case 'effort': return raw === null || typeof raw === 'string' ? ctx.effort(raw === null ? null : raw.trim() || null) : { ok: false, message: 'effort: expected a reasoning level or null' };
     case 'autoMemory':
+    case 'eventWakes':
     case 'subagents': return typeof raw === 'boolean' ? { ok: true, value: raw } : { ok: false, message: `${key}: expected true or false` };
     case 'dailyBudget':
       return raw === null || (typeof raw === 'number' && Number.isFinite(raw) && raw >= AGENT_DAILY_BUDGET.min && raw <= AGENT_DAILY_BUDGET.max)
@@ -225,7 +248,7 @@ export function checkAgentSettingRequest(params: Pick<AgentSettingRequestParams,
   const remote = key === 'projects' ? [...new Set([...(normalized.value as string[]), ...(previous as string[])])].filter(id => id.includes('/')) : [];
   const labels = Object.fromEntries(remote.map(id => [id, ctx.projects.find(project => project.id === id)?.label ?? id]));
   return {
-    ok: true, reason, setting: { agentId: ctx.profile.id, agentName: ctx.profile.name, key, value: normalized.value, previous, ...(remote.length ? { labels } : {}) },
+    ok: true, reason, setting: { agentId: ctx.profile.id, agentName: ctx.profile.name, key, value: normalized.value, previous, ...(remote.length ? { labels } : {}), ...(key === 'model' ? { modelRefs: true as const } : {}) },
     // Applied is never an answer: the core says it when the value moves.
     options: [{ id: 'refuse', label: 'Refuse' }],
   };
@@ -242,8 +265,15 @@ export function settledAgentSetting(setting: AgentSettingAsk, profile: AgentProf
   const archiving = setting.key === 'status' && setting.value === 'archived';
   if (!archiving && (config === null || profile.status === 'archived')) return 'close';
   const now = archiving ? profile.status : agentSettingValue(profile, config!, setting.key);
-  if (sameSetting(now, setting.previous)) return null;
-  return { optionIds: [sameSetting(now, setting.value) ? 'applied' : 'changed'], value: now };
+  // A model card drawn before cards named the provider compares model ids.
+  const held = setting.key === 'model' && setting.modelRefs !== true ? profile.selection.model : now;
+  if (sameSetting(held, setting.previous)) return null;
+  return { optionIds: [sameSetting(held, setting.value) ? 'applied' : 'changed'], value: now };
+}
+
+/** The value a card proposes, as `<provider>/<model>` for a model card drawn with a model id of the agent's provider. */
+export function agentSettingProposal(setting: AgentSettingAsk, profile: AgentProfile): unknown {
+  return setting.key === 'model' && setting.modelRefs !== true && typeof setting.value === 'string' ? `${profile.selection.providerId}/${setting.value}` : setting.value;
 }
 
 /** The longest value a refusal or an outcome quotes: a bot's instructions run to thousands of characters. */

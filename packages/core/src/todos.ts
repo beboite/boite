@@ -47,7 +47,7 @@ function stored(core: Core, projectId: ProjectId): Todo[] {
 }
 
 /** A `/goal2`'s state as a card shows it; null for a plain goal, a loop or no goal. */
-function goalOf(activity: ThreadActivity): TodoGoal | null {
+export function goalOf(activity: ThreadActivity): TodoGoal | null {
   const goal = activity.goal;
   if (!goal?.review) return null;
   return { status: goal.status, reviewing: goal.review.phase === 'reviewing', checklist: goal.checklist ?? null };
@@ -106,7 +106,7 @@ function save(core: Core, projectId: ProjectId, todos: Todo[]): Todo[] {
 }
 
 function send(core: Core, projectId: ProjectId, todos: Todo[]): Todo[] {
-  const list = withGoals(core, orderTodos(todos));
+  const list = orderTodos([...withGoals(core, todos), ...(core.sharedBoard?.todos(projectId) ?? [])]);
   core.bus.emit('todos.updated', { projectId, todos: list });
   return list;
 }
@@ -128,8 +128,11 @@ function checkText(text: unknown): string {
 export function listTodos(core: Core, threadId: ThreadId): Todo[] {
   const projectId = projectOfThread(core, threadId);
   linkedThreads(core, projectId);
-  return withGoals(core, orderTodos(stored(core, projectId)));
+  return orderTodos([...withGoals(core, stored(core, projectId)), ...(core.sharedBoard?.todos(projectId) ?? [])]);
 }
+
+/** Replication invalidates the same project board without persisting foreign cards as local ones. */
+export function notifySharedTodos(core: Core, projectId: ProjectId): void { send(core, projectId, stored(core, projectId)); }
 
 export function addTodo(core: Core, params: RpcParams<'todos.add'>, principal: Principal = 'owner'): Todo {
   const projectId = projectOfThread(core, params.threadId);
@@ -219,7 +222,7 @@ export function updateTodo(core: Core, params: RpcParams<'todos.update'>, princi
     updatedAt: Date.now(),
   };
   const list = save(core, projectId, todos.map((todo) => (todo.id === updated.id ? updated : todo)));
-  return list.find((todo) => todo.id === updated.id) ?? updated;
+  return list.find((todo) => todo.id === updated.id && !todo.shared) ?? updated;
 }
 
 /**
@@ -242,6 +245,29 @@ function followGoal(core: Core, threadId: ThreadId, sent: Map<ThreadId, string>)
   const claims = (todo: Todo) => passedAt !== null && todo.goalThreadId === threadId && todo.status === 'open' && todo.updatedAt < passedAt;
   if (!todos.some(claims)) { send(core, projectId, todos); return; }
   save(core, projectId, todos.map((todo) => claims(todo) ? { ...todo, status: 'claimed', threadId, updatedAt: Date.now() } : todo));
+}
+
+/**
+ * The card of an automatic goal (`docs/goals.md`): the prompt's first line,
+ * linked to its conversation so the board follows that goal like one it
+ * started. None for an incognito conversation, which no board keeps.
+ */
+export function addGoalCard(core: Core, threadId: ThreadId, prompt: string): Todo | null {
+  const thread = core.journal.getThread(threadId);
+  const text = prompt.split('\n').map((line) => line.trim()).find(Boolean)?.slice(0, TODO_TEXT_MAX);
+  if (!thread?.projectId || thread.incognito || !text) return null;
+  const now = Date.now();
+  const todo: Todo = { id: newId('todo_'), projectId: thread.projectId, text, status: 'open', threadId, goalThreadId: threadId, createdAt: now, updatedAt: now };
+  save(core, thread.projectId, [...stored(core, thread.projectId), todo]);
+  return todo;
+}
+
+/** A goal removed or replaced: its cards let go of the conversation, an open one back in To do, a claimed or done one where it is. */
+export function unlinkGoalCards(core: Core, threadId: ThreadId): void {
+  const projectId = core.journal.getThread(threadId)?.projectId;
+  if (!projectId || !linkedThreads(core, projectId).has(threadId)) return;
+  const now = Date.now();
+  save(core, projectId, stored(core, projectId).map((todo) => todo.goalThreadId === threadId ? { ...todo, goalThreadId: null, updatedAt: now } : todo));
 }
 
 export function removeTodo(core: Core, params: RpcParams<'todos.remove'>): void {
@@ -272,11 +298,15 @@ export function registerTodoMethods(core: Core): void {
       for (const [linking, linked] of links.get(core) ?? []) if (linked.has(threadId)) send(core, linking, stored(core, linking));
     }
   });
-  core.router.register('todos.list', (params) => listTodos(core, params.threadId));
+  core.router.register('todos.list', (params, ctx) => core.sharedBoard.visibleTodos(params.threadId, listTodos(core, params.threadId), ctx.connection));
   core.router.register('todos.add', (params, ctx) => addTodo(core, params, ctx.connection.identity.principal));
-  core.router.register('todos.update', (params, ctx) => updateTodo(core, params, ctx.connection.identity.principal));
+  core.router.register('todos.update', (params, ctx) => params.sharedProjectId ? core.sharedBoard.updateTodo(params, ctx.connection) : updateTodo(core, params, ctx.connection.identity.principal));
   // Deleting a card is the user's: an agent that is done with one claims it.
-  core.router.register('todos.remove', (params) => {
+  core.router.register('todos.remove', async (params, ctx) => {
+    if (params.sharedProjectId) {
+      await core.sharedBoard.apply({threadId: params.threadId, sharedProjectId: params.sharedProjectId, command: {kind: 'remove', cardId: params.todoId, requestId: newId('remove_')}}, ctx.connection);
+      return {ok: true} as const;
+    }
     removeTodo(core, params);
     return { ok: true } as const;
   });

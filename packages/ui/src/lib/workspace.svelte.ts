@@ -1,5 +1,5 @@
 import { Store, store } from './store.svelte';
-import { threadActive, withoutTrailingSlashes, type AgentAddress, type GroupCore } from '@boite/contracts';
+import { INITIAL_PAGE_BYTES, RpcErrorCode, threadActive, withoutTrailingSlashes, type AgentAddress, type GroupCore } from '@boite/contracts';
 import {
   forgetGroupOf,
   removeBrought,
@@ -19,6 +19,7 @@ import {
 } from './endpoint';
 import { fill, strings } from './strings';
 import { threadAddress } from './chat-links';
+import { RpcFailure } from './rpc-error';
 import { onReveal, reveal } from './reveal';
 import { AutoSettingsSync } from './auto-settings-sync.svelte';
 import { GroupLinks } from './group-links.svelte';
@@ -531,8 +532,8 @@ export class Workspace {
     if (saved) storeEndpoint(saved);
   }
 
-  /** `fresh`: a project's new draft rather than the last one written there. */
-  async select(target: Store, threadId?: string, projectId?: string, options: { fresh?: boolean } = {}): Promise<void> {
+  /** A named draft, a project's fresh draft, or the machine's last visit when no destination is given. */
+  async select(target: Store, threadId?: string, projectId?: string | null, options: { fresh?: boolean; draftId?: string } = {}): Promise<void> {
     this.selecting += 1;
     try {
       await this.#select(target, threadId, projectId, options);
@@ -541,15 +542,17 @@ export class Workspace {
     }
   }
 
-  async #select(target: Store, threadId: string | undefined, projectId: string | undefined, options: { fresh?: boolean }): Promise<void> {
+  async #select(target: Store, threadId: string | undefined, projectId: string | null | undefined, options: { fresh?: boolean; draftId?: string }): Promise<void> {
     ++this.#generation;
     this.#moveTo(target);
-    target.showChat();
     target.visible = true;
     if (threadId) await target.open(threadId);
-    else if (projectId) target.startDraft(projectId, options.fresh ? { fresh: true } : {});
-    else if (target.openThread) await target.open(target.openThread.id);
-    else await target.openWhereLeft();
+    else if (projectId !== undefined || options.draftId !== undefined) target.startDraft(projectId, options);
+    else {
+      target.showChat();
+      if (target.openThread) await target.open(target.openThread.id);
+      else await target.openWhereLeft();
+    }
   }
 
   async addLocalProjects(paths: string[]): Promise<void> {
@@ -725,37 +728,61 @@ export class Workspace {
     return matches.find((machine) => machine.store.connection === 'ready') ?? matches[0] ?? null;
   }
 
-  /**
-   * A thread an answer names the way `boite threads` prints it: `thr_x`,
-   * `<machine>/thr_x` or `<core-id>/thr_x`, read in `from` on `owner`.
-   * A connected machine that lists the thread opens it: the owner's when no
-   * machine is named, the one named, only the owner for `here`. Otherwise the
-   * owner's contacts say which core holds it, and last the one machine listing
-   * the id, which the agent may know by another name.
-   */
+  /** Resolve an answer's thread address on its owning machine, including an unlisted archive. */
   async openThreadLink(owner: Store, from: string | undefined, where: string | null, threadId: string): Promise<void> {
+    const generation = ++this.#generation, lifecycle = this.#lifecycle;
+    const active = this.active, navigation = active.navigationGeneration;
+    const client = owner.client, ownerNavigation = owner.navigationGeneration;
+    const current = () => generation === this.#generation && lifecycle === this.#lifecycle && this.active === active
+      && active.navigationGeneration === navigation && owner.client === client
+      && owner.navigationGeneration === ownerNavigation;
     const core = where !== null && /^[0-9a-f]{64}$/.test(where) ? where : null;
     const slug = (name: string) => name.trim().replace(/\s+/g, '-').toLowerCase();
-    const names = (name: string) => where === null || where === 'here' || slug(name) === where.toLowerCase() || (/^[0-9a-f]{6,}$/.test(where) && name.startsWith(where));
-    const holders = this.machines.filter(machine => machine.store.connection === 'ready' && machine.store.threads.some(thread => thread.id === threadId)
-      && (core === null || machine.store.core?.coreId === core));
-    const named = where === 'here' ? holders.filter(machine => machine.store === owner)
-      : holders.filter(machine => names(machine.label) || names(machine.store.core?.coreId ?? ''));
-    const pick = where === null ? holders.find(machine => machine.store === owner) ?? (holders.length === 1 ? holders[0] : undefined)
-      : named.length === 1 ? named[0] : undefined;
-    if (pick) { await this.select(pick.store, threadId); return; }
-    const client = owner.client;
-    if (client && from && owner.connection === 'ready') {
+    const names = (name: string) => where === null || where === 'here' || slug(name) === where.toLowerCase()
+      || (/^[0-9a-f]{6,}$/.test(where) && name.startsWith(where));
+    const connected = this.machines.filter(machine => machine.store.connection === 'ready');
+    const named = connected.filter(machine => core !== null ? machine.store.core?.coreId === core
+      : names(machine.label) || names(machine.store.core?.coreId ?? ''));
+    const target = where === null || where === 'here' ? owner : named.length === 1 ? named[0]!.store : undefined;
+    if (!current()) return;
+    if (where !== null && where !== 'here' && named.length > 1) { owner.error = strings.agentMessages.threadMissing; return; }
+    if (target?.client && target.connection === 'ready') {
+      const targetClient = target.client, targetNavigation = target.navigationGeneration;
+      const targetCurrent = () => current() && target.client === targetClient && target.connection === 'ready'
+        && target.navigationGeneration === targetNavigation;
+      try {
+        // The active list excludes archives. Probe only the contextual owner, without navigating or subscribing.
+        if (!target.threads.some(thread => thread.id === threadId))
+          await targetClient.call('threads.get', { threadId, limit: 1, maxBytes: INITIAL_PAGE_BYTES,
+            compactTools: true, compactFiles: true, compactImages: true, compactToolParts: true });
+        if (targetCurrent()) await this.select(target, threadId);
+        return;
+      } catch (error) {
+        if (!targetCurrent()) return;
+        if (!(error instanceof RpcFailure) || error.code !== RpcErrorCode.NotFound) {
+          owner.error = error instanceof Error ? error.message : String(error);
+          return;
+        }
+        // A resolved explicit owner stays authoritative even if a directory repeats its name elsewhere.
+        if (where !== null) { owner.error = strings.agentMessages.threadMissing; return; }
+      }
+    }
+    // An offline source can open an explicit ready target, but cannot resolve another address.
+    if (owner.connection !== 'ready') return;
+    // An unqualified address can still name the sole known remote holder after local NotFound.
+    const holders = this.machines.filter(machine => machine.store.connection === 'ready'
+      && machine.store.threads.some(thread => thread.id === threadId));
+    if (where === null && holders.length === 1) { await this.select(holders[0]!.store, threadId); return; }
+    if (client && from) {
       try {
         const [{ self }, { agents }] = await Promise.all([client.call('collaboration.get', { threadId: from }), client.call('collaboration.directory', { threadId: from })]);
+        if (!current() || owner.connection !== 'ready') return;
         const found = agents.filter(agent => agent.threadId === threadId && (core !== null ? agent.coreId === core
           : where === 'here' ? agent.coreId === self.coreId : names(agent.machine) || names(agent.coreId)));
         if (found.length === 1) { await this.openAgentThread(owner, self, found[0]!); return; }
       } catch { /* Coordination off on this thread: no contact names the core. */ }
     }
-    const only = where !== null && where !== 'here' && holders.length === 1 ? holders[0]! : null;
-    if (only) { await this.select(only.store, threadId); return; }
-    owner.error = strings.agentMessages.threadMissing;
+    if (current() && owner.connection === 'ready') owner.error = strings.agentMessages.threadMissing;
   }
 
   /** A click on a thread link `renderMarkdown` drew opens that thread; true when it was one. */

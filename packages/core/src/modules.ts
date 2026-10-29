@@ -27,6 +27,7 @@ import { registerSpeechMethods } from './speech.ts';
 import { registerTelemetry } from './telemetry.ts';
 import { registerCoordination } from './coordination.ts';
 import { registerContactMethods } from './contacts/rpc.ts';
+import { registerSharedComputeMethods } from './contacts/compute.ts';
 import { registerResidentMethods } from './agents/projects.ts';
 import { registerGroupMethods } from './group/rpc.ts';
 import { registerTerminalMethods } from './terminals.ts';
@@ -37,6 +38,7 @@ import { updateEverything } from './update-everything.ts';
 
 /** Adding a module is one file plus one line here. `hello` is the server's own. */
 export function registerModules(core: Core): void {
+  registerSharedComputeMethods(core);
   registerJournalInspection(core);
   core.router.register('core.logs', async params => {
     const records = await core.logs.query(params);
@@ -71,6 +73,7 @@ export function registerModules(core: Core): void {
   registerPushMethods(core);
   core.router.register('threads.activity.set', (params) => core.activity.set(params));
   core.router.register('threads.activity.control', (params) => core.activity.control(params));
+  core.router.register('threads.goal.track', (params) => core.activity.track(params.threadId));
   // Progress is for the window that asked: every other client would drop it on its requestId.
   core.router.register('quotas.list', (params, ctx) => core.quotas.list(params.refresh, params.requestId,
     (quota) => ctx.connection.sendEvent('quotas.progress', { requestId: params.requestId!, quota })));

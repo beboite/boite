@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { AGENT_ENV, VIEW_CONTENT_POLICY, VIEW_HELP, VIEW_GUIDE_LINE, viewDocument, viewFrameHeight, viewTitleOf, readViewMessage, type MessagePart } from '@boite/contracts';
-import { agentGuide } from '../src/agent-guide.ts';
+import { agentGuide, CHAT_VISUALS } from '../src/agent-guide.ts';
 import { findChromium } from '../src/browser/chromium.ts';
 import { connect, type CoreClient } from '../src/client.ts';
 import { runCli } from '../src/cli.ts';
@@ -57,8 +57,15 @@ async function cli(...args: string[]): Promise<{ code: number; output: string; e
   return { code, output, error };
 }
 
-test('the session guide names the command and what calls for it, and view help carries the rules', async () => {
-  expect(agentGuide(true)).toContain(VIEW_GUIDE_LINE);
+test('the session guide sends a visual to the chat\'s own Mermaid and TeX first, and view help carries the page rules', async () => {
+  const guide = agentGuide(true);
+  // A diagram, a chart or a formula needs no command and no help to read: the guide names the blocks chat draws.
+  expect(guide).toContain(CHAT_VISUALS);
+  for (const header of ['```mermaid', 'flowchart', 'sequenceDiagram', 'xychart-beta with "quoted" labels', 'pie', 'gantt', 'timeline', 'quadrantChart', 'sankey-beta', 'mindmap', '`$$`', 'never single `$`']) expect(CHAT_VISUALS).toContain(header);
+  expect(CHAT_VISUALS).toMatch(/when asked for a visual or when a picture explains better than text/);
+  // Then the page, for what Mermaid cannot draw: its help is read before a page, not before every visual.
+  expect(guide.indexOf(CHAT_VISUALS)).toBeLessThan(guide.indexOf(VIEW_GUIDE_LINE));
+  expect(VIEW_GUIDE_LINE).toMatch(/^Only a simulator, an animation or a custom page needs `boite view/);
   // The logs hint stands without a skill (one that could not be written), and only while agents may read logs.
   expect(agentGuide(true, true, [])).toContain('`boite logs problems`');
   expect(agentGuide(true, false, [])).not.toContain('boite logs');
@@ -67,9 +74,8 @@ test('the session guide names the command and what calls for it, and view help c
   expect(agentGuide(true, false, skills)).not.toContain('boite-report-issue');
   expect(agentGuide(true, false, skills)).toContain('boite-prove-it: d2\nFile: /p');
   expect(agentGuide(true, true, skills)).toContain('; skill boite-report-issue: /r');
-  expect(VIEW_GUIDE_LINE).toMatch(/when asked for a visual or a schema/);
-  // One line of the session prompt, which every turn of every thread pays for.
-  expect(VIEW_GUIDE_LINE.length).toBeLessThan(240);
+  // Two lines of the session prompt, which every turn of every thread pays for.
+  expect(CHAT_VISUALS.length + VIEW_GUIDE_LINE.length).toBeLessThan(420);
   const help = await cli('view', 'help');
   expect(help.code).toBe(0);
   expect(help.output).toContain(VIEW_HELP);
@@ -144,11 +150,44 @@ test('local files are embedded, and a remote address or a missing file is a prob
     '<script src="lib.js"></script>',
     '<a href="https://example.com/docs">docs</a>',
     '<script>var tag = "<img src=\\"https://example.com/in-a-string.png\\">";</script>',
+    // A `url(` in script text or prose is no address: it stays as written, and the script still parses.
+    '<script>const css = "url(dot.png)";</script>',
+    '<p>Write url(dot.png) or url(gone.png) in a rule.</p>',
+    '<svg><rect style=\'fill: url(dot.png)\'/></svg>',
+    // A quoted `>` does not end its tag, and an address quoted in another attribute is that attribute's text.
+    '<div title="a > b" style="background: url(dot.png)"></div>',
+    '<img alt="x > y src=gone.png" src="dot.png">',
+    // Prose and a textarea's text are no rules, nor tags: nothing in them is loaded or refused.
+    '<p>Write @import url("theme.css") in a stylesheet.</p>',
+    '<textarea><style>.x { background: url(gone.png) }</style><img src="gone.png"></textarea>',
+    // Only a CSS attribute holds CSS: a tooltip, a data value or a handler keeps its text.
+    '<div title="url(gone.png)" data-css="@import \'x.css\'">tip</div>',
+    '<button onclick="alert(\'url(dot.png)\')">show</button>',
+    '<svg><rect fill="url(dot.png)"/></svg>',
+    // A tag spelled inside a quoted value starts nothing, and a custom element named like a text one is markup.
+    '<div title="<textarea>" data-a="<style>" data-b="<img src=gone.png>"></div><p>url(gone.png) after</p>',
+    '<title-card><img src="dot.png" alt="card"></title-card>',
+    // A style body is CSS, not tags: a script, textarea or title spelled in its strings hides nothing after it.
+    '<style>.icon::after { content: "<script>" } .note::before { content: "<textarea><title>" } .icon { background: url(dot.png) }</style><img src="dot.png" alt="after-style">',
   ].join('\n'), '<link rel="stylesheet" href="look.css"><link rel="stylesheet" href="theme/skin.css">'), join(harness.dataDir, 'views'), harness.dataDir);
   expect(built.problems).toEqual([]);
   const data = `data:image/png;base64,${PNG.toString('base64')}`;
   expect(built.html).toContain(`<img src="${data}" alt="">`);
-  expect(built.html).toContain(`url("${data}")`);
+  expect(built.html).toContain(`<div style="background: url(${data})"></div>`);
+  expect(built.html).toContain(`<rect style='fill: url(${data})'/>`);
+  expect(built.html).toContain(`<div title="a > b" style="background: url(${data})"></div>`);
+  expect(built.html).toContain(`<img alt="x > y src=gone.png" src="${data}">`);
+  expect(built.html).toContain('<textarea><style>.x { background: url(gone.png) }</style><img src="gone.png"></textarea>');
+  expect(built.html).toContain('<div title="url(gone.png)" data-css="@import \'x.css\'">tip</div>');
+  expect(built.html).toContain('<button onclick="alert(\'url(dot.png)\')">show</button>');
+  expect(built.html).toContain(`<rect fill="url(${data})"/>`);
+  expect(built.html).toContain('<div title="<textarea>" data-a="<style>" data-b="<img src=gone.png>"></div><p>url(gone.png) after</p>');
+  expect(built.html).toContain(`<title-card><img src="${data}" alt="card"></title-card>`);
+  expect(built.html).toContain(`.icon { background: url(${data}) }</style><img src="${data}" alt="after-style">`);
+  const script = /<script>(const css[^<]*)<\/script>/.exec(built.html)![1]!;
+  expect(script).toBe('const css = "url(dot.png)";');
+  expect(() => new Function(script)).not.toThrow();
+  expect(built.html).toContain('<p>Write url(dot.png) or url(gone.png) in a rule.</p>');
   expect(built.html).toContain('<script>window.lib = "<\\/script>";</script>');
   expect(built.html).toContain('<style>.stage { height: 200px }</style>');
   expect(built.html).toContain(`<style>.skin { background: url("data:image/png;base64,${PNG.toString('base64')}") } .mark { background: url("#mark") }</style>`);
@@ -175,6 +214,14 @@ test('local files are embedded, and a remote address or a missing file is a prob
   expect(refused.some(line => /^line 11: the stylesheet uses @import/.test(line))).toBe(true);
   expect(refused.some(line => /^line 11: gone\.png: .*does not exist/.test(line))).toBe(true);
   expect(refused.some(line => /^line 11: url\(https:\/\/example\.com\/b\.png\) in the stylesheet is remote/.test(line))).toBe(true);
+});
+
+test('a page of many small style blocks is read in one pass', () => {
+  // 32,000 blocks, 864 KB: one pass takes tens of milliseconds, a copy of the page per block takes seconds.
+  const started = performance.now();
+  const built = buildView('<style>a{color:red}</style>'.repeat(32_000), join(harness.dataDir, 'views'), harness.dataDir);
+  expect(performance.now() - started).toBeLessThan(1_000);
+  expect(built.problems).toEqual([]);
 });
 
 test('boite view publishes a page as an artifact that opens only on the view route, under its sandbox', async () => {

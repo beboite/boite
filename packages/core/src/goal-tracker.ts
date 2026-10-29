@@ -240,7 +240,7 @@ export class GoalTracker {
     try {
       if (!parent || parent.archived) throw refused('the goal\'s conversation is gone or archived');
       let tracker = list.threadId ? this.core.journal.getThread(list.threadId) : null;
-      if (tracker && (['queued', 'running', 'waiting'].includes(tracker.status) || this.core.threads.runner.handles.has(tracker.id))) {
+      if (tracker && this.core.threads.isBusy(tracker.id)) {
         // The last pass is still settling: try again in a moment.
         if (++tracking.busy < BUSY_TRIES) {
           if (job.kind === 'write') tracking.writes--;
@@ -272,7 +272,7 @@ export class GoalTracker {
         : job.kind === 'update' ? updatePrompt(list.items, job.messages)
         : checkPrompt(list.items, joinDigests(job.turns.map(id => turnDigest(this.core.journal.walkTurnMessages(threadId, id, { blobs: false })))));
       const label = job.kind === 'write' ? 'Write the checklist' : job.kind === 'update' ? 'Update the checklist from your message' : 'Check what the agent did';
-      const turn = this.core.threads.startTurn(tracker.id, prompt, [], undefined, 'delegation', undefined, undefined, label);
+      const turn = this.core.threads.startTurn(tracker.id, { prompt, display: label }, { kind: 'goal-check' });
       const timer = setTimeout(() => this.timeout(threadId, turn.id), TRACKER_PASS.timeoutMs);
       tracking.running = { job, threadId: tracker.id, turnId: turn.id, timer };
       list.phase = job.kind === 'check' ? 'checking' : 'writing';
@@ -311,9 +311,9 @@ export class GoalTracker {
     const chosen = this.core.settings.get().goalTracker;
     if (chosen) {
       const provider = this.core.providers.get(chosen.providerId);
-      if (!provider) throw refused(`the checklist model ${chosen.providerId}/${chosen.model} is not installed on this machine; pick another in Settings, Experiments`, { field: 'goalTracker' });
+      if (!provider) throw refused(`the checklist model ${chosen.providerId}/${chosen.model} is not installed on this machine; pick another in Settings, General`, { field: 'goalTracker' });
       const account = accountFor(this.core, parent, provider.id);
-      if (!account || account.status === 'unauthenticated') throw refused(`${provider.name} has no signed-in account to keep the checklist; sign in or pick another model in Settings, Experiments`, { field: 'goalTracker' });
+      if (!account || account.status === 'unauthenticated') throw refused(`${provider.name} has no signed-in account to keep the checklist; sign in or pick another model in Settings, General`, { field: 'goalTracker' });
       const listed = modelsFor(provider, account.id).some(model => model.id === chosen.model);
       const effort = listed ? checkEffort(provider, account.id, chosen.model, chosen.effort) : chosen.effort;
       return { id: 'goal-tracker', name: chosen.model, providerId: provider.id, accountId: account.id, model: chosen.model, effort };

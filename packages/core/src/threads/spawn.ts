@@ -166,7 +166,7 @@ export class ThreadSpawns {
     saveThread(this.core, { ...this.threads.require(created.id), titleSource: 'user' }, 'thread.retitled');
     // Written before the turn starts: a turn that ends at once still finds where to report.
     this.core.journal.setSetting(`${ORIGIN}${created.id}`, launch.origin satisfies Origin);
-    const turn = this.threads.startTurn(created.id, launch.note + launch.prompt, [], undefined, undefined, undefined, undefined, launch.prompt, [], launch.origin.origin);
+    const turn = this.threads.startTurn(created.id, { prompt: launch.note + launch.prompt, display: launch.prompt }, { kind: 'spawned', startedBy: launch.origin.origin });
     return { created, turn };
   }
 

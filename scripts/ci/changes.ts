@@ -64,6 +64,13 @@ export function needsWorkflowLint(files: string[]): boolean {
   return files.some((file) => /^\.github\/(workflows|actions)\//.test(file) || file.startsWith('scripts/ci/'));
 }
 
+/** Protection and shared inputs need the actual Windows boundary, including on pull requests. */
+export function needsNativeWindows(files: string[]): boolean {
+  return files.some((file) => /^packages\/core\/(src\/(platform\/|execution-|drivers\/(?:[^/]+\/)?protected[^/]*\.ts$|contacts\/native-execution\.ts$)|bin\/install-windows-sandbox\.ts$|test\/protected)/.test(file)
+    || ['package.json', 'bun.lock', '.github/workflows/ci.yml', '.github/actions/setup/action.yml', 'scripts/ci/changes.ts', 'scripts/ci/changes.test.ts'].includes(file))
+    || Object.values(affectedChecks(files)).every(Boolean);
+}
+
 // Linux builds on the oldest runner that carries WebKitGTK 4.1: its glibc (2.35)
 // is the floor for every Linux user a published package can serve. Intel macOS
 // is cross-built on Apple Silicon and smoke-tested under Rosetta: the Intel
@@ -73,59 +80,64 @@ const LINUX_X64: Platform = { id: 'linux-x64', name: 'Linux x64', runner: 'ubunt
 const LINUX_ARM64: Platform = { id: 'linux-arm64', name: 'Linux arm64', runner: 'ubuntu-22.04-arm' };
 const MACOS_ARM64: Platform = { id: 'macos-arm64', name: 'macOS arm64', runner: 'macos-15' };
 const MACOS_X64: Platform = { id: 'macos-x64', name: 'macOS x64', runner: 'macos-15', target: 'x86_64-apple-darwin' };
-const PORTABLE_PR = [LINUX_X64, MACOS_ARM64];
+const PORTABLE_QUEUE = [LINUX_X64, MACOS_ARM64];
 export const PORTABLE_ALL = [LINUX_X64, LINUX_ARM64, MACOS_ARM64, MACOS_X64];
 
 // The core suite still needs a real Intel Mac, a scarce runner: 322 to 409 s a
-// PR on 2026-10-17. Pull requests skip it like the Intel desktop leg; main
+// PR on 2026-10-17. The merge queue skips it like the Intel desktop leg; main
 // pushes, releases and manual runs keep it.
 export type CoreRunner = { os: string; name: string };
-const CORE_PR: CoreRunner[] = [
+const CORE_QUEUE: CoreRunner[] = [
   { os: 'ubuntu-24.04', name: 'Linux x64' },
   { os: 'ubuntu-24.04-arm', name: 'Linux arm64' },
   { os: 'windows-2025', name: 'Windows x64' },
   { os: 'macos-15', name: 'macOS arm64' },
 ];
-export const CORE_ALL: CoreRunner[] = [...CORE_PR, { os: 'macos-15-intel', name: 'macOS x64' }];
+export const CORE_ALL: CoreRunner[] = [...CORE_QUEUE, { os: 'macos-15-intel', name: 'macOS x64' }];
 
-// `pr` gates a merge, in the pull request and again in the merge queue, `warm`
-// follows it on main, `full` is a release or a manual run. Main runs the extra
-// portable architectures, the Intel Mac core suite, and refreshes caches.
-// `draft` is a draft pull request: only the Linux checks run, and marking it
-// ready runs `pr` (docs/ci.md#draft-pull-requests).
+// `queue` gates a merge in the merge queue, `warm` follows it on main, `full`
+// is a release or a manual run. Main runs the extra portable architectures,
+// the Intel Mac core suite, and refreshes caches. `pr`, a pull request draft
+// or ready, normally runs the Linux checks; protection inputs add native
+// Windows. The queue runs the rest on top of main (docs/ci.md#pull-request-runs).
 // A push event alone provides no proof that its tree passed PR tests, so every
 // mode runs the affected suites. A main push compares with the last main commit
 // whose CI passed, not the previous push: a cancelled or failed run's changes
 // are tested again, so a green main commit has every suite passing on some tree
 // that its later changes did not affect. The nightly publishes on that alone.
-export type Mode = 'draft' | 'pr' | 'warm' | 'full';
+export type Mode = 'pr' | 'queue' | 'warm' | 'full';
 
-export function ciMode(event: string, force: boolean, draft = false): Mode {
+export function ciMode(event: string, force: boolean): Mode {
   if (force) return 'full';
-  if (event === 'pull_request') return draft ? 'draft' : 'pr';
-  if (event === 'merge_group') return 'pr';
+  if (event === 'pull_request') return 'pr';
+  if (event === 'merge_group') return 'queue';
   if (event === 'push') return 'warm';
   return 'full';
 }
 
-// A draft keeps the Linux core suite, type checks, UI tests and focused checks;
-// Windows, macOS, desktop packages, E2E, stress, Docker and the APKs wait for
-// the ready pull request.
-const CORE_DRAFT: CoreRunner[] = CORE_PR.slice(0, 1);
+// A pull request keeps the Linux core suite, type checks, UI tests, focused
+// checks and its bundle sizes; protection inputs also select Windows
+// core/native tests; macOS, desktop packages, E2E, stress, Docker and the
+// APKs wait for the merge queue.
+const CORE_PR: CoreRunner[] = CORE_QUEUE.slice(0, 1);
 
-export function plan(checks: ReturnType<typeof affectedChecks>, mode: Mode) {
-  if (mode === 'draft') {
-    const draft = plan({ ...checks, desktop: false, server: false, android: false, androidServer: false, stress: false }, 'pr');
-    return { ...draft, coreRunners: JSON.stringify(CORE_DRAFT) };
+export function plan(checks: ReturnType<typeof affectedChecks>, mode: Mode, nativeWindows = false) {
+  if (mode === 'pr') {
+    const pr = plan({ ...checks, desktop: false, server: false, android: false, androidServer: false, stress: false }, 'queue', nativeWindows);
+    const runners = nativeWindows ? CORE_QUEUE.filter((runner) => runner.os === 'ubuntu-24.04' || runner.os === 'windows-2025') : CORE_PR;
+    // The queue skips Bundle size, which compares a pull request with its base.
+    return { ...pr, size: checks.desktop, coreRunners: JSON.stringify(runners) };
   }
   return {
     ...checks,
+    size: checks.desktop,
+    nativeWindows,
     // Full suites already cover these focused checks.
     telemetry: checks.telemetry && !checks.core,
     e2eTypes: checks.e2eTypes && !checks.web,
     e2e: checks.desktop,
-    portable: JSON.stringify(mode === 'pr' ? PORTABLE_PR : PORTABLE_ALL),
-    coreRunners: JSON.stringify(mode === 'pr' ? CORE_PR : CORE_ALL),
+    portable: JSON.stringify(mode === 'queue' ? PORTABLE_QUEUE : PORTABLE_ALL),
+    coreRunners: JSON.stringify(mode === 'queue' ? CORE_QUEUE : CORE_ALL),
   };
 }
 
@@ -162,6 +174,7 @@ if (import.meta.main) {
   if (mainPush && base) console.log(`Comparing with ${base}, the last main commit whose CI passed`);
   let checks = affectedChecks(['unknown']);
   let workflows = true;
+  let nativeWindows = true;
   if (!force && base && /^[a-f0-9]{40}$/.test(base) && !/^0+$/.test(base)) {
     // A move between packages affects both its old and new runtime.
     const diff = Bun.spawnSync(['git', 'diff', '--no-renames', '--name-only', '-z', base, 'HEAD'], { stdout: 'pipe', stderr: 'pipe' });
@@ -169,9 +182,10 @@ if (import.meta.main) {
     const files = diff.stdout.toString().split('\0').filter(Boolean);
     checks = affectedChecks(files);
     workflows = needsWorkflowLint(files);
+    nativeWindows = needsNativeWindows(files);
   }
-  const mode = ciMode(process.env.GITHUB_EVENT_NAME ?? '', force, process.env.DRAFT === 'true');
-  const output = Object.entries({ ...plan(checks, mode), workflows, mode }).map(([key, value]) => `${key}=${value}\n`).join('');
+  const mode = ciMode(process.env.GITHUB_EVENT_NAME ?? '', force);
+  const output = Object.entries({ ...plan(checks, mode, nativeWindows), workflows, mode }).map(([key, value]) => `${key}=${value}\n`).join('');
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, output);
   process.stdout.write(output);
 }

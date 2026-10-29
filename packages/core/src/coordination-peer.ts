@@ -7,11 +7,13 @@
 import { verify } from 'node:crypto';
 import type { AgentContact, AgentLetter, CoordinationPeer } from '@boite/contracts';
 import { text } from './coordination-letter.ts';
-import { checkRemoteContact, searchContacts, searchWords, transcript } from './coordination-lookup.ts';
+import { checkRemoteContact, PARTIAL, searchContacts, searchWords, transcript } from './coordination-lookup.ts';
 import { boundedBody, BOT_OPERATIONS, type BotOperation, type Envelope } from './coordination-wire.ts';
 import { pack, SEALED, sealResponse, unpack, type Sealing } from './group/seal.ts';
 import type { Core } from './core.ts';
 import { invalidParams, refused, RpcFailure } from './errors.ts';
+import { receiveProject } from './contacts/project-relay.ts';
+import { redactSharedText, redactSharedContact } from './contacts/file-policy.ts';
 import { machineSettingChanged, readMachineSetting } from './threads/group-spawn.ts';
 
 /** What the desk reads of the coordination it answers for. */
@@ -84,7 +86,7 @@ export class PeerDesk {
       else rate.floor = Math.max(rate.floor ?? 0, envelope.at);
       // A member that sent a signed request is up, even past its quota: the next tick offers it the roster, whatever its wait.
       this.core.group.backoff.heard(peer.coreId);
-      if (rate.count > 120) return new Response('peer rate limit', { status: 429 });
+      if (rate.count > 120) return this.signed({nonce: envelope.nonce, error: 'peer rate limit'}, 429, sealing);
     } catch { return new Response('invalid signed message', { status: 403 }); }
     const groupOnly = envelope.operation === 'group.sync' || envelope.operation === 'group.push' || envelope.operation === 'contact.route'
       || envelope.operation === 'thread.start' || envelope.operation.startsWith('setting.') || envelope.operation.startsWith('bot.'); // the group's own: sealed, from a member
@@ -114,8 +116,8 @@ export class PeerDesk {
         if (!member && envelope.operation === 'thread.start') throw refused('operation: only a machine of this core\'s group starts threads here');
         if (!member && envelope.operation.startsWith('setting.')) throw refused('operation: only a machine of this core\'s group reads or announces its settings');
         if (!member && envelope.operation.startsWith('bot.')) throw refused('operation: only a machine of this core\'s group looks after projects here');
-        if (envelope.operation === 'contact.route') result = await this.core.coordination.mailboxes.handle(currentPeer, envelope.payload);
-        else if (contact) result = await this.contact(currentPeer, envelope.operation, envelope.payload, false);
+        if (contact) result = await this.contact(currentPeer, envelope.operation, envelope.payload, false);
+        else if (envelope.operation === 'contact.route') result = await this.core.coordination.mailboxes.handle(currentPeer, envelope.payload);
         else if (envelope.operation === 'directory') result = this.side.directory();
         else if (envelope.operation === 'deliver') result = this.side.receive(envelope.payload as AgentLetter, peer);
         else if (envelope.operation === 'search') {
@@ -168,9 +170,16 @@ export class PeerDesk {
    */
   private async contact(peer: CoordinationPeer, operation: string, payload: unknown, relayed: boolean): Promise<unknown> {
     const members = this.core.contacts.members;
+    if (operation === 'contact.project') return receiveProject(this.core, peer.coreId, payload, relayed);
+    if (this.core.sharedProjects.hasContact(peer.coreId) && ['directory', 'search', 'read'].includes(operation)) throw refused('operation: associated projects require scoped contact.project queries');
+    // A contact that asks for a partial list also learns how many of this group's machines did not answer.
+    const listed = (entries: AgentContact[], unavailable: number) => (payload as { partial?: unknown } | null)?.partial === PARTIAL
+      ? { entries: entries.slice(0, 100), unavailable } : entries.slice(0, 100);
     if (operation === 'directory') {
-      const local = this.side.contactDirectory(peer.coreId);
-      return relayed ? local : [...local, ...await members.directory(peer.coreId)].sort((a, b) => (b.activeAt ?? 0) - (a.activeAt ?? 0)).slice(0, 100);
+      const local = this.side.contactDirectory(peer.coreId).map(redactSharedContact);
+      if (relayed) return local;
+      const held = await members.directory(peer.coreId);
+      return listed([...local, ...held.entries].sort((a, b) => (b.activeAt ?? 0) - (a.activeAt ?? 0)), held.unavailable);
     }
     if (operation === 'deliver') {
       const letter = payload as AgentLetter;
@@ -180,11 +189,13 @@ export class PeerDesk {
     if (operation === 'search') {
       const words = searchWords(((payload as { words?: unknown })?.words as string[] | undefined)?.join?.(' '));
       // Chat is searched only where the owner let the contact read conversations.
-      const open = this.side.contactDirectory(peer.coreId);
+      const open = this.side.contactDirectory(peer.coreId).map(redactSharedContact);
       const readable = open.filter(entry => this.core.contacts.reach.mayRead(peer.coreId, entry.threadId));
       const closed = open.filter(entry => !this.core.contacts.reach.mayRead(peer.coreId, entry.threadId));
-      const local = [...searchContacts(this.core.journal.db, readable, words, true), ...searchContacts(this.core.journal.db, closed, words, false)];
-      return (relayed ? local : [...local, ...await members.search(peer.coreId, words)]).slice(0, 100);
+      const local = [...searchContacts(this.core.journal.db, readable, words, true, redactSharedText), ...searchContacts(this.core.journal.db, closed, words, false, redactSharedText)];
+      if (relayed) return local.slice(0, 100);
+      const held = await members.search(peer.coreId, words);
+      return listed([...local, ...held.entries], held.unavailable);
     }
     if (operation === 'read') {
       const { threadId, limit, before } = readParams(payload);
@@ -193,7 +204,7 @@ export class PeerDesk {
       const entry = this.side.contactDirectory(peer.coreId).find(a => a.threadId === threadId);
       if (!entry) throw refused('read.threadId: not a thread of a project opened to you');
       if (!this.core.contacts.reach.mayRead(peer.coreId, threadId)) throw refused('read.threadId: this owner has not let you read the conversations of that project (readThreads)');
-      return { contact: entry, ...transcript(this.core.journal.db, threadId, limit, before, id => this.core.journal.streamingMessage(id)) };
+      return { contact: redactSharedContact(entry), ...transcript(this.core.journal.db, threadId, limit, before, id => this.core.journal.streamingMessage(id), redactSharedText) };
     }
     if (operation === 'receipt') {
       // A malformed receipt is refused here, before any member is asked.

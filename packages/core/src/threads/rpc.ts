@@ -1,7 +1,8 @@
 import { stat } from 'node:fs/promises';
-import { pullRequestAddress, type AccountId, type ClientPreferences, type ProviderId, type SentFrom, type ThreadId } from '@boite/contracts';
+import { pullRequestAddress, type AccountId, type ProviderId, type ThreadId } from '@boite/contracts';
 import type { Connection } from '../router.ts';
 import type { Core } from '../core.ts';
+import { promptOrigin } from '../client-preferences.ts';
 import { invalidParams, refused } from '../errors.ts';
 import type { ProviderProbe } from '../providers/probe.ts';
 import { defaultModel, needsModelDiscovery } from './selection.ts';
@@ -9,9 +10,11 @@ import { LinkedPullRequests } from '../linked-pull-requests.ts';
 import { threadCapabilities } from './capabilities.ts';
 import { agentShape } from './agent-shape.ts';
 import { steerUser } from './user-steering.ts';
+import { startsAutoGoal } from '../composer-activity.ts';
 import { readToolOutput, readToolPart } from './records.ts';
 import { readMessageAttachment } from './attachment-read.ts';
 import { CreationRequests } from './creation-requests.ts';
+import { trustLetters } from '../contacts/letter-scopes.ts';
 
 /**
  * A turn in a folder that is gone is refused by that folder. An archived
@@ -196,6 +199,10 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     core.threads.markRead(params.threadId);
     return { ok: true } as const;
   });
+  core.router.register('threads.trustContactHistory', (params) => {
+    trustLetters(core, params.threadId);
+    return { ok: true } as const;
+  });
   core.router.register('threads.subscribe', (params, ctx) => {
     core.threads.require(params.threadId);
     ctx.connection.subscriptions.add(params.threadId);
@@ -207,6 +214,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
   });
   core.router.register('threads.focus', (params, ctx) => {
     core.threads.focus.set(ctx.connection.id, params.threadId, params.protectedThreadIds, params.protectAllThreads, params.attentive, params.idleMs);
+    if (params.threadId !== null) core.threads.autoCompact.shown(params.threadId);
     return { ok: true } as const;
   });
   core.router.register('turns.start', async (params, ctx) => {
@@ -214,7 +222,9 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     const attachments = await core.attachmentUploads.resolve(ctx.connection.id, params.attachments ?? [], params.attachmentIds);
     // A subagent put away as done takes a new prompt, as it takes a letter from its parent.
     const thread = core.threads.require(params.threadId);
-    const start = () => core.threads.startTurn(params.threadId, params.prompt, attachments, params.expectedSelectionVersion, undefined, undefined, params.clientRequestId, undefined, params.previewReferences ?? [], undefined, promptOrigin(ctx.connection, core.clients.use(ctx.connection)));
+    const preferences = core.clients.use(ctx.connection);
+    const autoGoal = startsAutoGoal(params.prompt, preferences?.experiments, core.settings.get().autoGoalMinChars) ? params.prompt : undefined;
+    const start = () => core.threads.startTurn(params.threadId, { prompt: params.prompt, attachments, previews: params.previewReferences ?? [] }, { kind: 'user', requestId: params.clientRequestId, sentFrom: promptOrigin(ctx.connection, preferences) }, { expectedSelectionVersion: params.expectedSelectionVersion, autoGoal });
     return core.delegation.retirements.revivable(thread) ? core.delegation.retirements.revive(thread, start) : start();
   });
   core.router.register('turns.stop', (params, ctx) => {
@@ -232,7 +242,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     return core.threads.recoverTurn(params);
   });
   core.router.register('turns.cancelRetry', (params) => ({ cancelled: core.threads.cancelRetry(params.threadId) }));
-  core.router.register('turns.steer', params => steerUser(core, core.threads, params));
+  core.router.register('turns.steer', (params, ctx) => steerUser(core, core.threads, params, promptOrigin(ctx.connection, core.clients.use(ctx.connection))));
   core.router.register('permissions.list', (params) => core.threads.listPermissions(params.threadId));
   core.router.register('permissions.answer', (params) => {
     core.threads.answerPermission({ requestId: params.requestId, decision: params.decision });
@@ -254,10 +264,4 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     });
     return { ok: true } as const;
   });
-}
-
-/** Where a prompt comes from, with the language its app speaks once the app said it. */
-function promptOrigin(connection: Connection, preferences: ClientPreferences | null): SentFrom | null {
-  const from = connection.sentFrom ?? null;
-  return from === null || preferences === null ? from : { ...from, language: preferences.language };
 }

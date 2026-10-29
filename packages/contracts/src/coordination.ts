@@ -2,6 +2,7 @@ import type { ProjectId, RequestId, ThreadId, Timestamp } from './ids';
 import type { PermissionRequest } from './permissions';
 import type { QuestionRequest } from './questions';
 import type { ThreadStatus, ThreadSummary } from './threads';
+import type { ContactCapabilities, SharedProjectRef, SharedThreadRef } from './shared-projects';
 
 export type CoordinationMode = 'off' | 'brief' | 'team';
 export interface CoordinationConfig {
@@ -37,6 +38,8 @@ export interface AgentContact extends AgentAddress {
   projectArchived?: boolean;
   /** Automatic delivery is paused, even when the thread remains discoverable. Missing on older cores. */
   paused?: boolean;
+  /** Only for an explicitly associated project, attested by its owning contact link. */
+  sharedThread?: SharedThreadRef;
 }
 /** A contact whose title, project, branch, model, resources or chat matched a search. */
 export interface AgentMatch extends AgentContact {
@@ -71,8 +74,11 @@ export interface AgentLetter {
    * and tells its parent; it is withdrawn when the card closes before delivery.
    * `contact` is a contact's answer to a request this thread made
    * (`collaboration.ask`), written by this core.
+   * `contact-human` is an authenticated human on the contact's core, attested
+   * by it and checked by the receiver. It is never this owner's instruction
+   * or a tool approval. Requires negotiated humanLetters support.
    */
-  origin?: 'user' | 'agent' | 'result' | 'resident' | 'question' | 'contact';
+  origin?: 'user' | 'agent' | 'result' | 'resident' | 'question' | 'contact' | 'contact-human';
   /**
    * A `result` written when a delegated agent ended its turn to wait on its
    * own background work: what it said so far, not its final result, which
@@ -103,6 +109,8 @@ export interface AgentLetter {
    * the sender's word. Missing on letters between one owner's machines.
    */
   contact?: { coreId: string; name: string };
+  /** Association scope for external shared work, checked by the receiving core. Never owner approval. */
+  sharedProjectId?: string;
   /**
    * How the other end relates to the thread whose view lists this letter.
    * The core sets it when it reads the letter out, never stores it; missing on
@@ -203,7 +211,12 @@ export interface ContactGrant {
   name?: string;
 }
 /** A project the contact opened to this core, as the contact's core announced it. */
-export interface ContactOffer { projectId: ProjectId; name: string }
+export interface ContactOffer {
+  projectId: ProjectId;
+  name: string;
+  /** Selected endpoint identity for shared-project version 1; absence cannot be guessed from a bare ID. */
+  sharedProject?: SharedProjectRef;
+}
 /**
  * Another owner's Boite, linked for agent work on the projects each side opens
  * to the other. A contact never sees this core's other projects, its group or
@@ -233,6 +246,8 @@ export interface Contact {
   link: 'connected' | 'connecting' | 'offline';
   lastSeenAt: Timestamp | null;
   addedAt: Timestamp;
+  /** Negotiated on the sealed contact sync, never inferred from a version string. Missing: legacy contact traffic only. */
+  capabilities?: ContactCapabilities;
 }
 /** An invitation a contact joins with. One use; whoever holds it can join, so it travels like a password. */
 export interface ContactInvite {

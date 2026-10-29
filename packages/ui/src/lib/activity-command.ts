@@ -1,21 +1,17 @@
-import { isExperimentEnabled } from './experiments';
 import { strings } from './strings';
 
 export type ActivityCommand = { goal: { objective: string; review?: true } } | { loop: { prompt: string; intervalMs: number; maxIterations?: number } };
 
-/** `/goal2` is a Boite command only while the Reviewed goals experiment is on; otherwise it goes to the agent as typed. */
-function commandPattern(): RegExp {
-  return isExperimentEnabled('goal2') ? /^\/(goal2|goal|loop)(?:\s+([\s\S]*))?$/ : /^\/(goal|loop)(?:\s+([\s\S]*))?$/;
-}
+const COMMAND = /^\/(goal2|goal|loop)(?:\s+([\s\S]*))?$/;
 
 /** Classification does not validate input while the queue waits for a turn. */
 export function isActivityCommand(text: string): boolean {
-  return commandPattern().test(text.trim());
+  return COMMAND.test(text.trim());
 }
 
 /** A loop needs an explicit cadence or iteration count, never an invented timer. */
 export function activityCommand(text: string): ActivityCommand | null {
-  const command = commandPattern().exec(text.trim());
+  const command = COMMAND.exec(text.trim());
   if (!command) return null;
   const body = command[2]?.trim() ?? '';
   if (!body) throw new Error(command[1] === 'goal' ? strings.activity.goalUsage : command[1] === 'goal2' ? strings.activity.goal2Usage : strings.activity.loopUsage);

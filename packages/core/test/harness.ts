@@ -21,6 +21,8 @@ export interface TestCore {
 }
 
 export interface TestCoreOptions {
+  /** Restart fixtures can retain the address peers already trust, like an installed core. */
+  port?: number;
   serverUpdates?: CoreOptions['serverUpdates'];
   bundleHash?: string;
   helloTimeoutMs?: number;
@@ -101,7 +103,7 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
   const server = startServer({
     core,
     host: '127.0.0.1',
-    port: 0,
+    port: options.port ?? 0,
     ...(options.helloTimeoutMs === undefined ? {} : { helloTimeoutMs: options.helloTimeoutMs }),
   });
 
@@ -160,6 +162,23 @@ export async function echoThread(
 
 /** How many test cores have stopped. A wait that outlives a stop was abandoned by its test. */
 let stops = 0;
+
+/**
+ * Archives the thread through a write that fails after the thread row is
+ * saved, so the whole transaction rolls back. Returns the error it threw;
+ * any other failure, an early refusal included, is thrown on.
+ */
+export function rolledBackArchive(harness: TestCore, threadId: string): unknown {
+  const announce = harness.core.projects.announce;
+  harness.core.projects.announce = () => { throw new Error('injected failure after the thread was written'); };
+  try { harness.core.threads.archive(threadId, true); }
+  catch (error) {
+    if (!(error instanceof Error) || !error.message.includes('injected failure')) throw error;
+    return error;
+  }
+  finally { harness.core.projects.announce = announce; }
+  throw new Error('the archive did not fail');
+}
 
 /**
  * Polls until `predicate` holds. A predicate that throws rejects the wait. A wait

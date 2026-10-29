@@ -466,22 +466,7 @@ export class Threads {
   /** Select the history synchronously; network work never owns navigation. */
   #show(thread: Thread, navigate: boolean, refreshTrace = false): void {
     const s = this.ctx.store;
-    const { delegation, workbench } = this.ctx;
-    if (this.openThread?.id !== thread.id) {
-      this.parts.leave();
-      this.rememberReadingThread();
-      this.ctx.drafts.park();
-      s.draft = null;
-      this.loadingOlder = false;
-      delegation.delegationEpoch++;
-      delegation.delegationConfigureEpoch++;
-      s.delegation = null;
-      s.delegationLoading = false;
-      s.delegationSaving = false;
-      s.delegationError = null;
-      this.leaveArchived(thread.id);
-      this.ctx.requests.keepRequestsOf(thread.id);
-    }
+    if (this.openThread?.id !== thread.id) this.#leaveFor(thread.id);
     this.openThread = thread;
     if (navigate) {
       s.page = this.pageOf(thread);
@@ -489,9 +474,35 @@ export class Threads {
       if (thread.projectId) this.ctx.projects.rememberProject(thread.projectId);
       if (s.page === 'chat') this.lastChatThreadId = thread.id;
     }
-    if (workbench.tracedThreadId !== thread.id) s.trace = [];
-    else if (refreshTrace && s.traceWatched) void s.refreshTrace();
-    workbench.tracedThreadId = thread.id;
+    this.#traceOf(thread.id, refreshTrace);
+  }
+
+  /** What the thread on screen leaves behind when `next` replaces it, online or not. */
+  #leaveFor(next: ThreadId): void {
+    const s = this.ctx.store;
+    const { delegation } = this.ctx;
+    this.parts.leave();
+    this.rememberReadingThread();
+    this.ctx.drafts.park();
+    s.draft = null;
+    this.loadingOlder = false;
+    delegation.delegationEpoch++;
+    delegation.delegationConfigureEpoch++;
+    s.delegation = null;
+    s.delegationLoading = false;
+    s.delegationSaving = false;
+    s.delegationError = null;
+    this.leaveArchived(next);
+    this.ctx.requests.keepRequestsOf(next);
+  }
+
+  /** The workbench trace belongs to the thread on screen: another thread's rows go. */
+  #traceOf(threadId: ThreadId, refresh: boolean): void {
+    const s = this.ctx.store;
+    const { workbench } = this.ctx;
+    if (workbench.tracedThreadId !== threadId) s.trace = [];
+    else if (refresh && s.traceWatched) void s.refreshTrace();
+    workbench.tracedThreadId = threadId;
   }
 
   /**
@@ -506,23 +517,11 @@ export class Threads {
     if (this.openThread?.id !== threadId) {
       const held = this.readingThreads.get(threadId);
       if (!row && !held) return;
-      this.parts.leave();
-      this.rememberReadingThread();
-      this.ctx.drafts.park();
-      s.draft = null;
-      this.loadingOlder = false;
-      const { delegation } = this.ctx;
-      delegation.delegationEpoch++;
-      delegation.delegationConfigureEpoch++;
-      s.delegation = null;
-      s.delegationLoading = false;
-      s.delegationSaving = false;
-      s.delegationError = null;
-      this.leaveArchived(threadId);
+      this.#leaveFor(threadId);
       // A bare row has no messages in hand and says so: nothing above it to page in.
       this.openThread = held ? { ...held, ...row } : { ...row!, messages: [], turns: [], commands: [], messagesBefore: null };
-      this.ctx.requests.keepRequestsOf(threadId);
     }
+    this.#traceOf(threadId, false);
     if (navigate) {
       s.page = this.openThread ? this.pageOf(this.openThread) : 'chat';
       s.sidebarOpen = false;
@@ -575,7 +574,7 @@ export class Threads {
 
   /** Hydrate only a card the reader opened (`store/deferred-parts.ts`). */
   loadToolOutput(threadId: ThreadId, messageId: MessageId, toolId: string): Promise<void> { return this.parts.toolOutput(threadId, messageId, toolId); }
-  loadMessageAttachment(threadId: ThreadId, messageId: string, partIndex: number): Promise<string> { return this.parts.attachment(threadId, messageId, partIndex); }
+  loadMessageAttachment(threadId: ThreadId, messageId: string, partIndex: number): Promise<string | null> { return this.parts.attachment(threadId, messageId, partIndex); }
 
   async createThread(input: {
     projectId: ProjectId;
@@ -671,6 +670,26 @@ export class Threads {
       if (open && open.id === threadId) open.pinned = summary.pinned;
     } catch (error) {
       if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
+    }
+  }
+
+  /**
+   * The owner accepts the contact mail that holds this thread
+   * (`Thread.contactHold`), so its turns run again. Resolves whether the core
+   * took it; a refusal is reported like any failed action.
+   */
+  async trustContactHistory(threadId: ThreadId): Promise<boolean> {
+    const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
+    if (!client) return false;
+    try {
+      await client.call('threads.trustContactHistory', { threadId });
+      // The core announces the cleared hold before it answers; clearing it here
+      // again would erase a hold a letter set in between.
+      return this.ctx.currentClient(client, clientGeneration);
+    } catch (error) {
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
+      return false;
     }
   }
 

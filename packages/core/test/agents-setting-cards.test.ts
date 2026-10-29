@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AgentProfile, MessagePart } from '@boite/contracts';
+import type { AgentProfile, MessagePart, ModelInfo } from '@boite/contracts';
 import { runCli } from '../src/cli.ts';
 import { connect } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
@@ -13,6 +13,22 @@ import { thrown } from './settle.ts';
 const cores: TestCore[] = [];
 const restores: (() => void)[] = [];
 afterEach(async () => { for (const h of cores.splice(0)) await h.stop(); for (const restore of restores.splice(0)) restore(); });
+
+test('the native bot eventWakes boolean card reads, validates, applies and reverses without pausing the bot', async () => {
+  const { h, owner, agent, worker, run, profile, cards } = await setup();
+  await owner.call('turns.start', { threadId: worker, prompt: 'Configure the bot.' });
+  await waitFor(() => settled(h, worker));
+  expect((await run(['settings', 'bot', 'eventWakes', '--bot', 'Ada'], worker)).out).toContain('eventWakes false');
+  expect((await run(['settings', 'bot', 'request', 'eventWakes', 'sometimes', '--bot', 'Ada', '--why', 'Batch project news.'], worker)).code).not.toBe(0);
+  for (const enabled of [true, false]) {
+    expect((await run(['settings', 'bot', 'request', 'eventWakes', String(enabled), '--bot', 'Ada', '--why', 'Batch project news.'], worker)).code).toBe(0);
+    const card = cards(worker).find(q => q.agentSetting?.key === 'eventWakes')!;
+    expect(card.agentSetting?.previous).toBe(!enabled);
+    await owner.call('agents.settings.apply', { threadId: worker, questionId: card.id });
+    expect(h.core.workforce.resident.config(agent.id).eventWakes).toBe(enabled);
+    expect(profile().status).toBe('active');
+  }
+});
 
 /** An echo driver that records every prompt per thread and answers in one line. */
 function recording(): Map<string, string[]> {
@@ -245,6 +261,80 @@ test('an agent whose stored model its provider no longer lists still takes a pro
   // Choosing a model is still checked.
   expect(await thrown(owner.call('agents.profile.save', { id: agent.id, expectedRevision: profile().revision, value: { ...profile(), selection: { ...profile().selection, model: 'echo/other' } } })))
     .toThrow('the provider does not offer this model');
+});
+
+test('a bot asks to run on another provider; applying the card moves it there on its signed-in login and allows the route', async () => {
+  const { h, owner, agent, self, run, profile, cards, drawn } = await setup();
+  // A second provider on the echo driver, with its own models and a signed-in default account.
+  const shipped = JSON.parse(readFileSync(join(import.meta.dir, '../src/providers/shipped/echo.json'), 'utf8')) as Record<string, unknown>;
+  // Its second model's id reads like a reference to the echo provider's model.
+  const models: ModelInfo[] = [{ id: 'twin-large', name: 'Twin Large', effort: { levels: [{ id: 'low', label: 'Low' }, { id: 'xhigh', label: 'Extra high' }], default: 'xhigh' } }, { id: 'echo/echo', name: 'Twin Echo' }];
+  mkdirSync(join(h.dataDir, 'providers'), { recursive: true });
+  writeFileSync(join(h.dataDir, 'providers', 'twin.json'), JSON.stringify({ ...shipped, id: 'twin', name: 'Twin', shortName: 'Twin', models }));
+  expect((await owner.call('providers.reload', {})).rejected).toEqual([]);
+  h.core.accounts.ensureDefaults();
+  const twinAccount = h.core.accounts.list().find(account => account.providerId === 'twin')!.id;
+  await owner.call('agents.profile.save', { id: agent.id, expectedRevision: profile().revision, value: { ...profile(), selection: { ...profile().selection, effort: 'low' } } });
+
+  // The reading names every model by its provider, its own first, beyond the one route its settings allow.
+  expect(h.core.workforce.resident.config(agent.id).allowedRoutes.map(route => route.model)).toEqual(['echo']);
+  const read = await run(['settings', 'bot', 'model'], self);
+  expect(read.out).toContain('model "echo/echo"');
+  expect(read.out).toContain('choices: Echo (echo/echo), Twin Large (twin/twin-large), Twin Echo (twin/echo/echo)');
+  expect((await run(['settings', 'bot', 'request', 'model', 'twin/nothing', '--why', 'Try it.'], self)).err).toContain('the provider does not offer this model');
+  expect((await run(['settings', 'bot', 'request', 'model', 'echo', '--why', 'Stay.'], self)).err).toContain('model is already "echo/echo"');
+
+  expect((await run(['settings', 'bot', 'request', 'model', 'twin/twin-large', '--why', 'Reviews need a larger model.'], self)).code).toBe(0);
+  const [card] = cards(self);
+  expect(card!.agentSetting).toMatchObject({ key: 'model', previous: 'echo/echo', value: 'twin/twin-large' });
+  // Turned off since the card was drawn, the provider cannot take the bot: Apply refuses and the card stays open.
+  await owner.call('providers.setEnabled', { providerId: 'twin', enabled: false });
+  expect(await thrown(owner.call('agents.settings.apply', { threadId: self, questionId: card!.id }))).toThrow('twin is not installed or is turned off');
+  expect(profile().selection.providerId).toBe('echo');
+  expect(cards(self).map(open => open.id)).toEqual([card!.id]);
+  await owner.call('providers.setEnabled', { providerId: 'twin', enabled: true });
+  await owner.call('agents.settings.apply', { threadId: self, questionId: card!.id });
+  // Its effort carries over where the new model has the level.
+  expect(profile().selection).toMatchObject({ providerId: 'twin', accountId: twinAccount, model: 'twin-large', effort: 'low' });
+  // The owner's Apply allowed it: the bot's settings list the route, and it is the default one.
+  const config = h.core.workforce.resident.config(agent.id);
+  expect(config.allowedRoutes.map(route => [route.id, route.name, route.providerId, route.model])).toEqual([['default', 'Default', 'echo', 'echo'], ['twin/twin-large', 'Twin Large', 'twin', 'twin-large']]);
+  expect(config.defaultRoute).toMatchObject({ providerId: 'twin', model: 'twin-large' });
+  expect(drawn(self, card!.id)!.answer).toEqual({ optionIds: ['applied'], value: 'twin/twin-large' });
+
+  // A model id of the provider it now runs on needs no prefix.
+  await waitFor(() => settled(h, self));
+  expect((await run(['settings', 'bot', 'request', 'model', 'twin-large', '--why', 'Stay.'], self)).err).toContain('model is already "twin/twin-large"');
+
+  // A card drawn before cards named the provider holds a model id of the bot's provider, slash included.
+  const legacy = { agentId: agent.id, agentName: agent.name, key: 'model' as const, previous: 'twin-large', value: 'echo/echo' };
+  const { questionId } = h.core.threads.cards.drawAsync(h.core.threads.require(self), { text: 'Older card.', options: [{ id: 'refuse', label: 'Refuse' }], allowText: false, multiple: false, async: true, agentSetting: legacy });
+  await owner.call('agents.settings.apply', { threadId: self, questionId });
+  expect(profile().selection).toMatchObject({ providerId: 'twin', model: 'echo/echo' });
+  expect(drawn(self, questionId)!.answer).toEqual({ optionIds: ['applied'], value: 'twin/echo/echo' });
+  await waitFor(() => settled(h, self));
+
+  // Back to echo, then to the twin model whose id reads like the echo reference the card moves from.
+  const move = async (to: string, previous: string, off?: string) => {
+    expect((await run(['settings', 'bot', 'request', 'model', to, '--why', 'Move.'], self)).code).toBe(0);
+    const [open] = cards(self);
+    expect(open!.agentSetting).toMatchObject({ previous, value: to });
+    if (off !== undefined) {
+      // The card names its provider: turned off, Apply refuses rather than read the bot's own model of that id.
+      await owner.call('providers.setEnabled', { providerId: off, enabled: false });
+      expect(await thrown(owner.call('agents.settings.apply', { threadId: self, questionId: open!.id }))).toThrow(`${off} is not installed or is turned off`);
+      expect(cards(self).map(card => card.id)).toEqual([open!.id]);
+      await owner.call('providers.setEnabled', { providerId: off, enabled: true });
+    }
+    await owner.call('agents.settings.apply', { threadId: self, questionId: open!.id });
+    expect(drawn(self, open!.id)!.answer).toEqual({ optionIds: ['applied'], value: to });
+    await waitFor(() => settled(h, self));
+  };
+  await move('echo/echo', 'twin/echo/echo', 'echo');
+  expect(profile().selection).toMatchObject({ providerId: 'echo', model: 'echo' });
+  await move('twin/echo/echo', 'echo/echo');
+  expect(profile().selection).toMatchObject({ providerId: 'twin', model: 'echo/echo' });
+  expect(h.core.workforce.resident.config(agent.id).allowedRoutes.map(route => `${route.providerId}/${route.model}`)).toEqual(['echo/echo', 'twin/twin-large', 'twin/echo/echo']);
 });
 
 test('a discussion creates the bot the user asked for, without a card, and reads its conversation', async () => {

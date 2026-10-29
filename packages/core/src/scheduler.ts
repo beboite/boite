@@ -158,7 +158,8 @@ export class Scheduler {
       // A restart handoff carries its queued turns to the next core as they are.
       for (const entry of this.queue.values()) {
         this.recordQueued(entry);
-        if (!entry.queueHold && !this.core.threads.handoff.keepsQueued(entry.turnId)) this.core.threads.markQueuedStopped(entry.turnId);
+        const serverQueued = this.core.journal.getTurn(entry.turnId)?.execution?.frozenSelection === true;
+        if (!entry.queueHold && !serverQueued && !this.core.threads.handoff.keepsQueued(entry.turnId)) this.core.threads.markQueuedStopped(entry.turnId);
       }
     }
     this.queue.clear();

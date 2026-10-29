@@ -184,7 +184,7 @@ test('CI wakes on its first failure and on its verdict, not on each check that f
   const rabbit = { name: 'CodeRabbit', context: true, status: 'PENDING' };
   let memory = initialMemory(since);
   const step = (runs: Run[]) => { const result = evaluate(memory, detail(runs), null); memory = result.next; return result.changes; };
-  // beboite/boite requires "PR title", done in seconds, and "CI required", which exists only once every job finished.
+  // mtsu-dev/boite requires "PR title", done in seconds, and "CI required", which exists only once every job finished.
   expect(step([title, job('Core tests', running), job('Build UI', running), rabbit])).toEqual([]);
   expect(step([title, job('Core tests'), job('Build UI', running), rabbit])).toEqual([]);
   expect(step([title, job('Core tests'), job('Build UI'), gate(running), rabbit])).toEqual([]);
@@ -243,7 +243,7 @@ test('the base branch names what it requires through its rulesets and its classi
 });
 
 test('a draft passes on the required checks it reports, without waiting for one it never reports', () => {
-  // beboite/boite's draft run names its planning job apart, so a draft never satisfies the ruleset (docs/ci.md#draft-pull-requests).
+  // A repository whose draft run names its planning job apart, so a draft never satisfies its ruleset.
   const required = ['Plan and repository checks', 'Build UI'];
   const draft = parseDetail(detailJson([{ name: 'Plan and repository checks (draft)' }, { name: 'Build UI' }], { isDraft: true }));
   expect(draft.draft).toBe(true);
@@ -276,6 +276,9 @@ test('a burst folds into one set of changes, and failures of an older head drop 
 
 interface FakeGitHub {
   state: 'OPEN' | 'CLOSED' | 'MERGED';
+  /** The head branch and its repository, absent where the test does not need them. */
+  headRef?: string;
+  headRepository?: string;
   mergeable: string;
   /** GitHub's merge state, absent where the test does not need it. */
   mergeState?: string;
@@ -323,7 +326,8 @@ async function answer(github: FakeGitHub, args: string[]): Promise<string> {
       timelineItems: { nodes: state === 'CLOSED' ? [{ actor: by }] : [] } } } } });
   }
   const mergeQueueEntry = github.queue === null ? null : { position: github.queue };
-  if (query?.includes('viewer')) return detailJson(github.runs, { state: github.detailState ?? github.state, mergeable: github.mergeable, mergeStateStatus: github.mergeState, headRefOid: github.head, mergeQueueEntry });
+  if (query?.includes('viewer')) return detailJson(github.runs, { state: github.detailState ?? github.state, mergeable: github.mergeable, mergeStateStatus: github.mergeState, headRefOid: github.head, mergeQueueEntry,
+    ...(github.headRef ? { headRefName: github.headRef, headRepository: { nameWithOwner: github.headRepository } } : {}) });
   if (query) {
     const counts = new Map<string, number>();
     for (const run of github.runs) { const key = run.status && run.status !== 'COMPLETED' ? run.status : run.conclusion ?? 'SUCCESS'; counts.set(key, (counts.get(key) ?? 0) + 1); }
@@ -366,6 +370,15 @@ async function settled(threadId: string): Promise<void> {
 }
 const wakeText = (threadId: string, turnId: string) => [...harness!.core.journal.walkTurnMessages(threadId, turnId)].find(message => message.role === 'system')!.parts
   .map(part => part.type === 'text' ? part.text : '').join('');
+
+test('a watch read refreshes the head the conversation link claims for the worktree cleanup', async () => {
+  const { owner, threadId, github, drive } = await watchedThread();
+  github.headRef = 'renamed';
+  github.headRepository = 'me/repo';
+  await owner.call('threads.watchPullRequest', { threadId });
+  await drive();
+  expect(harness!.core.linkedPullRequests.saved(threadId)[0]).toMatchObject({ state: 'OPEN', head: 'renamed', headRepository: 'me/repo' });
+});
 
 test('a watch reads first without waking, wakes once per change with links, and reads in full only when the fingerprint moves', async () => {
   const { owner, threadId, github, drive } = await watchedThread();
@@ -443,7 +456,7 @@ test('a watch reads first without waking, wakes once per change with links, and 
 
 test('a check the base branch requires holds "passed" back until it reported', async () => {
   const { owner, threadId, github, watches, drive } = await watchedThread();
-  // beboite/boite's ruleset requires "PR title", done in seconds, and "CI required", created only once every other job ended.
+  // mtsu-dev/boite's ruleset requires "PR title", done in seconds, and "CI required", created only once every other job ended.
   github.rules = ['PR title', 'CI required'];
   const title = { name: 'PR title', workflow: 'pr title', required: true };
   github.runs = [{ ...title, status: 'IN_PROGRESS', conclusion: '' }];

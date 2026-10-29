@@ -4,9 +4,15 @@ import type { MessagePart } from '@boite/contracts';
 import { nativeAgentPartSql } from './native-agent-parts.ts';
 import { addPartBlobCodecs, createPartBlobs } from './part-blobs.ts';
 import { createCommandLines } from './processes.ts';
+import { createPendingQuestions } from './questions.ts';
 import { parseJson } from './rows.ts';
+import { createSharedProjects } from '../contacts/project-journal.ts';
+import { createSharedBoard } from '../contacts/board-journal.ts';
+import { createSharedCompute } from '../contacts/compute-journal.ts';
+import { createSharedAccess } from '../contacts/access-journal.ts';
+import { createSharedReview } from '../contacts/review-journal.ts';
 
-export const SCHEMA_VERSION = 38;
+export const SCHEMA_VERSION = 45;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -450,6 +456,29 @@ export function migrate(db: Database, file: string): { from: number; to: number 
     db.exec('ALTER TABLE turns ADD COLUMN quiet INTEGER NOT NULL DEFAULT 0;');
     version = 38;
   }
+  if (version < 44) {
+    db.exec(`CREATE TABLE IF NOT EXISTS composer_records (
+      section TEXT NOT NULL, id TEXT NOT NULL, revision INTEGER NOT NULL, updated_at INTEGER NOT NULL, value TEXT,
+      PRIMARY KEY (section, id)) WITHOUT ROWID;
+      CREATE TABLE IF NOT EXISTS composer_assets (
+        id TEXT PRIMARY KEY, attachment TEXT NOT NULL, kind TEXT NOT NULL, mime_type TEXT NOT NULL, name TEXT, bytes INTEGER NOT NULL
+      ) WITHOUT ROWID;
+      CREATE TABLE IF NOT EXISTS composer_deliveries (
+        id TEXT PRIMARY KEY, section TEXT NOT NULL, record_id TEXT NOT NULL,
+        status TEXT NOT NULL, thread_id TEXT, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL
+      ) WITHOUT ROWID;`);
+    version = 44;
+  }
+  if (version < 45) {
+    // A new journal has no events to read; reading them anyway marks `events` for ANALYZE on SQLite before 3.46.
+    createPendingQuestions(db, (row?.user_version ?? 0) > 0);
+    version = 45;
+  }
+  createSharedProjects(db);
+  createSharedBoard(db);
+  createSharedCompute(db);
+  createSharedAccess(db);
+  createSharedReview(db);
   version = Math.max(version, SCHEMA_VERSION);
   if (row?.user_version !== version) db.exec(`PRAGMA user_version = ${version}`);
   return { from: row?.user_version ?? 0, to: version };

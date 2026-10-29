@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AgentLetter } from '@boite/contracts';
@@ -192,3 +192,41 @@ test('a contact still relayed by another member keeps the reply windows when one
   await waitFor(() => !member.core.group.peers().some(peer => peer.coreId === otherId), 10000);
   expect(member.core.coordination.trusted().some(peer => peer.coreId === guestId)).toBe(false);
 }, 30000);
+
+
+test('an authenticated group sync refreshes legacy relay copies without trusting missing admissions', async () => {
+  const {host, member, hostClient, memberClient, hostId, guestId, memberId} = await setup();
+  const gamma = await project(member, memberClient, 'legacy');
+  await hostClient.call('contacts.grant', {coreId: guestId, projectId: gamma.id, machine: memberId});
+  await waitFor(() => member.core.contacts.members.relayedOf(guestId).length === 1);
+  const copies = member.core.journal.getSetting('contacts:relayed') as {admission?: string}[];
+  member.core.journal.setSetting('contacts:relayed', copies.map(({admission, ...entry}) => entry));
+  expect(member.core.contacts.members.relayedOf(guestId)).toEqual([]);
+  const gateway = member.core.group.peers().find(peer => peer.coreId === hostId)!;
+  await member.core.coordination.request(gateway, 'group.sync', member.core.group.require());
+  await waitFor(() => member.core.contacts.members.relayedOf(guestId).length === 1);
+  expect(member.core.contacts.members.relayedOf(guestId)[0]?.admission).toBe(copies[0]?.admission);
+}, 30000);
+
+test('a contact hears that one machine of the linked group did not answer, instead of an empty list', async () => {
+  const { host, guest, member, hostClient, guestClient, memberClient, hostId, guestId, memberId } = await setup();
+  const gamma = await project(member, memberClient, 'gamma');
+  const memberThread = await thread(memberClient, gamma.id, 'Gamma work');
+  const guestThread = await thread(guestClient, (await project(guest, guestClient, 'mine')).id, 'Guest work');
+  await hostClient.call('contacts.grant', { coreId: guestId, projectId: gamma.id, machine: memberId });
+  await waitFor(() => member.core.contacts.members.relayedOf(guestId).length === 1, 10000);
+  const alias = memberThreadId(memberId, memberThread);
+  const whole = await guest.core.coordination.directory(guestThread);
+  expect(whole.agents.map(agent => agent.threadId)).toContain(alias);
+  expect(whole.unavailable).toEqual([]);
+  const name = guest.core.coordination.trusted().find(peer => peer.coreId === hostId)!.name;
+  const ask = spyOn(host.core.contacts.members as unknown as { ask(...args: unknown[]): Promise<unknown> }, 'ask').mockRejectedValue(new Error('member offline'));
+  try {
+    const directory = await guest.core.coordination.directory(guestThread);
+    expect(directory.agents.map(agent => agent.threadId)).not.toContain(alias);
+    expect(directory.unavailable).toEqual([`${name} (1 of its machines did not answer)`]);
+    const search = await guest.core.coordination.search(guestThread, 'gamma');
+    expect(search.matches).toEqual([]);
+    expect(search.unavailable).toEqual([`${name} (1 of its machines did not answer)`]);
+  } finally { ask.mockRestore(); }
+}, 60000);

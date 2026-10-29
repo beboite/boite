@@ -7,8 +7,10 @@
  * everything it touches and reads codes, data keys and events, never message
  * text: the words may change, the refusal may not.
  */
+import { SHARED_SCENARIOS } from './shared-projects.ts';
 import {
   GROUP_INVITE_PREFIX,
+  PROJECT_NAME_MAX,
   RpcErrorCode,
   type Account,
   type Project,
@@ -22,6 +24,8 @@ import {
 } from '../../packages/contracts/src/index.ts';
 
 export interface ContractEnv {
+  /** Another isolated Contacts core, with no real account or public network. */
+  newContact(): Promise<ContractEnv>;
   call<M extends RpcMethodName>(method: M, params: RpcParams<M>): Promise<RpcResult<M>>;
   on<E extends RpcEventName>(event: E, handler: (payload: RpcEvents[E]) => void): () => void;
   /** A folder that exists, a new one per call. */
@@ -146,6 +150,34 @@ async function unavailable(env: ContractEnv): Promise<{ provider: ProviderSummar
 }
 
 export const SCENARIOS: Record<string, Scenario> = {
+  ...SHARED_SCENARIOS,
+  'providers.addLocal writes an ACP provider with a default account, providers.removeLocal takes it away, each refusal names its field': async (env) => {
+    const heard = record(env, ['providers.updated']);
+    const added = await env.call('providers.addLocal', { name: 'Contract Local', command: 'bun', args: ['acp', 'two words'], env: { CONTRACT_LOCAL: '1' } });
+    same(added.providerId, 'contract-local', 'the id the name turns into');
+    const summary = added.loaded.find((entry) => entry.id === 'contract-local');
+    check(summary !== undefined, 'the new provider is not listed');
+    same([summary.protocol, summary.source, summary.available, summary.login], ['acp', 'user', true, false], 'the new provider');
+    check(heard.events.some((event) => (event.payload as RpcEvents['providers.updated']).loaded.some((entry) => entry.id === 'contract-local')), 'no providers.updated carried the new provider');
+    const account = (await env.call('accounts.list', {})).find((entry) => entry.providerId === 'contract-local');
+    check(account !== undefined && account.isolationDir === null && account.status === 'ok', 'the new provider has no default account on its own configuration');
+
+    const add = (patch: Record<string, unknown>) => env.call('providers.addLocal', { name: 'Other', command: 'bun', args: [], env: {}, ...patch });
+    same((await refusedWith(add({ name: 'Contract  local!' }), RpcErrorCode.InvalidParams, ['expected']))['field'], 'name', 'a name whose id is taken');
+    const shipped = await refusedWith(add({ name: 'Echo' }), RpcErrorCode.InvalidParams, ['expected']);
+    same([shipped['field'], shipped['providerId']], ['name', 'echo'], 'a shipped id');
+    same((await refusedWith(add({ command: 'dir/agent' }), RpcErrorCode.InvalidParams))['field'], 'command', 'a relative path');
+    same((await refusedWith(add({ args: [''] }), RpcErrorCode.InvalidParams))['field'], 'args[0]', 'an empty argument');
+    same((await refusedWith(add({ env: { 'NOT-A-NAME': 'x' } }), RpcErrorCode.InvalidParams))['field'], 'env.NOT-A-NAME', 'a bad variable name');
+    same((await refusedWith(add({ env: JSON.parse('{"__proto__":"x"}') }), RpcErrorCode.InvalidParams))['field'], 'env.__proto__', 'a variable a plain object drops');
+
+    same((await refusedWith(env.call('providers.removeLocal', { providerId: 'echo' }), RpcErrorCode.Refused))['field'], 'providerId', 'removing a shipped provider');
+    await refusedWith(env.call('providers.removeLocal', { providerId: 'contract-missing' }), RpcErrorCode.NotFound);
+    const removed = await env.call('providers.removeLocal', { providerId: 'contract-local' });
+    check(!removed.loaded.some((entry) => entry.id === 'contract-local'), 'the removed provider is still listed');
+    check(!(heard.events.at(-1)?.payload as RpcEvents['providers.updated']).loaded.some((entry) => entry.id === 'contract-local'), 'the last providers.updated still lists it');
+    heard.stop();
+  },
   'agents.runtime.configure keeps the route it saved, refuses a stale revision and follows the profile': async (env) => {
     const setup = await echo(env);
     check(setup.levels.length >= 2, 'the echo model offers fewer than two effort levels');
@@ -540,6 +572,33 @@ export const SCENARIOS: Record<string, Scenario> = {
     added.stop();
     same([again.id, third.id], [first.id, first.id], 'the ids');
     same(added.events.filter((event) => (event.payload as { id: string }).id === first.id).length, 1, 'project.added for the folder');
+  },
+  'projects.rename trims and broadcasts the display name, retaining the folder and archive': async (env) => {
+    const project = await env.call('projects.add', { path: await env.newFolder(), name: 'before' });
+    await env.call('projects.archive', { projectId: project.id });
+    const updates = record(env, ['project.updated']);
+    try {
+      const renamed = await env.call('projects.rename', { projectId: project.id, name: '  My project  ' });
+      same([renamed.name, renamed.path, renamed.createdAt, renamed.archived], ['My project', project.path, project.createdAt, true], 'renamed project');
+      await until('the renamed project', () => updates.events.some(event => (event.payload as Project).name === 'My project'));
+      const again = await env.call('projects.add', { path: project.path });
+      same([again.id, again.name], [project.id, 'My project'], 'reopening the same folder');
+      const listed = (await env.call('projects.list', {})).find(p => p.id === project.id);
+      same(listed?.name, 'My project', 'the listed name');
+      const longest = 'x'.repeat(PROJECT_NAME_MAX);
+      same((await env.call('projects.rename', { projectId: project.id, name: `  ${longest}  ` })).name, longest, 'the maximum trimmed name');
+    } finally { updates.stop(); }
+  },
+  'projects.rename refuses invalid names, missing projects and the system drafts project': async (env) => {
+    const project = await env.call('projects.add', { path: await env.newFolder(), name: 'before' });
+    for (const name of ['  ', 42 as unknown as string, 'x'.repeat(PROJECT_NAME_MAX + 1)]) {
+      const data = await refusedWith(env.call('projects.rename', { projectId: project.id, name }), RpcErrorCode.Refused, ['field', 'expected']);
+      same(data.field, 'name', 'the refused field');
+    }
+    const drafts = await env.call('projects.drafts', {});
+    await refusedWith(env.call('projects.rename', { projectId: drafts.id, name: 'other' }), RpcErrorCode.Refused, ['field']);
+    await refusedWith(env.call('projects.rename', { projectId: 'prj_missing', name: 'other' }), RpcErrorCode.NotFound);
+    same((await env.call('projects.list', {})).find(p => p.id === project.id)?.name, 'before', 'the name after refusal');
   },
   'projects.refreshIcon answers the project, and projects.icon refuses one with no image by field': async (env) => {
     const project = await env.call('projects.add', { path: await env.newFolder() });

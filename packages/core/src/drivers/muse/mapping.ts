@@ -270,6 +270,8 @@ export function addUsage(left: Usage | null, right: Usage): Usage {
  */
 export function sessionKey(ctx: SessionContext): string {
   return JSON.stringify({
+    protection: ctx.protectedExecution?.fingerprint ?? null,
+    protectedTools: ctx.protectedExecution?.toolsAllowed ?? null,
     cwd: ctx.thread.cwd,
     flags: MODE_POSTURE[ctx.thread.permissionMode].flags,
     accountId: ctx.account.id,
