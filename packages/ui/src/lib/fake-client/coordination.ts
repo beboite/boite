@@ -98,9 +98,10 @@ function nextMailTime(ctx: FakeContext, threadId: string): number {
 export function deliverContactAnswer(ctx: FakeContext, request: ContactRequest): void {
   const thread = ctx.threads.get(request.from.threadId);
   if (!thread || thread.archived) return;
+  const responder = request.decidedBy === 'owner' ? request.contact : `${request.contact}'s Boite${request.decidedBy === 'match' || request.decidedBy === 'concierge' ? ' automatically' : ''}`;
   const text = request.status === 'accepted'
-    ? `${request.contact} opened its project ${JSON.stringify(request.project?.name ?? '')} to you.`
-    : `${request.contact} refused your request: ${request.reason ?? 'no reason given'}`;
+    ? `${responder} opened its project ${JSON.stringify(request.project?.name ?? '')} to you.`
+    : `${responder} refused your request: ${request.reason ?? 'no reason given'}`;
   const at = nextMailTime(ctx, thread.id);
   const letter: AgentLetter = {
     id: `contact-answer-${request.id}`, origin: 'contact', contact: { coreId: request.coreId, name: request.contact },
