@@ -24,9 +24,9 @@ export function windowCaptureRefusal(os: 'linux' | 'macos', env: Record<string, 
 }
 
 /**
- * Linux and macOS currently track direct children through the registry. Linux
- * also samples descendants and reads start times from procfs. macOS supplies resident
- * memory through libproc when the platform entry loads its native backend.
+ * Linux and macOS track direct children through the registry. Their load
+ * backends also sample descendants and verify process identities before a
+ * memory stop, using procfs on Linux and libproc on macOS.
  */
 export function createPosixPlatform(
   os: 'linux' | 'macos',
