@@ -81,7 +81,7 @@ export async function chooseHere(ctx: FakeContext, caller: Thread, request: Mode
   const listed = (model: string) => modelChoices(ctx, caller).some(c => label(c) === model || c.model === model);
   if (request.model !== undefined && !listed(request.model)) {
     await Promise.all(ctx.providers.filter(provider => provider.available && providerEnabled(provider) && PROBED_PROTOCOLS.includes(provider.protocol)).map(async provider => {
-      const account = ctx.accounts.find(entry => entry.providerId === provider.id);
+      const account = accountFor(ctx, caller, provider.id);
       if (account && !ctx.modelCatalogs.has(provider.id + '::' + account.id)) await probe(ctx, provider.id, account.id).catch(() => undefined);
     }));
   }

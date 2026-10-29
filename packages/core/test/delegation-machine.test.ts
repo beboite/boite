@@ -563,8 +563,14 @@ test('a restart of the child\'s machine keeps the child at work for its parent u
   expect(seen(child.thread.id).state?.restarting).toBe(true);
   expect(desk.core.delegation.remote.busy(threadId)).toBe(true);
   expect((await agent(child.thread.id)).resultRef).toBeUndefined();
+  expect(await owner.call('delegation.wait', { threadId, agentId: child.thread.id, timeoutMs: 0 })).toMatchObject({ state: 'waiting_for_children', timedOut: true });
+  expect(await owner.call('delegation.wait', { threadId, timeoutMs: 0 })).toMatchObject({ state: 'waiting_for_children', timedOut: true });
   // That machine's owner stops one and the parent the other: no next core continues them, and the parent hears it at once.
   await pcOwner.call('turns.stop', { threadId: child.thread.id });
+  await pc.core.delegation.remote.flush(deskId);
+  await waitFor(() => seen(child.thread.id).state?.restarting === undefined);
+  expect(await owner.call('delegation.wait', { threadId, agentId: child.thread.id, timeoutMs: 0 })).toMatchObject({ state: 'result_available', timedOut: false });
+  expect(await owner.call('delegation.wait', { threadId, timeoutMs: 0 })).toMatchObject({ state: 'waiting_for_children', timedOut: true });
   desk.core.delegation.remote.stop(threadId, other.thread.id);
   await desk.core.delegation.remote.flush(pcId);
   await pc.core.delegation.remote.flush(deskId);
