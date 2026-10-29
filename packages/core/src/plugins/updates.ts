@@ -142,47 +142,50 @@ export class PluginUpdateChecks {
   /** Test seam: the clock checks and backoff read. */
   now: () => number = () => Date.now();
 
-  private entries = new Map<string, Entry>();
-  private timer: ReturnType<typeof setTimeout> | null = null;
-  private started = false;
-  private closed = false;
-  private queue: Promise<void> = Promise.resolve();
+  #entries = new Map<string, Entry>();
+  #timer: ReturnType<typeof setTimeout> | null = null;
+  #started = false;
+  #closed = false;
+  #queue: Promise<void> = Promise.resolve();
 
-  constructor(private host: UpdateHost) {}
+  #host: UpdateHost;
 
-  private entry(id: string): Entry {
-    let entry = this.entries.get(id);
+  constructor(host: UpdateHost) {
+    this.#host = host;}
+
+  #entry(id: string): Entry {
+    let entry = this.#entries.get(id);
     if (entry === undefined) {
       entry = { checking: null, checkedAt: null, nextCheckAt: null, available: null, ignored: null, error: null, failures: 0 };
-      this.entries.set(id, entry);
+      this.#entries.set(id, entry);
     }
     return entry;
   }
 
   /** The higher of the pinned and the installed version: what a found manifest must beat. */
-  private newest(id: string, pinned: PluginManifest): string {
-    const installed = this.host.installed(id);
+  #newest(id: string, pinned: PluginManifest): string {
+    const installed = this.#host.installed(id);
     return installed !== null && compareVersions(installed, pinned.version) > 0 ? installed : pinned.version;
   }
 
   /** The newer manifest found for `id`, while it still beats both the pinned entry and the install. */
   offered(id: string): Entry['available'] {
-    const available = this.entries.get(id)?.available ?? null;
-    const pinned = this.host.pinned(id);
-    if (available === null || pinned === null || this.host.source(id) === null) return null;
-    return compareVersions(available.manifest.version, this.newest(id, pinned)) > 0 ? available : null;
+    const available = this.#entries.get(id)?.available ?? null;
+    const pinned = this.#host.pinned(id);
+    if (available === null || pinned === null || this.#host.source(id) === null) return null;
+    return compareVersions(available.manifest.version, this.#newest(id, pinned)) > 0 ? available : null;
   }
 
   state(id: string): PluginUpdates | null {
-    const source = this.host.source(id);
+    const source = this.#host.source(id);
     if (source === null) return null;
-    const entry = this.entries.get(id);
+    const entry = this.#entries.get(id);
     const offered = this.offered(id);
     return {
       source: { url: source.url, ref: source.ref },
       checking: entry?.checking != null,
       checkedAt: entry?.checkedAt ?? null,
-      nextCheckAt: this.started && !this.closed ? entry?.nextCheckAt ?? null : null,
+      nextCheckAt: this.#started && !this.#closed ? entry?.nextCheckAt ?? null : null,
       available: offered === null ? null : { version: offered.manifest.version, commit: offered.commit, checkedAt: offered.checkedAt },
       ignored: entry?.ignored ?? null,
       error: entry?.error ?? null,
@@ -191,10 +194,10 @@ export class PluginUpdateChecks {
 
   /** At core start: the first check of every installed plugin with a source, a minute later. */
   start(): void {
-    if (this.started || this.closed) return;
-    this.started = true;
+    if (this.#started || this.#closed) return;
+    this.#started = true;
     const at = this.now() + FIRST_CHECK_MS;
-    for (const id of this.host.ids()) this.entry(id).nextCheckAt ??= at;
+    for (const id of this.#host.ids()) this.#entry(id).nextCheckAt ??= at;
     this.arm();
   }
 
@@ -205,24 +208,24 @@ export class PluginUpdateChecks {
    */
   async check(ids: string[]): Promise<void> {
     await Promise.all(ids.map((id) => {
-      const entry = this.entry(id);
+      const entry = this.#entry(id);
       if (entry.checking !== null) return entry.checking;
       if (entry.checkedAt !== null && this.now() - entry.checkedAt < MANUAL_FLOOR_MS) return Promise.resolve();
-      return this.run(id);
+      return this.#run(id);
     }));
   }
 
   /** Reads one source and records what it held. Never throws: a failure is the entry's `error`. */
-  private run(id: string): Promise<void> {
-    const entry = this.entry(id);
+  #run(id: string): Promise<void> {
+    const entry = this.#entry(id);
     if (entry.checking !== null) return entry.checking;
-    const source = this.host.source(id);
-    const pinned = this.host.pinned(id);
-    if (source === null || pinned === null || this.closed) return Promise.resolve();
+    const source = this.#host.source(id);
+    const pinned = this.#host.pinned(id);
+    if (source === null || pinned === null || this.#closed) return Promise.resolve();
     const checking = (async () => {
       try {
-        const read = await this.host.read(source);
-        const verdict = judge(read.text, pinned, this.newest(id, pinned));
+        const read = await this.#host.read(source);
+        const verdict = judge(read.text, pinned, this.#newest(id, pinned));
         const at = this.now();
         entry.error = null;
         entry.failures = 0;
@@ -231,63 +234,63 @@ export class PluginUpdateChecks {
         entry.available = verdict.kind === 'offer' ? { manifest: verdict.manifest, commit: read.commit, checkedAt: at } : null;
         entry.checkedAt = at;
         entry.nextCheckAt = at + CHECK_INTERVAL_MS;
-        if (verdict.kind === 'offer') this.host.log('info', `plugin ${id} ${verdict.manifest.version} is available from ${source.url} at ${read.commit.slice(0, 7)}`);
+        if (verdict.kind === 'offer') this.#host.log('info', `plugin ${id} ${verdict.manifest.version} is available from ${source.url} at ${read.commit.slice(0, 7)}`);
       } catch (error) {
         const at = this.now();
         entry.failures += 1;
         entry.error = messageOf(error);
         entry.checkedAt = at;
         entry.nextCheckAt = at + Math.min(RETRY_FIRST_MS * 2 ** (entry.failures - 1), CHECK_INTERVAL_MS);
-        this.host.log('warn', `plugin ${id} update check failed (${entry.error}); next try in ${Math.round((entry.nextCheckAt - at) / 60_000)} minutes`);
+        this.#host.log('warn', `plugin ${id} update check failed (${entry.error}); next try in ${Math.round((entry.nextCheckAt - at) / 60_000)} minutes`);
       } finally {
         entry.checking = null;
-        if (!this.closed) {
-          this.host.changed(id);
+        if (!this.#closed) {
+          this.#host.changed(id);
           this.arm();
         }
       }
     })();
     entry.checking = checking;
-    this.host.changed(id);
+    this.#host.changed(id);
     return checking;
   }
 
   /** One timer for the earliest due check. Plugins not installed move on without a read. */
   private arm(): void {
-    if (!this.started || this.closed) return;
-    if (this.timer !== null) clearTimeout(this.timer);
-    this.timer = null;
+    if (!this.#started || this.#closed) return;
+    if (this.#timer !== null) clearTimeout(this.#timer);
+    this.#timer = null;
     let next: number | null = null;
-    for (const id of this.host.ids()) {
-      const at = this.entry(id).nextCheckAt;
+    for (const id of this.#host.ids()) {
+      const at = this.#entry(id).nextCheckAt;
       if (at !== null && (next === null || at < next)) next = at;
     }
     if (next === null) return;
-    this.timer = setTimeout(() => this.tick(), Math.max(1_000, next - this.now()));
-    (this.timer as { unref?: () => void }).unref?.();
+    this.#timer = setTimeout(() => this.#tick(), Math.max(1_000, next - this.now()));
+    (this.#timer as { unref?: () => void }).unref?.();
   }
 
   /** The due checks, one after the other, never two git fetches at once. */
-  private tick(): void {
-    this.timer = null;
-    if (this.closed) return;
+  #tick(): void {
+    this.#timer = null;
+    if (this.#closed) return;
     const now = this.now();
-    for (const id of this.host.ids()) {
-      const entry = this.entry(id);
+    for (const id of this.#host.ids()) {
+      const entry = this.#entry(id);
       if (entry.nextCheckAt === null || entry.nextCheckAt > now || entry.checking !== null) continue;
-      if (this.host.installed(id) === null) {
+      if (this.#host.installed(id) === null) {
         entry.nextCheckAt = now + CHECK_INTERVAL_MS;
         continue;
       }
-      this.queue = this.queue.then(() => this.run(id));
+      this.#queue = this.#queue.then(() => this.#run(id));
     }
-    void this.queue.then(() => this.arm());
+    void this.#queue.then(() => this.arm());
   }
 
   async close(): Promise<void> {
-    this.closed = true;
-    if (this.timer !== null) clearTimeout(this.timer);
-    this.timer = null;
-    await Promise.all([...this.entries.values()].map((entry) => entry.checking ?? Promise.resolve()));
+    this.#closed = true;
+    if (this.#timer !== null) clearTimeout(this.#timer);
+    this.#timer = null;
+    await Promise.all([...this.#entries.values()].map((entry) => entry.checking ?? Promise.resolve()));
   }
 }

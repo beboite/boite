@@ -37,57 +37,60 @@ interface Walk { folders: string[]; index: number; paths?: string[]; next: numbe
 
 /** Private file snapshots, independent of the driver's native conversation checkpoints. */
 export class CodeCheckpoints {
-  private readonly active = new Map<string, Active>();
-  private readonly restoring = new Set<string>();
+  readonly #active = new Map<string, Active>();
+  readonly #restoring = new Set<string>();
   /** Threads a rewind is reading; a trim waits for them. */
-  private readonly rewinding = new Set<string>();
+  readonly #rewinding = new Set<string>();
   /** A trim in flight per thread, which a turn or a rewind of that thread waits for. */
-  private readonly trims = new Map<string, Promise<void>>();
+  readonly #trims = new Map<string, Promise<void>>();
   /** File metadata per real workspace root, least recently used first. */
-  private readonly previous = new Map<string, SnapshotCache>();
-  private pruned: Promise<void> | undefined;
-  private collecting: Promise<number> | undefined;
+  readonly #previous = new Map<string, SnapshotCache>();
+  #pruned: Promise<void> | undefined;
+  #collecting: Promise<number> | undefined;
   /** Snapshots and saves under way; the background pass waits while any is. */
   private writing = 0;
-  private timer: ReturnType<typeof setTimeout> | null = null;
-  private pass: Promise<void> | undefined;
-  private walk: Walk | undefined;
-  private migration: StoreMigration | undefined;
-  private closed = false;
+  #timer: ReturnType<typeof setTimeout> | null = null;
+  #pass: Promise<void> | undefined;
+  #walk: Walk | undefined;
+  #migration: StoreMigration | undefined;
+  #closed = false;
 
-  constructor(private readonly core: Core) {
-    this.pruned = this.prune().catch(error => this.core.log('warn', `file checkpoint cleanup failed: ${messageOf(error)}`));
-    void this.pruned.then(() => this.collect());
-    this.arm(STORE_FIRST_MS);
+  readonly #core: Core;
+
+  constructor(core: Core) {
+    this.#core = core;
+    this.#pruned = this.#prune().catch(error => this.#core.log('warn', `file checkpoint cleanup failed: ${messageOf(error)}`));
+    void this.#pruned.then(() => this.collect());
+    this.#arm(STORE_FIRST_MS);
   }
-  private root(): string { return join(this.core.dataDir, 'checkpoints'); }
-  private folder(threadId: string): string { return join(this.root(), threadId); }
-  private objects(threadId: string): string { return join(this.folder(threadId), 'objects'); }
-  private shared(): string { return join(this.root(), SHARED); }
+  private root(): string { return join(this.#core.dataDir, 'checkpoints'); }
+  #folder(threadId: string): string { return join(this.root(), threadId); }
+  private objects(threadId: string): string { return join(this.#folder(threadId), 'objects'); }
+  #shared(): string { return join(this.root(), SHARED); }
 
   /**
    * Blobs live once in the shared store, so threads on the same root reuse
    * one metadata map; a hit only links the blob into the thread's folder.
    */
-  private async cachedSnapshot(threadId: string, root: string): Promise<FileSnapshot> {
-    const files = this.previous.get(root) ?? new Map();
-    this.previous.delete(root);
-    this.previous.set(root, files);
+  async #cachedSnapshot(threadId: string, root: string): Promise<FileSnapshot> {
+    const files = this.#previous.get(root) ?? new Map();
+    this.#previous.delete(root);
+    this.#previous.set(root, files);
     let total = 0;
-    for (const cached of this.previous.values()) total += cached.size;
-    for (const [key, cached] of this.previous) {
+    for (const cached of this.#previous.values()) total += cached.size;
+    for (const [key, cached] of this.#previous) {
       if (total <= CACHED_FILES || key === root) break;
       total -= cached.size;
-      this.previous.delete(key);
+      this.#previous.delete(key);
     }
     this.writing += 1;
-    try { return await snapshot(this.core, threadId, root, this.objects(threadId), files, this.shared()); }
+    try { return await snapshot(this.#core, threadId, root, this.objects(threadId), files, this.#shared()); }
     finally { this.writing -= 1; }
   }
 
   /** Cached metadata that names a folder whose blobs were removed is forgotten. */
   private forget(objects: string): void {
-    for (const files of this.previous.values()) for (const [name, cached] of files) if (cached.objects === objects) files.delete(name);
+    for (const files of this.#previous.values()) for (const [name, cached] of files) if (cached.objects === objects) files.delete(name);
   }
 
   /**
@@ -95,14 +98,14 @@ export class CodeCheckpoints {
    * Runs after startup cleanup and after a discard, one pass after another.
    */
   collect(graceMs = COLLECT_GRACE_MS): Promise<number> {
-    const pass = (this.collecting ?? Promise.resolve(0)).then(() => collectSharedBlobs(this.shared(), graceMs))
-      .catch(error => { this.core.log('warn', `file checkpoint blob cleanup failed: ${messageOf(error)}`); return 0; });
-    this.collecting = pass;
+    const pass = (this.#collecting ?? Promise.resolve(0)).then(() => collectSharedBlobs(this.#shared(), graceMs))
+      .catch(error => { this.#core.log('warn', `file checkpoint blob cleanup failed: ${messageOf(error)}`); return 0; });
+    this.#collecting = pass;
     return pass;
   }
 
   assertAvailable(cwd: string): void {
-    if ([...this.restoring].some(root => contains(root, cwd) || contains(cwd, root))) {
+    if ([...this.#restoring].some(root => contains(root, cwd) || contains(cwd, root))) {
       throw refused('the project files are being restored; wait before starting another turn', { field: 'cwd', path: cwd, reason: 'rewind-in-flight' });
     }
   }
@@ -110,98 +113,98 @@ export class CodeCheckpoints {
   begin(thread: ThreadSummary, turnId: string): Promise<void> | undefined {
     // Persistent sessions and a workspace containing the database cannot be
     // snapshotted. Preserve synchronous admission when there is no file work.
-    if (thread.agentSessionId || contains(thread.cwd, this.core.dataDir)) return;
-    return this.capture(thread, turnId);
+    if (thread.agentSessionId || contains(thread.cwd, this.#core.dataDir)) return;
+    return this.#capture(thread, turnId);
   }
 
-  private async capture(thread: ThreadSummary, turnId: string): Promise<void> {
+  async #capture(thread: ThreadSummary, turnId: string): Promise<void> {
     let root: string;
     try { root = await workspaceRoot(thread.cwd); } catch { return; }
-    const checkpoint: Checkpoint = { root, messages: [...this.core.journal.walkTurnMessages(thread.id, turnId, { blobs: false })].filter(message => message.role === 'user').map(message => message.id) };
+    const checkpoint: Checkpoint = { root, messages: [...this.#core.journal.walkTurnMessages(thread.id, turnId, { blobs: false })].filter(message => message.role === 'user').map(message => message.id) };
     this.assertAvailable(root);
     // Registered first: a turn that starts while this one compares sees it.
-    const others = [...this.active.values()];
-    this.active.set(turnId, { threadId: thread.id, turnId, checkpoint });
+    const others = [...this.#active.values()];
+    this.#active.set(turnId, { threadId: thread.id, turnId, checkpoint });
     try {
       for (const other of others) {
-        if (await overlap(this.core, thread.id, root, other.checkpoint.root)) checkpoint.reason = other.checkpoint.reason = 'turns ran concurrently in the same workspace';
+        if (await overlap(this.#core, thread.id, root, other.checkpoint.root)) checkpoint.reason = other.checkpoint.reason = 'turns ran concurrently in the same workspace';
       }
-      this.pruned ??= this.prune();
-      await this.pruned;
-      await this.trims.get(thread.id);
-      checkpoint.before = await this.cachedSnapshot(thread.id, root);
-      await this.save(thread.id, turnId, checkpoint);
+      this.#pruned ??= this.#prune();
+      await this.#pruned;
+      await this.#trims.get(thread.id);
+      checkpoint.before = await this.#cachedSnapshot(thread.id, root);
+      await this.#save(thread.id, turnId, checkpoint);
     } catch (error) { checkpoint.reason = messageOf(error); }
   }
 
   end(turnId: string): Promise<void> | undefined {
-    const active = this.active.get(turnId);
+    const active = this.#active.get(turnId);
     if (!active) return;
-    return this.finish(active);
+    return this.#finish(active);
   }
 
-  private async finish(active: Active): Promise<void> {
+  async #finish(active: Active): Promise<void> {
     const { turnId } = active;
     try {
       const { checkpoint, threadId } = active;
-      if (!checkpoint.reason) checkpoint.after = await this.cachedSnapshot(threadId, checkpoint.root);
-      await this.save(threadId, turnId, checkpoint);
+      if (!checkpoint.reason) checkpoint.after = await this.#cachedSnapshot(threadId, checkpoint.root);
+      await this.#save(threadId, turnId, checkpoint);
     } catch (error) {
       active.checkpoint.reason = messageOf(error);
-      try { await this.save(active.threadId, turnId, active.checkpoint); }
-      catch (failure) { this.core.log('warn', `file checkpoint ${turnId} unavailable: ${messageOf(failure)}`); }
-    } finally { this.active.delete(turnId); }
-    void this.trimFull(active.threadId);
+      try { await this.#save(active.threadId, turnId, active.checkpoint); }
+      catch (failure) { this.#core.log('warn', `file checkpoint ${turnId} unavailable: ${messageOf(failure)}`); }
+    } finally { this.#active.delete(turnId); }
+    void this.#trimFull(active.threadId);
   }
 
   /** Hold the workspace through both the file restoration and the journal cut. */
   async rewind<T>(thread: ThreadSummary, turnIds: string[], messageId: string, cut: (files: FileResult) => T): Promise<T> {
-    this.core.sharedAccess.denyTool(thread.id);
-    this.rewinding.add(thread.id);
+    this.#core.sharedAccess.denyTool(thread.id);
+    this.#rewinding.add(thread.id);
     try {
-      await this.trims.get(thread.id);
-      return await this.rewindHeld(thread, turnIds, messageId, cut);
-    } finally { this.rewinding.delete(thread.id); }
+      await this.#trims.get(thread.id);
+      return await this.#rewindHeld(thread, turnIds, messageId, cut);
+    } finally { this.#rewinding.delete(thread.id); }
   }
 
-  private async rewindHeld<T>(thread: ThreadSummary, turnIds: string[], messageId: string, cut: (files: FileResult) => T): Promise<T> {
+  async #rewindHeld<T>(thread: ThreadSummary, turnIds: string[], messageId: string, cut: (files: FileResult) => T): Promise<T> {
     let root: string;
     try { root = await workspaceRoot(thread.cwd); }
     catch (error) { return cut({ status: 'unavailable', count: 0, reason: `the working directory is unavailable: ${messageOf(error)}` }); }
     this.assertAvailable(root);
     // Held before comparing, so no turn starts here while the files are restored.
-    this.restoring.add(root);
+    this.#restoring.add(root);
     try {
       // A turn still working here (a sub-agent winding down after a Stop, a
       // second conversation) ran beside the removed ones, so their checkpoint
       // is not exact, and restoring would write under that agent. The edit
       // still goes through; only the files stay as they are.
-      for (const active of [...this.active.values()]) {
-        if (await overlap(this.core, thread.id, root, active.checkpoint.root)) {
+      for (const active of [...this.#active.values()]) {
+        if (await overlap(this.#core, thread.id, root, active.checkpoint.root)) {
           return cut({ status: 'unavailable', count: 0, reason: 'another turn is working in this folder; files were left as they are', busy: true });
         }
       }
-      const { files, changes } = await this.restore(thread, root, turnIds, messageId);
+      const { files, changes } = await this.#restore(thread, root, turnIds, messageId);
       try { return cut(files); }
       catch (error) {
         await restoreFiles(root, this.objects(thread.id), changes.map(change => ({ name: change.name, before: change.after, after: change.before })));
         throw error;
       }
     }
-    finally { this.restoring.delete(root); }
+    finally { this.#restoring.delete(root); }
   }
 
-  private async restore(thread: ThreadSummary, root: string, turnIds: string[], messageId: string): Promise<{ files: FileResult; changes: FileChange[] }> {
+  async #restore(thread: ThreadSummary, root: string, turnIds: string[], messageId: string): Promise<{ files: FileResult; changes: FileChange[] }> {
     const unavailable = (reason: string) => ({ files: { status: 'unavailable' as const, count: 0, reason }, changes: [] });
     const changes = new Map<string, FileChange>();
     for (const turnId of turnIds) {
       let checkpoint: Checkpoint;
-      try { checkpoint = await decodeManifest<Checkpoint>(await readFile(join(this.folder(thread.id), `${turnId}.json`))); }
-      catch { return unavailable(this.beyondKept(thread.id, turnId) ? `file checkpoints are kept for the newest ${KEEP_TURNS} turns of a conversation` : 'this turn has no saved file checkpoint'); }
+      try { checkpoint = await decodeManifest<Checkpoint>(await readFile(join(this.#folder(thread.id), `${turnId}.json`))); }
+      catch { return unavailable(this.#beyondKept(thread.id, turnId) ? `file checkpoints are kept for the newest ${KEEP_TURNS} turns of a conversation` : 'this turn has no saved file checkpoint'); }
       if (checkpoint.reason || !checkpoint.before || !checkpoint.after || checkpoint.root !== root) {
         return unavailable(checkpoint.reason ?? 'this turn has no complete checkpoint in the current folder');
       }
-      if (this.core.journal.getMessage(messageId)?.turnId === turnId && !checkpoint.messages?.includes(messageId)) {
+      if (this.#core.journal.getMessage(messageId)?.turnId === turnId && !checkpoint.messages?.includes(messageId)) {
         return unavailable('no file checkpoint inside a running turn');
       }
       for (const name of new Set([...Object.keys(checkpoint.before), ...Object.keys(checkpoint.after)])) {
@@ -223,14 +226,14 @@ export class CodeCheckpoints {
   }
 
   /** Whether `turnId` is older than the turns whose checkpoints a thread keeps. */
-  private beyondKept(threadId: string, turnId: string): boolean {
-    const turns = this.core.journal.listTurns(threadId);
+  #beyondKept(threadId: string, turnId: string): boolean {
+    const turns = this.#core.journal.listTurns(threadId);
     const index = turns.findIndex(turn => turn.id === turnId);
     return index >= 0 && turns.length - index > KEEP_TURNS;
   }
 
-  private async save(threadId: string, turnId: string, checkpoint: Checkpoint): Promise<void> {
-    const folder = this.folder(threadId);
+  async #save(threadId: string, turnId: string, checkpoint: Checkpoint): Promise<void> {
+    const folder = this.#folder(threadId);
     this.writing += 1;
     try {
       await mkdir(folder, { recursive: true, mode: 0o700 });
@@ -242,33 +245,33 @@ export class CodeCheckpoints {
 
   async discard(threadIds: string[]): Promise<void> {
     const folders = threadIds.filter(threadId => threadId !== SHARED);
-    for (const threadId of folders) await rm(this.folder(threadId), { recursive: true, force: true });
+    for (const threadId of folders) await rm(this.#folder(threadId), { recursive: true, force: true });
     if (folders.length) void this.collect();
   }
 
   /** Deletions kept undoable in a session are purged by the journal on restart. */
-  private async prune(): Promise<void> {
+  async #prune(): Promise<void> {
     let entries;
     try { entries = await readdir(this.root(), { withFileTypes: true }); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
-    if (!this.core.journal.isClosed()) await this.discard(entries.filter(entry => entry.isDirectory() && !this.core.journal.getThread(entry.name)).map(entry => entry.name));
+    if (!this.#core.journal.isClosed()) await this.discard(entries.filter(entry => entry.isDirectory() && !this.#core.journal.getThread(entry.name)).map(entry => entry.name));
   }
 
   /**
    * Run one trim of a thread at a time, never beside its turn or its rewind:
    * blobs a snapshot just wrote are in no manifest yet.
    */
-  private trim(threadId: string, work: () => Promise<void>): Promise<void> {
-    if (this.trims.has(threadId) || this.rewinding.has(threadId) || [...this.active.values()].some(active => active.threadId === threadId)) return Promise.resolve();
-    const running = work().catch(error => { if (!this.closed) this.core.log('warn', `file checkpoint retention for ${threadId} failed: ${messageOf(error)}`); })
-      .finally(() => this.trims.delete(threadId));
-    this.trims.set(threadId, running);
+  #trim(threadId: string, work: () => Promise<void>): Promise<void> {
+    if (this.#trims.has(threadId) || this.#rewinding.has(threadId) || [...this.#active.values()].some(active => active.threadId === threadId)) return Promise.resolve();
+    const running = work().catch(error => { if (!this.#closed) this.#core.log('warn', `file checkpoint retention for ${threadId} failed: ${messageOf(error)}`); })
+      .finally(() => this.#trims.delete(threadId));
+    this.#trims.set(threadId, running);
     return running;
   }
 
   /** At the end of a turn, a thread far over its kept turns drops the oldest. */
-  private async trimFull(threadId: string): Promise<void> {
-    const names = await readdir(this.folder(threadId)).catch(() => [] as string[]);
+  async #trimFull(threadId: string): Promise<void> {
+    const names = await readdir(this.#folder(threadId)).catch(() => [] as string[]);
     if (names.filter(name => name.endsWith('.json')).length > KEEP_TURNS + TRIM_SLACK) await this.retainThread(threadId);
   }
 
@@ -278,21 +281,21 @@ export class CodeCheckpoints {
    * links any more leave at the next collection.
    */
   retainThread(threadId: string, now = Date.now()): Promise<void> {
-    return this.trim(threadId, async () => {
-      const thread = this.core.journal.isClosed() ? null : this.core.journal.getThread(threadId);
+    return this.#trim(threadId, async () => {
+      const thread = this.#core.journal.isClosed() ? null : this.#core.journal.getThread(threadId);
       if (!thread) return;
       // Restoring clears `doneAt`; the archived flag is still the one that counts.
       const since = thread.archived ? thread.doneAt ?? thread.archivedAt ?? thread.updatedAt : null;
       if (since != null && now - since > IDLE_THREAD_MS) {
-        await rm(this.folder(threadId), { recursive: true, force: true });
+        await rm(this.#folder(threadId), { recursive: true, force: true });
         this.forget(this.objects(threadId));
         return;
       }
-      const names = (await readdir(this.folder(threadId)).catch(() => [] as string[])).filter(name => name.endsWith('.json')).map(name => name.slice(0, -'.json'.length));
+      const names = (await readdir(this.#folder(threadId)).catch(() => [] as string[])).filter(name => name.endsWith('.json')).map(name => name.slice(0, -'.json'.length));
       if (names.length <= KEEP_TURNS) return;
-      const order = new Map(this.core.journal.listTurns(threadId).map((turn, index) => [turn.id, index]));
+      const order = new Map(this.#core.journal.listTurns(threadId).map((turn, index) => [turn.id, index]));
       names.sort((a, b) => (order.get(a) ?? -1) - (order.get(b) ?? -1));
-      const removed = await trimFolder(this.folder(threadId), new Set(names.slice(-KEEP_TURNS)));
+      const removed = await trimFolder(this.#folder(threadId), new Set(names.slice(-KEEP_TURNS)));
       if (removed.blobs) this.forget(this.objects(threadId));
     });
   }
@@ -303,29 +306,29 @@ export class CodeCheckpoints {
    * The timer runs it in bounded ticks; tests and the restart path call it whole.
    */
   async maintain(now = Date.now()): Promise<void> {
-    while (!this.closed && !await this.migrateSome(Infinity)) { /* until every folder is done */ }
-    await this.retainAll(now);
+    while (!this.#closed && !await this.migrateSome(Infinity)) { /* until every folder is done */ }
+    await this.#retainAll(now);
     await this.collect();
   }
 
-  private arm(delay: number): void {
-    if (this.closed) return;
-    this.timer = setTimeout(() => { this.timer = null; this.pass = this.tick(); }, delay);
-    this.timer.unref?.();
+  #arm(delay: number): void {
+    if (this.#closed) return;
+    this.#timer = setTimeout(() => { this.#timer = null; this.#pass = this.#tick(); }, delay);
+    this.#timer.unref?.();
   }
 
-  private async tick(): Promise<void> {
-    if (this.closed || this.core.journal.isClosed()) return;
-    if (this.writing > 0 || this.restoring.size > 0) { this.arm(STORE_WAIT_MS); return; }
+  async #tick(): Promise<void> {
+    if (this.#closed || this.#core.journal.isClosed()) return;
+    if (this.writing > 0 || this.#restoring.size > 0) { this.#arm(STORE_WAIT_MS); return; }
     try {
-      if (!await this.migrateSome(TICK_NAMES)) { this.arm(STORE_TICK_MS); return; }
-      await this.retainAll(Date.now());
+      if (!await this.migrateSome(TICK_NAMES)) { this.#arm(STORE_TICK_MS); return; }
+      await this.#retainAll(Date.now());
       await this.collect();
     } catch (error) {
-      if (this.closed) return;
-      this.core.log('warn', `file checkpoint store pass failed: ${messageOf(error)}`);
+      if (this.#closed) return;
+      this.#core.log('warn', `file checkpoint store pass failed: ${messageOf(error)}`);
     }
-    this.arm(RETAIN_EVERY_MS);
+    this.#arm(RETAIN_EVERY_MS);
   }
 
   /**
@@ -334,58 +337,58 @@ export class CodeCheckpoints {
    * keeps across restarts.
    */
   private async migrateSome(names: number): Promise<boolean> {
-    if (this.core.journal.isClosed()) return true;
-    const cursor = this.core.journal.getSetting(STORE_CURSOR);
+    if (this.#core.journal.isClosed()) return true;
+    const cursor = this.#core.journal.getSetting(STORE_CURSOR);
     if (cursor === true) return true;
-    if (!this.walk) {
+    if (!this.#walk) {
       const after = typeof cursor === 'string' ? cursor : '';
       const entries = await readdir(this.root(), { withFileTypes: true }).catch(() => []);
-      this.walk = { folders: entries.filter(entry => entry.isDirectory() && entry.name !== SHARED && entry.name > after).map(entry => entry.name).sort(), index: 0, next: 0 };
+      this.#walk = { folders: entries.filter(entry => entry.isDirectory() && entry.name !== SHARED && entry.name > after).map(entry => entry.name).sort(), index: 0, next: 0 };
     }
-    const walk = this.walk;
-    const migration = this.migration ??= new StoreMigration(this.shared());
+    const walk = this.#walk;
+    const migration = this.#migration ??= new StoreMigration(this.#shared());
     const bytes = migration.counts.bytesRead + TICK_BYTES;
     let done = 0;
     while (walk.index < walk.folders.length) {
       const threadId = walk.folders[walk.index]!;
       if (!walk.paths) {
         const objects = (await readdir(this.objects(threadId)).catch(() => [] as string[])).map(name => join(this.objects(threadId), name));
-        const manifests = (await readdir(this.folder(threadId)).catch(() => [] as string[])).filter(name => name.endsWith('.json')).map(name => join(this.folder(threadId), name));
+        const manifests = (await readdir(this.#folder(threadId)).catch(() => [] as string[])).filter(name => name.endsWith('.json')).map(name => join(this.#folder(threadId), name));
         walk.paths = [...objects, ...manifests];
       }
       while (walk.next < walk.paths.length) {
-        if (this.closed || (names !== Infinity && (done >= names || migration.counts.bytesRead >= bytes || this.writing > 0))) return false;
+        if (this.#closed || (names !== Infinity && (done >= names || migration.counts.bytesRead >= bytes || this.writing > 0))) return false;
         const path = walk.paths[walk.next]!;
         if (!path.endsWith('.json')) await migration.blob(dirname(path), basename(path));
-        else if (!this.active.has(basename(path, '.json'))) await migration.manifest(path);
+        else if (!this.#active.has(basename(path, '.json'))) await migration.manifest(path);
         walk.next += 1; done += 1;
       }
-      if (this.core.journal.isClosed()) return true;
-      this.core.journal.setSetting(STORE_CURSOR, threadId);
+      if (this.#core.journal.isClosed()) return true;
+      this.#core.journal.setSetting(STORE_CURSOR, threadId);
       walk.index += 1; walk.paths = undefined; walk.next = 0;
     }
-    if (this.core.journal.isClosed()) return true;
-    this.core.journal.setSetting(STORE_CURSOR, true);
+    if (this.#core.journal.isClosed()) return true;
+    this.#core.journal.setSetting(STORE_CURSOR, true);
     const { linked, adopted, compressed, manifests, mismatched, unlinked } = migration.counts;
-    this.core.log('info', `file checkpoint store: ${linked} copies linked, ${adopted} adopted, ${compressed} blobs and ${manifests} manifests compressed, ${mismatched} not matching their name, ${unlinked} kept without a hard link`);
-    this.walk = undefined; this.migration = undefined;
+    this.#core.log('info', `file checkpoint store: ${linked} copies linked, ${adopted} adopted, ${compressed} blobs and ${manifests} manifests compressed, ${mismatched} not matching their name, ${unlinked} kept without a hard link`);
+    this.#walk = undefined; this.#migration = undefined;
     return true;
   }
 
-  private async retainAll(now: number): Promise<void> {
+  async #retainAll(now: number): Promise<void> {
     const entries = await readdir(this.root(), { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
-      if (this.closed) return;
+      if (this.#closed) return;
       if (entry.isDirectory() && entry.name !== SHARED) await this.retainThread(entry.name, now);
     }
   }
 
   /** Stops the background pass and waits for the step under way. */
   async close(): Promise<void> {
-    this.closed = true;
-    if (this.timer !== null) clearTimeout(this.timer);
-    this.timer = null;
-    await this.pass;
-    await Promise.all(this.trims.values());
+    this.#closed = true;
+    if (this.#timer !== null) clearTimeout(this.#timer);
+    this.#timer = null;
+    await this.#pass;
+    await Promise.all(this.#trims.values());
   }
 }

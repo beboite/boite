@@ -22,11 +22,11 @@ interface PendingDelta {
  */
 export class Bus {
   private readonly listeners = new Set<BusListener>();
-  private readonly committedListeners = new Set<BusListener>();
-  private staged: Staged[] | null = null;
-  private readonly pending = new Map<string, PendingDelta>();
-  private timer: ReturnType<typeof setTimeout> | null = null;
-  private reporting = false;
+  readonly #committedListeners = new Set<BusListener>();
+  #staged: Staged[] | null = null;
+  readonly #pending = new Map<string, PendingDelta>();
+  #timer: ReturnType<typeof setTimeout> | null = null;
+  #reporting = false;
   /**
    * Where a throwing listener is reported. One listener's error must neither
    * skip the listeners after it nor escape the delta timer, which would end the
@@ -50,30 +50,30 @@ export class Bus {
 
   /** Observers with effects see a write only after its synchronous transaction commits. */
   onCommitted(listener: BusListener): () => void {
-    this.committedListeners.add(listener);
-    return () => { this.committedListeners.delete(listener); };
+    this.#committedListeners.add(listener);
+    return () => { this.#committedListeners.delete(listener); };
   }
 
   /** Buffer external notifications around a synchronous storage commit; discard on rollback. */
   afterCommit<T>(write: () => T): T {
     this.flush();
-    const parent = this.staged;
+    const parent = this.#staged;
     const notifications: Staged[] = [];
-    this.staged = notifications;
+    this.#staged = notifications;
     let result: T;
     try {
       result = write();
       this.flush();
     } catch (error) {
-      this.pending.clear();
-      if (this.timer !== null) clearTimeout(this.timer);
-      this.timer = null;
+      this.#pending.clear();
+      if (this.#timer !== null) clearTimeout(this.#timer);
+      this.#timer = null;
       throw error;
     } finally {
-      this.staged = parent;
+      this.#staged = parent;
     }
     if (parent !== null) parent.push(...notifications);
-    else for (const staged of notifications) this.release(staged);
+    else for (const staged of notifications) this.#release(staged);
     return result;
   }
 
@@ -84,12 +84,12 @@ export class Bus {
    */
   whenCommitted(effect: () => void): void {
     this.flush();
-    if (this.staged !== null) this.staged.push({ effect });
-    else this.release({ effect });
+    if (this.#staged !== null) this.#staged.push({ effect });
+    else this.#release({ effect });
   }
 
-  private release(staged: Staged): void {
-    if (!('effect' in staged)) { this.notify(this.committedListeners, staged.name, staged.payload); return; }
+  #release(staged: Staged): void {
+    if (!('effect' in staged)) { this.#notify(this.#committedListeners, staged.name, staged.payload); return; }
     try { staged.effect(); }
     catch (error) { this.onError(`committed effect failed: ${error instanceof Error ? error.message : String(error)}`); }
   }
@@ -97,23 +97,23 @@ export class Bus {
   emit<E extends RpcEventName>(name: E, payload: RpcEvents[E]): void {
     if (name === 'core.log' && this.normalizeLog) payload = this.normalizeLog(payload as RpcEvents['core.log']) as RpcEvents[E];
     if (name === 'message.delta') {
-      this.queue(payload as RpcEvents['message.delta']);
+      this.#queue(payload as RpcEvents['message.delta']);
       return;
     }
     this.flush();
-    this.dispatch(name, payload);
+    this.#dispatch(name, payload);
   }
 
   flush(): void {
-    if (this.timer !== null) {
-      clearTimeout(this.timer);
-      this.timer = null;
+    if (this.#timer !== null) {
+      clearTimeout(this.#timer);
+      this.#timer = null;
     }
-    if (this.pending.size === 0) return;
-    const items = [...this.pending.values()];
-    this.pending.clear();
+    if (this.#pending.size === 0) return;
+    const items = [...this.#pending.values()];
+    this.#pending.clear();
     for (const item of items) {
-      this.dispatch('message.delta', {
+      this.#dispatch('message.delta', {
         threadId: item.threadId,
         messageId: item.messageId,
         partIndex: item.partIndex,
@@ -125,42 +125,42 @@ export class Bus {
   dispose(): void {
     this.flush();
     this.listeners.clear();
-    this.committedListeners.clear();
+    this.#committedListeners.clear();
   }
 
-  private queue(delta: RpcEvents['message.delta']): void {
+  #queue(delta: RpcEvents['message.delta']): void {
     const key = `${delta.messageId}|${delta.partIndex}`;
-    const current = this.pending.get(key);
+    const current = this.#pending.get(key);
     if (current) current.text += delta.text;
-    else this.pending.set(key, { ...delta });
-    if (this.timer === null) {
-      this.timer = setTimeout(() => {
-        this.timer = null;
+    else this.#pending.set(key, { ...delta });
+    if (this.#timer === null) {
+      this.#timer = setTimeout(() => {
+        this.#timer = null;
         this.flush();
       }, DELTA_WINDOW_MS);
     }
   }
 
-  private dispatch(name: RpcEventName, payload: EventPayload): void {
-    this.notify(this.listeners, name, payload);
-    if (this.staged !== null) this.staged.push({ name, payload });
-    else this.notify(this.committedListeners, name, payload);
+  #dispatch(name: RpcEventName, payload: EventPayload): void {
+    this.#notify(this.listeners, name, payload);
+    if (this.#staged !== null) this.#staged.push({ name, payload });
+    else this.#notify(this.#committedListeners, name, payload);
   }
 
-  private notify(listeners: Set<BusListener>, name: RpcEventName, payload: EventPayload): void {
+  #notify(listeners: Set<BusListener>, name: RpcEventName, payload: EventPayload): void {
     for (const listener of listeners) {
       try {
         listener(name, payload);
       } catch (error) {
         // A report is itself an event: a listener that throws on it too must not loop.
-        if (this.reporting) continue;
-        this.reporting = true;
+        if (this.#reporting) continue;
+        this.#reporting = true;
         try {
           this.onError(`event listener failed on ${name}: ${error instanceof Error ? error.message : String(error)}`);
         } catch {
           // Nothing left to report to.
         } finally {
-          this.reporting = false;
+          this.#reporting = false;
         }
       }
     }

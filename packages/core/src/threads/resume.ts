@@ -69,25 +69,28 @@ type Record_ = Record<ThreadId, Entry>;
  * neither cancels a plan nor holds it back: it gives way.
  */
 export class ResumePlanner {
-  private readonly timers = new Map<ThreadId, ReturnType<typeof setTimeout>>();
-  private closed = false;
-  private cached: Record_ | null = null;
+  readonly #timers = new Map<ThreadId, ReturnType<typeof setTimeout>>();
+  #closed = false;
+  #cached: Record_ | null = null;
 
-  constructor(private readonly core: Core, private readonly threads: ThreadStore) {
+  readonly #core: Core;
+
+  constructor(core: Core, private readonly threads: ThreadStore) {
+    this.#core = core;
     // An archive that rolls back keeps the plan and its timer.
     core.bus.onCommitted((name, payload) => {
-      if (this.closed) return;
-      if (name === 'turn.started') this.turnStarted(payload as RpcEvents['turn.started']);
+      if (this.#closed) return;
+      if (name === 'turn.started') this.#turnStarted(payload as RpcEvents['turn.started']);
       else if (name === 'thread.updated' && (payload as ThreadSummary).archived) this.cancel((payload as ThreadSummary).id, 'the thread was archived');
     });
   }
 
   /** Once recovery ran: plans a previous core left are armed again, those of threads that are gone dropped. */
   start(): void {
-    const record = this.load();
+    const record = this.#load();
     let changed = false;
     for (const [threadId, entry] of Object.entries(record)) {
-      const thread = this.core.journal.getThread(threadId);
+      const thread = this.#core.journal.getThread(threadId);
       if (thread === null || (thread.archived && entry.resumedWindow === undefined)) {
         delete record[threadId];
         changed = true;
@@ -110,31 +113,31 @@ export class ResumePlanner {
         continue;
       }
       const startDelay = plan.reason === 'limit' ? RESUME_TIMING.limit.startDelayMs : RESUME_TIMING.carryOn.startDelayMs;
-      this.arm(threadId, Math.max(startDelay, plan.at - Date.now()));
+      this.#arm(threadId, Math.max(startDelay, plan.at - Date.now()));
     }
-    if (changed) this.save(record);
+    if (changed) this.#save(record);
   }
 
   close(): void {
-    this.closed = true;
-    for (const timer of this.timers.values()) clearTimeout(timer);
-    this.timers.clear();
+    this.#closed = true;
+    for (const timer of this.#timers.values()) clearTimeout(timer);
+    this.#timers.clear();
   }
 
   /** The thread's row of resumes, a copy. */
   entry(threadId: ThreadId): Entry | undefined {
-    const entry = this.load()[threadId];
+    const entry = this.#load()[threadId];
     return entry === undefined ? undefined : { ...entry };
   }
 
   /** Whether a resume is planned or going out. */
   planned(threadId: ThreadId): boolean {
-    return this.load()[threadId]?.plan !== undefined;
+    return this.#load()[threadId]?.plan !== undefined;
   }
 
   /** The resume planned for the thread, as its row shows it; null when none or while it goes out. */
   retryOf(threadId: ThreadId): ThreadRetry | null {
-    const entry = this.load()[threadId];
+    const entry = this.#load()[threadId];
     const plan = entry?.plan;
     if (plan === undefined || plan.dispatching) return null;
     if (plan.reason === 'limit') return { kind: 'usage-limit', turnId: plan.turnId, at: plan.at, attempt: 1, attempts: 1, resetsAt: plan.resetsAt ?? null };
@@ -143,42 +146,42 @@ export class ResumePlanner {
 
   /** Plans the resume of `turn`, the thread's last, at `plan.at`. The caller decided it is due. */
   schedule(threadId: ThreadId, turn: Turn, plan: Omit<Plan, 'turnId' | 'dispatching'>, message: string): void {
-    if (this.closed || this.core.journal.isClosed()) return;
+    if (this.#closed || this.#core.journal.isClosed()) return;
     const full: Plan = { ...plan, turnId: turn.id };
-    const record = this.load();
+    const record = this.#load();
     record[threadId] = { ...record[threadId], handled: turn.id, plan: full };
-    this.save(record);
-    this.arm(threadId, full.at - Date.now());
+    this.#save(record);
+    this.#arm(threadId, full.at - Date.now());
     this.log('info', threadId, message, 'planned', full);
-    this.announce(threadId);
+    this.#announce(threadId);
   }
 
   /** Writes the thread's row with no plan: a turn resumes nothing more. */
   settle(threadId: ThreadId, entry: Omit<Entry, 'plan'>): void {
-    if (this.core.journal.isClosed()) return;
-    const record = this.load();
+    if (this.#core.journal.isClosed()) return;
+    const record = this.#load();
     record[threadId] = entry;
-    this.save(record);
+    this.#save(record);
   }
 
   /** Drops the plan of the thread, when `which` accepts it. False when it had none. */
   cancel(threadId: ThreadId, reason: string, which: (plan: Plan) => boolean = () => true): boolean {
-    const record = this.load();
+    const record = this.#load();
     const entry = record[threadId];
     const plan = entry?.plan;
     if (entry === undefined || plan === undefined || plan.dispatching || !which(plan)) return false;
-    this.disarm(threadId);
+    this.#disarm(threadId);
     const { plan: _, ...rest } = entry;
     record[threadId] = { ...rest, handled: plan.turnId };
-    this.save(record);
+    this.#save(record);
     this.log('info', threadId, `The ${what(plan)} of turn ${plan.turnId} is cancelled: ${reason}`, 'cancelled', plan);
-    this.announce(threadId);
+    this.#announce(threadId);
     return true;
   }
 
   cancelAll(reason: string, which: (plan: Plan) => boolean): void {
-    if (this.core.journal.isClosed()) return;
-    for (const threadId of Object.keys(this.load())) this.cancel(threadId, reason, which);
+    if (this.#core.journal.isClosed()) return;
+    for (const threadId of Object.keys(this.#load())) this.cancel(threadId, reason, which);
   }
 
   /**
@@ -187,21 +190,21 @@ export class ResumePlanner {
    * never turns into a loop.
    */
   forget(threadId: ThreadId): void {
-    const record = this.load();
+    const record = this.#load();
     const entry = record[threadId];
     if (entry === undefined || entry.plan?.dispatching) return;
-    if (entry.plan !== undefined) this.disarm(threadId);
+    if (entry.plan !== undefined) this.#disarm(threadId);
     if (entry.resumedWindow === undefined) delete record[threadId];
     else record[threadId] = { resumedWindow: entry.resumedWindow };
-    this.save(record);
-    if (entry.plan !== undefined) this.announce(threadId);
+    this.#save(record);
+    if (entry.plan !== undefined) this.#announce(threadId);
   }
 
   /** The thread's latest turn that is not a cache ping. */
   lastTurn(threadId: ThreadId): Turn | null {
-    const rows = this.core.journal.db.query('SELECT id FROM turns WHERE thread_id = ? ORDER BY rowid DESC LIMIT 50').all(threadId) as { id: string }[];
+    const rows = this.#core.journal.db.query('SELECT id FROM turns WHERE thread_id = ? ORDER BY rowid DESC LIMIT 50').all(threadId) as { id: string }[];
     for (const row of rows) {
-      const turn = this.core.journal.getTurn(row.id);
+      const turn = this.#core.journal.getTurn(row.id);
       if (turn !== null && turn.execution?.operation !== 'keepalive') return turn;
     }
     return null;
@@ -209,45 +212,45 @@ export class ResumePlanner {
 
   log(level: 'info' | 'warn', threadId: ThreadId, message: string, event: string, plan: Plan | null = null, extra: Record<string, string> = {}, reason: PlannedReason | undefined = plan?.reason): void {
     try {
-      this.core.logs.record(level, message, {
+      this.#core.logs.record(level, message, {
         source: 'turns', event: `${reason === 'limit' ? 'limit-resume' : 'auto-continue'}.${event}`, threadId, ...(plan ? { turnId: plan.turnId } : {}),
         data: { ...extra, ...(plan ? { reason: plan.reason, at: plan.at, ...(plan.resetsAt !== undefined ? { resetsAt: plan.resetsAt } : {}), ...(plan.selection ? { providerId: plan.selection.providerId } : {}) } : {}) },
       });
     } catch { /* the plan stands without its record */ }
   }
 
-  private arm(threadId: ThreadId, delayMs: number): void {
-    this.disarm(threadId);
-    if (this.closed) return;
+  #arm(threadId: ThreadId, delayMs: number): void {
+    this.#disarm(threadId);
+    if (this.#closed) return;
     // A timer longer than 2^31 - 1 ms fires at once: a far plan is checked again on the way.
     const timer = setTimeout(() => {
-      this.timers.delete(threadId);
-      this.fire(threadId);
+      this.#timers.delete(threadId);
+      this.#fire(threadId);
     }, Math.max(0, Math.min(delayMs, 2_000_000_000)));
     timer.unref?.();
-    this.timers.set(threadId, timer);
+    this.#timers.set(threadId, timer);
   }
 
-  private disarm(threadId: ThreadId): void {
-    const timer = this.timers.get(threadId);
+  #disarm(threadId: ThreadId): void {
+    const timer = this.#timers.get(threadId);
     if (timer === undefined) return;
     clearTimeout(timer);
-    this.timers.delete(threadId);
+    this.#timers.delete(threadId);
   }
 
-  private fire(threadId: ThreadId): void {
-    if (this.closed || this.core.stopping || this.core.journal.isClosed()) return;
-    const record = this.load();
+  #fire(threadId: ThreadId): void {
+    if (this.#closed || this.#core.stopping || this.#core.journal.isClosed()) return;
+    const record = this.#load();
     const entry = record[threadId];
     const plan = entry?.plan;
     if (entry === undefined || plan === undefined || plan.dispatching) return;
-    if (plan.at > Date.now() + 1_000) { this.arm(threadId, plan.at - Date.now()); return; }
+    if (plan.at > Date.now() + 1_000) { this.#arm(threadId, plan.at - Date.now()); return; }
     // A cache ping holds the thread only to keep it warm: it gives way, and the resume goes once it stopped.
-    if (this.threads.cacheKeepalive.yieldTo(threadId)) { this.arm(threadId, PING_YIELD_MS); return; }
-    const refusal = this.refusal(threadId, plan);
+    if (this.threads.cacheKeepalive.yieldTo(threadId)) { this.#arm(threadId, PING_YIELD_MS); return; }
+    const refusal = this.#refusal(threadId, plan);
     if (refusal !== null) { this.cancel(threadId, refusal); return; }
     record[threadId] = { ...entry, plan: { ...plan, dispatching: true } };
-    this.save(record);
+    this.#save(record);
     let sent: TurnId | null = null;
     try {
       // The request id makes the resume one turn whatever happens: a second call returns the first.
@@ -259,39 +262,39 @@ export class ResumePlanner {
     } catch (error) {
       this.log('warn', threadId, `The ${what(plan)} of turn ${plan.turnId} could not start: ${messageOf(error)}`, 'failed', plan);
     } finally {
-      const after = this.load();
+      const after = this.#load();
       after[threadId] = settled(after[threadId] ?? entry, plan, sent);
-      this.save(after);
-      this.announce(threadId);
+      this.#save(after);
+      this.#announce(threadId);
     }
   }
 
   /** Why the plan must not go out now, or null. */
-  private refusal(threadId: ThreadId, plan: Plan): string | null {
+  #refusal(threadId: ThreadId, plan: Plan): string | null {
     const limit = plan.reason === 'limit';
-    if (limit && this.core.settings.get().autoResumeLimitedThreads !== true) return 'automatic resume was turned off';
-    const thread = this.core.journal.getThread(threadId);
+    if (limit && this.#core.settings.get().autoResumeLimitedThreads !== true) return 'automatic resume was turned off';
+    const thread = this.#core.journal.getThread(threadId);
     if (thread === null) return 'the thread is gone';
     if (thread.archived) return 'the thread was archived';
     if (this.threads.isBusy(threadId)) return 'the thread is busy';
     if (this.lastTurn(threadId)?.id !== plan.turnId) return 'the thread was answered since';
-    if (limit && this.core.journal.getTurn(plan.turnId)?.status !== 'error') return 'the turn is no longer the failed one';
+    if (limit && this.#core.journal.getTurn(plan.turnId)?.status !== 'error') return 'the turn is no longer the failed one';
     const selection = plan.selection;
     if (selection && (thread.providerId !== selection.providerId || thread.accountId !== selection.accountId || thread.model !== selection.model || (thread.sessionGeneration ?? 0) !== selection.sessionGeneration)) {
       return "the thread's provider, account or model changed";
     }
     if (this.threads.cards.listPermissions(threadId).length > 0 || this.threads.cards.listQuestions(threadId).some(question => !question.async)) return 'a card waits for the user';
-    const team = this.core.delegation.config(threadId);
+    const team = this.#core.delegation.config(threadId);
     // A team the user paused or stopped is his to restart; one a crash held is the agent's to resume.
     if (team.paused && (team.pausedBy === undefined || team.pausedBy === 'owner' || team.pausedBy === 'stop')) return 'the user paused its subagent team';
     return null;
   }
 
   /** A turn of the user's, or any other, opened on the thread: the resume is no longer the next thing. */
-  private turnStarted(turn: Turn): void {
+  #turnStarted(turn: Turn): void {
     // A cache ping answers nothing (`cache-keepalive.ts`).
     if (turn.execution?.operation === 'keepalive') return;
-    const entry = this.load()[turn.threadId];
+    const entry = this.#load()[turn.threadId];
     if (entry === undefined) return;
     if (entry.plan !== undefined && !entry.plan.dispatching) this.cancel(turn.threadId, 'the thread was answered since');
     // The user's own words end the row: whatever stops next is a new problem.
@@ -299,17 +302,17 @@ export class ResumePlanner {
   }
 
   /** A copy of the record: read from the journal once, then kept, since every thread row asks for it. */
-  private load(): Record_ {
-    if (this.cached === null) {
-      if (this.core.journal.isClosed()) return {};
-      this.cached = this.read();
+  #load(): Record_ {
+    if (this.#cached === null) {
+      if (this.#core.journal.isClosed()) return {};
+      this.#cached = this.#read();
     }
-    return { ...this.cached };
+    return { ...this.#cached };
   }
 
   /** The record, with the two legacy records merged into it once and removed. */
-  private read(): Record_ {
-    const journal = this.core.journal;
+  #read(): Record_ {
+    const journal = this.#core.journal;
     const own = asRecord(journal.getSetting(KEY));
     const limits = asRecord(journal.getSetting(LEGACY_LIMIT_KEY));
     const carryOns = asRecord(journal.getSetting(LEGACY_CARRY_ON_KEY));
@@ -339,18 +342,18 @@ export class ResumePlanner {
     return merged;
   }
 
-  private save(record: Record_): void {
-    if (this.core.journal.isClosed()) return;
+  #save(record: Record_): void {
+    if (this.#core.journal.isClosed()) return;
     for (const [threadId, entry] of Object.entries(record)) if (Object.values(entry).every(value => value === undefined)) delete record[threadId];
-    if (Object.keys(record).length === 0) this.core.journal.deleteSetting(KEY);
-    else this.core.journal.setSetting(KEY, record);
-    this.cached = record;
+    if (Object.keys(record).length === 0) this.#core.journal.deleteSetting(KEY);
+    else this.#core.journal.setSetting(KEY, record);
+    this.#cached = record;
   }
 
-  private announce(threadId: ThreadId): void {
-    if (this.core.journal.isClosed()) return;
-    const thread = this.core.journal.getThread(threadId);
-    if (thread !== null) this.core.bus.emit('thread.updated', withLoad(this.core, thread));
+  #announce(threadId: ThreadId): void {
+    if (this.#core.journal.isClosed()) return;
+    const thread = this.#core.journal.getThread(threadId);
+    if (thread !== null) this.#core.bus.emit('thread.updated', withLoad(this.#core, thread));
   }
 }
 

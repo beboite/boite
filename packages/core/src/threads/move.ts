@@ -73,15 +73,18 @@ interface Waiting {
  */
 export class ThreadMove {
   /** Moves asked for while the thread's turn ran, applied when the turn ends. Memory only. */
-  private readonly waiting = new Map<ThreadId, Waiting>();
+  readonly #waiting = new Map<ThreadId, Waiting>();
 
-  constructor(private readonly core: Core, private readonly threads: ThreadStore) {}
+  readonly #core: Core;
+
+  constructor(core: Core, private readonly threads: ThreadStore) {
+    this.#core = core;}
 
   /** The row's "Moves to ... after this turn", or null. */
   pendingOf(threadId: ThreadId): PendingMove | null {
-    const waiting = this.waiting.get(threadId);
+    const waiting = this.#waiting.get(threadId);
     if (waiting === undefined) return null;
-    const project = this.core.journal.getProject(waiting.projectId);
+    const project = this.#core.journal.getProject(waiting.projectId);
     return { projectId: waiting.projectId, project: project?.name ?? waiting.projectId, by: waiting.by, at: waiting.at };
   }
 
@@ -93,32 +96,32 @@ export class ThreadMove {
   async userMove(threadId: ThreadId, projectId: ProjectId, stopBackground?: boolean): Promise<ThreadSummary> {
     checkStop(threadId, stopBackground);
     const thread = this.threads.require(threadId);
-    if (!this.inFlight(thread)) return this.move(threadId, projectId, stopBackground, 'now', 'user');
+    if (!this.#inFlight(thread)) return this.move(threadId, projectId, stopBackground, 'now', 'user');
     const target = this.check(thread, projectId, stopBackground, 'request');
     await this.requireFolder(threadId, target);
     // The turn may have ended while the folder was looked at: then it moves now.
-    if (!this.inFlight(this.threads.require(threadId))) return this.move(threadId, projectId, stopBackground, 'now', 'user');
-    this.waiting.set(threadId, { projectId: target.id, by: 'user', stopBackground, at: Date.now() });
-    return this.announce(threadId);
+    if (!this.#inFlight(this.threads.require(threadId))) return this.move(threadId, projectId, stopBackground, 'now', 'user');
+    this.#waiting.set(threadId, { projectId: target.id, by: 'user', stopBackground, at: Date.now() });
+    return this.#announce(threadId);
   }
 
   /** `threads.moveCancel`: the waiting move goes, the thread stays where it is. */
   cancel(threadId: ThreadId): ThreadSummary {
     this.threads.require(threadId);
-    if (!this.waiting.delete(threadId)) {
+    if (!this.#waiting.delete(threadId)) {
       throw refused(`thread ${threadId} has no move waiting for its turn to end`, { threadId, field: 'threadId', expected: 'a thread with a pending move' });
     }
-    return this.announce(threadId);
+    return this.#announce(threadId);
   }
 
-  private inFlight(thread: ThreadSummary): boolean {
+  #inFlight(thread: ThreadSummary): boolean {
     return this.threads.isBusy(thread.id);
   }
 
   /** Every client hears the row with its pending move, which lives in memory and changes nothing stored. */
-  private announce(threadId: ThreadId): ThreadSummary {
-    const summary = withLoad(this.core, this.threads.require(threadId));
-    this.core.bus.emit('thread.updated', summary);
+  #announce(threadId: ThreadId): ThreadSummary {
+    const summary = withLoad(this.#core, this.threads.require(threadId));
+    this.#core.bus.emit('thread.updated', summary);
     return summary;
   }
 
@@ -130,16 +133,16 @@ export class ThreadMove {
     // A thread that had a worktree of its own gets one in the target, the way
     // `threads.create` does with `worktree: {}`; a target that is no repository
     // gives it the project folder instead.
-    const placed: PlacedWorktree | null = this.wantsWorktree(thread, target) ? await this.core.worktrees.add(threadId, target) : null;
+    const placed: PlacedWorktree | null = this.#wantsWorktree(thread, target) ? await this.#core.worktrees.add(threadId, target) : null;
     try {
       // Git took time: a turn may have started or the project changed meanwhile.
       const now = this.threads.require(threadId);
       const again = this.check(now, projectId, stopBackground, phase);
       const cwd = placed?.path
         ?? (again.kind === 'drafts' ? makeDraftFolder(again.path, draftFolderName(now.title, new Date())) : again.path);
-      return this.write(now, again, cwd, placed?.branch ?? null, stopBackground === true, by, placed?.namingPending ?? false);
+      return this.#write(now, again, cwd, placed?.branch ?? null, stopBackground === true, by, placed?.namingPending ?? false);
     } catch (error) {
-      if (placed !== null) await this.core.worktrees.remove(threadId, target, placed);
+      if (placed !== null) await this.#core.worktrees.remove(threadId, target, placed);
       throw error;
     }
   }
@@ -151,16 +154,16 @@ export class ThreadMove {
    */
   async request(threadId: ThreadId, query: string): Promise<AgentMove> {
     const thread = this.threads.require(threadId);
-    const target = this.resolve(threadId, query);
+    const target = this.#resolve(threadId, query);
     this.check(thread, target.id, true, 'request');
     await this.requireFolder(threadId, target);
-    const family = [thread, ...this.children(thread)];
+    const family = [thread, ...this.#children(thread)];
     const stopsBackground = family.some((one) => (this.threads.agentState.background.get(one.id)?.length ?? 0) > 0);
     const answer = { threadId, projectId: target.id, project: target.name, projectPath: target.path, stopsBackground };
-    if (this.inFlight(thread)) {
-      this.waiting.set(threadId, { projectId: target.id, by: 'agent', stopBackground: true, at: Date.now() });
-      this.announce(threadId);
-      const plain = target.kind !== 'drafts' && !this.wantsWorktree(thread, target);
+    if (this.#inFlight(thread)) {
+      this.#waiting.set(threadId, { projectId: target.id, by: 'agent', stopBackground: true, at: Date.now() });
+      this.#announce(threadId);
+      const plain = target.kind !== 'drafts' && !this.#wantsWorktree(thread, target);
       return { ...answer, cwd: plain ? target.path : null, when: 'turn-end' };
     }
     const moved = await this.move(threadId, target.id, true, 'apply', 'agent');
@@ -177,34 +180,34 @@ export class ThreadMove {
    * thread stayed.
    */
   async applyWaiting(threadId: ThreadId): Promise<void> {
-    const waiting = this.waiting.get(threadId);
+    const waiting = this.#waiting.get(threadId);
     if (waiting === undefined) return;
-    this.waiting.delete(threadId);
+    this.#waiting.delete(threadId);
     try {
       await this.move(threadId, waiting.projectId, waiting.stopBackground ?? false, 'apply', waiting.by);
     } catch (error) {
       const reason = messageOf(error);
       const who = waiting.by === 'agent' ? 'the agent' : 'the user';
-      this.core.log('warn', `thread ${threadId}: the move ${who} asked for did not happen: ${reason}`);
-      if (this.core.journal.getThread(threadId) === null) return;
-      const name = this.core.journal.getProject(waiting.projectId)?.name ?? waiting.projectId;
-      this.systemMessage(threadId, { type: 'text', text: `The move to project ${name} ${who} asked for did not happen: ${reason}` });
+      this.#core.log('warn', `thread ${threadId}: the move ${who} asked for did not happen: ${reason}`);
+      if (this.#core.journal.getThread(threadId) === null) return;
+      const name = this.#core.journal.getProject(waiting.projectId)?.name ?? waiting.projectId;
+      this.#systemMessage(threadId, { type: 'text', text: `The move to project ${name} ${who} asked for did not happen: ${reason}` });
       // The row loses its "Moves to ..." line.
-      this.announce(threadId);
+      this.#announce(threadId);
     }
   }
 
   /** A waiting move goes with an archived or removed thread. */
   forget(threadId: ThreadId): void {
-    this.waiting.delete(threadId);
+    this.#waiting.delete(threadId);
   }
 
   /** A project named by id, by name (any case) or by its absolute folder, among the ones the owner added. */
-  private resolve(threadId: ThreadId, query: string): Project {
-    return this.core.projects.find(query, 'agent.move', 'project', { threadId });
+  #resolve(threadId: ThreadId, query: string): Project {
+    return this.#core.projects.find(query, 'agent.move', 'project', { threadId });
   }
 
-  private wantsWorktree(thread: ThreadSummary, target: Project): boolean {
+  #wantsWorktree(thread: ThreadSummary, target: Project): boolean {
     return thread.branch !== null && target.kind !== 'drafts' && existsSync(join(target.path, '.git'));
   }
 
@@ -232,7 +235,7 @@ export class ThreadMove {
     if (thread.incognito) {
       throw refused('an incognito conversation cannot be moved: it is erased when it is left', { threadId, field: 'threadId', expected: 'a conversation that is not incognito' });
     }
-    const target = this.core.projects.require(projectId);
+    const target = this.#core.projects.require(projectId);
     if (target.id === thread.projectId) {
       throw refused(`thread ${threadId} is already in project ${target.name}`, { threadId, projectId, field: 'projectId', expected: 'another project than the thread\'s own' });
     }
@@ -241,7 +244,7 @@ export class ThreadMove {
       if (one.id === threadId && phase === 'apply') return this.threads.runner.handles.has(one.id) || one.status === 'running' || one.status === 'waiting';
       return this.threads.isBusy(one.id);
     };
-    const busy = [thread, ...this.children(thread)].find(busyNow);
+    const busy = [thread, ...this.#children(thread)].find(busyNow);
     if (busy !== undefined) {
       throw refused(busy.id === threadId
         ? 'this thread has a turn running or queued; stop it before moving the thread'
@@ -249,7 +252,7 @@ export class ThreadMove {
         threadId, busyThreadId: busy.id, reason: 'turn-in-flight', status: busy.status, expected: 'an idle thread',
       });
     }
-    const working = [thread, ...this.children(thread)].some((one) => (this.threads.agentState.background.get(one.id)?.length ?? 0) > 0);
+    const working = [thread, ...this.#children(thread)].some((one) => (this.threads.agentState.background.get(one.id)?.length ?? 0) > 0);
     if (working && stopBackground === undefined) {
       throw refused(`the agent still runs work in the background in ${thread.cwd}; say whether to stop it`, {
         threadId, field: 'stopBackground', expected: `true to stop it, or false to leave it running in ${thread.cwd}`,
@@ -258,20 +261,20 @@ export class ThreadMove {
     return target;
   }
 
-  private children(thread: ThreadSummary): ThreadSummary[] {
-    return this.core.journal.listThreads(thread.projectId ?? undefined).filter((one) => one.parentThreadId === thread.id);
+  #children(thread: ThreadSummary): ThreadSummary[] {
+    return this.#core.journal.listThreads(thread.projectId ?? undefined).filter((one) => one.parentThreadId === thread.id);
   }
 
-  private write(thread: ThreadSummary, target: Project, cwd: string, branch: string | null, stopBackground: boolean, by: 'user' | 'agent', branchNamingPending: boolean): ThreadSummary {
+  #write(thread: ThreadSummary, target: Project, cwd: string, branch: string | null, stopBackground: boolean, by: 'user' | 'agent', branchNamingPending: boolean): ThreadSummary {
     // The journal refuses each moved row in a checkout being removed; asked once up front too,
     // since the loop releases agents and leaves notes before each row it writes.
-    this.core.worktrees.reservations.assertFree(cwd, 'a moved conversation', { threadId: thread.id });
-    const source = this.core.journal.getProject(thread.projectId ?? '');
+    this.#core.worktrees.reservations.assertFree(cwd, 'a moved conversation', { threadId: thread.id });
+    const source = this.#core.journal.getProject(thread.projectId ?? '');
     const from: MoveEnd = { projectId: thread.projectId ?? '', name: source?.name ?? thread.projectId ?? '', cwd: thread.cwd };
     const to: MoveEnd = { projectId: target.id, name: target.name, cwd };
-    const children = this.children(thread);
+    const children = this.#children(thread);
     // Whatever waited is done or overtaken: the row loses its "Moves to" line.
-    this.waiting.delete(thread.id);
+    this.#waiting.delete(thread.id);
     let saved: ThreadSummary | null = null;
     for (const one of [thread, ...children]) {
       // The warm process goes now unless it holds background work the user
@@ -282,21 +285,21 @@ export class ThreadMove {
         this.threads.releaseAgent(one.id);
         if (holding) this.threads.agentState.noteBackground(one.id, []);
       }
-      const next = this.moved(one, target.id, cwd, branch);
+      const next = this.#moved(one, target.id, cwd, branch);
       next.branchNamingPending = branchNamingPending;
-      if (by === 'user') this.noteMove(one.id, { ...from, cwd: one.cwd }, to, branch);
+      if (by === 'user') this.#noteMove(one.id, { ...from, cwd: one.cwd }, to, branch);
       // The agent asked and knows where it goes: nothing waits for its next message.
-      else this.core.journal.deleteSetting(`${MOVE_NOTE_PREFIX}${one.id}`);
-      const summary = saveThread(this.core, next, 'thread.moved');
-      this.followQueued(next);
+      else this.#core.journal.deleteSetting(`${MOVE_NOTE_PREFIX}${one.id}`);
+      const summary = saveThread(this.#core, next, 'thread.moved');
+      this.#followQueued(next);
       if (one.id === thread.id) saved = summary;
     }
     if (by === 'agent') {
       const notice: MoveNotice = { from, to, note: agentMoveNote(from, to, branch), at: Date.now(), by: 'agent' };
-      this.systemMessage(thread.id, { type: 'text', text: '', moved: notice });
+      this.#systemMessage(thread.id, { type: 'text', text: '', moved: notice });
     }
     // A thread moved into a project put away says the project is in use again.
-    if (target.archived === true) this.core.projects.archive(target.id, false);
+    if (target.archived === true) this.#core.projects.archive(target.id, false);
     return saved ?? this.threads.require(thread.id);
   }
 
@@ -304,22 +307,22 @@ export class ThreadMove {
    * A turn queued before the move took the session it would resume from the
    * thread; it runs in the new folder, so it takes the moved thread's session.
    */
-  private followQueued(thread: ThreadSummary): void {
-    for (const turn of this.core.journal.listTurns(thread.id)) {
+  #followQueued(thread: ThreadSummary): void {
+    for (const turn of this.#core.journal.listTurns(thread.id)) {
       if (turn.status !== 'queued' || turn.execution === undefined) continue;
       const { sessionResumeAt: _dropped, ...execution } = turn.execution;
       const next = { ...turn, execution: { ...execution, sessionId: thread.sessionId, sessionGeneration: thread.sessionGeneration ?? 0 } };
-      this.core.journal.append({ type: 'turn.moved', threadId: thread.id, version: 1, payload: next }, () => this.core.journal.putTurn(next));
+      this.#core.journal.append({ type: 'turn.moved', threadId: thread.id, version: 1, payload: next }, () => this.#core.journal.putTurn(next));
     }
   }
 
   /** A line of the timeline from the core, on the thread's last turn. */
-  private systemMessage(threadId: ThreadId, part: Message['parts'][number]): void {
-    const turnId = this.core.journal.lastTurn(threadId)?.id ?? newId('trn_');
+  #systemMessage(threadId: ThreadId, part: Message['parts'][number]): void {
+    const turnId = this.#core.journal.lastTurn(threadId)?.id ?? newId('trn_');
     const message: Message = { id: newId('msg_'), threadId, turnId, role: 'system', parts: [part], state: 'complete', createdAt: Date.now() };
-    this.core.journal.append({ type: 'thread.moved.note', threadId, version: 1, payload: message }, () => this.core.journal.putMessage(message));
-    this.core.bus.emit('message.started', message);
-    this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
+    this.#core.journal.append({ type: 'thread.moved.note', threadId, version: 1, payload: message }, () => this.#core.journal.putMessage(message));
+    this.#core.bus.emit('message.started', message);
+    this.#core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
   }
 
   /**
@@ -328,10 +331,10 @@ export class ThreadMove {
    * history, as after an account switch. The warm process is keyed by folder
    * in every driver, so the next turn never reuses one started in the old one.
    */
-  private moved(thread: ThreadSummary, projectId: ProjectId, cwd: string, branch: string | null): ThreadSummary {
+  #moved(thread: ThreadSummary, projectId: ProjectId, cwd: string, branch: string | null): ThreadSummary {
     let protocol: Protocol | null = null;
     try {
-      protocol = this.core.providers.require(thread.providerId).protocol;
+      protocol = this.#core.providers.require(thread.providerId).protocol;
     } catch {
       protocol = null;
     }
@@ -356,15 +359,15 @@ export class ThreadMove {
    * message does not lose it. Several moves keep the first origin; a thread
    * back in the folder it started from has nothing to explain.
    */
-  private noteMove(threadId: ThreadId, from: MoveEnd, to: MoveEnd, branch: string | null): void {
+  #noteMove(threadId: ThreadId, from: MoveEnd, to: MoveEnd, branch: string | null): void {
     const key = `${MOVE_NOTE_PREFIX}${threadId}`;
-    const earlier = this.core.journal.getSetting(key) as MoveNotice | undefined;
+    const earlier = this.#core.journal.getSetting(key) as MoveNotice | undefined;
     const origin = earlier?.from ?? from;
     if (origin.cwd === to.cwd) {
-      this.core.journal.deleteSetting(key);
+      this.#core.journal.deleteSetting(key);
       return;
     }
     const notice: MoveNotice = { from: origin, to, note: moveNote(origin, to, branch), at: Date.now() };
-    this.core.journal.setSetting(key, notice);
+    this.#core.journal.setSetting(key, notice);
   }
 }

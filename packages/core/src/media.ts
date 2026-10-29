@@ -79,15 +79,18 @@ export async function makePreview(data: string): Promise<string | null> {
  * queued.
  */
 export class MediaPreviews {
-  private readonly waiting = new Map<string, Job>();
+  readonly #waiting = new Map<string, Job>();
   private readonly running = new Map<string, Job>();
-  private queuedChars = 0;
+  #queuedChars = 0;
   /** WebP copies being made, one promise per picture however many clients ask. */
-  private readonly displays = new Map<string, Promise<{ data: Uint8Array; kept: boolean }>>();
-  private displaying = 0;
-  private readonly displayTurns: (() => void)[] = [];
+  readonly #displays = new Map<string, Promise<{ data: Uint8Array; kept: boolean }>>();
+  #displaying = 0;
+  readonly #displayTurns: (() => void)[] = [];
 
-  constructor(private readonly core: Core) {}
+  readonly #core: Core;
+
+  constructor(core: Core) {
+    this.#core = core;}
 
   /** What a projection of `threadId`'s messages asks for each deferred picture. */
   lookup(threadId: string): ImagePreviews {
@@ -95,10 +98,10 @@ export class MediaPreviews {
     return (messageId, partIndex, data) => {
       if (known?.messageId !== messageId) {
         try {
-          known = { messageId, parts: mediaPreviews(this.core.journal.db, messageId) };
+          known = { messageId, parts: mediaPreviews(this.#core.journal.db, messageId) };
         } catch (error) {
           // A page goes out without its blurs rather than not at all.
-          this.core.log('warn', `media previews of message ${messageId} could not be read: ${messageOf(error)}`);
+          this.#core.log('warn', `media previews of message ${messageId} could not be read: ${messageOf(error)}`);
           return null;
         }
       }
@@ -121,26 +124,26 @@ export class MediaPreviews {
     const kept = this.kept(threadId, messageId, partIndex, size);
     if (kept !== null) return { data: kept, kept: true };
     const key = `${messageId}\0${partIndex}\0${size}`;
-    let made = this.displays.get(key);
+    let made = this.#displays.get(key);
     if (made === undefined) {
       const sourceBytes = typeof source === 'string' ? source.length * 3 / 4 : source.length;
-      made = this.displayTurn(() => makeDisplay(source, size)).then(copy => {
+      made = this.#displayTurn(() => makeDisplay(source, size)).then(copy => {
         // The source wins when it is already as light: a small PNG icon, a WebP sent as one.
         const light = copy !== null && copy.length < sourceBytes ? copy : new Uint8Array(0);
         let kept = false;
         try {
-          if (!this.core.journal.isClosed()) {
-            putMediaDisplay(this.core.journal.db, threadId, messageId, slotOf(partIndex, size), light);
+          if (!this.#core.journal.isClosed()) {
+            putMediaDisplay(this.#core.journal.db, threadId, messageId, slotOf(partIndex, size), light);
             // Nothing is written for a message that left its thread meanwhile.
-            kept = this.core.journal.db.query('SELECT 1 FROM media_displays WHERE message_id = ? AND part_index = ? AND thread_id = ?')
+            kept = this.#core.journal.db.query('SELECT 1 FROM media_displays WHERE message_id = ? AND part_index = ? AND thread_id = ?')
               .get(messageId, slotOf(partIndex, size), threadId) !== null;
           }
         } catch (error) {
-          this.core.log('warn', `${size} copy of message ${messageId} part ${partIndex} was not kept: ${messageOf(error)}`);
+          this.#core.log('warn', `${size} copy of message ${messageId} part ${partIndex} was not kept: ${messageOf(error)}`);
         }
         return { data: light, kept };
-      }).finally(() => this.displays.delete(key));
-      this.displays.set(key, made);
+      }).finally(() => this.#displays.delete(key));
+      this.#displays.set(key, made);
     }
     return await made;
   }
@@ -152,49 +155,49 @@ export class MediaPreviews {
    */
   kept(threadId: string, messageId: string, partIndex: number, size: DisplaySize): Uint8Array | null {
     try {
-      return mediaDisplay(this.core.journal.db, threadId, messageId, slotOf(partIndex, size));
+      return mediaDisplay(this.#core.journal.db, threadId, messageId, slotOf(partIndex, size));
     } catch (error) {
-      this.core.log('warn', `${size} copy of message ${messageId} part ${partIndex} could not be read: ${messageOf(error)}`);
+      this.#core.log('warn', `${size} copy of message ${messageId} part ${partIndex} could not be read: ${messageOf(error)}`);
       return null;
     }
   }
 
   /** Runs `work` once fewer than `DISPLAY_CONCURRENCY` copies are being made. */
-  private async displayTurn<T>(work: () => Promise<T>): Promise<T> {
-    if (this.displaying >= DISPLAY_CONCURRENCY) await new Promise<void>(resolve => this.displayTurns.push(resolve));
-    this.displaying += 1;
+  async #displayTurn<T>(work: () => Promise<T>): Promise<T> {
+    if (this.#displaying >= DISPLAY_CONCURRENCY) await new Promise<void>(resolve => this.#displayTurns.push(resolve));
+    this.#displaying += 1;
     try {
       return await work();
     } finally {
-      this.displaying -= 1;
-      this.displayTurns.shift()?.();
+      this.#displaying -= 1;
+      this.#displayTurns.shift()?.();
     }
   }
 
   /** Queue a missing blur; a full queue leaves it for a later read. */
   private enqueue(threadId: string, messageId: string, partIndex: number, data: string): void {
     const key = `${messageId}\0${partIndex}`;
-    const existing = this.waiting.get(key) ?? this.running.get(key);
+    const existing = this.#waiting.get(key) ?? this.running.get(key);
     if (existing !== undefined) return;
-    if (this.queuedChars + data.length > PREVIEW_QUEUE_CHARS && this.waiting.size + this.running.size > 0) return;
-    this.queuedChars += data.length;
-    this.waiting.set(key, { threadId, messageId, partIndex, data });
-    this.pump();
+    if (this.#queuedChars + data.length > PREVIEW_QUEUE_CHARS && this.#waiting.size + this.running.size > 0) return;
+    this.#queuedChars += data.length;
+    this.#waiting.set(key, { threadId, messageId, partIndex, data });
+    this.#pump();
   }
 
-  private pump(): void {
-    while (this.running.size < PREVIEW_CONCURRENCY && this.waiting.size > 0) {
-      const [key, job] = this.waiting.entries().next().value as [string, Job];
-      this.waiting.delete(key);
+  #pump(): void {
+    while (this.running.size < PREVIEW_CONCURRENCY && this.#waiting.size > 0) {
+      const [key, job] = this.#waiting.entries().next().value as [string, Job];
+      this.#waiting.delete(key);
       this.running.set(key, job);
       void makePreview(job.data).then(preview => {
-        if (!this.core.journal.isClosed()) putMediaPreview(this.core.journal.db, job.threadId, job.messageId, job.partIndex, preview);
+        if (!this.#core.journal.isClosed()) putMediaPreview(this.#core.journal.db, job.threadId, job.messageId, job.partIndex, preview);
       }).catch((error: unknown) => {
-        this.core.log('warn', `media preview for ${job.messageId} part ${job.partIndex} failed: ${messageOf(error)}`);
+        this.#core.log('warn', `media preview for ${job.messageId} part ${job.partIndex} failed: ${messageOf(error)}`);
       }).finally(() => {
         this.running.delete(key);
-        this.queuedChars -= job.data.length;
-        this.pump();
+        this.#queuedChars -= job.data.length;
+        this.#pump();
       });
     }
   }

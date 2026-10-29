@@ -343,128 +343,131 @@ const CHANGE_WAIT_MS = 20;
  * With PrintWindow, each `next` is a fresh PrintWindow.
  */
 class Frames implements WindowFrames {
-  private readonly hwnd: bigint;
-  private capture: Capture | null = null;
-  private held: Pointer | null = null;
-  private read = false;
-  private last: WindowPixels | null = null;
-  private mode: 'wgc' | 'printwindow' = 'wgc';
-  private wgcFailure = '';
-  private pump: ReturnType<typeof setInterval> | null = null;
-  private closed = false;
-  private queue: Promise<unknown> = Promise.resolve();
+  readonly #hwnd: bigint;
+  #capture: Capture | null = null;
+  #held: Pointer | null = null;
+  #read = false;
+  #last: WindowPixels | null = null;
+  #mode: 'wgc' | 'printwindow' = 'wgc';
+  #wgcFailure = '';
+  #pump: ReturnType<typeof setInterval> | null = null;
+  #closed = false;
+  #queue: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly id: string) {
+  readonly #id: string;
+
+  constructor(id: string) {
+    this.#id = id;
     // A bad id becomes window 0, which `next` reports as gone.
-    this.hwnd = parseWindowId(id);
+    this.#hwnd = parseWindowId(id);
   }
 
   next(): Promise<WindowPixels> {
-    const run = this.queue.then(() => this.step());
-    this.queue = run.catch(() => undefined);
+    const run = this.#queue.then(() => this.#step());
+    this.#queue = run.catch(() => undefined);
     return run;
   }
 
   close(): void {
-    if (this.closed) return;
-    this.closed = true;
-    this.stopWgc();
+    if (this.#closed) return;
+    this.#closed = true;
+    this.#stopWgc();
   }
 
-  private async step(): Promise<WindowPixels> {
-    if (this.closed) throw new WindowCaptureError('failed', 'the frames of this window were closed');
-    checkWindow(this.id, this.hwnd);
-    if (this.mode === 'wgc') {
+  async #step(): Promise<WindowPixels> {
+    if (this.#closed) throw new WindowCaptureError('failed', 'the frames of this window were closed');
+    checkWindow(this.#id, this.#hwnd);
+    if (this.#mode === 'wgc') {
       try {
-        const picture = await this.wgcStep();
+        const picture = await this.#wgcStep();
         if (picture !== null) return picture;
       } catch (error) {
         if (isCaptureError(error)) throw error;
         forgetDevice(error);
-        this.wgcFailure = message(error);
-        this.stopWgc();
-        this.mode = 'printwindow';
+        this.#wgcFailure = message(error);
+        this.#stopWgc();
+        this.#mode = 'printwindow';
       }
     }
-    if (this.closed) throw new WindowCaptureError('failed', 'the frames of this window were closed');
-    checkWindow(this.id, this.hwnd);
+    if (this.#closed) throw new WindowCaptureError('failed', 'the frames of this window were closed');
+    checkWindow(this.#id, this.#hwnd);
     try {
-      this.last = printWindowPicture(this.hwnd);
-      return this.last;
+      this.#last = printWindowPicture(this.#hwnd);
+      return this.#last;
     } catch (error) {
-      checkWindow(this.id, this.hwnd);
-      const wgc = this.wgcFailure === '' ? '' : `WGC: ${this.wgcFailure}; `;
-      throw new WindowCaptureError('failed', `capture of window ${this.id} failed: ${wgc}${message(error)}`);
+      checkWindow(this.#id, this.#hwnd);
+      const wgc = this.#wgcFailure === '' ? '' : `WGC: ${this.#wgcFailure}; `;
+      throw new WindowCaptureError('failed', `capture of window ${this.#id} failed: ${wgc}${message(error)}`);
     }
   }
 
   /** The newest picture from WGC, or null when this window should go to PrintWindow instead. */
-  private async wgcStep(): Promise<WindowPixels | null> {
-    if (this.capture === null) {
-      this.capture = new Capture(this.hwnd, 2);
-      this.pump = setInterval(() => {
-        try { this.drain(); } catch { /* the next `next` meets the same failure and reports it */ }
+  async #wgcStep(): Promise<WindowPixels | null> {
+    if (this.#capture === null) {
+      this.#capture = new Capture(this.#hwnd, 2);
+      this.#pump = setInterval(() => {
+        try { this.#drain(); } catch { /* the next `next` meets the same failure and reports it */ }
       }, PUMP_MS);
-      this.pump.unref?.();
+      this.#pump.unref?.();
     }
-    const wait = this.last === null ? FIRST_FRAME_MS : CHANGE_WAIT_MS;
+    const wait = this.#last === null ? FIRST_FRAME_MS : CHANGE_WAIT_MS;
     const deadline = performance.now() + wait;
-    this.drain();
-    while ((this.held === null || this.read) && performance.now() < deadline) {
+    this.#drain();
+    while ((this.#held === null || this.#read) && performance.now() < deadline) {
       await Bun.sleep(POLL_MS);
-      if (this.closed || this.capture === null) throw new WindowCaptureError('failed', 'the frames of this window were closed');
-      this.drain();
+      if (this.#closed || this.#capture === null) throw new WindowCaptureError('failed', 'the frames of this window were closed');
+      this.#drain();
     }
-    if (this.held === null || this.read) {
-      if (this.last !== null) return this.last;
-      checkWindow(this.id, this.hwnd);
+    if (this.#held === null || this.#read) {
+      if (this.#last !== null) return this.#last;
+      checkWindow(this.#id, this.#hwnd);
       throw new Error(`no frame within ${FIRST_FRAME_MS} ms`);
     }
-    const first = this.last === null;
-    const { pixels: picture, content } = framePixels(this.held);
-    this.read = true;
-    if (content.width > 0 && content.height > 0 && (content.width !== this.capture.width || content.height !== this.capture.height)) {
-      this.releaseHeld();
-      this.capture.resize(content.width, content.height);
+    const first = this.#last === null;
+    const { pixels: picture, content } = framePixels(this.#held);
+    this.#read = true;
+    if (content.width > 0 && content.height > 0 && (content.width !== this.#capture.width || content.height !== this.#capture.height)) {
+      this.#releaseHeld();
+      this.#capture.resize(content.width, content.height);
     }
     if (first && isBlank(picture)) {
       // A window WGC sees black (exclusive fullscreen, protected content) may print.
       try {
-        const printed = printWindowPicture(this.hwnd);
+        const printed = printWindowPicture(this.#hwnd);
         if (!isBlank(printed)) {
-          this.stopWgc();
-          this.mode = 'printwindow';
-          this.last = printed;
+          this.#stopWgc();
+          this.#mode = 'printwindow';
+          this.#last = printed;
           return printed;
         }
       } catch { /* the black picture is the answer; the service reports it */ }
     }
-    this.last = picture;
+    this.#last = picture;
     return picture;
   }
 
   /** Keeps only the newest frame in hand, closing the ones it replaces. */
-  private drain(): void {
-    if (this.capture === null) return;
-    for (let frame = this.capture.nextFrame(); frame !== null; frame = this.capture.nextFrame()) {
-      this.releaseHeld();
-      this.held = frame;
-      this.read = false;
+  #drain(): void {
+    if (this.#capture === null) return;
+    for (let frame = this.#capture.nextFrame(); frame !== null; frame = this.#capture.nextFrame()) {
+      this.#releaseHeld();
+      this.#held = frame;
+      this.#read = false;
     }
   }
 
-  private releaseHeld(): void {
-    const frame = this.held;
-    this.held = null;
+  #releaseHeld(): void {
+    const frame = this.#held;
+    this.#held = null;
     if (frame !== null) closeAndRelease(frame);
   }
 
-  private stopWgc(): void {
-    if (this.pump !== null) clearInterval(this.pump);
-    this.pump = null;
-    try { this.releaseHeld(); } catch { /* the session is closed below either way */ }
-    const capture = this.capture;
-    this.capture = null;
+  #stopWgc(): void {
+    if (this.#pump !== null) clearInterval(this.#pump);
+    this.#pump = null;
+    try { this.#releaseHeld(); } catch { /* the session is closed below either way */ }
+    const capture = this.#capture;
+    this.#capture = null;
     try { capture?.close(); } catch { /* nothing left to release it with */ }
   }
 }

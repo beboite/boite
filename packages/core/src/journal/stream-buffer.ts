@@ -62,83 +62,90 @@ interface OpenMessage {
  * selected rows without writing.
  */
 export class StreamBuffer {
-  private readonly deltas = new Map<string, PendingDelta>();
-  private deltaTimer: ReturnType<typeof setTimeout> | null = null;
+  readonly #deltas = new Map<string, PendingDelta>();
+  #deltaTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly open = new Map<string, OpenMessage>();
-  private persistTimer: ReturnType<typeof setTimeout> | null = null;
-  private persistDelay = PERSIST_MS;
+  #persistTimer: ReturnType<typeof setTimeout> | null = null;
+  #persistDelay = PERSIST_MS;
+
+  readonly #db: Database;
+  readonly #journal: Pick<Journal, 'isClosed' | 'markNativeAgents'>;
+  readonly #onError: (message: string) => void;
 
   constructor(
-    private readonly db: Database,
-    private readonly journal: Pick<Journal, 'isClosed' | 'markNativeAgents'>,
-    private readonly onError: (message: string) => void,
-  ) {}
+    db: Database,
+    journal: Pick<Journal, 'isClosed' | 'markNativeAgents'>,
+    onError: (message: string) => void,
+  ) {
+    this.#db = db;
+    this.#journal = journal;
+    this.#onError = onError;}
 
   appendDelta(threadId: string, messageId: string, partIndex: number, text: string): void {
     const key = `${messageId}|${partIndex}`;
-    const current = this.deltas.get(key);
+    const current = this.#deltas.get(key);
     if (current) current.text += text;
-    else this.deltas.set(key, { threadId, messageId, partIndex, text });
-    this.armDeltaTimer();
+    else this.#deltas.set(key, { threadId, messageId, partIndex, text });
+    this.#armDeltaTimer();
   }
 
   flushDeltas(): void {
-    if (this.deltaTimer !== null) {
-      clearTimeout(this.deltaTimer);
-      this.deltaTimer = null;
+    if (this.#deltaTimer !== null) {
+      clearTimeout(this.#deltaTimer);
+      this.#deltaTimer = null;
     }
-    if (this.deltas.size === 0 || this.journal.isClosed()) return;
-    const items = [...this.deltas.values()];
-    this.deltas.clear();
+    if (this.#deltas.size === 0 || this.#journal.isClosed()) return;
+    const items = [...this.#deltas.values()];
+    this.#deltas.clear();
     const stored: PendingDelta[] = [];
     for (const item of items) {
-      if (this.open.has(item.messageId)) this.appendToPart(item.messageId, item.partIndex, item.text);
+      if (this.open.has(item.messageId)) this.#appendToPart(item.messageId, item.partIndex, item.text);
       else stored.push(item);
     }
     if (stored.length === 0) return;
     try {
-      this.db.transaction(() => {
-        for (const item of stored) this.appendToPart(item.messageId, item.partIndex, item.text);
+      this.#db.transaction(() => {
+        for (const item of stored) this.#appendToPart(item.messageId, item.partIndex, item.text);
       })();
     } catch (error) {
-      this.requeue(stored);
+      this.#requeue(stored);
       throw error;
     }
   }
 
   persistMessages(): void {
-    if (this.persistTimer !== null) {
-      clearTimeout(this.persistTimer);
-      this.persistTimer = null;
+    if (this.#persistTimer !== null) {
+      clearTimeout(this.#persistTimer);
+      this.#persistTimer = null;
     }
-    if (this.journal.isClosed()) return;
+    if (this.#journal.isClosed()) return;
     const dirty = [...this.open.values()].filter((entry) => entry.dirty);
     if (dirty.length === 0) return;
     // Under a caller's transaction the write below is only a savepoint, which
     // that caller can still roll back: the parts are written but stay dirty,
     // and the timer writes them again on their own.
-    const nested = this.db.inTransaction;
+    const nested = this.#db.inTransaction;
     const started = performance.now();
     const now = Date.now();
     const written: [OpenMessage, (string | undefined)[], boolean][] = [];
-    this.db.transaction(() => {
+    this.#db.transaction(() => {
       for (const entry of dirty) {
         if (now - entry.rowAt >= ROW_WRITE_MS) {
-          written.push([entry, this.writeRow(entry), true]);
+          written.push([entry, this.#writeRow(entry), true]);
           continue;
         }
         const json = [...entry.json];
         const { id, threadId } = entry.message;
         entry.message.parts.forEach((part, index) => {
           if (json[index] !== undefined) return;
-          json[index] = storePart(this.db, entry.message, index, part);
-          runWrite(this.db, UPSERT_SIDE, id, index, threadId, json[index]);
+          json[index] = storePart(this.#db, entry.message, index, part);
+          runWrite(this.#db, UPSERT_SIDE, id, index, threadId, json[index]);
         });
         written.push([entry, json, false]);
       }
     })();
     if (nested) {
-      this.armPersistTimer();
+      this.#armPersistTimer();
       return;
     }
     // Clean only once committed: a rolled-back write stays dirty for the next try.
@@ -149,7 +156,7 @@ export class StreamBuffer {
       if (whole) entry.rowAt = now;
     }
     const elapsed = performance.now() - started;
-    this.persistDelay = Math.min(PERSIST_MAX_MS, Math.max(PERSIST_MS, Math.round(elapsed * PERSIST_SHARE)));
+    this.#persistDelay = Math.min(PERSIST_MAX_MS, Math.max(PERSIST_MS, Math.round(elapsed * PERSIST_SHARE)));
   }
 
   releaseTurn(turnId: string): void {
@@ -158,7 +165,7 @@ export class StreamBuffer {
       if (entry.message.turnId !== turnId) continue;
       // Written whatever the flag says: it can be clean after a write a caller's
       // transaction rolled back, and the memory copy is dropped right after.
-      this.writeParts(entry);
+      this.#writeParts(entry);
       this.open.delete(id);
     }
   }
@@ -169,8 +176,8 @@ export class StreamBuffer {
    * any other state lets it go. Its old `streaming_parts` rows go.
    */
   track(message: Message): string {
-    this.db.query('DELETE FROM streaming_parts WHERE message_id = ?').run(message.id);
-    const json = storeParts(this.db, message);
+    this.#db.query('DELETE FROM streaming_parts WHERE message_id = ?').run(message.id);
+    const json = storeParts(this.#db, message);
     if (message.state === 'streaming') this.open.set(message.id, { message: { ...message, parts: [...message.parts] }, dirty: false, json, side: false, rowAt: Date.now() });
     else this.open.delete(message.id);
     return `[${json.join(',')}]`;
@@ -183,7 +190,7 @@ export class StreamBuffer {
   writeRows(threadIds?: Set<string>): void {
     for (const entry of this.open.values()) {
       if (threadIds !== undefined && !threadIds.has(entry.message.threadId)) continue;
-      if (entry.dirty || entry.side) this.writeParts(entry);
+      if (entry.dirty || entry.side) this.#writeParts(entry);
     }
   }
 
@@ -217,35 +224,35 @@ export class StreamBuffer {
       padInPlace(open.message.parts, partIndex);
       open.message.parts[partIndex] = part;
       open.json[partIndex] = undefined;
-      if (isNativeAgentPart(part)) this.journal.markNativeAgents(messageId, open.message.threadId);
-      this.markDirty(open);
+      if (isNativeAgentPart(part)) this.#journal.markNativeAgents(messageId, open.message.threadId);
+      this.#markDirty(open);
       return;
     }
-    const row = this.db.query('SELECT thread_id AS threadId FROM messages WHERE id = ?').get(messageId) as { threadId: string } | null;
+    const row = this.#db.query('SELECT thread_id AS threadId FROM messages WHERE id = ?').get(messageId) as { threadId: string } | null;
     if (row === null) return;
-    if (isNativeAgentPart(part)) this.journal.markNativeAgents(messageId, row.threadId);
-    this.rewritePart(messageId, partIndex, () => part);
+    if (isNativeAgentPart(part)) this.#journal.markNativeAgents(messageId, row.threadId);
+    this.#rewritePart(messageId, partIndex, () => part);
   }
 
   setMessageState(messageId: string, state: Message['state']): void {
     const open = this.open.get(messageId);
     // Written whatever the flag says when the memory copy goes: a clean flag can
     // follow a write that a caller's transaction rolled back.
-    if (open !== undefined && (open.dirty || state !== 'streaming')) this.writeParts(open);
+    if (open !== undefined && (open.dirty || state !== 'streaming')) this.#writeParts(open);
     if (state !== 'streaming') this.open.delete(messageId);
-    this.db.query('UPDATE messages SET state = ? WHERE id = ?').run(state, messageId);
+    this.#db.query('UPDATE messages SET state = ? WHERE id = ?').run(state, messageId);
   }
 
-  private appendToPart(messageId: string, partIndex: number, text: string): void {
+  #appendToPart(messageId: string, partIndex: number, text: string): void {
     const open = this.open.get(messageId);
     if (open !== undefined) {
       padInPlace(open.message.parts, partIndex);
       appendText(open.message.parts, partIndex, text);
       open.json[partIndex] = undefined;
-      this.markDirty(open);
+      this.#markDirty(open);
       return;
     }
-    this.rewritePart(messageId, partIndex, current => {
+    this.#rewritePart(messageId, partIndex, current => {
       const parts = [current ?? { type: 'text' as const, text: '' }];
       appendText(parts, 0, text);
       return parts[0]!;
@@ -257,67 +264,67 @@ export class StreamBuffer {
    * parts keep their stored JSON as it is, large values stay in `part_blobs`,
    * and only the changed part's values are read and written.
    */
-  private rewritePart(messageId: string, partIndex: number, change: (part: MessagePart | undefined) => MessagePart): void {
+  #rewritePart(messageId: string, partIndex: number, change: (part: MessagePart | undefined) => MessagePart): void {
     // Parts a message left in `streaming_parts` belong to its row first.
-    foldStreamingParts(this.db, messageId);
-    const row = this.db.query('SELECT thread_id AS threadId, parts FROM messages WHERE id = ?').get(messageId) as { threadId: string; parts: string } | null;
+    foldStreamingParts(this.#db, messageId);
+    const row = this.#db.query('SELECT thread_id AS threadId, parts FROM messages WHERE id = ?').get(messageId) as { threadId: string; parts: string } | null;
     if (row === null) return;
     const stored = JSON.parse(row.parts) as MessagePart[];
-    const current = stored[partIndex] == null ? undefined : hydratePart(this.db, messageId, partIndex, stored[partIndex]);
+    const current = stored[partIndex] == null ? undefined : hydratePart(this.#db, messageId, partIndex, stored[partIndex]);
     const next = change(current);
     // An unchanged part leaves the row and its blobs as they are.
     if (current !== undefined && samePart(current, next)) return;
     padInPlace(stored, partIndex);
     const texts = stored.map(part => JSON.stringify(part ?? null));
-    texts[partIndex] = storePart(this.db, { id: messageId, threadId: row.threadId }, partIndex, next);
-    runWrite(this.db, 'UPDATE messages SET parts = ? WHERE id = ?', `[${texts.join(',')}]`, messageId);
+    texts[partIndex] = storePart(this.#db, { id: messageId, threadId: row.threadId }, partIndex, next);
+    runWrite(this.#db, 'UPDATE messages SET parts = ? WHERE id = ?', `[${texts.join(',')}]`, messageId);
   }
 
   /** Every part's stored JSON: the committed one when unchanged, else stored now. */
-  private stored(entry: OpenMessage): string[] {
-    return entry.message.parts.map((part, index) => entry.json[index] ?? storePart(this.db, entry.message, index, part));
+  #stored(entry: OpenMessage): string[] {
+    return entry.message.parts.map((part, index) => entry.json[index] ?? storePart(this.#db, entry.message, index, part));
   }
 
-  private markDirty(entry: OpenMessage): void {
+  #markDirty(entry: OpenMessage): void {
     entry.dirty = true;
-    this.armPersistTimer();
+    this.#armPersistTimer();
   }
 
-  private armPersistTimer(): void {
-    if (this.persistTimer !== null || this.journal.isClosed()) return;
-    this.persistTimer = setTimeout(() => {
-      this.persistTimer = null;
+  #armPersistTimer(): void {
+    if (this.#persistTimer !== null || this.#journal.isClosed()) return;
+    this.#persistTimer = setTimeout(() => {
+      this.#persistTimer = null;
       try {
         this.persistMessages();
       } catch (error) {
         // A quiet stream must retry too; failed writes retain their dirty parts.
-        this.onError(`journal message write: ${messageOfError(error)}`);
+        this.#onError(`journal message write: ${messageOfError(error)}`);
         if ([...this.open.values()].some((entry) => entry.dirty)) {
-          this.persistDelay = Math.min(PERSIST_MAX_MS, this.persistDelay * 2);
-          this.armPersistTimer();
+          this.#persistDelay = Math.min(PERSIST_MAX_MS, this.#persistDelay * 2);
+          this.#armPersistTimer();
         }
       }
-    }, this.persistDelay);
-    this.persistTimer.unref?.();
+    }, this.#persistDelay);
+    this.#persistTimer.unref?.();
   }
 
   /**
    * Writes the whole row and drops its `streaming_parts` rows, together: a
    * side row left beside a newer row would be folded over it at startup.
    */
-  private writeRow(entry: OpenMessage): string[] {
-    const parts = this.stored(entry);
-    this.db.transaction(() => {
-      runWrite(this.db, 'UPDATE messages SET parts = ? WHERE id = ?', `[${parts.join(',')}]`, entry.message.id);
-      this.db.query('DELETE FROM streaming_parts WHERE message_id = ?').run(entry.message.id);
+  #writeRow(entry: OpenMessage): string[] {
+    const parts = this.#stored(entry);
+    this.#db.transaction(() => {
+      runWrite(this.#db, 'UPDATE messages SET parts = ? WHERE id = ?', `[${parts.join(',')}]`, entry.message.id);
+      this.#db.query('DELETE FROM streaming_parts WHERE message_id = ?').run(entry.message.id);
     })();
     return parts;
   }
 
-  private writeParts(entry: OpenMessage): void {
-    const parts = this.writeRow(entry);
+  #writeParts(entry: OpenMessage): void {
+    const parts = this.#writeRow(entry);
     // A write inside a caller's transaction is not committed yet: it stays dirty.
-    if (!this.db.inTransaction) {
+    if (!this.#db.inTransaction) {
       entry.dirty = false;
       entry.json = parts;
       entry.side = false;
@@ -325,15 +332,15 @@ export class StreamBuffer {
     }
   }
 
-  private armDeltaTimer(): void {
-    if (this.deltaTimer !== null || this.journal.isClosed()) return;
-    this.deltaTimer = setTimeout(() => {
-      this.deltaTimer = null;
+  #armDeltaTimer(): void {
+    if (this.#deltaTimer !== null || this.#journal.isClosed()) return;
+    this.#deltaTimer = setTimeout(() => {
+      this.#deltaTimer = null;
       // No caller to throw to: an error thrown from a timer ends the whole process.
       try {
         this.flushDeltas();
       } catch (error) {
-        this.onError(`journal delta flush: ${messageOfError(error)}`);
+        this.#onError(`journal delta flush: ${messageOfError(error)}`);
       }
     }, DELTA_WINDOW_MS);
   }
@@ -342,19 +349,19 @@ export class StreamBuffer {
    * Puts back the text of a failed flush, ahead of anything newer for the same
    * part. The next flush, from the next delta, event or close, tries it again.
    */
-  private requeue(items: PendingDelta[]): void {
+  #requeue(items: PendingDelta[]): void {
     for (const item of items) {
       const attempts = (item.attempts ?? 0) + 1;
       if (attempts >= DELTA_ATTEMPTS) {
-        this.onError(`journal dropped ${item.text.length} characters of message ${item.messageId} part ${item.partIndex} after ${attempts} failed writes`);
+        this.#onError(`journal dropped ${item.text.length} characters of message ${item.messageId} part ${item.partIndex} after ${attempts} failed writes`);
         continue;
       }
       const key = `${item.messageId}|${item.partIndex}`;
-      const current = this.deltas.get(key);
+      const current = this.#deltas.get(key);
       if (current) {
         current.text = item.text + current.text;
         current.attempts = attempts;
-      } else this.deltas.set(key, { ...item, attempts });
+      } else this.#deltas.set(key, { ...item, attempts });
     }
   }
 }
