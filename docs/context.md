@@ -304,6 +304,10 @@ when another conversation is open. A driver that declines it retains input
 for the next turn. Enter again in the emptied composer (not where the primary
 pointer is coarse), or Send now under the bubbles, submits it immediately without stopping the agent when the driver accepts it.
 Permissions and blocking questions hold it until answered.
+Answers to asynchronous questions and bot setting cards share the running
+turn's steering channel. Answers received while another message or memory
+notice is being delivered resume when that delivery finishes, in order. Each
+accepted answer leaves the pending queue and appears once in the transcript.
 Messages already queued go together in their original order, with their
 attachments and preview references. While that batch goes out its bubbles stay
 drawn and cannot be removed or taken back for editing; a declined attempt
