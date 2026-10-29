@@ -230,6 +230,11 @@ function autoCompactRule(value: unknown): AutoCompact | null | Refusal {
   return { tokens: tokens as number | null, moments: MOMENTS.filter(moment => moments.includes(moment)) };
 }
 
+function compactionSummaryRule(value: unknown): string | null | Refusal {
+  return value === null || typeof value === 'string' ? (typeof value === 'string' ? value.trim() || null : null)
+    : refuse('compactionSummary must be text or null');
+}
+
 function compactionByTypeRule(value: unknown): Settings['compactionByType'] | Refusal {
   const policies = record(value);
   if (policies === null) return refuse('compactionByType must be an object keyed by agent, subagent or bot');
@@ -241,7 +246,10 @@ function compactionByTypeRule(value: unknown): Settings['compactionByType'] | Re
     if (policy.autoCompact === undefined || typeof policy.backgroundCompaction !== 'boolean') return refuse(`compactionByType.${target}: expected autoCompact (a rule or null) and backgroundCompaction (a boolean)`);
     const autoCompact = autoCompactRule(policy.autoCompact);
     if (autoCompact instanceof Refusal) return refuse(`compactionByType.${target}.${autoCompact.message}`);
-    normalized[target] = { autoCompact, backgroundCompaction: policy.backgroundCompaction };
+    const summary = policy.compactionSummary === undefined ? undefined : compactionSummaryRule(policy.compactionSummary);
+    if (summary instanceof Refusal) return refuse(`compactionByType.${target}.${summary.message}`);
+    normalized[target] = { autoCompact, backgroundCompaction: policy.backgroundCompaction,
+      ...(summary === undefined ? {} : { compactionSummary: summary }) };
   }
   return normalized;
 }
@@ -324,6 +332,7 @@ const SETTING_RULES: { readonly [K in keyof Settings]-?: FieldRule<K> } = {
   },
   autoCompact: autoCompactRule,
   compactionByType: compactionByTypeRule,
+  compactionSummary: compactionSummaryRule,
   cacheKeepalive: value => {
     if (value === null) return null;
     const { hours } = (record(value) ?? {}) as Partial<CacheKeepalive>;

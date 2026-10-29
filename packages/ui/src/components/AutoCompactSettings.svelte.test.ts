@@ -125,6 +125,40 @@ test('no control moves while a save is on its way, so a second change never rebu
   expect(store.settings.autoCompact).toEqual({ tokens: null, moments: ['turn-end', 'cache-expiry'] });
 });
 
+test('a preset waits for summary instructions to save before rebuilding the type policy', async () => {
+  const store = render({ tokens: 100_000, moments: ['cache-expiry'] }, 'subagent', {
+    subagent: { autoCompact: { tokens: 200_000, moments: ['turn-end'] }, backgroundCompaction: false, compactionSummary: 'old' },
+    bot: { autoCompact: null, backgroundCompaction: true },
+  });
+  const answers: (() => void)[] = [];
+  store.saveSettings.mockImplementation((patch: Partial<Settings>) => new Promise<boolean>(resolve => {
+    answers.push(() => { store.settings = { ...store.settings, ...patch }; resolve(true); });
+  }));
+  const summary = document.querySelector<HTMLTextAreaElement>('[data-testid="compaction-summary"]')!;
+  summary.value = 'new instructions';
+  summary.dispatchEvent(new Event('input', { bubbles: true }));
+  summary.dispatchEvent(new Event('blur'));
+  await settle();
+  const switchesDisabled = ['auto-compact-on', 'auto-compact-turn-end', 'auto-compact-threshold']
+    .every(id => input(id).disabled);
+  input('auto-compact-preset-400000').click();
+  await settle();
+  const requestsBeforeAnswer = store.saveSettings.mock.calls.length;
+  answers.shift()!();
+  await settle();
+  answers.shift()!();
+  await settle();
+
+  expect(store.settings.compactionByType?.subagent).toEqual({
+    autoCompact: { tokens: 400_000, moments: ['turn-end'] }, backgroundCompaction: false, compactionSummary: 'new instructions',
+  });
+  expect(requestsBeforeAnswer).toBe(1);
+  expect(switchesDisabled).toBe(true);
+  expect(store.saveSettings).toHaveBeenCalledTimes(2);
+  expect(store.settings.autoCompact?.tokens).toBe(100_000);
+  expect(store.settings.compactionByType?.bot).toEqual({ autoCompact: null, backgroundCompaction: true });
+});
+
 test('a typed size saves after a pause or when the page leaves, without waiting for the field to lose focus', async () => {
   vi.useFakeTimers();
   try {

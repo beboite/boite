@@ -358,16 +358,16 @@ describe('automatic compaction', () => {
   test('type policies inherit live defaults, normalize complete overrides and reject malformed policies', async () => {
     const client = await h.connect();
     try {
-      const policy: CompactionPolicy = { autoCompact: { tokens: 200_000, moments: ['cache-expiry', 'turn-end', 'turn-end'] }, backgroundCompaction: true };
+      const policy: CompactionPolicy = { autoCompact: { tokens: 200_000, moments: ['cache-expiry', 'turn-end', 'turn-end'] }, backgroundCompaction: true, compactionSummary: 'Keep identifiers.' };
       const next = await client.call('settings.set', { compactionByType: { subagent: policy } });
       expect(next.compactionByType?.subagent?.autoCompact?.moments).toEqual(['turn-end', 'cache-expiry']);
-      for (const bad of [null, [], { worker: policy }, { bot: {} }, { bot: { autoCompact: null } }, { bot: { autoCompact: 'on', backgroundCompaction: false } }, { bot: { autoCompact: null, backgroundCompaction: 1 } }]) {
+      for (const bad of [null, [], { worker: policy }, { bot: {} }, { bot: { autoCompact: null } }, { bot: { autoCompact: 'on', backgroundCompaction: false } }, { bot: { autoCompact: null, backgroundCompaction: 1 } }, { bot: { ...policy, compactionSummary: 42 } }]) {
         expect(checkSettingsPatch({ compactionByType: bad } as never)).toMatchObject({ ok: false, field: 'compactionByType' });
       }
       expect(checkSettingsPatch({ compactionByType: {} })).toEqual({ ok: true, patch: { compactionByType: {} } });
       expect(followedPatch(next, { compactionByType: {} })).toEqual({ compactionByType: {} });
       expect(effectiveSetting(h.core.settings.get(), 'compactionByType')).toEqual(next.compactionByType);
-      const common = { autoCompact: { tokens: 3000, moments: [] }, backgroundCompaction: false } satisfies CompactionPolicy;
+      const common = { autoCompact: { tokens: 3000, moments: [] }, backgroundCompaction: false, compactionSummary: 'Keep decisions.' } satisfies CompactionPolicy;
       const settings = { ...common, compactionByType: next.compactionByType };
       expect(effectiveCompaction(settings, {})).toEqual(common);
       expect(effectiveCompaction(settings, { agentSessionId: 'bot' })).toEqual(common);

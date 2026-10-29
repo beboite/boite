@@ -146,6 +146,8 @@ export interface TurnContext {
   shortAnswers?: boolean;
   /** The owner's current independent token limit, read without a provider request. Null keeps native defaults. */
   autoCompactTokens?(): number | null;
+  /** Live common or target summary guidance; null keeps the native prompt. */
+  compactionSummary?(): string | null;
   emit: EmitSink;
   log(level: 'info' | 'warn' | 'error', message: string, context?: CoreLogContext): void;
   /**
@@ -227,7 +229,7 @@ export interface TurnContext {
 /** Native session setup without a prompt, a turn or a message sink. */
 export type SessionContext = Pick<TurnContext,
   'thread' | 'account' | 'provider' | 'sessionId' | 'resumeAt' | 'sessionBefore' |
-  'accountEnv' | 'systemGuide' | 'warmProcessMinutes' | 'toolSummaries' | 'shortAnswers' | 'autoCompactTokens' | 'log' | 'diagnostic' | 'authenticationFailed' | 'commands' | 'context' | 'hook' |
+  'accountEnv' | 'systemGuide' | 'warmProcessMinutes' | 'toolSummaries' | 'shortAnswers' | 'autoCompactTokens' | 'compactionSummary' | 'log' | 'diagnostic' | 'authenticationFailed' | 'commands' | 'context' | 'hook' |
   'background' | 'backgroundFinished' | 'wake' | 'spawnChild' | 'finishStartup' | 'killTree' | 'quota' | 'lazyMcp' | 'protectedExecution'>;
 
 export type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error';
