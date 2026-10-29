@@ -53,7 +53,9 @@
   }
   async function decide(row: Row, accept: boolean) {
     if (!row.letter) return;
-    failed = await row.view.decideMail(row.letter.id, accept) ? '' : row.view.error;
+    const done = await row.view.decideMail(row.letter.id, accept);
+    // The toast may show another letter by now: an answer only marks its own.
+    if (untrack(() => displayed?.key) === row.key) failed = done ? '' : row.view.error;
   }
 </script>
 

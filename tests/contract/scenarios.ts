@@ -8,6 +8,7 @@
  * text: the words may change, the refusal may not.
  */
 import { COMPOSER_SCENARIOS } from './composer.ts';
+import { CONTACT_MAIL_SCENARIOS } from './contact-mail.ts';
 import { SHARED_SCENARIOS } from './shared-projects.ts';
 import {
   GROUP_INVITE_PREFIX,
@@ -156,6 +157,7 @@ async function unavailable(env: ContractEnv): Promise<{ provider: ProviderSummar
 export const SCENARIOS: Record<string, Scenario> = {
   ...SHARED_SCENARIOS,
   ...COMPOSER_SCENARIOS,
+  ...CONTACT_MAIL_SCENARIOS,
   'policy.get reports no restrictions when no admin policy file exists': async (env) => {
     const policy = await env.call('policy.get', {});
     same([policy.present, policy.values, policy.locked, policy.problems, policy.failedClosed],
