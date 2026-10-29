@@ -54,6 +54,9 @@ export class ComposerSync {
   #refused = $state(false);
   #epoch = 0;
   #private = new Set<string>();
+  #privateEntries = new Set<string>();
+  /** A launch put with no definitive answer stays protected even if local input changes. */
+  #launching = new Set<string>();
   #client: Client | null = null;
   #listed = false;
   /** Records heard before the list answered, latest per key. */
@@ -96,18 +99,37 @@ export class ComposerSync {
     return false;
   }
 
-  /** An unsent offline queue may move, but a possibly admitted start keeps its identity. */
-  admitPrivacyChange(id: string): boolean {
+  /** Pure membership: the journal can consult privacy before the thread row arrives. */
+  privateRecord(section: Section, id: string): boolean { return this.#private.has(entryKey(section, id)); }
+
+  #launchProtected(id: string): boolean {
     const key = entryKey('drafts', id);
-    const queued = this.#source(key)?.input.queued ?? [];
-    const accepted = new Set(this.#known.get(key)?.ids ?? []);
-    if (!queued.length || (!this.#inflight.has(key) && queued.every(entry => !accepted.has(entry.id!) && !entry.request?.start && !entry.request?.sent))) return true;
+    return this.#launching.has(key) || !!this.#known.get(key)?.ids.length ||
+      !!this.#source(key)?.input.queued.some(entry => entry.request?.start || entry.request?.sent);
+  }
+
+  /** A never-submitted offline draft stays editable; a possibly admitted launch keeps its identity. */
+  admitDraftMutation(id: string): boolean {
+    if (!this.#launchProtected(id)) return true;
+    this.ctx.store.error = strings.drafts.launchQueued;
+    return false;
+  }
+
+  admitPrivacyChange(id: string): boolean {
+    if (!this.#launchProtected(id)) return true;
     this.ctx.store.error = strings.drafts.privacyQueued;
     return false;
   }
 
+  #tag(record: ComposerRecord): void {
+    if (!record.privateMode && !this.#isPrivate(record.section, record.id, record.value)) return;
+    this.#private.add(entryKey(record.section, record.id));
+    for (const entry of record.value?.input.queued ?? []) this.#privateEntries.add(entry.id);
+  }
+
   #isPrivate(section: Section, id: string, value?: ComposerValue | null): boolean {
-    if (this.#private.has(entryKey(section, id)) || value?.draft?.incognito) return true;
+    if (this.#private.has(entryKey(section, id)) || value?.draft?.incognito ||
+      value?.input.queued.some(entry => entry.request?.start?.incognito || this.#privateEntries.has(entry.id))) return true;
     const source = this.ctx.drafts.liveSource(section, id);
     if (source && this.ctx.drafts.isIncognito(source)) return true;
     const s = this.ctx.store;
@@ -141,6 +163,7 @@ export class ComposerSync {
     for (const record of this.#early.values()) this.#receive(record);
     this.#early.clear();
     this.#startup = false;
+    for (const key of this.#launching) if (!listed.has(key) && !this.#inflight.has(key)) this.#launching.delete(key);
     // What the core has never seen: this device's unsent input from before, or
     // input cleared offline. Unchanged synced records stay as the core has them.
     for (const key of [...this.#known.keys()]) {
@@ -233,7 +256,7 @@ export class ComposerSync {
     this.#startup = true;
     this.#forced.clear();
     this.#listed = false;
-    this.#early.clear(); this.#private.clear(); this.#known.clear(); this.#remoteAssets.clear(); this.#dirty.clear(); this.#inflight.clear(); this.#stashed.clear();
+    this.#early.clear(); this.#private.clear(); this.#privateEntries.clear(); this.#launching.clear(); this.#known.clear(); this.#remoteAssets.clear(); this.#dirty.clear(); this.#inflight.clear(); this.#stashed.clear();
     this.#assetIds.clear(); this.#bytes.clear(); this.#fetching.clear(); this.#byteHashes.clear(); this.#homes.clear(); this.#left.clear();
     this.#metaKey = client && this.ctx.drafts.storageKey ? `${this.ctx.drafts.storageKey}:composer` : null;
     this.#meta = { entries: {}, assets: {} };
@@ -395,7 +418,8 @@ export class ComposerSync {
   }
 
   #know(key: string, record: ComposerRecord): void {
-    if (this.#isPrivate(record.section, record.id, record.value)) this.#private.add(key);
+    this.#tag(record);
+    if (!record.value?.input.queued.length) this.#launching.delete(key);
     const prior = this.#known.get(key)?.hash;
     const known: Known = { revision: record.revision, ...this.#parts(this.#shape(this.#toLocal(record.value, this.#isPrivate(record.section, record.id, record.value)))), ...(prior ? { prior } : {}) };
     this.#known.set(key, known);
@@ -408,6 +432,7 @@ export class ComposerSync {
   // ---------------------------------------------------------------------------
 
   #receive(record: ComposerRecord): void {
+    this.#tag(record);
     const key = entryKey(record.section, record.id);
     const known = this.#known.get(key);
     // A delayed list or event never takes a newer record back.
@@ -574,7 +599,8 @@ export class ComposerSync {
     if (open && value?.draft) this.#applyDraft(value);
     const slot = section === 'inputs' ? id : 'draft';
     if (!value && !states[slot]) return;
-    const state = states[slot] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };
+    states[slot] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };
+    const state = states[slot]!;
     this.#write(state, value?.input ?? { text: '', attachments: [], previewReferences: [], queued: [], paused: false, editing: null }, this.#private.has(key));
   }
 
@@ -624,6 +650,8 @@ export class ComposerSync {
         if (value && [...value.input.attachments, ...value.input.queued.flatMap(entry => entry.attachments)].some(file => file.assetId.startsWith('local:'))) { this.#dirty.add(key); return; }
         const sent = this.#parts(value);
         const expectedRevision = this.#known.get(key)?.revision ?? 0;
+        if (section === 'drafts' && value?.input.queued.length) this.#launching.add(key);
+        if (privateMode) for (const entry of value?.input.queued ?? []) this.#privateEntries.add(entry.id);
         const result = await client.call('composer.put', { section, id, expectedRevision, value, ...(sendNow ? { sendNow: true as const } : {}) });
         if (epoch !== this.#epoch) return;
         const now = this.#localOf(this.#source(key));
@@ -653,6 +681,7 @@ export class ComposerSync {
       this.#later();
     } catch (error) {
       if (epoch !== this.#epoch) return;
+      if (error instanceof RpcFailure && [RpcErrorCode.MethodNotFound, RpcErrorCode.InvalidParams, RpcErrorCode.Refused, RpcErrorCode.NotFound].some(code => code === error.code) && !this.#known.get(key)?.ids.length) this.#launching.delete(key);
       if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) { this.#unsupported(); return; }
       const details = error instanceof RpcFailure ? error.data as { reason?: unknown; threadId?: unknown } | undefined : undefined;
       if (section === 'inputs' && error instanceof RpcFailure && error.code === RpcErrorCode.NotFound && details?.reason === 'thread-deleted' && details.threadId === id) {

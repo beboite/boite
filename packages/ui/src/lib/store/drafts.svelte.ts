@@ -351,13 +351,14 @@ export class Drafts {
   unqueue(id: string): void {
     const s = this.ctx.store;
     const input = s.draft && draftKey(s.draft) === id ? this.ctx.composer.composerStates.draft : this.saved[id]?.input;
-    if (!input || input.sending || !input.queued.length || input.queued.some(entry => entry.request?.start)) return;
+    if (!input || !this.ctx.sync.admitDraftMutation(id) || input.sending || !input.queued.length || input.queued.some(entry => entry.request?.start)) return;
     const taken = input.queued.splice(0);
     input.text = [input.text, ...taken.map(entry => entry.text)].filter(text => text.length > 0).join('\n\n');
     input.attachments = [...input.attachments, ...taken.flatMap(entry => entry.attachments)];
     const references = [...(input.previewReferences ?? []), ...taken.flatMap(entry => entry.previewReferences ?? [])];
     if (references.length) input.previewReferences = references;
     input.paused = false;
+    this.ctx.sync.queued('drafts', id);
     this.persist();
   }
 
@@ -369,13 +370,14 @@ export class Drafts {
   discard(id: string, options: { started?: boolean } = {}): void {
     const s = this.ctx.store;
     const input = s.draft && draftKey(s.draft) === id ? this.ctx.composer.composerStates.draft : this.saved[id]?.input;
-    if (!options.started && input?.sending && input.queued[0]?.request) return;
+    if (!options.started && (!this.ctx.sync.admitDraftMutation(id) || (input?.sending && input.queued[0]?.request))) return;
     delete this.saved[id];
     if (s.draft && draftKey(s.draft) === id) {
       this.ctx.composer.composerStates.draft = empty();
       const { id, createdAt } = newDraft(s.draft.projectId, s.draft.worktree);
       s.draft = { ...s.draft, id, createdAt };
     }
+    this.ctx.sync.queued('drafts', id);
     this.persist();
   }
   async flush(): Promise<boolean> {
@@ -579,6 +581,7 @@ export class Drafts {
   }
 
   #incognito(source: Source): boolean {
+    if (this.ctx.sync.privateRecord(source.section, source.id)) return true;
     if (source.section === 'drafts') return source.draft?.incognito === true;
     const s = this.ctx.store;
     return s.openThread?.id === source.id ? s.openThread.incognito === true : s.threads.some(thread => thread.id === source.id && thread.incognito);

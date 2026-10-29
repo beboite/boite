@@ -26,7 +26,7 @@ type Device = Awaited<ReturnType<typeof device>>;
  * A device on `machineId` whose client records its calls. `hold` keeps the
  * answer of its first `composer.list` until released, as a slow link would.
  */
-async function device(machineId: string, client: FakeClient, options: { hold?: Promise<void>; connect?: boolean } = {}) {
+async function device(machineId: string, client: FakeClient, options: { hold?: Promise<void>; holdPushes?: Promise<void>; connect?: boolean } = {}) {
   clients.push(client);
   const original = client.call.bind(client);
   const subscribe = client.on.bind(client);
@@ -43,7 +43,14 @@ async function device(machineId: string, client: FakeClient, options: { hold?: P
     return original(method, params);
   });
   vi.spyOn(client, 'on').mockImplementation((event, handler) => {
-    if (event === 'composer.updated') pushes.push(handler as (record: ComposerRecord) => void);
+    if (event === 'composer.updated') {
+      const receive = handler as (record: ComposerRecord) => void;
+      pushes.push(receive);
+      return subscribe('composer.updated', record => {
+        if (options.holdPushes) void options.holdPushes.then(() => receive(record));
+        else receive(record);
+      });
+    }
     return subscribe(event, handler);
   });
   const store = new Store();
@@ -838,4 +845,117 @@ test('an old core refuses queue admission before the UI clears the input', async
   expect(desk.store.composerStates['t-trace']).toMatchObject({ text: 'Keep these words', queued: [] });
   expect(desk.store.error).toMatch(/update/i);
   expect(called(desk, 'turns.start')).toHaveLength(0);
+});
+
+
+test.each(['flag', 'lineage'] as const)('private transfer before thread.created never writes metadata or journal content (%s)', async source => {
+  const desk = await device('private-order', new FakeClient({ delayMs: 0 }));
+  const writes = vi.spyOn(Storage.prototype, 'setItem');
+  const id = 'private-before-thread-created';
+  const value = { input: { text: 'Private transferred box', attachments: [{ kind: 'file' as const, mimeType: 'text/plain', name: 'secret.txt', assetId: 'private-transfer-asset' }], paused: true,
+    queued: [{ id: 'private-transfer-entry', text: 'Private transferred prompt', attachments: [], ...(source === 'lineage' ? { request: { id: 'private-start', choice: null, queuedAt: 1, start: { projectId: 'p', worktree: false, incognito: true } } } : {}) }] } };
+  desk.push({ section: 'inputs', id, revision: 1, updatedAt: 1, value, ...(source === 'flag' ? { privateMode: true as const } : {}) });
+  await desk.store.flushDrafts();
+  desk.push({ section: 'inputs', id, revision: 2, updatedAt: 2, value: null, ...(source === 'flag' ? { privateMode: true as const } : {}) });
+  await desk.store.flushDrafts();
+  for (const args of writes.mock.calls) for (const word of [id, 'private-transfer-entry', 'private-transfer-asset', 'Private transferred']) expect(JSON.stringify(args)).not.toContain(word);
+});
+
+test.each(['remove', 'restore'] as const)('a private prompt taken back with %s leaves the core queue before the next turn', async action => {
+  const desk = await device('private-mutation', new FakeClient({ delayMs: 0 }));
+  const project = await desk.client.call('projects.drafts', {});
+  const choice = desk.store.defaultChoice()!;
+  const { model, ...selection } = choice;
+  const secret = await desk.client.call('threads.create', { ...selection, projectId: project.id, ...(model ? { model } : {}), incognito: true });
+  desk.store.composerStates[secret.id] = { text: '', attachments: [], queued: [], sending: false, paused: true };
+  queue(desk.store, secret.id, 'Removed private prompt');
+  await vi.waitFor(async () => expect((await recordOf(desk.client, 'inputs', secret.id))?.value?.input.queued).toHaveLength(1));
+  if (action === 'remove') desk.store.removeQueued(secret.id, 0);
+  else expect(desk.store.restoreQueued(secret.id, 0)?.text).toBe('Removed private prompt');
+  await vi.waitFor(async () => expect((await recordOf(desk.client, 'inputs', secret.id))?.value?.input.queued ?? []).toEqual([]));
+  await desk.store.send('Next private turn', secret.id);
+  await desk.client.settled();
+  expect(await userTexts(desk.client, secret.id)).toEqual(['Next private turn']);
+});
+
+test('retrying a private failed queue explicitly sends its resumed state to the core', async () => {
+  const desk = await device('private-retry', new FakeClient({ delayMs: 0 }));
+  const project = await desk.client.call('projects.drafts', {});
+  const choice = desk.store.defaultChoice()!;
+  const { model, ...selection } = choice;
+  const secret = await desk.client.call('threads.create', { ...selection, projectId: project.id, ...(model ? { model } : {}), incognito: true });
+  await desk.client.call('composer.put', { section: 'inputs', id: secret.id, expectedRevision: 0, value: { input: { text: '', attachments: [], paused: true,
+    queued: [{ id: 'private-retry-entry', text: 'Private retry once', attachments: [], request: { id: 'private-retry-request', choice, queuedAt: 1, failed: 'Refused once' } }] } } });
+  await vi.waitFor(() => expect(desk.store.composerStates[secret.id]?.queued[0]?.request?.failed).toBe('Refused once'));
+  desk.store.retryQueued(secret.id, 0);
+  await vi.waitFor(async () => expect(await userTexts(desk.client, secret.id)).toEqual(['Private retry once']));
+  expect((await recordOf(desk.client, 'inputs', secret.id))?.value?.input.queued).toEqual([]);
+});
+
+test('a draft launch put protects cancel, remove, restore, discard and privacy before its admission answer', async () => {
+  let release!: () => void, held = false;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const desk = await device('held-admission', new FakeClient({ delayMs: 0 }), { holdPushes: gate });
+  desk.store.startDraft(null, { fresh: true });
+  const id = desk.store.draft!.id!;
+  desk.calls.mockImplementation(async (method, params) => {
+    const answer = await desk.original(method, params);
+    if (method === 'composer.put' && (params as { id?: string }).id === id && !held) { held = true; await gate; }
+    return answer;
+  });
+  try {
+    desk.store.queuePrompt('draft', { text: 'One admitted launch', attachments: [] }, { choice: desk.store.defaultChoice() });
+    await vi.waitFor(() => expect(held).toBe(true));
+    await vi.waitFor(async () => expect((await desk.original('threads.list', {})).filter(row => row.title === 'One admitted launch')).toHaveLength(1));
+    expect(desk.store.composerStates.draft!.queued[0]?.request?.start).toBeUndefined();
+    desk.store.cancelQueuedDraft(id);
+    expect(desk.store.composerStates.draft!.queued).toHaveLength(1);
+    expect(desk.store.error).toBe(strings.drafts.launchQueued);
+    desk.store.removeQueued('draft', 0);
+    expect(desk.store.composerStates.draft!.queued).toHaveLength(1);
+    expect(desk.store.restoreQueued('draft', 0)).toBeUndefined();
+    desk.store.discardDraft(id);
+    expect(desk.store.draft?.id).toBe(id);
+    desk.store.setDraftIncognito(true);
+    expect(desk.store.draft).toMatchObject({ id });
+    expect(desk.store.draft?.incognito).toBeUndefined();
+    expect(desk.store.error).toBe(strings.drafts.privacyQueued);
+  } finally { release(); }
+  await vi.waitFor(() => expect(desk.store.openThread?.title).toBe('One admitted launch'));
+  expect(desk.store.openThread?.incognito).toBeFalsy();
+  await desk.client.settled();
+  expect((await desk.client.call('threads.list', {})).filter(row => row.title === 'One admitted launch')).toHaveLength(1);
+  expect(await userTexts(desk.client, desk.store.openThread!.id)).toEqual(['One admitted launch']);
+});
+
+
+test('a private direct send refused as turn-in-flight explicitly synchronizes its held prompt', async () => {
+  const desk = await device('private-refusal', new FakeClient({ delayMs: 0 }));
+  const project = await desk.client.call('projects.drafts', {});
+  const { model, ...choice } = desk.store.defaultChoice()!;
+  const secret = await desk.client.call('threads.create', { ...choice, projectId: project.id, ...(model ? { model } : {}), incognito: true });
+  desk.store.composerStates[secret.id] = { text: '', attachments: [], queued: [], sending: false, paused: true };
+  desk.calls.mockImplementation(async (method, params) => {
+    if (method === 'turns.start') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'turn in flight',
+      data: { reason: 'turn-in-flight', threadId: secret.id, thread: { ...secret, status: 'running' } } });
+    return desk.original(method, params);
+  });
+  expect(await desk.store.send('Private refused input', secret.id)).toBe(true);
+  await vi.waitFor(async () => expect((await recordOf(desk.client, 'inputs', secret.id))?.value?.input.queued).toMatchObject([{ text: 'Private refused input' }]));
+});
+
+test.each(['cancel', 'discard'] as const)('a never-submitted private offline draft can be taken back with %s', async action => {
+  const desk = await device('private-offline-cancel', new FakeClient({ delayMs: 0 }));
+  desk.store.startDraft(null, { fresh: true }); desk.store.setDraftIncognito(true);
+  const id = desk.store.draft!.id!;
+  desk.client.drop(); await desk.client.settled();
+  desk.store.queuePrompt('draft', { text: 'Do not launch offline draft', attachments: [] }, { choice: desk.store.defaultChoice() });
+  if (action === 'cancel') {
+    desk.store.cancelQueuedDraft(id);
+    expect(desk.store.composerStates.draft).toMatchObject({ text: 'Do not launch offline draft', queued: [] });
+  } else desk.store.discardDraft(id);
+  await desk.client.restore();
+  await quiet();
+  expect((await desk.client.call('threads.list', {})).some(row => row.title === 'Do not launch offline draft')).toBe(false);
+  expect(desk.store.error).toBeNull();
 });

@@ -82,8 +82,9 @@ export class ComposerStorage {
   save(section: ComposerRecord['section'], id: string, value: ComposerValue | null, owner?: Connection): ComposerRecord {
     const previous = this.get(section, id);
     const references = value ? this.references(value).map(reference => reference.assetId) : [];
-    const record = { section, id, value, revision: previous.revision + 1, updatedAt: Date.now() };
-    if (this.privateMode(section, id, value)) {
+    const privateMode = this.privateMode(section, id, value);
+    const record: ComposerRecord = { section, id, value, revision: previous.revision + 1, updatedAt: Date.now(), ...(privateMode ? { privateMode: true } : {}) };
+    if (privateMode) {
       if (previous.revision && !this.privateRecords.has(recordKey(section, id))) throw refused('composer: a persisted composer cannot become incognito; use a new draft');
       const connection = this.privateOwners.get(recordKey(section, id)) ?? owner;
       if (!connection) throw refused('composer: an incognito record requires its originating connection');

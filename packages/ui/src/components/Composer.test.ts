@@ -4,6 +4,7 @@ import { mount, unmount } from 'svelte';
 import { RpcErrorCode } from '@boite/contracts';
 import App from '../App.svelte';
 import { FakeClient } from '../lib/fake-client';
+import { TestComposerCore } from '../test/composer-core';
 import { RpcFailure } from '../lib/client';
 import { defaultPrefs, PREFS_STORAGE_KEY, STASH_STORAGE_KEY } from '../lib/prefs';
 import { store } from '../lib/store.svelte';
@@ -21,16 +22,16 @@ import { setExperiment } from '../lib/experiments';
 
 let running: Record<string, unknown> | null = null;
 
-/** A core without composer records: the frontend delivers its queues itself, which these tests watch. */
-const OLD_CORE = ['composer.list'];
+let queueCore: TestComposerCore;
 
-const test = fixtureTest.extend<{ app: void; oldCoreApp: void }>({
+const test = fixtureTest.extend<{ app: void; queueApp: void }>({
   app: async ({}, use) => {
     await mountOnFake();
     await use();
   },
-  oldCoreApp: async ({}, use) => {
-    await mountOnFake(undefined, OLD_CORE);
+  queueApp: async ({}, use) => {
+    queueCore = new TestComposerCore();
+    await mountOnFake(0, undefined, queueCore);
     await use();
   },
 });
@@ -77,7 +78,7 @@ test('an intact preview mention never opens file completion, while editing it re
   expect(mentionMenu()).not.toBeNull();
 });
 
-test('preview references survive queuing and a failed drain, and stashing refuses without changing the draft', async ({ oldCoreApp: _app }) => {
+test('preview references survive queuing and a failed drain, and stashing refuses without changing the draft', async ({ queueApp: _app }) => {
   await store.open('t-trace');
   await waitFor(() => !store.busy);
   await type('Change the selected control');
@@ -89,17 +90,19 @@ test('preview references survive queuing and a failed drain, and stashing refuse
   expect(store.error).toContain('cannot be stashed');
   expect(input().value).toBe('Change the selected control @Save');
   expect(store.composerStates['t-trace']?.previewReferences).toEqual([reference]);
-  const send = vi.spyOn(store, 'send').mockResolvedValue(false);
+  queueCore.start.mockRejectedValue(new Error('Preview delivery refused'));
+  store.composerStates['t-trace']!.paused = true;
   store.openThread!.status = 'running';
   await new Promise(resolve => setTimeout(resolve, 0));
   press('Enter');
   await waitFor(() => store.composerStates['t-trace']?.queued.length === 1);
   expect(store.composerStates['t-trace']!.queued[0]!.previewReferences).toEqual([reference]);
   expect(store.composerStates['t-trace']!.previewReferences).toEqual([]);
-  store.openThread!.status = 'idle';
-  await waitFor(() => store.composerStates['t-trace']?.paused === true);
-  expect(send).toHaveBeenCalledWith('Change the selected control @Save', 't-trace', [], [reference]);
-  expect(store.composerStates['t-trace']!.text).toBe('Change the selected control @Save');
+  await waitFor(() => !!store.composerStates['t-trace']?.queued[0]?.request?.failed);
+  expect(queueCore.start).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'Change the selected control @Save', previewReferences: [reference] }));
+  expect(store.composerStates['t-trace']!.queued[0]!.previewReferences).toEqual([reference]);
+  input().focus(); press('ArrowUp');
+  await waitFor(() => input().value === 'Change the selected control @Save');
   expect(store.composerStates['t-trace']!.previewReferences).toEqual([reference]);
 });
 
@@ -172,7 +175,7 @@ async function type(text: string): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-async function mountOnFake(delayMs?: number, missing?: string[]): Promise<void> {
+async function mountOnFake(delayMs?: number, missing?: string[], composerState?: TestComposerCore): Promise<void> {
   window.history.replaceState(null, '', `/?fake=1&open=recent${missing ? `&missing=${missing.join(',')}` : ''}`);
   const target = document.createElement('div');
   document.body.appendChild(target);
@@ -188,7 +191,7 @@ async function mountOnFake(delayMs?: number, missing?: string[]): Promise<void> 
   closeTour();
   running = mount(App, { target });
   await waitFor(() => store.booted && store.openThread !== null);
-  if (delayMs !== undefined) { store.attach(new FakeClient({ delayMs, ...(missing ? { missing } : {}) })); await store.connect(); }
+  if (delayMs !== undefined) { store.attach(new FakeClient({ delayMs, ...(missing ? { missing } : {}), ...(composerState ? { composerState } : {}) })); await store.connect(); }
 }
 
 /** One finished turn on the thread that is open, sent from the composer. */
@@ -706,9 +709,10 @@ test('reconnecting queues a send instead of sending it, and a new thread queues 
   expect(store.draftEntries.find(entry => entry.active)).toMatchObject({ text: 'a new thread', queued: 'waiting' });
 });
 
-test('ArrowUp removes the latest queued prompt and restores its images for editing', async ({ oldCoreApp: _app }) => {
+test('ArrowUp removes the latest queued prompt and restores its images for editing', async ({ queueApp: _app }) => {
   await store.open('t-trace');
-  store.openThread!.status = 'running';
+  await store.client!.call('turns.start', { threadId: 't-trace', prompt: 'Wait [permission]' });
+  await waitFor(() => store.openThread?.status === 'waiting');
   await type('first pending');
   press('Enter');
   await type('edit this pending prompt');
@@ -758,7 +762,7 @@ test('Escape in the box that answers a question keeps the question and its turn'
   expect(document.querySelector('[data-testid=question-card][data-state=pending]')).not.toBeNull();
 });
 
-test('a thread of a machine that dropped still opens and queues its prompts until the machine is back', async ({ oldCoreApp: _app }) => {
+test('a thread of a machine that dropped still opens and queues its prompts until the machine is back', async ({ queueApp: _app }) => {
   await store.open('t-trace');
   await waitFor(() => !store.busy);
   const other = store.threads.find((t) => t.id === 't-descriptors')!;
@@ -782,7 +786,7 @@ test('a thread of a machine that dropped still opens and queues its prompts unti
   const id = store.composerStates[other.id]!.queued[0]!.request!.id;
   expect(rpc).not.toHaveBeenCalled();
   await fake.restore();
-  const start = () => rpc.mock.calls.find(([method]) => method === 'turns.start')?.[1] as { threadId: string; prompt: string } | undefined;
+  const start = () => queueCore.start.mock.calls[0]?.[0];
   await waitFor(() => start() !== undefined && store.composerStates[other.id]?.queued.length === 0);
   const started = start();
   expect(started).toMatchObject({ threadId: other.id, prompt: 'Run this once you are back', clientRequestId: id });
@@ -791,19 +795,17 @@ test('a thread of a machine that dropped still opens and queues its prompts unti
   await waitFor(() => asked('threads.get') && asked('collaboration.get') && asked('workflows.list') && asked('delegation.get'));
 });
 
-test('an outbox prompt the core refuses shows why, holds the next one, and goes again on Send again', async ({ oldCoreApp: _app }) => {
+test('an outbox prompt the core refuses shows why, holds the next one, and goes again on Send again', async ({ queueApp: _app }) => {
   await store.open('t-descriptors');
   await waitFor(() => !store.busy);
   const fake = store.client as FakeClient;
-  const original = fake.call.bind(fake);
-  const starts: { prompt: string; clientRequestId: string }[] = [];
+  const starts: { prompt: string; clientRequestId?: string }[] = [];
+  const start = queueCore.start.getMockImplementation()!;
   let refuse = true;
-  vi.spyOn(fake, 'call').mockImplementation(async (method, params) => {
-    if (method === 'turns.start') {
-      starts.push(params as { prompt: string; clientRequestId: string });
-      if (refuse) { refuse = false; throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'The account is signed out' }); }
-    }
-    return original(method, params);
+  queueCore.start.mockImplementation(async params => {
+    starts.push(params);
+    if (refuse) { refuse = false; throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'The account is signed out' }); }
+    return start(params);
   });
   fake.drop();
   await waitFor(() => input().placeholder.includes('offline'));
@@ -873,7 +875,8 @@ test('a prompt queued while a turn runs on the agent\'s default model steers tha
 });
 
 test('Send now submits a follow-up without interrupting the live agent', async () => {
-  await mountOnFake(40, OLD_CORE);
+  const core = new TestComposerCore();
+  await mountOnFake(40, undefined, core);
   await store.open('t-trace');
   await type('Keep reading [tools]');
   press('Enter');
@@ -885,7 +888,8 @@ test('Send now submits a follow-up without interrupting the live agent', async (
   query<HTMLButtonElement>('[data-testid=composer-send-now]').click();
   await waitFor(() => store.composerStates['t-trace']?.queued.length === 0 && !store.composerStates['t-trace']?.sending);
   expect(store.openThread?.status).toBe('running');
-  expect(rpc.mock.calls.filter(([method]) => method === 'turns.steer')).toHaveLength(1);
+  expect(core.steer).toHaveBeenCalledTimes(1);
+  expect(rpc.mock.calls.filter(([method]) => method === 'turns.steer')).toHaveLength(0);
   expect(rpc.mock.calls.filter(([method]) => method === 'turns.stop')).toHaveLength(0);
   await waitFor(() => !store.busy);
 });
@@ -1872,43 +1876,35 @@ test('Escape shuts the slash menu and keeps what is typed', async ({ app: _app }
   expect(input().value).toBe('/whisper ');
 });
 
-test('queued prompts survive settings and wait for a ready connection', async ({ oldCoreApp: _app }) => {
+test('queued prompts survive settings and wait for a ready connection', async ({ queueApp: _app }) => {
   await store.open('t-trace');
-  store.openThread!.status = 'running';
-  await type('queue through settings');
-  press('Enter');
+  const client = store.client as FakeClient;
+  client.drop();
+  await waitFor(() => store.connection !== 'ready');
+  await type('queue through settings'); press('Enter');
   await waitFor(() => input().value === '');
   store.page = 'settings';
   await waitFor(() => document.querySelector('[data-testid=composer-input]') === null);
-  store.connection = 'connecting';
-  store.openThread!.status = 'idle';
+  expect(queueCore.start).not.toHaveBeenCalled();
   store.page = 'chat';
   await waitFor(() => document.querySelector('[data-testid=composer-queued]') !== null);
-  const rpc = vi.spyOn(store.client!, 'call');
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  expect(rpc.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(0);
   store.page = 'settings';
-  await waitFor(() => document.querySelector('[data-testid=composer-input]') === null);
-  store.connection = 'ready';
-  await waitFor(() => store.composerStates['t-trace']?.queued.length === 0 && !store.composerStates['t-trace']?.sending);
-  expect(rpc.mock.calls.filter(([method]) => method === 'turns.start')).toEqual([
-    ['turns.start', { threadId: 't-trace', prompt: 'queue through settings', expectedSelectionVersion: 0, clientRequestId: expect.stringMatching(/^[a-f0-9]{32}$/) }]
-  ]);
+  await client.restore();
+  await waitFor(() => store.composerStates['t-trace']?.queued.length === 0);
+  expect(queueCore.start).toHaveBeenCalledWith(expect.objectContaining({ threadId: 't-trace', prompt: 'queue through settings', clientRequestId: expect.any(String) }));
+  expect(queueCore.start).toHaveBeenCalledTimes(1);
 });
 
-test('a refused prompt keeps its place in the queue and the next send resumes it in order', async ({ oldCoreApp: _app }) => {
+test('a refused prompt keeps its place in the queue and the next send resumes it in order', async ({ queueApp: _app }) => {
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
-  const client = store.client!;
-  const call = client.call.bind(client);
+  const client = store.client as FakeClient;
+  const start = queueCore.start.getMockImplementation()!;
   let refuse = true;
-  vi.spyOn(client, 'call').mockImplementation((method, params) => {
-    if (method === 'turns.start' && refuse) return Promise.reject(new Error('account at its cap'));
-    return call(method, params);
-  });
-
+  queueCore.start.mockImplementation(params => refuse ? Promise.reject(new Error('account at its cap')) : start(params));
+  await client.call('turns.start', { threadId: 't-trace', prompt: 'Wait [permission]' });
+  await waitFor(() => store.openThread?.status === 'waiting');
   // Two prompts queued behind a running turn, a third typed while it runs.
-  store.openThread!.status = 'running';
   await type('P1');
   press('Enter');
   await type('P2');
@@ -1917,8 +1913,8 @@ test('a refused prompt keeps its place in the queue and the next send resumes it
   await type('P3');
 
   // The turn ends, the queue drains, and the core refuses the first prompt.
-  store.openThread!.status = 'idle';
-  await waitFor(() => store.error === 'account at its cap');
+  await client.call('permissions.answer', { requestId: store.pendingPermissions[0]!.id, decision: 'allow' });
+  await waitFor(() => store.composerStates['t-trace']?.queued[0]?.request?.failed === 'account at its cap');
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(store.composerStates['t-trace']?.queued.map((entry) => entry.text)).toEqual(['P1', 'P2']);
   expect(input().value).toBe('P3');
@@ -1931,19 +1927,19 @@ test('a refused prompt keeps its place in the queue and the next send resumes it
 
   const sent = store
     .openThread!.messages.filter((message) => message.role === 'user')
-    .slice(-1)
+    .filter(message => message.parts.some(part => part.type === 'text' && /^P[123]/.test(part.text)))
     .map((message) => message.parts.map((part) => (part.type === 'text' ? part.text : '')).join(''));
-  expect(sent).toEqual(['P1\n\nP2\n\nP3']);
+  expect(sent.join('\n\n')).toBe('P1\n\nP2\n\nP3');
 });
 
-test('a turn the core opened on its own holds the prompt, then sends it without an error', async ({ oldCoreApp: _app }) => {
+test('a turn the core opened on its own holds the prompt, then sends it without an error', async ({ queueApp: _app }) => {
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
   const client = store.client!;
   const call = client.call.bind(client);
   // The core has just opened a turn by itself (held answers to an asynchronous
   // question) and this client has not heard of it yet: it still shows idle.
-  let refusals = 2;
+  let refusals = 1;
   const rpc = vi.spyOn(client, 'call').mockImplementation((method, params) => {
     if (method === 'turns.start' && refusals-- > 0) {
       const thread = { ...store.threads.find((row) => row.id === 't-trace')!, status: 'running' as const };
@@ -1953,27 +1949,27 @@ test('a turn the core opened on its own holds the prompt, then sends it without 
     return call(method, params);
   });
 
-  // Sent straight from the box: refused as early, so it waits in the queue.
-  await type('sent into a busy thread');
-  press('Enter');
-  await waitFor(() => store.composerStates['t-trace']?.queued.length === 1);
-  expect(input().value).toBe('');
-  expect(store.busy).toBe(true);
-  expect(store.error).toBeNull();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const start = queueCore.start.getMockImplementation()!;
+  queueCore.start.mockImplementation(async params => { await gate; return start(params); });
+  try {
+    // Sent straight from the box: refused as early, so it waits in the queue.
+    await type('sent into a busy thread');
+    press('Enter');
+    await waitFor(() => store.composerStates['t-trace']?.queued.length === 1);
+    expect(input().value).toBe('');
+    expect(store.busy).toBe(true);
+    expect(store.error).toBeNull();
 
-  // That turn ends, the queue drains, and a second turn the core opened in
-  // between refuses it once more: it goes back at the head, still no error.
-  store.openThread!.status = 'idle';
-  await waitFor(() => refusals === 0 && store.busy);
-  expect(store.composerStates['t-trace']!.queued.map((entry) => entry.text)).toEqual(['sent into a busy thread']);
-  expect(store.composerStates['t-trace']!.paused).toBe(false);
-  expect(store.error).toBeNull();
-
-  store.openThread!.status = 'idle';
-  await waitFor(() => store.composerStates['t-trace']?.queued.length === 0 && store.openThread!.messages.some((m) => m.role === 'user'
-    && m.parts.some((p) => p.type === 'text' && p.text === 'sent into a busy thread')));
-  expect(rpc.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(3);
-  expect(store.error).toBeNull();
+    release();
+    // The composer owner explicitly synchronizes the refused direct send.
+    await waitFor(() => store.composerStates['t-trace']?.queued.length === 0 && store.openThread!.messages.some(m => m.role === 'user'
+      && m.parts.some(p => p.type === 'text' && p.text === 'sent into a busy thread')));
+    expect(rpc.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(1);
+    expect(queueCore.start).toHaveBeenCalledTimes(1);
+    expect(store.error).toBeNull();
+  } finally { release(); }
 });
 
 test('the mention menu never opens on the project the composer just left', async ({ app: _app }) => {

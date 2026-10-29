@@ -389,6 +389,7 @@
       const kept = queuedChoice(inputStore, inputStore.openThread?.id === inputKey ? inputStore.openThread : null, $state.snapshot(sendChoice));
       if (!inputStore.queuePrompt(inputKey, { text: prompt, attachments: images, afterBoundary: store.inputBoundaries[key]?.boundary, choice: kept, ...(references.length ? { previewReferences: references } : {}) },
         offline ? { choice: { ...kept } } : undefined)) return;
+      if (state.queued[0]?.request?.failed !== undefined) inputStore.retryQueued(inputKey, 0);
       state.editing = null;
       emptyBox(state);
       resetHistory(state);

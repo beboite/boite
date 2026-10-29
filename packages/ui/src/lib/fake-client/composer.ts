@@ -53,7 +53,8 @@ export class FakeComposerState {
 
   write(section: ComposerRecord['section'], id: string, value: ComposerValue | null, owner?: FakeContext): ComposerRecord {
     const key = keyOf(section, id);
-    const record = { section, id, revision: (this.records.get(key)?.revision ?? 0) + 1, updatedAt: Date.now(), value: copy(value) };
+    const privateMode = !!owner || this.owners.has(key);
+    const record: ComposerRecord = { section, id, revision: (this.records.get(key)?.revision ?? 0) + 1, updatedAt: Date.now(), value: copy(value), ...(privateMode ? { privateMode: true } : {}) };
     if (owner) this.owners.set(key, owner);
     this.records.set(key, record);
     // As the core, a boundary or a Send now lasts only while the queue holds something.
@@ -96,6 +97,7 @@ export class FakeComposerState {
     const value = row?.value;
     const methods = this.methods.get(ctx)?.();
     if (!row || !value || !methods) return;
+    const owner = this.owners.get(key);
     const head = value.input.queued[0]!;
     if (head.request?.failed !== undefined) return;
     if (row.section === 'drafts') { await this.launch(ctx, row, methods); return; }
@@ -137,9 +139,11 @@ export class FakeComposerState {
       const consumed = this.consumed.get(key) ?? new Set<string>();
       for (const entry of entries) consumed.add(entry.id);
       this.consumed.set(key, consumed);
-      const current = copy(this.records.get(key)?.value ?? value);
+      const latest = this.records.get(key)?.value;
+      if (!latest || (owner && this.owners.get(key) !== owner)) return;
+      const current = copy(latest);
       current.input.queued = current.input.queued.filter(item => !consumed.has(item.id));
-      this.write('inputs', row.id, current);
+      this.write('inputs', row.id, current, owner);
     } catch (error) {
       const current = this.records.get(key)?.value;
       if (current) {
@@ -155,6 +159,7 @@ export class FakeComposerState {
   private async launch(ctx: FakeContext, row: ComposerRecord, methods: FakeMethods): Promise<void> {
     const value = row.value!, head = value.input.queued[0]!;
     const key = keyOf(row.section, row.id);
+    const owner = this.owners.get(key);
     const choice = head.request?.choice ?? head.choice ?? value.choice;
     if (!choice || !value.draft) return;
     this.delivering.set(key, [head]);
@@ -162,21 +167,25 @@ export class FakeComposerState {
       const projectId = value.draft.projectId ?? (await methods['projects.drafts']({})).id;
       const { model, ...selection } = choice;
       const thread = await methods['threads.create']({ ...selection, ...(model ? { model } : {}), projectId, title: head.text.slice(0, 60), clientRequestId: head.request?.id ?? head.id, ...(value.draft.worktree ? { worktree: {} } : {}), ...(value.draft.incognito ? { incognito: true } : {}) });
-      const transferred = copy(value);
+      const latest = this.records.get(key)?.value;
+      if (!latest || (owner && this.owners.get(key) !== owner)) return;
+      const transferred = copy(latest);
       delete transferred.draft;
       transferred.input.text = ''; transferred.input.attachments = []; transferred.input.previewReferences = [];
-      this.write('inputs', thread.id, transferred, this.owners.get(key));
-      const kept = copy(this.records.get(key)?.value ?? value);
+      this.write('inputs', thread.id, transferred, owner);
+      const kept = copy(latest);
       kept.input.queued = [];
-      this.write('drafts', row.id, kept.input.text || kept.input.attachments.length || kept.input.previewReferences?.length ? kept : null);
+      this.write('drafts', row.id, kept.input.text || kept.input.attachments.length || kept.input.previewReferences?.length ? kept : null, owner);
       // Peers share composer metadata. The fixture's owning core creates and runs the thread.
       this.schedule(ctx);
     } catch (error) {
-      const held = copy(value);
+      const latest = this.records.get(key)?.value;
+      if (!latest || (owner && this.owners.get(key) !== owner)) return;
+      const held = copy(latest);
       held.input.paused = true;
       const first = held.input.queued[0]!;
       first.request = { id: first.request?.id ?? first.id, choice, queuedAt: Date.now(), ...first.request, failed: error instanceof Error ? error.message : String(error) };
-      this.write('drafts', row.id, held);
+      this.write('drafts', row.id, held, owner);
     } finally { this.delivering.delete(key); }
   }
 }

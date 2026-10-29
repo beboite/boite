@@ -489,6 +489,15 @@ export class Composer {
     return true;
   }
 
+  #queueChanged(threadId: string): void {
+    if (threadId === 'draft' && this.ctx.store.draft) this.ctx.sync.queued('drafts', draftKey(this.ctx.store.draft));
+    else this.ctx.sync.queued('inputs', threadId);
+  }
+
+  #admitQueueEdit(threadId: string): boolean {
+    return threadId !== 'draft' || !this.ctx.store.draft || this.ctx.sync.admitDraftMutation(draftKey(this.ctx.store.draft));
+  }
+
   /** A refused outbox prompt goes again, under the same request id: its content has not changed. */
   retryQueued(threadId: string, at: number): void {
     const state = this.composerStates[threadId];
@@ -497,6 +506,7 @@ export class Composer {
     const { failed: _failed, ...request } = entry.request;
     entry.request = request;
     state.paused = false;
+    this.#queueChanged(threadId);
   }
 
   /**
@@ -508,7 +518,7 @@ export class Composer {
   restoreQueued(threadId: string, at: number): QueuedPrompt | undefined {
     const state = this.composerStates[threadId];
     // A draft's start asked once is retried, not taken back (`Drafts.unqueue`).
-    if (!state || state.sending || state.queued[at]?.request?.start) return undefined;
+    if (!state || !this.#admitQueueEdit(threadId) || state.sending || state.queued[at]?.request?.start) return undefined;
     const [entry] = state.queued.splice(at, 1);
     if (entry?.request) {
       const s = this.ctx.store;
@@ -516,14 +526,16 @@ export class Composer {
       this.pendingSends.set(threadId, { id: entry.request.id, prompt: entry.text, attachments: [...entry.attachments],
         previewReferences: $state.snapshot(entry.previewReferences ?? []), selectionVersion: thread?.selectionVersion ?? 0 });
     }
+    if (entry) this.#queueChanged(threadId);
     return entry;
   }
 
   /** Takes a pending prompt out of the queue, unless it is the one going out right now. */
   removeQueued(threadId: string, at: number): void {
     const state = this.composerStates[threadId];
-    if (!state || at < (state.outgoing ?? 0) || state.queued[at]?.request?.start) return;
+    if (!state || !this.#admitQueueEdit(threadId) || at < (state.outgoing ?? 0) || state.queued[at]?.request?.start) return;
     state.queued.splice(at, 1);
+    this.#queueChanged(threadId);
   }
 
   async send(
@@ -680,6 +692,7 @@ export class Composer {
       // An id and experiments from the start, as `queuePrompt` gives: a put already on its way cannot then merge it away.
       if (!this.ctx.sync.admitQueue()) return { failed: s.error! };
       held.queued.unshift({ id: secureId(), text: prompt, attachments, experiments: readExperiments(), ...(previewReferences.length ? { previewReferences } : {}) });
+      this.#queueChanged(early.thread.id);
       // The queue shows it from here on.
       delete this.staged[early.thread.id];
       return 'sent';

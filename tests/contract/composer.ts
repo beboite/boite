@@ -70,10 +70,15 @@ export const COMPOSER_SCENARIOS: Record<string, Scenario> = {
     const { data: _data, ...meta } = attachment;
     const value: ComposerValue = { input: { ...box(), text: 'private box', attachments: [{ ...meta, assetId }] } };
     const put = { section: 'inputs' as const, id: thread.id, expectedRevision: 0, value };
-    await env.call('composer.put', put);
+    const saved = await env.call('composer.put', put);
+    check(saved.record.privateMode === true, 'private put did not identify its privacy');
+    check((await env.call('composer.list', {})).find(row => row.id === thread.id)?.privateMode === true, 'private list lost its privacy');
     check(!(await peer.call('composer.list', {})).some(row => row.id === thread.id), 'another connection listed a private record');
     await refused(peer.call('composer.put', put), RpcErrorCode.NotFound);
     await refused(peer.call('composer.asset.get', { assetId }), RpcErrorCode.NotFound);
+    const deleted = await env.call('composer.put', { ...put, expectedRevision: saved.record.revision, value: null });
+    check(deleted.record.value === null && deleted.record.privateMode === true, 'private tombstone lost its privacy');
+    check(!(await peer.call('composer.list', {})).some(row => row.id === thread.id), 'private tombstone was broadcast');
   },
   'composer reconnect retains private consumed ids when new input arrives behind an unacknowledged delivery': async env => {
     const origin = await env.peer();
