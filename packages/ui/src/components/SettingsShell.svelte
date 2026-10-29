@@ -167,6 +167,7 @@
     ['general', 'conversations', strings.settings.shortAnswers],
     ['general', 'conversations', strings.settings.toolSummaries],
     ['general', 'conversations', strings.settings.titleModel],
+    ['general', 'conversations', strings.settings.goalTrackerModel],
     ['general', 'conversations', strings.features.chatArtifacts.title],
     ...(inShell ? [['general', 'conversations', strings.features.openChatLinks.title] as [SettingsTab, string, string]] : []),
     ['general', 'conversations', strings.features.previewComments.title],

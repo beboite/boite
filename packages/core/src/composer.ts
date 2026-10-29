@@ -10,7 +10,7 @@ import { steerUser, userSteeringUnavailable } from './threads/user-steering.ts';
 import { DraftReservationLedger, type DraftOwnership } from './threads/draft-reservation-ledger.ts';
 import { needsModelDiscovery } from './threads/selection.ts';
 import { admissionRefusal } from './threads/admission.ts';
-import { composerActivity, isComposerActivity } from './composer-activity.ts';
+import { composerActivity, isComposerActivity, startsAutoGoal } from './composer-activity.ts';
 import { composerBatch } from './composer-batch.ts';
 
 const choiceOf = (thread: ThreadSummary): ComposerChoice => ({ providerId: thread.providerId, accountId: thread.accountId, model: thread.model, effort: thread.effort, speed: thread.speed ?? null, permissionMode: thread.permissionMode });
@@ -212,7 +212,7 @@ export class Composer {
         const current = this.core.journal.getThread(id);
         if (this.closed || this.core.stopping || !current || current.archived || (current.projectId && this.core.projects.require(current.projectId).archived)) return;
         if (current.projectId) await this.core.projects.requireFolder(current.projectId);
-        const activity = composerActivity(item.text, item.experiments ?? this.core.clients.current()?.experiments);
+        const activity = composerActivity(item.text);
         this.atomic(() => {
           const target = this.core.journal.getThread(id);
           if (!target || target.archived || (target.projectId && this.core.projects.require(target.projectId).archived)) return;
@@ -220,7 +220,9 @@ export class Composer {
           if (activity) {
             if (item.previewReferences?.length) throw refused('Activity commands do not accept page references.');
             this.core.activity.set({ threadId: id, ...activity, attachments }, undefined, choice);
-          } else this.core.threads.startTurn(id, { prompt: batch.text, attachments, previews: batch.previewReferences }, { kind: 'user', requestId: batch.requestId, sentFrom: batch.entries[0]!.sentFrom ?? null }, { expectedSelectionVersion: current.selectionVersion ?? 0, choice });
+          } else this.core.threads.startTurn(id, { prompt: batch.text, attachments, previews: batch.previewReferences }, { kind: 'user', requestId: batch.requestId, sentFrom: batch.entries[0]!.sentFrom ?? null }, { expectedSelectionVersion: current.selectionVersion ?? 0, choice,
+            // Decided from the experiments the prompt was queued with, so a restart keeps what it meant.
+            autoGoal: startsAutoGoal(batch.text, item.experiments, this.core.settings.get().autoGoalMinChars) ? batch.text : undefined });
           this.complete(section, id, batch.entries.map(entry => entry.id));
         });
       } catch (error) {

@@ -247,6 +247,29 @@ function followGoal(core: Core, threadId: ThreadId, sent: Map<ThreadId, string>)
   save(core, projectId, todos.map((todo) => claims(todo) ? { ...todo, status: 'claimed', threadId, updatedAt: Date.now() } : todo));
 }
 
+/**
+ * The card of an automatic goal (`docs/goals.md`): the prompt's first line,
+ * linked to its conversation so the board follows that goal like one it
+ * started. None for an incognito conversation, which no board keeps.
+ */
+export function addGoalCard(core: Core, threadId: ThreadId, prompt: string): Todo | null {
+  const thread = core.journal.getThread(threadId);
+  const text = prompt.split('\n').map((line) => line.trim()).find(Boolean)?.slice(0, TODO_TEXT_MAX);
+  if (!thread?.projectId || thread.incognito || !text) return null;
+  const now = Date.now();
+  const todo: Todo = { id: newId('todo_'), projectId: thread.projectId, text, status: 'open', threadId, goalThreadId: threadId, createdAt: now, updatedAt: now };
+  save(core, thread.projectId, [...stored(core, thread.projectId), todo]);
+  return todo;
+}
+
+/** A goal removed or replaced: its cards let go of the conversation, an open one back in To do, a claimed or done one where it is. */
+export function unlinkGoalCards(core: Core, threadId: ThreadId): void {
+  const projectId = core.journal.getThread(threadId)?.projectId;
+  if (!projectId || !linkedThreads(core, projectId).has(threadId)) return;
+  const now = Date.now();
+  save(core, projectId, stored(core, projectId).map((todo) => todo.goalThreadId === threadId ? { ...todo, goalThreadId: null, updatedAt: now } : todo));
+}
+
 export function removeTodo(core: Core, params: RpcParams<'todos.remove'>): void {
   const projectId = projectOfThread(core, params.threadId);
   const todos = stored(core, projectId);
