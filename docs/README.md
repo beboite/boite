@@ -24,6 +24,7 @@
 - [Windows](windows.md): desktop-window captures and the Window panel, with the owner's consent.
 - [Chat files and previews](chat-files.md): attachments, file links, inline previews and pages drawn in an answer.
 - [Diagrams and formulas](diagrams-and-formulas.md): Mermaid and LaTeX in messages.
+- [Experimental view kit](view-kit.md): an opt-in composition prototype and remaining authoring, runtime and publication improvements.
 - [The thread terminal](terminal.md): shells under the chat and interactive sign-ins.
 - [Reviewed goals](goals.md): `/goal2`, its fresh reviewer and the checklist of the user's requests.
 - [The project board](board.md): todo columns and reviewed `/goal2` work.
