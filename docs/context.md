@@ -304,6 +304,10 @@ when another conversation is open. A driver that declines it retains input
 for the next turn. Enter again in the emptied composer (not where the primary
 pointer is coarse), or Send now under the bubbles, submits it immediately without stopping the agent when the driver accepts it.
 Permissions and blocking questions hold it until answered.
+Answers to asynchronous questions and bot setting cards share the running
+turn's steering channel. Answers received while another message or memory
+notice is being delivered resume when that delivery finishes, in order. Each
+accepted answer leaves the pending queue and appears once in the transcript.
 Messages already queued go together in their original order, with their
 attachments and preview references. While that batch goes out its bubbles stay
 drawn and cannot be removed or taken back for editing; a declined attempt
@@ -419,7 +423,15 @@ brings it back without a duplicate turn: the owning core reads the receipt of
 that request ID, drops the entry when it already took it and starts it once
 when it never did.
 
-Accepted queues run on the core without an open client, including after restart
+Incognito records use the same queue RPCs with connection-owned memory storage;
+their assets and device sync metadata never enter the durable composer cache.
+Older cores without `composerPersistence` refuse queue admission with an update
+message while preserving the input.
+Changing a draft's privacy retires its composer identity and creates another.
+A start already submitted keeps its privacy; input queued only on an offline
+device can still change it before submission.
+
+Accepted durable queues run on the core without an open client, including after restart
 when delivery is known to be safe. Unconfirmed provider submissions stay held.
 Provider, account, model, effort and speed stay captured; permission modes follow
 the thread's current selection, including for queued input.
@@ -429,8 +441,7 @@ changes its preferences.
 A restored ordinary queue whose previous acceptance cannot be proved stays
 paused until explicitly resumed.
 Input written while the core is unreachable stays on the device until a client
-reconnects and synchronizes it. Incognito input stays in client memory and uses
-the client delivery path; older cores retain device-local persistence.
+reconnects and synchronizes it.
 
 Undoable deletion retains core input. Permanent deletion erases reply records
 and linked delivery receipts, and reconnecting clients discard their stale

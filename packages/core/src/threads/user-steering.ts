@@ -92,6 +92,6 @@ export async function steerUser(core: Core, threads: ThreadStore, params: RpcPar
     throw refused(`delivery of this message is unconfirmed: ${messageOf(error)}`, { reason: 'delivery-uncertain', threadId });
   } finally {
     runner.steering.delete(threadId);
-    void threads.deferred.memory.flushRunning(threadId);
+    void threads.deferred.flushRunning(threadId);
   }
 }

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { AgentProfile, AgentSettingAsk, AgentSpawn, CoordinationPeer } from '@boite/contracts';
@@ -344,6 +344,35 @@ test('a bot starts a thread in a project another machine entrusted to it, and he
   expect((await pc.core.workforce.groupHost.handle(peer, 'bot.start', ask) as AgentSpawn).thread.id).toBe(once.thread.id);
   expect(pc.core.journal.listThreads().filter(t => t.projectId === notes.id).map(t => t.title).sort()).toEqual(['File', 'Letter', 'Sort']);
   expect(answered()).toHaveLength(1);
+}, 30_000);
+
+test('a bot starting in an entrusted remote project honors explicit model, effort and speed without falling back', async () => {
+  answering();
+  const { pc, pcOwner, notes, cli, machine } = await setup();
+  const shipped = JSON.parse(readFileSync(join(import.meta.dir, '../src/providers/shipped/echo.json'), 'utf8')) as Record<string, unknown>;
+  mkdirSync(join(pc.dataDir, 'providers'), { recursive: true });
+  writeFileSync(join(pc.dataDir, 'providers', 'twin.json'), JSON.stringify({ ...shipped, id: 'twin', name: 'Twin', shortName: 'Twin', models: [
+    { id: 'twin-b', name: 'Twin B', effort: { levels: [{ id: 'low', label: 'Low' }, { id: 'max', label: 'Max' }], default: 'max' } },
+  ] }));
+  expect((await pcOwner.call('providers.reload', {})).rejected).toEqual([]);
+  pc.core.accounts.ensureDefaults();
+  // Speed tiers come from the driver probe rather than the provider descriptor.
+  pc.core.providers.require('twin').models[0]!.speeds = [{ id: 'priority', label: 'Fast' }];
+  await pcOwner.call('settings.set', { groupBots: true });
+  const args = ['thread', 'new', `${machine}/Notes`, 'Sort the letters', '--model', 'twin/twin-b', '--effort', 'low', '--speed', 'priority', '--request-id', 'bot-model-1', '--json'];
+  const before = pc.core.journal.listThreads().length;
+  // Reading a model list still requires the destination's groupThreads switch.
+  expect((await cli(args)).err).toContain(`boite settings request groupThreads true --machine ${machine} --why`);
+  expect(pc.core.journal.listThreads()).toHaveLength(before);
+  await pcOwner.call('settings.set', { groupThreads: true });
+  const started = await cli(args);
+  expect([started.code, started.err]).toEqual([0, '']);
+  const spawned = JSON.parse(started.out) as AgentSpawn;
+  expect(pc.core.threads.require(spawned.thread.id)).toMatchObject({ projectId: notes.id, providerId: 'twin', model: 'twin-b', effort: 'low', speed: 'priority' });
+  expect((JSON.parse((await cli(args)).out) as AgentSpawn).thread.id).toBe(spawned.thread.id);
+  const missing = await cli(['thread', 'new', 'Notes', 'Sort the letters', '--machine', machine, '--model', 'twin/missing', '--request-id', 'bot-model-2']);
+  expect(missing.err).toContain(`model: no installed model matches "twin/missing"; run boite delegate models --machine ${machine}`);
+  expect(pc.core.journal.listThreads()).toHaveLength(before + 1);
 }, 30_000);
 
 test('a bot starts no thread on a machine whose groupBots is off, nor in a project of it not entrusted to the bot', async () => {

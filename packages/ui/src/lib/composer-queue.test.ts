@@ -1,98 +1,6 @@
-import { expect, test, vi } from 'vitest';
-import { ATTACHMENTS_PER_TURN } from '@boite/contracts';
-import type { Store } from './store.svelte';
-import { drainQueue, textEntries, type ComposerState } from './composer-queue';
-
-const attachment = { kind: 'file' as const, name: 'note.txt', mimeType: 'text/plain', data: 'YQ==' };
-const reference = { id: 'save', url: 'https://example.test', selector: '#save', text: 'Save', bounds: { x: 0, y: 0, width: 80, height: 30 }, mention: { start: 0, end: 5 } };
-const state = (): ComposerState => ({ text: '', attachments: [], sending: false, paused: false, queued: [
-  { text: '@Save first', attachments: [attachment], previewReferences: [reference] },
-  { text: '@Save second', attachments: [], previewReferences: [reference] },
-  { text: 'third', attachments: [] }
-] });
-
-test('one batch carries every attachment and mention, while new arrivals wait for the next turn', async () => {
-  const draft = state();
-  const original = [...draft.queued];
-  let finish!: (accepted: boolean) => void;
-  const send = vi.fn(() => new Promise<boolean>(resolve => { finish = resolve; }));
-  const store = { send } as unknown as Store;
-  const sending = drainQueue(store, 'thread', draft);
-  draft.queued.push({ text: 'arrived during send', attachments: [] });
-  await drainQueue(store, 'thread', draft);
-  // The batch stays drawn while it goes out: emptied, the queue would unmount
-  // and replay its arrival animation at every refused tool boundary.
-  expect(draft.queued.slice(0, 3)).toEqual(original);
-  draft.queued.slice(0, 3).forEach((entry, at) => expect(entry).toBe(original[at]));
-  expect(draft.outgoing).toBe(3);
-  expect(send).toHaveBeenCalledTimes(1);
-  const args = send.mock.calls[0] as unknown as [string, string, unknown[], typeof reference[]];
-  expect(args.slice(0, 3)).toEqual(['@Save first\n\n@Save second\n\nthird', 'thread', [attachment]]);
-  expect(args[3].map(ref => ref.mention)).toEqual([{ start: 0, end: 5 }, { start: 13, end: 18 }]);
-  expect(new Set(args[3].map(ref => ref.id)).size).toBe(2);
-  finish(true); await sending;
-  expect(draft.queued.map(entry => entry.text)).toEqual(['arrived during send']);
-  expect(draft.sending).toBe(false);
-});
-
-test('a steer the agent declines at each tool boundary leaves the same entries queued and unpaused', async () => {
-  const draft = state();
-  const original = [...draft.queued];
-  const steer = vi.fn<Store['steer']>(async () => {
-    // Mid-attempt the batch is still drawn, and locked against removal.
-    expect(draft.queued).toHaveLength(3);
-    expect(draft.outgoing).toBe(3);
-    return false;
-  });
-  const store = { steer } as unknown as Store;
-  await drainQueue(store, 'thread', draft, 'turn');
-  await drainQueue(store, 'thread', draft, 'turn');
-  expect(steer).toHaveBeenCalledTimes(2);
-  expect(draft.queued).toHaveLength(3);
-  draft.queued.forEach((entry, at) => expect(entry).toBe(original[at]));
-  expect(draft.paused).toBe(false);
-  expect(draft.outgoing).toBe(0);
-});
-
-test('a refused batch restores separate prompts and their files before later arrivals', async () => {
-  const draft = state();
-  const original = [...draft.queued];
-  const send = vi.fn(async () => { draft.queued.push({ text: 'later', attachments: [] }); return false; });
-  await drainQueue({ send } as unknown as Store, 'thread', draft);
-  expect(draft.queued.slice(0, 3)).toEqual(original);
-  expect(draft.queued[3]?.text).toBe('later');
-  expect(draft.paused).toBe(true);
-  expect(draft.sending).toBe(false);
-});
-
-test('goals and loops keep their own queue entries and cannot consume neighboring prompts', async () => {
-  const draft = state();
-  draft.queued.splice(1, 0, { text: '/goal Fix the parser', attachments: [] }, { text: '/loop 2 Check the output', attachments: [] });
-  const send = vi.fn<Store['send']>(async () => true);
-  const store = { send } as unknown as Store;
-  await drainQueue(store, 'thread', draft);
-  expect(send.mock.calls[0]?.[0]).toBe('@Save first');
-  expect(draft.queued.map(entry => entry.text)).toEqual(['/goal Fix the parser', '/loop 2 Check the output', '@Save second', 'third']);
-  await drainQueue(store, 'thread', draft);
-  expect(send.mock.calls[1]?.[0]).toBe('/goal Fix the parser');
-  await drainQueue(store, 'thread', draft);
-  expect(send.mock.calls[2]?.[0]).toBe('/loop 2 Check the output');
-  await drainQueue(store, 'thread', draft);
-  expect(send.mock.calls[3]?.[0]).toBe('@Save second\n\nthird');
-  expect(draft.queued).toEqual([]);
-});
-
-test('individually valid files stay split across turns when their combined count exceeds the turn limit', async () => {
-  const draft = state();
-  draft.queued = Array.from({ length: ATTACHMENTS_PER_TURN + 1 }, (_, index) => ({ text: `file ${index}`, attachments: [attachment] }));
-  const send = vi.fn<Store['send']>(async () => true);
-  await drainQueue({ send } as unknown as Store, 'thread', draft);
-  expect(send.mock.calls[0]?.[2]).toHaveLength(ATTACHMENTS_PER_TURN);
-  expect(draft.queued.map(entry => entry.text)).toEqual([`file ${ATTACHMENTS_PER_TURN}`]);
-  await drainQueue({ send } as unknown as Store, 'thread', draft);
-  expect(send.mock.calls[1]?.[2]).toHaveLength(1);
-  expect(draft.queued).toEqual([]);
-});
+import { expect, test } from 'vitest';
+import { ATTACHMENTS_PER_TURN, composerBatch, type ComposerQueuedPrompt } from '@boite/contracts';
+import { textEntries } from './composer-queue';
 
 test('pending answers keep their entry objects across thread updates, so keyed bubbles do not remount', () => {
   const entries = textEntries();
@@ -101,4 +9,27 @@ test('pending answers keep their entry objects across thread updates, so keyed b
   expect(again[0]).toBe(first[0]);
   expect(again[1]).toBe(first[1]);
   expect(entries(['no', 'use the parser'])[0]).not.toBe(first[0]);
+});
+
+const attachment = { kind: 'file' as const, name: 'note.txt', mimeType: 'text/plain', data: 'YQ==' };
+const reference = { id: 'save', url: 'https://example.test', selector: '#save', text: 'Save', bounds: { x: 0, y: 0, width: 80, height: 30 }, mention: { start: 0, end: 5 } };
+const entry = (text: string, id = text): ComposerQueuedPrompt => ({ id, text, attachments: [] });
+
+test('the shared batch carries files, offsets mentions and disambiguates repeated reference ids', () => {
+  const first = { ...entry('@Save first'), attachments: [{ kind: attachment.kind, mimeType: attachment.mimeType, name: attachment.name, assetId: 'asset' }], previewReferences: [reference] };
+  const second = { ...entry('@Save second'), previewReferences: [reference] };
+  const batch = composerBatch([first, second, entry('third')], () => attachment);
+  expect(batch.text).toBe('@Save first\n\n@Save second\n\nthird');
+  expect(batch.attachments).toEqual([attachment]);
+  expect(batch.previewReferences.map(ref => ref.mention)).toEqual([{ start: 0, end: 5 }, { start: 13, end: 18 }]);
+  expect(new Set(batch.previewReferences.map(ref => ref.id)).size).toBe(2);
+});
+
+test('the shared batch keeps activity commands, request ids and file count limits at separate boundaries', () => {
+  expect(composerBatch([entry('first'), entry('/goal Fix the parser'), entry('last')], () => attachment).entries.map(item => item.text)).toEqual(['first']);
+  expect(composerBatch([entry('/goal Fix the parser'), entry('last')], () => attachment).entries).toHaveLength(1);
+  const request = { id: 'request-id', choice: null, queuedAt: 0 };
+  expect(composerBatch([{ ...entry('first'), request }, entry('last')], () => attachment).entries).toHaveLength(1);
+  const withFiles = Array.from({ length: ATTACHMENTS_PER_TURN + 1 }, (_, at) => ({ ...entry(`file ${at}`), attachments: [{ kind: attachment.kind, mimeType: attachment.mimeType, name: attachment.name, assetId: 'asset' }] }));
+  expect(composerBatch(withFiles, () => attachment).entries).toHaveLength(ATTACHMENTS_PER_TURN);
 });

@@ -526,6 +526,8 @@ export interface HeldBytes {
   name?: string;
   /** Kept by no cache: a picture of an incognito conversation, which leaves nothing behind. */
   noStore?: true;
+  /** A ```view block's page (`viewBlock`): `VIEW_ROUTE` opens it, the file route only downloads it. */
+  view?: true;
 }
 
 interface BytesTicket {
@@ -541,15 +543,15 @@ interface BytesTicket {
  * names a path to the HTTP server.
  */
 export class FileTickets {
-  private readonly held = new Map<string, FileTicketTarget & { expiresAt: number; identity: string | null; permit?: SharedFilePermit }>();
-  private readonly bytesHeld = new Map<string, BytesTicket>();
+  readonly #held = new Map<string, FileTicketTarget & { expiresAt: number; identity: string | null; permit?: SharedFilePermit }>();
+  readonly #bytesHeld = new Map<string, BytesTicket>();
   /** The live ticket of each key, so a part asked again keeps its address and the client's HTTP cache. */
-  private readonly bytesKeys = new Map<string, string>();
+  readonly #bytesKeys = new Map<string, string>();
 
   mint(path: string, mime: string, now = Date.now(), name?: string, identity?: string, view = false, permit?: SharedFilePermit): string {
-    this.sweep(now);
+    this.#sweep(now);
     const ticket = newToken();
-    this.held.set(ticket, {
+    this.#held.set(ticket, {
       path,
       mime,
       ...(name ? { name } : {}),
@@ -565,17 +567,17 @@ export class FileTickets {
   renew(ticket: string, path: string, now = Date.now()): boolean {
     const target = this.resolve(ticket, now);
     if (!target || target.path !== path) return false;
-    this.held.get(ticket)!.expiresAt = now + FILE_TICKET_TTL_MS;
+    this.#held.get(ticket)!.expiresAt = now + FILE_TICKET_TTL_MS;
     return true;
   }
 
   resolve(ticket: string, now = Date.now()): FileTicketTarget | null {
-    this.sweep(now);
-    const entry = this.held.get(ticket);
+    this.#sweep(now);
+    const entry = this.#held.get(ticket);
     if (entry === undefined) return null;
-    try { entry.permit?.check(); } catch { this.held.delete(ticket); return null; }
+    try { entry.permit?.check(); } catch { this.#held.delete(ticket); return null; }
     if (entry.identity === null || fileIdentity(entry.path) !== entry.identity) {
-      this.held.delete(ticket);
+      this.#held.delete(ticket);
       return null;
     }
     return { path: entry.path, mime: entry.mime, ...(entry.name ? { name: entry.name } : {}), ...(entry.view ? { view: true as const } : {}) };
@@ -587,44 +589,44 @@ export class FileTickets {
    * lives the same one comes back, renewed, so its address stays the same.
    */
   mintBytes(key: string, read: () => HeldBytes | null, now = Date.now()): string {
-    this.sweep(now);
-    const live = this.bytesKeys.get(key);
-    const entry = live === undefined ? undefined : this.bytesHeld.get(live);
+    this.#sweep(now);
+    const live = this.#bytesKeys.get(key);
+    const entry = live === undefined ? undefined : this.#bytesHeld.get(live);
     if (live !== undefined && entry !== undefined) {
       entry.expiresAt = now + FILE_TICKET_TTL_MS;
       return live;
     }
     const ticket = newToken();
-    this.bytesHeld.set(ticket, { key, read, expiresAt: now + FILE_TICKET_TTL_MS });
-    this.bytesKeys.set(key, ticket);
+    this.#bytesHeld.set(ticket, { key, read, expiresAt: now + FILE_TICKET_TTL_MS });
+    this.#bytesKeys.set(key, ticket);
     return ticket;
   }
 
   /** What a bytes ticket opens, renewing it, or null when it is not one, has expired or its bytes are gone. */
   bytes(ticket: string, now = Date.now()): HeldBytes | null {
-    this.sweep(now);
-    const entry = this.bytesHeld.get(ticket);
+    this.#sweep(now);
+    const entry = this.#bytesHeld.get(ticket);
     if (entry === undefined) return null;
     // A picture still drawn keeps its address: a ticket lives ten minutes past its last use.
     entry.expiresAt = now + FILE_TICKET_TTL_MS;
     let found: HeldBytes | null;
     try { found = entry.read(); } catch { found = null; }
-    if (found === null) this.dropBytes(ticket, entry);
+    if (found === null) this.#dropBytes(ticket, entry);
     return found;
   }
 
   /** Drop every ticket. A revoked session must not keep a bearer URL alive. */
   forgetAll(): void {
-    this.held.clear();
-    this.bytesHeld.clear();
-    this.bytesKeys.clear();
+    this.#held.clear();
+    this.#bytesHeld.clear();
+    this.#bytesKeys.clear();
   }
 
   /** Drop tickets for files under `root`. Artifact tickets live outside a project cwd, so they stay. */
   forgetUnder(root: string): void {
     const base = realOf(root);
-    for (const [ticket, entry] of this.held) {
-      if (contains(base, realOf(entry.path))) this.held.delete(ticket);
+    for (const [ticket, entry] of this.#held) {
+      if (contains(base, realOf(entry.path))) this.#held.delete(ticket);
     }
   }
 
@@ -633,10 +635,10 @@ export class FileTickets {
    * mint. The handle is the caller's to close. A mismatch drops the ticket.
    */
   async open(ticket: string, now = Date.now()): Promise<{ handle: FileHandle; path: string; mime: string; name?: string; size: number; view?: true; permit?: SharedFilePermit } | null> {
-    this.sweep(now);
-    const entry = this.held.get(ticket);
+    this.#sweep(now);
+    const entry = this.#held.get(ticket);
     if (entry === undefined || entry.identity === null) {
-      if (entry !== undefined) this.held.delete(ticket);
+      if (entry !== undefined) this.#held.delete(ticket);
       return null;
     }
     let handle: FileHandle;
@@ -644,7 +646,7 @@ export class FileTickets {
       entry.permit?.check();
       handle = await open(entry.path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | NOFOLLOW);
     } catch {
-      this.held.delete(ticket);
+      this.#held.delete(ticket);
       return null;
     }
     try {
@@ -654,30 +656,30 @@ export class FileTickets {
       // still rejects a swapped inode, including when the ticket named a link.
       const suffix = `|${stats.dev}|${stats.ino}|${stats.size}|${stats.mtimeNs}|${stats.ctimeNs}`;
       if (!stats.isFile() || suffix.length >= entry.identity.length || !entry.identity.endsWith(suffix)) {
-        this.held.delete(ticket);
+        this.#held.delete(ticket);
         await handle.close();
         return null;
       }
       return { handle, path: entry.path, mime: entry.mime, ...(entry.name ? { name: entry.name } : {}), size: Number(stats.size), ...(entry.view ? { view: true as const } : {}), ...(entry.permit ? {permit: entry.permit} : {}) };
     } catch (error) {
       await handle.close();
-      this.held.delete(ticket);
+      this.#held.delete(ticket);
       return null;
     }
   }
 
-  private sweep(now: number): void {
-    for (const [ticket, entry] of this.held) {
-      if (entry.expiresAt <= now) this.held.delete(ticket);
+  #sweep(now: number): void {
+    for (const [ticket, entry] of this.#held) {
+      if (entry.expiresAt <= now) this.#held.delete(ticket);
     }
-    for (const [ticket, entry] of this.bytesHeld) {
-      if (entry.expiresAt <= now) this.dropBytes(ticket, entry);
+    for (const [ticket, entry] of this.#bytesHeld) {
+      if (entry.expiresAt <= now) this.#dropBytes(ticket, entry);
     }
   }
 
-  private dropBytes(ticket: string, entry: BytesTicket): void {
-    this.bytesHeld.delete(ticket);
-    if (this.bytesKeys.get(entry.key) === ticket) this.bytesKeys.delete(entry.key);
+  #dropBytes(ticket: string, entry: BytesTicket): void {
+    this.#bytesHeld.delete(ticket);
+    if (this.#bytesKeys.get(entry.key) === ticket) this.#bytesKeys.delete(entry.key);
   }
 }
 

@@ -23,6 +23,8 @@ export interface DelegateOptions {
   profile?: string;
   /** A git worktree of its own instead of the parent's checkout. */
   worktree?: boolean;
+  /** `delegate models|spawn --machine <name>`: another machine of the group. */
+  machine?: string;
   /** What `contextRequest` built from the context flags; the core checks it. */
   context?: Record<string, unknown>;
 }
@@ -71,7 +73,7 @@ function agentRow(agent: DelegatedAgent, now: number): string[] {
   const wait = agent.thread.backgroundWait;
   const end = busy(agent) ? now : wait?.state === 'interrupted' ? wait.at : agent.lastTurn?.finishedAt ?? now;
   const route = routeOf(agent);
-  const head = `${agent.thread.id} ${state} ${elapsed(end - agent.thread.createdAt)} ${route} ${JSON.stringify(agent.thread.title)}`;
+  const head = `${agent.thread.id} ${state} ${elapsed(end - agent.thread.createdAt)} ${route}${agent.machine ? ` on ${agent.machine.name}` : ''} ${JSON.stringify(agent.thread.title)}`;
   const lines = [head];
   if (wait?.state === 'waiting') lines.push(`  waiting for: ${oneLine(wait.for, 200)} (${elapsed(now - wait.since)})`);
   if (wait?.state === 'interrupted') lines.push(`  interrupted: ${oneLine(wait.for, 200)} ended without waking it (${INTERRUPTION_TEXT[wait.reason]}); boite delegate send ${agent.thread.id} "<instruction>" resumes it`);
@@ -121,9 +123,12 @@ export async function delegateCommand(client: CoreClient, threadId: string, rest
   const requestId = options.requestId ?? crypto.randomUUID();
   switch (action) {
     case 'models': {
-      const models = await client.call('delegation.models', { threadId });
+      const machine = options.machine;
+      const models = await client.call('delegation.models', { threadId, ...(machine === undefined ? {} : { machine }) });
       print([
-        `models a child can run on: boite delegate spawn "<brief>" --model <provider/model> [--effort <level>] [--speed <tier>]`,
+        machine === undefined
+          ? `models a child can run on: boite delegate spawn "<brief>" --model <provider/model> [--effort <level>] [--speed <tier>]`
+          : `models a thread on ${machine} can run on: boite thread new <project> "<brief>" --machine ${machine} --model <provider/model> [--effort <level>] [--speed <tier>], or boite delegate spawn "<brief>" --machine ${machine} --model <provider/model> for a subagent there`,
         ...models.choices.map(choiceRow),
         ...models.unavailable.map(u => `unavailable: ${u.providerId} (${u.reason})`),
         ...(models.anyModel ? [] : ['The owner allows only this conversation\'s model and the profiles (boite delegate profiles); --model must name one of them.']),
@@ -178,9 +183,11 @@ export async function delegateCommand(client: CoreClient, threadId: string, rest
         ...(speed === undefined ? {} : { speed }),
         ...(options.title === undefined ? {} : { title: options.title }),
         ...(options.worktree === true ? { worktree: true } : {}),
+        ...(options.machine === undefined ? {} : { machine: options.machine }),
       });
       print([
         `agent: ${agent.thread.id}`,
+        ...(agent.machine ? [`machine: ${agent.machine.name}`] : []),
         `model: ${routeOf(agent)}`,
         `status: ${agent.thread.status}`,
         ...(agent.thread.projectId === null ? [] : [`project: ${agent.thread.projectId}`, `cwd: ${agent.thread.cwd}`]),

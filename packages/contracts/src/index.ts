@@ -232,10 +232,14 @@ export { resumeAnchor, snapshotOptionsProblem } from './thread-sync.ts';
 export { IMAGE_INLINE_CHARS, previewFileData, previewImageData, type ImagePreviews } from './file-preview.ts';
 export { imageSize } from './image-size.ts';
 export {
-  VIEW_ROUTE, VIEW_MAX_BYTES, VIEW_WIDTH, VIEW_NARROW_WIDTH, VIEW_BLEED, VIEW_NARROW_BELOW, VIEW_MIN_HEIGHT, VIEW_MAX_HEIGHT, VIEW_DEFAULT_HEIGHT, VIEW_TITLE_MAX,
+  VIEW_ROUTE, VIEW_MAX_BYTES, VIEW_BLOCK_MAX_BYTES, VIEW_WIDTH, VIEW_NARROW_WIDTH, VIEW_BLEED, VIEW_NARROW_BELOW, VIEW_MIN_HEIGHT, VIEW_MAX_HEIGHT, VIEW_DEFAULT_HEIGHT, VIEW_TITLE_MAX,
   VIEW_CONTENT_POLICY, VIEW_SANDBOX, VIEW_TOKENS, VIEW_HEIGHT_EXPRESSION, VIEW_GUIDE_LINE, VIEW_HELP,
   clampViewHeight, viewFrameHeight, viewThemeFragment, readViewMessage, viewDocument, viewTitleOf,
   type InlineView, type ViewCheckCapture, type ViewTheme, type ViewHostMessage, type ViewPageMessage,
 } from './view.ts';
 
 export { effectiveCompaction, type CompactionTarget, type CompactionPolicy } from './settings';
+
+export { composerBatch, type ComposerBatch } from './composer-batch';
+export { composerActivity, isComposerActivity, stableComposerValue } from './composer-activity';
+export { permissionAutoDecision } from './permissions';

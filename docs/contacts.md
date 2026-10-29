@@ -242,15 +242,19 @@ project like X". To message an agent conversation, use `boite threads send`.
 The access request carries the agent's git remote when its checkout has one.
 On the contact's side it waits
 in the Contacts page: the owner accepts by opening one project, or refuses with
-a reason. A contact marked trusted is answered without the owner:
+a reason. A request from a contact marked trusted can open a project without
+the owner:
 
 1. a request whose git remote matches exactly one local project opens that
    project (`decidedBy: 'match'`);
-2. otherwise the concierge decides: one inference on the delegation profile
+2. otherwise the concierge looks: one inference on the delegation profile
    named `concierge`, else Opus 5.5 at high effort, given the request and the
-   project list as JSON data. It answers with the project to open or the
-   reason to refuse (`decidedBy: 'concierge'`). If it fails, takes over 3
-   minutes or ends without a verdict, the request waits for the owner.
+   project list as JSON data. It answers with the project to open
+   (`decidedBy: 'concierge'`) or declines. Only the owner refuses: a request
+   the concierge declines waits for the owner like any other, since it may be
+   a question for the owner in person, and the concierge's reason stays in
+   this core's log. If it fails, takes over 3 minutes or ends without a
+   verdict, the request waits for the owner too.
 
 The concierge runs on the driver's side-question path: no tools, no MCP
 servers, hooks or settings, nothing persisted, in an empty folder under the
@@ -258,8 +262,8 @@ data directory. Its processes get no Boite token or thread id, not even one the
 core inherited from an agent that started it. A request cannot make it read a
 file. A
 profile on a protocol without that path (pi, Codex, ACP) never runs it: the
-request waits for the owner and the log says why. It creates no thread; the
-decided request shows its verdict and reason. It never grants `readThreads`.
+request waits for the owner and the log says why. It creates no thread; a
+request it opened shows that verdict. It never grants `readThreads`.
 
 Each request a contact sends gets an id of this core; the contact's own id is
 kept only to recognize its retries and to answer it, so two contacts, or a

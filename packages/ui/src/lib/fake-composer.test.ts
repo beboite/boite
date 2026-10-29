@@ -12,6 +12,20 @@ async function ready(delayMs = 0) {
 }
 const value = (text: string): ComposerValue => ({ input: { text, attachments: [], queued: [], paused: false } });
 
+test('a paired snapshot creates a fresh thread without overwriting a copied conversation', async () => {
+  const owner = await ready();
+  const source = await owner.call('threads.get', { threadId: 't-trace' });
+  const selection = { projectId: source.projectId!, providerId: source.providerId, accountId: source.accountId };
+  const original = await owner.call('threads.create', { ...selection, title: 'Created before pairing' });
+  const peer = owner.composerPeer({ delayMs: 0 });
+  clients.push(peer);
+  await peer.connect();
+  const created = await peer.call('threads.create', { ...selection, title: 'Created after pairing' });
+  expect(created.id).not.toBe(original.id);
+  expect((await peer.call('threads.get', { threadId: original.id })).title).toBe('Created before pairing');
+  expect((await peer.call('threads.list', {})).filter(thread => thread.id === original.id || thread.id === created.id)).toHaveLength(2);
+});
+
 test('soft deletion preserves composer input but purging rejects an offline resurrection', async () => {
   const client = await ready();
   const first = await client.call('composer.put', { section: 'inputs', id: 't-trace', expectedRevision: 0, value: value('Kept during undo') });

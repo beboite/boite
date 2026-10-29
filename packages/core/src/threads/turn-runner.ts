@@ -19,7 +19,7 @@ export { STOP_DEADLINE, STOP_DEADLINE_ERROR } from './turn-attempts.ts';
  * ignores ended by the deadline, and what the finished turn leaves behind.
  */
 export class TurnRunner {
-  private readonly attempts: TurnAttempts;
+  readonly #attempts: TurnAttempts;
   readonly handles: TurnAttempts['handles'];
   readonly steering = new Set<ThreadId>();
   /**
@@ -28,50 +28,53 @@ export class TurnRunner {
    */
   readonly answerAfter = new Map<TurnId, number>();
 
-  constructor(private readonly core: Core, private readonly threads: ThreadStore) {
-    this.attempts = new TurnAttempts(core, threads);
-    this.handles = this.attempts.handles;
+  readonly #core: Core;
+
+  constructor(core: Core, private readonly threads: ThreadStore) {
+    this.#core = core;
+    this.#attempts = new TurnAttempts(core, threads);
+    this.handles = this.#attempts.handles;
   }
 
   /** Mail is a timeline boundary even when the provider has not accepted it yet. */
   noteMail(threadId: ThreadId, at: number): void {
-    const turn = this.core.journal.runningTurn(threadId);
+    const turn = this.#core.journal.runningTurn(threadId);
     if (turn) this.answerAfter.set(turn.id, Math.max(at, this.answerAfter.get(turn.id) ?? 0));
   }
 
   /** Asks a running turn to pause at its next tool boundary for an agent update. False when the thread runs no turn. */
   requestPause(threadId: ThreadId, providerId: ProviderId): boolean {
-    return this.attempts.requestPause(threadId, providerId);
+    return this.#attempts.requestPause(threadId, providerId);
   }
 
   /** Withdraws a pause not yet taken. */
   cancelPause(threadId: ThreadId): void {
-    this.attempts.cancelPause(threadId);
+    this.#attempts.cancelPause(threadId);
   }
 
   /** The capacity retry the thread's turn waits for, or null. */
   retryOf(threadId: ThreadId): ThreadRetry | null {
-    return this.attempts.retryOf(threadId);
+    return this.#attempts.retryOf(threadId);
   }
 
   /** Gives up a capacity retry: the turn fails with the refusal. False when none waits. */
   cancelRetry(threadId: ThreadId): boolean {
-    return this.attempts.cancelRetry(threadId);
+    return this.#attempts.cancelRetry(threadId);
   }
 
   /** True while the thread's turn waits for its agent's update. */
   isPaused(threadId: ThreadId): boolean {
-    return this.attempts.isPaused(threadId);
+    return this.#attempts.isPaused(threadId);
   }
 
   changePermissionMode(threadId: ThreadId, mode: PermissionMode, before: ThreadSummary, next: ThreadSummary): void {
-    this.attempts.changePermissionMode(threadId, mode, before, next);
+    this.#attempts.changePermissionMode(threadId, mode, before, next);
   }
 
   /** What a saved selection means for the turn that is running: its mode, its effort and its speed. */
   selectionChanged(before: ThreadSummary, next: ThreadSummary): void {
-    if (next.permissionMode !== before.permissionMode) this.attempts.changePermissionMode(next.id, next.permissionMode, before, next);
-    if (next.effort !== before.effort || next.speed !== before.speed) this.attempts.changeSettings(next.id, next);
+    if (next.permissionMode !== before.permissionMode) this.#attempts.changePermissionMode(next.id, next.permissionMode, before, next);
+    if (next.effort !== before.effort || next.speed !== before.speed) this.#attempts.changeSettings(next.id, next);
   }
 
   /**
@@ -79,7 +82,7 @@ export class TurnRunner {
    * ordinary stop, a fault also reaches the scheduler's error log.
    */
   private prepareWake(turnId: TurnId, threadId: ThreadId): boolean {
-    try { return this.core.coordination.prepareWake(threadId, turnId); } catch (error) {
+    try { return this.#core.coordination.prepareWake(threadId, turnId); } catch (error) {
       if (error instanceof RpcFailure) return false;
       this.threads.markQueuedStopped(turnId);
       throw error;
@@ -87,10 +90,10 @@ export class TurnRunner {
   }
 
   async runTurn(turnId: TurnId, threadId: ThreadId): Promise<void> {
-    const queued = this.core.journal.getTurn(turnId);
-    const selected = this.core.journal.getThread(threadId);
+    const queued = this.#core.journal.getTurn(turnId);
+    const selected = this.#core.journal.getThread(threadId);
     if (queued === null || selected === null) return;
-    if (!this.core.delegation.prepareTurn(queued)) {
+    if (!this.#core.delegation.prepareTurn(queued)) {
       this.threads.markQueuedStopped(turnId);
       return;
     }
@@ -103,40 +106,40 @@ export class TurnRunner {
       thread: { ...selected, ...queued.execution, permissionMode: selected.permissionMode },
       running: { ...queued, status: 'running', startedAt: Date.now() },
     };
-    const permissions = this.attempts.open(state);
+    const permissions = this.#attempts.open(state);
 
     let result: TurnResult;
     let started = false;
     try {
       // Commit the running state before a driver can spawn or stream output.
       this.threads.progress.begin(threadId, turnId);
-      this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
-        this.core.journal.append({ type: 'turn.started', threadId, version: 1, payload: state.running }, () => {
-          this.core.journal.putTurn(state.running);
+      this.#core.bus.afterCommit(() => this.#core.journal.db.transaction(() => {
+        this.#core.journal.append({ type: 'turn.started', threadId, version: 1, payload: state.running }, () => {
+          this.#core.journal.putTurn(state.running);
         });
-        this.core.bus.emit('turn.started', state.running);
-        markRunning(this.core, threadId);
+        this.#core.bus.emit('turn.started', state.running);
+        markRunning(this.#core, threadId);
       })());
       started = true;
       // A delegated agent with a worktree of its own: made from its parent's HEAD before the agent starts in it.
-      const entering = this.core.delegation.worktrees.enter(threadId, () => {
-        if (this.attempts.preparationStopped(threadId)) throw refused('worktree preparation was stopped');
+      const entering = this.#core.delegation.worktrees.enter(threadId, () => {
+        if (this.#attempts.preparationStopped(threadId)) throw refused('worktree preparation was stopped');
       });
       if (entering) await entering;
-      this.core.workforce.resident.assertThreadRoute(threadId, state.thread);
-      const provider = this.core.providers.require(state.thread.providerId);
-      const account = this.core.accounts.require(state.thread.accountId);
-      assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), account);
+      this.#core.workforce.resident.assertThreadRoute(threadId, state.thread);
+      const provider = this.#core.providers.require(state.thread.providerId);
+      const account = this.#core.accounts.require(state.thread.accountId);
+      assertDriverRunnable(provider.protocol, this.#core.providers.summary(provider.id), account);
       const driver = getDriver(provider.protocol);
-      result = await this.attempts.run(queued, state, { provider, account, driver }, permissions);
-      if (state.running.execution?.operation === 'coordination' && result.status === 'done') this.core.coordination.submitted(threadId, turnId);
+      result = await this.#attempts.run(queued, state, { provider, account, driver }, permissions);
+      if (state.running.execution?.operation === 'coordination' && result.status === 'done') this.#core.coordination.submitted(threadId, turnId);
     } catch (error) {
-      result = this.attempts.preparationStopped(threadId)
+      result = this.#attempts.preparationStopped(threadId)
         ? { status: 'stopped', sessionId: state.thread.sessionId, usage: null }
         : { status: 'error', sessionId: state.thread.sessionId, usage: null, error: messageOf(error), diagnosticError: logMessageOf(error) };
     } finally {
-      try { this.attempts.close(threadId); }
-      catch (error) { reportSettlementError(this.core, threadId, turnId, 'attempt cleanup', error); }
+      try { this.#attempts.close(threadId); }
+      catch (error) { reportSettlementError(this.#core, threadId, turnId, 'attempt cleanup', error); }
       this.answerAfter.delete(turnId);
     }
 
@@ -144,10 +147,10 @@ export class TurnRunner {
     try {
       const checkpoint = this.threads.codeCheckpoints.end(turnId);
       if (checkpoint) await checkpoint;
-    } catch (error) { reportSettlementError(this.core, threadId, turnId, 'checkpoint', error); }
-    if (this.core.journal.isClosed()) return;
-    try { this.core.delegation.submitted(threadId, turnId, result.status === 'done'); }
-    catch (error) { reportSettlementError(this.core, threadId, turnId, 'delegation submission', error); }
+    } catch (error) { reportSettlementError(this.#core, threadId, turnId, 'checkpoint', error); }
+    if (this.#core.journal.isClosed()) return;
+    try { this.#core.delegation.submitted(threadId, turnId, result.status === 'done'); }
+    catch (error) { reportSettlementError(this.#core, threadId, turnId, 'delegation submission', error); }
     const finished: Turn = {
       ...running,
       status: result.status === 'done' ? 'done' : result.status,
@@ -157,12 +160,12 @@ export class TurnRunner {
       ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}),
       ...(result.agentTotals ? { agentTotals: result.agentTotals } : {}),
     };
-    const completion = await settleTurn(this.core, { queued, running, thread, result, started, finished });
+    const completion = await settleTurn(this.#core, { queued, running, thread, result, started, finished });
     // No in-memory events or after-finish effects run before the transaction
     // commits. Even a failure in the thread write cannot publish completion twice.
     if (completion === null) {
       // An abandoned result still owns its old progress, but a newer turn does not.
-      if (!this.core.journal.isClosed()) this.threads.progress.end(threadId, turnId);
+      if (!this.#core.journal.isClosed()) this.threads.progress.end(threadId, turnId);
       return;
     }
     const { next, sameSession, threadOwned } = completion;
@@ -171,17 +174,17 @@ export class TurnRunner {
       try {
         this.threads.cards.clearPermissionsOf(threadId);
         this.threads.cards.clearQuestionsOf(threadId);
-      } catch (error) { reportSettlementError(this.core, threadId, turnId, 'card cleanup', error); }
+      } catch (error) { reportSettlementError(this.#core, threadId, turnId, 'card cleanup', error); }
     }
-    this.core.bus.emit('turn.finished', finished);
+    this.#core.bus.emit('turn.finished', finished);
     if (result.status === 'error') {
-      this.core.log('error', `turn ${turnId} failed: ${result.diagnosticError ?? result.error ?? 'unknown error'}`, { source: thread.providerId, event: 'turn.failed', threadId, turnId });
+      this.#core.log('error', `turn ${turnId} failed: ${result.diagnosticError ?? result.error ?? 'unknown error'}`, { source: thread.providerId, event: 'turn.failed', threadId, turnId });
       // The agent's own last words are usually the cause; provider output is otherwise never persisted.
       // Only this turn's: a quick retry must not blame the previous turn's lines on it.
       // After settlement: a diagnostic failure must not skip the moves, wakes and flushes below.
       try {
         const tail = stderrTail(threadId, undefined, undefined, running.startedAt ?? 0);
-        if (tail !== null) this.core.logs.warn(`The agent's last ${tail.length} characters on stderr before turn ${turnId} failed are in data.stderrTail and stay on this machine`, { source: thread.providerId, event: 'turn.failed.stderr', threadId, turnId, data: { stderrTail: tail } });
+        if (tail !== null) this.#core.logs.warn(`The agent's last ${tail.length} characters on stderr before turn ${turnId} failed are in data.stderrTail and stay on this machine`, { source: thread.providerId, event: 'turn.failed.stderr', threadId, turnId, data: { stderrTail: tail } });
       } catch { /* the turn's own record above already says it failed */ }
     }
     if (!next) return;
@@ -192,7 +195,7 @@ export class TurnRunner {
       return;
     }
     if (next.archived) releaseThread(threadId);
-    this.core.bus.emit('thread.updated', withLoad(this.core, next));
+    this.#core.bus.emit('thread.updated', withLoad(this.#core, next));
     // A move the agent asked for during the turn happens now that no process
     // works in the old folder, before any wake or held answer starts the next.
     await this.threads.moves.applyWaiting(threadId);
@@ -201,7 +204,7 @@ export class TurnRunner {
     // A stopped turn pauses coordination until the user's next message. A failed one pauses nothing: another agent
     // can wake the crashed thread, and a letter that arrived during the turn reaches it now. A keepalive was only waiting.
     const keepalive = queued.execution?.operation === 'keepalive';
-    if (result.status === 'stopped' && !keepalive) this.core.coordination.pause(threadId);
+    if (result.status === 'stopped' && !keepalive) this.#core.coordination.pause(threadId);
     // A spent subscription window: the thread may resume by itself once it resets (`threads/limit-resume.ts`).
     if (result.status === 'error' && result.refusal?.kind === 'usage-limit' && !next.archived && !keepalive) this.threads.limitResumes.turnFailed(next, finished, result.refusal.resetsAt);
     // Any other stop before the answer resumes by itself, twice in a row at most (`threads/auto-continue.ts`).
@@ -224,6 +227,6 @@ export class TurnRunner {
   }
 
   stopRunning(threadId: ThreadId): boolean {
-    return this.attempts.stopRunning(threadId);
+    return this.#attempts.stopRunning(threadId);
   }
 }

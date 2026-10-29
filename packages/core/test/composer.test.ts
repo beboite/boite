@@ -704,3 +704,31 @@ test('a missing project in a delivered receipt does not abort startup of another
   await waitFor(() => h.core.journal.listTurns(threadId).some(turn => turn.status === 'done'));
   expect(h.core.composer.storage.get('inputs', threadId).value?.input.queued).toEqual([]);
 });
+
+
+test('a private draft transfer identifies its privacy before thread.created and keeps tombstones private', async () => {
+  h = await startTestCore();
+  const a = await h.connect(), peer = await h.connect();
+  const project = await a.call('projects.drafts', {});
+  const account = (await a.call('accounts.list', {})).find(row => row.providerId === 'echo')!;
+  const choice = { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' as const };
+  const events: { event: string; record?: import('@boite/contracts').ComposerRecord; id?: string }[] = [];
+  const leaks: unknown[] = [];
+  a.on('thread.created', row => events.push({ event: 'thread.created', id: row.id }));
+  a.on('composer.updated', record => events.push({ event: 'composer.updated', record }));
+  peer.on('composer.updated', record => leaks.push(record));
+  const accepted = await a.call('composer.put', { section: 'drafts', id: 'private-transfer-draft', expectedRevision: 0,
+    value: { draft: { projectId: project.id, worktree: false, incognito: true }, choice,
+      input: { text: '', attachments: [], paused: false, queued: [{ id: 'private-transfer-prompt', text: 'Private transfer', attachments: [], choice }] } } });
+  await waitFor(() => events.some(entry => entry.record?.section === 'inputs'));
+  const transferred = events.find(entry => entry.record?.section === 'inputs')!.record!;
+  await waitFor(() => events.some(entry => entry.event === 'thread.created' && entry.id === transferred.id));
+  expect(accepted.record.privateMode).toBe(true);
+  expect(transferred.privateMode).toBe(true);
+  expect(transferred.value?.draft).toBeUndefined();
+  expect(events.findIndex(entry => entry.record === transferred)).toBeLessThan(events.findIndex(entry => entry.event === 'thread.created' && entry.id === transferred.id));
+  const tombstone = events.find(entry => entry.record?.id === 'private-transfer-draft' && entry.record.value === null)?.record;
+  expect(tombstone).toMatchObject({ privateMode: true, value: null });
+  expect(leaks).toEqual([]);
+  expect(h.core.journal.db.query('SELECT count(*) AS n FROM composer_records').get()).toEqual({ n: 0 });
+});

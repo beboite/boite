@@ -205,6 +205,17 @@ export class Workbench {
     } catch (error) { return { ok: false, error: this.ctx.reason(error) }; }
   }
 
+  /** The address a ```view block of an answer opens at as a page, which a frame loads. */
+  async viewBlock(html: string): Promise<FileAnswer<string>> {
+    const client = this.ctx.client;
+    if (!client) return { ok: false, error: strings.errors.noEndpoint };
+    try {
+      const { url } = await client.call('artifacts.viewBlock', { html });
+      const endpoint = this.ctx.store.endpointUrl;
+      return { ok: true, value: url.startsWith('/') && endpoint ? coreHref(endpoint, url) : url };
+    } catch (error) { return { ok: false, error: this.ctx.reason(error) }; }
+  }
+
   /** The editor's save. The bytes that reached the disk, or why they did not. */
   async writeFile(
     threadId: ThreadId,

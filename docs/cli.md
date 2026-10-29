@@ -384,7 +384,10 @@ archive|unarchive|remove|rename`, `thread move <project> <id>`, `questions`,
 and `thread new` need no `--thread` from a terminal. There they use the owner
 methods: `thread send` is the owner's own prompt, queued behind a running turn,
 and `thread new` copies the agent of `--thread`, else of the project's most
-recent thread (`--model` replaces the model). Inside the thread of
+recent thread (`--model` replaces the model, while `--effort` and `--speed`
+set its reasoning level and service tier). From a terminal, use `--core`
+to reach another machine; `--machine` is for an agent inside a thread.
+Inside the thread of
 a [bot](bots.md#projects-entrusted-to-a-bot) the same words
 reach the threads of the projects the owner entrusted to it and the threads
 it started in any project, through `resident.*`, and its messages reach them as that bot's letters, never as the
@@ -413,7 +416,7 @@ brains and the user's notes name them; `boite help` shows only the new ones
 boite where                      thread, title, project, cwd, branch, worktree, agent
 boite thread move <project>      move this thread to another project (name, id or
                                  folder) when this turn ends
-boite thread new <project> <brief> [--worktree] [--title <title>] [--machine <name>] [context flags]
+boite thread new <project> <brief> [--worktree] [--title <title>] [--machine <name>] [--model <provider/model>] [--effort <level>] [--speed <tier>] [context flags]
                                  start a thread in a project, on this machine or
                                  another of the group; its first answer comes
                                  back as a message
@@ -471,8 +474,9 @@ boite bot schedule <json>
 boite bot unschedule <routine-id>
 boite bot watch|unwatch <thread-id>
 boite bot event <bot> [--key <key>] <text>
-boite delegate models|profiles|list
-boite delegate spawn <brief> [--model <provider/model>] [--effort <level>] [--speed <tier>] [--profile <id>] [--title <t>] [--worktree] [context flags]
+boite delegate models [--machine <name>]
+boite delegate profiles|list
+boite delegate spawn <brief> [--model <provider/model>] [--effort <level>] [--speed <tier>] [--profile <id>] [--title <t>] [--worktree] [--machine <name> [--project <name>]] [context flags]
 boite delegate send <thread-id> <text>
 boite delegate wait [thread-id] [--timeout <s>]
 boite delegate result <thread-id> <turn-id> [offset]
@@ -535,6 +539,10 @@ appears there, keeps its own session and can be opened, answered, moved or
 archived like any other. It is not a delegated child. The new thread runs on
 the caller's provider, account, model, effort and permission mode, in the
 project folder or, with `--worktree`, on a new `boite/` branch of its own.
+`--model`, `--effort` and `--speed` choose another model of this machine,
+matched as `delegate spawn --model` matches them, and are refused with the
+expected values when the model, level or tier is not listed; the permission
+mode stays the caller's.
 The title is `--title` or the brief's first line. The CLI prints its thread ID, title,
 project, working directory, provider/model
 and coordination address. Its first answer returns automatically; later steering
@@ -569,7 +577,13 @@ an ordinary one of that machine: its owner sees it in that machine's sidebar,
 and the starter's line and the new thread's note name the other machine. It
 runs on the caller's provider when that machine has an account signed in for
 it, else it is refused; the model, effort and speed follow when that machine
-lists the model, else its defaults apply. The first answer comes back the same
+lists the model, else its defaults apply. With `--model`, `--effort` or
+`--speed`, the caller first reads that machine's models, the list
+`boite delegate models --machine <name>` prints, and matches the names
+against it; a miss is refused with that machine's list and starts nothing.
+That machine then starts on exactly the chosen provider, model, effort and
+speed or refuses. A machine whose Boite cannot list its models is reported too
+old before anything starts there. The first answer comes back the same
 way, as a letter between the two machines, and `threads send <machine>/<id>`
 steers it after. The caller's Communication settings decide as for a project
 of its own machine, except that another machine is always "elsewhere": a thread
@@ -578,19 +592,23 @@ machine's rule: it starts nothing until the user writes in it. A bot's thread
 takes another path: it starts threads on another machine only in a project
 there entrusted to it, named `<machine>/<project>` as `threads` lists it, or
 by its name there with `--machine`. That machine starts it while its
-`groupBots` switch is on, whatever its `groupThreads` says, and the thread goes
+`groupBots` switch is on, and the thread goes
 on the bot's desk, where its first answer arrives as an event; `machine:` in
 the output names the machine and `thread send <machine>/<id>` steers it
 ([bots](bots.md#projects-of-the-other-machines-of-the-group)). A project of
 that machine not entrusted to the bot is refused with the ones it may use
-there.
+there. Without explicit model, effort or speed, this path does not require
+`groupThreads`; choosing them reads the destination's model list, which
+requires `groupThreads` too.
 
 The machine that would hold the thread decides whether it accepts them: its
 **Threads from the other machines** switch (`groupThreads`), on its row of the
 group card, is off by default. While it is off the CLI is refused with
 `<machine> does not let the other machines of its group start threads there;
 propose the switch to the user with boite settings request groupThreads true
---machine <machine> --why "<what the thread is for>"`. Only a member of the
+--machine <machine> --why "<what the thread is for>"`. The same switch gates
+reading its models, so `delegate models --machine` gets the same refusal.
+Only a member of the
 group can ask: a contact or a paired device has no such operation. From a
 terminal, `--machine` is refused; `--core` reaches the other machine instead.
 
@@ -878,6 +896,14 @@ owner wrote again, continues the children whose last turn stopped, or only the
 one named, and resumes the workflow runs a pause held
 ([delegation](delegation.md#stop-pause-and-resume)). Only the owner changes
 profiles or lifts the pause set in Subagents > Settings.
+`delegate spawn --machine <name>` runs the child on another machine of the
+group, in its project named like the parent's or the one `--project` names,
+under that machine's `groupThreads` switch; `--model`, `--effort` and `--speed`
+are matched against that machine's list, and without them the child runs on the
+parent's model there or is refused. `delegate list` names the machine after the
+model, and `send`,
+`stop`, `wait` and `result` reach the child there
+([delegation](delegation.md#on-another-machine-of-the-group)).
 [Workflows](workflows.md) run a JSON plan of such children: `workflow help`
 prints the whole format, `workflow run` starts it and opens it in the panel,
 and the results come back as one message when the run ends.

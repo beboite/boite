@@ -237,7 +237,7 @@ export interface Contact {
   role: 'host' | 'guest';
   /** What a guest dials: the host's tailnet name URL. Missing on the host side. */
   url?: string;
-  /** Its access requests are decided without the owner: a git remote match, else the concierge. */
+  /** A git remote match, else the concierge, opens a project for its access requests without the owner; the owner decides the rest. */
   trusted: boolean;
   /** Projects this core opened to the contact. */
   grants: ContactGrant[];
@@ -286,7 +286,7 @@ export interface ContactRequest {
   status: 'pending' | 'accepted' | 'refused';
   /** The project opened, once accepted. Its name on the side that opened it. */
   project?: { id: ProjectId; name: string };
-  /** Why it was refused, written by the owner or the concierge. */
+  /** Why it was refused, written by the owner, or by the concierge on an older core. */
   reason?: string;
   decidedBy?: 'owner' | 'match' | 'concierge';
   decidedAt?: Timestamp;

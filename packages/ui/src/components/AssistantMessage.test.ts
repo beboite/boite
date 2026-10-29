@@ -37,6 +37,30 @@ test('live paragraphs update without rebuilding completed prose when tools and r
   } finally { store.detach(); client.close(); }
 });
 
+test('a view block being written shows a placeholder, never its half-written HTML, until it closes', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store(); store.attach(client);
+  try {
+    await store.connect(); await store.open('t-trace');
+    const message = store.openThread!.messages.at(-1)!;
+    message.state = 'streaming';
+    message.parts = [{ type: 'text', text: 'Here it is.\n\nA card:\n```view\n<svg width="40" height="40"><circle' }];
+    mounted = mount(AssistantMessage, { target: document.body, props: { store, threadId: message.threadId, message, signedOut: null, showModel: false } });
+    flushSync();
+    const part = () => document.querySelector('[data-testid=text-part]')!;
+    expect(document.querySelectorAll('[data-testid=paragraph]')).toHaveLength(1);
+    expect(document.querySelector('[data-testid=paragraph-pending]')?.textContent).toBe('A card:');
+    expect(document.querySelector('[data-testid=drawing-pending]')).not.toBeNull();
+    expect(part().textContent).not.toContain('<svg');
+    if (message.parts[0]?.type !== 'text') throw new Error('missing text');
+    message.parts[0].text += ' r="20"/></svg>\n```\n\nDone';
+    flushSync();
+    expect(document.querySelector('[data-testid=drawing-pending]')).toBeNull();
+    expect(document.querySelector<HTMLElement>('.md-view')?.dataset.source).toBe('<svg width="40" height="40"><circle r="20"/></svg>');
+    expect(document.querySelector('[data-testid=paragraph-pending]')?.textContent).toBe('Done');
+  } finally { store.detach(); client.close(); }
+});
+
 test('a compaction a background copy made says so beside its counts', async () => {
   const client = new FakeClient({ delayMs: 0 });
   const store = new Store(); store.attach(client);

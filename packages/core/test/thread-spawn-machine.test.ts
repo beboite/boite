@@ -1,11 +1,14 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import type { AgentSpawn } from '@boite/contracts';
+import type { AgentSpawn, ModelInfo } from '@boite/contracts';
 import { runCli } from '../src/cli.ts';
+import type { CoreClient } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
+import { invalidParams } from '../src/errors.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { thrown } from './settle.ts';
 
 /* `boite thread new --machine`: a thread's agent starts a thread on another machine of its group. */
 
@@ -202,4 +205,95 @@ test('a card about another machine draws what that machine has, even when the ow
   expect((await ask()).code).toBe(0);
   const [card] = await owner.call('questions.list', { threadId });
   expect(card?.setting).toMatchObject({ key: 'groupThreads', value: true, previous: false });
+});
+
+/* `--model`, `--effort` and `--speed` on `thread new`, here and on another machine. */
+
+const TWIN_MODELS: ModelInfo[] = [
+  { id: 'twin-a', name: 'Twin A', default: true, effort: { levels: [{ id: 'low', label: 'Low' }, { id: 'high', label: 'High' }], default: 'high' } },
+  { id: 'twin-b', name: 'Twin B', effort: { levels: [{ id: 'low', label: 'Low' }, { id: 'max', label: 'Max' }], default: 'max' } },
+];
+
+/** A second provider on the echo driver, signed in, that the calling thread does not run on. */
+async function twinProvider(h: TestCore, owner: CoreClient): Promise<void> {
+  const shipped = JSON.parse(readFileSync(join(import.meta.dir, '../src/providers/shipped/echo.json'), 'utf8')) as Record<string, unknown>;
+  mkdirSync(join(h.dataDir, 'providers'), { recursive: true });
+  writeFileSync(join(h.dataDir, 'providers', 'twin.json'), JSON.stringify({ ...shipped, id: 'twin', name: 'Twin', shortName: 'Twin', models: TWIN_MODELS }));
+  expect((await owner.call('providers.reload', {})).rejected).toEqual([]);
+  h.core.accounts.ensureDefaults();
+}
+
+test('thread new --model starts on that model of this machine, and refuses one it lacks with the list', async () => {
+  answering();
+  const { desk, owner, threadId, cli } = await setup();
+  await twinProvider(desk, owner);
+  const started = await cli(['thread', 'new', 'test', 'Read the parser', '--model', 'twin/twin-b', '--effort', 'low', '--request-id', 'model-1', '--json']);
+  expect(started.err).toBe('');
+  const spawned = JSON.parse(started.out) as AgentSpawn;
+  expect(desk.core.threads.require(spawned.thread.id)).toMatchObject({ providerId: 'twin', model: 'twin-b', effort: 'low' });
+
+  const before = desk.core.journal.listThreads().length;
+  const unknown = await cli(['thread', 'new', 'test', 'Read the parser', '--model', 'nothing-like-it', '--request-id', 'model-2']);
+  expect(unknown.err).toContain('model: no installed model matches "nothing-like-it"; run boite delegate models');
+  const refusal = await desk.core.threads.spawns.spawn({ threadId, project: 'test', prompt: 'Read the parser', model: 'nothing-like-it', requestId: 'model-3' }).catch((error: unknown) => error);
+  expect(refusal).toMatchObject({ data: { field: 'model', expected: expect.arrayContaining(['echo/echo', 'twin/twin-a', 'twin/twin-b']) } });
+  expect((await cli(['thread', 'new', 'test', 'Read the parser', '--model', 'twin/twin-b', '--effort', 'high', '--request-id', 'model-4'])).err).toContain('effort: twin/twin-b has no "high" level; expected low, max');
+  expect(desk.core.journal.listThreads()).toHaveLength(before);
+});
+
+test('thread new --machine --model starts on that machine\'s model, read from it, and refuses one it lacks before anything starts', async () => {
+  answering();
+  const { desk, pc, pcOwner, threadId, notes, machine, cli } = await setup();
+  await twinProvider(pc, pcOwner);
+  // Off on the PC: its models are not read either, and the agent is told how to ask.
+  const off = await cli(['delegate', 'models', '--machine', machine]);
+  expect(off.err).toContain(`boite settings request groupThreads true --machine ${machine} --why`);
+  expect((await cli(['thread', 'new', 'notes', 'Brief', '--machine', machine, '--model', 'twin/twin-b'])).err).toContain(`boite settings request groupThreads true --machine ${machine} --why`);
+  await pc.core.settings.set({ groupThreads: true });
+
+  // This machine has no twin provider: the list is the PC's, its own model marked.
+  const listed = await cli(['delegate', 'models', '--machine', machine]);
+  expect(listed.err).toBe('');
+  expect(listed.out).toContain(`models a thread on ${machine} can run on: boite thread new <project> "<brief>" --machine ${machine} --model <provider/model>`);
+  expect(listed.out).toContain('twin/twin-b "Twin B" effort=low|max (default max)');
+  expect(listed.out).toContain('echo/echo "Echo" effort=low|high (default high) [this conversation]');
+  expect((await cli(['delegate', 'models'])).out).not.toContain('twin/');
+
+  const started = await cli(['thread', 'new', 'notes', 'Print the letter', '--machine', machine, '--model', 'twin-b', '--effort', 'low', '--request-id', 'remote-model-1', '--json']);
+  expect(started.err).toBe('');
+  const spawned = JSON.parse(started.out) as AgentSpawn;
+  expect(pc.core.threads.require(spawned.thread.id)).toMatchObject({ projectId: notes.id, providerId: 'twin', model: 'twin-b', effort: 'low' });
+
+  // A model the PC lacks: refused with the PC's list, and no thread.start is sent.
+  const asked: string[] = [];
+  const request = desk.core.coordination.request.bind(desk.core.coordination);
+  desk.core.coordination.request = ((peer, operation, payload) => { asked.push(operation); return request(peer, operation, payload); }) as typeof desk.core.coordination.request;
+  const before = pc.core.journal.listThreads().length;
+  const missing = await cli(['thread', 'new', 'notes', 'Print the letter', '--machine', machine, '--model', 'echo/missing', '--request-id', 'remote-model-2']);
+  expect(missing.err).toContain(`model: no installed model matches "echo/missing"; run boite delegate models --machine ${machine}`);
+  const refusal = await desk.core.threads.spawns.spawn({ threadId, project: 'notes', prompt: 'Print', machine, model: 'echo/missing', requestId: 'remote-model-3' }).catch((error: unknown) => error);
+  expect(refusal).toMatchObject({ data: { field: 'model', expected: expect.arrayContaining(['echo/echo', 'twin/twin-a', 'twin/twin-b']) } });
+  expect(asked).toEqual(['delegation.catalog', 'delegation.catalog']);
+  expect(pc.core.journal.listThreads()).toHaveLength(before);
+
+  // The PC itself starts a strict request on exactly its model or not at all, never its default.
+  const peer = desk.core.group.peers().find(member => member.coreId === pc.core.coordination.card().coreId)!;
+  const strict = { from: { threadId, title: 'Family helper', projectId: 'p', project: 'test' }, project: 'notes', prompt: 'Brief', title: 'Brief', worktree: false, requestId: 'strict-1', agent: { providerId: 'twin', model: 'twin-c', effort: null, speed: null, permissionMode: 'default', strict: true } };
+  expect(await thrown(request(peer, 'thread.start', strict))).toThrow('twin/twin-c is not a model of');
+  expect(pc.core.journal.listThreads()).toHaveLength(before);
+});
+
+test('a member whose Boite has no model list is reported too old before anything starts there', async () => {
+  answering();
+  const { pc, machine, cli } = await setup();
+  await pc.core.settings.set({ groupThreads: true });
+  // As an older core answers an operation it does not know.
+  pc.core.threads.spawns.catalogFor = async () => { throw invalidParams('operation: expected directory, deliver, receipt, search, read, group.sync, group.push, relay.*, thread.start, setting.* or bot.*'); };
+  const before = pc.core.journal.listThreads().length;
+  const spawned = await cli(['thread', 'new', 'notes', 'Brief', '--machine', machine, '--model', 'echo/echo']);
+  expect(spawned.err).toContain('is too old to start threads on a model chosen from another machine; the owner updates it in Settings, Machines and updates');
+  expect((await cli(['delegate', 'models', '--machine', machine])).err).toContain('is too old to list its models for another machine');
+  expect(pc.core.journal.listThreads()).toHaveLength(before);
+  // Without --model nothing is read first: the thread starts as before.
+  expect((await cli(['thread', 'new', 'notes', 'Brief', '--machine', machine])).err).toBe('');
 });

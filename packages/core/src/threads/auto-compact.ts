@@ -32,12 +32,15 @@ export const AUTO_COMPACT_LABEL = 'Automatic compaction';
  * a copy compacted in the background takes its place (`threads/background-compact.ts`).
  */
 export class AutoCompaction {
-  private readonly timers = new Map<ThreadId, ReturnType<typeof setTimeout>>();
-  private readonly unlisten: () => void;
+  readonly #timers = new Map<ThreadId, ReturnType<typeof setTimeout>>();
+  readonly #unlisten: () => void;
 
-  constructor(private readonly core: Core, private readonly threads: ThreadStore) {
+  readonly #core: Core;
+
+  constructor(core: Core, private readonly threads: ThreadStore) {
+    this.#core = core;
     // An ACP agent names its commands only once its session is prepared, after the client showed the thread.
-    this.unlisten = core.bus.onCommitted((name, payload) => {
+    this.#unlisten = core.bus.onCommitted((name, payload) => {
       if (name !== 'thread.commands') return;
       const { threadId } = payload as { threadId: ThreadId };
       if (this.threads.focus.viewed(threadId)) queueMicrotask(() => this.shown(threadId));
@@ -51,35 +54,35 @@ export class AutoCompaction {
     this.threads.backgroundCompact.turnFinished(thread, turn);
     // A stop or a failure is the user's to look at; a compaction never chains into another.
     if (turn.status !== 'done' || turn.execution?.operation === 'compact') return;
-    const rule = effectiveCompaction(this.core.settings.get(), thread).autoCompact;
-    if (!rule || this.refusal(thread) !== null) return;
+    const rule = effectiveCompaction(this.#core.settings.get(), thread).autoCompact;
+    if (!rule || this.#refusal(thread) !== null) return;
     const due = this.due(thread, rule);
-    if (due !== null) this.arm(thread.id, due.delay);
+    if (due !== null) this.#arm(thread.id, due.delay);
   }
 
-  private arm(threadId: ThreadId, delay: number): void {
+  #arm(threadId: ThreadId, delay: number): void {
     const timer = setTimeout(() => {
-      this.timers.delete(threadId);
-      this.fire(threadId);
+      this.#timers.delete(threadId);
+      this.#fire(threadId);
     }, delay);
     timer.unref?.();
-    this.timers.set(threadId, timer);
+    this.#timers.set(threadId, timer);
   }
 
   cancel(threadId: ThreadId): void {
-    const timer = this.timers.get(threadId);
+    const timer = this.#timers.get(threadId);
     if (timer === undefined) return;
     clearTimeout(timer);
-    this.timers.delete(threadId);
+    this.#timers.delete(threadId);
   }
 
   /** A planned compaction replaces a cache keepalive rather than being postponed by its ping. */
-  planned(threadId: ThreadId): boolean { return this.timers.has(threadId); }
+  planned(threadId: ThreadId): boolean { return this.#timers.has(threadId); }
 
   /** A background copy finished or failed: an idle thread takes it, or compacts if it is due, now. */
   recheck(threadId: ThreadId): void {
     this.cancel(threadId);
-    this.fire(threadId);
+    this.#fire(threadId);
   }
 
   /**
@@ -92,14 +95,14 @@ export class AutoCompaction {
    * that kept more than the limit: the last turn decides.
    */
   shown(threadId: ThreadId): void {
-    if (this.core.stopping || this.core.journal.isClosed()) return;
-    const thread = this.core.journal.getThread(threadId);
+    if (this.#core.stopping || this.#core.journal.isClosed()) return;
+    const thread = this.#core.journal.getThread(threadId);
     const reading = thread?.context ?? null;
     if (thread === null || reading === null) return;
-    const limit = effectiveCompaction(this.core.settings.get(), thread).autoCompact?.tokens ?? null;
+    const limit = effectiveCompaction(this.#core.settings.get(), thread).autoCompact?.tokens ?? null;
     if (limit === null || reading.tokens < limit) return;
     // A keepalive's ping says nothing of the conversation, as after a turn.
-    const last = this.core.journal.lastTurn(threadId, true);
+    const last = this.#core.journal.lastTurn(threadId, true);
     if (last !== null && (last.status !== 'done' || last.execution?.operation === 'compact')) return;
     // A timer armed below an older limit, for the cache's moment, would wait minutes: the moment is worked out again.
     this.recheck(threadId);
@@ -107,17 +110,17 @@ export class AutoCompaction {
 
   /** Done lets the final answer finish, but has no further context to prepare. */
   stopIfDone(threadId: ThreadId): void {
-    const thread = this.core.journal.getThread(threadId);
+    const thread = this.#core.journal.getThread(threadId);
     if (!thread?.archived || thread.doneAt == null) return;
     this.cancel(threadId);
-    if (this.core.journal.runningTurn(threadId)?.execution?.operation === 'compact'
-      || this.threads.progress.get(threadId)?.phase === 'compacting') this.core.scheduler.stop(threadId);
+    if (this.#core.journal.runningTurn(threadId)?.execution?.operation === 'compact'
+      || this.threads.progress.get(threadId)?.phase === 'compacting') this.#core.scheduler.stop(threadId);
   }
 
   close(): void {
-    for (const timer of this.timers.values()) clearTimeout(timer);
-    this.timers.clear();
-    this.unlisten();
+    for (const timer of this.#timers.values()) clearTimeout(timer);
+    this.#timers.clear();
+    this.#unlisten();
   }
 
   /**
@@ -145,30 +148,30 @@ export class AutoCompaction {
   }
 
   /** Why this thread is not compacted now, or null. */
-  private refusal(thread: ThreadSummary): string | null {
+  #refusal(thread: ThreadSummary): string | null {
     if (thread.archived) return 'archived';
     return this.threads.compactRefusal(thread);
   }
 
-  private fire(threadId: ThreadId): void {
-    if (this.core.stopping || this.core.journal.isClosed()) return;
-    const thread = this.core.journal.getThread(threadId);
+  #fire(threadId: ThreadId): void {
+    if (this.#core.stopping || this.#core.journal.isClosed()) return;
+    const thread = this.#core.journal.getThread(threadId);
     if (thread === null) return;
-    const rule = effectiveCompaction(this.core.settings.get(), thread).autoCompact;
+    const rule = effectiveCompaction(this.#core.settings.get(), thread).autoCompact;
     if (!rule || thread.status !== 'idle') return;
     if (this.threads.runner.handles.has(threadId) || this.threads.runner.steering.has(threadId)) return;
-    if (this.refusal(thread) !== null || this.expected(threadId)) return;
+    if (this.#refusal(thread) !== null || this.#expected(threadId)) return;
     // The setting or the background work may have changed since the timer was
     // armed: the moment is worked out again, and one that lies ahead waits for its own time.
     const due = this.due(thread, rule);
     if (due === null) return;
-    if (due.delay > 0) { this.arm(threadId, due.delay); return; }
+    if (due.delay > 0) { this.#arm(threadId, due.delay); return; }
     // A copy compacted in the background replaces the turn, or one still running is waited for.
     if (this.threads.backgroundCompact.due(thread) !== null || due.moment === 'copy') return;
     try {
       this.threads.compact(threadId, undefined, true);
     } catch (error) {
-      this.core.log('info', `thread ${threadId}: automatic compaction skipped: ${messageOf(error)}`);
+      this.#core.log('info', `thread ${threadId}: automatic compaction skipped: ${messageOf(error)}`);
     }
   }
 
@@ -178,17 +181,17 @@ export class AutoCompaction {
    * iteration must not wait behind maintenance. Children working elsewhere
    * are not pending input: their eventual results stay in the inbox.
    */
-  private expected(threadId: ThreadId): boolean {
+  #expected(threadId: ThreadId): boolean {
     if (this.threads.deferred.pendingWakes.has(threadId) || this.threads.deferred.deferredAnswers.has(threadId) || this.threads.deferred.consumed.has(threadId)) return true;
     if (this.threads.resumes.retryOf(threadId)?.kind === 'auto-continue') return true;
-    const activity = this.core.activity.get(threadId);
+    const activity = this.#core.activity.get(threadId);
     if (activity.goal?.status === 'active' || activity.loop?.status === 'active') return true;
     try {
       // Work elsewhere can last hours. Only mail already waiting to open
       // this thread's next turn takes precedence; later results stay queued.
-      if (this.core.delegation.hasMail(threadId)) return true;
+      if (this.#core.delegation.hasMail(threadId)) return true;
     } catch (error) {
-      this.core.log('warn', `thread ${threadId}: automatic compaction could not read its agents: ${messageOf(error)}`);
+      this.#core.log('warn', `thread ${threadId}: automatic compaction could not read its agents: ${messageOf(error)}`);
       return true;
     }
     return false;

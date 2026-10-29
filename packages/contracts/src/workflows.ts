@@ -47,6 +47,13 @@ export interface WorkflowStepPlan {
   worktree?: boolean;
   /** Explicit shared-project host route. Accounts, tools, checkout and permissions belong to that host. */
   compute?: { sharedProjectId: string; host: SharedProjectRef; profileId: string; baseCommit: string };
+  /**
+   * Another machine of the group, by name or core id prefix as `delegate spawn --machine` takes it:
+   * the step runs there as a subagent of the run's conversation. Not with `compute`.
+   */
+  machine?: string;
+  /** With `machine`: one of that machine's projects. Left out, the one named like this conversation's project. */
+  project?: string;
 }
 
 export interface WorkflowLimits {
@@ -110,6 +117,13 @@ export interface WorkflowInstance {
   worktree?: DelegationWorktree;
   /** A remote worker is never used as a local threadId. Persisted across reconnect/restart. */
   compute?: { requestId: string; jobId: string; host: SharedProjectRef; worker: SharedThreadRef | null; result: SharedComputeResult | null };
+  /**
+   * A step with `machine`: its subagent on that machine. `childId` is that machine's thread id, never a local
+   * `threadId`; `turnId` is its last turn already judged, so a report of it again settles nothing.
+   * `correction`: an output correction decided and not yet taken there, sent again with the same request id
+   * until it is, a core restart included.
+   */
+  machine?: { name: string; coreId: string | null; requestId: string; childId: string | null; turnId: string | null; corrections: number; correction?: { requestId: string; text: string } };
 }
 
 export interface WorkflowNode {

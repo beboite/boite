@@ -208,7 +208,8 @@ header, draws the QR code and offers the link ([groups](groups.md#using-it)).
 Once the group has two machines, each machine's row this window controls
 carries a **Threads from the other machines** switch (`groupThreads`), off by
 default: on, the agents of the other machines may start threads in its
-projects with `boite thread new --machine` ([CLI](cli.md#commands)). The
+projects with `boite thread new --machine` ([CLI](cli.md#commands)) and read
+the models such a thread can run on with `boite delegate models --machine`. The
 setting belongs to that machine and is saved there, so the PC with the printer
 can accept them while the server does not. Beside it, **Bots from the other
 machines** (`groupBots`, off by default) lets a bot of another machine look
@@ -415,10 +416,13 @@ and tooltip identify a pending start and its machine. Cancel the start returns
 an unsent prompt to the box; an in-flight start remains locked while its result
 is unknown.
 
-Incognito drafts and replies stay in client memory, with no durable upload or
-cross-device synchronization. Older cores without `composerPersistence` keep
-the client-owned outbox and draft launch path
-(`packages/ui/src/lib/store/draft-launch.svelte.ts`).
+Incognito drafts and replies use the same core queue through `composer.put`.
+Their records and attachments stay in memory, restricted to the originating
+connection and discarded when it closes. Consumed IDs remain in memory to
+prevent reconnect duplicates and never survive a core restart. The device
+writes no private composer metadata to its offline cache. Cores without
+`composerPersistence` refuse queued input with an update message before the
+composer clears; explicit Send and Steer remain available.
 
 Archiving or restoring a project of a machine that is offline still works: the
 project moves at once and the choice is kept on this device, per core, in

@@ -1,10 +1,9 @@
 import { RpcErrorCode, PREVIEW_REFERENCES_PER_TURN, previewReferencesError, threadActive, type PreviewReference, type RpcParams } from '@boite/contracts';
-import { untrack } from 'svelte';
 import type { Attachment, ExperimentId, Message, MessageId, MessagePart, SentFrom, ThreadId, ThreadSummary, Turn, TurnInFlightData } from '@boite/contracts';
-import { drainQueue, SENDING_PREFIX, sentPrompt } from '../composer-queue';
+import { SENDING_PREFIX, sentPrompt } from '../composer-queue';
 import { checkpoint } from '../composer-history';
 import { restorePreviewMentions } from '../preview-mentions';
-import { activityCommand, isActivityCommand } from '../activity-command';
+import { composerActivity, isComposerActivity } from '@boite/contracts';
 import { RpcFailure, readyAgain, wasUnanswered, type Client } from '../client';
 import { titleFrom } from '../format';
 import { patchFields } from '../thread-rows';
@@ -18,7 +17,6 @@ import { readExperiments } from '../experiments';
 import type { Choice, Draft } from '../store.svelte';
 import type { StoreContext } from './context';
 import { draftKey } from './drafts.svelte';
-import { DraftLaunch } from './draft-launch.svelte';
 
 /**
  * A prompt written while its machine could not be reached: the outbox. It goes
@@ -100,9 +98,6 @@ export class Composer {
   /** Only this client's accepted input asks the timeline to reveal a prompt. */
   promptFocus = $state<{ threadId: string; turnId: string; after: string | null } | null>(null);
   private steerRequests = new Map<string, { content: string; id: string; generation: number }>();
-  /** Outbox prompts already asked about while their thread ran, on this connection. */
-  private probed = new Set<string>();
-  private readonly launcher: DraftLaunch;
 
   previewUndo = new Map<string, { text: string; references: PreviewReference[] }[]>();
   composerInsertions = new Map<string, (start: number, end: number, text: string) => void>();
@@ -116,45 +111,7 @@ export class Composer {
   /** The local row a landed message took the place of: the timeline keeps its height and does not replay its rise. */
   readonly landings = new Map<string, string>();
 
-  constructor(private readonly ctx: StoreContext) { this.launcher = new DraftLaunch(ctx); }
-
-  /** Queued input follows its machine and thread even when their composer is off screen. */
-  watchQueues(): () => void {
-    return $effect.root(() => {
-      $effect(() => {
-        const s = this.ctx.store;
-        if (s.connection !== 'ready') { this.probed.clear(); return; }
-        for (const [threadId, state] of Object.entries(this.composerStates)) {
-          // A core that keeps composer records runs the queue itself.
-          if (threadId === DRAFT_STASH_KEY || this.ctx.sync.deferred(threadId)) continue;
-          // A refused outbox prompt holds the ones behind it: they were written after it.
-          if (!state.queued.length || state.sending || state.paused || state.queued[0]!.request?.failed !== undefined) continue;
-          const thread = s.openThread?.id === threadId ? s.openThread : s.threads.find(row => row.id === threadId);
-          if (!thread || thread.archived || ['queued', 'waiting'].includes(thread.status)) continue;
-          if (thread.status === 'running') {
-            // An outbox prompt is a turn of its own, started once the running one ends.
-            // It is asked once per connection all the same: after a reload the running
-            // turn may be the one it started, and the core answers its id with that turn.
-            const head = state.queued[0]!.request;
-            if (head) {
-              if (head.sent && !this.probed.has(head.id)) { this.probed.add(head.id); untrack(() => void drainQueue(s, threadId, state)); }
-              continue;
-            }
-            const boundary = this.inputBoundaries[threadId];
-            if (!boundary ||state.queued[0]?.afterBoundary === boundary.boundary || this.blocked(threadId) || isActivityCommand(state.queued[0]!.text)) continue;
-            untrack(() => {
-              for (const entry of state.queued) entry.afterBoundary = boundary.boundary;
-              void drainQueue(s, threadId, state, boundary.turnId);
-            });
-          } else untrack(() => void drainQueue(s, threadId, state));
-        }
-      });
-      // A draft written while its machine was away becomes its conversation once the machine is back.
-      this.launcher.watch();
-    });
-  }
-
-
+  constructor(private readonly ctx: StoreContext) {}
 
   private blocked(threadId: string): boolean {
     const s = this.ctx.store;
@@ -170,18 +127,9 @@ export class Composer {
     if (!state || !thread || state.sending || !state.queued.length || this.blocked(threadId) || thread.status === 'waiting' || thread.status === 'queued') return;
     const head = state.queued[0]!.request;
     if (head?.failed !== undefined || (head && thread.status === 'running')) return;
+    if (!this.ctx.sync.admitQueue()) return;
     state.paused = false;
-    // The core keeps the queue: it is told to skip its wait for a tool boundary.
-    if (this.ctx.sync.deferred(threadId)) { await this.ctx.sync.sendNow(threadId); return; }
-    if (thread.status !== 'running') { await drainQueue(s, threadId, state); return; }
-    const turnId = s.openThread?.id === threadId ? s.openThread.turns.findLast(turn => turn.status === 'running')?.id : this.inputBoundaries[threadId]?.turnId;
-    if (isActivityCommand(state.queued[0]!.text)) { s.error = strings.composer.queueWaitForEnd; return; }
-    if (!turnId) { s.error = strings.composer.queueTurnNotReady; return; }
-    const client = this.ctx.client, generation = this.ctx.clientGeneration;
-    const first = state.queued[0];
-    for (const entry of state.queued) entry.afterBoundary = this.inputBoundaries[threadId]?.boundary;
-    await drainQueue(s, threadId, state, turnId);
-    if (client && this.ctx.currentClient(client, generation) && this.composerStates[threadId] === state && state.queued[0] === first && !state.paused) s.error = strings.composer.queueNotAccepted;
+    await this.ctx.sync.sendNow(threadId);
   }
 
   /** True is provider acceptance, false is safely held input, null is a failed or uncertain send. */
@@ -319,7 +267,7 @@ export class Composer {
    * or the draft's key. A `/goal` or `/loop` writes no message, so it has no row: null.
    */
   stage(key: string, prompt: string, attachments: Attachment[], previewReferences: PreviewReference[]): Message | null {
-    if (isActivityCommand(prompt)) return null;
+    if (isComposerActivity(prompt)) return null;
     const id = `${SENDING_PREFIX}${secureId()}`;
     this.staged[key] = {
       id, threadId: key, turnId: id, role: 'user', state: 'complete', createdAt: Date.now(),
@@ -468,7 +416,7 @@ export class Composer {
     previewReferences = $state.snapshot(previewReferences);
     choice = { ...choice };
     try {
-      if (activityCommand(prompt) && previewReferences.length) throw new Error(strings.previewComments.activityUnsupported);
+      if (composerActivity(prompt, issue => new Error(strings.activity[issue])) && previewReferences.length) throw new Error(strings.previewComments.activityUnsupported);
     } catch (error) { this.ctx.fail(error); return null; }
     return { choice, attachments, previewReferences };
   }
@@ -552,7 +500,8 @@ export class Composer {
    * interrupted send already used, and the choice it was written with, and the
    * device's journal writes it at once rather than after the typing pause.
    */
-  queuePrompt(threadId: string, entry: QueuedPrompt, outbox?: { choice: Choice | null; id?: string; head?: boolean }): void {
+  queuePrompt(threadId: string, entry: QueuedPrompt, outbox?: { choice: Choice | null; id?: string; head?: boolean }): boolean {
+    if (!this.ctx.sync.admitQueue()) return false;
     this.composerStates[threadId] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };
     const state = this.composerStates[threadId]!;
     const request = outbox ? { id: outbox.id ?? secureId(), choice: outbox.choice ? { ...outbox.choice } : null, queuedAt: Date.now(), ...(outbox.id ? { sent: true as const } : {}) } : undefined;
@@ -562,6 +511,16 @@ export class Composer {
     const draft = threadId === DRAFT_STASH_KEY ? this.ctx.store.draft : null;
     if (threadId !== DRAFT_STASH_KEY) this.ctx.sync.queued('inputs', threadId);
     else if (draft) this.ctx.sync.queued('drafts', draftKey(draft));
+    return true;
+  }
+
+  #queueChanged(threadId: string): void {
+    if (threadId === 'draft' && this.ctx.store.draft) this.ctx.sync.queued('drafts', draftKey(this.ctx.store.draft));
+    else this.ctx.sync.queued('inputs', threadId);
+  }
+
+  #admitQueueEdit(threadId: string): boolean {
+    return threadId !== 'draft' || !this.ctx.store.draft || this.ctx.sync.admitDraftMutation(draftKey(this.ctx.store.draft));
   }
 
   /** A refused outbox prompt goes again, under the same request id: its content has not changed. */
@@ -572,6 +531,7 @@ export class Composer {
     const { failed: _failed, ...request } = entry.request;
     entry.request = request;
     state.paused = false;
+    this.#queueChanged(threadId);
   }
 
   /**
@@ -583,7 +543,7 @@ export class Composer {
   restoreQueued(threadId: string, at: number): QueuedPrompt | undefined {
     const state = this.composerStates[threadId];
     // A draft's start asked once is retried, not taken back (`Drafts.unqueue`).
-    if (!state || state.sending || state.queued[at]?.request?.start) return undefined;
+    if (!state || !this.#admitQueueEdit(threadId) || state.sending || state.queued[at]?.request?.start) return undefined;
     const [entry] = state.queued.splice(at, 1);
     if (entry?.request) {
       const s = this.ctx.store;
@@ -591,24 +551,16 @@ export class Composer {
       this.pendingSends.set(threadId, { id: entry.request.id, prompt: entry.text, attachments: [...entry.attachments],
         previewReferences: $state.snapshot(entry.previewReferences ?? []), selectionVersion: thread?.selectionVersion ?? 0 });
     }
+    if (entry) this.#queueChanged(threadId);
     return entry;
   }
 
   /** Takes a pending prompt out of the queue, unless it is the one going out right now. */
   removeQueued(threadId: string, at: number): void {
     const state = this.composerStates[threadId];
-    if (!state || at < (state.outgoing ?? 0) || state.queued[at]?.request?.start) return;
+    if (!state || !this.#admitQueueEdit(threadId) || at < (state.outgoing ?? 0) || state.queued[at]?.request?.start) return;
     state.queued.splice(at, 1);
-  }
-
-  /** One outbox prompt through the composer's own send path, under its request id and choice. */
-  deliver(threadId: string, entry: QueuedPrompt & { request: OutboxRequest }): Promise<Delivery> {
-    const queued = this.composerStates[threadId]?.queued.find(item => item.request?.id === entry.request.id);
-    if (queued?.request && !queued.request.sent) {
-      queued.request = { ...queued.request, sent: true };
-      this.ctx.drafts.persist(threadId); void this.ctx.drafts.flush();
-    }
-    return this.start(entry.text, threadId, entry.attachments, entry.previewReferences ?? [], entry.request);
+    this.#queueChanged(threadId);
   }
 
   async send(
@@ -646,7 +598,7 @@ export class Composer {
       // Reconnect snapshots must land before a new stream starts mutating the thread.
       await connection.reloading?.essential;
       if (!this.deliveryCurrent(client, clientGeneration)) return 'wait';
-      const activity = activityCommand(prompt);
+      const activity = composerActivity(prompt, issue => new Error(strings.activity[issue]));
       if (activity) return await this.sendActivity(client, clientGeneration, threadId, activity, attachments, previewReferences);
       const selection = this.deliverySelection(threadId, request);
       target = selection?.target ?? null;
@@ -691,7 +643,7 @@ export class Composer {
     return this.ctx.currentClient(client, clientGeneration) && this.ctx.store.connection === 'ready';
   }
 
-  private async sendActivity(client: Client, clientGeneration: number, threadId: string, activity: NonNullable<ReturnType<typeof activityCommand>>, attachments: Attachment[], previewReferences: PreviewReference[]): Promise<Delivery> {
+  private async sendActivity(client: Client, clientGeneration: number, threadId: string, activity: NonNullable<ReturnType<typeof composerActivity>>, attachments: Attachment[], previewReferences: PreviewReference[]): Promise<Delivery> {
     const s = this.ctx.store;
     if (previewReferences.length) throw new Error(strings.previewComments.activityUnsupported);
     const accepted = await client.call('threads.activity.set', { threadId, ...activity, ...(attachments.length ? { attachments } : {}) }).catch((error: unknown) => {
@@ -767,7 +719,9 @@ export class Composer {
       const held = this.composerStates[early.thread.id]!;
       takeOutgoing(held);
       // An id and experiments from the start, as `queuePrompt` gives: a put already on its way cannot then merge it away.
+      if (!this.ctx.sync.admitQueue()) return { failed: s.error! };
       held.queued.unshift({ id: secureId(), text: prompt, attachments, experiments: readExperiments(), ...(previewReferences.length ? { previewReferences } : {}) });
+      this.#queueChanged(early.thread.id);
       // The queue shows it from here on.
       delete this.staged[early.thread.id];
       return 'sent';
@@ -780,7 +734,7 @@ export class Composer {
     // text back to the box is what made the user send it again.
     if (sent && wasUnanswered(error) && this.pendingSends.get(threadId) === sent) {
       this.pendingSends.delete(threadId);
-      this.queuePrompt(threadId, { text: prompt, attachments, ...(previewReferences.length ? { previewReferences } : {}) }, { choice: target, id: sent.id, head: true });
+      if (!this.queuePrompt(threadId, { text: prompt, attachments, ...(previewReferences.length ? { previewReferences } : {}) }, { choice: target, id: sent.id, head: true })) return { failed: s.error! };
       delete this.staged[threadId];
       return 'sent';
     }

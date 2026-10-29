@@ -47,7 +47,11 @@ export class RemoteDrive {
   #streams = new Map<string, StreamEntry>();
   /** Per client and conversation, the tab whose own page it shows and when it last said so (`browser.remoteWatch`). */
   #shown = new Map<string, { tabId: string; at: number }>();
-  constructor(private context: RemoteDriveContext) {}
+  #context: RemoteDriveContext;
+
+  constructor(context: RemoteDriveContext) {
+    this.#context = context;
+  }
 
   dropTab(id: string): void {
     for (const viewer of this.#viewers.values()) viewer.frames = viewer.frames.filter(saved => saved.frame.tabId !== id);
@@ -80,12 +84,12 @@ export class RemoteDrive {
   /** A client shows the tab's own page: it is woken now and stays awake while the client keeps saying so. */
   async remoteWatch({ threadId, tabId }: RpcParams<'browser.remoteWatch'>, connection: Connection): Promise<{ ok: true }> {
     this.#viewer(threadId, connection);
-    const tab = this.context.tabOf(threadId, tabId);
+    const tab = this.#context.tabOf(threadId, tabId);
     const key = `${connection.id}:${threadId}`;
     for (const [id, shown] of this.#shown) if (Date.now() - shown.at >= REMOTE_WATCH_MS) this.#shown.delete(id);
     if (this.#shown.size >= 32 && !this.#shown.has(key)) throw refused('too many remote browser viewers');
     this.#shown.set(key, { tabId: tab.id, at: Date.now() });
-    await this.context.use(tab, async () => {});
+    await this.#context.use(tab, async () => {});
     return { ok: true };
   }
 
@@ -107,16 +111,16 @@ export class RemoteDrive {
   }
 
   #viewer(threadId: ThreadId, connection: Connection): void {
-    if (this.context.require(threadId).archived || !connection.subscriptions.has(threadId)) throw refused('subscribe to the active conversation before watching its browser');
+    if (this.#context.require(threadId).archived || !connection.subscriptions.has(threadId)) throw refused('subscribe to the active conversation before watching its browser');
   }
 
   remoteStatus({ threadId }: RpcParams<'browser.remoteStatus'>, connection: Connection): AgentBrowserStatus {
     this.#viewer(threadId, connection);
-    return this.context.status({ threadId });
+    return this.#context.status({ threadId });
   }
 
   #capture(tab: Tab, maxWidth: number | undefined, quality: number): Promise<{ frame: RemoteBrowserFrame; page: PageInfo }> {
-    return this.context.screen(tab, () => captureFrame(tab.id, { evaluate: (script, ms) => this.context.evaluate(tab, script, ms), send: (method, params, ms) => tab.engine.cdp.send(method, params ?? {}, tab.sessionId, ms) }, maxWidth, quality));
+    return this.#context.screen(tab, () => captureFrame(tab.id, { evaluate: (script, ms) => this.#context.evaluate(tab, script, ms), send: (method, params, ms) => tab.engine.cdp.send(method, params ?? {}, tab.sessionId, ms) }, maxWidth, quality));
   }
 
   async remoteFrame({ threadId, tabId, maxWidth, quality, after }: RpcParams<'browser.remoteFrame'>, connection: Connection): Promise<RemoteBrowserFrame | RemoteBrowserUnchanged> {
@@ -128,11 +132,11 @@ export class RemoteDrive {
     if (previous && Date.now() - previous.requestedAt < 120) throw refused('wait before requesting another browser frame');
     for (const [id, value] of this.#viewers) if (Date.now() - value.requestedAt > 10_000) this.#viewers.delete(id);
     if (this.#viewers.size >= 32 && !previous) throw refused('too many remote browser viewers');
-    const tab = this.context.tabOf(threadId, tabId);
+    const tab = this.#context.tabOf(threadId, tabId);
     const viewer: Viewer = { requestedAt: Date.now(), tabId: tab.id, options: { maxWidth, quality: quality ?? 55 }, frames: previous?.frames ?? [] };
     this.#viewers.set(key, viewer);
     // The desktop app's webviews have one DevTools session each, the agent's: no second one to stream on.
-    return this.context.use(tab, () => tab.engine.hosted ? this.#captured(tab, viewer, maxWidth, quality) : this.#streamed(tab, viewer, after));
+    return this.#context.use(tab, () => tab.engine.hosted ? this.#captured(tab, viewer, maxWidth, quality) : this.#streamed(tab, viewer, after));
   }
 
   /** A capture of a tab the desktop app hosts, shared by the viewers that ask within `FRAME_REUSE_MS`. */
@@ -161,7 +165,7 @@ export class RemoteDrive {
     const key = streamKey(tab.id, viewer.options);
     let entry = this.#streams.get(key);
     if (!entry) {
-      const stream = new ViewerStream(tab.engine.cdp, tab.targetId, async () => await this.context.evaluate(tab, PAGE_INFO_SCRIPT, 5000) as PageInfo | null);
+      const stream = new ViewerStream(tab.engine.cdp, tab.targetId, async () => await this.#context.evaluate(tab, PAGE_INFO_SCRIPT, 5000) as PageInfo | null);
       this.#streams.set(key, entry = { tabId: tab.id, options: viewer.options, stream, asking: 0 });
     }
     const { stream, options } = entry, started = Date.now();
@@ -210,33 +214,33 @@ export class RemoteDrive {
     if (problem) throw refused(problem);
     const saved = this.#viewers.get(`${connection.id}:${threadId}`)?.frames.find(entry => entry.frame.id === frameId && Date.now() - entry.frame.at < FRAME_LIFE_MS);
     if (!saved) throw refused('refresh the live browser before interacting');
-    const tab = this.context.tabOf(threadId, saved.frame.tabId);
-    return this.context.use(tab, () => this.#input(tab, saved, input));
+    const tab = this.#context.tabOf(threadId, saved.frame.tabId);
+    return this.#context.use(tab, () => this.#input(tab, saved, input));
   }
 
   async #input(tab: Tab, saved: Saved, input: RpcParams<'browser.remoteInput'>['input']): Promise<{ ok: true; picker?: RemoteBrowserPicker }> {
     const changed = () => refused('the page changed; wait for a fresh frame before interacting');
     const retire = () => { this.stale(tab); for (const viewer of this.#viewers.values()) viewer.frames = viewer.frames.filter(entry => entry.frame.tabId !== tab.id); };
     switch (input.kind) {
-      case 'navigate': retire(); await this.context.send(tab, 'Page.navigate', { url: input.url }); return { ok: true };
-      case 'reload': retire(); await this.context.send(tab, 'Page.reload'); return { ok: true };
+      case 'navigate': retire(); await this.#context.send(tab, 'Page.navigate', { url: input.url }); return { ok: true };
+      case 'reload': retire(); await this.#context.send(tab, 'Page.reload'); return { ok: true };
       case 'history': {
         retire();
-        const history = await this.context.send(tab, 'Page.getNavigationHistory') as { currentIndex: number; entries: Array<{ id: number }> };
+        const history = await this.#context.send(tab, 'Page.getNavigationHistory') as { currentIndex: number; entries: Array<{ id: number }> };
         const entry = history.entries[history.currentIndex + (input.direction === 'back' ? -1 : 1)];
-        if (entry) await this.context.send(tab, 'Page.navigateToHistoryEntry', { entryId: entry.id });
+        if (entry) await this.#context.send(tab, 'Page.navigateToHistoryEntry', { entryId: entry.id });
         return { ok: true };
       }
       case 'viewport':
-        retire(); await this.context.screen(tab, () => this.context.send(tab, 'Emulation.setDeviceMetricsOverride', { width: input.width, height: input.height, deviceScaleFactor: 1, mobile: false }), true);
+        retire(); await this.#context.screen(tab, () => this.#context.send(tab, 'Emulation.setDeviceMetricsOverride', { width: input.width, height: input.height, deviceScaleFactor: 1, mobile: false }), true);
         tab.preset = null; return { ok: true };
-      case 'reset-viewport': retire(); await this.context.screen(tab, () => this.context.send(tab, 'Emulation.clearDeviceMetricsOverride'), true); tab.preset = null; return { ok: true };
+      case 'reset-viewport': retire(); await this.#context.screen(tab, () => this.#context.send(tab, 'Emulation.clearDeviceMetricsOverride'), true); tab.preset = null; return { ok: true };
       default: break;
     }
     // The size the viewer aimed at is known without the page: a tap on another one is refused before a read of it.
     if ((input.kind === 'tap' || input.kind === 'drag' || input.kind === 'choose') && (input.width !== saved.frame.width || input.height !== saved.frame.height)) throw refused('the browser viewport changed; refresh before tapping');
     // Read in turn with captures: a scaled one in flight resizes the page for its shot.
-    const page = await this.context.screen(tab, () => this.context.evaluate(tab, PAGE_INFO_SCRIPT, 5000), true) as PageInfo;
+    const page = await this.#context.screen(tab, () => this.#context.evaluate(tab, PAGE_INFO_SCRIPT, 5000), true) as PageInfo;
     const same = page.width === saved.page.width && page.height === saved.page.height && page.href === saved.page.href && page.origin === saved.page.origin;
     if (!same) throw changed();
     const at = (x: number, y: number) => ({ x: Math.min(page.width - 1, x * page.width), y: Math.min(page.height - 1, y * page.height) });
@@ -244,30 +248,30 @@ export class RemoteDrive {
       case 'tap': {
         const point = at(input.x, input.y);
         // A plain tap on a <select> focuses it and answers its options: Chrome's own list would open on this machine, in no frame.
-        const picker = (input.count ?? 1) === 1 && !input.shift ? await this.context.evaluate(tab, pickerScript(point.x, point.y, REMOTE_PICKER_MAX), 5000) as RemoteBrowserPicker | null : null;
-        if (picker) { await this.context.send(tab, 'Input.dispatchMouseEvent', { type: 'mouseMoved', ...point }); tab.frame = null; return { ok: true, picker }; }
+        const picker = (input.count ?? 1) === 1 && !input.shift ? await this.#context.evaluate(tab, pickerScript(point.x, point.y, REMOTE_PICKER_MAX), 5000) as RemoteBrowserPicker | null : null;
+        if (picker) { await this.#context.send(tab, 'Input.dispatchMouseEvent', { type: 'mouseMoved', ...point }); tab.frame = null; return { ok: true, picker }; }
         await this.#click(tab, point, input.count ?? 1, input.shift === true); break;
       }
       case 'choose': {
         const point = at(input.x, input.y);
-        if (!await this.context.evaluate(tab, chooseScript(point.x, point.y, input.index, input.label), 5000)) throw refused('that option cannot be chosen: the list changed or the option is disabled');
+        if (!await this.#context.evaluate(tab, chooseScript(point.x, point.y, input.index, input.label), 5000)) throw refused('that option cannot be chosen: the list changed or the option is disabled');
         break;
       }
       case 'drag': await this.#drag(tab, at(input.from.x, input.from.y), at(input.to.x, input.to.y)); break;
       case 'press': for (const key of input.keys) await press(tab.page, key); break;
       case 'select-all':
         // The editing command is named: headless, no browser menu turns Control+A into it.
-        await this.context.send(tab, 'Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, modifiers: 2, commands: ['selectAll'] });
-        await this.context.send(tab, 'Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, modifiers: 2 });
+        await this.#context.send(tab, 'Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, modifiers: 2, commands: ['selectAll'] });
+        await this.#context.send(tab, 'Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, modifiers: 2 });
         break;
       case 'text':
-        if (!await this.context.evaluate(tab, EDITABLE_SCRIPT, 5000)) throw refused('tap a text field in the page first');
-        await this.context.send(tab, 'Input.insertText', { text: input.text }); break;
+        if (!await this.#context.evaluate(tab, EDITABLE_SCRIPT, 5000)) throw refused('tap a text field in the page first');
+        await this.#context.send(tab, 'Input.insertText', { text: input.text }); break;
       case 'key': await this.#key(tab, input.key); break;
       case 'scroll': {
         // The wheel lands where the finger started, so an inner scrolling panel moves instead of the page.
         const point = input.at ? at(input.at.x, input.at.y) : { x: page.width / 2, y: page.height / 2 };
-        await this.context.send(tab, 'Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: input.x, deltaY: input.y });
+        await this.#context.send(tab, 'Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: input.x, deltaY: input.y });
         break;
       }
     }
@@ -280,33 +284,33 @@ export class RemoteDrive {
     this.#viewer(threadId, connection);
     const saved = this.#viewers.get(`${connection.id}:${threadId}`)?.frames.find(entry => entry.frame.id === frameId && Date.now() - entry.frame.at < FRAME_LIFE_MS);
     if (!saved) throw refused('refresh the live browser before copying');
-    const tab = this.context.tabOf(threadId, saved.frame.tabId);
-    const text = String(await this.context.use(tab, () => this.context.evaluate(tab, selectionScript(REMOTE_SELECTION_MAX), 5000)) ?? '');
+    const tab = this.#context.tabOf(threadId, saved.frame.tabId);
+    const text = String(await this.#context.use(tab, () => this.#context.evaluate(tab, selectionScript(REMOTE_SELECTION_MAX), 5000)) ?? '');
     return { text: text.slice(0, REMOTE_SELECTION_MAX), truncated: text.length > REMOTE_SELECTION_MAX };
   }
 
   async #key(tab: Tab, key: keyof typeof KEY_CODES): Promise<void> {
     const keyCode = KEY_CODES[key];
-    await this.context.send(tab, 'Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: keyCode, ...(key === 'Enter' ? { text: '\r' } : {}) });
-    await this.context.send(tab, 'Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: keyCode });
+    await this.#context.send(tab, 'Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: keyCode, ...(key === 'Enter' ? { text: '\r' } : {}) });
+    await this.#context.send(tab, 'Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: keyCode });
   }
 
   /** `count` is the click's rank in a double or triple click; Shift extends the selection to the point. */
   async #click(tab: Tab, point: { x: number; y: number }, count = 1, shift = false): Promise<void> {
     const modifiers = shift ? 8 : 0;
-    await this.context.send(tab, 'Input.dispatchMouseEvent', { type: 'mouseMoved', ...point, modifiers });
-    await this.context.send(tab, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: count, modifiers });
-    await this.context.send(tab, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: count, modifiers });
+    await this.#context.send(tab, 'Input.dispatchMouseEvent', { type: 'mouseMoved', ...point, modifiers });
+    await this.#context.send(tab, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: count, modifiers });
+    await this.#context.send(tab, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: count, modifiers });
   }
 
   /** The button held from one point to the other, through a few steps so the page sees a drag and not a jump. */
   async #drag(tab: Tab, from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> {
-    await this.context.send(tab, 'Input.dispatchMouseEvent', { type: 'mouseMoved', ...from });
-    await this.context.send(tab, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...from, button: 'left', buttons: 1, clickCount: 1 });
+    await this.#context.send(tab, 'Input.dispatchMouseEvent', { type: 'mouseMoved', ...from });
+    await this.#context.send(tab, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...from, button: 'left', buttons: 1, clickCount: 1 });
     for (let step = 1; step <= 4; step++) {
-      await this.context.send(tab, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: from.x + (to.x - from.x) * step / 4, y: from.y + (to.y - from.y) * step / 4, button: 'left', buttons: 1 });
+      await this.#context.send(tab, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: from.x + (to.x - from.x) * step / 4, y: from.y + (to.y - from.y) * step / 4, button: 'left', buttons: 1 });
     }
-    await this.context.send(tab, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...to, button: 'left', clickCount: 1 });
+    await this.#context.send(tab, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...to, button: 'left', clickCount: 1 });
   }
 
   disconnect(connectionId: string): void {

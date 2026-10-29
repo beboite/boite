@@ -198,6 +198,8 @@ test('a routed ask returns its decision to the initiating thread, including afte
       const request = await ac.call('collaboration.ask', { threadId: source, contact: ci, text: `Project access: ${accept}` });
       a.core.coordination.pause(source, 'restart');
       verdict.resolve(accept ? { accept: true, projectId: c.core.threads.require(recipient).projectId! } : { accept: false, reason: 'No matching project.' });
+      // Older cores can still send concierge refusals; current cores leave them to the owner.
+      if (!accept) b.core.contacts.answered(ci, { id: request.id, status: 'refused', reason: 'No matching project.', decidedBy: 'concierge', decidedAt: Date.now() }, []);
       await waitFor(() => a.core.coordination.get(source).messages.some(letter => letter.from.threadId === request.id && letter.status === 'delivered'), 12000);
       const answer = a.core.coordination.get(source).messages.find(letter => letter.from.threadId === request.id)!;
       expect(answer.text).toStartWith(`${name}'s Boite automatically ${accept ? 'opened its project' : 'refused your request:'}`);

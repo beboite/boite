@@ -39,15 +39,15 @@ function expired(id?: string) {
 /** Pre-send bytes belong to a connection, never to the journal or permanent attachment store. */
 export class AttachmentUploads {
   private readonly directory: string;
-  private readonly instances: AttachmentUploadInstances;
-  private readonly leases = new Map<string, Lease>();
-  private readonly uploads = new Set<Upload>();
+  readonly #instances: AttachmentUploadInstances;
+  readonly #leases = new Map<string, Lease>();
+  readonly #uploads = new Set<Upload>();
   private readonly ttlMs: number;
   private readonly globalMaxBytes: number;
   private readonly globalMaxCount: number;
-  private readonly timer: ReturnType<typeof setInterval>;
-  private closed = false;
-  private closing?: Promise<void>;
+  readonly #timer: ReturnType<typeof setInterval>;
+  #closed = false;
+  #closing?: Promise<void>;
 
   constructor(dataDir: string, options: Options = {}) {
     this.ttlMs = options.ttlMs ?? TTL_MS;
@@ -58,33 +58,33 @@ export class AttachmentUploads {
       if (!Number.isSafeInteger(value) || value < 1) throw new RangeError(`${field}: expected a positive safe integer`);
     }
     // A manager only removes its own instance, including when two cores share a parent directory.
-    this.instances = new AttachmentUploadInstances(dataDir);
-    this.directory = this.instances.directory;
-    this.timer = setInterval(() => {
-      void this.expire().catch(error => { console.error('attachment upload cleanup failed', error); });
+    this.#instances = new AttachmentUploadInstances(dataDir);
+    this.directory = this.#instances.directory;
+    this.#timer = setInterval(() => {
+      void this.#expire().catch(error => { console.error('attachment upload cleanup failed', error); });
     }, interval);
-    this.timer.unref();
+    this.#timer.unref();
   }
 
   /** Startup recovery is shared with first upload and shutdown; it creates no new scratch data. */
-  recover(): Promise<UploadRecovery> { return this.instances.recover(); }
+  recover(): Promise<UploadRecovery> { return this.#instances.recover(); }
 
   async upload(connectionId: string, attachment: Attachment): Promise<{ id: string }> {
-    if (this.closed) throw expired();
+    if (this.#closed) throw expired();
     const error = answerAttachmentError([attachment]);
     if (error) throw refused(error.message, error.data);
     const snapshot = { ...attachment };
     const pending: Upload = { connectionId, cancelled: false };
-    this.uploads.add(pending);
+    this.#uploads.add(pending);
     try {
       await this.recover();
-      await this.expire();
-      if (this.closed || pending.cancelled) throw expired();
+      await this.#expire();
+      if (this.#closed || pending.cancelled) throw expired();
       const bytes = Buffer.byteLength(snapshot.data, 'base64');
       let connectionBytes = 0;
       let connectionCount = 0;
       let totalBytes = 0;
-      for (const lease of this.leases.values()) {
+      for (const lease of this.#leases.values()) {
         totalBytes += lease.bytes;
         if (lease.connectionId === connectionId) {
           connectionBytes += lease.bytes;
@@ -93,7 +93,7 @@ export class AttachmentUploads {
       }
       if (connectionCount >= ATTACHMENTS_PER_TURN) throw refused(`a connection holds at most ${ATTACHMENTS_PER_TURN} attachment uploads`, { count: connectionCount + 1, max: ATTACHMENTS_PER_TURN });
       if (connectionBytes + bytes > ATTACHMENTS_TOTAL_MAX_BYTES) throw refused('the connection attachment uploads exceed the byte budget', { bytes: connectionBytes + bytes, max: ATTACHMENTS_TOTAL_MAX_BYTES });
-      if (this.leases.size >= this.globalMaxCount) throw refused('the attachment upload store is full', { count: this.leases.size + 1, max: this.globalMaxCount });
+      if (this.#leases.size >= this.globalMaxCount) throw refused('the attachment upload store is full', { count: this.#leases.size + 1, max: this.globalMaxCount });
       if (totalBytes + bytes > this.globalMaxBytes) throw refused('the attachment upload store exceeds the byte budget', { bytes: totalBytes + bytes, max: this.globalMaxBytes });
 
       const id = randomUUID();
@@ -104,8 +104,8 @@ export class AttachmentUploads {
         cancelled: false, writing: Promise.resolve(),
       };
       // Reserve before the first filesystem operation: concurrent requests cannot oversubscribe.
-      this.leases.set(id, lease);
-      lease.writing = this.write(lease, body);
+      this.#leases.set(id, lease);
+      lease.writing = this.#write(lease, body);
       try {
         await lease.writing;
         this.require(connectionId, id);
@@ -116,7 +116,7 @@ export class AttachmentUploads {
         throw error;
       }
     } finally {
-      this.uploads.delete(pending);
+      this.#uploads.delete(pending);
     }
   }
 
@@ -129,7 +129,7 @@ export class AttachmentUploads {
     }
     const snapshot = attachments.map(attachment => attachment && { ...attachment });
     const references = [...ids];
-    await this.expire();
+    await this.#expire();
     let totalBytes = 0;
     const selected = snapshot.map((attachment, index) => {
       const id = references[index]!;
@@ -177,48 +177,48 @@ export class AttachmentUploads {
     if (!Array.isArray(ids)) throw refused('attachment upload IDs must be an array of nonempty strings');
     if (ids.length > ATTACHMENTS_PER_TURN) throw refused(`release at most ${ATTACHMENTS_PER_TURN} attachment uploads at once`, { count: ids.length, max: ATTACHMENTS_PER_TURN });
     if (ids.some(id => typeof id !== 'string' || id.length === 0)) throw refused('attachment upload IDs must be an array of nonempty strings');
-    await this.expire();
+    await this.#expire();
     const leases = [...new Set(ids)].map(id => this.require(connectionId, id));
-    await this.removeAll(leases);
+    await this.#removeAll(leases);
   }
 
   async disconnect(connectionId: string): Promise<void> {
-    for (const upload of this.uploads) if (upload.connectionId === connectionId) upload.cancelled = true;
-    await this.removeAll([...this.leases.values()].filter(lease => lease.connectionId === connectionId));
+    for (const upload of this.#uploads) if (upload.connectionId === connectionId) upload.cancelled = true;
+    await this.#removeAll([...this.#leases.values()].filter(lease => lease.connectionId === connectionId));
   }
 
   close(): Promise<void> {
-    if (this.closing) return this.closing;
-    this.closed = true;
-    clearInterval(this.timer);
-    for (const upload of this.uploads) upload.cancelled = true;
-    this.closing = (async () => {
+    if (this.#closing) return this.#closing;
+    this.#closed = true;
+    clearInterval(this.#timer);
+    for (const upload of this.#uploads) upload.cancelled = true;
+    this.#closing = (async () => {
       const errors: unknown[] = [];
       try { await this.recover(); } catch (error) { errors.push(error); }
-      try { await this.removeAll([...this.leases.values()]); } catch (error) { errors.push(error); }
+      try { await this.#removeAll([...this.#leases.values()]); } catch (error) { errors.push(error); }
       try { await rm(this.directory, { recursive: true, force: true }); } catch (error) { errors.push(error); }
       if (errors.length === 1) throw errors[0];
       if (errors.length > 1) throw new AggregateError(errors, 'attachment upload shutdown failed');
-    })().catch(error => { this.closing = undefined; throw error; });
-    return this.closing;
+    })().catch(error => { this.#closing = undefined; throw error; });
+    return this.#closing;
   }
 
   private require(connectionId: string, id: string): Lease {
-    const lease = this.leases.get(id);
-    if (this.closed || !lease || lease.cancelled || lease.connectionId !== connectionId || lease.expiresAt <= Date.now()) throw expired(id);
+    const lease = this.#leases.get(id);
+    if (this.#closed || !lease || lease.cancelled || lease.connectionId !== connectionId || lease.expiresAt <= Date.now()) throw expired(id);
     return lease;
   }
 
-  private async write(lease: Lease, body: Buffer): Promise<void> {
-    await this.instances.own();
+  async #write(lease: Lease, body: Buffer): Promise<void> {
+    await this.#instances.own();
     await mkdir(lease.directory, { recursive: true, mode: 0o700 });
-    if (this.closed || lease.cancelled) throw expired(lease.id);
+    if (this.#closed || lease.cancelled) throw expired(lease.id);
     await writeFile(join(lease.directory, 'body'), body, { flag: 'wx', mode: 0o600 });
   }
 
-  private expire(): Promise<void> {
+  #expire(): Promise<void> {
     const now = Date.now();
-    return this.removeAll([...this.leases.values()].filter(lease => lease.cancelled || lease.expiresAt <= now));
+    return this.#removeAll([...this.#leases.values()].filter(lease => lease.cancelled || lease.expiresAt <= now));
   }
 
   private remove(lease: Lease): Promise<void> {
@@ -228,12 +228,12 @@ export class AttachmentUploads {
       // A write that was already submitted must settle before its directory can be removed.
       await lease.writing.catch(() => {});
       await rm(lease.directory, { recursive: true, force: true });
-      this.leases.delete(lease.id);
+      this.#leases.delete(lease.id);
     })().finally(() => { lease.cleaning = undefined; });
     return lease.cleaning;
   }
 
-  private async removeAll(leases: Lease[]): Promise<void> {
+  async #removeAll(leases: Lease[]): Promise<void> {
     const results = await Promise.allSettled(leases.map(lease => this.remove(lease)));
     const errors = results.flatMap(result => result.status === 'rejected' ? [result.reason] : []);
     if (errors.length === 1) throw errors[0];

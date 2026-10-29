@@ -3,6 +3,7 @@ import { flushSync, mount, tick, unmount } from 'svelte';
 import { threadBusy } from '@boite/contracts';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
+import { workspace, type Machine } from '../lib/workspace.svelte';
 import DelegationSurface from './DelegationSurface.svelte';
 
 async function settle(): Promise<void> {
@@ -168,5 +169,78 @@ test('a subagent and a step run by one subagent open in the chat, not in the pan
     expect(document.querySelector('[data-testid=workflow-detail]')).toBeNull();
   } finally {
     await close(shown);
+  }
+});
+
+test('a subagent on another machine names that machine, opens on its store, and stays shut while that machine is not connected here', async () => {
+  const machine = async (coreId: string) => {
+    const client = new FakeClient({ delayMs: 0, coreId, coreName: coreId, publicUrl: `https://${coreId}.test` });
+    const store = new Store();
+    store.attach(client);
+    await store.connect();
+    return { client, store, machine: { id: `https://${coreId}.test`, label: coreId === 'pc' ? 'Studio PC' : coreId, store } as Machine };
+  };
+  const desk = await machine('desk'), pc = await machine('pc');
+  const before = { active: workspace.active, machines: workspace.machines };
+  let component: object | null = null;
+  try {
+    await desk.client.call('group.create', { name: 'Home' });
+    await pc.client.call('group.join', { invite: (await desk.client.call('group.invite', {})).invite });
+    await pc.client.call('settings.set', { groupThreads: true });
+    // Ids are per machine: the child there will take an id this machine gives one of its own threads below.
+    const create = (on: typeof desk) => on.client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
+    const number = (thread: { id: string }) => Number(thread.id.slice(2));
+    const ahead = number(await create(desk)) + 3;
+    while (number(await create(pc)) < ahead);
+    const child = await desk.client.call('delegation.spawn', { threadId: 't-trace', task: 'Read the notes', machine: 'pc', requestId: 'remote-row' });
+    workspace.machines = [desk.machine, pc.machine];
+    workspace.active = desk.store;
+    await desk.store.open('t-trace');
+    desk.store.panel.open('agents');
+    component = mount(DelegationSurface, { target: document.body, props: { store: desk.store, surface: desk.store.panel.active!, panel: desk.store.panel } });
+    await settle();
+
+    const row = () => document.querySelector<HTMLButtonElement>(`[data-agent-id="${child.thread.id}"]`)!;
+    // The chip names the machine as this window lists it; a local subagent has none.
+    expect(row().querySelector('[data-testid=delegation-member-machine]')!.textContent).toBe('Studio PC');
+    expect(document.querySelectorAll('[data-testid=delegation-member-machine]')).toHaveLength(1);
+    expect(row().getAttribute('aria-disabled')).toBeNull();
+    expect(row().dataset.machineId).toBe(pc.machine.id);
+
+    // It opens on the machine that runs it, never in the parent's store, where the same id may be another thread.
+    row().click();
+    await settle();
+    expect(workspace.active).toBe(pc.store);
+    expect(pc.store.openThread?.id).toBe(child.thread.id);
+    expect(desk.store.openThread?.id).toBe('t-trace');
+
+    // A thread of this machine under the same id changing does not rewrite the row of the one there.
+    workspace.active = desk.store;
+    await desk.store.open('t-trace');
+    await settle();
+    let twin = await create(desk);
+    while (number(twin) < number(child.thread)) twin = await create(desk);
+    expect(twin!.id).toBe(child.thread.id);
+    await desk.client.call('threads.update', { threadId: twin!.id, title: 'A thread of this machine' });
+    await settle();
+    expect(row().querySelector('.title')!.textContent).toBe(child.thread.title);
+
+    // That machine not connected here: the row still reads, says why, and opens nothing.
+    workspace.machines = [desk.machine];
+    await settle();
+    expect(row().querySelector('[data-testid=delegation-member-machine]')!.textContent).toBe('pc');
+    expect(row().getAttribute('aria-disabled')).toBe('true');
+    expect(row().getAttribute('data-preload-thread')).toBeNull();
+    expect(row().title).toBe('pc is not connected here. Connect it in Settings, Machines and updates to open this subagent.');
+    expect(row().querySelector('[data-testid=delegation-member-away]')!.textContent).toBe(row().title);
+    row().click();
+    await settle();
+    expect(workspace.active).toBe(desk.store);
+    expect(desk.store.openThread?.id).toBe('t-trace');
+  } finally {
+    if (component) await unmount(component);
+    workspace.active = before.active; workspace.machines = before.machines;
+    for (const { client, store } of [desk, pc]) { store.detach(); client.close(); }
+    document.body.innerHTML = ''; window.localStorage.clear();
   }
 });

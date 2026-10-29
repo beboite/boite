@@ -1,4 +1,4 @@
-/* Drawn diagrams and formulas of rendered Markdown (lib/rich-markdown-draw.ts).
+/* Drawn diagrams, formulas and views of rendered Markdown (lib/rich-markdown-draw.ts).
    Global, because reasoning draws its Markdown outside Prose; loaded with the drawing code. */
 
 /* Pele colors every diagram with these variables: a theme or accent change
@@ -70,6 +70,19 @@
 @media (hover: none) {
   .md-diagram-bar { position: static; justify-content: flex-end; margin-bottom: 4px; padding: 0; background: none; opacity: 1; }
 }
+
+/* A ```view block's page (lib/view-block.ts). The frame reaches past the
+   column by the bleed the page is padded with, as a published view's does. */
+.md-view { position: relative; margin: 6px 0 10px; white-space: normal; }
+.md-view > pre { margin: 0; }
+.md-view-stage { width: calc(100% + 2 * var(--bleed)); margin: calc(-1 * var(--bleed)); }
+.md-view-frame { display: block; width: 100%; border: 0; background: transparent; }
+/* Until the page says it is up it loads out of sight, at the column's width, under the placeholder. */
+.md-view:not(.md-drawn) > .md-view-stage { position: absolute; top: 0; left: 0; visibility: hidden; pointer-events: none; }
+.md-view[data-view='diagram'] > pre,
+.md-view[data-view='code'] > .md-view-stage { display: none; }
+.md-view:hover > .md-diagram-bar,
+.md-view:focus-within > .md-diagram-bar { opacity: 1; }
 
 .md-diagram-error {
   margin: 4px 0 0;

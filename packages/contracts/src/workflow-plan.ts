@@ -116,6 +116,10 @@ export function checkSteps(value: unknown, options: CheckOptions, field = 'steps
       compute = {sharedProjectId: text(c.sharedProjectId, `${at}.compute.sharedProjectId`, 100), host: {ownerCoreId: c.host.ownerCoreId, coreId: c.host.coreId, projectId: text(c.host.projectId, `${at}.compute.host.projectId`, 128)},
         profileId: text(c.profileId, `${at}.compute.profileId`, 128), baseCommit: c.baseCommit};
     }
+    const machine = raw.machine === undefined || raw.machine === null ? undefined : text(raw.machine, `${at}.machine`, 128).trim();
+    if (machine !== undefined && compute) fail(`${at}.machine: a step runs on another machine of the group or on a shared-project host, not both; drop machine or compute`);
+    const project = raw.project === undefined || raw.project === null ? undefined : text(raw.project, `${at}.project`, 4096).trim();
+    if (project !== undefined && machine === undefined) fail(`${at}.project: names a project of another machine; set machine too, or leave project out`);
     const profile = raw.profile === undefined || raw.profile === null ? undefined : text(raw.profile, `${at}.profile`, 64);
     if (profile !== undefined && profile !== CONVERSATION_PROFILE && !options.profiles.includes(profile)) fail(`${at}.profile: "${profile}" is not a profile of this thread; ${options.profiles.length ? `expected one of ${options.profiles.join(', ')}, or` : 'none is configured:'} leave profile out to run the step on the conversation's model`);
     const model = raw.model === undefined || raw.model === null ? undefined : text(raw.model, `${at}.model`, 256);
@@ -153,7 +157,7 @@ export function checkSteps(value: unknown, options: CheckOptions, field = 'steps
     if (context !== undefined) {
       try { resolveContext(context); } catch (error) { if (error instanceof ContextRequestError) fail(`${at}.${error.message}`); throw error; }
     }
-    return { id, ...(compute ? {compute} : {}), ...(profile && (profile !== CONVERSATION_PROFILE || options.profiles.includes(profile)) ? { profile } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(context !== undefined ? { context } : {}), task, deps: [...deps], ...(title ? { title } : {}), ...(raw.after ? { after: raw.after.map(String) } : {}), ...(forEach ? { forEach } : {}), ...(when ? { when } : {}), ...(output ? { output } : {}), ...(raw.worktree === true ? { worktree: true } : {}) };
+    return { id, ...(compute ? {compute} : {}), ...(machine ? { machine } : {}), ...(project ? { project } : {}), ...(profile &&(profile !== CONVERSATION_PROFILE || options.profiles.includes(profile)) ? { profile } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(context !== undefined ? { context } : {}), task, deps: [...deps], ...(title ? { title } : {}), ...(raw.after ? { after: raw.after.map(String) } : {}), ...(forEach ? { forEach } : {}), ...(when ? { when } : {}), ...(output ? { output } : {}), ...(raw.worktree === true ? { worktree: true } : {}) };
   });
   // Existing steps cannot depend on new ones, so a cycle can only run through the new ones.
   const graph = new Map<string, string[]>([...existing.map(s => [s.id, s.after] as const), ...steps.map(s => [s.id, s.deps] as const)]);

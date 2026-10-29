@@ -278,6 +278,13 @@ export class Workspace {
       await remote.client.call('group.join', { invite });
       await Promise.all([store.loadGroup(), remote.loadGroup()]);
     }
+    // `&remote=1` gives the open conversation a subagent on this machine; `&remote=away` then closes this machine's connection.
+    const subagent = params.get('remote');
+    if ((subagent === '1' || subagent === 'away') && store.client && remote.client) {
+      await remote.client.call('settings.set', { groupThreads: true });
+      await store.client.call('delegation.spawn', { threadId: 't-trace', machine: 'Builder', task: 'Build the release on this machine and report the artifact sizes.', title: 'Build the release on Builder', requestId: 'demo-remote-subagent' });
+      if (subagent === 'away') remote.client.close();
+    }
   }
 
   async #boot(thread: string | null): Promise<void> {

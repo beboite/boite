@@ -1,5 +1,5 @@
 /** A thread's working directory: files, git, the panel and published artifacts. */
-import { ARTIFACT_MAX_BYTES, ATTACHMENT_MAX_BYTES, PANEL_SURFACE_KINDS, RpcErrorCode, VIEW_DEFAULT_HEIGHT, VIEW_MAX_BYTES, VIEW_TITLE_MAX, viewDocument, viewTitleOf, type ArtifactContent, type FileContent, type FileEntry, type GitDiff, type GitStatus, type Message, type PanelSurface } from '@boite/contracts';
+import { ARTIFACT_MAX_BYTES, ATTACHMENT_MAX_BYTES, PANEL_SURFACE_KINDS, RpcErrorCode, VIEW_BLOCK_MAX_BYTES, VIEW_DEFAULT_HEIGHT, VIEW_MAX_BYTES, VIEW_TITLE_MAX, viewDocument, viewTitleOf, type ArtifactContent, type FileContent, type FileEntry, type GitDiff, type GitStatus, type Message, type PanelSurface } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { FAKE_CHANGES, FAKE_DIFFS, FAKE_MEDIA, FAKE_MEDIA_PATHS, fakeBytes, fakeLanguage } from './files';
 import { seededArtifact } from './agents-demo';
@@ -129,6 +129,8 @@ function checkSurface(ctx: FakeContext, cwd: string, surface: PanelSurface): Pan
 
 export function workdirMethods(ctx: FakeContext, all: () => Pick<FakeMethods, 'browser.command'>) {
   const snapshots = new Map<string, ArtifactContent>();
+  /** Each block's page by its HTML, so a block drawn again keeps its address, as the core's ticket does. */
+  const viewBlocks = new Map<string, string>();
   return {
     'artifacts.preview': async ({ threadId, path }) => {
       const thread = ctx.thread(threadId);
@@ -168,6 +170,17 @@ export function workdirMethods(ctx: FakeContext, all: () => Pick<FakeMethods, 'b
       if (remote) throw refusal(`artifacts.viewCheck page is not ready to show. Fix the file and run the command again:\n- ${remote[1]} is remote, and a view loads nothing remote.`);
       // The in-memory client has no isolated browser. Never pretend it captured or executed a page.
       return { checked: false, errors: ['the draft could not be checked: this client has no available browser'], advice: [], captures: [] };
+    },
+    'artifacts.viewBlock': async ({ html }) => {
+      if (typeof html !== 'string' || !html.trim()) throw refusal('artifacts.viewBlock html must be the HTML of a view block');
+      if (new TextEncoder().encode(html).length > VIEW_BLOCK_MAX_BYTES) throw refusal(`artifacts.viewBlock html must be at most ${VIEW_BLOCK_MAX_BYTES / 1024} KB`);
+      let url = viewBlocks.get(html);
+      if (!url) {
+        url = URL.createObjectURL(new Blob([viewDocument(html)], { type: 'text/html' }));
+        ctx.artifactUrls.add(url);
+        viewBlocks.set(html, url);
+      }
+      return { url };
     },
     // The real core embeds local files and loads the page in a headless browser; here the page is stored as written.
     'artifacts.view': async (params) => {

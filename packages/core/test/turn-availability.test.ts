@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -29,6 +29,55 @@ function text(messages: Message[]): string {
 function retryOf(h: TestCore, threadId: string): ThreadRetry | null {
   return h.core.threads.list({ includeArchived: true }).find(thread => thread.id === threadId)?.retry ?? null;
 }
+
+test.each(['preparation', 'attempt', 'retry'] as const)('an account signed out during %s cannot prepare or start another attempt', async phase => {
+  const h = await startTestCore();
+  const workspace = mkdtempSync(join(tmpdir(), 'boite-account-attempt-'));
+  const entered = Promise.withResolvers<void>(), ready = Promise.withResolvers<void>();
+  const prepared: string[] = [], started: TurnContext[] = [];
+  const restore = setDriver('echo', {
+    protocol: 'echo',
+    async prepare(ctx) { prepared.push(ctx.account.status); },
+    startTurn(ctx) {
+      started.push(ctx);
+      return { stop() {}, done: Promise.resolve(phase === 'retry' && started.length === 1
+        ? { status: 'error', sessionId: null, usage: null, error: 'at capacity', refusal: { kind: 'capacity' } }
+        : { status: 'done', sessionId: null, usage: null }) };
+    },
+  });
+  const execution = h.core.sharedAccess.execution, prepare = execution.prepare.bind(execution);
+  const held = spyOn(execution, 'prepare');
+  try {
+    const client = await h.connect();
+    const project = await client.call('projects.add', { path: workspace, name: 'Account attempt' });
+    const account = h.core.accounts.list().find(account => account.providerId === 'echo')!;
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id });
+    let calls = 0;
+    held.mockImplementation(id => {
+      if (id === thread.id && ++calls === ({ preparation: 1, attempt: 2, retry: 3 })[phase]) {
+        entered.resolve();
+        return ready.promise;
+      }
+      return prepare(id);
+    });
+    const finished = client.next('turn.finished', turn => turn.threadId === thread.id);
+    await client.call('turns.start', { threadId: thread.id, prompt: 'do not run with a signed-out account' });
+    await entered.promise;
+    expect(h.core.accounts.require(account.id).status).toBe('ok');
+    h.core.accounts.authenticationFailed(account.id);
+    ready.resolve();
+    expect(await finished).toMatchObject({ status: 'error', error: expect.stringContaining('not logged in') });
+    expect(prepared).toEqual(phase === 'preparation' ? [] : ['ok']);
+    expect(started).toHaveLength(phase === 'retry' ? 1 : 0);
+    expect(retryOf(h, thread.id)?.kind).not.toBe('capacity');
+  } finally {
+    ready.resolve();
+    held.mockRestore();
+    await h.stop();
+    restore();
+    await removeDir(workspace);
+  }
+});
 
 test('a turn refused at capacity before writing anything tries again with the same input until it answers', async () => {
   const h = await startTestCore();

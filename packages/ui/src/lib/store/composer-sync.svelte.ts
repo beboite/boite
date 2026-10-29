@@ -11,7 +11,7 @@ import { draftKey, type Input, type LiveSource } from './drafts.svelte';
 
 type Section = ComposerRecord['section'];
 /** A record as the composer holds it: attachments carry their bytes, or a placeholder until they are fetched. */
-type Local = { input: Pick<Input, 'text' | 'attachments' | 'previewReferences' | 'queued' | 'paused' | 'editing'>; draft?: Draft; choice?: Choice | null; parked?: number };
+type Local = { input: Pick<Input, 'text' | 'attachments' | 'previewReferences' | 'queued' | 'paused' | 'editing'>; draft?: Draft; choice?: Choice | null; parked?: number; privateMode?: boolean };
 /**
  * The last record this device and the core agreed on, by hash: the whole
  * value, the box, the queue and its ids, so a later change on either side is
@@ -48,7 +48,7 @@ const hasContent = (local: Local | null) => !!local && (!boxEmpty(local.input) |
  * thread's box and queue, each draft. The device-local journal stays the
  * offline cache; this class sends only the record that changed, after a short
  * pause in typing, and each attachment once, by the id the core gives its
- * bytes. A core without `composerPersistence` keeps the device-local behaviour.
+ * bytes. Private records and asset metadata remain in memory on both ends.
  */
 export class ComposerSync {
   /** True when this core answered that it has no composer records. */
@@ -56,6 +56,10 @@ export class ComposerSync {
   /** The over-limit warning this sync raised, and the box it is about: only that box, accepted, takes it back. */
   #overLimit: { key: string; message: string } | null = null;
   #epoch = 0;
+  #private = new Set<string>();
+  #privateEntries = new Set<string>();
+  /** A launch put with no definitive answer stays protected even if local input changes. */
+  #launching = new Set<string>();
   #client: Client | null = null;
   #listed = false;
   /** Records heard before the list answered, latest per key. */
@@ -91,19 +95,54 @@ export class ComposerSync {
     return !this.#refused && this.ctx.store.core?.features?.composerPersistence === true;
   }
 
-  /**
-   * True when the frontend must not deliver this thread's queue itself: the
-   * core runs it. Incognito input never leaves the device and keeps the
-   * frontend's queue.
-   */
-  deferred(threadId: string): boolean {
-    if (!this.active) return false;
-    const s = this.ctx.store;
-    const thread = s.openThread?.id === threadId ? s.openThread : s.threads.find(row => row.id === threadId);
-    return !thread?.incognito;
+  /** Queue admission uses the core's composer capability, including while temporarily offline. */
+  admitQueue(): boolean {
+    if (this.active) return true;
+    this.ctx.store.error = strings.errors.olderCore.replace('{machine}', this.ctx.store.core?.hostname ?? strings.app.name);
+    return false;
   }
 
-  deferredDraft(draft: Draft): boolean { return this.active && !draft.incognito; }
+  /** Pure membership: the journal can consult privacy before the thread row arrives. */
+  privateRecord(section: Section, id: string): boolean { return this.#private.has(entryKey(section, id)); }
+
+  #launchProtected(id: string): boolean {
+    const key = entryKey('drafts', id);
+    return this.#launching.has(key) || !!this.#known.get(key)?.ids.length ||
+      !!this.#source(key)?.input.queued.some(entry => entry.request?.start || entry.request?.sent);
+  }
+
+  /** A never-submitted offline draft stays editable; a possibly admitted launch keeps its identity. */
+  admitDraftMutation(id: string): boolean {
+    if (!this.#launchProtected(id)) return true;
+    this.ctx.store.error = strings.drafts.launchQueued;
+    return false;
+  }
+
+  admitPrivacyChange(id: string): boolean {
+    if (!this.#launchProtected(id)) return true;
+    this.ctx.store.error = strings.drafts.privacyQueued;
+    return false;
+  }
+
+  #tag(record: ComposerRecord): void {
+    if (!record.privateMode && !this.#isPrivate(record.section, record.id, record.value)) return;
+    this.#private.add(entryKey(record.section, record.id));
+    for (const entry of record.value?.input.queued ?? []) this.#privateEntries.add(entry.id);
+  }
+
+  #isPrivate(section: Section, id: string, value?: ComposerValue | null): boolean {
+    if (this.#private.has(entryKey(section, id)) || value?.draft?.incognito ||
+      value?.input.queued.some(entry => entry.request?.start?.incognito || this.#privateEntries.has(entry.id))) return true;
+    const source = this.ctx.drafts.liveSource(section, id);
+    if (source && this.ctx.drafts.isIncognito(source)) return true;
+    const s = this.ctx.store;
+    return section === 'inputs' && !!(s.openThread?.id === id ? s.openThread : s.threads.find(row => row.id === id))?.incognito;
+  }
+
+  #unsupported(): void {
+    this.#refused = true;
+    this.admitQueue();
+  }
 
   /** After the journal is read, and again on each reconnect: list, merge, then send what changed offline. */
   async resync(): Promise<void> {
@@ -116,7 +155,7 @@ export class ComposerSync {
     try { records = await client.call('composer.list', {}); }
     catch (error) {
       if (epoch !== this.#epoch) return;
-      if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) { this.#refused = true; return; }
+      if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) { this.#unsupported(); return; }
       this.#later();
       return;
     }
@@ -127,6 +166,7 @@ export class ComposerSync {
     for (const record of this.#early.values()) this.#receive(record);
     this.#early.clear();
     this.#startup = false;
+    for (const key of this.#launching) if (!listed.has(key) && !this.#inflight.has(key)) this.#launching.delete(key);
     // What the core has never seen: this device's unsent input from before, or
     // input cleared offline. Unchanged synced records stay as the core has them.
     for (const key of [...this.#known.keys()]) {
@@ -219,7 +259,7 @@ export class ComposerSync {
     this.#startup = true;
     this.#forced.clear();
     this.#listed = false;
-    this.#early.clear(); this.#known.clear(); this.#remoteAssets.clear(); this.#dirty.clear(); this.#inflight.clear(); this.#stashed.clear();
+    this.#early.clear(); this.#private.clear(); this.#privateEntries.clear(); this.#launching.clear(); this.#known.clear(); this.#remoteAssets.clear(); this.#dirty.clear(); this.#inflight.clear(); this.#stashed.clear();
     this.#assetIds.clear(); this.#bytes.clear(); this.#fetching.clear(); this.#byteHashes.clear(); this.#homes.clear(); this.#left.clear();
     this.#metaKey = client && this.ctx.drafts.storageKey ? `${this.ctx.drafts.storageKey}:composer` : null;
     this.#meta = { entries: {}, assets: {} };
@@ -240,6 +280,7 @@ export class ComposerSync {
     const used = new Set<string>();
     // A confirmed deletion needs no memory once the device holds nothing there either.
     for (const [key, known] of this.#known) {
+      if (this.#private.has(key)) continue;
       if (known.hash === EMPTY.hash && !this.#dirty.has(key)) continue;
       entries[key] = known;
       for (const id of known.assets) used.add(id);
@@ -281,16 +322,16 @@ export class ComposerSync {
   #localOf(source: LiveSource | null): Local | null {
     if (!source) return null;
     for (const entry of source.input.queued) entry.id ??= entry.request?.id ?? secureId();
-    const local: Local = { input: source.input };
+    const local: Local = { input: source.input, privateMode: this.ctx.drafts.isIncognito(source) };
     if (source.section === 'drafts') { local.draft = source.draft; local.choice = source.choice; local.parked = source.parked; }
     return hasContent(local) ? local : null;
   }
 
   /** The id an attachment is known by on the core, if any. */
-  #assetOf(file: Attachment): string | undefined {
+  #assetOf(file: Attachment, privateMode = false): string | undefined {
     const pending = unresolvedAssetId(file);
     if (pending !== undefined) return this.#remote(pending) ? pending : undefined;
-    return this.#assetIds.get(file.data)?.get(fileMeta(file)) ?? this.#meta.assets[this.#byteHash(file)];
+    return this.#assetIds.get(file.data)?.get(fileMeta(file, privateMode)) ?? (privateMode ? undefined : this.#meta.assets[this.#byteHash(file)]);
   }
 
   #byteHash(file: Pick<Attachment, 'kind' | 'mimeType' | 'name' | 'data'>): string {
@@ -302,20 +343,21 @@ export class ComposerSync {
   #remember(file: Pick<Attachment, 'kind' | 'mimeType' | 'name' | 'data'>, assetId: string): void {
     let ids = this.#assetIds.get(file.data);
     if (!ids) this.#assetIds.set(file.data, ids = new Map());
-    ids.set(fileMeta(file), assetId);
+    const privateMode = assetId.startsWith('private-');
+    ids.set(fileMeta(file, privateMode), assetId);
     this.#bytes.set(assetId, file.data);
     this.#remoteAssets.add(assetId);
-    this.#meta.assets[this.#byteHash(file)] = assetId;
+    if (!privateMode) this.#meta.assets[this.#byteHash(file)] = assetId;
   }
 
-  #fileShape(file: Attachment) {
+  #fileShape(file: Attachment, privateMode = false) {
     const pending = unresolvedAssetId(file);
     return { kind: file.kind, mimeType: file.mimeType, name: file.name ?? null,
-      assetId: this.#assetOf(file) ?? (pending !== undefined ? `pending:${pending}` : `local:${this.#byteHash(file)}`) };
+      assetId: this.#assetOf(file, privateMode) ?? (pending !== undefined ? `pending:${pending}` : `local:${this.#byteHash(file)}`) };
   }
 
-  #queueShape(entry: QueuedPrompt): ComposerQueuedPrompt {
-    return { id: entry.id ?? '', text: entry.text, attachments: entry.attachments.map(file => this.#fileShape(file)),
+  #queueShape(entry: QueuedPrompt, privateMode = false): ComposerQueuedPrompt {
+    return { id: entry.id ?? '', text: entry.text, attachments: entry.attachments.map(file => this.#fileShape(file, privateMode)),
       ...(entry.previewReferences?.length ? { previewReferences: references(entry.previewReferences) } : {}),
       ...(entry.afterBoundary ? { afterBoundary: entry.afterBoundary } : {}),
       ...(entry.choice ? { choice: { ...$state.snapshot(entry.choice) } } : {}),
@@ -328,11 +370,11 @@ export class ComposerSync {
   #shape(local: Local | null): ComposerValue | null {
     // An empty composer and a deleted record are the same: neither side writes the other back.
     if (!local || !hasContent(local)) return null;
-    const { input } = local;
+    const { input, privateMode = false } = local;
     const value: ComposerValue = { input: {
-      text: input.text, attachments: input.attachments.map(file => this.#fileShape(file)),
+      text: input.text, attachments: input.attachments.map(file => this.#fileShape(file, privateMode)),
       ...(input.previewReferences?.length ? { previewReferences: references(input.previewReferences) } : {}),
-      queued: input.queued.map(entry => this.#queueShape(entry)), paused: input.paused, editing: input.editing ?? null } };
+      queued: input.queued.map(entry => this.#queueShape(entry, privateMode)), paused: input.paused, editing: input.editing ?? null } };
     if (local.draft) {
       const { id, createdAt, projectId, worktree, worktreeExplicit, incognito } = local.draft;
       value.draft = { ...(id !== undefined ? { id } : {}), ...(createdAt !== undefined ? { createdAt } : {}), projectId, worktree,
@@ -355,7 +397,7 @@ export class ComposerSync {
   }
 
   /** The composer's form of a record: known bytes inline, the rest as placeholders fetched on demand. */
-  #toLocal(value: ComposerValue | null): Local | null {
+  #toLocal(value: ComposerValue | null, privateMode = false): Local | null {
     if (!value) return null;
     const file = (item: ComposerAttachment): Attachment => {
       this.#remoteAssets.add(item.assetId);
@@ -370,7 +412,7 @@ export class ComposerSync {
       ...(entry.experiments ? { experiments: [...entry.experiments] } : {}),
       ...(entry.sentFrom !== undefined ? { sentFrom: entry.sentFrom && { ...entry.sentFrom } } : {}),
       ...(entry.request ? { request: { ...entry.request, choice: entry.request.choice as Choice | null } } : {}) }));
-    const local: Local = { input: { text: value.input.text, attachments: value.input.attachments.map(file), previewReferences: value.input.previewReferences ?? [],
+    const local: Local = { privateMode, input: { text: value.input.text, attachments: value.input.attachments.map(file), previewReferences: value.input.previewReferences ?? [],
       queued, paused: value.input.paused, editing: value.input.editing ?? null } };
     if (value.draft) local.draft = { ...value.draft } as Draft;
     if (value.choice !== undefined) local.choice = value.choice as Choice | null;
@@ -379,8 +421,10 @@ export class ComposerSync {
   }
 
   #know(key: string, record: ComposerRecord): void {
+    this.#tag(record);
+    if (!record.value?.input.queued.length) this.#launching.delete(key);
     const prior = this.#known.get(key)?.hash;
-    const known: Known = { revision: record.revision, ...this.#parts(this.#shape(this.#toLocal(record.value))), ...(prior ? { prior } : {}) };
+    const known: Known = { revision: record.revision, ...this.#parts(this.#shape(this.#toLocal(record.value, this.#isPrivate(record.section, record.id, record.value)))), ...(prior ? { prior } : {}) };
     this.#known.set(key, known);
     for (const entry of record.value?.input.queued ?? []) if (record.section === 'inputs') this.#homes.set(entry.id, record.id);
     this.#saveMeta();
@@ -391,6 +435,7 @@ export class ComposerSync {
   // ---------------------------------------------------------------------------
 
   #receive(record: ComposerRecord): void {
+    this.#tag(record);
     const key = entryKey(record.section, record.id);
     const known = this.#known.get(key);
     // A delayed list or event never takes a newer record back.
@@ -400,7 +445,7 @@ export class ComposerSync {
       const source = this.#source(key);
       if (!this.#startup || (source && this.ctx.drafts.isIncognito(source))) return;
       const mine = this.#parts(this.#shape(this.#restored(key, source, known, record.value))).hash;
-      if (mine !== known.hash && mine === known.prior) this.#apply(key, this.#toLocal(record.value));
+      if (mine !== known.hash && mine === known.prior) this.#apply(key, this.#toLocal(record.value, this.#isPrivate(record.section, record.id, record.value)));
       return;
     }
     if (this.#inflight.has(key)) {
@@ -408,11 +453,10 @@ export class ComposerSync {
       return;
     }
     const source = this.#source(key);
-    if (source && this.ctx.drafts.isIncognito(source)) return;
     const base = known ?? EMPTY_KNOWN;
     const local = this.#restored(key, source, known, record.value);
     const mine = this.#parts(this.#shape(local));
-    const remote = this.#toLocal(record.value);
+    const remote = this.#toLocal(record.value, this.#isPrivate(record.section, record.id, record.value));
     const before = record.section === 'drafts' ? this.#queuedIds(local) : [];
     this.#know(key, record);
     const now = this.#known.get(key)!;
@@ -524,7 +568,7 @@ export class ComposerSync {
     }
     const paused = mine.paused === base.paused ? r.paused : l.paused;
     if (fork) this.#fork(key, local);
-    const merged: Local = { input: { text: box.text, attachments: box.attachments, previewReferences: box.previewReferences ?? [], editing: box.editing ?? null, queued, paused } };
+    const merged: Local = { privateMode: local?.privateMode ?? remote?.privateMode, input: { text: box.text, attachments: box.attachments, previewReferences: box.previewReferences ?? [], editing: box.editing ?? null, queued, paused } };
     // The draft's project, worktree switch and model merge on their own: the side that changed them wins.
     const meta = !local?.draft || (remote?.draft && mine.draft === base.draft) ? remote : local;
     if (meta?.draft) { merged.draft = meta.draft; merged.choice = meta.choice ?? null; merged.parked = Math.max(local?.parked ?? 0, remote?.parked ?? 0); }
@@ -551,15 +595,16 @@ export class ComposerSync {
       if (!value) { this.ctx.drafts.forget(id); return; }
       const saved = this.ctx.drafts.saved[id];
       const input = saved?.input ?? { text: '', attachments: [], queued: [], sending: false, paused: false };
-      this.#write(input, value.input);
+      this.#write(input, value.input, !!value.privateMode);
       this.ctx.drafts.saved[id] = { draft: { ...(value.draft ?? { projectId: null, worktree: false }), id }, choice: value.choice ?? null, input, parked: value.parked ?? 0 };
       return;
     }
     if (open && value?.draft) this.#applyDraft(value);
     const slot = section === 'inputs' ? id : 'draft';
     if (!value && !states[slot]) return;
-    const state = states[slot] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };
-    this.#write(state, value?.input ?? { text: '', attachments: [], previewReferences: [], queued: [], paused: false, editing: null });
+    states[slot] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };
+    const state = states[slot]!;
+    this.#write(state, value?.input ?? { text: '', attachments: [], previewReferences: [], queued: [], paused: false, editing: null }, this.#private.has(key));
   }
 
   /** Another device moved the open draft to another project, worktree switch or model: the chips follow. */
@@ -589,7 +634,9 @@ export class ComposerSync {
     if (!client || client !== this.#client || !this.#listed || this.ctx.store.connection !== 'ready' || !this.active) return;
     if (this.#inflight.has(key)) return;
     const source = this.#source(key);
-    if (source && this.ctx.drafts.isIncognito(source)) { this.#dirty.delete(key); this.#fits(key); return; }
+    const [section, id] = parseKey(key);
+    const privateMode = this.#isPrivate(section, id);
+    if (privateMode) this.#private.add(key);
     let local = this.#localOf(source);
     const known = this.#known.get(key);
     const files = local ? [...local.input.attachments, ...local.input.queued.flatMap(entry => entry.attachments)] : [];
@@ -604,16 +651,17 @@ export class ComposerSync {
     this.#inflight.add(key);
     this.#dirty.delete(key);
     let failed = false;
-    const [section, id] = parseKey(key);
     try {
       for (let attempt = 0; attempt < 3; attempt++) {
-        await this.#upload(client, files);
+        await this.#upload(client, files, privateMode);
         if (epoch !== this.#epoch) return;
         local = this.#localOf(this.#source(key));
         value = this.#shape(local);
         if (value && [...value.input.attachments, ...value.input.queued.flatMap(entry => entry.attachments)].some(file => file.assetId.startsWith('local:'))) { this.#dirty.add(key); return; }
         const sent = this.#parts(value);
         const expectedRevision = this.#known.get(key)?.revision ?? 0;
+        if (section === 'drafts' && value?.input.queued.length) this.#launching.add(key);
+        if (privateMode) for (const entry of value?.input.queued ?? []) this.#privateEntries.add(entry.id);
         const result = await client.call('composer.put', { section, id, expectedRevision, value, ...(sendNow ? { sendNow: true as const } : {}) });
         if (epoch !== this.#epoch) return;
         const now = this.#localOf(this.#source(key));
@@ -624,7 +672,7 @@ export class ComposerSync {
           const stored = this.#known.get(key)!;
           if (stored.hash === sent.hash) { if (this.#parts(this.#shape(now)).hash !== sent.hash) this.#dirty.add(key); return; }
           // The core stamped a choice or dropped an entry it delivered: its record is what the box shows, with typing since kept.
-          const merged = this.#merge(key, now, sent, this.#toLocal(result.record.value));
+          const merged = this.#merge(key, now, sent, this.#toLocal(result.record.value, privateMode));
           this.#apply(key, merged);
           if (this.#parts(this.#shape(merged)).hash !== stored.hash) this.#dirty.add(key);
           return;
@@ -633,7 +681,7 @@ export class ComposerSync {
         const strict = result.record.revision === expectedRevision;
         const base = this.#known.get(key) ?? EMPTY_KNOWN;
         this.#know(key, result.record);
-        const merged = this.#merge(key, now, base, this.#toLocal(result.record.value), strict);
+        const merged = this.#merge(key, now, base, this.#toLocal(result.record.value, privateMode), strict);
         this.#apply(key, merged);
         // Nothing left to send, unless Send now still has to reach the core.
         if (!sendNow && this.#parts(this.#shape(merged)).hash === this.#known.get(key)!.hash) return;
@@ -644,7 +692,8 @@ export class ComposerSync {
       this.#later();
     } catch (error) {
       if (epoch !== this.#epoch) return;
-      if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) { this.#refused = true; return; }
+      if (error instanceof RpcFailure && [RpcErrorCode.MethodNotFound, RpcErrorCode.InvalidParams, RpcErrorCode.Refused, RpcErrorCode.NotFound].some(code => code === error.code) && !this.#known.get(key)?.ids.length) this.#launching.delete(key);
+      if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) { this.#unsupported(); return; }
       const details = error instanceof RpcFailure ? error.data as { reason?: unknown; threadId?: unknown } | undefined : undefined;
       if (section === 'inputs' && error instanceof RpcFailure && error.code === RpcErrorCode.NotFound && details?.reason === 'thread-deleted' && details.threadId === id) {
         // A missed permanent-deletion event must not keep an offline cache retrying forever.
@@ -690,8 +739,8 @@ export class ComposerSync {
   #lost(local: Local | null): boolean {
     let lost = false;
     for (const file of local ? [...local.input.attachments, ...local.input.queued.flatMap(entry => entry.attachments)] : []) {
-      if (unresolvedAssetId(file) !== undefined || !this.#assetOf(file)) continue;
-      this.#assetIds.get(file.data)?.delete(fileMeta(file));
+      if (unresolvedAssetId(file) !== undefined || !this.#assetOf(file, local?.privateMode)) continue;
+      this.#assetIds.get(file.data)?.delete(fileMeta(file, local?.privateMode));
       delete this.#meta.assets[this.#byteHash(file)];
       lost = true;
     }
@@ -700,10 +749,10 @@ export class ComposerSync {
   }
 
   /** Each file's bytes once per session, under the id the core derives from them. */
-  async #upload(client: Client, files: Attachment[]): Promise<void> {
+  async #upload(client: Client, files: Attachment[], privateMode: boolean): Promise<void> {
     for (const file of files) {
-      if (unresolvedAssetId(file) !== undefined || this.#assetOf(file) !== undefined) continue;
-      const { assetId } = await client.call('composer.asset.put', { attachment: { kind: file.kind, mimeType: file.mimeType, data: file.data, name: file.name } as Attachment });
+      if (unresolvedAssetId(file) !== undefined || this.#assetOf(file, privateMode) !== undefined) continue;
+      const { assetId } = await client.call('composer.asset.put', { attachment: { kind: file.kind, mimeType: file.mimeType, data: file.data, name: file.name } as Attachment, ...(privateMode ? { incognito: true } : {}) });
       this.#remember(file, assetId);
     }
   }
@@ -735,21 +784,21 @@ export class ComposerSync {
   }
 
   /** Copies a record's fields into a live input, keeping attachments and queued entries whose content did not change. */
-  #write(state: Input, value: Local['input']): void {
-    const files = (list: Attachment[]) => JSON.stringify(list.map(file => this.#fileShape(file)));
+  #write(state: Input, value: Local['input'], privateMode = false): void {
+    const files = (list: Attachment[]) => JSON.stringify(list.map(file => this.#fileShape(file, privateMode)));
     if (state.text !== value.text) state.text = value.text;
     if (files(state.attachments) !== files(value.attachments)) state.attachments = value.attachments;
     const refs = value.previewReferences ?? [];
     if (JSON.stringify(state.previewReferences ?? []) !== JSON.stringify(refs)) state.previewReferences = refs;
     if ((state.editing ?? null) !== (value.editing ?? null)) state.editing = value.editing ?? null;
     if (state.paused !== value.paused) state.paused = value.paused;
-    const shape = (entry: QueuedPrompt) => JSON.stringify(this.#queueShape(entry));
+    const shape = (entry: QueuedPrompt) => JSON.stringify(this.#queueShape(entry, privateMode));
     const queued = value.queued.map(entry => { const next = shape(entry); return state.queued.find(old => old.id === entry.id && shape(old) === next) ?? entry; });
     if (queued.length !== state.queued.length || queued.some((entry, at) => entry !== state.queued[at])) state.queued = queued;
   }
 }
 
-const fileMeta = (file: Pick<Attachment, 'kind' | 'mimeType' | 'name'>) => JSON.stringify([file.kind, file.mimeType, file.name ?? null]);
+const fileMeta = (file: Pick<Attachment, 'kind' | 'mimeType' | 'name'>, privateMode = false) => JSON.stringify([file.kind, file.mimeType, file.name ?? null, privateMode]);
 
 const EMPTY: Omit<Known, 'revision'> = { hash: digest('null'), box: digest(JSON.stringify(['', [], [], null])), queue: digest('[]'), ids: [], paused: false, assets: [], draft: digest('null') };
 const EMPTY_KNOWN: Known = { revision: 0, ...EMPTY };
