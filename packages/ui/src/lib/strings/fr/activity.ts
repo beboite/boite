@@ -21,6 +21,8 @@ export const fr: Translation = {
     loopDescription: 'Répéter une tâche un nombre de fois ou selon un rythme',
     goalUsage: 'Utilisez /goal suivi d\'un objectif.',
     goal2: 'Objectif relu',
+    autoGoal: 'Objectif automatique',
+    autoGoalShort: 'Auto',
     goal2Description: "Travailler vers un objectif jusqu'à ce qu'un relecteur neuf le valide",
     goal2Usage: "Utilisez /goal2 suivi d'un objectif.",
     reviewing: 'En relecture',

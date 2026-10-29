@@ -316,7 +316,7 @@
         <div class="activity-row" class:finished={entry.status === 'complete'} data-testid="activity-{kind}" data-blocked={waiting || undefined}>
           {#if waiting}<Hand size={16} />{:else if kind === 'goal'}<Target size={16} />{:else}<Repeat size={16} />{/if}
           <!-- A phone keeps the short word: the review line under it already says the goal is reviewed. -->
-          <span class="kind ui-label">{#if kind === 'goal' && review}<span class="wide">{strings.activity.goal2}</span><span class="narrow">{strings.activity.goal}</span>{:else}{kind === 'goal' ? strings.activity.goal : strings.activity.loop}{/if}</span>
+          <span class="kind ui-label" data-auto={kind === 'goal' && goal?.auto ? '' : undefined}>{#if kind === 'goal' && review}<span class="wide">{goal?.auto ? strings.activity.autoGoal : strings.activity.goal2}</span><span class="narrow">{goal?.auto ? strings.activity.autoGoalShort : strings.activity.goal}</span>{:else}{kind === 'goal' ? strings.activity.goal : strings.activity.loop}{/if}</span>
           <span class="objective" title={'objective' in entry ? entry.objective : entry.prompt}>
             {#if 'objective' in entry}{entry.objective}{:else}{iteration(entry.iterations, entry.maxIterations)}{/if}
           </span>

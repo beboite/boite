@@ -17,10 +17,10 @@ beforeAll(() => {
   Object.defineProperty(HTMLDialogElement.prototype, 'close', {configurable: true, value: function(this: HTMLDialogElement) {this.open = false;}});
   HTMLElement.prototype.scrollTo = function(this: HTMLElement, options: ScrollToOptions | number) {this.scrollLeft = typeof options === 'number' ? options : options.left ?? 0;} as typeof HTMLElement.prototype.scrollTo;
 });
-afterEach(async () => {for (const run of cleanup.splice(0).reverse()) await run(); vi.restoreAllMocks(); sharedProjectDialog.current = undefined; sharedProjectDialog.failed = false; setExperiment('contacts', false); setExperiment('goal2', false); document.body.innerHTML = '';});
+afterEach(async () => {for (const run of cleanup.splice(0).reverse()) await run(); vi.restoreAllMocks(); sharedProjectDialog.current = undefined; sharedProjectDialog.failed = false; setExperiment('contacts', false); document.body.innerHTML = '';});
 async function settle() {for (let i = 0; i < 8; i++) {await new Promise(r => setTimeout(r, 0)); await tick();} flushSync();}
 async function setup() {
-  setExperiment('contacts', true); setExperiment('goal2', true);
+  setExperiment('contacts', true);
   const pair = await sharedFlow(); cleanup.push(() => pair.close());
   const store = new Store(); store.attach(pair.a); await store.connect(); await store.open(pair.local.id);
   cleanup.push(() => store.detach());
@@ -33,14 +33,14 @@ function show<C extends import('svelte').Component<any>>(component: C, props: im
 
 test('shared project rows separate both owners, preserve local navigation, deny a private transcript and send an attested human letter', async () => {
   const {store, a, b, aid, bid, bp, localScope} = await setup();
-  setExperiment('goal2', false);
   const open = vi.spyOn(store, 'open');
   show(SharedProjectThreads, {store, projectId: bp.id, active: true, children: createRawSnippet(() => ({render: () => '<div data-testid="local-row">Local row</div>'}))});
   await vi.waitFor(() => expect(document.querySelectorAll('[data-testid=shared-thread]').length).toBeGreaterThan(1));
   expect(el('shared-local-person').textContent).toContain('You');
   expect(el('shared-project-people').textContent).toContain('Pat');
   expect(el('local-row')).not.toBeNull();
-  expect(document.querySelector('[data-testid=shared-open-board]')).toBeNull();
+  // The board needs no experiment, only a core that sends `features.projectBoard`.
+  expect(document.querySelector('[data-testid=shared-open-board]')).not.toBeNull();
   const privateProject = (await b.call('projects.list', {})).find(p => p.id !== bp.id)!;
   const privateThread = (await b.call('threads.list', {})).find(t => t.projectId === privateProject.id)!;
   expect(el('shared-project-people').textContent).not.toContain(privateThread.title);
