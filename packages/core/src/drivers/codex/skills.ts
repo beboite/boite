@@ -82,9 +82,16 @@ export class CodexSkillCommands {
     if (rpc !== null && ctx !== null) this.latest = this.list(rpc, ctx, true);
   }
 
-  /** A turn's input: a prompt that opens on `/name` waits for the newest list. */
+  /** A turn's input: a prompt that opens on `/name` waits for the newest list, a reload asked meanwhile included. */
   async turn(prompt: string): Promise<Input> {
-    if (LEADING.test(prompt)) await this.latest;
+    if (LEADING.test(prompt)) {
+      const deadline = Date.now() + LIST_MS;
+      let pending: Promise<void>;
+      do {
+        pending = this.latest;
+        await pending;
+      } while (pending !== this.latest && Date.now() < deadline);
+    }
     return promptInput(prompt, this.paths);
   }
 
