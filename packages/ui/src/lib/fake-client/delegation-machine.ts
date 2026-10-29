@@ -27,7 +27,19 @@ export function childContext(ctx: FakeContext, row: DelegationRow): FakeContext 
   return row.machine === undefined ? ctx : fakeCore(row.machine.coreId);
 }
 
-type Base = Pick<DelegationProfile, 'id' | 'providerId' | 'effort'> & { model: string | null };
+/**
+ * A new child's id on `there`. Fake machines count `t-N` from the same seed, so it also skips the ids of
+ * this machine and of the parent's team: an agentId names one child, wherever it runs.
+ */
+export function childId(ctx: FakeContext, rootId: ThreadId, there: FakeContext = ctx): ThreadId {
+  const team = new Set((ctx.delegationAgents.get(rootId) ?? []).map(row => row.threadId));
+  for (;;) {
+    const id = `t-${++there.seq}`;
+    if (!there.threads.has(id) && !ctx.threads.has(id) && !team.has(id)) return id;
+  }
+}
+
+type Base =Pick<DelegationProfile, 'id' | 'providerId' | 'effort'> & { model: string | null };
 type Ask = Pick<RpcParams<'delegation.spawn'>, 'model' | 'effort' | 'speed' | 'project' | 'worktree' | 'title'>;
 
 /** The child's thread on the member, not stored yet: that machine's model and project, or refused as the core and that member do. */
@@ -56,7 +68,7 @@ function placeThere(ctx: FakeContext, parent: Thread, config: DelegationConfig, 
       : `${machine.name}: delegation.start.project: ${machine.name} has no project named ${wanted || 'like the parent\'s'}; name one of its projects with --project: ${names.join(', ') || 'none'}`, data: { field: 'project', expected: names } });
   }
   const project = found[0]!;
-  const id = `t-${++there.seq}`;
+  const id = childId(ctx, parent.id, there);
   const at = there.now();
   const worktree = params.worktree === true ? { branch: `boite/sub-${id}`, path: `${project.path}/.boite/worktrees/sub-${id}`, base: null, state: 'pending' as const } : null;
   // Top-level there: its parent is on another machine.

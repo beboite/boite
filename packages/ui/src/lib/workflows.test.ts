@@ -4,6 +4,7 @@ import { RpcErrorCode, type WorkflowPlan, type WorkflowRun } from '@boite/contra
 import { STEP_GAP, STEP_MIN, edgesOf, fitsPhase, nodeProgress, phasesOf, retryable, routeOf, runProgress, shown } from './workflow-view';
 import { FakeContext } from './fake-client/context';
 import { seed } from './fake-client/seed';
+import { fakeCore, registerCore, unregisterCore } from './fake-client/coordination';
 import type { FakeClient, FakeClientOptions } from './fake-client';
 
 const plan: WorkflowPlan = {
@@ -270,6 +271,35 @@ test('a step on another machine fails at launch while it keeps group threads off
   expect(stopped.nodes[0]!.instances[0]!.status).toBe('stopped');
   const there = await pc.call('threads.get', { threadId: childId });
   expect([there.status, there.turns.at(-1)!.status]).toEqual(['idle', 'error']);
+});
+
+test('a step on another machine out of reach when it would end settles once that machine is back, and a stopped run stays stopped', async ({ createClient }) => {
+  const { desk, pc } = await pair(createClient, 5);
+  await pc.call('settings.set', { groupThreads: true });
+  const machine = fakeCore('pc')!;
+  const plan: WorkflowPlan = { name: 'There', steps: [{ id: 'far', machine: 'pc', task: 'Read the notes.' }] };
+  const read = (runId: string) => desk.call('workflows.get', { threadId: 't-trace', runId });
+  const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+  const run = await desk.call('workflows.start', { threadId: 't-trace', plan, requestId: 'away' });
+  unregisterCore(machine);
+  // Past the step's own time (60 ticks of 5 ms), nothing came back from there.
+  await pause(450);
+  expect((await read(run.id)).status).toBe('running');
+  registerCore(machine);
+  const done = await until(() => read(run.id), value => value.status !== 'running');
+  expect(done.status).toBe('done');
+  expect(done.nodes[0]!.instances[0]!.machine!.turnId).toBe((await pc.call('threads.get', { threadId: done.nodes[0]!.instances[0]!.machine!.childId! })).turns.at(-1)!.id);
+
+  const held = await desk.call('workflows.start', { threadId: 't-trace', plan, requestId: 'stopped' });
+  unregisterCore(machine);
+  await pause(450);
+  expect((await desk.call('workflows.control', { threadId: 't-trace', runId: held.id, action: 'stop' })).status).toBe('stopped');
+  registerCore(machine);
+  // Its waiting timer fires again once that machine is back, and revives nothing.
+  await pause(450);
+  const stopped = await read(held.id);
+  expect([stopped.status, stopped.nodes[0]!.instances[0]!.status, stopped.nodes[0]!.instances[0]!.machine!.turnId]).toEqual(['stopped', 'stopped', null]);
 });
 
 test('the store follows the runs of the open thread and of its parent from a step', async ({ createStore }) => {

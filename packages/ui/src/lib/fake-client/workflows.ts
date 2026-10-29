@@ -268,8 +268,8 @@ export class FakeWorkflows {
     if (inst.threadId) this.host.answer(inst.threadId, answer, !failing);
     else if (inst.machine?.childId && inst.machine.coreId) {
       const turnId = this.host.answerThere(inst.machine.coreId, inst.machine.childId, answer, !failing);
-      // Out of reach, that machine reports nothing: the step waits, as the core's does.
-      if (turnId === null) return;
+      // Out of reach, that machine reports nothing: the step waits, as the core's does, and settles once it is back.
+      if (turnId === null) return this.#arm(run.id, inst);
       inst.machine.turnId = turnId;
     }
     const now = this.host.now();
@@ -468,10 +468,20 @@ export class FakeWorkflows {
       Object.assign(inst, { threadId, providerId: profile.providerId, model: profile.model, effort });
     }
     Object.assign(inst, { status: 'running', attempts: 1, error: null, result: null, output: null, startedAt: now, finishedAt: null });
+    this.#arm(run.id, inst);
+  }
+
+  /**
+   * The step's settlement timer, unless a demo holds the run. A timer of an earlier attempt there
+   * finishes nothing: a retry has a new request id.
+   */
+  #arm(runId: string, inst: WorkflowInstance): void {
     if (this.#held) return;
-    const runId = run.id, key = inst.key;
+    const key = inst.key, attempt = inst.machine?.requestId;
     const timer = setTimeout(() => {
       this.#timers.delete(timer);
+      const run = this.#runs.get(runId);
+      if (attempt !== undefined && (run && this.#instance(run, key))?.machine?.requestId !== attempt) return;
       this.finish(runId, key);
     }, this.host.delayMs() * STEP_TICKS);
     this.#timers.add(timer);

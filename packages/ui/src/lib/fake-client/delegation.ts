@@ -8,7 +8,7 @@ import { modelsOf, PROBED_PROTOCOLS, probe } from './provider-catalog';
 import type { FakeContext, FakeMethods } from './context';
 import { delegationProject } from './delegation-project';
 import { accountFor, memberModels, modelChoices } from './thread-models';
-import { childContext, remoteAgent, sendThere, spawnThere, type DelegationRow } from './delegation-machine';
+import { childContext, childId, remoteAgent, sendThere, spawnThere, type DelegationRow } from './delegation-machine';
 import { fakeCore } from './coordination';
 import { fakeMember } from './requests';
 
@@ -306,12 +306,16 @@ function waitDelegation(ctx: FakeContext, params: RpcParams<'delegation.wait'>):
         resolve({ state: asks ? 'needs_input' : waiting ? 'waiting_for_children' : params.agentId && agents.some(agent => agent.settlement === 'result_available') ? 'result_available' : 'settled', timedOut: timedOut && !asks, agents });
       } catch (error) { cleanup(); reject(error); }
     };
-    // A child on another machine finishes on that machine's bus.
+    // A card is filed just after its event is emitted: read the child once the emitter returns.
+    const later = () => queueMicrotask(() => inspect());
+    const watch = (bus: FakeContext['bus']) => subscriptions.push(bus.observe('turn.finished', () => inspect()), bus.observe('thread.background', () => inspect()), bus.observe('question.asked', later), bus.observe('permission.requested', later));
+    // A child on another machine finishes, asks and waits on that machine's bus.
     for (const coreId of new Set(directChildren(ctx, params.threadId, params.agentId).flatMap(row => (row.machine ? [row.machine.coreId] : [])))) {
       const there = fakeCore(coreId);
-      if (there) subscriptions.push(there.bus.observe('turn.finished', () => inspect()));
+      if (there) watch(there.bus);
     }
-    subscriptions.push(ctx.bus.observe('turn.finished', () => inspect()), ctx.bus.observe('delegation.changed', () => inspect()), ctx.bus.observe('thread.removed', () => inspect()), ctx.bus.observe('thread.background', () => inspect()), ctx.bus.observe('question.asked', () => inspect()), ctx.bus.observe('permission.requested', () => inspect()));
+    watch(ctx.bus);
+    subscriptions.push(ctx.bus.observe('delegation.changed', () => inspect()), ctx.bus.observe('thread.removed', () => inspect()));
     subscriptions.push(ctx.bus.onState(state => {
       if (state !== 'ready') { cleanup(); reject(new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation.wait: connection closed' })); }
     }));
@@ -344,7 +348,8 @@ export function delegationMethods(ctx: FakeContext) {
     },
     'delegation.models': async ({ threadId, machine }) => {
       const parent = ctx.thread(delegationRoot(ctx, threadId));
-      if (machine !== undefined) return { anyModel: true, choices: memberModels(ctx, parent, machine, 'delegation.models').choices, unavailable: [] };
+      // That machine's models, under this conversation's own rule on which a subagent may take.
+      if (machine !== undefined) return { anyModel: delegationConfig(ctx, parent.id).anyModel !== false, choices: memberModels(ctx, parent, machine, 'delegation.models').choices, unavailable: [] };
       // The core's discover(): every agent-owned list nobody read yet is read first,
       // and a failed read is reported, never thrown. The fake's probe only clones
       // fixtures, so it cannot fail; this method skips the core's no-logged-in-account case.
@@ -422,7 +427,7 @@ export function delegationMethods(ctx: FakeContext) {
       if (!profile) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'unknown delegation profile' });
       const speed = pickSpeed(ctx, profile, params.speed);
       const contextMode = fakeContextMode(ctx.providers.find(entry => entry.id === profile.providerId) ?? { protocol: 'echo', name: profile.providerId }, params.context);
-      const id = `t-${++ctx.seq}`;
+      const id = childId(ctx, parent.id);
       const at = ctx.now();
       // As the core: a branch and folder of its own, refused outside a project; the fake has no git to make it with.
       const placement = delegationProject(ctx, parent, wantedProject);

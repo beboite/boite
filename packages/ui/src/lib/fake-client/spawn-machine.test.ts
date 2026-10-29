@@ -7,8 +7,8 @@ import { fakeCore } from './coordination';
 const clients: FakeClient[] = [];
 afterEach(() => { for (const client of clients.splice(0)) client.close(); });
 
-async function machine(id: string, name = id): Promise<FakeClient> {
-  const client = new FakeClient({ delayMs: 0, coreId: id, coreName: name, publicUrl: `https://${id}.test` });
+async function machine(id: string, name = id, delayMs = 0): Promise<FakeClient> {
+  const client = new FakeClient({ delayMs, coreId: id, coreName: name, publicUrl: `https://${id}.test` });
   clients.push(client);
   await client.connect();
   return client;
@@ -119,4 +119,61 @@ test('delegate spawn --machine starts the subagent on that machine, and its pare
   // Out of reach, its parent keeps what it last saw.
   pc.close();
   expect((await desk.call('delegation.get', { threadId: 't-trace' })).agents.find(entry => entry.thread.id === child.thread.id)).toMatchObject({ machine: { coreId: 'pc' }, result: latest.result });
+});
+
+/** Two machines of one group with group threads on; `delayMs` paces the second one's turns. */
+async function group(delayMs = 0) {
+  const desk = await machine('desk'), pc = await machine('pc', 'pc', delayMs);
+  await desk.call('group.create', { name: 'Home' });
+  await pc.call('group.join', { invite: (await desk.call('group.invite', {})).invite });
+  await pc.call('settings.set', { groupThreads: true });
+  return { desk, pc };
+}
+
+test('a wait on a subagent on another machine ends as soon as it asks a question or an approval there', async () => {
+  // Paced there, so the wait is under way before the child asks.
+  const { desk } = await group(20);
+  for (const [kind, task] of [['question', 'Ask a question first'], ['permission', 'Write the notes [permission]']] as const) {
+    const child = await desk.call('delegation.spawn', { threadId: 't-trace', task, machine: 'pc', requestId: kind });
+    expect(child.needsInput).toBeUndefined();
+    const wait = desk.call('delegation.wait', { threadId: 't-trace', agentId: child.thread.id, timeoutMs: 60_000 });
+    wait.catch(() => {});
+    const early = await Promise.race([wait, new Promise(resolve => setTimeout(resolve, 3000, 'still waiting'))]);
+    expect(early).toMatchObject({ state: 'needs_input', timedOut: false, agents: [{ needsInput: [expect.objectContaining({ kind })] }] });
+  }
+});
+
+test('subagents here and on another machine counting from the same seed keep apart, only the ones here count turns, and the owner\'s model rule holds there', async () => {
+  const { desk } = await group(20);
+  const here = fakeCore('desk')!, there = fakeCore('pc')!;
+  const spawn = (requestId: string, task: string, machine?: string) => desk.call('delegation.spawn', { threadId: 't-trace', task, requestId, ...(machine === undefined ? {} : { machine }) });
+  const turns = async () => (await desk.call('delegation.get', { threadId: 't-trace' })).turnsUsed;
+  const used = await turns();
+  // Both machines would name their next thread alike.
+  here.seq = there.seq = Math.max(here.seq, there.seq);
+  const near = await spawn('near', 'Read the parser');
+  const far = await spawn('far', 'Read the notes', 'pc');
+  expect((await spawn('far', 'Read the notes', 'pc')).thread.id).toBe(far.thread.id);
+  there.seq = Math.max(here.seq, there.seq);
+  const later = await spawn('later', 'Read the lexer', 'pc');
+  const next = await spawn('next', 'Read the tests');
+  expect(new Set([near, far, later, next].map(agent => agent.thread.id)).size).toBe(4);
+  // As the core: only the turns this machine admits count, a child there spends there.
+  expect(await turns()).toBe(used + 2);
+
+  // Each public call reaches the child it names.
+  const view = await desk.call('delegation.get', { threadId: 't-trace' });
+  expect([near, far, later, next].map(agent => view.agents.filter(entry => entry.thread.id === agent.thread.id).map(entry => entry.machine?.coreId ?? 'desk'))).toEqual([['desk'], ['pc'], ['pc'], ['desk']]);
+  const waited = await desk.call('delegation.wait', { threadId: 't-trace', agentId: far.thread.id, timeoutMs: 5000 });
+  expect(waited.agents.map(agent => [agent.machine?.coreId, waited.state])).toEqual([['pc', 'result_available']]);
+  const page = await desk.call('delegation.result', { threadId: 't-trace', agentId: far.thread.id, turnId: waited.agents[0]!.resultRef!.turnId });
+  expect(page.text).toBe(waited.agents[0]!.result);
+  expect((await desk.call('delegation.send', { threadId: 't-trace', toThreadId: near.thread.id, requestId: 'near-1', text: 'Read the tests too' })).to).toEqual({ coreId: 'local', threadId: near.thread.id });
+  await desk.call('delegation.wait', { threadId: 't-trace', agentId: later.thread.id, timeoutMs: 5000 });
+  expect((await desk.call('delegation.send', { threadId: 't-trace', toThreadId: later.thread.id, requestId: 'later-1', text: 'Read the tests too' })).to).toEqual({ coreId: 'pc', threadId: later.thread.id });
+
+  // Limited to this conversation's model and the profiles, the other machine's list says so too.
+  await desk.call('delegation.configure', { threadId: 't-trace', config: { enabled: true, paused: false, profiles: [], anyModel: false } });
+  expect((await desk.call('delegation.models', { threadId: 't-trace' })).anyModel).toBe(false);
+  expect((await desk.call('delegation.models', { threadId: 't-trace', machine: 'pc' })).anyModel).toBe(false);
 });
