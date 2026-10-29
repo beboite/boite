@@ -31,6 +31,7 @@ import {
   type DelegationWorktree,
   type HarnessUpdate,
   type HooksStatus,
+  type HomeCard,
   type ImportableSession,
   type Keybindings,
   type ModelInfo,
@@ -137,6 +138,8 @@ export interface FakeClientOptions {
   watchDemo?: boolean;
   /** Window captures, consent cards in each state and a watched Unity window on the trace thread, on `?fake=1&windows=1`. */
   windowsDemo?: boolean;
+  /** A home card under the new-thread composer, with figures, lists and a refresh, on `?fake=1&home=1`. */
+  homeCardsDemo?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
   /** The thread an agent's token names; with none, every agent call fails closed, as on the core. */
@@ -210,6 +213,8 @@ export class FakeContext {
   brain: BrainStatus = { config: { path: null, enabled: false }, entries: [], problems: [], git: null, lastSync: null };
   /** Each agent's own hooks and the runs that did not pass (`hooks.ts`). */
   hooks: HooksStatus = seedHooks();
+  /** The owner's home cards (`home-cards.ts`); none unless a demo seeds them, as on a fresh core. */
+  homeCards: HomeCard[] = [];
   telemetry: TelemetryState = { mode: 'basic', configured: true, pendingDeletion: false };
   /** The user's analytics choice, before the policy's ceiling is applied. */
   telemetryMode: TelemetryState['mode'] = 'basic';

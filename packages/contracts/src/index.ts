@@ -29,6 +29,7 @@ import type { FilesRpcMethods } from './files';
 import type { GitRpcMethods } from './git';
 import type { GroupRpcEvents, GroupRpcMethods } from './group';
 import type { HooksRpcEvents, HooksRpcMethods } from './hooks';
+import type { HomeCardsRpcEvents, HomeCardsRpcMethods } from './home-cards';
 import type { ImportsRpcEvents, ImportsRpcMethods } from './imports';
 import type { KeybindingsRpcEvents, KeybindingsRpcMethods } from './keybindings';
 import type { MessagesRpcEvents, MessagesRpcMethods } from './messages';
@@ -70,6 +71,7 @@ export * from './scheduler';
 export * from './settings';
 export * from './subscription-proxy';
 export * from './keybindings';
+export * from './home-cards';
 export * from './imports';
 export * from './core';
 export * from './agent-door';
@@ -152,6 +154,7 @@ export interface RpcMethods extends
   DelegationRpcMethods,
   BrainRpcMethods,
   HooksRpcMethods,
+  HomeCardsRpcMethods,
   SharedProjectsRpcMethods,
   TerminalsRpcMethods,
   PolicyRpcMethods {}
@@ -192,6 +195,7 @@ export interface RpcEvents extends
   DelegationRpcEvents,
   BrainRpcEvents,
   HooksRpcEvents,
+  HomeCardsRpcEvents,
   SharedProjectsRpcEvents,
   TerminalsRpcEvents,
   PolicyRpcEvents {}

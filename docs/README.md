@@ -22,6 +22,7 @@
 - [The agent's browser](browser.md): headless browser commands and watching a page from any device.
 - [Devices](devices.md): simulators, emulators and connected Android devices; live video is experimental.
 - [Windows](windows.md): desktop-window captures and the Window panel, with the owner's consent.
+- [Home cards](home-cards.md): status cards a script of yours writes, shown under the new-thread composer.
 - [Chat files and previews](chat-files.md): attachments, file links, inline previews and pages drawn in an answer.
 - [Diagrams and formulas](diagrams-and-formulas.md): Mermaid and LaTeX in messages.
 - [Experimental view kit](view-kit.md): an opt-in composition prototype and remaining authoring, runtime and publication improvements.

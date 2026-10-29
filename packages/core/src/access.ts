@@ -43,6 +43,9 @@
  * encrypted link (`Connection.encrypted`): loopback, Tailscale, or HTTPS
  * terminated on this machine. Plain HTTP from the LAN is refused with the
  * reason, so a key or its deletion never crosses the network in clear.
+ * homeCards.list and homeCards.refresh let a phone read and refresh the
+ * owner's home cards. A refresh runs only the command the owner wrote in that
+ * card's refresh.json, never one a client names, and joins a run already going.
  * policy.get lets a paired device draw the controls the admin policy locks,
  * as the desktop does. It holds no secret, only what the file says and where
  * it lies; no RPC changes it, only an administrator editing the file.

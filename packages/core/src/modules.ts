@@ -8,6 +8,7 @@ import { registerSecretMethods } from './secrets/rpc.ts';
 import { registerAgentMethods } from './agent.ts';
 import { registerImportMethods } from './imports.ts';
 import { registerKeybindingMethods } from './keybindings.ts';
+import { registerHomeCardMethods } from './home-cards.ts';
 import { registerProjectMethods } from './projects.ts';
 import { registerProviderMethods } from './providers/loader.ts';
 import { registerProbeMethods } from './providers/probe.ts';
@@ -128,6 +129,7 @@ export function registerModules(core: Core): void {
   registerSubscriptionProxy(core);
   registerGatewayMove(core);
   registerKeybindingMethods(core);
+  registerHomeCardMethods(core);
   registerSessionMethods(core);
   registerTailscaleMethods(core);
   registerFirewallMethods(core);

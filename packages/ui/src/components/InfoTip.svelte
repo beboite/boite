@@ -8,8 +8,11 @@
   import { floating } from '../lib/floating';
   import { fill, strings } from '../lib/strings';
 
-  /** `icon` replaces the "i" where the mark itself says more, as the lock of a control the policy holds. */
-  let { text, topic, testid, icon: Icon = Info }: { text: string; topic: string; testid?: string; icon?: typeof Info } = $props();
+  /**
+   * `icon` replaces the "i" where the mark itself says more, as the lock of a control the policy holds.
+   * `lines` keeps the text's line breaks and scrolls a text taller than the room it has.
+   */
+  let { text, topic, testid, icon: Icon = Info, lines = false }: { text: string; topic: string; testid?: string; icon?: typeof Info; lines?: boolean } = $props();
 
   const tip = new Closing();
   const id = `info-${Math.random().toString(36).slice(2, 10)}`;
@@ -84,6 +87,7 @@
     {id}
     class="info-bubble"
     class:closing={tip.closing}
+    class:lines
     role="tooltip"
     data-testid="{testid ?? 'info-tip'}-text"
     bind:this={bubble}
@@ -127,6 +131,12 @@
     text-transform: none;
     white-space: normal;
     animation: pop var(--dur-2) var(--ease-out-quint);
+  }
+
+  .info-bubble.lines {
+    white-space: pre-line;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .info-bubble.closing {

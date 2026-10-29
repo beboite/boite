@@ -74,6 +74,7 @@ import { workdirMethods } from './fake-client/workdir';
 import { browserMethods } from './fake-client/browser';
 import { devicesMethods } from './fake-client/devices';
 import { seedWindowsDemo, windowsMethods } from './fake-client/windows';
+import { homeCardMethods, seedHomeCards } from './fake-client/home-cards';
 import { pullRequestMethods } from './fake-client/pull-requests';
 import { worktreeMethods } from './fake-client/worktrees';
 import { serverUpdateMethods } from './fake-client/server-update';
@@ -140,6 +141,7 @@ export class FakeClient implements ObservableClient {
       ];
     }
     if (options.windowsDemo) seedWindowsDemo(ctx);
+    if (options.homeCardsDemo) ctx.homeCards = seedHomeCards();
     if (options.uninstalled) {
       ctx.providers = ctx.providers.filter(provider => provider.id !== 'echo').map(provider => ({
         ...provider, available: false, executable: null,
@@ -559,6 +561,7 @@ export class FakeClient implements ObservableClient {
       ...browserMethods(ctx),
       ...devicesMethods(ctx),
       ...windowsMethods(ctx),
+      ...homeCardMethods(ctx),
       ...pullRequestMethods(ctx),
       ...worktreeMethods(ctx),
       // The one owner connection is this client: the event comes back to it, as the core's reaches each owner.

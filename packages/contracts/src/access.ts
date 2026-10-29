@@ -212,6 +212,10 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'subscriptionProxy.setEnabled',
   'settings.get',
   'keybindings.get',
+  // The owner's home cards. A refresh runs only the command the owner wrote in
+  // the card's refresh.json, joined while one runs (core access.ts).
+  'homeCards.list',
+  'homeCards.refresh',
 ]);
 
 /** Push events must not bypass the read permissions enforced on RPC calls. */
@@ -242,6 +246,7 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   'quotas.updated', 'quotas.progress', 'subscriptionProxy.quotasUpdated', // What quotas.list and subscriptionProxy.quotas answer.
   'quotas.alerted', // One window of a row quotas.list already answers the device.
   'settings.updated', 'keybindings.updated', 'sessions.updated',
+  'homeCards.updated', // What homeCards.list already answers the device.
   'policy.changed', // What policy.get answers the device.
   // Experiment ids of the desktop app, as client.preferences already answers the device.
   'client.desktopExperiments',

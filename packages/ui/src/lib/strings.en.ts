@@ -17,6 +17,7 @@ import { strings as previewComments } from './strings/en/previewComments';
 import { strings as artifacts } from './strings/en/artifacts';
 import { strings as brain } from './strings/en/brain';
 import { strings as hooks } from './strings/en/hooks';
+import { strings as homeCards } from './strings/en/homeCards';
 import { strings as diagnostics } from './strings/en/diagnostics';
 import { strings as telemetry } from './strings/en/telemetry';
 import { strings as speech } from './strings/en/speech';
@@ -110,6 +111,7 @@ export const strings = {
   ...artifacts,
   ...brain,
   ...hooks,
+  ...homeCards,
   ...diagnostics,
   ...telemetry,
   ...speech,

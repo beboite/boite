@@ -21,6 +21,7 @@ import { fr as previewComments } from './strings/fr/previewComments';
 import { fr as artifacts } from './strings/fr/artifacts';
 import { fr as brain } from './strings/fr/brain';
 import { fr as hooks } from './strings/fr/hooks';
+import { fr as homeCards } from './strings/fr/homeCards';
 import { fr as diagnostics } from './strings/fr/diagnostics';
 import { fr as telemetry } from './strings/fr/telemetry';
 import { fr as speech } from './strings/fr/speech';
@@ -114,6 +115,7 @@ export const fr: Translation = {
   ...artifacts,
   ...brain,
   ...hooks,
+  ...homeCards,
   ...diagnostics,
   ...telemetry,
   ...speech,

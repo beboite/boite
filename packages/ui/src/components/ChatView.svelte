@@ -23,6 +23,7 @@
   import ForkReturn from './ForkReturn.svelte';
   import ProjectTile from './ProjectTile.svelte';
   import MachineIcon from './MachineIcon.svelte';
+  import HomeCards from './HomeCards.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import DoneThreadNotice from './DoneThreadNotice.svelte';
   import WorktreeGoneNotice from './WorktreeGoneNotice.svelte';
@@ -146,6 +147,8 @@
           </span>
           {#if draftChoice}<small>{modePhrase(draftChoice.permissionMode, draftProvider)}</small>{/if}
           {#if store.draft?.worktree}<small>{strings.thread.inWorktree}</small>{/if}
+          <!-- On a phone the composer holds the bottom: the cards read under the welcome instead. -->
+          {#if phone.current}<HomeCards {store} phone />{/if}
         </div>
         <div class="draft-heading" data-testid="draft-sentence">
           <h1 class="start">
@@ -208,6 +211,8 @@
             <span class="ui-label">{strings.drafts.openFolder}</span>
           </button>
         {/if}
+        <!-- The owner's status cards, read at a glance before a thread is opened. -->
+        {#if !phone.current}<HomeCards {store} />{/if}
       </div>
     {/if}
     <!-- Desktop drafts anchor against the whole chat so their centered heading stays clear. -->
@@ -286,8 +291,9 @@
     flex: 1 1 0;
     min-height: 0;
     display: flex;
-    justify-content: center;
-    align-items: flex-start;
+    flex-direction: column;
+    align-items: center;
+    overflow-y: auto;
   }
 
   /* Inline, so the mark stays with the first word when the line wraps on a phone. */

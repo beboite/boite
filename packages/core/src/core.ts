@@ -20,6 +20,7 @@ import { ImportStore } from './imports.ts';
 import { Journal } from './journal.ts';
 import { scheduleEventRetention, scheduleInlineValueMoves } from './journal/retention.ts';
 import { KeybindingStore } from './keybindings.ts';
+import { HomeCardStore } from './home-cards.ts';
 import { DiagnosticLogs, type ThreadIdentity } from './logs.ts';
 import { Diagnostics } from './diagnostics.ts';
 import { registerModules } from './modules.ts';
@@ -184,6 +185,7 @@ export class Core {
   readonly sessions: SessionStore;
   readonly worktrees: Worktrees;
   readonly keybindings: KeybindingStore;
+  readonly homeCards: HomeCardStore;
   readonly imports: ImportStore;
   readonly activity: ActivityStore;
   readonly push: PushStore;
@@ -398,6 +400,7 @@ export class Core {
     this.journal.admitThread = (thread) => this.worktrees.reservations.admit(thread);
     this.procs.admitCwd = (cwd) => this.worktrees.reservations.assertFree(cwd, 'a process');
     this.keybindings = new KeybindingStore(this);
+    this.homeCards = new HomeCardStore(this);
     this.imports = new ImportStore(this);
     // The journal erased the incognito conversations the last core left behind; their transcripts follow.
     this.threads.transcriptPurge = removeTranscripts(this, this.journal.takeIncognitoSessions());
@@ -472,6 +475,7 @@ export class Core {
     this.agentRuntime = new AgentRuntime(this);
     queueMicrotask(() => this.composer.start());
     this.brain.start();
+    this.homeCards.start();
     this.mergedPrArchive = new MergedPrArchive(this, this.pullRequests);
     this.mergedPrArchive.start();
     this.worktreeCleanup = new WorktreeCleanup(this);
@@ -611,6 +615,8 @@ export class Core {
     await this.drafts.close().catch(error => this.log('warn', `draft shutdown cleanup failed: ${String(error)}`));
     await this.attachmentUploads.close().catch(error => this.log('warn', `attachment shutdown cleanup failed: ${String(error)}`));
     await this.brain.close();
+    // Its refreshes end with the other processes below; this only stops the schedule.
+    void this.homeCards.close();
     this.updates.close();
     this.providers.close();
     this.serverUpdates.close();

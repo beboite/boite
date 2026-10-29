@@ -81,6 +81,7 @@ client. Development fixtures spend no provider tokens:
 | `?fake=1&open=recent` | Opens the latest thread instead of a new draft |
 | `?fake=1&uninstalled=1` | No connected provider |
 | `?fake=1&policy=managed` | An admin policy that locks every key a control shows; `broken` adds problems, `closed` fails closed ([enterprise](enterprise.md)) |
+| `?fake=1&home=1` | One status card under the new-thread composer ([home cards](home-cards.md)) |
 
 Production bundles exclude the fake client and Svelte development runtime.
 Vite removes an orphan fake-client chunk and rejects shipped references to it.

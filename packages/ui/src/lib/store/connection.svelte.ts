@@ -179,6 +179,7 @@ export class Connection {
             boardDemo: params.get('board') === '1',
             watchDemo: params.get('watch') === '1',
             windowsDemo: params.get('windows') === '1',
+            homeCardsDemo: params.get('home') === '1',
             uninstalled: params.get('uninstalled') === '1',
             ...(params.get('principal') === 'session' ? { principal: 'session' as const } : {}),
             ...(params.get('missing') ? { missing: params.get('missing')!.split(',') } : {})
