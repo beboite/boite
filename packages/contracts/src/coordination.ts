@@ -344,6 +344,27 @@ export interface ContactsState {
   internet?: boolean;
   /** The contact routes on Tailscale Funnel while they are up, null otherwise. Absent from older cores. */
   funnel?: ContactFunnelState | null;
+  /** Contact mail waiting for this owner, oldest first, at most 50. Absent from older cores. */
+  mail?: HeldContactLetter[];
+}
+/**
+ * A letter a contact not marked trusted wrote outside a shared project, to a
+ * thread whose agent has tools: no agent reads it until the owner delivers it
+ * (`contacts.decideMail`). It still expires when its sender said.
+ */
+export interface HeldContactLetter {
+  id: string;
+  coreId: string;
+  /** The contact's local name. */
+  contact: string;
+  /** The sending thread's title as the contact's core gave it. */
+  from: string;
+  threadId: ThreadId;
+  /** The title of the thread it was written to. */
+  thread: string;
+  text: string;
+  createdAt: Timestamp;
+  expiresAt: Timestamp;
 }
 export interface CoordinationView {
   self: AgentAddress;
@@ -446,6 +467,8 @@ export interface CoordinationRpcMethods {
   'contacts.remove': { params: { coreId: string }; result: { ok: true } };
   /** Accept a request by opening `projectId`, or refuse it with a reason sent back to the asking agent. Owner only. */
   'contacts.decide': { params: { id: string; accept: boolean; projectId?: ProjectId; reason?: string }; result: ContactRequest };
+  /** Deliver a held contact letter (`ContactsState.mail`) to its thread, or refuse it: its sender reads it was refused. Owner only. */
+  'contacts.decideMail': { params: { id: string; accept: boolean }; result: { ok: true } };
   'contacts.settings': { params: { settings: ContactSettings }; result: ContactSettings };
   /** Store or clear the Tailscale API key; it never leaves the core. Owner only. */
   'contacts.tailscaleKey': { params: { key: string | null }; result: ContactTailscale };

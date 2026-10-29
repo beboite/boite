@@ -13,7 +13,7 @@ import { projectName, senderContext, withProjects, withRelations } from './coord
 import { firstAnswer, PeerGone, PeerRefusal, post, settle, type Answer, type Envelope, type Operation } from './coordination-wire.ts';
 import { checkTailnetName } from './contacts/invite.ts';
 import { outgoingContact, incomingContact } from './contacts/human-letters.ts';
-import {protectLetters} from './contacts/letter-scopes.ts';
+import {contactMailGate, protectLetters} from './contacts/letter-scopes.ts';
 import type { Connection } from './router.ts';
 import { pack, SEALED } from './group/seal.ts';
 import type { Core } from './core.ts';
@@ -227,11 +227,17 @@ export class Coordination {
     const reason = this.#core.journal.getSetting(`${AUTO_PAUSE_PREFIX}${threadId}`);
     return Boolean(reason) && reason !== 'stop';
   }
-  /** The owner trusted the contact mail a held wake refused: a failure's pause ends, Stop's and the owner's stay, and the letters go again. */
+  /**
+   * The owner trusted the contact mail a held wake refused, or let held mail through: a failure's pause ends,
+   * Stop's and the owner's stay, and the letters go again, to an agent waiting for them first.
+   */
   resumeTrusted(threadId: string): void {
     this.#resumeForAgent(threadId);
+    this.#handToWaiter(threadId, null);
     this.#kick(threadId);
   }
+  /** The owner refused contact mail held for it: its sender reads why. */
+  refuseHeld(letter: AgentLetter, reason: string): void { this.update(letter, 'rejected', reason); }
   #resumeForAgent(threadId: string): void {
     if (this.#wakesForAgent(threadId)) this.resumeForUser(threadId);
   }
@@ -343,11 +349,11 @@ export class Coordination {
    * A waiting agent takes the letter that just arrived, with what else it may read now. Mail held from
    * one waiter may still reach the next; a fault fails the waiter that read, never the letter's sender.
    */
-  #handToWaiter(letter: AgentLetter): void {
-    for (const waiter of this.#waiters.get(letter.to.threadId) ?? []) {
-      if (waiter.from !== null && !same(waiter.from, letter.from)) continue;
+  #handToWaiter(threadId: string, from: AgentAddress | null): void {
+    for (const waiter of this.#waiters.get(threadId) ?? []) {
+      if (from !== null && waiter.from !== null && !same(waiter.from, from)) continue;
       let letters: AgentLetter[];
-      try { letters = this.claim(letter.to.threadId, waiter.from); } catch (error) { waiter.fail(error); continue; }
+      try { letters = this.claim(threadId, waiter.from); } catch (error) { waiter.fail(error); continue; }
       if (letters.length > 0) return waiter.done(letters);
     }
   }
@@ -460,7 +466,7 @@ export class Coordination {
     this.#core.threads.runner.noteMail(threadId, letter.createdAt);
     this.#resumeForAgent(threadId);
     this.update(letter, 'received');
-    this.#handToWaiter(letter);
+    this.#handToWaiter(threadId, letter.from);
     const current = this.#find(letter.id, 'in');
     if (current?.status === 'received') this.#kick(threadId);
     return current ?? letter;
@@ -482,6 +488,8 @@ export class Coordination {
       this.#core.journal.db.query("UPDATE coordination_letters SET status = ?, data = json_set(?, '$.createdAt', created_at) WHERE id = ?").run(status, JSON.stringify(next), letter.id);
     });
     for (const endpoint of [letter.from, letter.to]) if (endpoint.coreId === this.#coreId) this.#changed(endpoint.threadId);
+    // Mail held for the owner came or went: the owner's list of it changed.
+    if (letter.contact && letter.to.coreId === this.#coreId && (status === 'received' || letter.status === 'received') && contactMailGate(this.#core, letter.to.threadId).held(letter)) this.#core.contacts.changed();
   }
   #changed(threadId: string): void { this.#core.bus.emit('collaboration.changed', { threadId }); }
 
@@ -561,17 +569,20 @@ export class Coordination {
   }
   /**
    * The oldest received letters this thread may take now, only its local mail
-   * when `local`. Held ones (paused, off, no longer permitted) stay in the inbox
-   * and never hide those behind them.
+   * and the contact mail already cleared when `local`. Held ones (paused, off,
+   * no longer permitted, waiting for the owner) stay in the inbox and never
+   * hide those behind them.
    */
   #ready(threadId: string, limit: number, from: AgentAddress | null = null, local = false): AgentLetter[] {
     const letters: AgentLetter[] = [];
+    let gate: ReturnType<typeof contactMailGate> | undefined;
+    const waits = (letter: AgentLetter) => Boolean(letter.contact) && ((gate ??= contactMailGate(this.#core, threadId)).held(letter) || local && !gate.cleared(letter));
     // Its own statement: a cached one left half read at the limit breaks the next selection.
     const statement = this.#core.journal.db.prepare("SELECT data FROM coordination_letters WHERE thread_id = ? AND direction = 'in' AND status = 'received' ORDER BY created_at");
     try {
       for (const row of statement.iterate(threadId) as Iterable<Row>) {
         const letter = JSON.parse(row.data) as AgentLetter;
-        if (letter.expiresAt > Date.now() && !(local && letter.contact) && (from === null || same(letter.from, from)) && this.#mayReceive(letter)) letters.push(letter);
+        if (letter.expiresAt > Date.now() && !waits(letter) && (from === null || same(letter.from, from)) && this.#mayReceive(letter)) letters.push(letter);
         if (letters.length >= limit) break;
       }
     } finally { statement.finalize(); }
@@ -704,6 +715,7 @@ export class Coordination {
           return true;
         })(), refusal => { held = refusal; return local(); });
         // No turn of an idle thread ends to retry its refused contact mail: the refusal pauses coordination until the owner's trust or message.
+        // Mail held for the owner never gets here: `#ready` leaves it out until the owner delivers it.
         if (!woke && held) throw held;
       }
     } catch (error) {

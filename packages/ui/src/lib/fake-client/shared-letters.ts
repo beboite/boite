@@ -1,7 +1,7 @@
 /** Human admission and contact mail, separate from the ordinary owner's composer. */
 import type { AgentLetter, RpcParams } from '@boite/contracts';
 import type { FakeContext, FakeMethods } from './context';
-import { coordinationConfig, fakeAgentContact, fakeCore } from './coordination';
+import { coordinationConfig, fakeAgentContact, fakeCore, mailRoute } from './coordination';
 import { contactState, modelTier, fakeNoteSent, fakeMayReach } from './contacts';
 import { secureId } from '../secure-id';
 import { holdContactMail } from './contact-hold';
@@ -10,6 +10,7 @@ import { assertSharedActive, cloneShared, endpoints, onceShared, projectAddress,
 const mailCores=new Set<FakeContext>();
 /** Reconnects and policy changes recheck mail before the paused destination can use it. */
 function flushContactMail():void {
+  const told=new Set<FakeContext>();
   for(const source of mailCores)for(const [threadId,letters] of source.letters)for(const letter of letters) {
     if(!letter.contact||(!letter.sharedProjectId&&letter.origin!=='contact-human')||(letter.from.sharedThread?.project.coreId ?? letter.from.coreId)!==source.identity.coreId||(letter.from.sharedThread?.threadId ?? letter.from.threadId)!==threadId||!['queued','received'].includes(letter.status))continue;
     const shared=letter.sharedProjectId?requireShared(source,letter.sharedProjectId):undefined,refs=shared?endpoints(source,shared):undefined;
@@ -28,16 +29,21 @@ function flushContactMail():void {
       if(!from||from.project.ownerCoreId!==refs.remote.ownerCoreId||from.project.coreId!==refs.remote.coreId||from.project.projectId!==refs.remote.projectId||recipient?.projectId!==refs.local.projectId)allowed=false;
     }catch{allowed=false;}}
     const before=letter.status;
+    const messages=target.letters.get(recipient?.id ?? letter.to.threadId)??[],received=messages.find(l=>l.id===letter.id);
+    // As the core's gate: mail outside a shared project waits for the owner unless its contact is trusted.
+    const route=allowed?mailRoute(target,recipient!.id,{...letter,contact:{coreId:refs?.local.ownerCoreId ?? source.identity.coreId,name:inbound!.name}}):'open';
     if(letter.expiresAt<=Date.now())letter.status='expired';
     else if(!allowed){letter.status='rejected';letter.error='letter.to: not a thread of a project opened to you';}
-    else letter.status=config!.paused||recipient!.status==='waiting'||recipient!.status==='queued'?'received':'delivered';
-    const messages=target.letters.get(recipient?.id ?? letter.to.threadId)??[],received=messages.find(l=>l.id===letter.id);
+    else if(route==='owner'&&received?.status==='rejected'){letter.status='rejected';letter.error=received.error;}
+    else letter.status=route==='owner'||config!.paused||recipient!.status==='waiting'||recipient!.status==='queued'?'received':'delivered';
     if(received){received.status=letter.status;received.error=letter.error;}
     else if(allowed)target.letters.set(recipient!.id,[...messages,{...cloneShared(letter),toTitle:recipient!.title,contact:{coreId:refs?.local.ownerCoreId ?? source.identity.coreId,name:inbound!.name}}]);
-    // As the core's letter scopes: delivered mail outside a shared project holds the thread.
-    if(letter.status==='delivered'&&before!=='delivered'&&!letter.sharedProjectId)holdContactMail(target,recipient!.id,[inbound!.name]);
+    // As the core's letter scopes: a tool-free thread reads mail outside a shared project and takes the hold.
+    if(letter.status==='delivered'&&before!=='delivered'&&route==='tool-free')holdContactMail(target,recipient!.id,[inbound!.name]);
+    if(route==='owner'&&letter.status==='received'&&(!received||before!=='received'))told.add(target);
     if(before!==letter.status){source.emit('collaboration.changed',{threadId});target.emit('collaboration.changed',{threadId:recipient?.id ?? letter.to.threadId});}
   }
+  for(const target of told)target.emit('contacts.updated',{});
 }
 
 export function sharedLetterMethods(ctx:FakeContext,ordinary:Pick<FakeMethods,'collaboration.send'|'collaboration.configure'|'collaboration.get'>){

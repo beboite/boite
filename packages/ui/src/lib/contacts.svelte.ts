@@ -153,6 +153,13 @@ export class ContactsView {
     return request;
   }
 
+  /** Delivers a held contact letter to its thread, or refuses it. True once the core took the decision. */
+  async decideMail(id: string, accept: boolean): Promise<boolean> {
+    const done = await this.#run(`mail:${id}`, () => this.#connected().call('contacts.decideMail', { id, accept }));
+    if (done && this.state?.mail) this.state.mail = this.state.mail.filter(entry => entry.id !== id);
+    return done !== null;
+  }
+
   async settings(settings: ContactSettings): Promise<void> {
     const next = await this.#run('settings', () => this.#connected().call('contacts.settings', { settings }));
     if (next && this.state) this.state.settings = next;
@@ -252,7 +259,7 @@ export function contactsOf(store: Store): ContactsView {
 /** A machine listed beside its contacts. */
 export interface MachineContacts { machine: Machine; view: ContactsView }
 
-/** A contact as the lists draw it, with the machine that holds it and how many of its requests wait. */
+/** A contact as the lists draw it, with the machine that holds it and how many of its requests and messages wait. */
 export interface ContactRow { machine: Machine; contact: Contact; waiting: number }
 
 /**
@@ -278,6 +285,7 @@ export function contactRows(views: readonly MachineContacts[]): ContactRow[] {
     machine,
     contact,
     waiting: view.state!.requests.filter(request => request.coreId === contact.coreId && request.direction === 'in' && request.status === 'pending').length
+      + (view.state!.mail ?? []).filter(letter => letter.coreId === contact.coreId).length
   })));
 }
 

@@ -8,6 +8,7 @@
  * text: the words may change, the refusal may not.
  */
 import { COMPOSER_SCENARIOS } from './composer.ts';
+import { CONTACT_MAIL_SCENARIOS } from './contact-mail.ts';
 import { SHARED_SCENARIOS } from './shared-projects.ts';
 import {
   GROUP_INVITE_PREFIX,
@@ -157,6 +158,7 @@ async function unavailable(env: ContractEnv): Promise<{ provider: ProviderSummar
 export const SCENARIOS: Record<string, Scenario> = {
   ...SHARED_SCENARIOS,
   ...COMPOSER_SCENARIOS,
+  ...CONTACT_MAIL_SCENARIOS,
   'artifacts.viewBlock reuses HTML and refuses empty or oversized UTF-8 input': async (env) => {
     const html = '<p>Shared view</p>';
     const { url } = await env.call('artifacts.viewBlock', { html });

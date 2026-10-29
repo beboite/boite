@@ -1,8 +1,8 @@
 /** Coordination between threads, on this core and on the other fake cores it trusts. */
-import { defaultCoordinationConfig, RpcErrorCode, type AgentAddress, type AgentContact, type AgentLetter, type AgentMatch, type AgentRelation, type Contact, type ContactRequest, type ContactsState, type CoordinationConfig, type CoordinationPeer, type CoordinationView, type Thread, type ThreadId } from '@boite/contracts';
+import { defaultCoordinationConfig, RpcErrorCode, type AgentAddress, type AgentContact, type AgentLetter, type AgentMatch, type AgentRelation, type Contact, type ContactRequest, type ContactsState, type CoordinationConfig, type HeldContactLetter, type CoordinationPeer, type CoordinationView, type Thread, type ThreadId } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { archiveProject } from './project-archive';
-import { holdContactMail } from './contact-hold';
+import { approveContactMail, contactMailRoute, holdContactMail } from './contact-hold';
 import type { FakeContext, FakeMethods } from './context';
 
 /** Every fake core of this page by id, what a remote letter or directory reaches. */
@@ -114,6 +114,52 @@ export function deliverContactAnswer(ctx: FakeContext, request: ContactRequest):
   ctx.emit('collaboration.changed', { threadId: thread.id });
 }
 
+/** As the core's `heldMail`: contact mail waiting for this owner, oldest first, at most 50. */
+export function fakeHeldMail(ctx: FakeContext): HeldContactLetter[] {
+  const now = ctx.now();
+  const held = [...ctx.letters].flatMap(([threadId, letters]) => {
+    const thread = ctx.threads.get(threadId);
+    if (!thread || thread.archived) return [];
+    return letters.filter(letter => letter.status === 'received' && letter.to.coreId === ctx.identity.coreId && letter.to.threadId === threadId
+      && letter.expiresAt > now && mailRoute(ctx, threadId, letter) === 'owner').map(letter => ({
+      id: letter.id, coreId: letter.contact!.coreId, contact: fakeContacts(ctx)?.contacts.find(entry => entry.coreId === letter.contact!.coreId)?.name ?? letter.contact!.name,
+      from: letter.from.title, threadId, thread: thread.title, text: letter.text, createdAt: letter.createdAt, expiresAt: letter.expiresAt
+    }));
+  });
+  return held.sort((a, b) => a.createdAt - b.createdAt).slice(0, 50);
+}
+
+/** As the core's `decideMail`: the owner delivers one held letter or refuses it, which its sender reads. */
+export function decideFakeMail(ctx: FakeContext, id: unknown, accept: unknown): { ok: true } {
+  const invalid = (message: string, field: string) => new RpcFailure({ code: RpcErrorCode.InvalidParams, message, data: { field } });
+  if (typeof id !== 'string' || id.length > 100) throw invalid('id: expected a letter id', 'id');
+  if (typeof accept !== 'boolean') throw invalid('accept: expected a boolean', 'accept');
+  const found = [...ctx.letters].flatMap(([threadId, letters]) => letters.filter(letter => letter.id === id).map(letter => ({ threadId, letter })))
+    .find(({ threadId, letter }) => letter.status === 'received' && letter.to.coreId === ctx.identity.coreId && letter.expiresAt > ctx.now() && mailRoute(ctx, threadId, letter) === 'owner');
+  if (!found) throw invalid('id: expected a contact letter waiting for the owner', 'id');
+  const { threadId, letter } = found;
+  if (accept) {
+    approveContactMail(ctx, letter.id);
+    deliverPending(ctx, threadId);
+  } else {
+    letter.status = 'rejected';
+    letter.error = 'Refused by the owner';
+    const forwarding = deliveredFrom.get(letter);
+    if (forwarding) {
+      Object.assign(forwarding.canonical, { status: letter.status, error: letter.error });
+      forwarding.source.emit('collaboration.changed', { threadId: forwarding.thread.id });
+    }
+  }
+  ctx.emit('collaboration.changed', { threadId });
+  ctx.emit('contacts.updated', {});
+  return { ok: true };
+}
+
+/** A contact the owner now trusts: the threads holding its mail take it. */
+export function releaseFakeMail(ctx: FakeContext, coreId: string): void {
+  for (const [threadId, letters] of ctx.letters) if (letters.some(letter => letter.status === 'received' && letter.contact?.coreId === coreId)) deliverPending(ctx, threadId);
+}
+
 export function migratePeer(ctx: FakeContext, coreId: string): void {
   const member = ctx.roster?.cores.find(core => core.coreId === coreId);
   const peer = ctx.peers.get(coreId);
@@ -223,13 +269,25 @@ function reachable(ctx: FakeContext, threadId: ThreadId): { contact: AgentContac
 
 /** Fake delivery is immediate, but it still respects pauses and restores the owning project. A failed thread receives, as on the core. */
 /** As the core's letter scopes: contact mail outside a shared project holds the thread before it is delivered. */
-function holdUnassociated(ctx: FakeContext, threadId: ThreadId, letter: AgentLetter): void {
-  if (letter.contact && !letter.sharedProjectId) holdContactMail(ctx, threadId, [letter.contact.name]);
+/** What the contact's trust or the owner lets through to this thread, as the core's gate decides. */
+export function mailRoute(ctx: FakeContext, threadId: ThreadId, letter: AgentLetter): ReturnType<typeof contactMailRoute> {
+  const contact = letter.contact && fakeContacts(ctx)?.contacts.find(entry => entry.coreId === letter.contact!.coreId);
+  return contactMailRoute(ctx, threadId, letter, contact ? contact.trusted : false);
 }
+
+function holdUnassociated(ctx: FakeContext, threadId: ThreadId, letter: AgentLetter): void {
+  if (mailRoute(ctx, threadId, letter) === 'tool-free') holdContactMail(ctx, threadId, [letter.contact!.name]);
+}
+
+/** Mail the owner was told about: the Contacts notice reads `contacts.get` again once per letter. */
+const announced = new WeakSet<AgentLetter>();
 
 function deliverPending(ctx: FakeContext, threadId: ThreadId): void {
   const thread = ctx.thread(threadId);
   const config = coordinationConfig(ctx, threadId);
+  const fresh = (ctx.letters.get(threadId) ?? []).filter(letter => letter.status === 'received' && !announced.has(letter) && mailRoute(ctx, threadId, letter) === 'owner');
+  for (const letter of fresh) announced.add(letter);
+  if (fresh.length) ctx.emit('contacts.updated', {});
   if (thread.archived || config.mode === 'off' || config.paused || ['waiting', 'queued'].includes(thread.status)) return;
   for (const letter of ctx.letters.get(threadId) ?? []) {
     if (letter.status !== 'received' || letter.to.coreId !== ctx.identity.coreId || letter.to.threadId !== threadId) continue;
@@ -242,6 +300,8 @@ function deliverPending(ctx: FakeContext, threadId: ThreadId): void {
       }
       continue;
     }
+    // As the core's `#ready`: mail held for the owner stays received until delivered or refused.
+    if (mailRoute(ctx, threadId, letter) === 'owner') continue;
     if (letter.origin === 'contact') { holdUnassociated(ctx, threadId, letter); letter.status = 'delivered'; ctx.emit('collaboration.changed', { threadId }); continue; }
     const sender = forwarding?.source ?? cores.get(letter.from.coreId);
     const source = forwarding?.thread ?? sender?.threads.get(letter.from.threadId);

@@ -107,6 +107,7 @@ const RULES: Partial<Record<RpcMethodName, Rule>> = {
   'contacts.grant': contactsOff,
   'contacts.sendHuman': contactsOff,
   'contacts.decide': when('network.contacts', (core, params) => params.accept === true && core.policy.networkOff('contacts')),
+  'contacts.decideMail': when('network.contacts', (core, params) => params.accept === true && core.policy.networkOff('contacts')),
   'contacts.tailscaleKey': when('network.contacts', (core, params) => params.key !== null && core.policy.networkOff('contacts')),
 
   'threads.linkPullRequest': pullRequestsOff,
