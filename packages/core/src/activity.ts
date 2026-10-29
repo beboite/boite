@@ -10,6 +10,8 @@ import type { ChildRoute } from './delegation/routes.ts';
 import { GoalTracker, modelRead, newChecklist } from './goal-tracker.ts';
 import type { ProviderProbe } from './providers/probe.ts';
 import { needsModelDiscovery } from './threads/selection.ts';
+import { nativeCommandPrompt } from './threads/operations.ts';
+import { addGoalCard, unlinkGoalCards } from './todos.ts';
 
 const empty = (): ThreadActivity => ({ goal: null, loop: null, tasks: [] });
 type PendingAttachments = Partial<Record<'goal' | 'loop', Attachment[]>>;
@@ -61,7 +63,10 @@ export class ActivityStore {
     for (const thread of savedThreads) {
       const saved = core.journal.getSetting(`activity:${thread.id}`) as ThreadActivity | undefined;
       if (!saved) continue;
-      let changed = pauseActivity(saved, 'Core restarted. Resume to continue.');
+      // An automatic goal's first turn still in line runs as the goal's after the restart: with its rules, its claim or blocker counting.
+      const first = firstInLine(core, thread.id, saved);
+      if (first) this.ownTurns.set(first, { kind: 'goal', generation: 0, iteration: 1 });
+      let changed = !first && pauseActivity(saved, 'Core restarted. Resume to continue.');
       const review = saved.goal?.review;
       for (const verdict of review?.verdicts ?? []) this.reviewers.add(verdict.threadId);
       // The interrupted review is not adopted: resuming starts a fresh one.
@@ -80,6 +85,10 @@ export class ActivityStore {
         const event = payload as { threadId: string; part: MessagePart };
         this.observeTool(event.threadId, event.part);
       }
+    });
+    // An archive or removal that rolls back pauses, stops and forgets nothing.
+    core.bus.onCommitted((name, payload) => {
+      if (this.closed) return;
       if (name === 'thread.updated') {
         const thread = payload as { id: string; archived: boolean };
         if (thread.archived) this.pauseAll(thread.id);
@@ -99,6 +108,7 @@ export class ActivityStore {
         core.journal.deleteSetting(`activity:${threadId}`);
         core.journal.deleteSetting(`activity-input:${threadId}`);
         core.journal.deleteSetting(`activity:shared:${threadId}`);
+        core.journal.deleteSetting(`auto-goal:${threadId}`);
       }
     });
   }
@@ -139,7 +149,76 @@ export class ActivityStore {
     if (goal?.checklist && goal.status !== 'complete') this.tracker.message(threadId, text);
   }
 
-  set(params: RpcParams<'threads.activity.set'>, sharedClaim?: {sharedProjectId: string; cardId: string; claimId: string}, executionChoice?: ComposerChoice): ThreadActivity {
+  /** A goal or a loop not finished yet, paused included: an automatic goal never replaces it. */
+  busy(threadId: string): boolean {
+    const state = this.states.get(threadId);
+    return [state?.goal, state?.loop].some(item => item && item.status !== 'complete');
+  }
+
+  /**
+   * An automatic goal (`auto-goal` experiment, `docs/goals.md`): the user's
+   * message `messageId` becomes a reviewed goal's objective, verbatim, and
+   * the project's board gets a card linked to it. False, and nothing changes,
+   * when the conversation is a subthread or already holds a goal or a loop.
+   * It never throws: the turn it follows is already accepted, so a goal that
+   * cannot start is logged and the prompt runs alone.
+   */
+  autoGoal(threadId: string, turnId: string, messageId: string, objective: string, executionChoice?: ComposerChoice): boolean {
+    const thread = this.core.journal.getThread(threadId);
+    if (!thread || thread.archived || thread.parentThreadId || this.busy(threadId) || !objective.trim()) return false;
+    try { this.set({ threadId, goal: { objective, review: true } }, undefined, executionChoice, true); } catch (error) {
+      this.core.log('warn', `automatic goal: ${messageOf(error)}`);
+      return false;
+    }
+    // The turn still under way is the goal's first: its claim or blocker counts, and no second run starts before them.
+    // `first` keeps that across a restart, while the turn waits in line.
+    const first = ['queued', 'running', 'waiting'].includes(this.core.journal.getTurn(turnId)?.status ?? '');
+    if (first) {
+      this.ownTurns.set(turnId, { kind: 'goal', generation: this.generations.get(`${threadId}:goal`) ?? 0, iteration: 1 });
+      this.states.get(threadId)!.goal!.iterations = 1;
+      this.save(threadId);
+    }
+    this.core.journal.setSetting(`auto-goal:${threadId}`, { turnId, messageId, ...(first ? { first } : {}) });
+    try { addGoalCard(this.core, threadId, objective); } catch (error) { this.core.log('warn', `automatic goal card: ${messageOf(error)}`); }
+    return true;
+  }
+
+  /**
+   * `boite goal track`: the agent asks for an automatic goal on the user's
+   * last prompt, below the threshold. Refused while the experiment is off,
+   * while a goal or a loop runs, and when that prompt already started one.
+   */
+  track(threadId: string): ThreadActivity {
+    const thread = this.core.journal.getThread(threadId);
+    if (!thread || thread.archived) throw refused('goal track needs an existing, unarchived conversation');
+    const experiments = this.core.clients.desktopExperiments() ?? this.core.clients.current()?.experiments ?? [];
+    if (!experiments.includes('auto-goal')) throw refused('goal track needs the Automatic goals experiment, which is off in the desktop app (Settings, Experiments)', { reason: 'experiment-off' });
+    if (this.busy(threadId)) throw refused('this conversation already has a goal or a loop; it must finish or be removed first', { reason: 'busy' });
+    const last = this.lastPrompt(threadId);
+    if (!last) throw refused('this conversation has no prompt of the user to track', { reason: 'no-prompt' });
+    const started = this.core.journal.getSetting(`auto-goal:${threadId}`) as { messageId?: string } | undefined;
+    if (started?.messageId === last.messageId) throw refused("the user's last prompt already started a goal", { reason: 'already-tracked' });
+    if (!this.autoGoal(threadId, last.turnId, last.messageId, last.text)) throw refused('a reviewed goal starts reviewer conversations; start it in a top-level conversation', { reason: 'subthread' });
+    return this.get(threadId);
+  }
+
+  /** The user's newest prompt, a steer included: no operation, no goal or loop turn, no native command. */
+  private lastPrompt(threadId: string): { turnId: string; messageId: string; text: string } | null {
+    for (const message of this.core.journal.walkMessages(threadId, { newestFirst: true, blobs: false })) {
+      if (message.role !== 'user' || !message.turnId || this.core.journal.getTurn(message.turnId)?.execution?.operation) continue;
+      const part = message.parts[0];
+      if (part?.type !== 'text' || part.activity || part.startedBy) continue;
+      const text = part.displayText ?? part.text;
+      if (!text.trim() || nativeCommandPrompt(text)) continue;
+      return { turnId: message.turnId, messageId: message.id, text };
+    }
+    return null;
+  }
+
+  /** A user's turn an automatic goal took as its first: the agent hears the goal's rules on it. */
+  autoGoalTurn(turnId: string): boolean { return this.ownTurns.get(turnId)?.kind === 'goal'; }
+
+  set(params: RpcParams<'threads.activity.set'>, sharedClaim?: {sharedProjectId: string; cardId: string; claimId: string}, executionChoice?: ComposerChoice, auto = false): ThreadActivity {
     const thread = this.core.journal.getThread(params.threadId);
     if (!thread || thread.archived) throw refused('activity requires an existing, unarchived thread');
     const attachments = params.attachments ?? [];
@@ -153,7 +232,9 @@ export class ActivityStore {
       if (params.goal?.review && thread.parentThreadId) throw refused('a reviewed goal starts reviewer conversations; start it in a top-level thread');
       this.stopReview(params.threadId);
       this.bounced.delete(params.threadId);
-      state.goal = params.goal === null ? null : { objective: params.goal.objective.trim(), status: 'active', iterations: 0, error: null, ...(params.goal.review ? { review: newReview(), checklist: newChecklist() } : {}) };
+      // A goal that replaces an automatic one leaves its card in To do, linked to nothing.
+      if (state.goal?.auto) unlinkGoalCards(this.core, params.threadId);
+      state.goal = params.goal === null ? null : { objective: auto ? params.goal.objective : params.goal.objective.trim(), status: 'active', iterations: 0, error: null, ...(params.goal.review ? { review: newReview(), checklist: newChecklist() } : {}), ...(auto ? { auto: true as const } : {}) };
       // This second argument is core-only. An ordinary RPC goal replacement cannot inherit another claim's stop authority.
       if (sharedClaim && params.goal) this.core.journal.setSetting(`activity:shared:${params.threadId}`, sharedClaim);
       else this.core.journal.deleteSetting(`activity:shared:${params.threadId}`);
@@ -199,6 +280,8 @@ export class ActivityStore {
     if (params.action === 'pause' && item.status === 'complete') throw refused(`this ${params.kind} is complete; there is nothing to pause`);
     // Paused, removed or finished by hand, a goal stops paying for its review.
     if (params.kind === 'goal' && params.action !== 'resume') this.stopReview(params.threadId);
+    // A removed automatic goal leaves its card in To do, linked to nothing.
+    if (params.action === 'remove' && params.kind === 'goal' && state.goal?.auto) unlinkGoalCards(this.core, params.threadId);
     if (params.action === 'remove') state[params.kind] = null;
     else if (params.action === 'complete' && state.goal) {
       state.goal.status = 'complete'; delete state.goal.blocked;
@@ -539,7 +622,15 @@ export class ActivityStore {
     this.core.bus.emit('thread.activity', { threadId, activity });
   }
 
-  close(): void { this.closed = true; this.tracker.close(); for (const threadId of this.states.keys()) this.pauseAll(threadId); }
+  close(): void {
+    this.closed = true;
+    this.tracker.close();
+    for (const [threadId, state] of this.states) {
+      // The next core runs an automatic goal's first turn still in line as the goal's (constructor).
+      if (firstInLine(this.core, threadId, state)) this.clearTimer(threadId);
+      else this.pauseAll(threadId);
+    }
+  }
 }
 
 export function validateLoop(loop: NonNullable<RpcParams<'threads.activity.set'>['loop']>): void {
@@ -557,6 +648,14 @@ function createdTaskId(text: string | null): string | null {
     if (typeof id === 'string' || typeof id === 'number') return String(id);
   } catch { /* Older agents return a human-readable confirmation. */ }
   return /Task\s+#?(\d+)\s+created/i.exec(text ?? '')?.[1] ?? null;
+}
+
+/** The queued user's turn an automatic goal took as its first, while the goal waits on it: `autoGoal` stores `first`. */
+function firstInLine(core: Core, threadId: string, state: ThreadActivity): string | null {
+  const started = core.journal.getSetting(`auto-goal:${threadId}`) as { turnId?: string; first?: boolean } | undefined;
+  const goal = state.goal;
+  if (!started?.first || !started.turnId || !goal?.auto || goal.status !== 'active' || goal.iterations !== 1 || state.loop?.status === 'active') return null;
+  return core.journal.getTurn(started.turnId)?.status === 'queued' ? started.turnId : null;
 }
 
 function pauseActivity(state: ThreadActivity, error: string | null): boolean {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { lockedBy } from '../lib/policy';
   import type { Snippet } from 'svelte';
   import type { ConnectionGroup } from '../lib/connection-group.svelte';
   import type { GroupCore, GroupDevice } from '@boite/contracts';
@@ -11,6 +12,7 @@
   import type { Store } from '../lib/store.svelte';
   import { listedName, workspace } from '../lib/workspace.svelte';
   import InfoTip from './InfoTip.svelte';
+  import PolicyLock from './PolicyLock.svelte';
   import MachineIcon from './MachineIcon.svelte';
 
   /**
@@ -105,7 +107,8 @@
       busy = null;
     }
   }
-  const join = () => run('join', async () => { if (await store.joinGroup(invitation.trim())) invitation = ''; });
+  const joinLocked = $derived(lockedBy(store.policy, 'network.groups') !== null);
+  const join = () => { if (!joinLocked) void run('join', async () => { if (await store.joinGroup(invitation.trim())) invitation = ''; }); };
   const add = () => run('add', () => store.addDevice());
   /** A machine alone in its group, or in none, may join another one and bring its devices; one with company leaves first. */
   let alone = $derived(!group || group.cores.every((core) => core.coreId === group!.self));
@@ -279,11 +282,11 @@
   {#if older}<p class="hint" data-testid="group-add-older">{fill(strings.group.addOlder, { machine: store.core?.hostname ?? strings.machines.local })}</p>{/if}
   <AddDevice {store} />
   {#if alone}
-    <form class="join" onsubmit={(event) => { event.preventDefault(); void join(); }}>
-      <span class="labelled"><label for="{uid}-join">{strings.group.joinLabel}</label><InfoTip topic={strings.group.join} text={strings.group.joinHint} /></span>
+    <form class="join" onsubmit={(event) => { event.preventDefault(); join(); }}>
+      <span class="labelled"><label for="{uid}-join">{strings.group.joinLabel}</label><InfoTip topic={strings.group.join} text={strings.group.joinHint} /><PolicyLock {store} keys={['network.groups']} /></span>
       <div class="field">
-        <input id="{uid}-join" bind:value={invitation} data-testid="group-join-input" type="password" autocomplete="off" spellcheck="false" />
-        <button type="submit" data-testid="group-join" disabled={busy !== null || !invitation.trim()}>
+        <input id="{uid}-join" bind:value={invitation} data-testid="group-join-input" type="password" autocomplete="off" spellcheck="false" disabled={joinLocked} />
+        <button type="submit" data-testid="group-join" disabled={busy !== null || !invitation.trim() || joinLocked}>
           {busy === 'join' ? strings.group.joining : strings.group.join}
         </button>
       </div>

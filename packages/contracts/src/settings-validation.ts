@@ -1,4 +1,4 @@
-import type { GoalTrackerModel, ModelFavorite, ModelFavorites, Settings, TitleModel } from './index.ts';
+import type { GoalTrackerModel, ModelFavorite, ModelFavorites, Settings, SubscriptionProxy, TitleModel } from './index.ts';
 import { BROWSER_PROFILE_NAME_MAX, BROWSER_PROFILES_MAX, browserProfileIdError, browserProfileNameError, browserUserAgentError, DEFAULT_BROWSER_PROFILE, type BrowserProfile } from './browser';
 import { SYNC_KEY_PATTERN, SYNC_OVERRIDES_MAX } from './settings-sync';
 
@@ -92,6 +92,9 @@ export interface AutoCompact {
   moments: AutoCompactMoment[];
 }
 
+/** The bounds of `Settings.autoGoalMinChars`, and the length it reads as when missing. */
+export const AUTO_GOAL_MIN_CHARS = { min: 200, max: 20000, default: 1500 } as const;
+
 /** The bounds of `CacheKeepalive.hours`, and what the setting offers first. */
 export const CACHE_KEEPALIVE_HOURS = { min: 1, max: 24, default: 12 } as const;
 
@@ -102,15 +105,6 @@ export interface CacheKeepalive {
    */
   hours: number;
 }
-
-const NUMERIC_KEYS = ['warmProcessMinutes', 'agentCpuCapPercent', 'threadMemoryCapMb', 'agentMemoryBudgetPercent', 'memoryReserveMb'] as const;
-const BOOLEAN_KEYS = ['listenOnLan', 'focusGuard', 'muteAgents', 'reapOrphans', 'memoryProtection', 'autoUpdateHarnesses', 'autoInstallUpdates', 'asyncQuestions', 'shortAnswers', 'toolSummaries', 'agentLogAccess', 'autoResumeLimitedThreads', 'backgroundCompaction', 'deviceStream', 'groupThreads', 'groupBots'] as const;
-/** Keys whose value is a percentage of the machine, so anything past 100 is a mistake. */
-const PERCENT_KEYS = ['agentCpuCapPercent'] as const;
-
-export type SettingsPatchCheck =
-  | { ok: true; patch: Partial<Settings> }
-  | { ok: false; field: keyof Settings; message: string };
 
 /**
  * The public address as an origin. A copy from the address bar ends in `/`,
@@ -141,209 +135,234 @@ function browserOrigin(value: unknown): string | null {
   }
 }
 
+/** A field's value refused, with the reason the caller is told. */
+class Refusal {
+  constructor(readonly message: string) {}
+}
+const refuse = (message: string) => new Refusal(message);
+
+/** One setting's rule: the value as stored, or why it is refused. `next` holds the fields checked before it. */
+type FieldRule<K extends keyof Settings> = (value: unknown, next: Partial<Settings>) => Settings[K] | Refusal;
+
+export type SettingsPatchCheck =
+  | { ok: true; patch: Partial<Settings> }
+  /** `field` names the setting, an unknown key as it was sent, or `params` for a patch that is not an object. */
+  | { ok: false; field: string; message: string };
+
+/** Keys older clients and saved settings may still carry: dropped, never refused. */
+const RETIRED_SETTINGS: readonly string[] = ['maxConcurrentTurns', 'perAccountConcurrency'];
+
+const bool = (key: keyof Settings): FieldRule<keyof Settings> => value => typeof value === 'boolean' ? value : refuse(`${key} must be a boolean`);
+const amount = (key: keyof Settings, max = Infinity): FieldRule<keyof Settings> => value => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return refuse(`${key} must be a number of zero or more`);
+  return value > max ? refuse(`${key} must be between 0 and ${max}`) : value;
+};
+const retentionDays = (value: unknown) => typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 3650;
+/** One line of text, trimmed, or '' when it is not a string. */
+const text = (value: unknown) => typeof value === 'string' ? value.trim() : '';
+const record = (value: unknown): Record<string, unknown> | null => typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
+
+function subscriptionProxyRule(value: unknown): Settings['subscriptionProxy'] | Refusal {
+  if (value === null) return null;
+  const proxy = record(value) as Partial<SubscriptionProxy> | null;
+  if (proxy === null || typeof proxy.enabled !== 'boolean' || !['douane', 'cliproxyapi'].includes(proxy.kind as string)) {
+    return refuse('subscriptionProxy must name douane or cliproxyapi and an enabled boolean');
+  }
+  const address = (raw: unknown, dashboard: boolean): string | null => {
+    if (typeof raw !== 'string' || raw.length > 2048 || /[\u0000-\u001f]/.test(raw)) return null;
+    try {
+      const url = new URL(raw.trim());
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || (!dashboard && url.hash)) return null;
+      return `${url.origin}${dashboard ? url.pathname : url.pathname.replace(/\/$/, '')}${dashboard ? url.hash : ''}`;
+    } catch { return null; }
+  };
+  const mode: unknown = proxy.mode;
+  if (mode !== undefined && mode !== 'remote' && mode !== 'local') return refuse('subscriptionProxy.mode must be remote, local or absent');
+  if (mode === 'local' && proxy.kind !== 'douane') return refuse('subscriptionProxy.mode local runs Douane: kind must be douane');
+  const baseUrl = address(proxy.baseUrl, false), dashboardUrl = address(proxy.dashboardUrl, true);
+  if (!baseUrl || !dashboardUrl) return refuse('subscriptionProxy URLs must be HTTP or HTTPS addresses without credentials or query; only the dashboard may have a fragment');
+  // Absent stays absent: settings saved before the local mode read as remote and compare unchanged.
+  return { enabled: proxy.enabled, kind: proxy.kind!, baseUrl, dashboardUrl, ...(mode === undefined ? {} : { mode }) };
+}
+
+function worktreeStorageRule(value: unknown): Settings['worktreeStorage'] | Refusal {
+  const storage = record(value);
+  if (storage === null || !['project', 'shared'].includes(storage.mode as string)) return refuse('worktreeStorage.mode must be project or shared');
+  const directory = typeof storage.directory === 'string' ? storage.directory.trim() : storage.directory;
+  // Accept either host's absolute paths; the core checks its own OS before use.
+  const absolute = typeof directory === 'string' && directory.length > 0 && !/[\u0000-\u001f]/.test(directory)
+    && (/^\//.test(directory) || /^[a-z]:[\\/]/i.test(directory) || /^\\\\[^\\/]+[\\/][^\\/]+/.test(directory));
+  if (!absolute && !(storage.mode === 'project' && directory === null)) {
+    return refuse('worktreeStorage.directory must be an absolute folder path, or null in project mode');
+  }
+  return { mode: storage.mode, directory } as Settings['worktreeStorage'];
+}
+
+function browserProfilesRule(value: unknown): BrowserProfile[] | Refusal {
+  if (!Array.isArray(value) || value.length > BROWSER_PROFILES_MAX) return refuse(`browserProfiles must list at most ${BROWSER_PROFILES_MAX} profiles`);
+  const profiles: BrowserProfile[] = [];
+  for (const entry of value as Partial<BrowserProfile>[]) {
+    const idError = browserProfileIdError(entry?.id);
+    if (idError) return refuse(`browserProfiles: ${idError}`);
+    const name = text(entry.name);
+    if (browserProfileNameError(name)) return refuse(`browserProfiles: ${entry.id} needs a name of 1 to ${BROWSER_PROFILE_NAME_MAX} characters other than default or private`);
+    if (profiles.some(profile => profile.id === entry.id || profile.name.toLowerCase() === name.toLowerCase())) {
+      return refuse(`browserProfiles: ${entry.id} repeats another profile's id or name`);
+    }
+    const userAgentError = browserUserAgentError(entry.userAgent);
+    if (userAgentError) return refuse(`browserProfiles: ${entry.id}: ${userAgentError}`);
+    const userAgent = entry.userAgent?.value.trim() ? { mode: entry.userAgent.mode, value: entry.userAgent.value.trim() } : undefined;
+    profiles.push({ id: entry.id as string, name, ...(userAgent ? { userAgent } : {}) });
+  }
+  return profiles;
+}
+
+function autoCompactRule(value: unknown): AutoCompact | null | Refusal {
+  if (value === null) return null;
+  const { tokens, moments } = (record(value) ?? {}) as Partial<AutoCompact>;
+  const TOKENS = AUTO_COMPACT_TOKENS, MOMENTS: readonly AutoCompactMoment[] = AUTO_COMPACT_MOMENTS;
+  if (!(tokens === null || (Number.isInteger(tokens) && tokens! >= TOKENS.min && tokens! <= TOKENS.max))) {
+    return refuse(`autoCompact.tokens must be null or an integer between ${TOKENS.min} and ${TOKENS.max}`);
+  }
+  if (!(Array.isArray(moments) && (moments.length > 0 || tokens !== null) && moments.every(moment => MOMENTS.includes(moment)))) {
+    return refuse(`autoCompact.moments must list only ${MOMENTS.join(', ')}; an empty list requires a token limit`);
+  }
+  return { tokens: tokens as number | null, moments: MOMENTS.filter(moment => moments.includes(moment)) };
+}
+
+function compactionSummaryRule(value: unknown): string | null | Refusal {
+  return value === null || typeof value === 'string' ? (typeof value === 'string' ? value.trim() || null : null)
+    : refuse('compactionSummary must be text or null');
+}
+
+function compactionByTypeRule(value: unknown): Settings['compactionByType'] | Refusal {
+  const policies = record(value);
+  if (policies === null) return refuse('compactionByType must be an object keyed by agent, subagent or bot');
+  const normalized: NonNullable<Settings['compactionByType']> = {};
+  for (const [target, raw] of Object.entries(policies)) {
+    if (target !== 'agent' && target !== 'subagent' && target !== 'bot') return refuse(`compactionByType.${target}: expected agent, subagent or bot`);
+    const policy = record(raw);
+    if (policy === null) return refuse(`compactionByType.${target}: expected { autoCompact, backgroundCompaction }`);
+    if (policy.autoCompact === undefined || typeof policy.backgroundCompaction !== 'boolean') return refuse(`compactionByType.${target}: expected autoCompact (a rule or null) and backgroundCompaction (a boolean)`);
+    const autoCompact = autoCompactRule(policy.autoCompact);
+    if (autoCompact instanceof Refusal) return refuse(`compactionByType.${target}.${autoCompact.message}`);
+    const summary = policy.compactionSummary === undefined ? undefined : compactionSummaryRule(policy.compactionSummary);
+    if (summary instanceof Refusal) return refuse(`compactionByType.${target}.${summary.message}`);
+    normalized[target] = { autoCompact, backgroundCompaction: policy.backgroundCompaction,
+      ...(summary === undefined ? {} : { compactionSummary: summary }) };
+  }
+  return normalized;
+}
+
+/** A list of distinct strings, each `valid`, at most `max` of them; `map` applies before the repeats go. */
+const list = (max: number, valid: (item: string) => boolean, message: string, map = (item: string) => item) => (value: unknown): string[] | Refusal =>
+  Array.isArray(value) && value.length <= max && value.every(item => typeof item === 'string' && valid(item)) ? [...new Set((value as string[]).map(map))] : refuse(message);
+
 /**
- * Pure validation shared by the core and its in-memory client: the patch as it
- * is stored, with `publicUrl` and `browserOrigins` reduced to bare origins, or
- * the first field it refuses.
+ * One rule per setting, in the order a patch is checked: `browserProfiles`
+ * comes before the default profile it names. The mapped type keeps the table
+ * complete: a setting added to `Settings` without a rule does not compile.
  */
-export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck {
-  const next: Partial<Settings> = { ...patch };
-  if (patch.subscriptionProxy !== undefined && patch.subscriptionProxy !== null) {
-    const proxy = patch.subscriptionProxy;
-    if (typeof proxy !== 'object' || typeof proxy.enabled !== 'boolean' || !['douane', 'cliproxyapi'].includes(proxy.kind)) {
-      return { ok: false, field: 'subscriptionProxy', message: 'subscriptionProxy must name douane or cliproxyapi and an enabled boolean' };
-    }
-    const address = (value: unknown, dashboard: boolean): string | null => {
-      if (typeof value !== 'string' || value.length > 2048 || /[\u0000-\u001f]/.test(value)) return null;
-      try {
-        const url = new URL(value.trim());
-        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || (!dashboard && url.hash)) return null;
-        return `${url.origin}${dashboard ? url.pathname : url.pathname.replace(/\/$/, '')}${dashboard ? url.hash : ''}`;
-      } catch { return null; }
-    };
-    const mode: unknown = (proxy as { mode?: unknown }).mode;
-    if (mode !== undefined && mode !== 'remote' && mode !== 'local') {
-      return { ok: false, field: 'subscriptionProxy', message: 'subscriptionProxy.mode must be remote, local or absent' };
-    }
-    if (mode === 'local' && proxy.kind !== 'douane') {
-      return { ok: false, field: 'subscriptionProxy', message: 'subscriptionProxy.mode local runs Douane: kind must be douane' };
-    }
-    const baseUrl = address(proxy.baseUrl, false), dashboardUrl = address(proxy.dashboardUrl, true);
-    if (!baseUrl || !dashboardUrl) return { ok: false, field: 'subscriptionProxy', message: 'subscriptionProxy URLs must be HTTP or HTTPS addresses without credentials or query; only the dashboard may have a fragment' };
-    // Absent stays absent: settings saved before the local mode read as remote and compare unchanged.
-    next.subscriptionProxy = { enabled: proxy.enabled, kind: proxy.kind, baseUrl, dashboardUrl, ...(mode === undefined ? {} : { mode }) };
-  }
-  // Older clients and saved settings may still carry the retired launch limits.
-  Reflect.deleteProperty(next, 'maxConcurrentTurns');
-  Reflect.deleteProperty(next, 'perAccountConcurrency');
-  if (patch.quotaOrder !== undefined) {
-    const order = patch.quotaOrder;
-    if (!Array.isArray(order) || order.length > 512 || order.some((id) => typeof id !== 'string' || !id.trim() || id.length > 200)) {
-      return { ok: false, field: 'quotaOrder', message: 'quotaOrder must contain at most 512 non-empty account ids of at most 200 characters' };
-    }
-    next.quotaOrder = [...new Set(order)];
-  }
-  if (patch.syncOverrides !== undefined) {
-    const keys: unknown = patch.syncOverrides;
-    if (!Array.isArray(keys) || keys.length > SYNC_OVERRIDES_MAX || keys.some((key) => typeof key !== 'string' || !SYNC_KEY_PATTERN.test(key))) {
-      return { ok: false, field: 'syncOverrides', message: `syncOverrides must list at most ${SYNC_OVERRIDES_MAX} keys: a setting, keybinding:<command> or brain:<switch>` };
-    }
-    next.syncOverrides = [...new Set(keys as string[])];
-  }
-  if (patch.windowCaptureExclusions !== undefined) {
-    const apps: unknown = patch.windowCaptureExclusions;
-    if (!Array.isArray(apps) || apps.length > 100 || apps.some((app) => typeof app !== 'string' || !app.trim() || app.length > 300 || /\p{Cc}/u.test(app))) {
-      return { ok: false, field: 'windowCaptureExclusions', message: 'windowCaptureExclusions must list at most 100 executable names or paths of 1 to 300 characters' };
-    }
-    next.windowCaptureExclusions = [...new Set((apps as string[]).map((app) => app.trim()))];
-  }
-  if (patch.worktreeStorage !== undefined) {
-    const storage = patch.worktreeStorage;
-    if (!storage || typeof storage !== 'object' || !['project', 'shared'].includes(storage.mode)) {
-      return { ok: false, field: 'worktreeStorage', message: 'worktreeStorage.mode must be project or shared' };
-    }
-    const directory = typeof storage.directory === 'string' ? storage.directory.trim() : storage.directory;
-    // Accept either host's absolute paths; the core checks its own OS before use.
-    const absolute = typeof directory === 'string' && directory.length > 0 && !/[\u0000-\u001f]/.test(directory)
-      && (/^\//.test(directory) || /^[a-z]:[\\/]/i.test(directory) || /^\\\\[^\\/]+[\\/][^\\/]+/.test(directory));
-    if (!absolute && !(storage.mode === 'project' && directory === null)) {
-      return { ok: false, field: 'worktreeStorage', message: 'worktreeStorage.directory must be an absolute folder path, or null in project mode' };
-    }
-    next.worktreeStorage = { mode: storage.mode, directory } as Settings['worktreeStorage'];
-  }
-  if (patch.publicUrl !== undefined && patch.publicUrl !== null) {
-    const origin = publicOrigin(patch.publicUrl);
-    if (origin === null) {
-      return { ok: false, field: 'publicUrl', message: 'publicUrl must be an HTTPS origin without path, credentials, query or fragment' };
-    }
-    next.publicUrl = origin;
-  }
-  if (patch.browserOrigins !== undefined) {
-    const origins = Array.isArray(patch.browserOrigins) ? patch.browserOrigins.map(browserOrigin) : null;
+const SETTING_RULES: { readonly [K in keyof Settings]-?: FieldRule<K> } = {
+  subscriptionProxy: subscriptionProxyRule,
+  quotaOrder: list(512, id => id.trim().length > 0 && id.length <= 200, 'quotaOrder must contain at most 512 non-empty account ids of at most 200 characters') as FieldRule<'quotaOrder'>,
+  syncOverrides: list(SYNC_OVERRIDES_MAX, key => SYNC_KEY_PATTERN.test(key), `syncOverrides must list at most ${SYNC_OVERRIDES_MAX} keys: a setting, keybinding:<command> or brain:<switch>`),
+  windowCaptureExclusions: list(100, app => app.trim().length > 0 && app.length <= 300 && !/\p{Cc}/u.test(app), 'windowCaptureExclusions must list at most 100 executable names or paths of 1 to 300 characters', app => app.trim()),
+  worktreeStorage: worktreeStorageRule,
+  publicUrl: value => {
+    if (value === null) return null;
+    return publicOrigin(value) ?? refuse('publicUrl must be an HTTPS origin without path, credentials, query or fragment');
+  },
+  browserOrigins: value => {
+    const origins = Array.isArray(value) ? value.map(browserOrigin) : null;
     const unique = origins && !origins.includes(null) ? [...new Set(origins as string[])] : null;
-    if (unique === null || unique.length > BROWSER_ORIGINS_MAX) {
-      return { ok: false, field: 'browserOrigins', message: `browserOrigins must contain at most ${BROWSER_ORIGINS_MAX} HTTP or HTTPS origins` };
+    return unique === null || unique.length > BROWSER_ORIGINS_MAX ? refuse(`browserOrigins must contain at most ${BROWSER_ORIGINS_MAX} HTTP or HTTPS origins`) : unique;
+  },
+  browserProfiles: browserProfilesRule,
+  browserDefaultProfile: (value, next) => {
+    const known = value === DEFAULT_BROWSER_PROFILE || (browserProfileIdError(value) === null
+      && (next.browserProfiles === undefined || next.browserProfiles.some(profile => profile.id === value)));
+    return known ? value as string : refuse('browserDefaultProfile must be default or the id of a browser profile, never private');
+  },
+  warmProcessMinutes: amount('warmProcessMinutes') as FieldRule<'warmProcessMinutes'>,
+  agentCpuCapPercent: amount('agentCpuCapPercent', 100) as FieldRule<'agentCpuCapPercent'>,
+  threadMemoryCapMb: amount('threadMemoryCapMb') as FieldRule<'threadMemoryCapMb'>,
+  agentMemoryBudgetPercent: value => typeof value === 'number' && Number.isInteger(value) && value >= 10 && value <= 90 ? value
+    : refuse('agentMemoryBudgetPercent must be an integer between 10 and 90'),
+  autoGoalMinChars: value => typeof value === 'number' && Number.isInteger(value) && value >= AUTO_GOAL_MIN_CHARS.min && value <= AUTO_GOAL_MIN_CHARS.max ? value
+    : refuse(`autoGoalMinChars must be an integer between ${AUTO_GOAL_MIN_CHARS.min} and ${AUTO_GOAL_MIN_CHARS.max}`),
+  memoryReserveMb: value => typeof value === 'number' && Number.isInteger(value) && (value === 0 || (value >= 256 && value <= 1048576)) ? value
+    : refuse('memoryReserveMb must be 0 (auto) or an integer between 256 and 1048576 MB'),
+  threadDoneRetentionDays: value => retentionDays(value) ? value as number
+    : refuse('threadDoneRetentionDays must be an integer between 0 and 3650 days (0 disables automatic deletion)'),
+  threadDeletionRetentionDays: value => retentionDays(value) ? value as number
+    : refuse('threadDeletionRetentionDays must be an integer between 0 and 3650 days (0 keeps deleted conversations indefinitely)'),
+  listenOnLan: bool('listenOnLan') as FieldRule<'listenOnLan'>,
+  focusGuard: bool('focusGuard') as FieldRule<'focusGuard'>,
+  muteAgents: bool('muteAgents') as FieldRule<'muteAgents'>,
+  reapOrphans: bool('reapOrphans') as FieldRule<'reapOrphans'>,
+  memoryProtection: bool('memoryProtection') as FieldRule<'memoryProtection'>,
+  autoUpdateHarnesses: bool('autoUpdateHarnesses') as FieldRule<'autoUpdateHarnesses'>,
+  autoInstallUpdates: bool('autoInstallUpdates') as FieldRule<'autoInstallUpdates'>,
+  asyncQuestions: bool('asyncQuestions') as FieldRule<'asyncQuestions'>,
+  shortAnswers: bool('shortAnswers') as FieldRule<'shortAnswers'>,
+  toolSummaries: bool('toolSummaries') as FieldRule<'toolSummaries'>,
+  agentLogAccess: bool('agentLogAccess') as FieldRule<'agentLogAccess'>,
+  autoResumeLimitedThreads: bool('autoResumeLimitedThreads') as FieldRule<'autoResumeLimitedThreads'>,
+  backgroundCompaction: bool('backgroundCompaction') as FieldRule<'backgroundCompaction'>,
+  deviceStream: bool('deviceStream') as FieldRule<'deviceStream'>,
+  groupThreads: bool('groupThreads') as FieldRule<'groupThreads'>,
+  groupBots: bool('groupBots') as FieldRule<'groupBots'>,
+  titleModel: value => {
+    if (value === null) return null;
+    const { providerId, model } = (record(value) ?? {}) as Partial<TitleModel>;
+    if (!text(providerId) || !text(model) || text(model).length > TITLE_MODEL_MAX) {
+      return refuse(`titleModel must be null or { providerId, model }, two non-empty strings, the model at most ${TITLE_MODEL_MAX} characters`);
     }
-    next.browserOrigins = unique;
-  }
-  if (patch.browserProfiles !== undefined) {
-    const raw: unknown = patch.browserProfiles;
-    const profiles: BrowserProfile[] = [];
-    if (!Array.isArray(raw) || raw.length > BROWSER_PROFILES_MAX) {
-      return { ok: false, field: 'browserProfiles', message: `browserProfiles must list at most ${BROWSER_PROFILES_MAX} profiles` };
-    }
-    for (const entry of raw as Partial<BrowserProfile>[]) {
-      const idError = browserProfileIdError(entry?.id);
-      if (idError) return { ok: false, field: 'browserProfiles', message: `browserProfiles: ${idError}` };
-      const name = typeof entry.name === 'string' ? entry.name.trim() : '';
-      if (browserProfileNameError(name)) {
-        return { ok: false, field: 'browserProfiles', message: `browserProfiles: ${entry.id} needs a name of 1 to ${BROWSER_PROFILE_NAME_MAX} characters other than default or private` };
-      }
-      if (profiles.some(profile => profile.id === entry.id || profile.name.toLowerCase() === name.toLowerCase())) {
-        return { ok: false, field: 'browserProfiles', message: `browserProfiles: ${entry.id} repeats another profile's id or name` };
-      }
-      const userAgentError = browserUserAgentError(entry.userAgent);
-      if (userAgentError) return { ok: false, field: 'browserProfiles', message: `browserProfiles: ${entry.id}: ${userAgentError}` };
-      const userAgent = entry.userAgent?.value.trim() ? { mode: entry.userAgent.mode, value: entry.userAgent.value.trim() } : undefined;
-      profiles.push({ id: entry.id as string, name, ...(userAgent ? { userAgent } : {}) });
-    }
-    next.browserProfiles = profiles;
-  }
-  if (patch.browserDefaultProfile !== undefined) {
-    const wanted = patch.browserDefaultProfile;
-    const known = wanted === DEFAULT_BROWSER_PROFILE || (browserProfileIdError(wanted) === null
-      && (next.browserProfiles === undefined || next.browserProfiles.some(profile => profile.id === wanted)));
-    if (!known) return { ok: false, field: 'browserDefaultProfile', message: 'browserDefaultProfile must be default or the id of a browser profile, never private' };
-  }
-  for (const key of NUMERIC_KEYS) {
-    const value = patch[key];
-    if (value === undefined) continue;
-    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return { ok: false, field: key, message: `${key} must be a number of zero or more` };
-  }
-  for (const key of PERCENT_KEYS) {
-    const value = patch[key];
-    if (value !== undefined && value > 100) return { ok: false, field: key, message: `${key} must be between 0 and 100` };
-  }
-  const budget = patch.agentMemoryBudgetPercent;
-  const doneRetention = patch.threadDoneRetentionDays;
-  if (doneRetention !== undefined && (!Number.isInteger(doneRetention) || doneRetention < 0 || doneRetention > 3650)) {
-    return { ok: false, field: 'threadDoneRetentionDays', message: 'threadDoneRetentionDays must be an integer between 0 and 3650 days (0 disables automatic deletion)' };
-  }
-  const retention = patch.threadDeletionRetentionDays;
-  if (retention !== undefined && (!Number.isInteger(retention) || retention < 0 || retention > 3650)) {
-    return { ok: false, field: 'threadDeletionRetentionDays', message: 'threadDeletionRetentionDays must be an integer between 0 and 3650 days (0 keeps deleted conversations indefinitely)' };
-  }
-  if (budget !== undefined && (!Number.isInteger(budget) || budget < 10 || budget > 90)) {
-    return { ok: false, field: 'agentMemoryBudgetPercent', message: 'agentMemoryBudgetPercent must be an integer between 10 and 90' };
-  }
-  const reserve = patch.memoryReserveMb;
-  if (reserve !== undefined && (!Number.isInteger(reserve) || (reserve !== 0 && (reserve < 256 || reserve > 1048576)))) {
-    return { ok: false, field: 'memoryReserveMb', message: 'memoryReserveMb must be 0 (auto) or an integer between 256 and 1048576 MB' };
-  }
-  for (const key of BOOLEAN_KEYS) {
-    const value = patch[key];
-    if (value !== undefined && typeof value !== 'boolean') return { ok: false, field: key, message: `${key} must be a boolean` };
-  }
-  if (patch.titleModel !== undefined && patch.titleModel !== null) {
-    const { providerId, model } = patch.titleModel as Partial<TitleModel>;
-    const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
-    if (typeof patch.titleModel !== 'object' || text(providerId).length === 0 || text(model).length === 0 || text(model).length > TITLE_MODEL_MAX) {
-      return { ok: false, field: 'titleModel', message: `titleModel must be null or { providerId, model }, two non-empty strings, the model at most ${TITLE_MODEL_MAX} characters` };
-    }
-    next.titleModel = { providerId: text(providerId), model: text(model) };
-  }
-  if (patch.goalTracker !== undefined && patch.goalTracker !== null) {
-    const { providerId, model, effort } = (typeof patch.goalTracker === 'object' ? patch.goalTracker : {}) as Partial<GoalTrackerModel>;
-    const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+    return { providerId: text(providerId), model: text(model) };
+  },
+  goalTracker: value => {
+    if (value === null) return null;
+    const { providerId, model, effort } = (record(value) ?? {}) as Partial<GoalTrackerModel>;
     const level = effort === null || effort === undefined ? null : text(effort);
-    if (text(providerId).length === 0 || text(model).length === 0 || text(model).length > TITLE_MODEL_MAX || level === '' || (level?.length ?? 0) > 40) {
-      return { ok: false, field: 'goalTracker', message: `goalTracker must be null or { providerId, model, effort }: two non-empty strings, the model at most ${TITLE_MODEL_MAX} characters, and the effort a level name or null` };
+    if (!text(providerId) || !text(model) || text(model).length > TITLE_MODEL_MAX || level === '' || (level?.length ?? 0) > 40) {
+      return refuse(`goalTracker must be null or { providerId, model, effort }: two non-empty strings, the model at most ${TITLE_MODEL_MAX} characters, and the effort a level name or null`);
     }
-    next.goalTracker = { providerId: text(providerId), model: text(model), effort: level };
-  }
-  if (patch.autoCompact !== undefined && patch.autoCompact !== null) {
-    const { tokens, moments } = (typeof patch.autoCompact === 'object' ? patch.autoCompact : {}) as Partial<AutoCompact>;
-    const TOKENS = AUTO_COMPACT_TOKENS, MOMENTS: readonly AutoCompactMoment[] = AUTO_COMPACT_MOMENTS;
-    const sized = tokens === null || (Number.isInteger(tokens) && tokens! >= TOKENS.min && tokens! <= TOKENS.max);
-    if (!sized) {
-      return { ok: false, field: 'autoCompact', message: `autoCompact.tokens must be null or an integer between ${TOKENS.min} and ${TOKENS.max}` };
-    }
-    const known = Array.isArray(moments) && (moments.length > 0 || tokens !== null) && moments.every((moment) => MOMENTS.includes(moment));
-    if (!known) {
-      return { ok: false, field: 'autoCompact', message: `autoCompact.moments must list only ${MOMENTS.join(', ')}; an empty list requires a token limit` };
-    }
-    next.autoCompact = { tokens: tokens as number | null, moments: MOMENTS.filter((moment) => moments.includes(moment)) };
-  }
-  if (patch.compactionByType !== undefined) {
-    const policies: unknown = patch.compactionByType;
-    const fail = (message: string): SettingsPatchCheck => ({ ok: false, field: 'compactionByType', message });
-    if (policies === null || typeof policies !== 'object' || Array.isArray(policies)) return fail('compactionByType must be an object keyed by agent, subagent or bot');
-    const normalized: NonNullable<Settings['compactionByType']> = {};
-    for (const [target, raw] of Object.entries(policies)) {
-      if (target !== 'agent' && target !== 'subagent' && target !== 'bot') return fail(`compactionByType.${target}: expected agent, subagent or bot`);
-      if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return fail(`compactionByType.${target}: expected { autoCompact, backgroundCompaction }`);
-      const policy = raw as Record<string, unknown>;
-      if (policy.autoCompact === undefined || typeof policy.backgroundCompaction !== 'boolean') return fail(`compactionByType.${target}: expected autoCompact (a rule or null) and backgroundCompaction (a boolean)`);
-      const checked = checkSettingsPatch({ autoCompact: policy.autoCompact as AutoCompact | null });
-      if (!checked.ok) return fail(`compactionByType.${target}.${checked.message}`);
-      normalized[target] = { autoCompact: checked.patch.autoCompact ?? null, backgroundCompaction: policy.backgroundCompaction };
-    }
-    next.compactionByType = normalized;
-  }
-  if (patch.cacheKeepalive !== undefined && patch.cacheKeepalive !== null) {
-    const { hours } = (typeof patch.cacheKeepalive === 'object' ? patch.cacheKeepalive : {}) as Partial<CacheKeepalive>;
+    return { providerId: text(providerId), model: text(model), effort: level };
+  },
+  autoCompact: autoCompactRule,
+  compactionByType: compactionByTypeRule,
+  compactionSummary: compactionSummaryRule,
+  cacheKeepalive: value => {
+    if (value === null) return null;
+    const { hours } = (record(value) ?? {}) as Partial<CacheKeepalive>;
     const HOURS = CACHE_KEEPALIVE_HOURS;
-    if (!Number.isInteger(hours) || hours! < HOURS.min || hours! > HOURS.max) {
-      return { ok: false, field: 'cacheKeepalive', message: `cacheKeepalive must be null or { hours }, an integer between ${HOURS.min} and ${HOURS.max}` };
-    }
-    next.cacheKeepalive = { hours: hours! };
+    return Number.isInteger(hours) && hours! >= HOURS.min && hours! <= HOURS.max ? { hours: hours! }
+      : refuse(`cacheKeepalive must be null or { hours }, an integer between ${HOURS.min} and ${HOURS.max}`);
+  },
+  modelFavorites: value => checkModelFavorites(value)
+    ?? refuse(`modelFavorites must be { at, items }: at a time in milliseconds, items at most ${MODEL_FAVORITES_MAX} of { providerId, model: { id, name }, account? }, each text 1 to ${FAVORITE_TEXT_MAX} characters on one line`),
+};
+
+/**
+ * Pure validation of untrusted input, shared by the core and its in-memory
+ * client: the patch as it is stored, each value normalized by its setting's
+ * rule (`publicUrl` and `browserOrigins` reduced to bare origins), or the first
+ * field it refuses. A key no rule knows is refused, retired keys are dropped
+ * and an undefined value counts as absent, as it would on the wire.
+ */
+export function checkSettingsPatch(patch: unknown): SettingsPatchCheck {
+  const input = record(patch);
+  if (input === null) return { ok: false, field: 'params', message: 'settings: expected an object of settings' };
+  for (const key of Object.keys(input)) {
+    if (!Object.hasOwn(SETTING_RULES, key) && !RETIRED_SETTINGS.includes(key)) return { ok: false, field: key, message: `${key} is not a setting this core knows` };
   }
-  if (patch.modelFavorites !== undefined) {
-    const favorites = checkModelFavorites(patch.modelFavorites);
-    if (favorites === null) {
-      return { ok: false, field: 'modelFavorites', message: `modelFavorites must be { at, items }: at a time in milliseconds, items at most ${MODEL_FAVORITES_MAX} of { providerId, model: { id, name }, account? }, each text 1 to ${FAVORITE_TEXT_MAX} characters on one line` };
-    }
-    next.modelFavorites = favorites;
+  const next: Record<string, unknown> = {};
+  for (const [key, rule] of Object.entries(SETTING_RULES) as [keyof Settings, FieldRule<keyof Settings>][]) {
+    if (input[key] === undefined) continue;
+    const value = rule(input[key], next as Partial<Settings>);
+    if (value instanceof Refusal) return { ok: false, field: key, message: value.message };
+    next[key] = value;
   }
-  return { ok: true, patch: next };
+  return { ok: true, patch: next as Partial<Settings> };
 }

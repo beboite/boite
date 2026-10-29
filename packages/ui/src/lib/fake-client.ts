@@ -13,11 +13,14 @@ import { sweepMergedPrFixtures, type MergedPrFixture } from './fake-client/merge
 import {
   RPC_CHUNK_BYTES,
   RpcErrorCode,
+  accessRefusal,
+  checkRpcParams,
   type CoreInfo,
   type CoreLogContext,
   type ExperimentId,
   type HookRun,
   type MemoryEvent,
+  type PolicyState,
   type ProcessRecord,
   type Principal,
   type RpcEventName,
@@ -59,7 +62,6 @@ import { resourceMethods } from './fake-client/resources';
 import { seed } from './fake-client/seed';
 import { settingsMethods } from './fake-client/settings';
 import { gatewayMoveMethods } from './fake-client/gateway-move';
-import { DEVICE_METHODS } from './fake-client/shared';
 import { speechMethods } from './fake-client/speech';
 import { terminalMethods } from './fake-client/terminals';
 import { capabilityMethods } from './fake-client/capabilities';
@@ -81,6 +83,7 @@ import { holdAfterRestart } from './fake-client/recovery';
 import { journalInspectionMethods } from './fake-client/journal-inspection';
 import { forkReturnMethods } from './fake-client/fork-return';
 import { startLoad } from './fake-client/load';
+import { applyPolicy, policyGate } from './fake-client/policy';
 
 export type { FakeClientOptions } from './fake-client/context';
 
@@ -156,6 +159,8 @@ export class FakeClient implements ObservableClient {
       ctx.usageSeeded = false;
       ctx.scheduler = { ...ctx.scheduler, running: [], queued: [] };
     }
+    // Again once the seeds and a first launch have set the providers the policy marks.
+    applyPolicy(ctx);
     if (options.load) this.#stopLoad = startLoad(ctx, options.load, options.loadTickMs);
     // After a first launch has cleared the threads, so no record names one that is gone.
     seedDiagnostics(ctx);
@@ -188,13 +193,15 @@ export class FakeClient implements ObservableClient {
   }
 
   /**
-   * Turns this client into a paired device, or back into the owner, in the
-   * spirit of `drop` and `restore`: the boundary is the core's, so a test can
-   * cross it without a second socket. `hello` and every later call answer as
-   * the new principal from here on.
+   * Turns this client into a paired device, an agent, or back into the owner,
+   * in the spirit of `drop` and `restore`: the boundary is the core's, so a
+   * test can cross it without a second socket. `hello` and every later call
+   * answer as the new principal from here on. An agent speaks for the thread
+   * its token names, `threadId` or the one the client was built with.
    */
-  becomes(principal: Principal): void {
+  becomes(principal: Principal, threadId?: ThreadId): void {
     this.#ctx.bus.principal = principal;
+    if (threadId !== undefined) this.#ctx.agentThreadId = threadId;
   }
 
   setBrainLinkPermission(denied: boolean): void {
@@ -344,20 +351,16 @@ export class FakeClient implements ObservableClient {
       throw new RpcFailure({ code: RpcErrorCode.Internal, message: 'connection changed before RPC dispatch' });
     }
     if (this.#missing.has(method)) throw new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: `unknown method ${method}` });
-    if (bus.principal === 'agent' && method.startsWith('composer.')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is not one of the agent's methods` });
-    // The fixture has no thread-bound agent token; do not widen this scoped read.
-    if (bus.principal === 'agent' && (method === 'threads.capabilities' || method === 'threads.mergeBack')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} requires a thread-bound agent identity` });
-    if (bus.principal === 'agent' && (method === 'core.logs' || method === 'projects.setAutoArchiveMergedPr' || method === 'projects.setAutoRemoveWorktrees' || method === 'quotas.reset' || method === 'threads.trustContactHistory')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is not one of the agent's methods` });
-    // The router's gate, word for word: deny by default, `hello` before it.
-    if (bus.principal === 'session' && method !== 'hello' && !DEVICE_METHODS.has(method)) {
-      throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is for the owner only` });
+    // The router's gate, word for word: `hello` before it, then who may call what, then the method's params rule.
+    if (method !== 'hello') {
+      const refusal = accessRefusal(method, { principal: bus.principal, threadId: this.#ctx.agentThreadId }, params);
+      if (refusal) throw new RpcFailure({ code: RpcErrorCode.Refused, message: refusal.message, data: refusal.data });
     }
-    if (bus.principal === 'session' && method === 'git.diff' && ![undefined, '', 'HEAD'].includes((params as RpcParams<'git.diff'>).ref)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'git.diff: paired devices compare the working tree with HEAD only' });
-    if (bus.principal === 'session' && (method === 'quotas.list' || method === 'subscriptionProxy.quotas') && (params as { refresh?: unknown }).refresh === true) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method}: paired devices read the last reading; refresh must be false or absent` });
-    if (bus.principal === 'agent' && /^(?:sharedProjects|sharedBoard|sharedCompute|sharedAccess)\.|^contacts\.sendHuman$/.test(method)) {
-      const owner = new Set(['sharedProjects.offer','sharedProjects.decide','sharedProjects.revoke','sharedProjects.configure','sharedCompute.host','sharedAccess.reviewConfig','sharedAccess.overrides','sharedAccess.override','sharedAccess.revokeOverride','contacts.sendHuman']);
-      if (owner.has(method) || !this.#ctx.agentThreadId || (params as {threadId?:string}).threadId !== this.#ctx.agentThreadId) throw refusedShared(`${method}: expected an allowed method and the authenticated agent thread`);
-    }
+    const checked = checkRpcParams(method, params);
+    if (!checked.ok) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: checked.message, data: { field: checked.field } });
+    params = checked.params as RpcParams<M>;
+    // The admin policy's gate runs before the method, as the core's router does.
+    policyGate(this.#ctx, method, params);
     const result = await bus.hold(this.#dispatch(method, params)) as RpcResult<M>;
     if (this.#ctx.rttMs > 0) {
       // An answer still on its way back when the socket changed never arrives.
@@ -414,6 +417,15 @@ export class FakeClient implements ObservableClient {
   reportDesktopExperiments(experiments: ExperimentId[]): void {
     this.#ctx.desktopExperiments = [...experiments];
     this.#ctx.emit('client.desktopExperiments', { experiments: [...experiments] });
+  }
+
+  /** The policy file edited on the fake machine, as the core's watcher rereads it and announces the change. */
+  changePolicy(policy: PolicyState): void {
+    this.#ctx.policy = structuredClone(policy);
+    applyPolicy(this.#ctx);
+    this.#ctx.emit('policy.changed', structuredClone(policy));
+    this.#ctx.emit('settings.updated', { ...this.#ctx.settings });
+    this.#ctx.emit('providers.updated', { loaded: structuredClone(this.#ctx.providers), rejected: [] });
   }
 
   /** A line of the core's own log, as `core.log` carries it: a failed scheduler, a guard at work. */

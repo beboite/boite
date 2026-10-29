@@ -7,7 +7,7 @@
 import { verify } from 'node:crypto';
 import type { AgentContact, AgentLetter, CoordinationPeer } from '@boite/contracts';
 import { text } from './coordination-letter.ts';
-import { checkRemoteContact, searchContacts, searchWords, transcript } from './coordination-lookup.ts';
+import { checkRemoteContact, PARTIAL, searchContacts, searchWords, transcript } from './coordination-lookup.ts';
 import { boundedBody, BOT_OPERATIONS, type BotOperation, type Envelope } from './coordination-wire.ts';
 import { pack, SEALED, sealResponse, unpack, type Sealing } from './group/seal.ts';
 import type { Core } from './core.ts';
@@ -15,6 +15,7 @@ import { invalidParams, refused, RpcFailure } from './errors.ts';
 import { receiveProject } from './contacts/project-relay.ts';
 import { redactSharedText, redactSharedContact } from './contacts/file-policy.ts';
 import { machineSettingChanged, readMachineSetting } from './threads/group-spawn.ts';
+import { policedRoutes } from './coordination-group.ts';
 
 /** What the desk reads of the coordination it answers for. */
 export interface PeerSide {
@@ -57,6 +58,9 @@ export class PeerDesk {
     // A contact another member holds never speaks to this core itself: that member does, for it.
     const peer = (known && !this.core.contacts.isRelayPeer(known) ? known : undefined) ?? this.core.group.removedPeer(id);
     if (!peer) return new Response('unknown peer', { status: 403 });
+    // These HTTP requests bypass the owner RPC gate, including ones carried by an existing link.
+    try { policedRoutes(this.core, peer); }
+    catch { return new Response('forbidden', { status: 403 }); }
     let envelope: Envelope;
     let sealing: Sealing | null = null;
     try {
@@ -109,6 +113,7 @@ export class PeerDesk {
         // A revoke while the body streamed wins before any data is read or changed.
         const currentPeer = this.side.trusted().find(p => p.coreId === peer.coreId);
         if (!currentPeer) throw refused('peer permission revoked');
+        policedRoutes(this.core, currentPeer, envelope.operation);
         const member = sealing !== null && this.core.group.peers().some(p => p.coreId === peer.coreId);
         if (contact && groupOnly) throw refused('operation: a contact takes no part in this core\'s group');
         if (!contact && envelope.operation.startsWith('contact.') && envelope.operation !== 'contact.route') throw refused('operation: only a contact sends contact operations');
@@ -147,7 +152,10 @@ export class PeerDesk {
         else if (envelope.operation === 'setting.changed') result = machineSettingChanged(this.core, currentPeer, envelope.payload);
         else if ((BOT_OPERATIONS as readonly string[]).includes(envelope.operation)) result = await this.core.workforce.group.peer(currentPeer, envelope.operation as BotOperation, envelope.payload);
         else throw invalidParams(member ? 'operation: expected directory, deliver, receipt, search, read, group.sync, group.push, relay.*, thread.start, setting.* or bot.*' : 'operation: expected directory, deliver, receipt, search, read, group.sync or group.push');
+        // An asynchronous contact lookup must not return data after access was withdrawn.
+        policedRoutes(this.core, currentPeer, envelope.operation);
       } catch (reason) {
+        result = undefined;
         status = reason instanceof RpcFailure ? 400 : 500;
         error = reason instanceof RpcFailure ? reason.message : 'Machine could not process the request';
       }
@@ -169,12 +177,18 @@ export class PeerDesk {
    * (`contacts/members.ts`); `relayed`, asked by that machine for the contact.
    */
   private async contact(peer: CoordinationPeer, operation: string, payload: unknown, relayed: boolean): Promise<unknown> {
+    this.core.policy.assert(this.core.policy.networkOff('contacts'), 'network.contacts');
     const members = this.core.contacts.members;
     if (operation === 'contact.project') return receiveProject(this.core, peer.coreId, payload, relayed);
     if (this.core.sharedProjects.hasContact(peer.coreId) && ['directory', 'search', 'read'].includes(operation)) throw refused('operation: associated projects require scoped contact.project queries');
+    // A contact that asks for a partial list also learns how many of this group's machines did not answer.
+    const listed = (entries: AgentContact[], unavailable: number) => (payload as { partial?: unknown } | null)?.partial === PARTIAL
+      ? { entries: entries.slice(0, 100), unavailable } : entries.slice(0, 100);
     if (operation === 'directory') {
       const local = this.side.contactDirectory(peer.coreId).map(redactSharedContact);
-      return relayed ? local : [...local, ...await members.directory(peer.coreId)].sort((a, b) => (b.activeAt ?? 0) - (a.activeAt ?? 0)).slice(0, 100);
+      if (relayed) return local;
+      const held = await members.directory(peer.coreId);
+      return listed([...local, ...held.entries].sort((a, b) => (b.activeAt ?? 0) - (a.activeAt ?? 0)), held.unavailable);
     }
     if (operation === 'deliver') {
       const letter = payload as AgentLetter;
@@ -188,7 +202,9 @@ export class PeerDesk {
       const readable = open.filter(entry => this.core.contacts.reach.mayRead(peer.coreId, entry.threadId));
       const closed = open.filter(entry => !this.core.contacts.reach.mayRead(peer.coreId, entry.threadId));
       const local = [...searchContacts(this.core.journal.db, readable, words, true, redactSharedText), ...searchContacts(this.core.journal.db, closed, words, false, redactSharedText)];
-      return (relayed ? local : [...local, ...await members.search(peer.coreId, words)]).slice(0, 100);
+      if (relayed) return local.slice(0, 100);
+      const held = await members.search(peer.coreId, words);
+      return listed([...local, ...held.entries], held.unavailable);
     }
     if (operation === 'read') {
       const { threadId, limit, before } = readParams(payload);

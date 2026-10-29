@@ -47,8 +47,8 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
     browsers.delete(threadId);
     changed(threadId);
   };
-  ctx.bus.on('thread.updated', thread => { if (thread.archived) closeAll(thread.id); });
-  ctx.bus.on('thread.removed', ({ threadId }) => closeAll(threadId));
+  ctx.bus.observe('thread.updated', thread => { if (thread.archived) closeAll(thread.id); });
+  ctx.bus.observe('thread.removed', ({ threadId }) => closeAll(threadId));
 
   const watching = (threadId: ThreadId) => {
     if (ctx.thread(threadId).archived || !ctx.bus.subscribed.has(threadId)) throw refusal('subscribe to the active conversation before watching its browser');

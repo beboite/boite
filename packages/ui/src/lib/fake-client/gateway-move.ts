@@ -1,7 +1,9 @@
 /** Moving this machine's logins into Douane, as the core does it, against no real gateway. */
-import { isLoopbackHost, RpcErrorCode, subscriptionProxyOrigin, type GatewayMoveItem, type GatewayMoveOutcome } from '@boite/contracts';
+import { isLoopbackHost, RpcErrorCode, subscriptionProxyOrigin, type GatewayMoveItem, type GatewayMoveOutcome, type SubscriptionProxy } from '@boite/contracts';
 import { RpcFailure } from '../client';
+import { gatewayBlockOf } from '../policy';
 import type { FakeContext } from './context';
+import { policyRefusal } from './policy';
 
 const LOGINS = new Set(['claude', 'codex', 'grok']);
 
@@ -14,12 +16,17 @@ function stateOf(ctx: FakeContext): MoveState {
 }
 
 function douane(ctx: FakeContext, target?: string) {
+  let proxy: SubscriptionProxy | null;
   if (target === 'plugin') {
     const port = ctx.plugins.gatewayPort('douane');
-    return ctx.plugins.gatewayRunning('douane') ? { enabled: false, kind: 'douane' as const, baseUrl: `http://127.0.0.1:${port}/v1`, dashboardUrl: `http://127.0.0.1:${port}/admin/` } : null;
+    proxy = ctx.plugins.gatewayRunning('douane') ? { enabled: false, kind: 'douane', baseUrl: `http://127.0.0.1:${port}/v1`, dashboardUrl: `http://127.0.0.1:${port}/admin/` } : null;
+  } else {
+    const saved = ctx.settings.subscriptionProxy;
+    proxy = saved && saved.kind === 'douane' && saved.baseUrl ? saved : null;
   }
-  const proxy = ctx.settings.subscriptionProxy;
-  return proxy && proxy.kind === 'douane' && proxy.baseUrl ? proxy : null;
+  const blocked = ctx.policy.present ? gatewayBlockOf(ctx.policy.values, proxy?.baseUrl ?? null) : null;
+  if (blocked !== null) throw policyRefusal(ctx, blocked, proxy?.baseUrl);
+  return proxy;
 }
 
 function items(ctx: FakeContext): GatewayMoveItem[] {

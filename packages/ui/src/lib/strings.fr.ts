@@ -88,6 +88,7 @@ import { fr as features } from './strings/fr/features';
 import { fr as quotas } from './strings/fr/quotas';
 import { fr as harnessUpdates } from './strings/fr/harnessUpdates';
 import { fr as providerSettings } from './strings/fr/providerSettings';
+import { fr as localAcp } from './strings/fr/localAcp';
 import { fr as plugins } from './strings/fr/plugins';
 import { fr as time } from './strings/fr/time';
 import { fr as errors } from './strings/fr/errors';
@@ -99,6 +100,7 @@ import { fr as onboarding } from './strings/fr/onboarding';
 import { fr as contacts } from './strings/fr/contacts';
 import { fr as shared } from './strings/fr/shared';
 import { fr as windows } from './strings/fr/windows';
+import { fr as policy } from './strings/fr/policy';
 
 export const fr: Translation = {
   ...subscriptionProxy,
@@ -179,6 +181,7 @@ export const fr: Translation = {
   ...quotas,
   ...harnessUpdates,
   ...providerSettings,
+  ...localAcp,
   ...plugins,
   ...time,
   ...errors,
@@ -190,4 +193,5 @@ export const fr: Translation = {
   ...contacts,
   ...shared,
   ...windows,
+  ...policy,
 };

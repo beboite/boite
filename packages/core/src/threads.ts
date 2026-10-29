@@ -405,7 +405,7 @@ export class ThreadStore {
   /** Turning off the project filter reveals its automatic hides without dismissing the PR. */
   showMergedPrThreads(projectId: ProjectId): void {
     for (const thread of this.core.journal.listThreads(projectId)) {
-      if (!thread.archived || thread.parentThreadId || this.isRemoving(thread.id)) continue;
+      if (!thread.archived || thread.parentThreadId || this.isRemoving(thread.id) || this.core.worktrees.reservations.holder(thread.cwd) !== null) continue;
       const state = archiveState(this.core.journal, thread.id);
       if (state.reason?.type !== 'pr-merged') continue;
       this.core.journal.setSetting(archiveStateKey(thread.id), { ...state, reason: undefined, generation: state.generation + 1 });
@@ -416,28 +416,7 @@ export class ThreadStore {
   archive(threadId: ThreadId, archived: boolean, onlyIfIdle = false): ThreadSummary {
     this.require(threadId);
     if (archived && onlyIfIdle) assertIdleFamily(this.core, threadId, 'explicit');
-    if (archived) {
-      // Temporary inference belongs to the visible family, including retained descendants.
-      const family = this.core.journal.db.query('WITH RECURSIVE family(id) AS (SELECT ? UNION SELECT child.id FROM threads child JOIN family ON child.parent_thread_id = family.id) SELECT id FROM family').all(threadId) as { id: ThreadId }[];
-      for (const member of family) this.sideQuestions.cancel(member.id);
-    }
     if (!archived && this.removing.has(threadId)) throw refused('threadId: this conversation is being deleted', { threadId, field: 'threadId', expected: 'a conversation not being deleted' });
-    // An archived thread is not coming back this minute: its warm process goes
-    // now, and the commands that process listed go with it.
-    if (archived) {
-      this.moves.forget(threadId);
-      this.core.delegation.stop(threadId);
-      this.core.scheduler.stop(threadId);
-      this.releaseAgent(threadId);
-      this.agentState.commands.delete(threadId);
-      this.agentState.noteBackground(threadId, []);
-      // Nobody answers a card on a thread put away, and no turn should start from one.
-      this.cards.clearQuestionsOf(threadId, true, 'archive');
-      this.deferred.deferredAnswers.delete(threadId);
-      this.deferred.consumed.delete(threadId);
-      this.deferred.pendingWakes.delete(threadId);
-      void this.core.terminals.closeThread(threadId);
-    }
     const thread = this.require(threadId);
     // A subagent reopened by hand is not put away again for the work it already finished.
     if (!archived && thread.archived && thread.parentThreadId) this.core.delegation.retirements.keep(threadId);
@@ -457,12 +436,30 @@ export class ThreadStore {
       const saved = this.save({ ...thread, archived, doneAt, archivedAt }, 'thread.archived');
       const projectThread = !thread.parentThreadId || this.core.journal.getThread(thread.parentThreadId)?.agentSessionId;
       if ((thread.archived !== archived || (thread.doneAt ?? null) !== doneAt) && projectThread && thread.projectId !== null) this.core.projects.announce(thread.projectId);
+      if (archived) this.core.bus.whenCommitted(() => this.putAway(threadId, thread.cwd));
       return saved;
     })());
-    // A removal waits for the same stops itself before it hides the family.
-    if (archived && !this.removing.has(threadId)) void this.endArchivedWork(threadId);
-    if (archived) this.core.fileTickets.forgetUnder(thread.cwd);
     return saved;
+  }
+
+  /** What a committed archive stops: its warm process and what it listed go now. One that rolls back stops nothing. */
+  private putAway(threadId: ThreadId, cwd: string): void {
+    // Temporary inference belongs to the visible family, including retained descendants.
+    const family = this.core.journal.db.query('WITH RECURSIVE family(id) AS (SELECT ? UNION SELECT child.id FROM threads child JOIN family ON child.parent_thread_id = family.id) SELECT id FROM family').all(threadId) as { id: ThreadId }[];
+    for (const member of family) this.sideQuestions.cancel(member.id);
+    this.moves.forget(threadId);
+    this.core.delegation.stop(threadId);
+    this.core.scheduler.stop(threadId);
+    this.releaseAgent(threadId);
+    this.agentState.commands.delete(threadId);
+    this.agentState.noteBackground(threadId, []);
+    // Nobody answers a card on a thread put away, and no turn should start from one.
+    this.cards.clearQuestionsOf(threadId, true, 'archive');
+    for (const pending of [this.deferred.deferredAnswers, this.deferred.consumed, this.deferred.pendingWakes]) pending.delete(threadId);
+    void this.core.terminals.closeThread(threadId);
+    // A removal waits for the same stops itself before it hides the family.
+    if (!this.removing.has(threadId)) void this.endArchivedWork(threadId);
+    this.core.fileTickets.forgetUnder(cwd);
   }
 
   /**
@@ -503,8 +500,9 @@ export class ThreadStore {
     const family = this.core.journal.listThreads().filter(t => t.id === threadId || t.parentThreadId === threadId);
     for (const thread of family) this.removing.add(thread.id);
     try {
+      // One write hides the family; until it commits, its runs and steps go on.
+      this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => { for (const thread of family) this.archive(thread.id, true); })());
       this.core.workflows.stopRoot(threadId, 'Conversation deleted');
-      for (const thread of family) this.archive(thread.id, true);
       await Promise.all(family.map(thread => this.core.scheduler.stopAndWait(thread.id)));
       await Promise.all(family.flatMap(thread => [
         this.core.procs.stopAndWait(thread.id),
@@ -610,7 +608,7 @@ export class ThreadStore {
   /** Accepts a turn and queues it (`threads/turn-origin.ts`): `origin` says who starts it and why. */
   startTurn(threadId: ThreadId, input: string | TurnInput, origin: TurnOrigin = USER_ORIGIN, options: StartTurnOptions = {}): Turn {
     let { prompt, attachments = [], previews: previewReferences = [], display: displayText } = typeof input === 'string' ? { prompt: input } : input;
-    const { expectedSelectionVersion, persistAdmission, choice: executionChoice } = options;
+    const { expectedSelectionVersion, persistAdmission, choice: executionChoice, autoGoal } = options;
     const operation = originOperation(origin), automatic = originAutomatic(origin);
     const clientRequestId = origin.requestId;
     const activity = origin.kind === 'goal' ? origin.activity : undefined;
@@ -746,8 +744,8 @@ export class ThreadStore {
       // His own message, a resume or a parent's message to its subagent puts the agent back to work,
       // so a pause the core left on Stop, a failure or a restart ends with it; the owner's stays.
       if (!activity && !startedBy && (!operation || operation === 'resume' || (operation === 'delegation' && thread.parentThreadId))) this.core.coordination.resumeForUser(threadId);
-      // A `/goal2`'s checklist reads what the user adds, drops or changes.
-      if (!activity && !operation && !startedBy && !nativeCommandPrompt(prompt)) this.core.activity.userMessage(threadId, prompt);
+      // `autoGoal`, the prompt as typed, may start an automatic goal (`docs/goals.md`); otherwise a `/goal2`'s checklist reads what the user adds, drops or changes.
+      if (!activity && !operation && !startedBy && !nativeCommandPrompt(prompt) && !(autoGoal !== undefined && this.core.activity.autoGoal(threadId, turn.id, message.id, autoGoal, executionChoice))) this.core.activity.userMessage(threadId, prompt);
     });
     this.autoCompact.cancel(threadId);
     this.cacheKeepalive.cancel(threadId);

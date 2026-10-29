@@ -1,3 +1,4 @@
+import type { PolicyRefusalData } from './policy';
 import type { AccountId, ProviderId, ThreadId, Timestamp } from './ids';
 
 // ---------------------------------------------------------------------------
@@ -44,8 +45,11 @@ export interface ExecutableCandidate {
 export interface ProviderInstall {
   /** A version string shown to the user and written beside the files. */
   version: string;
-  /** Omitted for zip archives; binary downloads contain exactly one file. */
-  format?: 'zip' | 'binary';
+  /**
+   * Omitted for zip archives; binary downloads contain exactly one file; `tgz`
+   * is a gzipped tar, the shape of an npm package tarball.
+   */
+  format?: 'zip' | 'binary' | 'tgz';
   /** The archive or executable download. */
   url: string;
   sha256: string;
@@ -296,7 +300,7 @@ export interface ProviderHookSource {
  * Quirks a driver applies to one agent's dialect of a protocol. A value the
  * core does not know is refused at load time rather than ignored.
  */
-export type ProviderQuirk = 'antigravity' | 'grok';
+export type ProviderQuirk = 'antigravity' | 'grok' | 'hermes';
 
 /** One step of a model's reasoning effort scale, as the descriptor spells it. */
 export interface EffortLevel {
@@ -434,6 +438,12 @@ export interface ProviderSummary {
    * on older cores, which read as on; read it through `providerEnabled`.
    */
   enabled?: boolean;
+  /**
+   * Set when the admin policy keeps this provider off (`providers.allow` or
+   * `providers.deny`): `enabled` is false and no switch turns it on. The
+   * provider stays listed so the user sees why.
+   */
+  policy?: PolicyRefusalData;
   /** The descriptor's `experimental`. Missing reads as false. */
   experimental?: boolean;
 }
@@ -441,6 +451,18 @@ export interface ProviderSummary {
 /** Whether a provider is turned on. A summary from a core older than the switch has no field and is on. */
 export function providerEnabled(summary: Pick<ProviderSummary, 'enabled'> | null | undefined): boolean {
   return summary !== null && summary !== undefined && summary.enabled !== false;
+}
+
+/**
+ * An ACP agent described by the command that starts it: the program, by name
+ * on PATH or by absolute path, its arguments one per entry, taken literally,
+ * and the environment variables it adds. `name` is what the picker shows.
+ */
+export interface LocalAcpCommand {
+  name: string;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
 }
 
 /** A descriptor that did not load. Always shown, never silent. */
@@ -533,6 +555,30 @@ export interface ProvidersRpcMethods {
    */
   'providers.setEnabled': {
     params: { providerId: ProviderId; enabled: boolean };
+    result: { loaded: ProviderSummary[]; rejected: ProviderRejected[] };
+  };
+  /**
+   * Write a user descriptor for an ACP agent from a command: `protocol: "acp"`,
+   * one profile for this machine's OS, `args` passed one by one with no shell,
+   * `env` added to the agent's environment. The agent keeps its own login and
+   * configuration, and its models come from its ACP answers. The id is the
+   * name's `localAcpId`; refused with the field when `checkLocalAcpCommand`
+   * refuses, when another provider or file already has that id, or when the
+   * program cannot be found on this machine. The answer and `providers.updated`
+   * carry the new list. Owner only: it decides what the machine runs.
+   */
+  'providers.addLocal': {
+    params: LocalAcpCommand;
+    result: { providerId: ProviderId; loaded: ProviderSummary[]; rejected: ProviderRejected[] };
+  };
+  /**
+   * Delete a user descriptor, whether `providers.addLocal` or a hand wrote it.
+   * Refused for a shipped provider and while a turn of that provider is queued
+   * or running; its warm processes are released first. Its accounts and threads
+   * stay, and come back when a descriptor with the same id loads again.
+   */
+  'providers.removeLocal': {
+    params: { providerId: ProviderId };
     result: { loaded: ProviderSummary[]; rejected: ProviderRejected[] };
   };
   /** Validate a user descriptor and show what it would do. Writes nothing. */

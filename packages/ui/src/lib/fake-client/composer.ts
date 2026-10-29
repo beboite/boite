@@ -14,6 +14,8 @@ const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const keyOf = (section: ComposerRecord['section'], id: string) => JSON.stringify([section, id]);
 /** The core's test (`isComposerActivity`): a command goes alone, whichever experiments then run it. */
 const isCommand = (text: string) => /^\/(goal2?|loop)(?:\s|$)/.test(text.trim());
+// The batch is decided from its first prompt's experiments, so a prompt queued with Automatic goals in another state goes alone.
+const autoGoal = (entry: ComposerQueuedPrompt) => entry.experiments?.includes('auto-goal') ?? false;
 /** As `composerBatch` compares choices: key order and an absent speed do not count. */
 const sameChoice = (a?: ComposerChoice, b?: ComposerChoice) => {
   const digest = (choice?: ComposerChoice) => JSON.stringify(Object.entries({ ...choice, speed: choice?.speed ?? null }).sort(([x], [y]) => x < y ? -1 : 1));
@@ -119,7 +121,7 @@ export class FakeComposerState {
     let files = 0, bytes = 0, refs = 0;
     for (const entry of queue) {
       const nextBytes = entry.attachments.reduce((sum, file) => sum + decodedBytes(this.assets.get(file.assetId)?.data ?? ''), 0);
-      if (entries.length && (entry.request || isCommand(entry.text) || !sameChoice(entry.choice, head.choice) || JSON.stringify(entry.sentFrom ?? null) !== JSON.stringify(head.sentFrom ?? null) || entry.afterBoundary !== head.afterBoundary || files + entry.attachments.length > ATTACHMENTS_PER_TURN || bytes + nextBytes > ATTACHMENTS_TOTAL_MAX_BYTES || refs + (entry.previewReferences?.length ?? 0) > PREVIEW_REFERENCES_PER_TURN)) break;
+      if (entries.length && (entry.request || isCommand(entry.text) || !sameChoice(entry.choice, head.choice) || JSON.stringify(entry.sentFrom ?? null) !== JSON.stringify(head.sentFrom ?? null) || entry.afterBoundary !== head.afterBoundary || autoGoal(entry) !== autoGoal(head) || files + entry.attachments.length > ATTACHMENTS_PER_TURN || bytes + nextBytes > ATTACHMENTS_TOTAL_MAX_BYTES || refs + (entry.previewReferences?.length ?? 0) > PREVIEW_REFERENCES_PER_TURN)) break;
       entries.push(entry); files += entry.attachments.length; bytes += nextBytes; refs += entry.previewReferences?.length ?? 0;
     }
     return entries;
@@ -151,14 +153,17 @@ export class FakeComposerState {
         if (!outcome.accepted) { this.boundaries.delete(row.id); return; }
       } else {
         this.boundaries.delete(row.id);
-        const command = activityCommand(payload.prompt, head.experiments ?? ctx.clientPreferences?.experiments ?? []);
+        const command = activityCommand(payload.prompt);
         if (command) await methods['threads.activity.set']({ threadId: row.id, ...command, ...(payload.attachments.length ? { attachments: payload.attachments } : {}) });
         else {
           const chosen = head.request?.choice ?? head.choice;
           const selection = choiceOf(thread);
           if (chosen) Object.assign(thread, chosen, { permissionMode: selection.permissionMode });
           // `turns.start` fixes the turn's execution before its first await: the whole picker goes back at once, before any update can land.
+          // The experiments it was queued with decide an automatic goal, as in the core.
+          ctx.queuedExperiments = head.experiments ?? [];
           const started = methods['turns.start']({ threadId: row.id, ...payload, clientRequestId: requestId });
+          ctx.queuedExperiments = null;
           if (chosen) Object.assign(thread, selection);
           await started;
         }
@@ -244,6 +249,13 @@ export function composerMethods(ctx: FakeContext, methods: () => FakeMethods): P
           queued.sentFrom = previous?.sentFrom !== undefined ? previous.sentFrom : null;
         }
         for (const file of [...value.input.attachments, ...value.input.queued.flatMap(entry => entry.attachments)]) if (!state.assets.has(file.assetId)) throw refusal(`assetId ${file.assetId}: expected an uploaded composer attachment`);
+        // The core's `validateAssets`: each prompt, box or queued, within what one message may carry.
+        for (const input of [value.input, ...value.input.queued]) {
+          if (input.attachments.length > ATTACHMENTS_PER_TURN) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `composer.attachments: expected at most ${ATTACHMENTS_PER_TURN} attachments per input` });
+          if (input.attachments.reduce((sum, file) => sum + decodedBytes(state.assets.get(file.assetId)!.data), 0) > ATTACHMENTS_TOTAL_MAX_BYTES) {
+            throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `composer.attachments: expected at most ${ATTACHMENTS_TOTAL_MAX_BYTES} bytes per input` });
+          }
+        }
       }
       const record = state.write(params.section, params.id, value);
       if (params.section === 'inputs' && params.sendNow && value?.input.queued.length) state.sendNow(params.id);

@@ -1,5 +1,5 @@
-import { expect, test, vi } from 'vitest';
-import { prefetchAllowed, prefetchNames, whenIdle } from './prefetch';
+import { expect, test } from 'vitest';
+import { prefetchAllowed, prefetchNames } from './prefetch';
 
 test('a data saver or a slow link fetches nothing ahead', () => {
   expect(prefetchAllowed(undefined)).toBe(true);
@@ -13,19 +13,4 @@ test('the seen tour and a paired device terminal are left for when they are aske
   expect(prefetchNames(names, { tourSeen: false, owner: true })).toEqual(names);
   expect(prefetchNames(names, { tourSeen: true, owner: true })).toEqual(['RightPanel', 'TerminalView']);
   expect(prefetchNames(names, { tourSeen: true, owner: false })).toEqual(['RightPanel']);
-});
-
-test('an idle task can be cancelled before it runs', () => {
-  vi.useFakeTimers();
-  try {
-    const task = vi.fn();
-    whenIdle(task)();
-    vi.advanceTimersByTime(2000);
-    expect(task).not.toHaveBeenCalled();
-    whenIdle(task);
-    vi.advanceTimersByTime(2000);
-    expect(task).toHaveBeenCalledTimes(1);
-  } finally {
-    vi.useRealTimers();
-  }
 });

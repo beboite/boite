@@ -147,6 +147,8 @@ ${CONTROL_HELP}
   todo list                      the project's todo list
   todo add <text>                add a card for the user
   todo claim <id>                mark a card finished, awaiting the user
+  goal track                     a reviewed goal and checklist on the user's
+                                 last prompt (the Automatic goals experiment)
   threads find <words>           locate threads by words of their chat, title,
                                  project, branch or model
   threads read <thread>          its conversation (--last <n>, --before <ms>)
@@ -168,6 +170,10 @@ ${CONTROL_HELP}
   bot watch|unwatch <thread-id>  put a thread of its projects on its desk, or
                                  take one off; <machine>/<thread-id> for a
                                  project another machine entrusted to it
+  bot event <bot> <text>         wake a bot with an event from outside Boite
+                                 (--key <key>: a later event with the same key
+                                 replaces it while it waits); from a terminal
+                                 as the owner, or --core with a paired device
   --request-id <id>              reuse to retry threads send|reply or delegate spawn|send
   delegate models                models, reasoning levels and speeds a subagent can use
   delegate spawn <brief>         start a subagent on one bounded job; its result
@@ -212,7 +218,8 @@ ${CONTROL_HELP}
   --core <url>                   another core, with its token in BOITE_TOKEN
                                  (an owner token, or a paired device's session)
   --thread <id> --data-dir <dir> --channel <stable|dev>
-                                 drive a thread from outside it, as the owner`;
+                                 drive a thread from outside it, as the owner
+  --                             ends Boite's flags: the words after it are the command's`;
 
 const STATUS_LETTER: Record<GitChange['status'], string> = {
   added: 'A',
@@ -461,6 +468,12 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       print([`server: ${state.currentVersion}`, `update: ${state.phase}`, ...(state.version ? [`version: ${state.version}`] : []), ...(state.error ? [`error: ${state.error}`] : [])], state);
     },
     bot: async () => {
+      if (rest[0] === 'event') {
+        if (rest.length < 3) throw new Usage('bot event needs a bot and the text: boite bot event <bot> [--key <key>] <text>');
+        const sent = await client.call('agents.event', { agent: rest[1]!, text: rest.slice(2).join(' '), ...(parsed.key === undefined ? {} : { key: parsed.key }) });
+        print([`event: ${sent.key} for ${sent.agentId}`, 'It wakes the bot once its thread is free; a later event with the same key replaces it until then.'], sent);
+        return;
+      }
       const result = await botCommand(client, threadId, rest);
       print([JSON.stringify(result)], result);
     },
@@ -770,6 +783,13 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         const todo = await client.call('todos.update', { threadId, todoId: want(1, 'a todo id'), status: 'claimed' });
         print([todoRow(todo)], todo);
       } else throw new Usage(`todo: unknown action ${action}`);
+    },
+    goal: async () => {
+      const action = want(0, 'track');
+      if (action !== 'track') throw new Usage(`goal: unknown action ${action}`);
+      const activity = await client.call('threads.goal.track', { threadId });
+      // This turn is the goal's first: its claim counts, so the agent learns the marker here.
+      print([`goal: reviewed, tracking the user's last prompt (${activity.goal?.objective.length ?? 0} characters)`, 'when it is done and verified, end this turn with [BOITE_GOAL_COMPLETE] alone on its last line; a reviewer then checks it'], activity);
     },
   };
   const handler = command !== undefined && Object.hasOwn(commands, command) ? commands[command] : undefined;

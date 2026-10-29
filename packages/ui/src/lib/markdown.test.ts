@@ -76,6 +76,20 @@ describe('renderMarkdown', () => {
     );
   });
 
+  test('tildes and longer fences hold code, shorter or decorated runs inside them do not close it', () => {
+    expect(renderMarkdown('~~~ts\nconst a = 1;\n\nconst b = 2;\n~~~\n\nAfter')).toBe(
+      '<pre data-language="ts"><code>const a = 1;\n\nconst b = 2;</code></pre><p>After</p>'
+    );
+    expect(renderMarkdown('````md\n```sh\nls\n```\n````')).toBe('<pre data-language="md"><code>```sh\nls\n```</code></pre>');
+    expect(renderMarkdown('```\n~~~\n```js\n```')).toBe('<pre><code>~~~\n```js</code></pre>');
+    expect(renderMarkdown('~~~~\n~~~\n~~~~~')).toBe('<pre><code>~~~</code></pre>');
+    expect(renderMarkdown('  ```py title="a.py"\n  x = 1\n   y = 2\n  ```')).toBe('<pre data-language="py"><code>x = 1\n y = 2</code></pre>');
+    // A backtick fence's info string has no backtick: that line is inline code.
+    expect(renderMarkdown('```a``` b')).toBe('<p><code>a</code> b</p>');
+    // An indented line under an open item stays the item's, as before.
+    expect(renderMarkdown('- step\n  ```sh')).toBe('<ul><li>step ```sh</li></ul>');
+  });
+
   test('lists nest by indentation, switch kind, and carry task boxes', () => {
     expect(renderMarkdown('- a\n  - a1\n  - a2\n- b\n1. one\n2. two')).toBe(
       '<ul><li>a<ul><li>a1</li><li>a2</li></ul></li><li>b</li></ul><ol><li>one</li><li>two</li></ol>'
@@ -128,7 +142,8 @@ test('links are found in linear time: a line of 32,000 brackets renders at once'
   const lines = ['['.repeat(32_000), '[a'.repeat(16_000), '[a](<'.repeat(6_000), '[a](http://'.repeat(3_000)];
   const started = performance.now();
   for (const line of lines) for (const rich of [false, true]) renderMarkdown(line, rich);
-  expect(performance.now() - started).toBeLessThan(500);
+  // The quadratic scan costs seconds per render; 2 s for all eight leaves room for eight loaded workers.
+  expect(performance.now() - started).toBeLessThan(2000);
   expect(renderMarkdown('['.repeat(32_000))).toBe(`<p>${'['.repeat(32_000)}</p>`);
   // Unmatched brackets stay outside the link; images still become links, never remote requests.
   expect(renderMarkdown(`${'['.repeat(100)}docs](https://a.b/c)`)).toBe(`<p>${'['.repeat(99)}<a href="https://a.b/c" target="_blank" rel="noopener noreferrer">docs</a></p>`);

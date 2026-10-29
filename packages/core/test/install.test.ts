@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { zipSync } from 'fflate';
+import { tarball } from './fixtures/tarball.ts';
 import type { HarnessUpdate, ProviderInstall, ProviderInstallState } from '@boite/contracts';
 import { Core } from '../src/core.ts';
 import { newToken } from '../src/ids.ts';
@@ -22,6 +23,16 @@ const EXE_V2 = new Uint8Array(6144).fill(0x43);
 const RELEASE = zipSync({ [EXE_PATH]: EXE, [NOTE_PATH]: NOTE });
 const RELEASE_V2 = zipSync({ [EXE_PATH]: EXE_V2, [NOTE_PATH]: NOTE });
 const ESCAPING = zipSync({ '../evil.txt': NOTE, [EXE_PATH]: EXE });
+
+/** A member path longer than the tar name field, so only its pax header names it. */
+const LONG_NOTE_PATH = `share/${'n'.repeat(120)}/note.txt`;
+const TARBALL = tarball([
+  { name: 'bin/', type: '5' },
+  { name: 'package.json', bytes: new TextEncoder().encode('{}') },
+  { name: EXE_PATH, bytes: EXE },
+  { name: LONG_NOTE_PATH, bytes: NOTE },
+]);
+const ESCAPING_TARBALL = tarball([{ name: '../evil.txt', bytes: NOTE }, { name: EXE_PATH, bytes: EXE }]);
 
 function sha256(bytes: Uint8Array): string {
   return new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
@@ -103,10 +114,10 @@ function url(path: string): string {
   return `${server.url.origin}${path}`;
 }
 
-function descriptor(install: Record<string, unknown>): Record<string, unknown> {
+function descriptor(install: Record<string, unknown>, executablePath = EXE_PATH): Record<string, unknown> {
   const profile = {
     detect: {},
-    executable: [{ kind: 'file', value: `{agentsDir}/${EXE_PATH}` }],
+    executable: [{ kind: 'file', value: `{agentsDir}/${executablePath}` }],
     isolation: { MANAGED_HOME: '{isolationDir}' },
     install,
   };
@@ -159,10 +170,10 @@ function nextInstall(): Record<string, unknown> {
 }
 
 /** Writes the descriptor and makes the core re-read it, the way a user would. */
-async function loadDescriptor(install: Record<string, unknown>): Promise<void> {
+async function loadDescriptor(install: Record<string, unknown>, executablePath = EXE_PATH): Promise<void> {
   const dir = join(harness.dataDir, 'providers');
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'managed.json'), JSON.stringify(descriptor(install), null, 2), 'utf8');
+  writeFileSync(join(dir, 'managed.json'), JSON.stringify(descriptor(install, executablePath), null, 2), 'utf8');
   const client = await harness.connect();
   const { rejected } = await client.call('providers.reload', {});
   expect(rejected).toEqual([]);
@@ -206,6 +217,8 @@ beforeEach(async () => {
       }
       if (path === '/release-2.zip') return new Response(RELEASE_V2);
       if (path === '/escaping.zip') return new Response(ESCAPING);
+      if (path === '/release.tgz') return new Response(TARBALL);
+      if (path === '/escaping.tgz') return new Response(ESCAPING_TARBALL);
       if (path === '/tampered.zip') return new Response(tampered());
       // Two bytes short of what the descriptor promises.
       if (path === '/short.zip') return new Response(RELEASE.slice(0, RELEASE.byteLength - 2));
@@ -344,6 +357,38 @@ describe('managed installs', () => {
     expect(existsSync(agentDir('current', EXE_PATH))).toBe(false);
   });
 
+  test('a gzipped tar installs its listed members, a pax long name included, and nothing else', async () => {
+    await loadDescriptor({ version: '1.0.0', format: 'tgz', url: url('/release.tgz'),
+      sha256: sha256(TARBALL), archiveBytes: TARBALL.byteLength,
+      files: [{ path: EXE_PATH, bytes: EXE.byteLength }, { path: LONG_NOTE_PATH, bytes: NOTE.byteLength }] });
+    const client = await harness.connect();
+    const seen: ProviderInstallState[] = [];
+    client.on('providers.installProgress', state => { seen.push(state); });
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => seen.some(state => state.state === 'installed' || state.state === 'failed'));
+    expect(seen.at(-1)?.state).toBe('installed');
+    expect(new Uint8Array(await Bun.file(agentDir('current', EXE_PATH)).arrayBuffer())).toEqual(EXE);
+    expect(readFileSync(agentDir('current', LONG_NOTE_PATH), 'utf8')).toBe(new TextDecoder().decode(NOTE));
+    expect(existsSync(agentDir('current', 'package.json'))).toBe(false);
+    expect((await client.call('providers.list', {})).loaded.find(provider => provider.id === 'managed')?.available).toBe(true);
+  });
+
+  test('a tar entry that climbs out of the release directory is refused', async () => {
+    await loadDescriptor({ version: '1.0.0', format: 'tgz', url: url('/escaping.tgz'),
+      sha256: sha256(ESCAPING_TARBALL), archiveBytes: ESCAPING_TARBALL.byteLength,
+      files: [{ path: EXE_PATH, bytes: EXE.byteLength }] });
+    const client = await harness.connect();
+    const seen: ProviderInstallState[] = [];
+    client.on('providers.installProgress', state => { seen.push(state); });
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => seen.some(state => state.state === 'failed'));
+    const failed = seen.find(state => state.state === 'failed');
+    if (failed?.state !== 'failed') throw new Error('no failure was reported');
+    expect(failed.message).toContain('evil.txt');
+    expect(existsSync(join(harness.dataDir, 'agents', 'managed', 'releases', 'evil.txt'))).toBe(false);
+    expect(existsSync(agentDir('current'))).toBe(false);
+  });
+
   test('a corrupt completion record stays visible as a failed install', async () => {
     await loadDescriptor(goodInstall());
     mkdirSync(agentDir('current'), { recursive: true });
@@ -352,6 +397,16 @@ describe('managed installs', () => {
     const provider = (await client.call('providers.list', {})).loaded.find((entry) => entry.id === 'managed');
     expect(provider?.install?.state).toBe('failed');
     if (provider?.install?.state === 'failed') expect(provider.install.message).toContain('.install-complete.json');
+  });
+  test.each(['bin', '..bin'])('a release that current reaches without its completion record is not available (%s)', async (directory) => {
+    // What an update a stop cut off leaves when recovery cannot settle it: the binary, no record.
+    await loadDescriptor(goodInstall(), `${directory}/agent.exe`);
+    mkdirSync(agentDir('current', directory), { recursive: true });
+    writeFileSync(agentDir('current', directory, 'agent.exe'), EXE, { mode: 0o755 });
+    const client = await harness.connect();
+    const provider = (await client.call('providers.list', {})).loaded.find((entry) => entry.id === 'managed');
+    expect(provider?.install?.state).toBe('absent');
+    expect(provider?.available).toBe(false);
   });
   test('a release is downloaded, checked, unpacked and pointed at by {agentsDir}', async () => {
     await loadDescriptor(goodInstall());
@@ -440,6 +495,36 @@ describe('managed installs', () => {
       installedAt: expect.any(Number),
       available: '1.1.0',
     });
+  });
+
+  // Root ignores the read-only directory that makes the old release impossible to remove.
+  test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('an update whose previous release cannot be removed yet still runs the new one', async () => {
+    await loadDescriptor(goodInstall());
+    const client = await harness.connect();
+    const states: ProviderInstallState[] = [];
+    client.on('providers.installProgress', (event) => states.push(event));
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => states.some((state) => state.state === 'installed'));
+    // The layout of an account that may not make links: the release itself sits at `current`, with a part it cannot delete.
+    rmSync(agentDir('current'));
+    renameSync(agentDir('releases', '1.0.0'), agentDir('current'));
+    mkdirSync(agentDir('current', 'locked'));
+    writeFileSync(agentDir('current', 'locked', 'file'), 'kept');
+    chmodSync(agentDir('current', 'locked'), 0o500);
+    try {
+      await loadDescriptor(nextInstall());
+      states.length = 0;
+      await client.call('providers.install', { providerId: 'managed' });
+      await waitFor(() => states.some((state) => state.state === 'installed' || state.state === 'failed'));
+      expect(states.at(-1)?.state).toBe('installed');
+      expect(statSync(agentDir('current', 'bin', 'agent.exe')).size).toBe(EXE_V2.byteLength);
+      expect(existsSync(agentDir('releases', '1.1.0', 'bin', 'agent.exe'))).toBe(true);
+    } finally {
+      for (const name of ['current', 'current.previous']) {
+        const locked = agentDir(name, 'locked');
+        if (existsSync(locked)) chmodSync(locked, 0o700);
+      }
+    }
   });
 
   test('an old release a process still runs out of stays until that process ends', async () => {

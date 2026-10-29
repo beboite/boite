@@ -154,3 +154,24 @@ export function checkRemoteContact(contact: AgentContact, peer: CoordinationPeer
     ...(sharedThread === undefined ? {} : { sharedThread }),
   };
 }
+
+/**
+ * A directory or search a contact's gateway answers for its group: `partial: 1`
+ * in the request asks it to count the machines of that group that did not
+ * answer. An older core ignores the flag and sends the bare list.
+ */
+export interface PartialList { entries: unknown[]; unavailable: number }
+export const PARTIAL = 1;
+
+/** The entries of a list answer, old or partial, and how many machines behind it did not answer. */
+export function partialList(answer: unknown, max = 100): PartialList {
+  const value = Array.isArray(answer) ? { entries: answer, unavailable: 0 } : answer as Partial<PartialList> | null;
+  if (!value || !Array.isArray(value.entries) || value.entries.length > max) throw invalidParams(`answer: expected at most ${max} entries`);
+  if (!Number.isSafeInteger(value.unavailable) || value.unavailable! < 0 || value.unavailable! > 256) throw invalidParams('answer.unavailable: expected a count of machines');
+  return { entries: value.entries, unavailable: value.unavailable! };
+}
+
+/** The name a lookup reports for a source that answered without some of its machines. */
+export function partialName(name: string, missing: number): string {
+  return missing === 0 ? name : `${name} (${missing} of its machines did not answer)`;
+}

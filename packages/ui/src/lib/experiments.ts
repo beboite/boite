@@ -19,8 +19,7 @@
  * `session-import` is on before showing or running the import, and the
  * context meter asks the same of `prompt-cache` before drawing its timer. The
  * bottom-left launchers and the store ask `resident-agents` before offering
- * the dedicated Agents interface. The composer asks `goal2` before taking
- * `/goal2` as a reviewed goal.
+ * the dedicated Agents interface.
  */
 
 import { EXPERIMENT_IDS, type ExperimentId } from '@boite/contracts';

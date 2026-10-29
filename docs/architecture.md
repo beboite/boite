@@ -101,7 +101,12 @@ the first checkpoint after a write, runs a passive checkpoint once the WAL
 passes 4 MiB and truncates it after 30 s without writes. The main thread
 checkpoints when the Worker is unavailable or when the WAL reaches 16 MiB
 because writes kept landing during the Worker's passes, and it truncates the
-WAL at close. A write that binds more than 64 KiB, such as a message's parts,
+WAL at close. The main connection caches up to 64 MiB of pages
+(`journal/statements.ts`): SQLite's default 2 MiB is less than one thread list
+on a journal of a few thousand threads, and a machine short of memory reads
+those file pages from the disk on the event loop
+(`bench/results/2026-10-28-journal-cache.md`).
+A write that binds more than 64 KiB, such as a message's parts,
 runs on a statement finalized after use (`journal/statements.ts`): a cached
 statement keeps its last bound values alive. An append to
 `events(id, thread_id, ts, type, version, payload)` and its projection changes
@@ -571,9 +576,11 @@ cores; a fixed known divergence must leave its explicit exception list.
 `bun run check:architecture` checks production runtime imports, including literal
 dynamic imports. It rejects cycles, runtime cross-imports, contracts importing
 runtimes, native backends imported outside their boundary and internal imports
-of entry modules. Type-only imports, Svelte scripts and Rust are outside this
-check. Unmapped workspace exports fail. The same check enforces 900 source lines
-or a shrinking allowance in `scripts/architecture/size-budget.json`.
+of entry modules. Svelte component scripts count as modules; type-only imports
+do not. Rust, Kotlin and Java have no import graph here. Unmapped workspace
+exports fail. The same check enforces 900 source lines, Rust and the Android
+sources included, or a shrinking allowance in
+`scripts/architecture/size-budget.json`.
 `bun run audit:complexity` provides an advisory ranking, not a CI threshold.
 [Development](development.md#architecture-checks) owns the commands and scope.
 

@@ -274,6 +274,22 @@ describe('a thread in its own worktree', () => {
     }
   });
 
+  test('a branch name git could not look up is refused, not taken as free', async () => {
+    const accountId = await echoAccount();
+    const project = await repoProject('lookup');
+    const spawn = harness.core.procs.spawn.bind(harness.core.procs);
+    // The lookup fails the way a damaged repository does: exit 128, not the 1 of an absent ref.
+    const spy = spyOn(harness.core.procs, 'spawn').mockImplementation((scope, command, args, options) =>
+      spawn(scope, command, command === 'git' && args.includes('rev-parse') && args.some((arg) => arg.startsWith('refs/heads/')) ? ['--git-dir=/nonexistent', ...args] : args, options));
+    try {
+      expect(await thrown(client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'lookup', worktree: {} })))
+        .toThrow('cannot tell whether branch boite/');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(git(project.path, 'worktree', 'list', '--porcelain')).not.toContain('refs/heads/boite/');
+  });
+
   test('concurrent registrations share the repository gate across linked checkouts but leave other repositories free', async () => {
     const project = await repoProject('registration'), other = await repoProject('independent');
     const row = harness.core.projects.require(project.id), otherRow = harness.core.projects.require(other.id);

@@ -38,8 +38,10 @@
   import { hostLocalAgentBrowser } from './lib/agent-browser-host.svelte';
   import type { Store } from './lib/store.svelte';
   import { tourRequested, tourSeen } from './lib/onboarding.svelte';
-  import { prefetchAllowed, prefetchNames, warmPages, whenIdle } from './lib/prefetch';
-  import { mobileNavigation, parts, prefetchParts } from './lib/deferred-parts';
+  import { whenIdle } from './lib/idle';
+  import { prefetchAllowed, prefetchNames, warmPages } from './lib/prefetch';
+  import { parts, prefetchParts } from './lib/deferred-parts';
+  import { mobileNavigation } from './lib/mobile-navigation';
   import { voice } from './lib/voice-prefs.svelte';
   import { startTheme } from './lib/theme';
   import { appName, appUpdater } from './lib/app-update.svelte';
@@ -62,7 +64,7 @@
 
   let store = $derived(workspace.active);
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
-  // The phone's navigation (`lib/deferred-parts.ts`). A failed fetch (offline,
+  // The phone's navigation (`lib/mobile-navigation.ts`). A failed fetch (offline,
   // cold cache) lets the app draw with a bar that says so and retries, by hand,
   // when the core answers again or when the browser is back online.
   function loadMobileNavigation(): void {

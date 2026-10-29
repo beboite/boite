@@ -17,8 +17,10 @@ export function composerBatch(queue: ComposerQueuedPrompt[], storage: ComposerSt
   let bytes = 0;
   const ids = new Set<string>();
   const choice = (item: ComposerQueuedPrompt) => digest({ ...item.choice, speed: item.choice?.speed ?? null });
+  // The batch is decided from its first prompt's experiments, so a prompt queued with Automatic goals in another state goes alone.
+  const autoGoal = (item: ComposerQueuedPrompt) => item.experiments?.includes('auto-goal') ?? false;
   for (const item of queue) {
-    if (result.entries.length && (first.request || item.request || isComposerActivity(first.text) || isComposerActivity(item.text) || choice(first) !== choice(item) || digest(first.sentFrom ?? null) !== digest(item.sentFrom ?? null) || item.afterBoundary !== first.afterBoundary)) break;
+    if (result.entries.length && (first.request || item.request || isComposerActivity(first.text) || isComposerActivity(item.text) || choice(first) !== choice(item) || digest(first.sentFrom ?? null) !== digest(item.sentFrom ?? null) || item.afterBoundary !== first.afterBoundary || autoGoal(first) !== autoGoal(item))) break;
     const attachments = item.attachments.map(reference => storage.readAsset(reference.assetId));
     const weight = attachments.reduce((sum, attachment) => sum + decodedBytes(attachment.data), 0);
     if (result.entries.length && (result.attachments.length + attachments.length > ATTACHMENTS_PER_TURN || bytes + weight > ATTACHMENTS_TOTAL_MAX_BYTES || result.previewReferences.length + (item.previewReferences?.length ?? 0) > PREVIEW_REFERENCES_PER_TURN)) break;

@@ -11,14 +11,17 @@ export type CompactionTarget = 'agent' | 'subagent' | 'bot';
 export interface CompactionPolicy {
   autoCompact: AutoCompact | null;
   backgroundCompaction: boolean;
+  /** Claude summary instructions. Null or absent keeps the native prompt. */
+  compactionSummary?: string | null;
 }
 
 /** Children take precedence, including children started by a resident bot. */
-export function effectiveCompaction(settings: Pick<Settings, 'autoCompact' | 'backgroundCompaction' | 'compactionByType'>, thread: Pick<ThreadSummary, 'parentThreadId' | 'agentSessionId'>): CompactionPolicy {
+export function effectiveCompaction(settings: Pick<Settings, 'autoCompact' | 'backgroundCompaction' | 'compactionByType' | 'compactionSummary'>, thread: Pick<ThreadSummary, 'parentThreadId' | 'agentSessionId'>): CompactionPolicy {
   const target: CompactionTarget = thread.parentThreadId ? 'subagent' : thread.agentSessionId ? 'bot' : 'agent';
   return settings.compactionByType?.[target] ?? {
     autoCompact: settings.autoCompact ?? null,
     backgroundCompaction: settings.backgroundCompaction === true,
+    ...(settings.compactionSummary === undefined ? {} : { compactionSummary: settings.compactionSummary }),
   };
 }
 
@@ -153,6 +156,13 @@ export interface Settings {
    */
   goalTracker?: GoalTrackerModel | null;
   /**
+   * With the `auto-goal` experiment on in the sending app, a prompt of at
+   * least this many characters that starts a turn also starts a reviewed goal
+   * with that prompt as its objective (`docs/goals.md`). Missing:
+   * `AUTO_GOAL_MIN_CHARS.default`.
+   */
+  autoGoalMinChars?: number;
+  /**
    * Independent token limit and idle moments for automatic compaction. The
    * limit reaches native tool boundaries where supported. Null or missing
    * leaves each agent's own behaviour. Missing on older cores.
@@ -169,6 +179,8 @@ export interface Settings {
   backgroundCompaction?: boolean;
   /** Complete policies per thread type. Missing targets follow the live common defaults. */
   compactionByType?: Partial<Record<CompactionTarget, CompactionPolicy>>;
+  /** Optional common Claude summary instructions; explicit /compact instructions take precedence. */
+  compactionSummary?: string | null;
   /**
    * Experimental: while a thread of the user's waits on its delegated agents
    * or workflows, the core sends a minimal turn before its prompt cache lapses
@@ -253,7 +265,7 @@ export interface TitleModel {
   model: string;
 }
 
-/** One provider's model and reasoning level, picked in Settings, Experiments to keep `/goal2` checklists. */
+/** One provider's model and reasoning level, picked in Settings, General to keep `/goal2` checklists. */
 export interface GoalTrackerModel {
   providerId: ProviderId;
   model: string;

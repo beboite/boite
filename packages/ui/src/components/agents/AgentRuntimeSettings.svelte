@@ -36,7 +36,7 @@
       const { permissionMode: _mode, ...rest } = r as R & { permissionMode?: unknown };
       return { ...rest, ...(r.name === undefined ? {} : { name: r.name.trim() }), effort: r.effort ?? null };
     };
-    return { ...value, defaultRoute: { ...value.defaultRoute, effort: value.defaultRoute.effort ?? null }, allowedRoutes: value.allowedRoutes.map(route), subagents: { ...value.subagents, profiles: value.subagents.profiles.map(route) }, autoMemory: value.autoMemory !== false, eventWakes: value.eventWakes !== false, dailyBudgetUsd: value.dailyBudgetUsd ?? null } as AgentRuntimeConfig;
+    return { ...value, defaultRoute: { ...value.defaultRoute, effort: value.defaultRoute.effort ?? null }, allowedRoutes: value.allowedRoutes.map(route), subagents: { ...value.subagents, profiles: value.subagents.profiles.map(route) }, autoMemory: value.autoMemory !== false, eventWakes: value.eventWakes === true, dailyBudgetUsd: value.dailyBudgetUsd ?? null } as AgentRuntimeConfig;
   }
   /** Read from the data, not the form: a card leaving the page has no form left to ask. */
   function problem(): string | null {
@@ -191,7 +191,7 @@
 
     <fieldset class="card" disabled={locked}>
       <h2>{labels.engine}<SaveStatus {save} at="engine" /></h2>
-      <label class="switch-row"><span class="text">{labels.eventWakes}<span class="hint">{labels.eventWakesHint}</span></span><input type="checkbox" role="switch" checked={config.eventWakes !== false} onchange={event => { if (config) { config.eventWakes = event.currentTarget.checked; save.change('engine'); } }} data-testid="agent-event-wakes" /></label>
+      <label class="switch-row"><span class="text">{labels.eventWakes}<span class="hint">{labels.eventWakesHint}</span></span><input type="checkbox" role="switch" checked={config.eventWakes === true} onchange={event => { if (config) { config.eventWakes = event.currentTarget.checked; save.change('engine'); } }} data-testid="agent-event-wakes" /></label>
       <!-- Missing on configurations saved before it existed: on. -->
       <label class="switch-row"><span class="text">{labels.autoMemory}<span class="hint">{labels.autoMemoryHint}</span></span><input type="checkbox" role="switch" checked={config.autoMemory !== false} onchange={event => { if (config) { config.autoMemory = event.currentTarget.checked; save.change('engine'); } }} data-testid="agent-auto-memory" /></label>
       <!-- Blank is no cap: the user's own messages always run, only its wakes stop for the day. -->

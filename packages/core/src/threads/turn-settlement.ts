@@ -56,10 +56,14 @@ export function markQueuedStopped(core: Core, turnId: TurnId): void {
   if (turn === null) return;
   const next: Turn = { ...turn, status: 'stopped', queueHold: null, finishedAt: Date.now() };
   core.bus.afterCommit(() => {
-    const done = core.journal.db.transaction(() => finishTurn(core, next, 'never-started'))();
+    // The stop and the wake's letters going back to the inbox commit together.
+    const done = core.journal.db.transaction(() => {
+      const finished = finishTurn(core, next, 'never-started');
+      if (turn.execution?.operation === 'coordination') core.coordination.queuedCancelled(turn.threadId, turn.id);
+      return finished;
+    })();
     announceFinished(core, next, done);
   });
-  if (turn.execution?.operation === 'coordination') core.coordination.queuedCancelled(turn.threadId);
 }
 
 /**

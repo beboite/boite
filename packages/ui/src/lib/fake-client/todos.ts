@@ -1,5 +1,5 @@
 /** The project todo lists every thread of a project shares. */
-import { TODO_STATUSES, type Thread, type Todo, type TodoGoal } from '@boite/contracts';
+import { TODO_STATUSES, TODO_TEXT_MAX, type Thread, type Todo, type TodoGoal } from '@boite/contracts';
 import { refusal, todoText } from './shared';
 import type { FakeContext, FakeMethods } from './context';
 import { applySharedBoard, sharedTodos } from './shared-board';
@@ -57,19 +57,41 @@ export function followGoal(ctx: FakeContext, thread: Thread): void {
   emitTodos(ctx, thread.projectId);
 }
 
+/** An automatic goal's card, as the core's `addGoalCard`: the prompt's first line, linked to its conversation. */
+export function addGoalCard(ctx: FakeContext, thread: Thread, prompt: string): void {
+  const text = prompt.split('\n').map((line) => line.trim()).find(Boolean)?.slice(0, TODO_TEXT_MAX);
+  if (thread.projectId === null || thread.incognito || !text) return;
+  const at = ctx.now();
+  ctx.todos.push({ id: `todo-${++ctx.seq}`, projectId: thread.projectId, text, status: 'open', threadId: thread.id, goalThreadId: thread.id, createdAt: at, updatedAt: at });
+  emitTodos(ctx, thread.projectId);
+}
+
+/** A goal removed or replaced: its cards let go of the conversation, an open one back in To do. */
+export function unlinkGoalCards(ctx: FakeContext, thread: Thread): void {
+  const linked = ctx.todos.filter((todo) => todo.goalThreadId === thread.id);
+  if (!linked.length || thread.projectId === null) return;
+  for (const todo of linked) { todo.goalThreadId = null; todo.updatedAt = ctx.now(); }
+  emitTodos(ctx, thread.projectId);
+}
+
 /** A list is shared by the project, so the whole of it travels on every change. */
 function emitTodos(ctx: FakeContext, projectId: string): void {
   ctx.emit('todos.updated', { projectId, todos: projectTodos(ctx, projectId) });
+}
+
+/** The cards an agent reads: a shared one only while its source may reach that association, as the core's `visibleTodos`. */
+export function agentTodos(ctx: FakeContext, threadId: string, todos: Todo[]): Todo[] {
+  return todos.filter(todo=>{
+    if(!todo.shared)return true;
+    try{sharedScope(ctx,{threadId,sharedProjectId:todo.shared.sharedProjectId});return true;}catch{return false;}
+  });
 }
 
 export function todoMethods(ctx: FakeContext) {
   return {
     'todos.list': async (params) => {
       const todos=projectTodos(ctx, ctx.thread(params.threadId).projectId);
-      return ctx.bus.principal!=='agent'?todos:todos.filter(todo=>{
-        if(!todo.shared)return true;
-        try{sharedScope(ctx,{threadId:params.threadId,sharedProjectId:todo.shared.sharedProjectId});return true;}catch{return false;}
-      });
+      return ctx.bus.principal!=='agent'?todos:agentTodos(ctx, params.threadId, todos);
     },
     'todos.add': async (params) => {
       const thread = ctx.thread(params.threadId);

@@ -114,7 +114,7 @@ test('project-directory threads do not inherit the shared checkout branch PR', a
   } finally { replacement.mockRestore(); }
 });
 
-test('PR reads run one gh call per repository, two processes at a time, and match each branch', async () => {
+test('PR reads run one gh call per GitHub repository, two processes at a time, and match each branch', async () => {
   const client = await harness.connect();
   const ids: string[] = [];
   for (let index = 0; index < 3; index++) {
@@ -146,11 +146,11 @@ test('PR reads run one gh call per repository, two processes at a time, and matc
     const results = await Promise.all([reader.read(ids[0]!), reader.read(ids[0]!), reader.read(ids[1]!), reader.read(ids[2]!)]);
     expect(results.map((pr) => pr?.number)).toEqual([4, 4, 5, 6]);
     expect(peak).toBe(2);
-    // Three repositories, three lists; the second read of the first thread shared its call.
-    expect(calls).toHaveLength(3);
-    expect(calls[0]).toContain('number,url,state,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergedAt');
+    // Three checkouts of one GitHub repository share its one page; the second read of the first thread shared it too.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.join(' ')).toContain('updatedAt title isDraft baseRefName headRefName headRefOid isCrossRepository mergedAt headRepository { name } headRepositoryOwner { login }');
     await reader.read(ids[0]!);
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(1);
   } finally {
     replacement.mockRestore();
   }
@@ -260,7 +260,7 @@ test('worktree PRs follow renamed branches, share repository reads and reject de
 });
 
 test('a full page asks for a missing branch alone, even when two of its pull requests share a branch', async () => {
-  // 200 pull requests, two of them from one reused branch: 199 branches, a full page all the same.
+  // A page of pull requests, two of them from one reused branch: one branch fewer, a full page all the same.
   const page = Array.from({ length: LIST_LIMIT }, (_, index) => ({
     headRefName: index < 2 ? 'patch-1' : `branch-${index}`,
     number: 1000 - index,
@@ -268,9 +268,9 @@ test('a full page asks for a missing branch alone, even when two of its pull req
     state: 'OPEN',
   }));
   const parsed = parsePullRequestList(JSON.stringify(page));
-  expect(parsed.byHead.size).toBe(LIST_LIMIT - 1);
+  expect(parsed.heads.size).toBe(LIST_LIMIT - 1);
   expect(parsed.count).toBe(LIST_LIMIT);
-  expect(parsed.byHead.get('patch-1')?.number).toBe(1000);
+  expect(parsed.heads.get('patch-1')).toHaveLength(2);
 
   const client = await harness.connect();
   const repo = join(harness.dataDir, 'busy-repo');

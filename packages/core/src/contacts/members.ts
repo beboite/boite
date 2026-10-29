@@ -178,27 +178,25 @@ export class ContactMembers {
     return { ...entry, coreId: this.selfId(), threadId: memberThreadId(member.coreId, entry.threadId), machine: this.core.info().hostname ?? 'Boite' };
   }
 
-  /** Each holder's threads open to the contact; a member that does not answer just lists none. */
-  async directory(contactId: string): Promise<AgentContact[]> {
-    const found = await Promise.all(this.holders(contactId).map(async member => {
-      try {
-        const answer = await this.ask(member, contactId, 'directory', {});
-        if (!Array.isArray(answer) || answer.length > 100) throw new Error('invalid directory');
-        return answer.map(entry => this.outward(checkRemoteContact(entry as AgentContact, member), member));
-      } catch (error) { this.warn(member, error); return []; }
-    }));
-    return found.flat();
+  /** Each holder's threads open to the contact, and how many holders did not answer. */
+  directory(contactId: string): Promise<{ entries: AgentContact[]; unavailable: number }> {
+    return this.gather(contactId, 'directory', {}, (entry, member) => checkRemoteContact(entry as AgentContact, member));
   }
 
-  async search(contactId: string, words: string[]): Promise<AgentContact[]> {
+  search(contactId: string, words: string[]): Promise<{ entries: AgentContact[]; unavailable: number }> {
+    return this.gather(contactId, 'search', { words }, (match, member) => ({ ...checkRemoteContact(match as AgentContact, member), ...checkMatchExtras(match as { matched?: unknown; excerpts?: unknown }) }));
+  }
+
+  /** One list from every holder: a member that fails or answers badly is counted, never read as an empty list. */
+  private async gather(contactId: string, operation: 'directory' | 'search', payload: unknown, check: (entry: unknown, member: CoordinationPeer) => AgentContact): Promise<{ entries: AgentContact[]; unavailable: number }> {
     const found = await Promise.all(this.holders(contactId).map(async member => {
       try {
-        const answer = await this.ask(member, contactId, 'search', { words });
-        if (!Array.isArray(answer) || answer.length > 100) throw new Error('invalid search');
-        return answer.map(match => this.outward({ ...checkRemoteContact(match as AgentContact, member), ...checkMatchExtras(match as { matched?: unknown; excerpts?: unknown }) }, member));
-      } catch (error) { this.warn(member, error); return []; }
+        const answer = await this.ask(member, contactId, operation, payload);
+        if (!Array.isArray(answer) || answer.length > 100) throw new Error(`invalid ${operation}`);
+        return answer.map(entry => this.outward(check(entry, member), member));
+      } catch (error) { this.warn(member, error); return null; }
     }));
-    return found.flat();
+    return { entries: found.flatMap(list => list ?? []), unavailable: found.filter(list => list === null).length };
   }
 
   async read(contactId: string, at: { member: CoordinationPeer; threadId: string }, payload: { limit?: unknown; before?: unknown }): Promise<unknown> {

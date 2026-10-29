@@ -232,11 +232,14 @@ history; selection yields every eight rows and shares a scheduler snapshot only
 within that synchronous group. Family, input, result and checkout guards remain
 fresh after asynchronous validation and immediately before the archive write.
 Large retained families and unindexed branch-holder checks can still cost more.
-Proofs share one `git remote -v` and one `gh pr list` per repository with the
+Proofs share one `git remote -v` and one page of PRs per repository with the
 sidebar badges, and a thread without a merged PR waits 5 minutes, then up to
 an hour, before its next proof. Four unmerged worktree threads cost 2 processes
 on the first pass and none on the next ones, against 12 and then 8 a minute
 before ([bench/results/2026-10-15-perf-git.md](../bench/results/2026-10-15-perf-git.md)).
+Those counts hold for a repository with fewer than 100 PRs, whose page is
+complete. On a full page, a thread whose branch the page does not show also
+walks its checkout's status and reads its branch alone before a proof.
 
 Short git reads (30 seconds or less) share eight slots per core; a read waits
 for a free one before its git starts, and the wait does not count against its
@@ -1537,6 +1540,58 @@ Edge components and 198 MiB of caches. It now starts with
 loses those folders once before its next start
 ([browser](browser.md#processes-and-profiles)); the size of a profile after
 that was not measured.
+
+## Where an agent's tokens go
+
+Each model call re-reads its whole context, from the cache while it is warm,
+so a block costs its size times the calls it stays for.
+`scripts/token-audit.ts` reads Claude Code transcripts and splits that sum by
+what the context holds; its header explains the attribution.
+
+```sh
+bun scripts/token-audit.ts --days 7 --chars-per-token 2.5
+```
+
+The original audit on one owner's machine selected transcript files modified
+in the 7 days to 2026-10-27, including older calls inside those files:
+86,238 calls in 1,561 stretches
+between compactions, a mean context of 104k tokens, compaction at 166k (the
+`autoCompactWindow: 200000` of that user's settings) down to 44k at the median. At API rates relative
+to input, cache reads made 52% of the cost, 1 hour cache writes 28% and output
+20%.
+
+| What the context held | Share of the sum of context |
+|---|---|
+| System prompt and tool definitions | 17.7% |
+| Claude Code attachments: instructions files 5.4%, files attached again after a compaction 5.0%, skill listing 3.5% | 17.5% |
+| Read results | 16.6% |
+| Earlier thinking | 13.2% |
+| Shell results | 10.7% |
+| Compaction summaries, 20k characters at the median | 6.8% |
+| Grep results | 6.7% |
+| Text Boite adds: guide, notices, delegation and coordination messages | 1.3% |
+| Tool calls the agent wrote: shell 3.5%, Write 1.9%, Edit 1.4% | 7.8% |
+| The rest: the agent's and the user's text, other tool results, images | 1.7% |
+
+The original audit replayed the same calls under other policies. These are
+pre-hook estimates using the measured 44k base and a fixed 8.3k summary output;
+they do not measure a configured summary prompt:
+
+| Policy | Sum of context | Cost |
+|---|---|---|
+| Compact at 120k | −26.1% | −6.6% |
+| Compact at 150k | −11.7% | +0.8% |
+| Clear tool results older than 10 calls, cache rewrites not counted | −22.2% | not modelled |
+| Cap each tool result at 5k tokens | −2.2% | not modelled |
+| 5 minute cache instead of 1 hour | unchanged | +9.2% of input cache cost |
+
+The cache row uses input cache cost as its denominator in this historical
+measurement. The script now reports that difference against full cost, like
+the compaction rows. The original transcripts were not re-audited.
+
+A lower threshold costs a summary and a rewritten cache at each extra
+compaction, which is why the cost falls far less than the context. Automatic
+compaction is the owner's setting ([context](context.md#automatic-compaction)).
 
 ## Benches
 

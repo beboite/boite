@@ -1,8 +1,9 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { forgetWhich } from './which.ts';
 import {
   threadActive,
+  type PolicyRefusalData,
   type ProviderDescriptor,
   type ProviderId,
   type ProviderInstall,
@@ -24,12 +25,14 @@ import antigravityShipped from './shipped/antigravity.json';
 import claudeShipped from './shipped/claude.json';
 import codexShipped from './shipped/codex.json';
 import grokShipped from './shipped/grok.json';
+import hermesShipped from './shipped/hermes.json';
 import museShipped from './shipped/muse.json';
 import opencodeShipped from './shipped/opencode.json';
 import opencodeV2Shipped from './shipped/opencode-v2.json';
 import piShipped from './shipped/pi.json';
 import echoShipped from './shipped/echo.json';
 import { detectionLogger, installLogger } from './install-log.ts';
+import { registerLocalCommands } from './local-command.ts';
 
 /**
  * Echo is the fake agent the tests and the bench drive: no CLI, it repeats the
@@ -46,6 +49,7 @@ const SHIPPED_SOURCES: { file: string; raw: unknown; when?: () => boolean }[] = 
   { file: 'shipped/claude.json', raw: claudeShipped },
   { file: 'shipped/codex.json', raw: codexShipped },
   { file: 'shipped/grok.json', raw: grokShipped },
+  { file: 'shipped/hermes.json', raw: hermesShipped },
   { file: 'shipped/muse.json', raw: museShipped },
   { file: 'shipped/opencode.json', raw: opencodeShipped },
   { file: 'shipped/opencode-v2.json', raw: opencodeV2Shipped },
@@ -84,13 +88,23 @@ export function summarize(
   dataDir: string,
   enabled = true,
   install: ProviderInstall | undefined = profileFor(entry.descriptor)?.install,
+  policy?: PolicyRefusalData,
 ): ProviderSummary {
   const profile = profileFor(entry.descriptor);
   // A provider that is turned off is listed from what is already known: asking its program its version would start it.
   const executable = profile === undefined ? null : (resolveCommand(profile, enabled)?.shown ?? null);
+  const current = installs.currentDir(entry.descriptor.id);
+  // A program found in the managed release counts once that release is whole: an update cut off and not yet settled leaves its files without the record.
+  const inRelease = (path: string): boolean => {
+    const rest = relative(current, path);
+    return rest !== '' && rest !== '..' && !rest.startsWith(`..${sep}`) && !isAbsolute(rest);
+  };
+  const fromRelease = install !== undefined && profile !== undefined &&
+    (profile.detect.file?.includes('{agentsDir}') === true || (executable !== null && inRelease(executable)));
   const available =
     profile !== undefined &&
-    detectResolves(profile, installs.currentDir(entry.descriptor.id), dataDir) &&
+    (!fromRelease || installs.installedVersion(entry.descriptor.id) !== null) &&
+    detectResolves(profile, current, dataDir) &&
     (profile.executable.length === 0 || executable !== null);
   return {
     id: entry.descriptor.id,
@@ -107,6 +121,7 @@ export function summarize(
     install: installs.stateOf(entry.descriptor.id, install),
     titles: writesTitles(entry.descriptor.protocol),
     enabled,
+    ...(policy !== undefined ? { policy } : {}),
     ...(entry.descriptor.experimental === true ? { experimental: true } : {}),
   };
 }
@@ -316,7 +331,7 @@ export class ProviderRegistry {
   list(): ProviderLoadResult {
     return {
       loaded: [...this.entries.values()].map((entry) =>
-        summarize(entry, this.installs, this.dataDir, this.enabledEntry(entry), this.installBlock(entry.descriptor.id))),
+        summarize(entry, this.installs, this.dataDir, this.enabledEntry(entry), this.installBlock(entry.descriptor.id), this.policyOf(entry.descriptor.id))),
       rejected: [...this.rejected],
     };
   }
@@ -368,7 +383,15 @@ export class ProviderRegistry {
   }
 
   private enabledEntry(entry: LoadedProvider): boolean {
+    if (this.policyOf(entry.descriptor.id) !== undefined) return false;
     return this.switches.get(entry.descriptor.id) ?? entry.descriptor.experimental !== true;
+  }
+
+  /** The admin policy's verdict on a provider; the core sets it once its policy is read. */
+  policyBlock: (id: ProviderId) => PolicyRefusalData | null = () => null;
+
+  private policyOf(id: ProviderId): PolicyRefusalData | undefined {
+    return this.policyBlock(id) ?? undefined;
   }
 
   get(id: ProviderId): ProviderDescriptor | undefined {
@@ -383,7 +406,13 @@ export class ProviderRegistry {
 
   summary(id: ProviderId): ProviderSummary | undefined {
     const entry = this.entries.get(id);
-    return entry === undefined ? undefined : summarize(entry, this.installs, this.dataDir, this.enabledEntry(entry), this.installBlock(id));
+    return entry === undefined ? undefined : summarize(entry, this.installs, this.dataDir, this.enabledEntry(entry), this.installBlock(id), this.policyOf(id));
+  }
+
+  /** The file a user descriptor was read from; undefined for a shipped or unknown provider. */
+  userFile(id: ProviderId): string | undefined {
+    const entry = this.entries.get(id);
+    return entry?.source === 'user' ? entry.file : undefined;
   }
 
   /** The launcher script on PATH that stands where this provider's program should be, if that is why it is missing. */
@@ -569,7 +598,7 @@ export function registerProviderMethods(core: Core): void {
       logDetection(first.loaded, first.rejected.length);
     } catch { /* the next list is logged */ }
   }, () => { settledOnce = true; });
-  core.router.register('providers.reload', async () => {
+  const reload = async (): Promise<ProviderLoadResult> => {
     const before = fingerprint(core.providers.list());
     core.providers.load();
     const result = await settledList();
@@ -577,7 +606,9 @@ export function registerProviderMethods(core: Core): void {
     noteListed(result);
     if (fingerprint(result) !== before) core.bus.emit('providers.updated', result);
     return result;
-  });
+  };
+  core.router.register('providers.reload', reload);
+  registerLocalCommands(core, reload);
   core.router.register('providers.install', async (params) => {
     const id = core.providers.require(params.providerId).id;
     // An install fetches the newest release, read again unless it was read in the last minute.

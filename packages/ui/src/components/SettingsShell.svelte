@@ -18,6 +18,7 @@
   import ExperimentsPage from './ExperimentsPage.svelte';
   import DiagnosticsPage from './DiagnosticsPage.svelte';
   import GeneralSettings from './GeneralSettings.svelte';
+  import PolicyBanner from './PolicyBanner.svelte';
   import MachinesPage from './MachinesPage.svelte';
   import ResourcesPage from './ResourcesPage.svelte';
   import TaskManagerLoader from './TaskManagerLoader.svelte';
@@ -29,16 +30,16 @@
   import SettingsMachineBar from './SettingsMachineBar.svelte';
   import { untrack } from 'svelte';
   import { revealSettingsCard } from '../lib/settings-flash';
+  import { desktopPage, desktopSettings, machinePage, ownerOnly } from '../lib/settings-tabs';
 
   let { store, onopenthread }: { store: Store; onopenthread?: () => void } = $props();
 
   /**
-   * The pages that change one machine take it from the bar above them; the
-   * others are this window's (appearance), the whole group's (machines) or
+   * The pages that change one machine (`machinePage`) take it from the bar
+   * above them; the others are this window's (appearance), the whole group's (machines) or
    * pick their own (usage, which also reads every machine). Experiments mixes
    * this device's switches with a machine's, so its bar sits above the latter.
    */
-  const MACHINE_TABS: SettingsTab[] = ['general', 'keyboard', 'voice', 'accounts', 'plugins', 'brain', 'limits', 'resources', 'advanced', 'diagnostics', 'experiments'];
   /** Machines this window controls, and the window's own whatever its role there. */
   let choices = $derived(workspace.machines.filter((machine) => machine.store === store || (machine.store.connection === 'ready' && machine.store.owner)));
   let picked = $state<string | null>(null);
@@ -49,9 +50,11 @@
   let chosen = $derived(choices.find((machine) => machine.id === picked)
     ?? (store.settingsTab === 'plugins' ? choices.find(isThisPC) : undefined)
     ?? choices.find((machine) => machine.store === store));
-  let target = $derived(MACHINE_TABS.includes(store.settingsTab) ? chosen?.store ?? store : store);
+  let target = $derived(machinePage(store.settingsTab) ? chosen?.store ?? store : store);
   /** The bar when there is a machine to pick or a default machine to speak of. */
-  let bar = $derived(MACHINE_TABS.includes(store.settingsTab) && chosen !== undefined && (choices.length > 1 || chosen.store.group?.settingsHome !== undefined));
+  let bar = $derived(machinePage(store.settingsTab) && chosen !== undefined && (choices.length > 1 || chosen.store.group?.settingsHome !== undefined));
+  /** The policy banner stands above the page, so the panel scrolls both on one column, as under the bar. */
+  let banner = $derived(target.policy?.present === true && target.policy.problems.length > 0);
   /**
    * A page reads the card it was asked to show off its own machine's layout:
    * on another machine than the window's, that layout follows the window's.
@@ -63,9 +66,6 @@
   });
   const narrow = new MediaQuery('(max-width: 720px)');
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
-
-  /** Providers, Plugins, Resources, Brain and Diagnostics call nothing a paired device may call. */
-  const OWNER_TABS: SettingsTab[] = ['accounts', 'plugins', 'resources', 'brain', 'diagnostics'];
 
   type Tab = SettingsTile;
 
@@ -102,7 +102,8 @@
       { id: 'secrets', label: strings.secrets.heading },
       ...(store.owner ? [{ id: 'browser-profiles', label: strings.browserProfiles.card }] : []),
       { id: 'app', label: strings.settings.app },
-      ...(store.owner ? [{ id: 'privacy', label: strings.telemetry.heading }] : [])
+      ...(store.owner ? [{ id: 'privacy', label: strings.telemetry.heading }] : []),
+      ...(target.policy?.present ? [{ id: 'policy', label: strings.policy.heading }] : [])
     ],
     appearance: [{ id: 'theme', label: strings.settings.display }, { id: 'reading', label: strings.settings.reading }, { id: 'workspace', label: strings.settings.workspace }, { id: 'buttons', label: strings.controls.heading }],
     keyboard: [
@@ -154,9 +155,9 @@
     Object.fromEntries(LONG_PAGES.map((id) => [id, children[id] ?? []]))
   );
 
-  let tabs = $derived(all.filter((tab) => store.owner || !OWNER_TABS.includes(tab.id)));
-  /** A tab this client has no nav entry for lands on Home rather than nowhere. */
-  let tab = $derived(tabs.some((entry) => entry.id === store.settingsTab) ? store.settingsTab : 'home');
+  let tabs = $derived(all.filter((tab) => store.owner || !ownerOnly(tab.id)));
+  /** A page only the owner may open lands on Home on a paired device, as it does on a phone. */
+  let tab = $derived(desktopPage(store.settingsTab, store.owner));
 
   /**
    * Single settings the search also finds, each with the card it sits on:
@@ -170,6 +171,7 @@
     ['general', 'conversations', strings.settings.shortAnswers],
     ['general', 'conversations', strings.settings.toolSummaries],
     ['general', 'conversations', strings.settings.titleModel],
+    ['general', 'conversations', strings.settings.goalTrackerModel],
     ['general', 'conversations', strings.features.chatArtifacts.title],
     ...(inShell ? [['general', 'conversations', strings.features.openChatLinks.title] as [SettingsTab, string, string]] : []),
     ['general', 'conversations', strings.features.previewComments.title],
@@ -297,7 +299,7 @@
   {#if chosen}<SettingsMachineBar machine={chosen} machines={choices} onpick={(id) => { picked = id; }} />{/if}
 {/snippet}
 
-{#if narrow.current && !inShell}
+{#if !desktopSettings(narrow.current)}
   <MobileSettings {store} {target} bar={bar ? machineBar : undefined} {onopenthread} />
 {:else}
 <div class="settings" data-testid="settings">
@@ -347,9 +349,10 @@
   <!-- The panel is keyed on the tab, so switching tabs fades the new page in
        rather than swapping it in one frame. -->
   {#key tab}
-    <section class="framed" class:with-bar={bar} onscrollcapture={spy}>
+    <section class="framed" class:with-bar={bar || banner} onscrollcapture={spy}>
       {#if bar && tab !== 'experiments'}{@render machineBar()}{/if}
       {#key target}
+      <PolicyBanner store={target} />
       {#if tab === 'home'}
         <SettingsHome {store} tiles={tabs} {entries} onopen={open} />
       {:else if tab === 'brain'}
@@ -395,12 +398,15 @@
   .framed.with-bar { scrollbar-gutter: stable both-edges; }
   .framed.with-bar > :global(.machine-bar) { padding: 24px clamp(20px, 4vw, 64px) 0; }
   .framed.with-bar > :global(.page) { height: auto; overflow: visible; padding-top: 20px; }
+  .framed > :global(.policy-banner) { margin: 24px clamp(20px, 4vw, 64px) 0; }
   @media (min-width: 721px) {
     .framed.with-bar > :global(.machine-bar) { padding-inline: max(clamp(20px, 4vw, 64px), calc((100% - var(--settings-width)) / 2)); max-width: none; }
+    .framed > :global(.policy-banner) { margin-inline: max(clamp(20px, 4vw, 64px), calc((100% - var(--settings-width)) / 2)); }
   }
   @media (max-width: 720px) {
     .framed.with-bar > :global(.machine-bar) { padding: 16px 16px 0; }
     .framed.with-bar > :global(.page) { padding-top: 16px; }
+    .framed > :global(.policy-banner) { margin: 16px 16px 0; }
   }
   .category { flex: none; }
   .rule { flex: none; height: 1px; margin: 8px 10px; background: var(--color-border); }

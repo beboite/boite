@@ -33,6 +33,7 @@ import type { ThreadStore } from '../threads.ts';
 import { compactionTail } from './background-compact.ts';
 import { nativeCommandPrompt, systemOperation } from './operations.ts';
 import { stoppedInput } from './stopped-input.ts';
+import { sessionUsage } from '../usage.ts';
 
 /**
  * The parts of a turn's prompt that building it consumes: the async answers
@@ -74,7 +75,9 @@ export class TurnContexts {
     const skills = builtinSkills(this.core.dataDir, message => { try { this.core.logs.warn(message, { source: 'skills', event: 'skills.write-failed' }); } catch { /* The guide is built without that skill. */ } });
     // Echo treats "question" as a test directive, including in injected help.
     // A persistent agent's thread has no checkout of its own: no pull request to watch, no project to add.
-    return agentGuide(provider.protocol !== 'echo' && settings.asyncQuestions !== false, logAccess, skills, !!thread.agentSessionId);
+    // `boite goal track` needs the Automatic goals experiment and a top-level thread of the user's.
+    const goalTrack = !thread.parentThreadId && !thread.agentSessionId && (this.core.clients.desktopExperiments() ?? this.core.clients.current()?.experiments ?? []).includes('auto-goal');
+    return agentGuide(provider.protocol !== 'echo' && settings.asyncQuestions !== false, logAccess, skills, !!thread.agentSessionId, goalTrack);
   }
 
   /** The guide as a session option, for a driver that puts it in the system prompt. */
@@ -101,6 +104,7 @@ export class TurnContexts {
       toolSummaries: this.core.settings.get().toolSummaries === true,
       shortAnswers: this.core.settings.get().shortAnswers !== false,
       autoCompactTokens: () => effectiveCompaction(this.core.settings.get(), this.core.journal.getThread(threadId) ?? thread).autoCompact?.tokens ?? null,
+      compactionSummary: () => effectiveCompaction(this.core.settings.get(), this.core.journal.getThread(threadId) ?? thread).compactionSummary ?? null,
       log: (level, message, context) => {
         if (context?.kind === 'provider-output') noteStderr(threadId, message);
         this.core.log(level, message, { ...context, source: provider.id, threadId });
@@ -413,6 +417,7 @@ export class TurnContexts {
       toolSummaries: this.core.settings.get().toolSummaries === true,
       shortAnswers: this.core.settings.get().shortAnswers !== false,
       autoCompactTokens: () => effectiveCompaction(this.core.settings.get(), this.core.journal.getThread(threadId) ?? thread).autoCompact?.tokens ?? null,
+      compactionSummary: () => effectiveCompaction(this.core.settings.get(), this.core.journal.getThread(threadId) ?? thread).compactionSummary ?? null,
       emit,
       reportProgress: progress,
       reportProviderEvent: () => this.threads.progress.contact(threadId, turn.id),
@@ -522,10 +527,10 @@ export class TurnContexts {
     };
   }
 
-  /** What the agent session this turn resumes already used (`Journal.sessionUsage`). */
+  /** What the agent session this turn resumes already used (`usage.ts` `sessionUsage`). */
   private sessionBefore(thread: ThreadSummary, turnId: TurnId): { costUsd: number; tokens: number } {
     if (thread.sessionId === null) return { costUsd: 0, tokens: 0 };
-    return this.core.journal.sessionUsage(thread.id, thread.sessionGeneration ?? 0, turnId);
+    return sessionUsage(this.core, thread.id, thread.sessionGeneration ?? 0, turnId);
   }
 
   /**
@@ -566,7 +571,8 @@ export class TurnContexts {
       const note = moved?.type === 'text' ? moved.moved?.note ?? '' : '';
       const sent = message.role === 'user' ? message.parts.find((part) => part.type === 'text' && part.sentFrom !== undefined) : undefined;
       return {
-        prompt: note + message.parts.map((part) => part.type === 'text' ? part.activity ? activityPrompt(part.activity.kind, part.text, part.activity.iteration, part.activity.review, part.activity.checklist) : part.text : '').join(''),
+        // The user's turn an automatic goal adopted carries the goal's rules, its message left as typed.
+        prompt: note + message.parts.map((part) => part.type === 'text' ? part.activity ? activityPrompt(part.activity.kind, part.text, part.activity.iteration, part.activity.review, part.activity.checklist) : message.role === 'user' && this.core.activity.autoGoalTurn(turnId) ? activityPrompt('goal', `/goal2 ${part.text}`, 1) : part.text : '').join(''),
         attachments,
         ...(note ? { moved: true as const } : {}),
         ...(sent?.type === 'text' && sent.sentFrom ? { sentFrom: { from: sent.sentFrom, messageId: message.id } } : {}),

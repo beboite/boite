@@ -35,11 +35,13 @@ export interface TestCoreOptions {
   dataDir?: string;
   /** The secret vault; a memory vault by default, so no test reaches the system's. */
   secretVault?: CoreOptions['secretVault'];
+  /** The admin policy file; a missing file inside the data directory by default, so the machine's never applies. */
+  policyFile?: string;
 }
 
 const HOST_AGENT_OPT_INS = [
   'BOITE_E2E_CLAUDE', 'BOITE_E2E_CODEX', 'BOITE_E2E_GROK', 'BOITE_E2E_GROK_QUOTA', 'BOITE_E2E_GROK_PROXY',
-  'BOITE_E2E_OPENCODE', 'BOITE_E2E_OPENCODE2', 'BOITE_E2E_PI', 'BOITE_E2E_ANTIGRAVITY',
+  'BOITE_E2E_OPENCODE', 'BOITE_E2E_OPENCODE2', 'BOITE_E2E_PI', 'BOITE_E2E_HERMES', 'BOITE_E2E_ANTIGRAVITY',
   'BOITE_E2E_ANTIGRAVITY_INSTALL', 'BOITE_E2E_INSTALLS', 'BOITE_E2E_PLUGIN_INSTALL',
   'BOITE_BENCH_CLAUDE', 'BOITE_BENCH_HOST_AGENTS',
 ];
@@ -87,7 +89,7 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
   process.env.BOITE_TERMINAL_SHELL = process.platform === 'win32' ? (process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe') : '/bin/sh';
 
   const token = newToken();
-  const core = new Core({ dataDir, token, onShutdown: options.onShutdown, bundleHash: options.bundleHash, serverUpdates: options.serverUpdates, retentionPassMs: options.retentionPassMs, pullRequestWatches: options.pullRequestWatches, secretVault: options.secretVault ?? (() => Promise.resolve(new MemoryVault())) });
+  const core = new Core({ dataDir, token, onShutdown: options.onShutdown, bundleHash: options.bundleHash, serverUpdates: options.serverUpdates, retentionPassMs: options.retentionPassMs, pullRequestWatches: options.pullRequestWatches, secretVault: options.secretVault ?? (() => Promise.resolve(new MemoryVault())), policyFile: options.policyFile ?? join(dataDir, 'no-policy.json') });
   // The scripted agents echo their prompt, and the line that teaches `boite ask`
   // would ride along in every reply: a test that wants it turns it back on.
   core.settings.set({ asyncQuestions: false, shortAnswers: false, ...options.settings });
@@ -162,6 +164,23 @@ export async function echoThread(
 
 /** How many test cores have stopped. A wait that outlives a stop was abandoned by its test. */
 let stops = 0;
+
+/**
+ * Archives the thread through a write that fails after the thread row is
+ * saved, so the whole transaction rolls back. Returns the error it threw;
+ * any other failure, an early refusal included, is thrown on.
+ */
+export function rolledBackArchive(harness: TestCore, threadId: string): unknown {
+  const announce = harness.core.projects.announce;
+  harness.core.projects.announce = () => { throw new Error('injected failure after the thread was written'); };
+  try { harness.core.threads.archive(threadId, true); }
+  catch (error) {
+    if (!(error instanceof Error) || !error.message.includes('injected failure')) throw error;
+    return error;
+  }
+  finally { harness.core.projects.announce = announce; }
+  throw new Error('the archive did not fail');
+}
 
 /**
  * Polls until `predicate` holds. A predicate that throws rejects the wait. A wait

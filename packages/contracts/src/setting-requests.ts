@@ -15,7 +15,7 @@ import type { QuestionAnswer, QuestionOption, Settings, ThreadId } from './index
  * The experiments this build ships, in the order Settings lists them. Each
  * device turns them on for itself (`packages/ui/src/lib/experiments.ts`).
  */
-export const EXPERIMENT_IDS = ['theme-grain', 'session-import', 'prompt-cache', 'resident-agents', 'whip', 'recording-indicators', 'goal2', 'contacts', 'pinned-quotas'] as const;
+export const EXPERIMENT_IDS = ['theme-grain', 'session-import', 'prompt-cache', 'resident-agents', 'whip', 'recording-indicators', 'contacts', 'pinned-quotas', 'auto-goal'] as const;
 export type ExperimentId = (typeof EXPERIMENT_IDS)[number];
 
 export function isExperimentId(id: unknown): id is ExperimentId {
@@ -127,6 +127,7 @@ export const REQUESTABLE_SETTINGS = {
   warmProcessMinutes: { page: 'advanced', section: 'execution', sensitive: false },
   autoCompact: { page: 'advanced', section: 'auto-compact', sensitive: false },
   compactionByType: { page: 'advanced', section: 'auto-compact', sensitive: false },
+  compactionSummary: { page: 'advanced', section: 'auto-compact', sensitive: false },
   autoResumeLimitedThreads: { page: 'limits', section: 'limit-resume', sensitive: false },
   backgroundCompaction: { page: 'experiments', section: 'background-compaction', sensitive: false },
   deviceStream: { page: 'experiments', section: 'device-stream', sensitive: false },
@@ -256,6 +257,7 @@ const MISSING: Partial<Record<RequestableSetting, unknown>> = {
   titleModel: null,
   autoCompact: null,
   compactionByType: {},
+  compactionSummary: null,
   publicUrl: null,
   browserOrigins: [],
 };

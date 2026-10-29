@@ -23,13 +23,18 @@ export interface AgentRuntimeConfig {
    * turn never waits for it. On unless the owner turns it off.
    */
   autoMemory?: boolean;
-  /** Project and desk facts wake this bot automatically. Default true; false keeps them for its next routine. */
+  /**
+   * Every project and desk fact wakes this bot. Default false: then only facts
+   * about threads it started, was entrusted or watches (`boite bot watch`), and
+   * outside events (`agents.event`), wake it; the rest wait for its next routine.
+   */
   eventWakes?: boolean;
   /**
-   * What the agent's own turns may spend in a day (API-equivalent dollars, the
-   * core's `costUsdEquivalent`), counted from local midnight. Past it, wakes are
-   * skipped with a line in its thread; the user's own messages still run. Null
-   * or missing: no cap.
+   * What the agent may spend in a day in API-equivalent dollars, counted from
+   * local midnight: its turns and its children's (subagents, workflow steps,
+   * memory pass), priced from usage the way `usage.history` prices them. Past
+   * it, wakes are skipped with a line in its thread; its children and the
+   * user's own messages still run. Null or missing: no cap.
    */
   dailyBudgetUsd?: number | null;
 }
@@ -126,16 +131,18 @@ export interface AgentWatchPullRequest {
   checks: 'pending' | 'passing' | 'failing' | null;
 }
 /**
- * A thread on an agent's desk: one it started, one entrusted to it, or one it
- * wrote to or answered for. It stays while the thread is open and leaves a day
- * after the thread is done or archived, or when the agent or the owner drops it.
+ * A thread on an agent's desk: one it started, one entrusted to it, one it or
+ * the owner watches (`followed`), or one it only wrote to or answered for
+ * (`touched`, upgraded to `followed` by a watch). It stays while the thread is
+ * open and leaves a day after the thread is done or archived, or when the
+ * agent or the owner drops it.
  */
 export interface AgentWatch {
   agentId: string;
   threadId: string;
   title: string;
   projectId: string | null;
-  origin: 'started' | 'entrusted' | 'followed';
+  origin: 'started' | 'entrusted' | 'followed' | 'touched';
   since: number;
   /** Read from the thread itself, never from what the agent said. */
   state: 'working' | 'queued' | 'needs-you' | 'failed' | 'idle' | 'done' | 'archived';
@@ -169,7 +176,11 @@ export interface AgentStatus {
   unread: number;
   /** The last answer it gave the user (not a quiet one), for its row. */
   last: { text: string; at: number } | null;
-  /** Its own turns since local midnight. */
+  /**
+   * Its own turns since local midnight. `costUsd` is what its daily budget
+   * counts: priced from usage the way `usage.history` prices it, its
+   * subagents, workflow steps and memory pass included.
+   */
   today: { turns: number; wakes: number; quiet: number; costUsd: number };
   /**
    * Its last memory pass: `threadId` is the core's own child conversation that
@@ -242,6 +253,14 @@ export interface AgentsRpcMethods {
   'agents.routine.remove': { params: { routineId: string; threadId?: string }; result: { removed: true } };
   /** Runs a routine now, as a turn on the agent's thread. Refused while that thread has a turn in flight. */
   'agents.routine.run': { params: { routineId: string; requestId: string }; result: { turnId: string } };
+  /**
+   * An event from outside Boite (a CI job, a script) for a bot, named by id or
+   * name: an urgent fact keyed `external:<key>` (default `external`), which a
+   * second event with the same key replaces while it waits. `text` reaches the
+   * bot quoted as data, with the caller named. The owner or a paired device,
+   * never an agent token.
+   */
+  'agents.event': { params: { agent: string; key?: string; text: string }; result: { agentId: string; key: string } };
   /** Puts a thread on the agent's desk or takes it off. From the agent's thread or the owner. */
   'agents.watch': { params: { threadId?: string; agentId?: string; watchThreadId: string; watched: boolean; machine?: string }; result: AgentWatch | null };
   'agents.limits.set': { params: AgentsSnapshot['limits']; result: AgentsSnapshot['limits'] };

@@ -22,7 +22,7 @@ type ListedSkill = { name: string; description: string; path: string };
  * here may wake the delegation guide (delegation.ts).
  */
 export const OWN_SETTINGS = 'Your settings are the user\'s, and keeping them right is part of your job: `boite settings bot` lists them. When one no longer fits, propose the change yourself with '
-  + '`boite settings bot request <key> <value> --why <reason>`, and `--bot <name>` for another bot\'s: the user\'s words contradict your instructions or role, most of your wakes end in [quiet] (`eventWakes false`), '
+  + '`boite settings bot request <key> <value> --why <reason>`, and `--bot <name>` for another bot\'s: the user\'s words contradict your instructions or role, most of your wakes end in [quiet] (`eventWakes false`), you miss project news your role needs (`eventWakes true`), '
   + 'your model or effort costs more than your work needs or falls short of it, you lack a project, or the user asks for such a change. '
   + 'Put the evidence in the reason. Never work around a setting in your memory, your routines or the brain. The user applies the card and the outcome comes back as a message.';
 
@@ -36,10 +36,10 @@ export const BOT_GUIDE = [
   'You are a bot: a persistent agent of the user\'s, with your own name, memory and routines, who works on its own and tells them what matters.',
   '- You are a colleague the user talks to, in their language. Short plain answers, result first. Show proof as files you attach (`boite attach <file>`) and links, never pasted logs, diffs or tool output.',
   '- Orchestrate project work in visible project threads: delegate research, implementation and tests with `boite delegate spawn "<brief>" --project <project>`, or start independent work with `boite thread new <project> <brief>`. Steer threads with `boite thread send <id> <text>` and inspect their results. Answer their questions within your rules with `boite answer <id> <ask-id> <option-or-text>`; never repeat a thread\'s ask to the user.',
-  '- You wake on `routine` and `event` turns: a routine came due, or something happened on your desk or in your projects. End a wake that needs nothing from the user with a line `[quiet] <what you checked, a few words>`.',
+  '- You wake on `routine` and `event` turns: a routine came due, a thread you started, were entrusted or watch moved, an outside event came in, or, with `eventWakes` on, anything else in your projects; the rest waits for your next routine. End a wake that needs nothing from the user with a line `[quiet] <what you checked, a few words>`.',
   '- Keep your routines matching your instructions: `boite bot routines`, `boite bot schedule <json>` (name, prompt, schedule), `boite bot unschedule <routine-id>`.',
   '- MEMORY.md is your map: where things are (paths, URLs, threads, accounts) and durable facts. Keep details in their files and note where they are. Note a fact with `boite bot remember <fact>`; MEMORY.md is also kept up to date after each answer. `boite bot memory` reads it.',
-  '- Put a thread on or off your desk with `boite bot watch|unwatch <thread-id>`; `boite threads` lists your projects\' threads and your desk.',
+  '- Put a thread on or off your desk with `boite bot watch|unwatch <thread-id>`: a watched thread wakes you, one you only wrote to waits for your routines; `boite threads` lists your projects\' threads and your desk.',
   '- Ask the user with `boite ask`; for a login, `--open <url>` opens the page beside your conversation.',
   `- ${OWN_SETTINGS}`,
 ].join('\n');
@@ -49,7 +49,7 @@ export const BOT_GUIDE = [
  * `bot`: a bot's thread, which has no checkout or project of its own: the
  * project-bound commands go and the bot section comes last.
  */
-export function agentGuide(asyncQuestions: boolean, logAccess = false, skills: readonly ListedSkill[] = [], bot = false): string {
+export function agentGuide(asyncQuestions: boolean, logAccess = false, skills: readonly ListedSkill[] = [], bot = false, goalTrack = false): string {
   const report = skills.find(skill => skill.name === REPORT_ISSUE_SKILL.name);
   const others = skills.filter(skill => skill !== report);
   const pullRequests = 'Link each PR: `boite pr link <url>`, then `boite pr watch`: it wakes you on CI, reviews and conflicts, so do not poll.';
@@ -69,6 +69,8 @@ export function agentGuide(asyncQuestions: boolean, logAccess = false, skills: r
     bot
       ? 'Task tracking is optional. Use it only when steps help you and the user. `boite task add <text>` / `boite task start|done <id>` track those steps.'
       : 'Task tracking is optional. Use it only when steps help you and the user. `boite task add <text>` / `boite task start|done <id>` track those steps. `boite todo list|add <text>|claim <id>` manages project todos; claim marks work done for user confirmation.',
+    // Only while the user has Automatic goals on (`docs/goals.md`).
+    ...(goalTrack ? ["When the user's prompt lists several distinct requests, run `boite goal track` first: it turns that prompt into a reviewed goal with a checklist."] : []),
     bot
       ? '`boite projects` lists projects. `boite thread new <project> <brief>` starts independent work in any of them, not a subagent; it lands on your desk, its answers come back as events and you drive it like the threads of your projects.'
       : '`boite projects` lists projects; `boite projects add <folder>` adds one. `boite thread new <project> <brief>` starts independent work in a project, not a subagent; its first answer comes back.',

@@ -4,8 +4,8 @@
   import type GoalChecklist from './GoalChecklist.svelte';
 
   /**
-   * Only a `/goal2` has a checklist, and only behind an experiment: the list
-   * loads the first time one is opened, outside the entry chunk. A chunk that
+   * Only a `/goal2` has a checklist: the list loads the first time one is
+   * opened, outside the entry chunk. A chunk that
    * fails to load (an update, a phone offline) offers another try.
    */
   let props: ComponentProps<typeof GoalChecklist> = $props();

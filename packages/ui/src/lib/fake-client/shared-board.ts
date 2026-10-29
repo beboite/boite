@@ -113,7 +113,7 @@ export async function applySharedBoard(ctx:FakeContext,p:import('@boite/contract
 }
 export function sharedBoardMethods(ctx:FakeContext){
   // Read the worker's current activity, never foreign RPC progress fields.
-  ctx.bus.on('thread.activity', ({threadId}) => {
+  ctx.bus.observe('thread.activity', ({threadId}) => {
     const thread=ctx.threads.get(threadId);
     for(const shared of sharedState(ctx).projects.values()) {
       if(shared.state!=='active'||!shared.access.every(a=>a.board))continue;

@@ -27,11 +27,14 @@ with mode `0600`; the owner requests a phone link through Settings or
 `pairing.grant`. Stop the scratch core before removing its directory.
 
 One core holds `<dataDir>/core.lock`. Another refuses to start on the same data.
-A dead holder can be replaced. Linux compares the holder's start key (boot id
-and start ticks) with the one in the lock, so a stepped wall clock never frees
-it; Windows compares process start time to reject a reused PID more than two
-seconds newer than the lock; macOS retains a lock while its recorded PID is
-alive.
+The operating system holds the lock (`flock` on Linux and macOS, `LockFileEx`
+on Windows, `packages/core/src/platform/`) and drops it when its holder dies,
+so a dead holder never blocks a start and two starts never both get in. The
+file's record (PID, start time, Linux start key, `osLock`) names the holder in
+the refusal only. A record without `osLock` comes from a core older than the
+OS lock: Linux compares its start key (boot id and start ticks), Windows
+rejects a reused PID more than two seconds newer than the record, and macOS
+retains it while its PID is alive.
 
 | Option | Meaning |
 | --- | --- |
@@ -77,6 +80,7 @@ client. Development fixtures spend no provider tokens:
 | `?fake=1&rtt=200` | Every call waits a 200 ms round trip, half each way; pushed events are not delayed |
 | `?fake=1&open=recent` | Opens the latest thread instead of a new draft |
 | `?fake=1&uninstalled=1` | No connected provider |
+| `?fake=1&policy=managed` | An admin policy that locks every key a control shows; `broken` adds problems, `closed` fails closed ([enterprise](enterprise.md)) |
 
 Production bundles exclude the fake client and Svelte development runtime.
 Vite removes an orphan fake-client chunk and rejects shipped references to it.
@@ -424,13 +428,14 @@ merged, non-fork PR from the same repository with the exact branch tip. The
 proof takes the checkout's current branch from `git status`, not the thread's
 recorded starting branch. The repository's cached fetch remotes identify origin,
 then explicitly linked URLs are read directly with `gh pr view`, even when they
-are absent from the repository list. Every linked PR is checked before accepting
+are absent from the repository's page. Every linked PR is checked before accepting
 a merge: another open linked PR keeps the conversation visible. A linked merge
 needs the exact tip but may have another head name, because agents often push
 `HEAD:fix/...`.
 
-Without a linked proof, the repository's newest 200 PRs are shared with sidebar
-discovery. Its branch needs exactly one local PR; unrelated fork branches do not
+Without a linked proof, the repository's page, its 100 PRs updated last, is
+shared with sidebar discovery; only that read counts as evidence, never what
+earlier pages taught. Its branch needs exactly one local PR; unrelated fork branches do not
 count. A full page requires a branch-specific query and a complete result before
 archiving. `git status` runs only when a merged PR could match. A negative proof
 retries after one minute even when the thread has not changed, so an external
@@ -639,7 +644,10 @@ live in `fake-client.parity.test.ts`. A fake path below a directory named
    domain is a file there, an `export *` and one line in each `extends`.
    A branch cut before the split, still editing the single `index.ts`, runs
    `bun scripts/migrate/split-contracts.ts` once `git merge origin/main`
-   stops: it replays its edits onto the domain files.
+   stops: it replays its edits onto the domain files. A rule for its params
+   in `RPC_PARAMS` (`packages/contracts/src/rpc-params.ts`) runs in the router
+   and the in-memory client before either handler, and refuses a bad field
+   with `InvalidParams` and `{ field }`; `settings.set` has one so far.
 2. Register the core handler in the domain's `register*Methods` function.
    For `threads.*`, use `registerThreadMethods` in
    `packages/core/src/threads/rpc.ts`, called by `packages/core/src/modules.ts`.
@@ -650,9 +658,9 @@ live in `fake-client.parity.test.ts`. A fake path below a directory named
    assembled in `fake-client.ts`; agent, plugin and workflow classes handle
    their own methods. A missing map entry fails `bun run check`.
    `packages/ui/src/lib/client.ts` already has a generic `call` method.
-4. Keep owner-only methods out of `DEVICE_METHODS` in
-   `packages/contracts/src/access.ts` and `AGENT_METHODS` in
-   `packages/core/src/access.ts`. Document the reason beside any permission.
+4. Keep owner-only methods out of `DEVICE_METHODS` and `AGENT_METHODS` in
+   `packages/contracts/src/access.ts`; the core and the in-memory client apply
+   the same `accessRefusal`. Document the reason beside any permission.
 5. Test the result and access boundary with a temporary core. Follow
    `packages/core/test/thread-remove.test.ts` for a paired-device refusal.
    The test client in `packages/core/src/client.ts` exposes `error.rpc.code`;
@@ -895,18 +903,30 @@ quoting a performance figure and include its command and date.
 
 ## Architecture checks
 
-`bun run check` includes `bun run check:architecture`; the latter uses Bun's
-parser without workspace dependencies. `bun test scripts/architecture` covers
-cycle detection, resolution, boundaries and source sizes. Runtime-import scope
+`bun run check` includes `bun run check:architecture`; it reads imports with
+Bun's transpiler and the `<script>` blocks of Svelte components with the UI's
+own `svelte/compiler`, so a component's imports are edges of the graph and a
+cycle through a component fails. `bun test scripts/architecture` covers
+cycle detection, resolution, boundaries and source sizes. The roots it reads
+are `ROOTS` in `scripts/architecture/inventory.ts`; a missing root fails rather
+than narrowing the check. Runtime-import scope
 and exclusions are documented in
 [architecture](architecture.md#module-boundaries-and-complexity).
 
-Production TypeScript, JavaScript and Svelte files have a 900-line ceiling.
-Existing exceptions in `scripts/architecture/size-budget.json` may shrink.
+Production TypeScript, JavaScript, Svelte, Rust, Kotlin and Java files have a
+900-line ceiling; tests, declarations and a Rust module's `tests.rs` do not
+count. Two files above it have an allowance in
+`scripts/architecture/size-budget.json` that may only shrink:
+
+- `apps/android-server/termux/boite-server.ts`: the Termux controller ships as
+  one file, which `install.sh` fetches alone and an update copies alone. It
+  splits once the bootstrap carries a directory.
+- `apps/shell/src-tauri/src/browser.rs`: the shell's browser surfaces, above
+  the ceiling before Rust entered the check.
+
 `--write-size-budget` lowers or removes allowances; it never raises them.
 `--rebaseline-size-budget` can raise them for a reviewed integration of branches
-written before the limits existed. Exempt contract, client and string tables
-have an explicit reason in that file.
+written before the limits existed. Nothing is exempt.
 
 `bun run audit:complexity --json` produces an advisory comparison for TypeScript,
 JavaScript and Svelte scripts, excluding Rust. A high score requires review of
@@ -1085,7 +1105,7 @@ zoom; plain browsers keep their native shortcut behavior.
 
 ### File attachments
 
-Desktop and paired devices can pick, paste or drop files. A turn accepts twenty
+Desktop and paired devices can pick, paste or drop files. A turn accepts fifty
 attachments, at most 5 MB each and 10 MB together. On a core advertising
 `features.attachmentUploads`, selected files upload before Send through
 `attachments.upload`. Finished uploads replace the corresponding
@@ -1113,6 +1133,46 @@ browser decodes them (Safari does); elsewhere they travel as a plain file. A
 source over 50 MB is refused before decoding, since a phone's canvas would not
 hold it. So twenty iPhone screenshots, 2 to 4 MB each as PNG, fit one turn at
 around 400 KB each.
+
+Fifty of them weigh about 26 MB prepared, and the 10 MB total cannot grow: the
+user message travels in one `turns.start` frame and stays inline in the
+journal, and Claude refuses a request body over 32 MB, history included. So
+the composer fits the turn instead of refusing it (`lib/turn-fit.ts`). While
+the turn is under budget nothing moves. Past it, the budget is shared out: an
+image lighter than its share stays as it is, and each heavier one is encoded
+again from the copy it arrived with, at the least loss that fits its share,
+down a ladder of JPEG quality (0.75 to 0.35) and long edge (2000 to 1280 px).
+It never goes under 1280 px, where a screenshot's text stops being readable;
+past that floor the files that still do not fit are refused, by name, with the
+usual total message. A GIF keeps its frames, a transparent picture tries PNG
+first, and files count at their weight. Every way in goes through it: the
+paperclip, pasted and dropped files and a question's answer files, pictures
+pasted from another composer, and queued prompts taken back into the box. A
+message brought back for editing or after a failed retry already fitted one
+turn. Measured on 2026-10-28 with Bun's encoders
+(`packages/ui/src/lib/turn-fit.test.ts`): 50 generated screenshots, 1170x2532
+and 2560x1440 PNGs of 3.0 to 4.9 MB, went in as one 9.0 MB turn of 154 to
+204 KB JPEGs, 1440 to 1600 px on their long edge.
+
+None of this holds the box. A pasted, dropped or picked file shows at once as
+a loading tile, a picture with its `[Image N]` at the caret, and the box keeps
+taking keys while the file is read (`receiveFiles`, `lib/composer-attachments.ts`).
+The reduction runs in a worker (`lib/image-prepare.worker.ts`, `OffscreenCanvas`)
+and falls back to the page where a browser has neither. Files of one composer
+settle in the order they came, each into its placeholder's place, its undo
+steps included. Files settle as they are read while the turn stays under its
+total; from the first that passes it, that file and the rest of its batch stay
+loading until the turn is fitted once with them, and the pictures already in
+take their lighter copies under the same tiles, in their undo steps too. A
+placeholder is never saved, synced or uploaded; when a sync conflict moves the
+words to a new draft, the file lands in that draft instead (`followRead`,
+`lib/draft-attachments.ts`). Send pressed meanwhile waits on a spinner and goes
+once every file is ready, in the box it was pressed in; typing on, or a sync
+that swaps the box, cancels it. Send pressed while pictures pasted from
+another composer are fitted waits for that fit too (`readyToSend`). A refused
+file drops its tile and its reference, in the box and in its undo steps, and
+says why. A file past the fifty, from the same drop or a later one, waits for
+one of them to be refused, and is refused itself only once they are all read.
 
 The Claude driver fits every prompt image to the same edge again before it
 goes in (`drivers/claude/images.ts`, Bun's image codec, same format), because

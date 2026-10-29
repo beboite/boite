@@ -20,8 +20,12 @@ export const strings = {
     goalDescription: 'Keep working toward an objective',
     loopDescription: 'Repeat a task a set number of times or on a schedule',
     goalUsage: 'Use /goal followed by an objective.',
-    /** `/goal2`, the Reviewed goals experiment: a fresh reviewer must pass the work. */
+    /** `/goal2`, a reviewed goal: a fresh reviewer must pass the work. */
     goal2: 'Reviewed goal',
+    /** A reviewed goal the core started on a long prompt (the `auto-goal` experiment). */
+    autoGoal: 'Automatic goal',
+    /** Its label on a phone, where "Automatic goal" would leave no room for the objective. */
+    autoGoalShort: 'Auto',
     goal2Description: 'Work toward an objective until a fresh reviewer passes it',
     goal2Usage: 'Use /goal2 followed by an objective.',
     /** The goal's agent claimed completion and a reviewer conversation is checking it. */

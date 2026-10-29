@@ -1,10 +1,15 @@
+import { ATTACHMENTS_TOTAL_MAX_BYTES } from '@boite/contracts';
 import type { ComposerState } from './composer-queue';
 import type { Store } from './store.svelte';
 import { editComposerInput } from './composer-images';
 import { recordEdit, redoStep, settled, undoStep, type ComposerSnapshot } from './composer-history';
 import { copiedFrom, copyImages, fitCopy, pastesAsText } from './composer-clipboard';
-import { acceptAttachments } from './attachments';
+import { acceptAttachments, attachedBytes } from './attachments';
+import { bytes } from './format';
+import { fitHeld } from './turn-fit';
 import { fill, strings } from './strings';
+import { touchScreen } from './device';
+import { undo } from './undo.svelte';
 
 /**
  * The composer's own edits: undo and redo from its history, and the copy, cut
@@ -20,6 +25,8 @@ export interface EditingHost {
   /** Where pasted pictures go; null for an answer, whose files reach the agent as paths whatever it reads. */
   provider: { name: string; capabilities: { images: boolean } } | null;
   moved: (caret: number) => void;
+  /** The key the box shows now, when it can move to another one while a toast waits. */
+  shown?: () => string;
 }
 
 /** The box's own selection, or nothing before it exists. */
@@ -38,10 +45,45 @@ export function travel(host: EditingHost, back: boolean): void {
   if (step) restoreStep(host, step);
 }
 
+/** Less than this gone, and no picture: a box cleared on a phone is no loss worth a toast. */
+const WORTH_UNDO_CHARS = 40;
+let offered: { id: number; key: string; state: ComposerState } | null = null;
+
+/**
+ * A phone has no Ctrl+Z: a draft emptied in one go, or replaced by Edit,
+ * offers its way back in the undo toast for a few seconds, the step Ctrl+Z
+ * would take. Typing, a file going in or the box moving to another
+ * conversation closes the offer (`closeDraftUndo`), and a box whose text or
+ * files changed since, or that shows another key, is left alone, so the toast
+ * never takes back another step or rewrites a draft off screen.
+ */
+export function offerDraftUndo(host: EditingHost, before: { text: string; attachments: number }, message: string): void {
+  if (!touchScreen() || (before.text.trim().length < WORTH_UNDO_CHARS && before.attachments === 0)) return;
+  const { store, key, state } = host, after = state.text, files = [...state.attachments];
+  const untouched = () => state.text === after && state.attachments.length === files.length && state.attachments.every((file, at) => file === files[at]);
+  undo.offer(message, async () => {
+    const mine = offered?.key === key;
+    offered = null;
+    if (mine && (host.shown?.() ?? key) === key && store.composerStates[key] === state && untouched()) travel(host, true);
+  });
+  offered = { id: undo.current?.id ?? 0, key, state };
+}
+
+/**
+ * The composer's undo offer ends with the next edit; given a key, only that
+ * key's offer ends, as its box leaves it, and given a draft, only that draft's.
+ */
+export function closeDraftUndo(key?: string, state?: ComposerState): void {
+  if (!offered || (key !== undefined && offered.key !== key) || (state !== undefined && offered.state !== state)) return;
+  if (undo.current?.id === offered.id) undo.dismiss();
+  offered = null;
+}
+
 /** Text, pictures, page references and selection exactly as the step held them. */
 function restoreStep({ store, key, box, state, moved }: EditingHost, step: ComposerSnapshot): void {
   state.attachments = [...step.attachments];
   state.previewReferences = [...step.previewReferences];
+  state.editing = step.editing;
   // Persists the draft at once; the references it would re-derive are the step's own.
   store.editComposerText(key, step.text);
   state.previewReferences = [...step.previewReferences];
@@ -73,8 +115,11 @@ export function copySelection(host: EditingHost, event: ClipboardEvent, cut: boo
   if (!copyImages(event.clipboardData, state, start, end)) return;
   event.preventDefault();
   if (!cut) return;
+  const before = { text: state.text, attachments: state.attachments.length };
+  closeDraftUndo();
   recordEdit(state, 'big', { start, end });
   writeEdit(host, state.text.slice(0, start) + state.text.slice(end), { start, end }, start);
+  if (!state.text && !state.attachments.length) offerDraftUndo(host, before, strings.composer.draftCleared);
 }
 
 /**
@@ -87,6 +132,7 @@ export function pasteImages(host: EditingHost, event: ClipboardEvent): boolean {
   const copied = copiedFrom(event.clipboardData);
   if (!copied || !box || pastesAsText(copied, state)) return false;
   event.preventDefault();
+  closeDraftUndo();
   const start = box.selectionStart, end = box.selectionEnd;
   const fitted = fitCopy(copied, state.attachments, (incoming) => {
     if (incoming.length === 0) return [];
@@ -94,7 +140,7 @@ export function pasteImages(host: EditingHost, event: ClipboardEvent): boolean {
       store.error = fill(strings.composer.attachNoImages, { provider: provider.name });
       return [];
     }
-    const result = acceptAttachments(state.attachments, incoming);
+    const result = acceptAttachments(state.attachments, incoming, { fit: true });
     if (result.refused !== null) store.error = result.refused;
     return incoming.filter((item) => result.accepted.includes(item));
   });
@@ -103,5 +149,11 @@ export function pasteImages(host: EditingHost, event: ClipboardEvent): boolean {
   recordEdit(state, 'big', { start, end });
   state.attachments = fitted.attachments;
   writeEdit(host, state.text.slice(0, start) + fitted.text + state.text.slice(end), { start, end }, start + fitted.text.length);
+  // Past the byte total, the pictures give way (`lib/turn-fit.ts`); the floor says when they cannot.
+  if (attachedBytes(state.attachments) > ATTACHMENTS_TOTAL_MAX_BYTES) {
+    void fitHeld(state).then((fits) => {
+      if (!fits) store.error = fill(strings.composer.attachTotalOver, { max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) });
+    });
+  }
   return true;
 }

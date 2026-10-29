@@ -12,7 +12,8 @@ const attachment = z.object({ kind: z.enum(['image', 'file']), mimeType: z.strin
 const references = z.array(z.unknown()).optional();
 const queued = z.object({
   id: z.string().min(1), text: z.string(), attachments: z.array(attachment), previewReferences: references,
-  afterBoundary: z.string().optional(), choice: choice.optional(), experiments: z.array(z.enum(EXPERIMENT_IDS)).optional(),
+  // An id this build no longer ships (`goal2`, now always on) is dropped, not refused: an older app or a stored queue still names it.
+  afterBoundary: z.string().optional(), choice: choice.optional(), experiments: z.array(z.string()).transform(ids => EXPERIMENT_IDS.filter(id => ids.includes(id))).optional(),
   sentFrom: z.object({ client: z.enum(['shell', 'pwa']), device: z.string().nullable(), language: z.enum(APP_LANGUAGES).optional() }).nullable().optional(),
   request: z.object({ id: z.string().min(1), choice: choice.nullable(), queuedAt: z.number().finite(), failed: z.string().optional(), sent: z.literal(true).optional(),
     start: z.object({ projectId: z.string().min(1), worktree: z.boolean(), incognito: z.boolean() }).optional() }).optional(),

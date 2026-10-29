@@ -81,6 +81,11 @@ Wi-Fi and Tailscale addresses both answer; `tailscale` on the tailnet address
 alone, waiting until the phone joins it; `local` on this phone only. A change
 to `host` or `port` applies on the next start.
 
+While the Tailscale app is connected, the core finds the tailnet address on
+the `tun` interface the app opens. Unless `host` is `local`, the group's roster
+then gives the phone's MagicDNS name and tailnet address before the Wi-Fi one,
+so the other machines still reach the phone away from that Wi-Fi.
+
 `name` is what the other machines of a group and every client call the phone.
 Android gives every app the host name `localhost`, and the name set in the
 phone's own settings is out of Termux's reach, so without one the core goes by
@@ -103,8 +108,15 @@ trusts.
 `update` picks the newest GitHub release of its channel whose `latest.json`
 carries that target, checks the Minisign signature against the same public
 key and unpacks it beside the running release, which keeps serving meanwhile.
-It then stops the core, switches `current` and starts it again; a new core
-that never answers puts the previous release back. Until a stable release carries
+Before it stops the core it reads what `current`, `bin/bun` and the controller
+point at and writes the `boite` command. It then stops the core, moves the
+release into place, switches the three and starts it again. When a step fails
+or the new core never answers, every one goes back to its exact previous
+target, the replaced copy of a reinstalled version included, and the previous
+core starts again. A core counts as answering only when `/health` reports the
+PID the supervisor launched and the version of the release it runs: another
+Boite on the same port is not mistaken for it, in `start`, `status` or an
+update. Until a stable release carries
 the target, the stable channel answers that none does and names the nightly
 one.
 

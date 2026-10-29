@@ -3,7 +3,7 @@
   import CompactionSettings from './CompactionSettings.svelte';
   import CacheKeepaliveSettings from './CacheKeepaliveSettings.svelte';
   import DeviceStreamSettings from './DeviceStreamSettings.svelte';
-  import GoalTrackerSetting from './GoalTrackerSetting.svelte';
+  import AutoGoalSetting from './AutoGoalSetting.svelte';
   import { untrack, type Snippet } from 'svelte';
   import { EXPERIMENT_IDS, canFollowDesktop, desktopExperiments, followsDesktop, readExperiments, setExperiment, setFollowDesktop, subscribeExperiments, type ExperimentId } from '../lib/experiments';
   import { experimentCopy } from '../lib/experiment-copy';
@@ -11,7 +11,7 @@
   import type { Store } from '../lib/store.svelte';
 
   /**
-   * The switches of this device, with the checklist model of `store`, this
+   * The switches of this device, with the Automatic goals threshold of `store`, this
    * window's machine; then the experiments of `target`, the machine `bar` picks.
    */
   let { store, target = store, bar }: { store?: Store; target?: Store; bar?: Snippet } = $props();
@@ -69,10 +69,8 @@
           onchange={(event) => toggle(id, event.currentTarget.checked)}
         />
       </label>
-      <!-- Only the owner sets the machine's checklist model: a paired device's save would be refused. -->
-      {#if id === 'goal2' && enabled.includes(id) && store?.settings && store.owner}
-        <GoalTrackerSetting {store} />
-      {/if}
+      <!-- Its threshold is the core's, under the switch while it is on. -->
+      {#if id === 'auto-goal' && store && enabled.includes(id)}<AutoGoalSetting {store} />{/if}
     {/each}
   </section>
 

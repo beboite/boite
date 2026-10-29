@@ -5,6 +5,8 @@
   import { subscriptionProxyName, type AccountQuota, type QuotaAlertPeriod } from '@boite/contracts';
   import { errorText } from '../lib/errors';
   import InfoTip from './InfoTip.svelte';
+  import PolicyLock from './PolicyLock.svelte';
+  import { lockedBy } from '../lib/policy';
   import ProviderLogo from './ProviderLogo.svelte';
   import UsageLimits from './UsageLimits.svelte';
   import AccountRename from './AccountRename.svelte';
@@ -12,6 +14,8 @@
   import { gatewayReader, namedQuotas, quotaProviderOff, quotaReader, shownQuotas } from '../lib/quota-reader.svelte';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
+  import { MediaQuery } from 'svelte/reactivity';
+  import { desktopSettings } from '../lib/settings-tabs';
   import SubscriptionProxyDashboard from './SubscriptionProxyDashboard.svelte';
   import GatewayOpenButton from './GatewayOpenButton.svelte';
   import SubscriptionProxySettings from './SubscriptionProxySettings.svelte';
@@ -26,6 +30,9 @@
    */
   let { store, showTitle = true }: { store: Store; showTitle?: boolean } = $props();
   const uid = $props.id();
+  /** Providers is a desktop settings page and the owner's: a phone is offered no way to it. */
+  const phoneWidth = new MediaQuery('(max-width: 720px)');
+  let providersReachable = $derived(store.owner && desktopSettings(phoneWidth.current));
   let native = $state(false);
   const proxy = $derived(store.settings?.subscriptionProxy);
   const proxyEnabled = $derived(proxy?.enabled === true);
@@ -114,6 +121,7 @@
   <header class="top">
     {#if showTitle}<h1><QuotaMachineScope {store} fallback={strings.usage.limits} /></h1>{/if}
     <QuotaPin />
+    <PolicyLock {store} keys={['quotaReads']} />
     {#if store.owner}
       <button type="button" class="quiet icon refresh" aria-label={strings.usage.refresh} title={strings.usage.refresh} data-testid="limits-refresh" aria-busy={reader.busy} onclick={refresh}>
         <RefreshCw size={15} strokeWidth={1.75} class={reader.busy ? 'spinning' : ''} />
@@ -121,6 +129,7 @@
     {/if}
   </header>
   <GatewaySwitch {store} />
+  {#if lockedBy(store.policy, 'quotaReads')}<p class="hint policy-note" data-testid="limits-policy">{strings.policy.quotasOff}</p>{/if}
   {#if proxyEnabled}<div class="actions proxy-switch">
     {#if !gatewayNative}<button type="button" class="ghost small" onclick={() => native = false} data-testid="subscription-proxy-show-dashboard"><span class="ui-label">{strings.subscriptionProxy.showDashboard}</span></button>{/if}
     <GatewayOpenButton {store} />
@@ -161,7 +170,7 @@
     <!-- A failed read never passes for "no provider connected". -->
     {#if !reader.error}<div class="card empty" data-testid="limits-empty">
       <p>{strings.quotas.empty}</p>
-      {#if store.owner}<button type="button" onclick={() => workspace.active.showSettings('accounts')}><span class="ui-label">{strings.settings.connectProvider}</span></button>{/if}
+      {#if providersReachable}<button type="button" onclick={() => workspace.active.showSettings('accounts')}><span class="ui-label">{strings.settings.connectProvider}</span></button>{/if}
     </div>{/if}
   {:else}
     {#if rows.length > 0}<UsageLimits {rows} {store} loading={reader.busy} completed={reader.landed} onalert={alert} />{/if}
@@ -196,6 +205,8 @@
 
 <style>
   .top { display: flex; align-items: center; gap: 8px; max-width: var(--settings-width); }
+  .top > :global(.policy-lock) { align-self: center; }
+  .policy-note { max-width: var(--settings-width); margin: -8px 0 20px; }
   .proxy-switch { margin-bottom: 12px; }
   .gateway-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; max-width: var(--settings-width); margin-bottom: 16px; }
   .group-head { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--text-base); font-weight: 600; }

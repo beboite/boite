@@ -174,7 +174,7 @@ test('Mark done stops a paused run, as the core does', async ({ createClient }) 
 test('an agent saves new templates but never replaces a saved one', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0, delegationDemo: true });
   const saved = await client.call('workflows.templates.save', { threadId: 't-trace', name: 'Lexer', plan });
-  client.becomes('agent');
+  client.becomes('agent', 't-trace');
   await expect(client.call('workflows.templates.save', { threadId: 't-trace', name: 'Lexer', plan })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
   await expect(client.call('workflows.templates.save', { threadId: 't-trace', name: 'Other', plan, templateId: saved.id })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
   expect((await client.call('workflows.templates.save', { threadId: 't-trace', name: 'Other', plan })).id).not.toBe(saved.id);

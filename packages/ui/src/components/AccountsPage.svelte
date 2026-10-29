@@ -1,7 +1,9 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
+  import PolicyLock from './PolicyLock.svelte';
   import HarnessUpdatesCard from './HarnessUpdatesCard.svelte';
   import SubscriptionProxySettings from './SubscriptionProxySettings.svelte';
+  import LocalAcpCard from './LocalAcpCard.svelte';
   import { onMount } from 'svelte';
   import { slide } from 'svelte/transition';
   import { ChevronRight, Plus, RefreshCw, Terminal } from '@lucide/svelte';
@@ -57,6 +59,7 @@
     opencode: 'https://opencode.ai/docs/',
     'opencode-v2': 'https://opencode.ai/v2/docs/',
     grok: 'https://grok.com/build',
+    hermes: 'https://hermes-agent.nousresearch.com/docs/getting-started/installation',
     muse: 'https://developer.meta.com/ai/products/muse-code/',
     pi: 'https://github.com/earendil-works/pi'
   };
@@ -115,11 +118,13 @@
     return store.accountsOf(provider.id).length > 0
       || store.installOf(provider.id)?.state === 'installed'
       || provider.executable !== null
+      || (provider.source === 'user' && store.owner)
       || (provider.available && (provider.login !== false || !provider.alwaysIsolated));
   }
 
   /** What the row says under the name: state, never advice. */
   function stateText(provider: ProviderSummary, step: SetupStep): string {
+    if (provider.policy) return strings.policy.providerOff;
     if (!providerEnabled(provider)) return strings.providerSettings.off;
     const install = store.installOf(provider.id);
     if (step === 'installing' && install) {
@@ -209,6 +214,18 @@
     if (ok) await store.uninstallProvider(provider.id);
   }
 
+  /** A provider added on this machine leaves with its file; its accounts and conversations stay. */
+  async function removeLocal(provider: ProviderSummary) {
+    const ok = await confirm.ask({
+      title: fill(strings.localAcp.removeTitle, { provider: provider.name }),
+      body: strings.localAcp.removeBody,
+      confirmLabel: strings.localAcp.remove,
+      cancelLabel: strings.install.removeCancel,
+      danger: true
+    });
+    if (ok) await store.removeLocalProvider(provider.id);
+  }
+
   /** Something the user installed or signed into outside Boite: look again. */
   async function detect() {
     if (!store.client || detecting) return;
@@ -296,6 +313,8 @@
 
 <!-- On or off. Owner only in the core, and only the owner reaches this page. -->
 {#snippet enabledSwitch(provider: ProviderSummary)}
+  <!-- A provider the admin policy keeps off: the lock says which key, and no switch turns it back on. -->
+  {#if provider.policy}<PolicyLock {store} keys={[provider.policy.policy]} />{/if}
   <input
     type="checkbox"
     role="switch"
@@ -305,7 +324,7 @@
     data-testid="provider-enabled"
     data-provider-id={provider.id}
     checked={providerEnabled(provider)}
-    disabled={!store.owner || switching !== null}
+    disabled={!store.owner || switching !== null || provider.policy !== undefined}
     onchange={(event) => void setEnabled(provider, event.currentTarget)}
   />
 {/snippet}
@@ -526,7 +545,7 @@
     </div>
   {/if}
 
-  {#if install?.state === 'installed' || provider.executable}
+  {#if install?.state === 'installed' || provider.executable || (provider.source === 'user' && store.owner)}
     <div class="section-head"><span class="section-label"><span class="ui-label">{strings.providerSettings.installation}</span></span></div>
     <dl class="facts">
       {#if install?.state === 'installed'}
@@ -542,6 +561,14 @@
         <div class="fact">
           <dt>{strings.providerSettings.executable}</dt>
           <dd><code>{provider.executable}</code></dd>
+        </div>
+      {/if}
+      {#if provider.source === 'user' && store.owner}
+        <div class="fact">
+          <dt>{strings.localAcp.source}</dt>
+          <dd class="managed">
+            <button class="quiet small" data-testid="local-acp-remove" onclick={() => void removeLocal(provider)}><span class="ui-label">{strings.localAcp.remove}</span></button>
+          </dd>
         </div>
       {/if}
     </dl>
@@ -682,6 +709,7 @@
       {#each groups.off as row (row.id)}{@render providerRow(row, true)}{/each}
     </div>
   {/if}
+  {#if store.owner}<LocalAcpCard {store} />{/if}
   {#if store.owner}<HarnessUpdatesCard {store} />{/if}
   {#if store.owner}<SubscriptionProxySettings {store} />{/if}
 </div>

@@ -459,7 +459,9 @@ test('remote transcript and search cannot republish a local credential-like answ
   const {a, b, sharedProjectId, agent} = await fixture();
   try {
     await b.client.call('turns.start', {threadId: b.threadId, prompt: 'TOKEN=transcript-secret-canary'});
-    await waitFor(() => b.h.core.journal.lastTurn(b.threadId)?.status === 'done');
+    await waitFor(() => b.h.core.journal.lastTurn(b.threadId)?.status === 'done').catch(error => {
+      throw new Error(`Transcript fixture did not finish: ${JSON.stringify({turn: b.h.core.journal.lastTurn(b.threadId), scheduler: b.h.core.scheduler.state()})}`, {cause: error});
+    });
     const listed = await a.client.call('sharedProjects.threads', {threadId: a.threadId, sharedProjectId});
     const target = listed.threads.find(t => t.ref.project.ownerCoreId === b.coreId && t.ref.threadId === b.threadId)!.ref;
     const read = await a.client.call('sharedProjects.read', {threadId: a.threadId, sharedProjectId, target});

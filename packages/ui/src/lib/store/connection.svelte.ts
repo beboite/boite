@@ -652,7 +652,7 @@ export class Connection {
         if (read) read.unread = false;
         const listed = new Set(s.threads.map(t => s.threadKey(t.id)));
         const stale = unlistedPanels(s.machineId, listed, s.openThread ? s.threadKey(s.openThread.id) : null);
-        rightPanel.prune(key => stale(key) && !rightPanel.drafts.get(key)?.size);
+        rightPanel.prune(key => stale(key) && !rightPanel.documents.drafted(key));
         work.settle(s.threads.length > 0 || onboardingSeen());
       }, () => threadRead.cancel()),
       slice(client.call('providers.list', {}), value => {
@@ -671,7 +671,12 @@ export class Connection {
     const secondary = [
       slice(client.call('scheduler.get', {}), value => { if (revisions.scheduler === this.ctx.metadataRevision.scheduler) s.scheduler = value; }),
       slice(s.owner ? client.call('accounts.logins', {}) : Promise.resolve([]), rows => accounts.restoreLogins(rows, loginRevision)),
-      slice(client.call('keybindings.get', {}), value => { if (revisions.keybindings === this.ctx.metadataRevision.keybindings) s.keybindings = value; })
+      slice(client.call('keybindings.get', {}), value => { if (revisions.keybindings === this.ctx.metadataRevision.keybindings) s.keybindings = value; }),
+      // A core older than the admin policy has none to tell: nothing is locked.
+      slice(client.call('policy.get', {}).catch((error: unknown) => {
+        if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) return null;
+        throw error;
+      }), value => { if (revisions.policy === this.ctx.metadataRevision.policy) s.policy = value; })
     ];
     const essential = Promise.all(primary).then(() => {
       ready();

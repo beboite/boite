@@ -20,6 +20,7 @@ import { AGENT_ENV, type ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { agentEnvOf } from '../agent.ts';
 import type { SpawnedChild } from '../procs.ts';
+import { LineSplitter, STDOUT_LINE_MAX } from '../drivers/lines.ts';
 
 /** Where the sessions reach the servers: `<route><registration>/<server name>`. */
 export const LAZY_MCP_ROUTE = '/mcp/lazy/';
@@ -235,6 +236,8 @@ export class LazyMcp {
   readonly #registrations = new Map<string, Registration>();
   readonly #sessions = new Map<string, Session>();
   #ids = 0;
+  /** The longest line a server may write on stdout. A test seam. */
+  lineMax = STDOUT_LINE_MAX;
 
   constructor(core: Core) { this.#core = core; }
 
@@ -461,37 +464,38 @@ export class LazyMcp {
     });
     const upstream: Upstream = { child, exited: false, stderr: '', initialize: null };
     session.upstream = upstream;
-    let buffered = '';
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => {
-      buffered += chunk;
-      let newline: number;
-      while ((newline = buffered.indexOf('\n')) >= 0) {
-        const line = buffered.slice(0, newline).trim();
-        buffered = buffered.slice(newline + 1);
-        if (line.length === 0) continue;
-        let message: unknown;
-        try { message = JSON.parse(line); } catch { continue; } // a server that logs on stdout
-        if (isRecord(message)) this.#fromServer(session, upstream, message as Message);
-      }
-    });
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk: string) => { upstream.stderr = (upstream.stderr + chunk).slice(-STDERR_TAIL); });
-    child.stdin.on('error', () => { /* the server left; its exit says so */ });
-    const gone = (): void => {
+    const gone = (reason = `the MCP server ${session.name} exited${upstream.stderr.trim() ? `: ${upstream.stderr.trim().slice(-500)}` : ''}`): void => {
       if (upstream.exited) return;
       upstream.exited = true;
       // A server that failed its start and was replaced leaves its successor's calls alone.
       if (session.upstream !== null && session.upstream !== upstream) return;
-      const reason = `the MCP server ${session.name} exited${upstream.stderr.trim() ? `: ${upstream.stderr.trim().slice(-500)}` : ''}`;
       for (const [internal, waiting] of session.pending) {
         session.pending.delete(internal);
         if (waiting.internal) waiting.internal(failure(internal, -32603, reason));
         else if (waiting.stream) { waiting.stream.send(failure(waiting.clientId, -32603, reason)); waiting.stream.settle(); }
       }
     };
-    child.once('exit', gone);
-    child.once('error', gone);
+    child.once('exit', () => gone());
+    child.once('error', () => gone());
+    // A line past the bound is no protocol line: the server is done, and so are the calls it owed.
+    let faulted = false;
+    const lines = new LineSplitter((line) => {
+      let message: unknown;
+      try { message = JSON.parse(line); } catch { return; } // a server that logs on stdout
+      if (isRecord(message)) this.#fromServer(session, upstream, message as Message);
+    }, {
+      maxLine: this.lineMax,
+      onOverflow: () => {
+        faulted = true;
+        gone(`the MCP server ${session.name} wrote a line past ${this.lineMax} characters on stdout`);
+        void this.#core.procs.stopChild(child);
+      },
+    });
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => { if (!faulted) lines.feed(chunk); });
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => { upstream.stderr = (upstream.stderr + chunk).slice(-STDERR_TAIL); });
+    child.stdin.on('error', () => { /* the server left; its exit says so */ });
 
     const answer = await this.#call(session, 'initialize', session.clientInit ?? {}, START_TIMEOUT_MS);
     if (answer.error !== undefined || !isRecord(answer.result)) {
@@ -595,7 +599,7 @@ export class LazyMcp {
   #stop(upstream: Upstream): void {
     if (upstream.exited) return;
     try { upstream.child.stdin.end(); } catch { /* already closed */ }
-    const timer = setTimeout(() => { if (!upstream.exited) upstream.child.kill(); }, EXIT_GRACE_MS);
+    const timer = setTimeout(() => { if (!upstream.exited) void this.#core.procs.stopChild(upstream.child); }, EXIT_GRACE_MS);
     timer.unref?.();
   }
 

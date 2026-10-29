@@ -32,6 +32,16 @@ source (`pi-agent-core` 1.0.4), not run. Grok takes its effort inside
 `session/set_model`, untested during a prompt; Muse and Antigravity have no
 call for it.
 
+An ACP agent that refuses the model a turn asks for, or lists a model option
+without that value, fails the turn before its prompt with a `thread.model:`
+error; the prompt never runs on the model the session was already on. The next
+turn asks again, so a model the agent takes later runs. The agent's own model
+needs no call, and an agent with no model option at all keeps its own. A
+refused effort stays one warning in the log. Grok takes the model and the effort
+in one `session/set_model`: when it refuses the pair for a model the session
+does not run yet, the core asks for the model alone, so only a refused model
+fails the turn.
+
 Claude cannot be trusted to switch fast mode on in a running process. The
 setter is accepted and `getSettings` reports `fastMode: true`, yet on a Max
 account without extra usage the CLI kept answering at standard speed, while a
@@ -237,9 +247,11 @@ This is a recency rule, not a cache invalidation detector;
 [cache lifetimes](prompt-cache.md) can differ. An account change uses the
 history-transfer warning above instead.
 
-Historical images use remaining slots within the eight-image turn limit. The
-current prompt's attachments take priority, then the most recent historical
-images. Delivery is chronological. The receiving agent is told which older
+Historical images use what the current prompt's attachments leave of one
+turn's limits: 50 images and 10 MB together (`ATTACHMENTS_PER_TURN`,
+`ATTACHMENTS_TOTAL_MAX_BYTES`). The current prompt's attachments take
+priority, then the most recent historical images, newest first until either
+limit is reached, so a request never carries more image bytes than one turn. Delivery is chronological. The receiving agent is told which older
 image references lack an attachment. An image-incapable destination refuses
 continuation of an image-bearing history explicitly.
 

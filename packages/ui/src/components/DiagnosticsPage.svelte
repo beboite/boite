@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { lockedBy } from '../lib/policy';
   import { workspace } from '../lib/workspace.svelte';
   import { tick, untrack } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
@@ -46,6 +47,9 @@
   let exporting = $state(false);
   let exportNote = $state('');
   let reporting = $state(false);
+  const reportsLocked = $derived(lockedBy(store.policy, 'issueReports') !== null);
+  // Closed by the lock, the report dialog does not reopen when it lifts.
+  $effect(() => { if (reportsLocked) reporting = false; });
   /**
    * The machine's core predates the anonymized log (#411): it still answers
    * `core.logs`, so the log reads, but the status, the export and the report
@@ -280,8 +284,13 @@
     {/if}
     <div class="actions buttons">
       <button type="button" data-testid="diagnostics-export" disabled={exporting || outdated || store.connection !== 'ready'} onclick={() => void exportLogs()}><FileDown size={15} /><span class="ui-label">{s.export}</span></button>
-      <button type="button" data-testid="diagnostics-report" disabled={outdated || store.connection !== 'ready'} onclick={() => { reporting = true; }}><Bug size={15} /><span class="ui-label">{s.report}</span></button>
-      <InfoTip topic={s.export} text={`${s.exportHint} ${s.reportHint}`} />
+      <!-- An admin policy that forbids issue reports hides the button; the core refuses the call anyway. -->
+      {#if reportsLocked}
+        <InfoTip topic={s.export} text={s.exportHint} />
+      {:else}
+        <button type="button" data-testid="diagnostics-report" disabled={outdated || store.connection !== 'ready'} onclick={() => { reporting = true; }}><Bug size={15} /><span class="ui-label">{s.report}</span></button>
+        <InfoTip topic={s.export} text={`${s.exportHint} ${s.reportHint}`} />
+      {/if}
     </div>
     {#if exportNote}<p class="hint note" data-testid="diagnostics-export-note">{exportNote}</p>{/if}
   </section>
@@ -397,7 +406,7 @@
   </section>
 </div>
 
-{#if reporting}<DiagnosticsReport {store} onclose={() => { reporting = false; }} />{/if}
+{#if reporting && !reportsLocked}<DiagnosticsReport {store} onclose={() => { reporting = false; }} />{/if}
 {/if}
 
 <style>

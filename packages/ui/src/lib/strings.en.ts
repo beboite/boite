@@ -84,6 +84,7 @@ import { strings as features } from './strings/en/features';
 import { strings as quotas } from './strings/en/quotas';
 import { strings as harnessUpdates } from './strings/en/harnessUpdates';
 import { strings as providerSettings } from './strings/en/providerSettings';
+import { strings as localAcp } from './strings/en/localAcp';
 import { strings as plugins } from './strings/en/plugins';
 import { strings as time } from './strings/en/time';
 import { strings as errors } from './strings/en/errors';
@@ -95,6 +96,7 @@ import { strings as onboarding } from './strings/en/onboarding';
 import { strings as contacts } from './strings/en/contacts';
 import { strings as shared } from './strings/en/shared';
 import { strings as windows } from './strings/en/windows';
+import { strings as policy } from './strings/en/policy';
 
 export const strings = {
   ...subscriptionProxy,
@@ -175,6 +177,7 @@ export const strings = {
   ...quotas,
   ...harnessUpdates,
   ...providerSettings,
+  ...localAcp,
   ...plugins,
   ...time,
   ...errors,
@@ -186,6 +189,7 @@ export const strings = {
   ...contacts,
   ...shared,
   ...windows,
+  ...policy,
 } as const;
 
 export type Strings = typeof strings;

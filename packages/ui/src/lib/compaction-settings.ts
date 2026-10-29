@@ -5,6 +5,7 @@ export function compactionPolicy(settings: Partial<Settings> | null | undefined,
   return (target ? settings?.compactionByType?.[target] : undefined) ?? {
     autoCompact: settings?.autoCompact ?? null,
     backgroundCompaction: settings?.backgroundCompaction === true,
+    ...(settings?.compactionSummary === undefined ? {} : { compactionSummary: settings.compactionSummary }),
   };
 }
 

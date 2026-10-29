@@ -1,6 +1,7 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
   import TitleModelSetting from './TitleModelSetting.svelte';
+  import GoalTrackerSetting from './GoalTrackerSetting.svelte';
   import ShellSettings from './ShellSettings.svelte';
   import TelemetrySettings from './TelemetrySettings.svelte';
   import ArchivedThreads from './ArchivedThreads.svelte';
@@ -15,6 +16,7 @@
   import ConversationSwitches from './ConversationSwitches.svelte';
   import NotificationKinds from './NotificationKinds.svelte';
   import SyncMark from './SyncMark.svelte';
+  import PolicySettings from './PolicySettings.svelte';
 
   /**
    * What the app does for the person in front of it: how a thread
@@ -71,7 +73,7 @@
         <input id="{uid}-tool-summaries" aria-labelledby="{uid}-tool-summaries-name" type="checkbox" role="switch" data-testid="setting-tool-summaries"
           checked={store.settings?.toolSummaries ?? false} disabled={!store.settings} onchange={(event) => void toggle('toolSummaries', event.currentTarget)} />
       </label>
-      {#if store.settings}<TitleModelSetting {store} />{/if}
+      {#if store.settings}<TitleModelSetting {store} /><GoalTrackerSetting {store} />{/if}
     {/if}
   </section>
 
@@ -95,4 +97,5 @@
   </section>
 
   <TelemetrySettings {store} />
+  <PolicySettings {store} />
 </div>

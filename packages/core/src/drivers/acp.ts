@@ -49,10 +49,10 @@ export function createAcpDriver(deps: AcpDeps): Driver {
         (ended) => {
           if (sessions.get(threadId) === ended) sessions.delete(threadId);
         },
-        (options) => {
+        (options, ownModel) => {
           // Kept beside the probe, never as its result: the picker and the
           // model check still see an account nobody probed.
-          if (options.length === 0 || revision !== probeRevision) return;
+          if (revision !== probeRevision || (options.length === 0 && ownModel === undefined)) return;
           const entry = probes.get(probeKey) ?? {
             options: [],
             providerId: ctx.provider.id,
@@ -60,8 +60,10 @@ export function createAcpDriver(deps: AcpDeps): Driver {
             running: null,
             result: null,
             effortRead: new Set<string>(),
+            ownModel: undefined,
           };
           if (entry.options.length === 0) entry.options = structuredClone(options);
+          if (entry.ownModel === undefined && ownModel !== undefined) entry.ownModel = ownModel;
           probes.set(probeKey, entry);
         },
       );
@@ -69,7 +71,8 @@ export function createAcpDriver(deps: AcpDeps): Driver {
     }
     const running = session;
     if (viewed.has(threadId)) running.setViewed(true);
-    running.seedConfig(probes.get(probeKey)?.options ?? []);
+    const probed = probes.get(probeKey);
+    running.seedConfig(probed?.options ?? [], probed?.ownModel);
     return running;
   }
 
@@ -91,6 +94,7 @@ export function createAcpDriver(deps: AcpDeps): Driver {
         running: null,
         result: null,
         effortRead: new Set<string>(),
+        ownModel: undefined,
       };
       probes.set(key, entry);
       // One process at a time per account: a caller naming a model waits for the
@@ -128,6 +132,7 @@ export function createAcpDriver(deps: AcpDeps): Driver {
         // otherwise start an agent process on every probe that names it.
         if (missing && wanted !== undefined) entry.effortRead.add(wanted);
         else if (reading.effort !== null) entry.effortRead.add(reading.effort.model);
+        entry.ownModel = reading.ownModel;
         // A second look keeps the scales the earlier ones found.
         const earlier = new Map((known?.models ?? []).filter((model) => model.effort !== undefined).map((model) => [model.id, model.effort]));
         const models = withModelEffort(reading.models, reading.effort).map((model) => (model.effort === undefined && earlier.has(model.id) ? { ...model, effort: earlier.get(model.id) } : model));
@@ -143,7 +148,7 @@ export function createAcpDriver(deps: AcpDeps): Driver {
       } catch (error) {
         // A failed look at one model's efforts leaves the list already read
         // standing, and a failed first look leaves the options a turn noted.
-        if (probes.get(key) === entry && known === null && entry.options.length === 0) probes.delete(key);
+        if (probes.get(key) === entry && known === null && entry.options.length === 0 && entry.ownModel === undefined) probes.delete(key);
         throw error;
       } finally {
         entry.running = null;
@@ -167,9 +172,11 @@ export function createAcpDriver(deps: AcpDeps): Driver {
         running: null,
         result: null,
         effortRead: new Set<string>(),
+        ownModel: undefined,
       };
       entry.options = options ?? [];
       entry.result = { models, probedAt: Date.now() };
+      entry.ownModel = agentModelsOf(created)?.currentModelId ?? null;
       for (const model of models) if (model.effort !== undefined) entry.effortRead.add(model.id);
       probes.set(key, entry);
       return models;
