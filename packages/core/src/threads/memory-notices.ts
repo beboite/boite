@@ -41,7 +41,7 @@ export class MemoryNotices {
       this.core.journal.setSetting(this.key(threadId), [...this.pending(threadId), notice]);
     });
     this.core.bus.emit('thread.memory', { ...event, threadId });
-    void this.flushRunning(threadId);
+    void this.threads.deferred.flushRunning(threadId);
   }
 
   async flushRunning(threadId: string): Promise<void> {

@@ -817,7 +817,7 @@ export class ThreadStore {
       return submitted;
     } finally {
       this.runner.steering.delete(threadId);
-      void this.deferred.memory.flushRunning(threadId);
+      void this.deferred.flushRunning(threadId);
     }
   }
 

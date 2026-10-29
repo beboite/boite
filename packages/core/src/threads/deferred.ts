@@ -1,5 +1,6 @@
 import type { Message, ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
+import type { TurnHandle } from '../drivers/types.ts';
 import { messageOf } from '../errors.ts';
 import { isAgentHeld } from '../agents/runtime.ts';
 import type { ThreadStore } from '../threads.ts';
@@ -30,6 +31,8 @@ export class DeferredInput {
   readonly pendingWakes = new Map<ThreadId, string>();
   /** What background work wrote while a persistent agent was held (paused, out of budget): one turn once it may run. */
   private readonly heldWakes = new Map<ThreadId, string[]>();
+  private readonly flushing = new Map<ThreadId, boolean>();
+  private readonly uncertain = new WeakSet<TurnHandle>();
 
   constructor(private readonly core: Core, private readonly threads: ThreadStore) {
     this.memory = new MemoryNotices(core, threads);
@@ -42,37 +45,64 @@ export class DeferredInput {
    */
   deliverAnswer(threadId: ThreadId, text: string): void {
     this.defer(threadId, text);
-    const handle = this.threads.runner.handles.get(threadId);
-    if (handle?.steer && !this.threads.runner.steering.has(threadId)) {
-      const turnId = this.core.journal.runningTurn(threadId)?.id;
-      this.threads.runner.steering.add(threadId);
-      let recorded = false;
-      const accepted = () => {
-        if (recorded || this.core.stopping) return;
-        if (turnId) this.threads.runner.answerAfter.set(turnId, this.recordAnswer(threadId, turnId, text));
-        const held = this.deferredAnswers.get(threadId) ?? [];
-        const index = held.indexOf(text);
-        if (index >= 0) held.splice(index, 1);
-        if (!held.length) this.deferredAnswers.delete(threadId);
-        recorded = true;
-        this.changed(threadId);
-      };
-      void handle.steer(text, undefined, accepted)
-        .then(submitted => { if (submitted) accepted(); })
-        .catch(error => {
-          if (this.core.stopping) return;
-          this.core.log('warn', `thread ${threadId}: steering an async answer failed, it waits for the next turn: ${messageOf(error)}`);
-        })
-        .finally(() => {
-          this.threads.runner.steering.delete(threadId);
-          if (this.core.stopping) return;
-          // A late rejection must not undo Stop or retry a failed turn.
-          if (!this.threads.runner.handles.has(threadId) && turnId && this.core.journal.getTurn(turnId)?.status === 'done') this.flushDeferred(threadId);
-          void this.memory.flushRunning(threadId);
-        });
+    void this.flushRunning(threadId);
+    if (!this.threads.runner.handles.has(threadId)) this.flushDeferred(threadId);
+  }
+
+  /** Drain answers and memory notices after any owner releases native steering. */
+  async flushRunning(threadId: ThreadId): Promise<void> {
+    if (this.core.stopping) return;
+    if (this.flushing.has(threadId)) {
+      this.flushing.set(threadId, true);
       return;
     }
-    if (!this.threads.runner.handles.has(threadId)) this.flushDeferred(threadId);
+    if (this.threads.runner.steering.has(threadId)) return;
+    this.flushing.set(threadId, true);
+    try {
+      while (this.flushing.get(threadId) && !this.core.stopping) {
+        this.flushing.set(threadId, false);
+        if (this.deferredAnswers.get(threadId)?.length) await this.steerAnswers(threadId);
+        await this.memory.flushRunning(threadId);
+      }
+    } finally {
+      this.flushing.delete(threadId);
+    }
+  }
+
+  private async steerAnswers(threadId: ThreadId): Promise<void> {
+    const runner = this.threads.runner;
+    const handle = runner.handles.get(threadId);
+    if (!handle?.steer || this.uncertain.has(handle) || runner.steering.has(threadId) || !this.deferredAnswers.get(threadId)?.length) return;
+    const turnId = this.core.journal.runningTurn(threadId)?.id;
+    runner.steering.add(threadId);
+    let recorded = false;
+    try {
+      while (!this.core.stopping && runner.handles.get(threadId) === handle) {
+        const text = this.deferredAnswers.get(threadId)?.[0];
+        if (text === undefined) break;
+        recorded = false;
+        const accepted = () => {
+          if (recorded || this.core.stopping) return;
+          if (turnId) runner.answerAfter.set(turnId, this.recordAnswer(threadId, turnId, text));
+          const held = this.deferredAnswers.get(threadId) ?? [];
+          const index = held.indexOf(text);
+          if (index >= 0) held.splice(index, 1);
+          if (!held.length) this.deferredAnswers.delete(threadId);
+          recorded = true;
+          this.changed(threadId);
+        };
+        if (await handle.steer(text, undefined, accepted)) accepted();
+        if (!recorded) break;
+      }
+    } catch (error) {
+      // A transport may have sent the text before it lost the acknowledgement.
+      if (!recorded) this.uncertain.add(handle);
+      if (!this.core.stopping) this.core.log('warn', `thread ${threadId}: steering an async answer failed, it waits for the next turn: ${messageOf(error)}`);
+    } finally {
+      runner.steering.delete(threadId);
+      // A late rejection must not undo Stop or retry a failed turn.
+      if (!this.core.stopping && !runner.handles.has(threadId) && turnId && this.core.journal.getTurn(turnId)?.status === 'done') this.flushDeferred(threadId);
+    }
   }
 
   private defer(threadId: ThreadId, text: string): void {
