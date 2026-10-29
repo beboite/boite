@@ -107,6 +107,7 @@ export class TurnContexts {
       toolSummaries: this.#core.settings.get().toolSummaries === true,
       shortAnswers: this.#core.settings.get().shortAnswers !== false,
       autoCompactTokens: () => effectiveCompaction(this.#core.settings.get(), this.#core.journal.getThread(threadId) ?? thread).autoCompact?.tokens ?? null,
+      compactionSummary: () => effectiveCompaction(this.#core.settings.get(), this.#core.journal.getThread(threadId) ?? thread).compactionSummary ?? null,
       log: (level, message, context) => {
         if (context?.kind === 'provider-output') noteStderr(threadId, message);
         this.#core.log(level, message, { ...context, source: provider.id, threadId });
@@ -419,6 +420,7 @@ export class TurnContexts {
       toolSummaries: this.#core.settings.get().toolSummaries === true,
       shortAnswers: this.#core.settings.get().shortAnswers !== false,
       autoCompactTokens: () => effectiveCompaction(this.#core.settings.get(), this.#core.journal.getThread(threadId) ?? thread).autoCompact?.tokens ?? null,
+      compactionSummary: () => effectiveCompaction(this.#core.settings.get(), this.#core.journal.getThread(threadId) ?? thread).compactionSummary ?? null,
       emit,
       reportProgress: progress,
       reportProviderEvent: () => this.#threads.progress.contact(threadId, turn.id),

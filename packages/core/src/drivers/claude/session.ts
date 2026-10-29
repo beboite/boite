@@ -14,7 +14,7 @@ import { SessionRetention } from '../session-retention.ts';
 import { noteClaudeMessage } from './diagnostics.ts';
 import { userStdioServers, type LazyServerEntry } from '../../mcp/lazy.ts';
 import {protectedClaudeOptions} from './protected.ts';
-import { openWithCompaction } from './compaction.ts';
+import { compactFocus, openWithCompaction } from './compaction.ts';
 
 /** How long `stop()` lets the CLI end its turn before the abort signal takes it. */
 /** Claude Code's own subagent and workflow tools; `Task` is the older name of `Agent`. */
@@ -875,6 +875,7 @@ export class ClaudeSession {
       hooks: {
         PreToolUse: [{ hooks: [this.#gate.preToolUse] }],
         PostToolUse: [{ hooks: [this.#gate.postToolUse] }],
+        PreCompact: [{ hooks: [compactFocus(() => this.#ctx.compactionSummary?.() ?? null)] }],
       },
       spawnClaudeCodeProcess: (options: SdkSpawnOptions): SpawnedChild => this.#spawnCli(options),
     };
