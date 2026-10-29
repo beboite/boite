@@ -7,6 +7,7 @@
  * everything it touches and reads codes, data keys and events, never message
  * text: the words may change, the refusal may not.
  */
+import { COMPOSER_SCENARIOS } from './composer.ts';
 import { SHARED_SCENARIOS } from './shared-projects.ts';
 import {
   GROUP_INVITE_PREFIX,
@@ -26,6 +27,9 @@ import {
 export interface ContractEnv {
   /** Another isolated Contacts core, with no real account or public network. */
   newContact(): Promise<ContractEnv>;
+  /** A new connection to this same core, for private-record and access boundaries. */
+  peer(role?: { agentThreadId: string }): Promise<ContractEnv>;
+  disconnect(): void;
   call<M extends RpcMethodName>(method: M, params: RpcParams<M>): Promise<RpcResult<M>>;
   on<E extends RpcEventName>(event: E, handler: (payload: RpcEvents[E]) => void): () => void;
   /** A folder that exists, a new one per call. */
@@ -151,6 +155,7 @@ async function unavailable(env: ContractEnv): Promise<{ provider: ProviderSummar
 
 export const SCENARIOS: Record<string, Scenario> = {
   ...SHARED_SCENARIOS,
+  ...COMPOSER_SCENARIOS,
   'providers.addLocal writes an ACP provider with a default account, providers.removeLocal takes it away, each refusal names its field': async (env) => {
     const heard = record(env, ['providers.updated']);
     const added = await env.call('providers.addLocal', { name: 'Contract Local', command: 'bun', args: ['acp', 'two words'], env: { CONTRACT_LOCAL: '1' } });

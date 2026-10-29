@@ -396,7 +396,15 @@ typing pauses and at least every five seconds while it continues. Attachments,
 failed backups, explicit flush, page hiding and navigation flush immediately.
 A local core changing port retains the same drafts.
 
-Accepted queues run on the core without an open client, including after restart
+Incognito records use the same queue RPCs with connection-owned memory storage;
+their assets and device sync metadata never enter the durable composer cache.
+Older cores without `composerPersistence` refuse queue admission with an update
+message while preserving the input.
+Changing a draft's privacy retires its composer identity and creates another.
+A start already submitted keeps its privacy; input queued only on an offline
+device can still change it before submission.
+
+Accepted durable queues run on the core without an open client, including after restart
 when delivery is known to be safe. Unconfirmed provider submissions stay held.
 Provider, account, model, effort and speed stay captured; permission modes follow
 the thread's current selection, including for queued input.

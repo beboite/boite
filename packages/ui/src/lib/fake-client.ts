@@ -171,7 +171,12 @@ export class FakeClient implements ObservableClient {
 
   /** A second device connected to this fake core's shared composer. */
   composerPeer(options: Omit<FakeClientOptions, 'composerState'> = {}): FakeClient {
-    return new FakeClient({ ...options, composerState: this.#ctx.composer });
+    const peer = new FakeClient({ ...options, composerState: this.#ctx.composer });
+    // A new connection sees the current core snapshot, including newly created conversations.
+    peer.#ctx.threads.clear();
+    for (const [id, thread] of this.#ctx.threads) peer.#ctx.threads.set(id, structuredClone(thread));
+    peer.#ctx.projects.splice(0, peer.#ctx.projects.length, ...structuredClone(this.#ctx.projects));
+    return peer;
   }
 
   get core(): CoreInfo | null {

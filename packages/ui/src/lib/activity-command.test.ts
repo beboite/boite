@@ -1,5 +1,8 @@
 import { afterEach, expect, test } from 'vitest';
-import { activityCommand, isActivityCommand } from './activity-command';
+import { composerActivity, isComposerActivity } from '@boite/contracts';
+import { readExperiments } from './experiments';
+const activityCommand = (text: string) => composerActivity(text, readExperiments());
+const isActivityCommand = (text: string) => isComposerActivity(text, readExperiments());
 import { setExperiment } from './experiments';
 
 afterEach(() => setExperiment('goal2', false));
@@ -25,6 +28,6 @@ test('/goal2 is a reviewed goal only while its experiment is on', () => {
   setExperiment('goal2', true);
   expect(activityCommand('/goal2 Ship the fix')).toEqual({ goal: { objective: 'Ship the fix', review: true } });
   expect(isActivityCommand('/goal2 Ship the fix')).toBe(true);
-  expect(() => activityCommand('/goal2')).toThrow('Use /goal2 followed by an objective.');
+  expect(() => activityCommand('/goal2')).toThrow('/goal2: expected an objective or loop cadence and prompt');
   expect(activityCommand('/goal Ship the fix')).toEqual({ goal: { objective: 'Ship the fix' } });
 });

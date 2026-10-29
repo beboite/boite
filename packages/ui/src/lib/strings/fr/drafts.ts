@@ -10,6 +10,7 @@ export const fr: Translation = {
     incognito: 'Incognito',
     incognitoStart: "Démarrer cette conversation en incognito : rien n'en reste une fois que vous la quittez",
     incognitoStop: 'Démarrer plutôt une conversation normale',
-    incognitoOn: 'Incognito : cette conversation et son dossier sont effacés quand vous la quittez'
+    incognitoOn: 'Incognito : cette conversation et son dossier sont effacés quand vous la quittez',
+    privacyQueued: 'Ce brouillon a déjà été envoyé. Ouvrez un nouveau brouillon pour changer de confidentialité.'
   }
 };

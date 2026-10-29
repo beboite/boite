@@ -130,7 +130,12 @@ export class ComposerStorage {
         if (value) for (const reference of this.references(value)) assets.add(reference.assetId);
         this.privateRecords.delete(key); this.privateOwners.delete(key); this.queued.delete(key); records.add(key);
       }
-      for (const [id, delivery] of this.privateDeliveries) if (records.has(recordKey(delivery.section, delivery.record_id))) this.privateDeliveries.delete(id);
+      // Consumed ids stay in memory until their thread is forgotten or the core exits.
+      // A reconnect can bring an unacknowledged copy plus new input: discarding these
+      // receipts would batch the old input again under a different turn request id.
+      for (const [id, delivery] of this.privateDeliveries) {
+        if (delivery.status !== 'delivered' && records.has(recordKey(delivery.section, delivery.record_id))) this.privateDeliveries.delete(id);
+      }
       for (const [id, ownerId] of this.privateAssetOwners) if (ownerId === connection.id) assets.add(id);
       for (const [id, pending] of this.pendingAssets) if (pending.delete(connection.id)) {
         if (!pending.size) this.pendingAssets.delete(id);

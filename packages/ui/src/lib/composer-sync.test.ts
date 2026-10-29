@@ -8,6 +8,7 @@ import { Store } from './store.svelte';
 import { takeFiles } from './composer-attachments';
 import { checkpoint, undoStep } from './composer-history';
 import { isLoading } from './draft-attachments';
+import { strings } from './strings';
 
 // One transparent pixel.
 const PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
@@ -344,10 +345,12 @@ test('a device back from a restart neither restores what another cleared nor sen
   expect(called(phone, 'turns.start')).toHaveLength(0);
 });
 
-test('a draft sent while its machine was away is started by the core, and the device opens that conversation once', async () => {
+test.each([false, true])('an offline draft (incognito=%s) starts on the core and opens its conversation once', async incognito => {
   const desk = await device('desk', new FakeClient({ delayMs: 0 }));
   const project = desk.store.projects.find(entry => entry.kind !== 'drafts')!;
-  desk.store.startDraft(project.id, { fresh: true });
+  desk.store.startDraft(incognito ? null : project.id, { fresh: true });
+  if (incognito) desk.store.setDraftIncognito(true);
+  const draftId = desk.store.draft!.id!;
   const before = new Set((await desk.client.call('threads.list', {})).map(thread => thread.id));
   desk.client.drop();
   await desk.client.settled();
@@ -369,9 +372,14 @@ test('a draft sent while its machine was away is started by the core, and the de
   expect(desk.store.draftEntries.some(entry => entry.text === 'Start the migration')).toBe(false);
   expect((await desk.client.call('threads.list', {})).filter(thread => !before.has(thread.id))).toHaveLength(1);
   expect(await userTexts(desk.client, startedId)).toEqual(['Start the migration']);
+  if (incognito) {
+    expect(desk.store.openThread?.incognito).toBe(true);
+    expect(JSON.stringify(localStorage)).not.toContain(draftId);
+    expect(JSON.stringify(localStorage)).not.toContain(startedId);
+  }
 });
 
-test('an incognito conversation never reaches the core\'s records and keeps the frontend\'s own queue', async () => {
+test('an incognito queue uses private core records and assets without a frontend runner', async () => {
   const desk = await device('desk', new FakeClient({ delayMs: 0 }));
   const phone = await device('phone', desk.client.composerPeer({ delayMs: 0, principal: 'session' }));
   const choice = desk.store.defaultChoice()!;
@@ -384,12 +392,91 @@ test('an incognito conversation never reaches the core\'s records and keeps the 
   desk.store.editComposerText(secret.id, 'Secret words');
   await quiet();
   queue(desk.store, secret.id, 'Secret prompt');
-  await vi.waitFor(() => expect(called(desk, 'turns.start', params => params.threadId === secret.id)).toHaveLength(1));
+  await vi.waitFor(() => expect(putsOf(desk, secret.id).length).toBeGreaterThan(0));
+  await vi.waitFor(async () => expect(await userTexts(desk.client, secret.id)).toEqual(['Secret prompt']));
   await quiet();
-  expect(putsOf(desk, secret.id)).toHaveLength(0);
-  expect(called(desk, 'composer.asset.put')).toHaveLength(0);
-  expect(await recordOf(desk.client, 'inputs', secret.id)).toBeUndefined();
+  expect(called(desk, 'turns.start')).toHaveLength(0);
+  expect(called(desk, 'composer.asset.put')).toMatchObject([['composer.asset.put', { incognito: true }]]);
+  expect((await recordOf(desk.client, 'inputs', secret.id))?.value?.input.queued).toEqual([]);
+  expect(await recordOf(phone.client, 'inputs', secret.id)).toBeUndefined();
+  expect(JSON.stringify(localStorage)).not.toContain('private-');
+  expect(JSON.stringify(localStorage)).not.toContain(secret.id);
   expect(phone.store.composerStates[secret.id]).toBeUndefined();
+});
+
+test('a synchronized public draft can switch to incognito and deliver without retaining its public record', async () => {
+  const desk = await device('desk', new FakeClient({ delayMs: 0 }));
+  desk.store.startDraft(null, { fresh: true });
+  desk.store.editComposerText('draft', 'Public draft');
+  const publicId = desk.store.draft!.id!;
+  await vi.waitFor(async () => expect((await recordOf(desk.client, 'drafts', publicId))?.value?.input.text).toBe('Public draft'));
+  desk.store.setDraftIncognito(true);
+  desk.store.editComposerText('draft', 'Private continuation');
+  desk.store.queuePrompt('draft', { text: 'Private continuation', attachments: [] }, { choice: desk.store.defaultChoice() });
+  desk.store.composerStates.draft!.text = '';
+  await vi.waitFor(() => expect(desk.store.openThread?.incognito).toBe(true));
+  const threadId = desk.store.openThread!.id;
+  await vi.waitFor(async () => expect(await userTexts(desk.client, threadId)).toEqual(['Private continuation']));
+  await vi.waitFor(async () => expect((await recordOf(desk.client, 'drafts', publicId))?.value ?? null).toBeNull());
+  expect(JSON.stringify(localStorage)).not.toContain('Private continuation');
+});
+
+test.each(['toggle', 'project'])('a private draft becomes durable through %s under a new composer identity', async via => {
+  const desk = await device('desk', new FakeClient({ delayMs: 0 }));
+  const phone = await device('phone', desk.client.composerPeer({ delayMs: 0, principal: 'session' }));
+  desk.store.startDraft(null, { fresh: true });
+  desk.store.setDraftIncognito(true);
+  desk.store.editComposerText('draft', 'Private before changing mode');
+  const privateId = desk.store.draft!.id!;
+  // A reconnect publishes the private box before any queued start exists.
+  desk.client.drop();
+  await desk.client.restore();
+  await vi.waitFor(async () => expect((await recordOf(desk.client, 'drafts', privateId))?.value?.draft?.incognito).toBe(true));
+  expect(await recordOf(phone.client, 'drafts', privateId)).toBeUndefined();
+  if (via === 'toggle') desk.store.setDraftIncognito(false);
+  else desk.store.setDraftProject(desk.store.projects.find(entry => entry.kind !== 'drafts')!.id);
+  const publicId = desk.store.draft!.id!;
+  expect(publicId).not.toBe(privateId);
+  desk.store.editComposerText('draft', 'Public after changing mode');
+  await vi.waitFor(async () => expect((await recordOf(phone.client, 'drafts', publicId))?.value?.input.text).toBe('Public after changing mode'));
+  await vi.waitFor(async () => expect((await recordOf(desk.client, 'drafts', privateId))?.value ?? null).toBeNull());
+  expect((await recordOf(phone.client, 'drafts', publicId))?.value?.draft?.incognito).toBeUndefined();
+  expect(JSON.stringify(localStorage)).not.toContain(privateId);
+});
+
+test('a never-submitted offline draft can change privacy without submitting its queue twice', async () => {
+  const desk = await device('desk', new FakeClient({ delayMs: 0 }));
+  desk.store.startDraft(null, { fresh: true });
+  const publicId = desk.store.draft!.id!;
+  desk.client.drop();
+  await desk.client.settled();
+  desk.store.queuePrompt('draft', { text: 'Change privacy before admission', attachments: [] }, { choice: desk.store.defaultChoice() });
+  desk.store.setDraftIncognito(true);
+  expect(desk.store.draft?.incognito).toBe(true);
+  expect(desk.store.draft?.id).not.toBe(publicId);
+  await desk.client.restore();
+  await vi.waitFor(() => expect(desk.store.openThread?.incognito).toBe(true));
+  expect(await userTexts(desk.client, desk.store.openThread!.id)).toEqual(['Change privacy before admission']);
+  expect((await desk.client.call('threads.list', {})).filter(row => row.title === 'Change privacy before admission')).toHaveLength(1);
+});
+
+test('a draft whose start is already admitted refuses privacy changes with a visible reason', async () => {
+  const desk = await device('desk', new FakeClient({ delayMs: 0 }));
+  const project = await desk.client.call('projects.drafts', {});
+  desk.store.startDraft(null, { fresh: true });
+  desk.store.setDraftIncognito(true);
+  const privateId = desk.store.draft!.id!;
+  desk.client.drop();
+  desk.store.queuePrompt('draft', { text: 'Already admitted', attachments: [], request: {
+    id: 'admitted-start', choice: desk.store.defaultChoice(), queuedAt: Date.now(), start: { projectId: project.id, worktree: false, incognito: true },
+  } });
+  desk.store.setDraftIncognito(false);
+  expect(desk.store.draft).toMatchObject({ id: privateId, incognito: true });
+  expect(desk.store.error).toBe(strings.drafts.privacyQueued);
+  desk.store.error = null;
+  desk.store.setDraftProject(desk.store.projects.find(entry => entry.kind !== 'drafts')!.id);
+  expect(desk.store.draft).toMatchObject({ id: privateId, incognito: true });
+  expect(desk.store.error).toBe(strings.drafts.privacyQueued);
 });
 
 test('a restart leaves running a queue the core holds, though the journal brings every queue back paused', async () => {
@@ -741,4 +828,14 @@ test('a prompt queued offline runs with the experiments it was queued with, afte
   await vi.waitFor(async () => expect((await phone.client.call('threads.get', { threadId: 't-trace' })).activity?.goal)
     .toMatchObject({ objective: 'Ship the release', review: expect.anything() }));
   expect(await delivered([desk, phone], 't-trace')).not.toContain('/goal2 Ship the release');
+});
+
+
+test('an old core refuses queue admission before the UI clears the input', async () => {
+  const desk = await device('old-core', new FakeClient({ delayMs: 0, missing: ['composer.list'] }));
+  desk.store.editComposerText('t-trace', 'Keep these words');
+  expect(desk.store.queuePrompt('t-trace', { text: 'Keep these words', attachments: [] })).toBe(false);
+  expect(desk.store.composerStates['t-trace']).toMatchObject({ text: 'Keep these words', queued: [] });
+  expect(desk.store.error).toMatch(/update/i);
+  expect(called(desk, 'turns.start')).toHaveLength(0);
 });
