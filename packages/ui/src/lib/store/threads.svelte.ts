@@ -64,8 +64,10 @@ export class Threads {
   readonly readingPositions = new Map<string, ReadingPosition>();
   readonly readingThreads = new ReadingCache();
   subscribedThreadId: ThreadId | null = null;
-  /** The newest navigation intent, including drafts, pages and detached clients. */
+  /** The newest open or navigation, including a quiet revalidation of the current thread. */
   openGeneration = 0;
+  /** The user's destination: a background revalidation must not cancel a pending bot selection. */
+  navigationGeneration = 0;
   /** What that newest run is opening, so an older one knows what to give back. */
   #openTarget: ThreadId | null = null;
   #olderGeneration = 0;
@@ -115,7 +117,8 @@ export class Threads {
     return thread.agentSessionId && experimentOn('resident-agents') ? 'agents' : 'chat';
   }
 
-  invalidateNavigation(): number {
+  invalidateNavigation(navigate = true): number {
+    if (navigate) this.navigationGeneration++;
     this.#openTarget = null;
     this.#olderGeneration++;
     this.loadingOlder = false;
@@ -315,7 +318,7 @@ export class Threads {
     const { delegation } = this.ctx;
     const client = this.ctx.client;
     if (!client) return;
-    const generation = this.invalidateNavigation();
+    const generation = this.invalidateNavigation(navigate);
     this.#openTarget = threadId;
     if (s.connection !== 'ready') { this.loadingThreadId = null; this.#openOffline(threadId, navigate); return; }
     const newest = (): boolean => this.ctx.currentNavigation(client, generation);
