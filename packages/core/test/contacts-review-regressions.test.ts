@@ -341,6 +341,15 @@ test.each(['protected','unprotected'] as const)('contact mail outside a shared p
     await waitFor(()=>status(later.id)==='delivered');
     expect(await mail()).toEqual([]);
     expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).toBeNull();
+    // A thread that read only a trusted contact's mail is not held, after a restart, as an older core's history.
+    const account=b.h.core.accounts.list().find(entry=>entry.providerId==='echo')!;
+    const fresh=await b.c.call('threads.create',{projectId:b.p.id,providerId:'echo',accountId:account.id,title:'Fresh work'});
+    const direct=await a.c.call('collaboration.send',{threadId:a.t.id,to:{coreId:b.id,threadId:fresh.id},text:'Fifth note',requestId:'trusted-fresh'});
+    await waitFor(()=>b.h.core.coordination.get(fresh.id).messages.find(l=>l.id===direct.id)?.status==='delivered');
+    await waitFor(()=>b.h.core.threads.require(fresh.id).status==='idle');
+    await b.h.stop();
+    const reopened=await startTestCore({dataDir:b.h.dataDir});cores.push(reopened);
+    expect((await (await reopened.connect()).call('threads.get',{threadId:fresh.id})).contactHold).toBeNull();
   }finally{providers.require=require;providers.get=get;access.execution.support=support;restore();}
 },30000);
 
@@ -385,6 +394,10 @@ test('SEC-01 contact mail a bound native thread admitted idle is not refused aga
     await b.c.call('contacts.decideMail',{id:letter.id,accept:true});
     // Idle, the thread admits it and queues its wake.
     desk.admit(id,[entry],()=>desk.update(entry,'uncertain','Queued for provider delivery'));
+    // The owner delivers another letter while this one waits for its wake: the earlier approval stands.
+    const second=await a.c.call('contacts.sendHuman',{threadId:a.t.id,to:{coreId:b.id,threadId:id},text:'Second answer',requestId:'bound-native-second'});
+    await waitFor(()=>core.coordination.get(id).messages.some(l=>l.id===second.id));
+    await b.c.call('contacts.decideMail',{id:second.id,accept:true});
     const thread=core.threads.require(id),require=core.threads.require.bind(core.threads);
     mocks.push(spyOn(core.threads,'require').mockImplementation(threadId=>threadId===id?{...thread,status:'queued'}:require(threadId)));
     // The thread is queued for that wake alone: the same letter crosses, it is not refused into a retry loop.

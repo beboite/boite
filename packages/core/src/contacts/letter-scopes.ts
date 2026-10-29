@@ -111,9 +111,10 @@ export function decideMail(core: Core, id: unknown, accept: unknown): {ok: true}
   }
   const threadId = letter.to.threadId;
   const scope = storedScope(core, threadId) ?? {bindings: [], legacy: false, peers: []};
-  // An approval lasts while its letter waits: one already read needs it no more.
-  const waiting = new Set(waitingMail(core, threadId).map(approval));
-  core.journal.setSetting(`shared-file-letters:${threadId}`, {...scope, trusted: [...(scope.trusted ?? []).filter(digest => waiting.has(digest)), approval(letter)]});
+  // An approval lasts until its letter reached the agent: waiting, or queued for a provider turn that admits it again.
+  const unread = core.journal.db.query("SELECT data FROM coordination_letters WHERE thread_id=? AND direction='in' AND status IN ('received','uncertain')").all(threadId) as {data: string}[];
+  const live = new Set(unread.map(row => approval(JSON.parse(row.data) as AgentLetter)));
+  core.journal.setSetting(`shared-file-letters:${threadId}`, {...scope, trusted: [...(scope.trusted ?? []).filter(digest => live.has(digest)), approval(letter)]});
   core.contacts.changed();
   core.coordination.resumeTrusted(threadId);
   return {ok: true};
@@ -207,7 +208,11 @@ export function protectLetters(core: Core, threadId: string, letters: AgentLette
   // A letter the owner trusted or delivered, or one from a trusted contact, carries no new authority.
   const gate = contactMailGate(core, threadId);
   const external = contactMail.filter(l => !gate.cleared(l));
-  if (!external.length) return;
+  if (!external.length) {
+    // Without a scope, a restart would read this delivered mail as an older core's history and hold the thread.
+    if (!storedScope(core, threadId)) core.journal.setSetting(`shared-file-letters:${threadId}`, {bindings: [], legacy: false, peers: [...new Set(contactMail.map(l => l.contact!.coreId))]} satisfies LetterScope);
+    return;
+  }
   if (external.some(gate.held)) throw refused('shared file policy: contact mail outside a shared project waits for the owner');
   const thread = core.threads.require(threadId);
   const protocol = core.providers.require(thread.providerId).protocol;
