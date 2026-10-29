@@ -4,6 +4,26 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { posixLockFile } from '../src/platform/posix-file-lock.ts';
 
+test.skipIf(process.platform === 'win32')('a POSIX lock rejects contention and can be acquired again after release', () => {
+  const dir = fs.mkdtempSync(join(tmpdir(), 'boite-posix-lock-'));
+  const file = join(dir, 'core.lock');
+  const lock = posixLockFile(process.platform === 'darwin' ? 'macos' : 'linux');
+  let held: ReturnType<typeof lock> = null;
+  try {
+    held = lock(file);
+    expect(held).not.toBeNull();
+    expect(lock(file)).toBeNull();
+    held!.write('owner');
+    expect(fs.readFileSync(file, 'utf8')).toBe('owner');
+    held!.release();
+    held = lock(file);
+    expect(held).not.toBeNull();
+  } finally {
+    held?.release();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test.skipIf(process.platform === 'win32')('a lock is not still at a path on another device with the same inode', () => {
   const dir = fs.mkdtempSync(join(tmpdir(), 'boite-posix-lock-'));
   const file = join(dir, 'core.lock');
