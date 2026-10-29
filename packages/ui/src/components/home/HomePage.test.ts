@@ -29,7 +29,6 @@ afterEach(async () => {
   workspace.active = primary;
   document.body.innerHTML = '';
   setExperiment('contacts', false);
-  setExperiment('goal2', false);
   localStorage.clear();
 });
 
@@ -138,8 +137,6 @@ test('his page draws the link, both ways of sharing and the check words; rename,
   expect(one('contact-link')!.textContent).toBe(strings.contacts.link.connected);
   expect(one('contact-shared')!.querySelector('[data-testid^="contact-grant-"]')?.textContent).toContain('boite');
   expect(one('contact-offer-chris-website')!.textContent).toContain('website');
-  // The board is a `/goal2` experiment: off, a shared project shows none.
-  expect(one('contact-board-p-boite')).toBeNull();
   expect(one('contact-words')!.querySelectorAll('li')).toHaveLength(8);
   // Only what he asks shows on his page, and nothing of the page that adds a contact.
   expect(one('contact-requests')!.querySelector('[data-testid="contact-request-creq-pending"]')).not.toBeNull();
@@ -161,7 +158,6 @@ test('his page draws the link, both ways of sharing and the check words; rename,
 });
 
 test('a shared project shows its board as four counts that follow its cards; a click opens the board in its last conversation', async () => {
-  setExperiment('goal2', true);
   const store = await draw('core-chris');
   const tallies = () => [...one('contact-board-p-boite')?.querySelectorAll('[data-column]') ?? []].map(node => node.textContent);
   // To do, In progress, In review, Done: one card open, one claimed, one confirmed.
@@ -174,7 +170,6 @@ test('a shared project shows its board as four counts that follow its cards; a c
 });
 
 test('the counts read again after a reconnect that may have missed an update, and after a first read that failed', async () => {
-  setExperiment('goal2', true);
   setExperiment('contacts', true);
   const store = new Store();
   store.machineId = 'home';
@@ -208,7 +203,6 @@ test('the counts read again after a reconnect that may have missed an update, an
 });
 
 test("a board asked for from a contact's page stays hidden when another page is picked while its conversation opens", async () => {
-  setExperiment('goal2', true);
   const store = await draw('core-chris');
   await vi.waitFor(() => { flushSync(); expect(one('contact-board-p-boite')).not.toBeNull(); });
   let release!: () => void;

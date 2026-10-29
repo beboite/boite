@@ -604,7 +604,7 @@ export class ThreadStore {
   /** Accepts a turn and queues it (`threads/turn-origin.ts`): `origin` says who starts it and why. */
   startTurn(threadId: ThreadId, input: string | TurnInput, origin: TurnOrigin = USER_ORIGIN, options: StartTurnOptions = {}): Turn {
     let { prompt, attachments = [], previews: previewReferences = [], display: displayText } = typeof input === 'string' ? { prompt: input } : input;
-    const { expectedSelectionVersion, persistAdmission, choice: executionChoice } = options;
+    const { expectedSelectionVersion, persistAdmission, choice: executionChoice, autoGoal } = options;
     const operation = originOperation(origin), automatic = originAutomatic(origin);
     const clientRequestId = origin.requestId;
     const activity = origin.kind === 'goal' ? origin.activity : undefined;
@@ -740,8 +740,8 @@ export class ThreadStore {
       // His own message, a resume or a parent's message to its subagent puts the agent back to work,
       // so a pause the core left on Stop, a failure or a restart ends with it; the owner's stays.
       if (!activity && !startedBy && (!operation || operation === 'resume' || (operation === 'delegation' && thread.parentThreadId))) this.core.coordination.resumeForUser(threadId);
-      // A `/goal2`'s checklist reads what the user adds, drops or changes.
-      if (!activity && !operation && !startedBy && !nativeCommandPrompt(prompt)) this.core.activity.userMessage(threadId, prompt);
+      // `autoGoal`, the prompt as typed, may start an automatic goal (`docs/goals.md`); otherwise a `/goal2`'s checklist reads what the user adds, drops or changes.
+      if (!activity && !operation && !startedBy && !nativeCommandPrompt(prompt) && !(autoGoal !== undefined && this.core.activity.autoGoal(threadId, turn.id, message.id, autoGoal, executionChoice))) this.core.activity.userMessage(threadId, prompt);
     });
     this.autoCompact.cancel(threadId);
     this.cacheKeepalive.cancel(threadId);

@@ -189,11 +189,11 @@ test('queued prompts share a turn when their choice is the same in any key order
   expect((await userTexts(client, thread.id)).slice(seen)).toEqual(['First\n\nSecond', 'After the tool']);
 });
 
-test('a queued command runs with the experiments its prompt was queued with, not the delivering app\'s', async () => {
+test('a queued /goal2 starts a reviewed goal, its stale goal2 experiment id ignored', async () => {
   const client = await ready();
   const thread = await client.call('threads.get', { threadId: 't-trace' });
   const input = value('');
-  input.input.queued.push({ id: 'reviewed-goal', text: '/goal2 Ship the release', attachments: [], choice: choiceOf(thread), experiments: ['goal2'] });
+  input.input.queued.push({ id: 'reviewed-goal', text: '/goal2 Ship the release', attachments: [], choice: choiceOf(thread), experiments: ['goal2'] as never });
   await client.call('composer.put', { section: 'inputs', id: thread.id, expectedRevision: 0, value: input });
   await vi.waitFor(async () => expect((await client.call('threads.get', { threadId: thread.id })).activity?.goal).toMatchObject({ objective: 'Ship the release', review: expect.anything() }));
   expect(await userTexts(client, thread.id)).not.toContain('/goal2 Ship the release');

@@ -6,8 +6,8 @@ shows and hides the drawer at any time. The terminal button in the thread header
 does the same unless Settings, Appearance, Buttons hides it. The top edge of the
 drawer sets its height, which the browser keeps per device. The cross ends the
 shell that has the keyboard, a tab's cross every shell of the tab; hiding the
-drawer ends none. With the Reviewed goals experiment on, the project board
-shares the drawer: its first tabs switch between Board and Terminal, and
+drawer ends none. In a project's thread on a core that links cards to goals,
+the project board shares the drawer: its first tabs switch between Board and Terminal, and
 `Ctrl+J` opens the tab picked last ([board.md](board.md)).
 
 ## Tabs and splits
