@@ -3,7 +3,7 @@ import { RpcErrorCode, type Contact, type ContactInvite, type ContactRequest, ty
 import { RpcFailure } from '../client';
 import { encodeInvite, INVITE_PREFIX, inviteShare, readInvite } from '../contact-link';
 import type { FakeContext, FakeMethods } from './context';
-import { checkContactTier, contactSender, coordinationConfig, deliverContactAnswer, fakeContactRoutes, fakeCore, registerContactState, trusts } from './coordination';
+import { checkContactTier, contactSender, coordinationConfig, decideFakeMail, deliverContactAnswer, fakeContactRoutes, fakeCore, fakeHeldMail, registerContactState, releaseFakeMail, trusts } from './coordination';
 
 const DAY = 24 * 60 * 60_000;
 const WORDS = ['amber', 'orbit', 'lantern', 'meadow', 'falcon', 'cobalt', 'harbor', 'velvet', 'thistle', 'glacier', 'ember', 'quartz'];
@@ -237,7 +237,7 @@ export function contactMethods(ctx: FakeContext) {
     return { id: found.id, name: found.name };
   };
   return {
-    'contacts.get': async () => structuredClone(contactState(ctx)),
+    'contacts.get': async () => structuredClone({ ...contactState(ctx), mail: fakeHeldMail(ctx) }),
     'contacts.invite': async (params) => {
       if (params?.share !== undefined && typeof params.share !== 'boolean') throw invalid('share: expected true or false', 'share');
       if (params?.internet !== undefined && typeof params.internet !== 'boolean') throw invalid('internet: expected true or false', 'internet');
@@ -337,6 +337,8 @@ export function contactMethods(ctx: FakeContext) {
       }
       if (params.trusted !== undefined) contact.trusted = params.trusted;
       offers(contact);
+      // As the core: trusted now, its mail goes to its threads.
+      if (contact.trusted) releaseFakeMail(ctx, contact.coreId);
       changed();
       return structuredClone(contact);
     },
@@ -380,6 +382,7 @@ export function contactMethods(ctx: FakeContext) {
       changed();
       return { ok: true as const };
     },
+    'contacts.decideMail': async (params) => decideFakeMail(ctx, params?.id, params?.accept),
     'contacts.decide': async (params) => {
       if (typeof params?.accept !== 'boolean') throw invalid('accept: expected a boolean', 'accept');
       const state = contactState(ctx);

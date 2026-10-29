@@ -269,7 +269,9 @@ contact reusing an id of this core's requests, never reach each other's
 request. The decision comes back to the asking thread as a
 message (`origin: 'contact'`): the project opened and its threads, or the
 reason for the refusal. When the contact's core refuses the ask itself (a
-tier, a full queue), the asking thread is told the same way.
+tier, a full queue), the asking thread is told the same way. That message, like any
+contact mail outside a shared project, waits for this owner unless the contact
+is trusted here ([Human letters and file boundaries](#human-letters-and-file-boundaries)).
 
 ## What an agent knows
 
@@ -703,6 +705,18 @@ local sibling. Other ordinary owner conversations retain their permissions.
 A new remote compute worker starts with its own captured host authority and
 fresh task; its host parent supplies an account/profile, never conversation
 history. That parent's old letter scopes do not replace the new job boundary.
+
+Contact mail outside a shared project, request answers included, reaches a
+native agent only once its contact is trusted or the owner delivered it.
+Until then it stays `received` in the inbox, and its thread keeps working and
+is never paused for it. `contacts.get` lists it in `mail`, oldest first and at
+most 50, and the Contacts notice shows each letter with Deliver, Refuse and
+Details. `contacts.decideMail`, owner only, delivers one letter as written,
+recording a digest of its sender and content in the thread's letter scope, or
+rejects it, which its sender reads. Marking the contact trusted delivers what
+waits from it. Held mail expires like any letter: 15 minutes for agent and
+human mail, 6 hours for a request answer. A tool-free thread (echo in default
+mode) reads it at once and takes the hold below.
 
 Legacy correspondence and pre-policy consumed history have no captured file
 authority: they use the no-tools route and deny file/tool/upload/publication

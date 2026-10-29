@@ -100,6 +100,56 @@ test('a dismissed request keeps its header badge, which refreshes after a reconn
   await vi.waitFor(() => { flushSync(); expect(one('contact-request-open')).toBeNull(); });
 });
 
+test('a message from a contact outside a shared project pops up to be read: Deliver hands it to its conversation, Refuse answers the sender, Details opens the contact', async () => {
+  const store = await connect();
+  store.page = 'settings';
+  const sam = new FakeClient({ delayMs: 0, coreId: 'core-sam', coreName: 'Sam' });
+  await sam.connect();
+  try {
+    const client = store.client!;
+    await client.call('contacts.join', { link: (await sam.call('contacts.invite', { share: false })).link });
+    for (const each of [client, sam]) await each.call('contacts.settings', { settings: { minTier: 2 } });
+    // Echo in default mode reads contact mail without tools; this one may edit files, so its mail waits.
+    await client.call('threads.update', { threadId: 't-trace', permissionMode: 'acceptEdits' });
+    await client.call('contacts.decide', { id: 'creq-pending', accept: false, reason: 'Not now' });
+    const answered = async (text: string) => {
+      const asked = await client.call('collaboration.ask', { threadId: 't-trace', contact: 'core-sam', text });
+      await sam.call('contacts.decide', { id: asked.id, accept: false, reason: `No: ${text}` });
+      await vi.waitFor(() => { flushSync(); expect(one('contact-request-notice')?.dataset.kind).toBe('mail'); });
+      expect(one('contact-mail-notice-text')!.textContent).toContain(`No: ${text}`);
+      return (await client.call('contacts.get', {})).mail!.at(-1)!;
+    };
+    const status = async (id: string) => (await client.call('collaboration.get', { threadId: 't-trace' })).messages.find(letter => letter.id === id)?.status;
+    components.push(mount(TitleBar, { target: document.body, props: { store } }));
+
+    const first = await answered('Which tool schedules your posts?');
+    expect(one('contact-request-notice')!.textContent).toContain(fill(strings.contacts.mail.writes, { contact: 'Sam', thread: 'Finish the trace tab' }));
+    expect(await status(first.id)).toBe('received');
+    one<HTMLButtonElement>('contact-mail-notice-deliver')!.click();
+    await vi.waitFor(async () => expect(await status(first.id)).toBe('delivered'));
+    await vi.waitFor(() => { flushSync(); expect(one('contact-request-notice')).toBeNull(); });
+    expect((await client.call('threads.get', { threadId: 't-trace' })).contactHold ?? null).toBeNull();
+
+    const second = await answered('Another note');
+    one<HTMLButtonElement>('contact-mail-notice-refuse')!.click();
+    await vi.waitFor(async () => expect(await status(second.id)).toBe('rejected'));
+    await vi.waitFor(() => { flushSync(); expect(one('contact-request-notice')).toBeNull(); });
+
+    // Details opens the contact's page, where the whole message waits with the same two answers.
+    const third = await answered('Third note');
+    one<HTMLButtonElement>('contact-mail-notice-details')!.click();
+    await vi.waitFor(() => expect([store.page, store.contact]).toEqual(['home', 'core-sam']));
+    components.push(mount(HomePage, { target: document.body, props: { store } }));
+    await vi.waitFor(() => { flushSync(); expect(one('contact-mail')?.querySelector(`[data-testid="contact-mail-${third.id}"]`)).not.toBeNull(); });
+    one<HTMLButtonElement>(`contact-mail-deliver-${third.id}`)!.click();
+    await vi.waitFor(async () => expect(await status(third.id)).toBe('delivered'));
+    await vi.waitFor(() => { flushSync(); expect(one('contact-mail')).toBeNull(); });
+    expect((await client.call('contacts.get', {})).mail).toEqual([]);
+  } finally {
+    sam.close();
+  }
+});
+
 function type(input: HTMLInputElement, value: string) {
   input.value = value;
   input.dispatchEvent(new Event('input', { bubbles: true }));

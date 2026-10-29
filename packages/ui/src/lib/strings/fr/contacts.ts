@@ -17,7 +17,7 @@ export const fr: Translation = {
     rename: 'Renommer {name}',
     nameLabel: 'Nom du contact',
     trusted: 'De confiance',
-    trustedTip: 'Ses demandes peuvent ouvrir un projet sans vous : celui dont le remote git correspond, sinon celui que choisit l\'agent concierge. Une demande qu\'il ne sait pas placer vous attend. La lecture des conversations n\'est jamais accordée ainsi.',
+    trustedTip: 'Ses demandes peuvent ouvrir un projet sans vous : celui dont le remote git correspond, sinon celui que choisit l\'agent concierge. Une demande qu\'il ne sait pas placer vous attend. Ses messages vont à vos agents sans vous attendre. La lecture des conversations n\'est jamais accordée ainsi.',
     youShare: 'Vous partagez avec {name}',
     theyShare: '{name} partage avec vous',
     nothingOpen: 'Rien pour l\'instant',
@@ -61,6 +61,19 @@ export const fr: Translation = {
       refused: 'Refusée',
       by: { owner: 'Propriétaire', match: 'Correspondance', concierge: 'Concierge' },
       byTip: { owner: 'Décidé par le propriétaire.', match: 'Son remote git correspondait à un seul projet.', concierge: 'Décidé par l\'agent concierge pour un contact de confiance.' }
+    },
+    mail: {
+      title: 'Messages',
+      tip: 'Envoyé hors d\'un projet partagé : aucun agent ne le lit avant que vous le transmettiez. Les messages d\'un contact de confiance vont directement à vos agents.',
+      writes: '{contact} écrit à {thread}',
+      from: 'Envoyé depuis : {thread}',
+      until: 'Attend jusqu\'à {time}',
+      deliver: 'Transmettre',
+      deliverTip: 'L\'agent de {thread} le lit tel quel.',
+      refuse: 'Refuser',
+      refuseTip: 'L\'expéditeur lit que vous l\'avez refusé.',
+      details: 'Détails',
+      pending: '{count} messages de contacts en attente'
     },
     invite: {
       title: 'Inviter quelqu\'un',
