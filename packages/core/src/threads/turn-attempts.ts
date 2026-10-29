@@ -1,4 +1,4 @@
-import type { Account, PermissionMode, ProviderDescriptor, ProviderId, RpcEvents, ThreadId, ThreadRetry, ThreadSummary, Turn, TurnId, Usage } from '@boite/contracts';
+import type { Account, MessageId, PermissionMode, ProviderDescriptor, ProviderId, RpcEvents, ThreadId, ThreadRetry, ThreadSummary, Turn, TurnId, Usage } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { assertDriverRunnable, releaseThread } from '../drivers/index.ts';
 import type { Driver, TurnContext, TurnHandle, TurnResult } from '../drivers/types.ts';
@@ -203,13 +203,31 @@ export class TurnAttempts {
       // Whether this attempt writes anything but an error: the agent's session then holds work a new try must not repeat.
       let wrote = false;
       const sink = context.emit;
+      // While the core hands its turns over, a service manager may signal every agent with it: an agent
+      // that dies then reports the restart as its error. That error waits for the attempt's end; one the
+      // agent writes past (a pi error notice) did not end it and goes out then. Redrawing an earlier part
+      // (Codex settles its running tools after its failure) is not going on.
+      const held: { errors: Parameters<TurnContext['emit']['part']>[]; failed: MessageId[] } = { errors: [], failed: [] };
+      const release = (messageId: MessageId | null, partIndex: number): void => {
+        if (!held.errors.some(([at, index]) => messageId === null || at !== messageId || partIndex > index)) return;
+        for (const args of held.errors.splice(0)) sink.part(...args);
+        for (const failed of held.failed.splice(0)) sink.complete(failed, 'error');
+      };
       context.emit = {
-        startMessage: role => sink.startMessage(role),
-        delta: (messageId, partIndex, text) => { wrote = true; sink.delta(messageId, partIndex, text); },
-        part: (messageId, partIndex, part) => { if (part.type !== 'error') wrote = true; sink.part(messageId, partIndex, part); },
+        startMessage: role => { release(null, 0); return sink.startMessage(role); },
+        delta: (messageId, partIndex, text) => { release(messageId, partIndex); wrote = true; sink.delta(messageId, partIndex, text); },
+        part: (messageId, partIndex, part) => {
+          if (part.type === 'error' && this.threads.handoff.active) { held.errors.push([messageId, partIndex, part]); return; }
+          release(messageId, partIndex);
+          if (part.type !== 'error') wrote = true;
+          sink.part(messageId, partIndex, part);
+        },
         // A patch changes a tool part already written.
         patchTool: (messageId, partIndex, fields) => sink.patchTool(messageId, partIndex, fields),
-        complete: (messageId, messageState) => sink.complete(messageId, messageState),
+        complete: (messageId, messageState) => {
+          if (messageState === 'error' && held.errors.length > 0) { held.failed.push(messageId); return; }
+          sink.complete(messageId, messageState);
+        },
       };
       if (continuing) {
         // The native session already holds the request and what the agent did with it.
@@ -253,8 +271,15 @@ export class TurnAttempts {
       const deadline = this.stopDeadlines.get(threadId);
       if (deadline?.timer) clearTimeout(deadline.timer);
       const fresh = !retriedLostSession && result.sessionLost === true ? this.dropLostSession(state.thread, result) : null;
-      if (this.stopRequested.has(threadId)) {
-        result = { ...result, status: 'stopped', ...(fresh ? { error: undefined } : {}) };
+      // Cut by the restart: a stop the next core resumes, not a failure. A refusal stays one.
+      const cut = result.status === 'error' && result.refusal === undefined && this.threads.handoff.active;
+      const stopped = cut || this.stopRequested.has(threadId);
+      // Only the death that cut the attempt is dropped; anything else held goes out as the agent wrote it.
+      // Drained: a later attempt writes through this wrapper too, and must not release them again.
+      for (const args of held.errors.splice(0)) if (!cut) sink.part(...args);
+      for (const messageId of held.failed.splice(0)) sink.complete(messageId, cut ? 'complete' : 'error');
+      if (stopped) {
+        result = { ...result, status: 'stopped', ...(fresh || cut ? { error: undefined } : {}) };
         break;
       }
       // A keepalive on a fresh session would write the whole history to warm nothing: it fails, and the wait ends.
