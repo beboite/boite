@@ -275,8 +275,9 @@ export class TurnAttempts {
       const cut = result.status === 'error' && result.refusal === undefined && this.threads.handoff.active;
       const stopped = cut || this.stopRequested.has(threadId);
       // Only the death that cut the attempt is dropped; anything else held goes out as the agent wrote it.
-      for (const args of cut ? [] : held.errors) sink.part(...args);
-      for (const messageId of held.failed) sink.complete(messageId, cut ? 'complete' : 'error');
+      // Drained: a later attempt writes through this wrapper too, and must not release them again.
+      for (const args of held.errors.splice(0)) if (!cut) sink.part(...args);
+      for (const messageId of held.failed.splice(0)) sink.complete(messageId, cut ? 'complete' : 'error');
       if (stopped) {
         result = { ...result, status: 'stopped', ...(fresh || cut ? { error: undefined } : {}) };
         break;
