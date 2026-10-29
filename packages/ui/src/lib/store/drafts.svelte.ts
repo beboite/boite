@@ -6,7 +6,10 @@ import type { StoreContext } from './context';
 import { fill, strings } from '../strings';
 import { bytes } from '../format';
 import { readDraftJournal, writeDraftJournal } from '../draft-journal';
-import { unresolvedAssetId, type DraftAttachment } from '../draft-attachments';
+import { followRead, isLoading, loadedFrom, readyAttachments, unresolvedAssetId, type DraftAttachment } from '../draft-attachments';
+import { keepSource } from '../attachments';
+import { settleIn } from '../composer-images';
+import { replaceInHistory } from '../composer-history';
 import { secureId } from '../secure-id';
 import { fitHeld } from '../turn-fit';
 import { attachedBytes } from '../attachments';
@@ -319,7 +322,19 @@ export class Drafts {
    */
   keepAside(projectId: string | null, box: Pick<Input, 'text' | 'attachments' | 'previewReferences'>): void {
     const draft = newDraft(projectId, false);
-    this.saved[draftKey(draft)] = { draft, choice: null, input: { ...empty(), ...box }, parked: created() };
+    const id = draftKey(draft);
+    this.saved[id] = { draft, choice: null, input: { ...empty(), ...box }, parked: created() };
+    // A file still being read in the box it left lands here too, where its `[Image N]` went.
+    for (const placeholder of box.attachments.filter(isLoading)) followRead(placeholder, ready => {
+      const input = this.liveSource('drafts', id)?.input;
+      if (!input) return;
+      const at = settleIn(input, placeholder, ready);
+      const landed = ready && at >= 0 ? input.attachments[at] ?? null : null;
+      if (ready && landed) { loadedFrom(landed, placeholder); keepSource(ready, landed); }
+      // Its own undo steps too, typed in it while the file was read, or a step undone back past it.
+      replaceInHistory(input, placeholder, landed ?? ready);
+      if (at >= 0) this.persist();
+    });
   }
 
   /** Drops one draft by its key. The open draft's composer is left to the caller. */
@@ -630,7 +645,7 @@ function savedInput(input: Input, assetId: (bytes: string) => string) {
   const file = (item: Attachment) => ({ kind: item.kind, mimeType: item.mimeType, name: item.name,
     assetId: unresolvedAssetId(item) ?? assetId(item.data), ...(unresolvedAssetId(item) ? {} : { data: item.data }) });
   // `$state.snapshot` hands anything but an object to `structuredClone`, which an absent list costs on every key.
-  return { text: input.text, editing: input.editing ?? null, attachments: input.attachments.map(file),
+  return { text: input.text, editing: input.editing ?? null, attachments: readyAttachments(input.attachments).map(file),
     previewReferences: input.previewReferences && $state.snapshot(input.previewReferences),
     queued: input.queued.map(item => ({ ...(item.id ? { id: item.id } : {}), ...(item.choice ? { choice: $state.snapshot(item.choice) } : {}),
       ...(item.experiments ? { experiments: [...item.experiments] } : {}), ...(item.sentFrom !== undefined ? { sentFrom: item.sentFrom && { ...item.sentFrom } } : {}),

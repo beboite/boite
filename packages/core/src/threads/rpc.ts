@@ -13,6 +13,7 @@ import { steerUser } from './user-steering.ts';
 import { readToolOutput, readToolPart } from './records.ts';
 import { readMessageAttachment } from './attachment-read.ts';
 import { CreationRequests } from './creation-requests.ts';
+import { trustLetters } from '../contacts/letter-scopes.ts';
 
 /**
  * A turn in a folder that is gone is refused by that folder. An archived
@@ -197,6 +198,10 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     core.threads.markRead(params.threadId);
     return { ok: true } as const;
   });
+  core.router.register('threads.trustContactHistory', (params) => {
+    trustLetters(core, params.threadId);
+    return { ok: true } as const;
+  });
   core.router.register('threads.subscribe', (params, ctx) => {
     core.threads.require(params.threadId);
     ctx.connection.subscriptions.add(params.threadId);
@@ -208,6 +213,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
   });
   core.router.register('threads.focus', (params, ctx) => {
     core.threads.focus.set(ctx.connection.id, params.threadId, params.protectedThreadIds, params.protectAllThreads, params.attentive, params.idleMs);
+    if (params.threadId !== null) core.threads.autoCompact.shown(params.threadId);
     return { ok: true } as const;
   });
   core.router.register('turns.start', async (params, ctx) => {
@@ -215,7 +221,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     const attachments = await core.attachmentUploads.resolve(ctx.connection.id, params.attachments ?? [], params.attachmentIds);
     // A subagent put away as done takes a new prompt, as it takes a letter from its parent.
     const thread = core.threads.require(params.threadId);
-    const start = () => core.threads.startTurn(params.threadId, params.prompt, attachments, params.expectedSelectionVersion, undefined, undefined, params.clientRequestId, undefined, params.previewReferences ?? [], undefined, promptOrigin(ctx.connection, core.clients.use(ctx.connection)));
+    const start = () => core.threads.startTurn(params.threadId, { prompt: params.prompt, attachments, previews: params.previewReferences ?? [] }, { kind: 'user', requestId: params.clientRequestId, sentFrom: promptOrigin(ctx.connection, core.clients.use(ctx.connection)) }, { expectedSelectionVersion: params.expectedSelectionVersion });
     return core.delegation.retirements.revivable(thread) ? core.delegation.retirements.revive(thread, start) : start();
   });
   core.router.register('turns.stop', (params, ctx) => {

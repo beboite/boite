@@ -157,8 +157,9 @@ label, which its opening system line shows (`threads/operations.ts`):
 - `routine`: a routine came due. The prompt is the routine's prompt, the label
   `Routine · <name>`.
 - `event`: something happened. The bot was just created (`Just created`),
-  its instructions changed (`Instructions changed`), or facts gathered about
-  its desk and projects (`3 project events`); the prompt carries the facts.
+  its instructions changed (`Instructions changed`), facts gathered about
+  its desk and projects (`3 project events`), or a service outside Boite sent
+  an event ([outside events](#outside-events)); the prompt carries the facts.
 
 A wake never starts while the bot's thread has a turn queued, running or
 waiting, while the bot is archived, while the bot or every bot on the core is
@@ -170,7 +171,8 @@ Every other turn the core starts by itself on the bot's thread meets the
 same policy in `threads.startTurn` (`AgentRuntime.admit`): the output of a
 background shell, an automatic resume, a letter from another thread, the
 results of its subagents or a workflow's summary, pull request news and the
-next turn of a goal. While the bot or the engine is paused, the bot is
+next turn of a goal. The turn's origin decides which ones count
+(`autonomousSource` in `threads/turn-origin.ts`); a request id never does. While the bot or the engine is paused, the bot is
 archived or its budget is spent, the turn does not start: one line in the
 bot's thread says what was held and why, and it starts once the bot may
 run again (`whenAdmitted`), except an automatic resume, which is dropped.
@@ -214,12 +216,24 @@ is data from other threads, not instructions:
 - a pull request of a thread on its desk is merged, or its checks start to
   fail (once each time they go from pending or passing to failing);
 - an entrusted thread's goal is done or blocked (a stop is the user's doing and
-  only leaves a line).
+  only leaves a line);
+- a service outside Boite sends one ([outside events](#outside-events)).
+
+Only the facts that are the bot's own business wake it at once
+(`AgentFact.urgent`): those about a thread on its desk as `started`,
+`entrusted` or `followed`, and outside events. The others, a thread it only
+wrote to or answered for (`touched`) and any other thread of its projects,
+wake it only when its `eventWakes` setting is on, which it is not by default:
+then they wait, durably, for its next routine, which carries them under its
+own prompt. An event turn carries only the facts that woke it; the waiting
+ones stay for the routine. Permission checks run again when either delivers
+them. A bot that should hear every project event as it lands asks for
+`eventWakes true` ([settings](#asking-to-change-a-bots-settings)).
 
 Facts gather: one `event` turn starts once the thread is free and the oldest
-fact is 30 seconds old, and it carries every fact waiting by then, those that
-arrived in the meantime included. Facts that arrive once it has started wait
-for the next one.
+waking fact is 30 seconds old, and it carries every waking fact waiting by
+then, those that arrived in the meantime included. Facts that arrive once it
+has started wait for the next one.
 An event prompt stops at 16,000 characters, older facts giving way, and one
 bot receives at most 60 facts in an hour. A dropped fact, under either cap,
 leaves a system line in the bot's thread naming it; past ten such lines in
@@ -227,6 +241,30 @@ an hour, one more says the rest go unlisted. Each fact records the threads it
 tells of; taking a project back drops what waiting facts say about its
 threads, and the runtime checks them again when it delivers them. Waiting
 facts survive a restart (`agents:pending:<agent>`).
+
+### Outside events
+
+A service outside Boite, a CI job, a monitor, a script, wakes a bot with
+`agents.event { agent, key?, text }` (`boite bot event <bot> [--key <key>]
+<text>`, [CLI](cli.md#commands)). The owner and paired devices may call it,
+never an agent token: threads and bots already reach a bot through letters.
+`agent` is the bot's id or name, `key` is 1 to 64 letters, digits, dots,
+underscores or hyphens (`external` by default) and `text` holds at most 16,000
+characters. Quoted, it may grow (a control character becomes six), so Boite
+cuts it until the wake it makes fits in 16,000 characters and says where it
+cut. The paired device's name is quoted in at most 120 characters, cut the
+same way. The event lands as an urgent fact under `external:<key>`, so it
+wakes the bot whatever `eventWakes` says, under the same hourly cap; a second
+event with the same key replaces one still waiting, keeping its place. The
+prompt quotes the text as data from outside Boite, never the user speaking,
+and names who sent it: the paired device by the name it gave when it paired,
+or the owner's token.
+
+Pair one device per outside service, under the service's name, and give that
+service its own session key: the prompt then names it, and revoking that one
+device (`sessions.revoke`, [phone](phone.md#older-links)) cuts that service alone. A
+paired device can do more than send events ([access](#access)), so keep its
+key where only that service reads it.
 
 ## The context block and the Boite guide
 
@@ -247,7 +285,10 @@ user; wake on `routine` and `event` turns and end one that needs nothing with
 routines|schedule|unschedule`); note durable facts (`boite bot remember`);
 put threads on or off its desk (`boite bot watch|unwatch`); ask the user with
 `boite ask`, `--open <url>` for a login; propose a change to its own settings
-with `boite settings bot request`. With the Boite guide off (the brain's
+with `boite settings bot request` as soon as one stops fitting (the user's
+words contradict its instructions, most wakes end in `[quiet]`, its model or
+effort costs more than its work needs), rather than working around it in its
+memory, routines or the brain. With the Boite guide off (the brain's
 switch or a context mode without guides) the context block carries the bot
 section instead, so a bot never loses `[quiet]`.
 
@@ -358,8 +399,11 @@ settings turn it off (`autoMemory`).
 The desk (`AgentsSnapshot.watches`, `AgentWatch`) is built from data threads
 already keep. A thread joins when the bot starts it (`boite thread new`,
 `threads/spawn.ts`, origin `started`), is entrusted it (`entrusted`), writes to
-it, answers for it or calls `boite bot watch <thread>` (`followed`); the
-first origin stays. The follows live in `resident-follow:<agent>`. A follow
+it or answers for it (`touched`), or calls `boite bot watch <thread>`
+(`followed`); the first origin stays, except that a watch upgrades `touched` to
+`followed`. Only `touched` threads do not wake the bot at once
+([events](#events)). A follow saved as `followed` by an older core for a thread
+the bot only wrote to stays `followed`, and wakes it, until it leaves the desk. The follows live in `resident-follow:<agent>`. A follow
 holds while its thread is open, whatever its age, and leaves a day after the
 thread is done or archived; a removed thread leaves every desk at once,
 whatever its origin. At most 100 open threads sit on one desk; past
@@ -519,15 +563,29 @@ Boite setting ([CLI](cli.md)). The keys are its name, its role (`domain`), its
 instructions (`--instructions-file <path>` for a long text), its picture
 (`avatar`: one or two characters, a robot code, or `""`), its `status`
 (`active`, `paused` or `archived`), the projects entrusted to it, its model and
-reasoning effort, the memory pass (`autoMemory`), its subagents and its daily
-budget (`dailyBudget`, dollars a day or `null`). A name another bot holds is
-refused, when the card is drawn and again when it is applied. The context
-block tells the bot how to ask, so one the user asks to
-rename itself draws the card, and one that needs a project it was not given
-asks for it instead of working around it. The card is asked without stopping and outlives its turn.
+reasoning effort, the memory pass (`autoMemory`), its automatic event wakes
+for every project and desk fact (`eventWakes`, off by default), its subagents and its daily budget (`dailyBudget`, dollars a
+day or `null`). A name another bot holds is refused, when the card is drawn and
+again when it is applied. The context block tells the bot how to ask and when:
+one the user asks to rename itself draws the card, one that needs a project it
+was not given asks for it, and one whose settings no longer fit its work (the
+user's words contradict its instructions, most wakes end quiet, its model or
+effort costs more than the work needs) proposes the change on its own instead
+of working around it. The card is asked without stopping and outlives its turn.
 Apply (`agents.settings.apply`, owner only) goes through the same checks as the
 bot's settings page, and for projects the owner can untick part of the
-proposal first. Any change to the bot, from the card or from the page,
+proposal first. A model is named `<provider>/<model>` (`codex/gpt-6.1-sol`),
+on any provider signed in on the machine; a model id of the bot's own provider
+needs no prefix. On its own provider the bot keeps its account, on another it
+takes that provider's signed-in default; an account the owner granted only to
+other bots is refused. A model outside the bot's allowed routes can be
+proposed: applying the card is the owner allowing it, so the route joins
+the allowed routes and becomes the default one. Apply checks the model again
+and refuses a move to another provider once that provider is turned off or
+signed out; a model of the bot's own provider passes, as on its settings
+page, which takes one whatever the provider's state. A model card
+drawn before cards named the provider holds a model id of the bot's provider
+and settles on that id. Any change to the bot, from the card or from the page,
 settles the cards it answers, and a card whose key no longer exists closes, as
 does one about a bot archived since, except the card that archived it; the
 asking thread reads the outcome as a message. Code:
@@ -656,8 +714,9 @@ routines, desk and status only), `agents.brain.get`, `agents.memory.note`,
 the projects of another machine through that machine's `groupBots`
 permission. A paired device reads
 `agents.snapshot`, `agents.open`, `agents.runtime.get` and `agents.brain.get`
-(`packages/contracts/src/access.ts`) and talks to the bot through its thread
-like any other; configuration, account grants and entrusting stay owner-only.
+(`packages/contracts/src/access.ts`), sends it outside events
+(`agents.event`) and talks to the bot through its thread like any other;
+configuration, account grants and entrusting stay owner-only.
 
 ## Verification
 
@@ -665,7 +724,8 @@ Follow the relevant [development checks](development.md#checks-and-tests).
 Core tests: `agents.test.ts` (creation and introduction, the user's messages
 as ordinary turns, delete refused and archive, open recreates, own snapshot
 only), `agents-runtime.test.ts` (the context block, routine wakes and
-outcomes, quiet events, budget, pauses, fact batching, instructions changed),
+outcomes, quiet events, budget, pauses, fact batching, instructions changed,
+an outside event from a paired device),
 `agents-desk.test.ts` (desk rows from a started, an entrusted and a watched
 thread, follows kept while open and dropped a day after done, the open cap,
 the stall event once per turn, an entrusted goal waking the bot, pull

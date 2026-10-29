@@ -2,6 +2,7 @@ import { RpcErrorCode, providerEnabled, subscriptionProxyName, subscriptionProxy
 import type {
   Account,
   HarnessUpdate,
+  LocalAcpCommand,
   ProviderId,
   ProviderInstallState,
   ProviderRejected,
@@ -11,7 +12,9 @@ import type {
   SubscriptionProxyQuotas
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
+import { strings } from '../strings';
 import type { LoginState } from '../store.svelte';
+import { updateStale } from '../update-freshness';
 import type { StoreContext } from './context';
 
 export interface AccountGateway {
@@ -327,7 +330,8 @@ export class Accounts {
    * A core from before updates answers MethodNotFound: that machine simply
    * offers none, which is not an error worth a toast.
    */
-  async loadHarnessUpdates(refresh = false): Promise<void> {
+  /** `quiet`: a check nobody asked for logs its failure instead of showing it. */
+  async loadHarnessUpdates(refresh = false, quiet = !refresh): Promise<void> {
     const client = this.ctx.client;
     if (!client || !this.ctx.store.owner) return;
     const generation = this.ctx.clientGeneration;
@@ -340,9 +344,21 @@ export class Accounts {
         this.harnessUpdates = [];
         return;
       }
-      if (refresh) this.ctx.fail(error);
+      if (!quiet) this.ctx.fail(error);
       else console.warn('reading the agent updates failed', error);
     }
+  }
+
+  /**
+   * Checks this machine's agents again when one of their readings is stale:
+   * the core checks every six hours from its start, so its reading can miss a
+   * release published since, and updating one agent stamps only its own row.
+   * Nothing starts while one of them is checking, updating or shows a failure.
+   */
+  async freshenHarnessUpdates(now = Date.now()): Promise<void> {
+    const updates = this.harnessUpdates;
+    if (updates.length === 0 || updates.some((update) => update.state !== 'idle')) return;
+    if (updates.some((update) => updateStale(update.checkedAt, now))) await this.loadHarnessUpdates(true, true);
   }
 
   async updateHarness(providerId: ProviderId): Promise<void> {
@@ -388,6 +404,45 @@ export class Accounts {
     const generation = this.ctx.clientGeneration;
     try {
       const { loaded, rejected } = await client.call('providers.setEnabled', { providerId, enabled });
+      if (!this.ctx.currentClient(client, generation)) return false;
+      this.providers = loaded;
+      this.rejectedProviders = rejected;
+      return true;
+    } catch (error) {
+      if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
+      return false;
+    }
+  }
+
+  /**
+   * Write a local ACP command as a provider on this store's machine. A refusal
+   * comes back to the form with the field it names instead of a toast.
+   */
+  async addLocalProvider(command: LocalAcpCommand): Promise<{ ok: true; providerId: ProviderId } | { ok: false; field: string | null; message: string }> {
+    const client = this.ctx.client;
+    if (!client || !this.ctx.store.owner) return { ok: false, field: null, message: strings.localAcp.unavailable };
+    const generation = this.ctx.clientGeneration;
+    try {
+      const { providerId, loaded, rejected } = await client.call('providers.addLocal', command);
+      if (this.ctx.currentClient(client, generation)) {
+        this.providers = loaded;
+        this.rejectedProviders = rejected;
+      }
+      return { ok: true, providerId };
+    } catch (error) {
+      const data = error instanceof RpcFailure ? error.data : null;
+      const field = typeof data === 'object' && data !== null && typeof (data as { field?: unknown }).field === 'string' ? (data as { field: string }).field : null;
+      return { ok: false, field, message: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  /** Delete a provider added on this machine. Refused by the core for a shipped one or while one of its turns runs. */
+  async removeLocalProvider(providerId: ProviderId): Promise<boolean> {
+    const client = this.ctx.client;
+    if (!client || !this.ctx.store.owner) return false;
+    const generation = this.ctx.clientGeneration;
+    try {
+      const { loaded, rejected } = await client.call('providers.removeLocal', { providerId });
       if (!this.ctx.currentClient(client, generation)) return false;
       this.providers = loaded;
       this.rejectedProviders = rejected;

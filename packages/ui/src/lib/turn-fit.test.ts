@@ -1,7 +1,9 @@
 import { writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { ATTACHMENTS_TOTAL_MAX_BYTES, IMAGE_MAX_EDGE, decodedBytes, type Attachment } from '@boite/contracts';
-import { attachFiles, gatherAttachments } from './composer-attachments';
+import { gatherAttachments, takeFiles } from './composer-attachments';
+import type { ComposerState } from './composer-queue';
+import { isLoading } from './draft-attachments';
 import type { Store } from './store.svelte';
 import { FIT_FLOOR_EDGE, fitHeld, fitTurn, waterLevel } from './turn-fit';
 import type { ImageCodec } from './image-prepare';
@@ -9,6 +11,11 @@ import { startBunCodec, type BunCodec } from '../test/bun-codec';
 import { screenshot } from '../test/screenshots';
 
 const KB = 1024;
+
+/** A composer box and a store for `takeFiles`, the way files come into the composer. */
+function composer(attachments: Attachment[]): { box: ComposerState; store: Store } {
+  return { box: { text: '', attachments, queued: [], sending: false, paused: false } as unknown as ComposerState, store: { error: null, composerStates: {} } as unknown as Store };
+}
 /** A tenth of the real budget, with pictures a tenth as heavy: the same shares at a tenth of the bytes to copy. */
 const MAX = ATTACHMENTS_TOTAL_MAX_BYTES / 10;
 
@@ -136,20 +143,32 @@ describe('fitTurn', () => {
         return { ...image, async encode(...args) { await new Promise(resolve => setTimeout(resolve, delay)); return image.encode(...args); } };
       }
     });
-    const box = { attachments: Array.from({ length: 3 }, (_, at) => jpeg(`shot-${at}.jpg`, 4 * 1024 * KB)) };
+    const { box, store } = composer(Array.from({ length: 3 }, (_, at) => jpeg(`shot-${at}.jpg`, 4 * 1024 * KB)));
     void fitHeld(box, slow(weighingCodec(4 * 1024 * KB), 2));
-    // The composer hands the files a stand-in that keeps undo steps; the box is what its fits run on.
-    const holder = { get attachments() { return box.attachments; }, set attachments(value: Attachment[]) { box.attachments = value; }, box };
-    const store = { error: null } as unknown as Store;
     const pdf = new File([new Uint8Array(4 * 1024 * KB)], 'spec.pdf', { type: 'application/pdf' });
-    await attachFiles(store, [pdf], holder, null, undefined, slow(weighingCodec(4 * 1024 * KB), 5));
+    await takeFiles(store, box, [pdf], null, () => {}, slow(weighingCodec(4 * 1024 * KB), 5));
     expect(store.error).toBeNull();
     expect(box.attachments.map(one => one.name)).toEqual(['shot-0.jpg', 'shot-1.jpg', 'shot-2.jpg', 'spec.pdf']);
     expect(box.attachments.reduce((sum, one) => sum + decodedBytes(one.data), 0)).toBeLessThanOrEqual(ATTACHMENTS_TOTAL_MAX_BYTES);
   });
 
+  test('gatherAttachments lets the held pictures make room for a file past the total', async () => {
+    let held = Array.from({ length: 2 }, (_, at) => jpeg(`shot-${at}.jpg`, 4 * 1024 * KB));
+    const pdf = new File([new Uint8Array(4 * 1024 * KB)], 'spec.pdf', { type: 'application/pdf' });
+    const refused = await gatherAttachments([pdf], {
+      held: () => held,
+      add: (one) => { held = [...held, one]; },
+      replace: (lighter) => { held = held.map(one => lighter.get(one) ?? one); },
+      noImages: null,
+      codec: weighingCodec(4 * 1024 * KB)
+    });
+    expect(refused).toBeNull();
+    expect(held.map(one => one.name)).toEqual(['shot-0.jpg', 'shot-1.jpg', 'spec.pdf']);
+    expect(held.reduce((sum, one) => sum + decodedBytes(one.data), 0)).toBeLessThanOrEqual(ATTACHMENTS_TOTAL_MAX_BYTES);
+  });
+
   test('a picture pasted while waiting files are fitted is fitted with them', async () => {
-    const box = { attachments: Array.from({ length: 2 }, (_, at) => jpeg(`shot-${at}.jpg`, 4 * 1024 * KB)) };
+    const { box, store } = composer(Array.from({ length: 2 }, (_, at) => jpeg(`shot-${at}.jpg`, 4 * 1024 * KB)));
     const weighing = weighingCodec(4 * 1024 * KB);
     let pasted = false;
     // A paste lands in the box as the first picture is encoded, outside the box's queue.
@@ -162,11 +181,11 @@ describe('fitTurn', () => {
         } };
       }
     };
-    const store = { error: null } as unknown as Store;
     const pdf = new File([new Uint8Array(4 * 1024 * KB)], 'spec.pdf', { type: 'application/pdf' });
-    await attachFiles(store, [pdf], box, null, undefined, codec);
+    await takeFiles(store, box, [pdf], null, () => {}, codec);
     expect(store.error).toBeNull();
-    expect(box.attachments.map(one => one.name)).toEqual(['shot-0.jpg', 'shot-1.jpg', 'pasted.jpg', 'spec.pdf']);
+    // The file's tile was there before the paste, and keeps its place.
+    expect(box.attachments.map(one => one.name)).toEqual(['shot-0.jpg', 'shot-1.jpg', 'spec.pdf', 'pasted.jpg']);
     expect(box.attachments.reduce((sum, one) => sum + decodedBytes(one.data), 0)).toBeLessThanOrEqual(ATTACHMENTS_TOTAL_MAX_BYTES);
   });
 });
@@ -190,17 +209,19 @@ describe('fifty screenshots in one turn', () => {
     const sources = files.map(file => file.size);
     expect(Math.min(...sources)).toBeGreaterThan(2 * 1024 * KB);
 
-    let held: Attachment[] = [];
-    const refused = await gatherAttachments(files, {
-      held: () => held,
-      add: (one) => { held = [...held, one]; },
-      replace: (lighter) => { held = held.map(one => lighter.get(one) ?? one); },
-      noImages: null,
-      codec: bun.codec
-    });
+    const { box, store } = composer([]);
+    let refusals = 0;
+    const taking = takeFiles(store, box, files, null, () => { refusals++; }, bun.codec);
+    // All fifty show at once as loading tiles, read behind the box.
+    expect(box.attachments).toHaveLength(50);
+    expect(box.attachments.every(isLoading)).toBe(true);
+    await taking;
 
-    expect(refused).toBeNull();
+    expect(store.error).toBeNull();
+    expect(refusals).toBe(0);
+    const held = box.attachments;
     expect(held).toHaveLength(50);
+    expect(held.some(isLoading)).toBe(false);
     const sizes = held.map(one => decodedBytes(one.data));
     const total = sizes.reduce((sum, size) => sum + size, 0);
     expect(total).toBeLessThanOrEqual(ATTACHMENTS_TOTAL_MAX_BYTES);

@@ -20,7 +20,7 @@ const COOKIE_SAVE_DELAY_MS = 1000, COOKIE_SAVE_EVERY_MS = 30_000;
 export class BrowserEngines {
   readonly pending = new Map<string, Promise<Engine>>();
   readonly #identities = new BrowserIdentities(
-    (path, dir) => this.#start(path, dir), () => this.profileDir(PRIVATE_BROWSER_PROFILE), dir => this.removeDir(dir), message => this.core.log('warn', message));
+    (path, dir) => this.start(path, dir), () => this.profileDir(PRIVATE_BROWSER_PROFILE), dir => this.removeDir(dir), message => this.core.log('warn', message));
 
   constructor(
     private core: Core,
@@ -42,10 +42,14 @@ export class BrowserEngines {
       : join(this.core.dataDir, 'browser', profile);
   }
 
-  /** A profile keeps one engine, including while its User-Agent or the attached host changes. */
+  /**
+   * A profile keeps one engine, including while its User-Agent or the attached
+   * host changes. One that is closing or lost keeps the profile until its
+   * process exited: a browser started sooner would find the old one's lock.
+   */
   get(profile: string): Promise<Engine> {
     const current = this.pending.get(profile) ?? this.pending.get(`host:${profile}`);
-    if (current) return current.then(engine => this.#closing.has(engine) ? engine.exited.then(() => this.get(profile)) : engine);
+    if (current) return current.then(engine => this.#closing.has(engine) || this.#ended.has(engine) ? engine.exited.then(() => this.get(profile)) : engine);
     // A webview has no per-profile process flags. Custom identities use Chromium
     // so its workers and popups inherit the same User-Agent as its pages.
     const hosted = this.host.attached && !this.#userAgent(profile);
@@ -55,7 +59,10 @@ export class BrowserEngines {
       engine = this.launch(profile, true, hosted);
       this.pending.set(key, engine);
       engine.then(started => {
-        void started.exited.then(() => this.lost(started));
+        void started.exited.then(() => {
+          this.lost(started);
+          if (this.pending.get(key) === engine) this.pending.delete(key);
+        });
         started.cdp.closed.then(() => this.lost(started));
       }, () => { if (this.pending.get(key) === engine) this.pending.delete(key); });
     }
@@ -84,7 +91,8 @@ export class BrowserEngines {
     return engine;
   }
 
-  #start(path: string, dir: string, userAgent?: string): Promise<Started> {
+  /** Starts a browser process on `dir`. A test seam. */
+  start(path: string, dir: string, userAgent?: string): Promise<Started> {
     return startChromium((cmd, args, options) => this.core.procs.spawn(this.scope, cmd, args, options), path, dir, START_TIMEOUT_MS, userAgent);
   }
 
@@ -111,7 +119,7 @@ export class BrowserEngines {
     const identity = native ? profileIdentity(native, setting) : null;
     const dir = this.profileDir(profile);
     let started: Started;
-    try { started = await this.#start(found.path, dir, identity?.userAgent); }
+    try { started = await this.start(found.path, dir, identity?.userAgent); }
     catch (error) {
       if (profile === PRIVATE_BROWSER_PROFILE) this.removeDir(dir);
       throw refused(`the agent browser could not start on ${this.machine}: ${error instanceof Error ? error.message : String(error)}`);
@@ -131,15 +139,17 @@ export class BrowserEngines {
       if (!engine.throwaway) engine.saveEvery = setInterval(() => { if (engine.tabs.size) void this.saveCookies(engine); }, COOKIE_SAVE_EVERY_MS);
       return engine;
     } catch (error) {
-      kill();
-      if (profile === PRIVATE_BROWSER_PROFILE) void started.exited.then(() => this.removeDir(dir));
+      // The profile stays this start's until the browser exited: `get` keeps it taken while this rejects.
+      cdp.close();
+      await kill();
+      if (profile === PRIVATE_BROWSER_PROFILE) this.removeDir(dir);
       throw refused(`the agent browser could not start on ${this.machine}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   /** Engines whose end is already in the log (the exit, the closed socket and a shutdown all call `lost`), those the core is closing, and page checks. */
   readonly #ended = new WeakSet<Engine>(); readonly #closing = new WeakSet<Engine>(); readonly #probing = new WeakSet<Engine>();
-  /** The process ended or dropped its connection: its tabs are gone. */
+  /** The process ended or dropped its connection: its tabs are gone, its profile is free once the process exited. */
   lost(engine: Engine): void {
     if (!this.#ended.has(engine)) {
       this.#ended.add(engine);
@@ -148,8 +158,6 @@ export class BrowserEngines {
       this.core.logs.record(!expected ? 'warn' : this.#probing.has(engine) ? 'debug' : 'info', `Agent browser for profile ${engine.profile} ended${expected ? '' : ' on its own'} with ${engine.tabs.size} tabs open`, {
         source: 'browser', event: expected ? 'browser.ended' : 'browser.lost', data: { profile: engine.profile, tabs: engine.tabs.size, hosted: engine.hosted } });
     }
-    const current = this.pending.get(engine.key);
-    void current?.then(value => { if (value === engine) this.pending.delete(engine.key); }, () => {});
     this.#stopTimers(engine);
     this.downloads.lost(engine);
     for (const id of [...engine.tabs]) this.drop(id);

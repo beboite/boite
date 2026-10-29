@@ -101,7 +101,12 @@ the first checkpoint after a write, runs a passive checkpoint once the WAL
 passes 4 MiB and truncates it after 30 s without writes. The main thread
 checkpoints when the Worker is unavailable or when the WAL reaches 16 MiB
 because writes kept landing during the Worker's passes, and it truncates the
-WAL at close. A write that binds more than 64 KiB, such as a message's parts,
+WAL at close. The main connection caches up to 64 MiB of pages
+(`journal/statements.ts`): SQLite's default 2 MiB is less than one thread list
+on a journal of a few thousand threads, and a machine short of memory reads
+those file pages from the disk on the event loop
+(`bench/results/2026-10-28-journal-cache.md`).
+A write that binds more than 64 KiB, such as a message's parts,
 runs on a statement finalized after use (`journal/statements.ts`): a cached
 statement keeps its last bound values alive. An append to
 `events(id, thread_id, ts, type, version, payload)` and its projection changes
@@ -127,7 +132,11 @@ out again once the newest events are deleted, so every deletion of events
 brings that cursor back to the last id in the same transaction. `message.started` keeps only the first
 1,024 characters of each string. The types that are read back (`question.asked`,
 `question.answered`, `thread.memory`) keep their whole payload and have partial
-indexes, so startup and a thread open no longer scan the events table.
+indexes, so a thread open no longer scans the events table. An asynchronous
+question nobody answered lives in `pending_questions` (`journal/questions.ts`),
+written in the transaction of the event that asks or closes it, so its card
+comes back at startup after its events are pruned (schema 45 fills it once from
+the events still kept).
 
 The blur a deferred picture is drawn with before its bytes arrive is a
 `media_previews` row, keyed by message and part, and the light WebP copy the
@@ -315,18 +324,24 @@ held with its original turn, input receipt and execution selection. Desktop and
 phone offer Resume and Discard through `turns.recover`; neither creates a second
 input. Work that may already have reached a provider is never replayed by this
 recovery path. Explicit restart handoff keeps its own authorization rules.
+A turn the restart closes as failed leaves its thread `error`, the status a live
+failure leaves: `threads/lifecycle.ts` is the only writer of a thread's status,
+and `finishTurn` in `threads/turn-settlement.ts` closes every turn, settled,
+never started, crashed or handed over.
 Server-owned composer queues may resume never-started turns admitted by their
 durable delivery ledger. A native submission whose acceptance is uncertain
 stays held for review; it is never submitted again automatically.
 
 A turn a provider refused for availability retries at capacity within the same
-turn, or, with `autoResumeLimitedThreads`, resumes after a usage limit's reset
-from a plan journalled under `limit-resumes`; `ThreadSummary.retry` shows
-either ([usage](usage.md#when-a-provider-refuses-a-turn)). Any other turn that
-stops before its answer (an error, a crash, a compaction, background work that
-ended without waking the agent) resumes by itself from a plan journalled under
-`auto-continues`, twice in a row at most
+turn, or, with `autoResumeLimitedThreads`, resumes after a usage limit's reset;
+`ThreadSummary.retry` shows either
+([usage](usage.md#when-a-provider-refuses-a-turn)). Any other turn that stops
+before its answer (an error, a crash, a compaction, background work that ended
+without waking the agent) resumes by itself, twice in a row at most
 ([restart handoff](restart-handoff.md#turns-that-stop-before-their-answer)).
+Both kinds are one `ResumePlanner` (`threads/resume.ts`): one plan per thread
+with its reason, journalled under `resumes`, checked again when it fires. Their
+prompts and labels live in `threads/resume-text.ts`.
 
 Owner and paired-device connections name one visible conversation through
 `threads.focus`. Claude, Codex, ACP, pi and Muse can prepare their traced process
@@ -561,9 +576,11 @@ cores; a fixed known divergence must leave its explicit exception list.
 `bun run check:architecture` checks production runtime imports, including literal
 dynamic imports. It rejects cycles, runtime cross-imports, contracts importing
 runtimes, native backends imported outside their boundary and internal imports
-of entry modules. Type-only imports, Svelte scripts and Rust are outside this
-check. Unmapped workspace exports fail. The same check enforces 900 source lines
-or a shrinking allowance in `scripts/architecture/size-budget.json`.
+of entry modules. Svelte component scripts count as modules; type-only imports
+do not. Rust, Kotlin and Java have no import graph here. Unmapped workspace
+exports fail. The same check enforces 900 source lines, Rust and the Android
+sources included, or a shrinking allowance in
+`scripts/architecture/size-budget.json`.
 `bun run audit:complexity` provides an advisory ranking, not a CI threshold.
 [Development](development.md#architecture-checks) owns the commands and scope.
 

@@ -63,8 +63,13 @@ test('agent links are thread scoped, saved only after verification, and events r
   const owner = await harness.connect(), { threadId } = await echoThread(harness, owner);
   const agent = await connect(harness.url, harness.core.agents.tokenFor(threadId), { client: { name: 'boite-cli', version: 'test' } });
   const spawn = harness.core.procs.spawn.bind(harness.core.procs);
+  const views: string[][] = [];
   const run = spyOn(harness.core.procs, 'spawn').mockImplementation((scope, command, args, options) => {
-    expect(command).toBe('gh'); expect(args[0]).toBe('pr'); expect(args[1]).toBe('view');
+    expect(command).toBe('gh');
+    // The repository's page comes first; this pull request is not on it.
+    if (args[0] === 'api') return spawn(scope, process.execPath, ['-e', 'console.log("[]")'], options);
+    expect(args.slice(0, 2)).toEqual(['pr', 'view']);
+    views.push(args);
     return spawn(scope, process.execPath, ['-e', `console.log(${JSON.stringify(JSON.stringify({ number: 1, url: pr(1).url, title: 'Change 1', state: 'OPEN', isDraft: false, headRefName: 'feature-1', baseRefName: 'main', headRepository: { name: 'repo' }, headRepositoryOwner: { login: 'example' } }))})`], options);
   });
   try {
@@ -75,7 +80,7 @@ test('agent links are thread scoped, saved only after verification, and events r
     expect((await event).pullRequests).toEqual(result);
     expect(await thrown(agent.call('threads.linkPullRequest', { threadId: 'other', url: pr(1).url }))).toThrow('not thread');
     expect(await thrown(agent.call('threads.linkPullRequest', { threadId, url: 'https://attacker.example/a/b/pull/1' }))).toThrow('host');
-    expect(run).toHaveBeenCalledTimes(1);
+    expect(views).toHaveLength(1);
     expect(await agent.call('threads.unlinkPullRequest', { threadId, url: pr(1).url })).toEqual([]);
   } finally { agent.close(); run.mockRestore(); }
 });

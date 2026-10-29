@@ -1,5 +1,6 @@
 import { errorText } from './errors';
 import { strings } from './strings';
+import { updateStale } from './update-freshness';
 
 export type UpdateChannel = 'stable' | 'nightly';
 
@@ -288,6 +289,16 @@ export class AppUpdater {
     if (!this.snapshot.supported || ['waiting', 'installing'].includes(this.snapshot.phase)) return;
     this.#pendingCheck = channel;
     this.#pump(this.#generation);
+  }
+
+  /**
+   * The window is shown again: checks now when the last check is stale,
+   * rather than waiting up to six hours for the timer. Before the first
+   * check the startup timer still decides.
+   */
+  checkIfStale(now = Date.now()): void {
+    if (!this.#started || this.#firstCheck !== null || this.lastCheckedAt === null || !updateStale(this.lastCheckedAt, now)) return;
+    this.#scheduledCheck();
   }
 
   download(): void {

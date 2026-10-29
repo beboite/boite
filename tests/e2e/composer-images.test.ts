@@ -70,7 +70,7 @@ test('pasted images have linked references and a preview that leaves the compose
         const transfer = new DataTransfer(); transfer.items.add(new File([blob], 'screen.png', { type: 'image/png' }));
         document.querySelector('[data-testid=composer-input]').dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer }));
       })()`);
-      await page.waitFor(`document.querySelectorAll('[data-testid=composer-attachment]').length === ${title === 'Checkout settings' ? 1 : 2}`);
+      await page.waitFor(`document.querySelectorAll('[data-testid=composer-attachment]:not([data-loading])').length === ${title === 'Checkout settings' ? 1 : 2}`);
     }
     const capture = async (name: string) => {
       await page!.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
@@ -143,6 +143,58 @@ test('pasted images have linked references and a preview that leaves the compose
     await server.close();
   }
 }, 90_000);
+
+test('a pasted image shows at once as a loading tile, the box keeps taking keys and Send waits for the read', async () => {
+  const port = await freePort();
+  const server = await startDevUi(port);
+  let page: BrowserPage | undefined;
+  try {
+    page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent`, windowSize: { width: 1280, height: 900 } });
+    await page.evaluate(`import('/src/lib/store.svelte.ts').then(({store}) => store.open('t-trace'))`);
+    await page.waitFor('document.querySelector("[data-testid=composer-input]")');
+    await page.type('[data-testid=composer-input]', 'Look at');
+    // A slow read, as on a big picture or a weak machine: nothing is read until the test lets it.
+    await page.evaluate(`(async () => {
+      const read = FileReader.prototype.readAsDataURL;
+      const hold = new Promise(resolve => { window.releaseReads = resolve; });
+      FileReader.prototype.readAsDataURL = function (blob) { hold.then(() => read.call(this, blob)); };
+      const canvas = document.createElement('canvas'); canvas.width = 640; canvas.height = 360;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#edf2f7'; ctx.fillRect(0, 0, 640, 360);
+      ctx.fillStyle = '#182534'; ctx.font = '32px sans-serif'; ctx.fillText('Slow picture', 40, 80);
+      window.slowPicture = await new Promise(resolve => canvas.toBlob(resolve));
+    })()`);
+    const before = await page.evaluate<number>(`import('/src/lib/store.svelte.ts').then(({store}) => store.openThread.messages.length)`);
+    // The paste and the checks run in one task: the tile and the reference are there before anything is read.
+    const pasted = await page.evaluate<{ tiles: number; loading: number; value: string }>(`(() => {
+      const transfer = new DataTransfer(); transfer.items.add(new File([window.slowPicture], 'slow.png', { type: 'image/png' }));
+      const box = document.querySelector('[data-testid=composer-input]');
+      box.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer }));
+      return new Promise(resolve => requestAnimationFrame(() => resolve({
+        tiles: document.querySelectorAll('[data-testid=composer-attachment]').length,
+        loading: document.querySelectorAll('[data-testid=composer-attachment][data-loading]').length,
+        value: box.value
+      })));
+    })()`);
+    expect(pasted).toEqual({ tiles: 1, loading: 1, value: 'Look at [Image 1] ' });
+    // Typing goes on after the reference, where the caret was.
+    await page.send('Input.insertText', { text: 'and tell me' });
+    expect(await page.evaluate('document.querySelector("[data-testid=composer-input]").value')).toBe('Look at [Image 1] and tell me');
+    await page.evaluate(`document.querySelector('[data-testid=composer-input]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))`);
+    await page.waitFor('document.querySelector("[data-testid=composer-send][data-waiting]")');
+    expect(await page.evaluate<number>(`import('/src/lib/store.svelte.ts').then(({store}) => store.openThread.messages.length)`)).toBe(before);
+    for (const phone of [false, true]) {
+      await page.send('Emulation.setDeviceMetricsOverride', { width: phone ? 390 : 1280, height: phone ? 844 : 900, deviceScaleFactor: 1, mobile: phone });
+      await page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+      await page.screenshot(join(import.meta.dir, '.artifacts', `image-loading-${phone ? 'phone' : 'desktop'}.png`));
+    }
+    await page.evaluate('window.releaseReads()');
+    await page.waitFor(`import('/src/lib/store.svelte.ts').then(({store}) => store.openThread.messages.some(m => m.role === 'user' && m.parts.some(p => p.type === 'text' && p.text === 'Look at [Image 1] and tell me') && m.parts.filter(p => p.type === 'image').length === 1))`);
+    expect(await page.evaluate('document.querySelector("[data-testid=composer-input]").value')).toBe('');
+    expect(await page.evaluate(`import('/src/lib/store.svelte.ts').then(({store}) => store.error)`)).toBeNull();
+    expect(page.errors()).toEqual([]);
+  } finally { await page?.close(); await server.close(); }
+}, 60_000);
 
 test('the list keeps to its bottom when the image preview closes and opens again before the next frame', async () => {
   const port = await freePort();

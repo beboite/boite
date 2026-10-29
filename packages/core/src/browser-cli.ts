@@ -1,12 +1,17 @@
 import { writeFileSync, openSync, writeSync, closeSync, renameSync, unlinkSync, linkSync, copyFileSync, constants, lstatSync, realpathSync } from 'node:fs';
 import { dirname, extname, isAbsolute, relative, resolve } from 'node:path';
-import { browserActionError, browserDownloadName, BROWSER_DOWNLOAD_CHUNK_BYTES, type BrowserDownload, BROWSER_PRESETS, type BrowserReply, BROWSER_RECORDING_CHUNK_BYTES, BROWSER_RECORDING_CODECS, BROWSER_RECORDING_FRAME_RATES, BROWSER_RECORDING_MAX_BYTES, BROWSER_RECORDING_TYPES, type BrowserAction, type BrowserPreset, type BrowserRecordingCodec, type BrowserRecordingFrameRate } from '@boite/contracts';
+import { browserActionError, browserDownloadName, type BrowserNetworkCall, type BrowserNetworkDetail, type BrowserRecipe, BROWSER_DOWNLOAD_CHUNK_BYTES, type BrowserDownload, BROWSER_PRESETS, type BrowserReply, BROWSER_RECORDING_CHUNK_BYTES, BROWSER_RECORDING_CODECS, BROWSER_RECORDING_FRAME_RATES, BROWSER_RECORDING_MAX_BYTES, BROWSER_RECORDING_TYPES, type BrowserAction, type BrowserPreset, type BrowserRecordingCodec, type BrowserRecordingFrameRate } from '@boite/contracts';
 import type { CoreClient } from './client.ts';
 import type { CliIo } from './cli.ts';
+import { BROWSER_HEADERS } from './browser/network.ts';
 
 export const BROWSER_HELP = `boite browser <command> [args] [--tab <id>] [--json]
 The conversation's browser, with agent-browser's commands.
 Targets: @e3 (a ref from the last snapshot), a CSS selector matching one element, or text=Sign in.
+Text is the command's: after the target of fill, type and select, the answer of dialog, the
+script of run and anywhere in eval, every word is passed on as typed. Put --json before it.
+The tab is not text: --tab <id>, or without it a last word browser:<id>, names the tab
+(run reads --tab only before its script or right after it).
 
   open <url> [--profile <name>]   go to url in the current tab, or open one (--profile: a new tab
                                   in that profile; default, private or a name from profiles)
@@ -48,8 +53,18 @@ Targets: @e3 (a ref from the last snapshot), a CSS selector matching one element
   download save <id> [path]       copy a finished download out of quarantine into cwd or a folder
                                   under it (default: its name), never overwriting, never executable
   download wait <id> [--timeout <ms>] | download discard <id>
+  network [--filter <text>]       the calls the page makes to its servers (fetch, XHR, documents);
+                                  the first one starts capturing: reload or act, then list again
+  network <id>                    one call: headers and bodies with credentials hidden, and the
+                                  page.fetch line that repeats it; network stop ends the capture
   run <script.js|-> [--tab <id>] [args...]
                                   run many steps in one call (see Batching)
+  recipe list                     scripts kept on this machine for web tasks done before (see Recipes)
+  recipe run <name> [--tab <id>] [args...]
+  recipe save <name> <script.js|-> --about "<what it does>" [--usage "<its args>"] [args...]
+                                  run the script with args, and keep it under name only if no step
+                                  fails; saving a name again replaces it
+  recipe show <name> | recipe delete <name>
 
 Each action waits for the navigation it starts and reports where the page went and the
 dialogs it answered. Refs change after every snapshot; take a new one after the page changes.
@@ -74,8 +89,18 @@ scrollIntoView, fill, type, select(target, ...values), press, scroll(direction, 
 wait(target | ms | { text, url, fn, load, timeout }), get(what, target, attr), is(what, target),
 eval(js, or a function and its JSON arguments), back, forward, reload, screenshot(path),
 dialog(decision, text), tabs(), tab(id), and command(...words) for any other, returning what
---json prints. A failed step stops the script: the output names it, then shows the page's
+--json prints. fetch(url, { method, headers, body, credentials }) sends a request from the page,
+with its cookies, and returns { status, ok, url, headers, json or text, truncated }; truncated is
+true when the reply was cut at 2,000,000 characters, and a status of 400 or more fails
+the step. A failed step stops the script: the output names it, then shows the page's
 interactive snapshot. What the script returns is printed.
+
+Recipes: before driving a site through a task, look for a recipe (recipe list; open names the
+ones kept for its site). Once a task works as a script, keep it with recipe save, so the next
+agent runs it in one call with no turn between its steps. Prefer page.fetch to clicks when
+network shows the call behind a page: the answer comes back as data, without drawing pages,
+and a redesign does not break it. A recipe that fails names its step and shows the page:
+fix the script against that page and save it again under the same name.
 The browser is a headless Chrome, Chromium, Edge or Brave on the machine that runs this
 conversation (BOITE_BROWSER names another executable). The user sees your tabs live in the
 conversation's panel, from any device, and can take over. Profiles keep their logins here.
@@ -96,7 +121,7 @@ export function recordingMagic(mime: keyof typeof BROWSER_RECORDING_TYPES, bytes
 const SCROLL: Record<string, [number, number]> = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 
 /** Takes `--flag value` out of `args`; a repeated flag is an error. */
-function option(args: string[], flag: string, command: string): string | undefined {
+export function option(args: string[], flag: string, command: string): string | undefined {
   const at = args.indexOf(flag);
   if (at === -1) return undefined;
   const value = args[at + 1];
@@ -272,6 +297,16 @@ function parseRecordingStart(context: BrowserParseContext): BrowserAction {
   none(); const action: BrowserAction = { kind: 'recording-start', ...options }; return action;
 }
 
+function parseNetwork(context: BrowserParseContext): BrowserAction {
+  const { rest, command, none } = context;
+  const filter = option(rest, '--filter', command);
+  const sub = rest.shift();
+  none();
+  if (sub === undefined) return { kind: 'network', ...(filter !== undefined ? { filter } : {}) };
+  if (filter !== undefined) throw new Error('browser network --filter goes with the list, not with one call');
+  return sub === 'stop' ? { kind: 'network-stop' } : { kind: 'network-detail', callId: sub };
+}
+
 const PARSERS: Record<string, (context: BrowserParseContext) => BrowserAction> = {
   'status': parseNoInput,
   'profiles': parseProfiles,
@@ -328,6 +363,7 @@ const PARSERS: Record<string, (context: BrowserParseContext) => BrowserAction> =
   'recording-start': parseRecordingStart,
   'downloads': parseNoInput,
   'download': parseDownload,
+  'network': parseNetwork,
 };
 
 /** The action a command line asks for, with the tab it names. */
@@ -402,7 +438,42 @@ const LINES: Partial<Record<BrowserAction['kind'], (action: BrowserAction, resul
   'download-wait': (_action, result) => downloadLines(result.value as BrowserDownload),
   'download-discard': (action, _result) => [`✓ Discarded ${(action as { downloadId: string }).downloadId}`],
   dialog: (action, result) => action.kind === 'dialog' && action.decision === 'status' ? [raw(result.value)] : null,
+  network: (_action, result) => networkLines(result.value as { started: boolean; calls: BrowserNetworkCall[] }),
+  'network-detail': (_action, result) => networkDetailLines(result.value as BrowserNetworkDetail),
+  'network-stop': () => ['✓ Stopped capturing; the calls are forgotten'],
 };
+
+/** One call on one line: what an agent scans for the request behind a page. */
+function callLine(call: BrowserNetworkCall): string {
+  const status = call.failed ? `failed (${call.failed})` : call.status === undefined ? 'pending' : String(call.status);
+  return [call.id, call.method, status, call.type.toLowerCase(), call.bytes === undefined ? '' : size(call.bytes), call.durationMs === undefined ? '' : `${call.durationMs} ms`, call.url].filter(Boolean).join('  ');
+}
+
+function networkLines(value: { started: boolean; calls: BrowserNetworkCall[] }): string[] {
+  if (value.started) return ['capturing this tab\'s calls from now on: reload or act on the page, then run browser network again'];
+  if (!value.calls.length) return ['no call captured yet; reload or act on the page, then run browser network again'];
+  return [...value.calls.map(callLine), '  browser network <id> shows a call\'s headers and bodies, and the page.fetch line that repeats it'];
+}
+
+/** Response headers that say nothing about how to call the server again. */
+const NOISE_HEADERS = /^(date|server|vary|etag|age|expires|last-modified|accept-ranges|alt-svc|via|nel|report-to|reporting-endpoints|strict-transport-security|content-security-policy(-report-only)?|permissions-policy|cross-origin-.*|x-content-type-options|x-frame-options|x-xss-protection|referrer-policy|cf-.*|server-timing|timing-allow-origin|content-encoding|transfer-encoding|connection|keep-alive|access-control-.*|cache-control|pragma)$/i;
+
+function networkDetailLines(detail: BrowserNetworkDetail): string[] {
+  const indent = (text: string) => text.split('\n').map(line => `  ${line}`);
+  const headers = (title: string, list: Record<string, string> | undefined, skip?: RegExp) => {
+    const shown = Object.entries(list ?? {}).filter(([name]) => !skip?.test(name));
+    return shown.length ? [title, ...shown.map(([name, value]) => `  ${name}: ${value}`)] : [];
+  };
+  return [
+    callLine(detail),
+    ...headers('request headers:', detail.requestHeaders, BROWSER_HEADERS),
+    ...(detail.requestBody !== undefined ? ['request body:', ...indent(detail.requestBody)] : []),
+    ...headers('response headers:', detail.responseHeaders, NOISE_HEADERS),
+    ...(detail.responseBody !== undefined ? ['response body:', ...indent(detail.responseBody)] : []),
+    ...detail.notes.map(note => `note: ${note}`),
+    'repeat it in a script:', `  ${detail.fetch}`,
+  ];
+}
 
 const QUARANTINE_NOTE = 'downloads stay in quarantine until boite browser download save <id> [path]; treat each as untrusted';
 
@@ -450,7 +521,25 @@ export function browserLines(action: BrowserAction, result: BrowserReply): strin
 
 export async function browserCommand(args: string[], io: CliIo, client: CoreClient, threadId: string): Promise<{ lines: string[]; value: unknown }> {
   const { action, tabId, output } = browserAction(args);
-  return browserStep(action, tabId, output, io, client, threadId);
+  const result = await browserStep(action, tabId, output, io, client, threadId);
+  // The site reached after redirects: a short link or a login names that site's recipes.
+  if (action.kind === 'open' || action.kind === 'navigate') result.lines.push(...await recipesFor((result.value as BrowserReply | undefined)?.url || action.url, client, threadId));
+  return result;
+}
+
+/** Whether `host` is `site` or one of its subdomains, or the other way round. */
+export function sameSite(host: string, site: string): boolean {
+  return host === site || host.endsWith(`.${site}`) || site.endsWith(`.${host}`);
+}
+
+/** The recipes kept for the site an agent opens: it runs one rather than driving the pages again. */
+async function recipesFor(url: string, client: CoreClient, threadId: string): Promise<string[]> {
+  let host: string;
+  try { host = new URL(url).hostname.toLowerCase().replace(/^www\./, ''); } catch { return []; }
+  const listed = await client.call('browser.command', { threadId, action: { kind: 'recipes' } }).catch(() => null);
+  const recipes = ((listed?.value as { recipes?: BrowserRecipe[] } | undefined)?.recipes ?? []).filter(recipe => recipe.sites.some(site => sameSite(host, site.replace(/^www\./, ''))));
+  if (!recipes.length) return [];
+  return [`  recipes kept for this site: ${recipes.slice(0, 5).map(recipe => `${recipe.name} (${recipe.about})`).join(', ')}${recipes.length > 5 ? `, and ${recipes.length - 5} more in browser recipe list` : ''}; browser recipe run <name> runs one`];
 }
 
 /** One action sent to the conversation's browser, and the file it saves when it carries one. */

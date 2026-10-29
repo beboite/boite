@@ -41,10 +41,24 @@ const EMBEDDED: Record<string, string> = {
   '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json',
 };
 
+/**
+ * The rest of a tag up to its `>`: a quoted value after `=` is one piece, so
+ * a `>` inside it does not end the tag, and a quote anywhere else is a letter.
+ * Each character has one reading, and a `<` outside quotes gives up on the
+ * tag, so a page full of tags left open is still read in one pass.
+ */
+/** Where a tag's name ends: `<title-card>` is not a `<title>`. */
+const NAME_END = String.raw`(?=[\s/>])`;
+const TAG_REST = String.raw`(?:[^<>"'=]|=(?!\s*["'])|=\s*"[^"]*"|=\s*'[^']*'|(?<!=\s*)["'])*>`;
 /** Tags whose address is fetched when the page loads. An `<a>` is not one: its link opens in the user's browser on a click. */
-const LOADING_TAG = /<(img|image|source|video|audio|track|script|link|use|input|iframe|embed|object)\b[^>]*>/gi;
-const ADDRESS = /\s(src|href|xlink:href|poster|data)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi;
+const LOADING_TAG = new RegExp(`<(img|image|source|video|audio|track|script|link|use|input|iframe|embed|object)${NAME_END}${TAG_REST}`, 'gi');
+const ADDRESS = new Set(['src', 'href', 'xlink:href', 'poster', 'data']);
+/** The attributes whose value is CSS: `style` and SVG's presentation attributes that take a `url(`. */
+const CSS_ATTRIBUTE = new Set(['style', 'fill', 'stroke', 'mask', 'clip-path', 'filter', 'marker-start', 'marker-mid', 'marker-end', 'cursor']);
 const CSS_URL = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^'")\s]+))\s*\)/gi;
+const TAG = new RegExp(`<[a-z]${TAG_REST}`, 'gi');
+/** Each attribute of a tag in turn, so a name written inside another's quoted value is never read. */
+const ATTRIBUTE = /\s([^\s=>]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/dg;
 
 interface Edit { start: number; end: number; text: string }
 
@@ -114,15 +128,24 @@ export function buildView(source: string, directory: string, cwd: string, guard?
   };
 
   // Comments and element bodies blanked to the same length: a tag written in a string is not the page's.
-  const blank = (tags: string) => source.replace(new RegExp(`<!--[\\s\\S]*?(?:-->|$)|(<(${tags})\\b[^>]*>)([\\s\\S]*?)(?=<\\/\\2\\s*>|$)`, 'gi'),
-    (match: string, open?: string, _tag?: string, body?: string) => open === undefined ? ' '.repeat(match.length) : open + ' '.repeat(body?.length ?? 0));
-  const markup = blank('script|style');
-  /** The page without its scripts: where a `url(` or an `@import` is a rule and not a string. */
-  const styled = blank('script');
+  // Every other tag is read whole, and a `<` in its quoted values blanked, so a tag spelled there starts nothing.
+  // A script's, style's, textarea's or title's body is text, not tags: what it spells is never loaded.
+  const inert = (tag: string) => tag[0] + tag.slice(1).replace(/</g, ' ');
+  /** Where each style body is: its rules are CSS, read from `source`. */
+  const styles: [number, number][] = [];
+  /** The page in one pass without its comments and element bodies: where a tag is the page's. */
+  const markup = source.replace(new RegExp(`<!--[\\s\\S]*?(?:-->|$)|(<(script|style|textarea|title)${NAME_END}${TAG_REST})([\\s\\S]*?)(?=<\\/\\2\\s*>|$)|<\\/?[a-z]${TAG_REST}`, 'gi'),
+    (match: string, open: string | undefined, element: string | undefined, body: string | undefined, at: number) => {
+      if (match.startsWith('<!--')) return ' '.repeat(match.length);
+      if (open === undefined) return inert(match);
+      if (element!.toLowerCase() === 'style') styles.push([at + open.length, at + match.length]);
+      return inert(open) + ' '.repeat(body!.length);
+    });
   for (const tag of markup.matchAll(LOADING_TAG)) {
     const name = tag[1]!.toLowerCase();
     const at = tag.index;
-    for (const attribute of tag[0].matchAll(ADDRESS)) {
+    for (const attribute of tag[0].matchAll(ATTRIBUTE)) {
+      if (!ADDRESS.has(attribute[1]!.toLowerCase())) continue;
       const address = (attribute[2] ?? attribute[3] ?? attribute[4] ?? '').trim();
       if (kept(address)) continue;
       const offset = at + attribute.index;
@@ -145,21 +168,39 @@ export function buildView(source: string, directory: string, cwd: string, guard?
       }
     }
   }
-  for (const found of source.matchAll(CSS_URL)) {
-    const address = (found[1] ?? found[2] ?? found[3] ?? '').trim();
-    // An import is refused below, whatever it names.
-    if (kept(address) || /@import\s+$/i.test(source.slice(Math.max(0, found.index - 16), found.index))) continue;
-    // Inside a script a `url(` is often no address at all: it is embedded when it names a file, and left as written otherwise.
-    const rule = styled.slice(found.index, found.index + 4).toLowerCase() === 'url(';
-    if (remote(address)) { if (rule) problem(found.index, `url(${address}) is remote, and a view loads nothing remote. Embed the file from disk.`); continue; }
-    const file = load(address);
-    if (typeof file === 'string') { if (rule) problem(found.index, file); continue; }
-    edits.push({ start: found.index, end: found.index + found[0].length, text: `url("${dataUrl(file)}")` });
+  /**
+   * Where a `url(` is CSS: the bodies of `<style>` elements and the values of
+   * CSS attributes (`style`, SVG's `fill` or `mask`). Script text, prose, a
+   * `title` or an `onclick` keep theirs as written. The data URL goes
+   * unquoted, which no attribute's quotes can end early.
+   */
+  const css: [number, number][] = [...styles];
+  for (const tag of markup.matchAll(TAG)) {
+    for (const value of tag[0].matchAll(ATTRIBUTE)) {
+      if (!CSS_ATTRIBUTE.has(value[1]!.toLowerCase())) continue;
+      const [start, end] = (value.indices![2] ?? value.indices![3] ?? value.indices![4])!;
+      css.push([tag.index + start, tag.index + end]);
+    }
   }
-  for (const found of styled.matchAll(/@import\s+(?:url\(\s*)?["']?([^"')\s;]+)/gi)) {
-    problem(found.index, remote(found[1] ?? '')
-      ? `@import of ${found[1]} is remote, and a view loads nothing remote.`
-      : `@import of ${found[1]} is not followed: name the stylesheet with <link rel="stylesheet" href="${found[1]}">.`);
+  for (const [start, end] of css) {
+    for (const found of source.slice(start, end).matchAll(CSS_URL)) {
+      const at = start + found.index;
+      const address = (found[1] ?? found[2] ?? found[3] ?? '').trim();
+      // An import is refused below, whatever it names.
+      if (kept(address) || /@import\s+$/i.test(source.slice(Math.max(start, at - 16), at))) continue;
+      if (remote(address)) { problem(at, `url(${address}) is remote, and a view loads nothing remote. Embed the file from disk.`); continue; }
+      const file = load(address);
+      if (typeof file === 'string') { problem(at, file); continue; }
+      edits.push({ start: at, end: at + found[0].length, text: `url(${dataUrl(file)})` });
+    }
+  }
+  // An import in prose is no rule either: only the same CSS regions are read.
+  for (const [start, end] of css) {
+    for (const found of source.slice(start, end).matchAll(/@import\s+(?:url\(\s*)?["']?([^"')\s;]+)/gi)) {
+      problem(start + found.index, remote(found[1] ?? '')
+        ? `@import of ${found[1]} is remote, and a view loads nothing remote.`
+        : `@import of ${found[1]} is not followed: name the stylesheet with <link rel="stylesheet" href="${found[1]}">.`);
+    }
   }
 
   let html = '';

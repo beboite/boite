@@ -172,7 +172,7 @@ test('a native event wake setting card works at desktop and phone widths', async
     await window.__boiteTest.workspace.select(store, thread.id);
     await store.client.call('turns.start', { threadId: thread.id, prompt: 'Configure the bot.' });
     await store.client.settled();
-    await store.client.call('agents.settings.request', { threadId: thread.id, agent: agent.id, key: 'eventWakes', value: false, reason: 'Review project news with the morning and evening routines.' });
+    await store.client.call('agents.settings.request', { threadId: thread.id, agent: agent.id, key: 'eventWakes', value: true, reason: 'Hear project news as it lands, not only with the routines.' });
     return agent.id;
   })()`) as string;
   const card = '[data-testid="agent-setting-card"][data-key="eventWakes"][data-state="pending"]';
@@ -190,6 +190,6 @@ test('a native event wake setting card works at desktop and phone widths', async
   await page.evaluate(`document.querySelector('[data-testid="agent-event-wakes"]').scrollIntoView({ block: 'center' })`);
   await capture('event-wakes-settings-desktop.png');
   await page.click('[data-testid="agent-event-wakes"]');
-  await page.waitFor(`window.__boiteTest.workspace.active.client.call('agents.runtime.get', { agentId: ${JSON.stringify(agentId)} }).then(c => c.eventWakes === false)`);
+  await page.waitFor(`window.__boiteTest.workspace.active.client.call('agents.runtime.get', { agentId: ${JSON.stringify(agentId)} }).then(c => c.eventWakes === true)`);
   expect(await page.evaluate(`window.__boiteTest.workspace.active.client.call('agents.snapshot', {}).then(s => s.profiles.find(p => p.id === ${JSON.stringify(agentId)}).status)`)).toBe('active');
 }, 60_000);

@@ -4,6 +4,7 @@ import type { AccountQuota } from '@boite/contracts';
 import type { Store } from '../lib/store.svelte';
 import { RpcFailure } from '../lib/client';
 import LimitsGlance from './LimitsGlance.svelte';
+import { phoneWidth } from '../test/phone-width';
 
 let mounted: ReturnType<typeof mount> | undefined;
 afterEach(async () => { if (mounted) await unmount(mounted); mounted = undefined; document.body.innerHTML = ''; });
@@ -13,6 +14,21 @@ const quota: AccountQuota = {
   accountId: 'claude-account', providerId: 'claude', providerName: 'Claude', label: 'Default', enabled: true,
   status: 'ready', windows: [{ id: 'week', label: 'Weekly', usedPercent: 20, resetsAt: null }], checkedAt: null, error: null,
 };
+
+test('on a phone, which leaves Providers to the desktop, an empty glance offers no way to Providers', async () => {
+  const restore = phoneWidth();
+  try {
+    const call = vi.fn(async () => []);
+    const store = { client: { call, on: () => () => {} }, owner: true, endpointUrl: 'glance-phone-core', accounts: [] } as unknown as Store;
+    mounted = mount(LimitsGlance, { target: document.body, props: { store } });
+    document.querySelector<HTMLButtonElement>('[data-testid="nav-limits"]')!.click();
+    await settle();
+    expect(document.querySelector('[data-testid="quota-empty"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="quota-empty"] button')).toBeNull();
+  } finally {
+    restore();
+  }
+});
 
 test('a failed first read says so and offers a retry instead of asking to connect a provider', async () => {
   let fail = true;

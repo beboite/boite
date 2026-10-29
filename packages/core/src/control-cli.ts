@@ -99,6 +99,8 @@ export function ownerWithoutThread(parsed: Parsed): boolean {
   const [command, action] = parsed.positional;
   if (isControlCommand(parsed)) return true;
   if (command === 'projects') return true;
+  // An outside event names its bot: the owner's terminal or a paired device sends it with no thread.
+  if (command === 'bot' && action === 'event') return true;
   return command === 'thread' && action === 'new';
 }
 

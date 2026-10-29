@@ -105,7 +105,9 @@ event over an hour ago, or when it was stopped on purpose without a handoff
 (`core.shutdown`, `SIGINT`, `POST /shutdown`), which leaves the journal setting
 `auto-continue-stopped`.
 
-Each plan sits in the journal setting `auto-continues`, so a restart arms it
+Each plan sits in the journal setting `resumes` with the usage limit resumes
+(`threads/resume.ts`; a core that still has the older `auto-continues` or
+`limit-resumes` reads them into it once), so a restart arms it
 again; one caught while dispatching is dropped. The row shows it as `retry`
 (`kind: 'auto-continue'`) with Do not resume. When it fires it is dropped
 instead if the thread was archived, answered or is busy, a card waits for the

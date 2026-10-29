@@ -37,6 +37,19 @@ export function decodedBytes(data: string): number {
   return Math.max(0, Math.floor((data.length * 3) / 4) - padding);
 }
 
+/** The file an attachment was read from on this device, so its thumbnail skips decoding the base64 again. */
+const sources = new WeakMap<Attachment, Blob>();
+
+export function attachmentSource(attachment: Attachment): Blob | undefined {
+  return sources.get(attachment);
+}
+
+/** The same file for `copy`, the object a reactive list made of `attachment`. */
+export function keepSource(attachment: Attachment, copy: Attachment): void {
+  const source = sources.get(attachment);
+  if (source) sources.set(copy, source);
+}
+
 /**
  * One file as an attachment, its base64 body stripped of the `data:` prefix.
  * Supported raster images use the native image input; everything else is a file.
@@ -47,9 +60,11 @@ export function readAttachmentFile(file: File): Promise<Attachment> {
     reader.onerror = () => reject(new Error(`${file.name || 'the file'} could not be read`));
     reader.onload = () => {
       const common = { data: stripDataPrefix(typeof reader.result === 'string' ? reader.result : ''), name: file.name || null };
-      resolve(isImageMimeType(file.type)
+      const attachment: Attachment = isImageMimeType(file.type)
         ? { kind: 'image', mimeType: file.type, ...common }
-        : { kind: 'file', mimeType: file.type || 'application/octet-stream', ...common });
+        : { kind: 'file', mimeType: file.type || 'application/octet-stream', ...common };
+      sources.set(attachment, file);
+      resolve(attachment);
     };
     reader.readAsDataURL(file);
   });

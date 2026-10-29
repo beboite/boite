@@ -2,11 +2,12 @@ import type { PermissionMode, ProviderId, ThreadId, ThreadRetry, ThreadSummary, 
 import type { Core } from '../core.ts';
 import { getDriver, releaseThread } from '../drivers/index.ts';
 import type { TurnResult } from '../drivers/types.ts';
-import { messageOf, refused } from '../errors.ts';
+import { messageOf, refused, RpcFailure } from '../errors.ts';
 import { logMessageOf } from '../log-errors.ts';
 import { reportSettlementError, settleTurn } from './turn-settlement.ts';
 import type { ThreadStore } from '../threads.ts';
-import { setThreadStatus, withLoad } from './records.ts';
+import { withLoad } from './records.ts';
+import { markRunning } from './lifecycle.ts';
 import { TurnAttempts, type TurnAttemptState } from './turn-attempts.ts';
 import { stderrTail } from '../drivers/stderr-tail.ts';
 
@@ -73,6 +74,18 @@ export class TurnRunner {
     if (next.effort !== before.effort || next.speed !== before.speed) this.attempts.changeSettings(next.id, next);
   }
 
+  /**
+   * A wake whose letters cannot cross stops and puts them back in the inbox: a refusal is that
+   * ordinary stop, a fault also reaches the scheduler's error log.
+   */
+  private prepareWake(turnId: TurnId, threadId: ThreadId): boolean {
+    try { return this.core.coordination.prepareWake(threadId, turnId); } catch (error) {
+      if (error instanceof RpcFailure) return false;
+      this.threads.markQueuedStopped(turnId);
+      throw error;
+    }
+  }
+
   async runTurn(turnId: TurnId, threadId: ThreadId): Promise<void> {
     const queued = this.core.journal.getTurn(turnId);
     const selected = this.core.journal.getThread(threadId);
@@ -81,7 +94,7 @@ export class TurnRunner {
       this.threads.markQueuedStopped(turnId);
       return;
     }
-    if (queued.execution?.operation === 'coordination' && !this.core.coordination.prepareWake(threadId, turnId)) {
+    if (queued.execution?.operation === 'coordination' && !this.prepareWake(turnId, threadId)) {
       this.threads.markQueuedStopped(turnId);
       return;
     }
@@ -102,7 +115,7 @@ export class TurnRunner {
           this.core.journal.putTurn(state.running);
         });
         this.core.bus.emit('turn.started', state.running);
-        setThreadStatus(this.core, threadId, 'running');
+        markRunning(this.core, threadId);
       })());
       started = true;
       // A delegated agent with a worktree of its own: made from its parent's HEAD before the agent starts in it.

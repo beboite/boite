@@ -2,7 +2,8 @@
  * A stdio MCP server for the lazy MCP tests. Each start appends a line to
  * `LAZY_MCP_STARTS`. `echo` answers with its arguments, its working directory
  * and the thread it was started for; `roots` asks the client for its roots
- * and answers with what it got. Like a strict server, it refuses other
+ * and answers with what it got; `chunked` answers a few bytes at a time and
+ * `flood` writes `LAZY_MCP_FLOOD` characters with no newline. Like a strict server, it refuses other
  * requests until the client says it is initialized, and answers `initialize`
  * after `LAZY_MCP_INIT_DELAY_MS`.
  */
@@ -51,6 +52,23 @@ function handle(message: { id?: number | string; method?: string; params?: Recor
         const asked = next++;
         waiting.set(asked, (result) => send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(result) }] } }));
         send({ jsonrpc: '2.0', id: asked, method: 'roots/list' });
+        return;
+      }
+      if (params.name === 'chunked') {
+        // A log line on stdout, then an answer written a few bytes at a time, characters cut in half.
+        const bytes = Buffer.from(`${JSON.stringify({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: 'h\u00e9 \u{1f600} '.repeat(50) }] } })}\n`);
+        process.stdout.write('a log line, not JSON\n');
+        void (async () => {
+          for (let at = 0; at < bytes.length; at += 5) {
+            process.stdout.write(bytes.subarray(at, at + 5));
+            await Bun.sleep(1);
+          }
+        })();
+        return;
+      }
+      if (params.name === 'flood') {
+        // A line that never ends, and a server that stays.
+        process.stdout.write('x'.repeat(Number(process.env.LAZY_MCP_FLOOD ?? 0)));
         return;
       }
       send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify({ arguments: params.arguments, cwd: process.cwd(), thread: process.env.BOITE_THREAD_ID, own: process.env.LAZY_MCP_OWN }) }] } });

@@ -1,7 +1,7 @@
 import type { QuestionRequest } from '@boite/contracts';
 import type { Store } from './store.svelte';
-import { unresolvedAssetId } from './draft-attachments';
-import { sendable } from './composer-attachments';
+import { isLoading, unresolvedAssetId } from './draft-attachments';
+import { readyToSend } from './composer-attachments';
 import { focusComposer } from './focus';
 import { strings } from './strings';
 
@@ -126,11 +126,13 @@ export async function sendAnswer(store: Store, question: QuestionRequest): Promi
   const optionIds = held.picks[question.id] ?? [];
   const text = state?.text ?? '';
   if (state) {
-    const ready = sendable(store, state, () => store.composerStates[question.threadId]!);
+    const ready = readyToSend(store, state, () => store.composerStates[question.threadId]!);
     if (!(typeof ready === 'boolean' ? ready : await ready) || replyTarget(store)?.id !== question.id) return false;
   }
   const attachments = state?.attachments ?? [];
   if (attachments.some(unresolvedAssetId)) { store.error = strings.errors.draftAttachment; return false; }
+  // The card's own button skips the composer's wait: a file still being read has no bytes to send.
+  if (attachments.some(isLoading)) { store.error = strings.errors.filesLoading; return false; }
   if (state) state.sending = true;
   try {
     if (!await store.answerQuestion(question.threadId, question.id, optionIds, text.trim(), attachments)) return false;

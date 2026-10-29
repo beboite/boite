@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import { posix } from 'node:path';
 
 export type Sources = Map<string, string>;
@@ -9,13 +10,51 @@ const aliases = new Map([
   ['@boite/core/client', 'packages/core/src/client.ts'],
 ]);
 
-/** Bun's parser excludes type-only imports and includes literal dynamic imports. */
+interface SvelteScript { content: { start: number; end: number } }
+type SvelteParse = (source: string, options: { modern: true }) => { module: SvelteScript | null; instance: SvelteScript | null; fragment: unknown };
+let svelteParse: SvelteParse | undefined;
+
+/** The literal specifiers of `import(...)` in markup expressions, which Svelte parses as ESTree. */
+function markupImports(node: unknown, found: string[] = []): string[] {
+  if (Array.isArray(node)) {
+    for (const child of node) markupImports(child, found);
+  } else if (node && typeof node === 'object') {
+    const { type, source } = node as { type?: unknown; source?: { type?: unknown; value?: unknown; expressions?: unknown[]; quasis?: { value: { cooked: string } }[] } };
+    if (type === 'ImportExpression' && source?.type === 'Literal' && typeof source.value === 'string') found.push(source.value);
+    else if (type === 'ImportExpression' && source?.type === 'TemplateLiteral' && source.expressions?.length === 0) found.push(source.quasis![0]!.value.cooked);
+    for (const [key, child] of Object.entries(node)) if (key !== 'metadata') markupImports(child, found);
+  }
+  return found;
+}
+
+/** A component's module and instance scripts, then the dynamic imports of its markup, read with the UI's own Svelte parser. */
+function svelteScripts(file: string): string {
+  // Svelte measures its offsets after dropping a byte order mark.
+  const source = file.replace(/^\uFEFF/, '');
+  svelteParse ??= (createRequire(new URL('../../packages/ui/package.json', import.meta.url))('svelte/compiler') as { parse: SvelteParse }).parse;
+  const root = svelteParse(source, { modern: true });
+  const scripts = [root.module, root.instance].flatMap(script => script ? [source.slice(script.content.start, script.content.end)] : []);
+  return [...scripts, ...markupImports(root.fragment).map(specifier => `import(${JSON.stringify(specifier)});`)].join('\n');
+}
+
+function runtimeImports(file: string, source: string): string[] {
+  try {
+    return scanner.scan(file.endsWith('.svelte') ? svelteScripts(source) : source).imports.map(imported => imported.path);
+  } catch (error) {
+    throw new Error(`${file}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Bun's parser excludes type-only imports and includes literal dynamic imports.
+ * A `.svelte` source contributes the imports of its scripts, components included,
+ * and the literal dynamic imports of its markup.
+ */
 export function dependencyGraph(sources: Sources): Graph {
   const graph: Graph = new Map();
   for (const [file, source] of sources) {
     const dependencies: string[] = [];
-    for (const imported of scanner.scan(source).imports) {
-      const specifier = imported.path;
+    for (const specifier of runtimeImports(file, source)) {
       if (specifier.startsWith('@boite/') && !aliases.has(specifier)) {
         throw new Error(`${file}: unmapped workspace import ${specifier}; add its source to the architecture aliases`);
       }
@@ -23,7 +62,7 @@ export function dependencyGraph(sources: Sources): Graph {
       if (path === null) continue;
       const resolved = [path, `${path}.ts`, `${path}.js`, `${path}/index.ts`].find(candidate => sources.has(candidate));
       if (resolved) dependencies.push(resolved);
-      else if (/\.[cm]?[jt]sx?$/.test(path) || !posix.extname(path)) {
+      else if (/\.(?:[cm]?[jt]sx?|svelte)$/.test(path) || !posix.extname(path)) {
         throw new Error(`${file}: cannot resolve runtime import ${specifier}`);
       }
     }

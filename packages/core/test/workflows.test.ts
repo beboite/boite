@@ -12,7 +12,7 @@ import { startServer } from '../src/server.ts';
 import { assertIdleFamily } from '../src/threads/completion.ts';
 import { HANDOFF } from '../src/threads/handoff.ts';
 import { AGENT_ENV } from '@boite/contracts';
-import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { echoThread, rolledBackArchive, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
 
 const cores: TestCore[] = [];
@@ -404,7 +404,8 @@ test.each(['running', 'correction'] as const)('a restarted core pauses %s workfl
   await waitFor(() => held.size === 1);
   const child = run.nodes[0]!.instances[0]!.threadId!;
   if (phase === 'correction') {
-    const off = h.core.bus.onAny((name, payload) => {
+    // Registered after the workflows' own committed observer: the close begins once the correction is decided.
+    const off = h.core.bus.onCommitted((name, payload) => {
       if (name === 'turn.finished' && (payload as Turn).threadId === child) h.core.workflows.beginClose();
     });
     held.get(child)!('missing structured result');
@@ -724,6 +725,54 @@ test('Mark done waits for a running run and stops a paused one, which expiry sti
   expect((await owner.call('threads.archive', { threadId, onlyIfIdle: true })).archived).toBe(true);
   expect(h.core.workflows.get(threadId, run.id)).toMatchObject({ status: 'stopped', error: 'The thread was archived.' });
   await Bun.sleep(20);
+  expect(held.size).toBe(0);
+});
+
+test('an archive that rolls back leaves its run paused, and the committed one stops it once', async () => {
+  const { held } = scripted(ctx => ctx.thread.parentThreadId ? { hold: true } : 'noted');
+  const { h, owner, threadId } = await setup();
+  const run = await owner.call('workflows.start', { threadId, plan: { name: 'Two', steps: [{ id: 'a', profile: 'fast', task: 'a' }, { id: 'b', profile: 'fast', task: 'b {{a}}' }] }, requestId: 'rollback' });
+  await waitFor(() => held.size === 1);
+  await owner.call('workflows.control', { threadId, runId: run.id, action: 'pause' });
+  [...held.values()][0]!('A done');
+  await waitFor(() => h.core.workflows.get(threadId, run.id).nodes[0]!.status === 'done' && h.core.threads.require(threadId).status === 'idle');
+  // Stopping a run also stops its processes and shared jobs, which no rollback brings back.
+  const stopRoot = h.core.workflows.stopRoot.bind(h.core.workflows);
+  let stops = 0;
+  h.core.workflows.stopRoot = (rootId, reason) => { stops += 1; return stopRoot(rootId, reason); };
+  // Nor do the archive's own stops: its children, its turn and its terminals.
+  const direct: string[] = [];
+  const delegationStop = h.core.delegation.stop.bind(h.core.delegation);
+  const schedulerStop = h.core.scheduler.stop.bind(h.core.scheduler);
+  const closeThread = h.core.terminals.closeThread.bind(h.core.terminals);
+  h.core.delegation.stop = (id, ...rest) => { direct.push('delegation'); return delegationStop(id, ...rest); };
+  h.core.scheduler.stop = (id, ...rest) => { direct.push('scheduler'); return schedulerStop(id, ...rest); };
+  h.core.terminals.closeThread = id => { direct.push('terminals'); return closeThread(id); };
+  rolledBackArchive(h, threadId);
+  expect(h.core.threads.require(threadId).archived).toBe(false);
+  expect([stops, direct]).toEqual([0, []]);
+  expect(h.core.workflows.get(threadId, run.id).status).toBe('paused');
+  h.core.threads.archive(threadId, true);
+  expect(stops).toBe(1);
+  expect(new Set(direct)).toEqual(new Set(['delegation', 'scheduler', 'terminals']));
+  expect(h.core.workflows.get(threadId, run.id)).toMatchObject({ status: 'stopped', error: 'The thread was archived.' });
+});
+
+test('a deletion whose archive rolls back leaves the run and its running step going', async () => {
+  const { held } = scripted(ctx => ctx.thread.parentThreadId ? { hold: true } : 'noted');
+  const { h, owner, threadId } = await setup();
+  const run = await owner.call('workflows.start', { threadId, plan: { name: 'Two', steps: [{ id: 'a', profile: 'fast', task: 'a' }, { id: 'b', profile: 'fast', task: 'b {{a}}' }] }, requestId: 'removal' });
+  await waitFor(() => held.size === 1);
+  const stepId = [...held.keys()][0]!;
+  const announce = h.core.projects.announce;
+  h.core.projects.announce = () => { throw new Error('injected failure after the thread was written'); };
+  try { expect(await thrown(h.core.threads.remove(threadId))).toThrow('injected failure'); }
+  finally { h.core.projects.announce = announce; }
+  expect([h.core.threads.require(threadId).archived, h.core.threads.require(stepId).archived]).toEqual([false, false]);
+  expect(h.core.workflows.get(threadId, run.id).status).toBe('running');
+  await Bun.sleep(20);
+  expect([...held.keys()]).toEqual([stepId]);
+  await h.core.threads.remove(threadId);
   expect(held.size).toBe(0);
 });
 
