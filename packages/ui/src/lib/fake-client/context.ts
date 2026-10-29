@@ -189,6 +189,7 @@ function tokenStream(): number | undefined {
 type Rest<F> = F extends (ctx: FakeContext, ...rest: infer R) => unknown ? R : never;
 
 export class FakeContext {
+  readonly composerClientId = secureId();
   readonly composer: FakeComposerState;
   hasProtectedInput(threadId: ThreadId): boolean {
     return this.bus.protectAllThreads || this.bus.protectedThreadIds.has(threadId);

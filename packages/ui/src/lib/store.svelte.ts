@@ -170,7 +170,6 @@ export class Store {
     this.sidebarCollapsed = layout.sidebarCollapsed;
     listen(ctx, client);
     ctx.off.push(modelFavorites.register(ctx.models.favoritesTarget));
-    ctx.off.push(ctx.composer.watchQueues());
     ctx.off.push(ctx.sync.watch());
     ctx.off.push(ctx.draftStartup.watch());
     ctx.off.push(watchIncognito(ctx));
@@ -647,7 +646,6 @@ export class Store {
   submitAndDraft(...args: Parameters<Composer['submitAndDraft']>) { return this.#ctx.composer.submitAndDraft(...args); }
   send(...args: Parameters<Composer['send']>) { return this.#ctx.composer.send(...args); }
   queuePrompt(...args: Parameters<Composer['queuePrompt']>) { return this.#ctx.composer.queuePrompt(...args); }
-  deliverQueued(...args: Parameters<Composer['deliver']>) { return this.#ctx.composer.deliver(...args); }
   retryQueued(...args: Parameters<Composer['retryQueued']>) { return this.#ctx.composer.retryQueued(...args); }
   restoreQueued(...args: Parameters<Composer['restoreQueued']>) { return this.#ctx.composer.restoreQueued(...args); }
   removeQueued(...args: Parameters<Composer['removeQueued']>) { return this.#ctx.composer.removeQueued(...args); }

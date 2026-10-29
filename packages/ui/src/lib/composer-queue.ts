@@ -1,6 +1,4 @@
-import { ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, PREVIEW_REFERENCES_PER_TURN, type Attachment, type Message, type MessageId, type PreviewReference } from '@boite/contracts';
-import { isActivityCommand } from './activity-command';
-import { attachedBytes } from './attachments';
+import { type Attachment, type Message, type MessageId, type PreviewReference } from '@boite/contracts';
 import { readExperiments } from './experiments';
 import { promptText } from './message-display';
 import { secureId } from './secure-id';
@@ -40,101 +38,6 @@ export function returnPrompt(state: ComposerState, text: string, attachments: At
   // Its own id and experiments from the start, as `queuePrompt` gives: a put already on its way cannot then merge it away.
   state.queued.unshift({ id: secureId(), text, attachments, experiments: readExperiments(), ...(previewReferences.length ? { previewReferences } : {}) });
   state.paused = true;
-}
-
-/**
- * Sends consecutive ordinary prompts together, within turn limits. Activity
- * commands are submitted individually. New arrivals wait for
- * the following turn. The batch stays queued until the agent takes it, so a
- * refused steer at each tool boundary leaves the bubbles where they are
- * instead of removing and redrawing them. A refusal pauses them.
- */
-export async function drainQueue(store: Store, threadId: string, state: ComposerState, turnId?: string): Promise<void> {
-  if (state.sending || state.queued.length === 0) return;
-  if (state.queued[0]!.request) { await deliverQueued(store, threadId, state); return; }
-  let count = 1;
-  let files = state.queued[0]!.attachments.length;
-  let bytes = attachedBytes(state.queued[0]!.attachments);
-  let references = state.queued[0]!.previewReferences?.length ?? 0;
-  if (!isActivityCommand(state.queued[0]!.text)) {
-    for (; count < state.queued.length; count++) {
-      const next = state.queued[count]!;
-      const weight = attachedBytes(next.attachments);
-      const refs = next.previewReferences?.length ?? 0;
-      if (next.request || isActivityCommand(next.text) || files + next.attachments.length > ATTACHMENTS_PER_TURN || bytes + weight > ATTACHMENTS_TOTAL_MAX_BYTES || references + refs > PREVIEW_REFERENCES_PER_TURN) break;
-      files += next.attachments.length;
-      bytes += weight;
-      references += refs;
-    }
-  }
-  const entries = state.queued.slice(0, count);
-  let text = '';
-  const attachments: Attachment[] = [];
-  const previewReferences: PreviewReference[] = [];
-  const referenceIds = new Set<string>();
-  for (const [index, entry] of entries.entries()) {
-    if (index > 0) text += '\n\n';
-    const offset = text.length;
-    text += entry.text;
-    attachments.push(...entry.attachments);
-    for (const reference of entry.previewReferences ?? []) {
-      let id = reference.id;
-      let suffix = 0;
-      while (referenceIds.has(id)) id = `${reference.id.slice(0, 60)}-queue-${++suffix}`;
-      referenceIds.add(id);
-      previewReferences.push({ ...reference, id,
-        ...(reference.mention ? { mention: { start: reference.mention.start + offset, end: reference.mention.end + offset } } : {})
-      });
-    }
-  }
-  state.sending = true;
-  state.outgoing = count;
-  let accepted: boolean | null = null;
-  try {
-    accepted = turnId ? await store.steer(text, threadId, turnId, attachments, previewReferences)
-      : await store.send(text, threadId, attachments, previewReferences) || null;
-  } finally {
-    if (accepted) {
-      for (const entry of entries) {
-        const at = state.queued.indexOf(entry);
-        if (at >= 0) state.queued.splice(at, 1);
-      }
-    } else {
-      // A lone refused prompt returns to the empty input. A batch keeps its
-      // separate entries in the queue so they remain editable.
-      state.paused = accepted === null;
-      if (accepted === null && state.queued.length === 1 && state.queued[0] === entries[0] && state.text.length === 0 && state.attachments.length === 0 && !state.previewReferences?.length) {
-        const back = state.queued.shift()!;
-        state.text = back.text;
-        state.attachments = back.attachments;
-        state.previewReferences = back.previewReferences ?? [];
-      }
-    }
-    state.sending = false;
-    state.outgoing = 0;
-  }
-}
-
-/**
- * The outbox prompt at the head of the queue, alone and under its own request
- * id: taken, it leaves the queue; refused, it stays with the core's reason and
- * holds the rest; otherwise it waits for the machine or the running turn.
- */
-async function deliverQueued(store: Store, threadId: string, state: ComposerState): Promise<void> {
-  const entry = state.queued[0]!;
-  const request = entry.request!;
-  state.sending = true;
-  state.outgoing = 1;
-  try {
-    const outcome = await store.deliverQueued(threadId, { ...entry, request });
-    const at = state.queued.indexOf(entry);
-    if (at < 0) return;
-    if (outcome === 'sent') state.queued.splice(at, 1);
-    else if (outcome !== 'wait') entry.request = { ...request, failed: outcome.failed };
-  } finally {
-    state.sending = false;
-    state.outgoing = 0;
-  }
 }
 
 /**

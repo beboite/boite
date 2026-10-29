@@ -70,6 +70,8 @@ export interface ComposerRecord {
   id: string;
   revision: number;
   updatedAt: number;
+  /** Core-authored: this record and its tombstones belong only to this connection, in memory. */
+  privateMode?: true;
   value: ComposerValue | null;
 }
 

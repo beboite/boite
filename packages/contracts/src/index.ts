@@ -239,3 +239,7 @@ export {
 } from './view.ts';
 
 export { effectiveCompaction, type CompactionTarget, type CompactionPolicy } from './settings';
+
+export { composerBatch, type ComposerBatch } from './composer-batch';
+export { composerActivity, isComposerActivity, stableComposerValue } from './composer-activity';
+export { permissionAutoDecision } from './permissions';

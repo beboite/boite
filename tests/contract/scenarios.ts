@@ -7,6 +7,7 @@
  * everything it touches and reads codes, data keys and events, never message
  * text: the words may change, the refusal may not.
  */
+import { COMPOSER_SCENARIOS } from './composer.ts';
 import { SHARED_SCENARIOS } from './shared-projects.ts';
 import {
   GROUP_INVITE_PREFIX,
@@ -26,6 +27,9 @@ import {
 export interface ContractEnv {
   /** Another isolated Contacts core, with no real account or public network. */
   newContact(): Promise<ContractEnv>;
+  /** A new connection to this same core, for private-record and access boundaries. */
+  peer(role?: { agentThreadId: string }): Promise<ContractEnv>;
+  disconnect(): void;
   call<M extends RpcMethodName>(method: M, params: RpcParams<M>): Promise<RpcResult<M>>;
   on<E extends RpcEventName>(event: E, handler: (payload: RpcEvents[E]) => void): () => void;
   /** A folder that exists, a new one per call. */
@@ -151,6 +155,12 @@ async function unavailable(env: ContractEnv): Promise<{ provider: ProviderSummar
 
 export const SCENARIOS: Record<string, Scenario> = {
   ...SHARED_SCENARIOS,
+  ...COMPOSER_SCENARIOS,
+  'policy.get reports no restrictions when no admin policy file exists': async (env) => {
+    const policy = await env.call('policy.get', {});
+    same([policy.present, policy.values, policy.locked, policy.problems, policy.failedClosed],
+      [false, {}, [], [], false], 'a missing policy leaves user preferences unlocked');
+  },
   'providers.addLocal writes an ACP provider with a default account, providers.removeLocal takes it away, each refusal names its field': async (env) => {
     const heard = record(env, ['providers.updated']);
     const added = await env.call('providers.addLocal', { name: 'Contract Local', command: 'bun', args: ['acp', 'two words'], env: { CONTRACT_LOCAL: '1' } });
@@ -617,6 +627,46 @@ export const SCENARIOS: Record<string, Scenario> = {
   },
   'accounts.add refuses an unknown provider': async (env) => {
     await refusedWith(env.call('accounts.add', { providerId: 'no-such-provider', label: 'x' }), RpcErrorCode.NotFound);
+  },
+  'threads.listChanges resumes changed rows, removals and full lists with validated cursors': async (env) => {
+    const setup = await echo(env);
+    const pinned = await thread(env, setup, 'pinned');
+    const unchanged = await thread(env, setup, 'unchanged');
+    const archived = await thread(env, setup, 'archived');
+    const removed = await thread(env, setup, 'removed');
+    const ids = (threads: ThreadSummary[]) => threads.map(row => row.id).sort();
+    const own = (threads: ThreadSummary[]) => threads.filter(row => row.projectId === setup.projectId);
+    const first = await env.call('threads.listChanges', {});
+    same(first.kind, 'full', 'the first read');
+    same(ids(own(first.threads)), [pinned.id, unchanged.id, archived.id, removed.id].sort(), 'the initial project rows');
+    same(first.threads.map(row => row.id), (await env.call('threads.list', {})).map(row => row.id), 'the full list order');
+
+    await env.call('threads.pin', { threadId: pinned.id, pinned: true });
+    await env.call('threads.archive', { threadId: archived.id, archived: true });
+    await env.call('threads.remove', { threadId: removed.id });
+    const created = await thread(env, setup, 'created while away');
+    const next = await env.call('threads.listChanges', { since: first.cursor });
+    check(next.kind === 'changes', 'a retained cursor did not return changes');
+    same(next.cursor.run, first.cursor.run, 'the run while resuming');
+    check(next.cursor.seq > first.cursor.seq, 'the cursor did not advance after changes');
+    same(ids(own(next.threads)), [pinned.id, created.id].sort(), 'only changed project rows');
+    same(next.threads.find(row => row.id === pinned.id)?.pinned, true, 'the updated row');
+    same(next.removed.filter(id => [archived.id, removed.id].includes(id)).sort(), [archived.id, removed.id].sort(), 'archived and deleted rows');
+    check(!next.removed.includes(unchanged.id), 'the unchanged row was removed');
+
+    const quiet = await env.call('threads.listChanges', { since: next.cursor });
+    check(quiet.kind === 'changes', 'the current cursor did not return changes');
+    same(own(quiet.threads), [], 'no project row changed again');
+    same(quiet.removed, [], 'no row was removed again');
+    for (const since of [{ run: 'another-run', seq: 0 }, { ...quiet.cursor, seq: quiet.cursor.seq + 1 }]) {
+      const full = await env.call('threads.listChanges', { since });
+      same(full.kind, 'full', 'an unknown cursor falls back to a full list');
+      same(ids(own(full.threads)), [pinned.id, unchanged.id, created.id].sort(), 'the fallback project rows');
+    }
+    for (const [since, field] of [[null, 'since'], [{ run: '', seq: 0 }, 'since.run'], [{ ...quiet.cursor, seq: -1 }, 'since.seq']] as const) {
+      const data = await refusedWith(env.call('threads.listChanges', { since: since as RpcParams<'threads.listChanges'>['since'] }), RpcErrorCode.InvalidParams, ['field', 'expected']);
+      same(data.field, field, 'the malformed cursor field');
+    }
   },
   'threads.markRead on a read thread announces nothing': async (env) => {
     const setup = await echo(env);

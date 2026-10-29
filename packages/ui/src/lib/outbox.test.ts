@@ -11,11 +11,11 @@ vi.mock('./draft-journal', () => ({ readDraftJournal: vi.fn(async () => null), w
 const stores: Store[] = [];
 const clients: FakeClient[] = [];
 
-/** A Store on `machine` whose client records every start, connected only when asked. Its core keeps no composer records, so the frontend delivers. */
+/** A device whose RPC recorder distinguishes explicit sends from core-owned delivery. */
 async function machine(id: string, before?: (client: FakeClient) => Promise<void>, delayMs = 0) {
   const store = new Store();
   store.machineId = id;
-  const client = new FakeClient({ delayMs, missing: ['composer.list'] });
+  const client = new FakeClient({ delayMs });
   clients.push(client);
   if (before) { await client.connect(); await before(client); }
   const original = client.call.bind(client);
@@ -38,60 +38,36 @@ afterEach(() => {
   vi.mocked(writeDraftJournal).mockResolvedValue();
 });
 
-/** Two prompts written while the machine was away, then the app closed. */
-async function writtenAway(threadId?: string, interrupted?: string) {
-  const first = await machine('one');
-  await first.connect();
-  const thread = threadId ?? first.store.threads.find(row => row.status === 'idle')!.id;
-  await first.store.open(thread);
-  first.client.drop();
-  expect(first.store.connection).not.toBe('ready');
-  first.store.queuePrompt(thread, { text: 'Written in the tunnel', attachments: [{ kind: 'file', mimeType: 'text/plain', name: 'note.txt', data: 'aGVsbG8=' }] }, { choice: null, ...(interrupted ? { id: interrupted } : {}) });
-  first.store.queuePrompt(thread, { text: 'And one more', attachments: [] }, { choice: null });
-  const ids = first.store.composerStates[thread]!.queued.map(entry => entry.request!.id);
-  expect(new Set(ids).size).toBe(2);
-  expect(first.starts).toHaveLength(0);
-  first.store.client?.close(); first.store.detach();
-  return { thread, ids };
-}
 
 async function userPrompts(client: FakeClient, threadId: string): Promise<string[]> {
   const thread = await client.call('threads.get', { threadId });
   return thread.messages.filter(message => message.role === 'user').map(message => JSON.stringify(message.parts));
 }
 
-test('prompts written offline survive closing the app and go out in order, once each, under their own ids', async () => {
-  const { thread, ids } = await writtenAway();
-  // Another machine has its own outbox: nothing of machine one is there.
-  const other = await machine('two');
-  await other.connect();
-  expect(other.store.composerStates[thread]?.queued ?? []).toHaveLength(0);
-
+test('offline input survives a detached Store and reconnects through composer.put without UI turn starts', async () => {
+  const first = await machine('one');
+  await first.connect();
+  await first.store.open('t-trace');
+  first.client.drop();
+  const file = { kind: 'file' as const, mimeType: 'text/plain', name: 'note.txt', data: 'aGVsbG8=' };
+  first.store.queuePrompt('t-trace', { text: 'Written in the tunnel', attachments: [file] }, { choice: null });
+  first.store.queuePrompt('t-trace', { text: 'And one more', attachments: [] }, { choice: null });
+  const ids = first.store.composerStates['t-trace']!.queued.map(entry => entry.id);
+  first.store.detach(); first.client.close();
   const next = await machine('one');
-  // Restored before the machine answers, not held: an outbox resends by itself.
   await next.connect();
-  await vi.waitFor(() => expect(next.store.composerStates[thread]?.queued).toHaveLength(0), { timeout: 5000 });
-  expect(next.starts.map(start => [start.prompt, start.clientRequestId])).toEqual([['Written in the tunnel', ids[0]], ['And one more', ids[1]]]);
-  const prompts = await userPrompts(next.client, thread);
+  await vi.waitFor(() => expect(next.store.composerStates['t-trace']?.queued ?? []).toHaveLength(0));
+  const prompts = await userPrompts(next.client, 't-trace');
   expect(prompts.filter(parts => parts.includes('Written in the tunnel'))).toHaveLength(1);
-  expect(prompts.at(-1)).toContain('And one more');
   expect(prompts.find(parts => parts.includes('Written in the tunnel'))).toContain('note.txt');
-  expect(other.starts).toHaveLength(0);
-});
-
-test('a prompt the machine already took before the answer was lost is not sent twice', async () => {
-  const { thread, ids } = await writtenAway();
-  const next = await machine('one', async client => {
-    // The core took the first prompt; only its answer never reached the phone.
-    await client.call('turns.start', { threadId: thread, prompt: 'Written in the tunnel', clientRequestId: ids[0]!,
-      attachments: [{ kind: 'file', mimeType: 'text/plain', name: 'note.txt', data: 'aGVsbG8=' }] });
-    await client.settled();
-  });
-  await next.connect();
-  await vi.waitFor(() => expect(next.store.composerStates[thread]?.queued).toHaveLength(0), { timeout: 5000 });
-  const prompts = await userPrompts(next.client, thread);
-  expect(prompts.filter(parts => parts.includes('Written in the tunnel'))).toHaveLength(1);
   expect(prompts.filter(parts => parts.includes('And one more'))).toHaveLength(1);
+  expect(next.starts).toHaveLength(0);
+  const remote = await next.client.call('composer.list', {});
+  const snapshot = remote.find(row => row.id === 't-trace')!;
+  await next.client.call('composer.put', { section: 'inputs', id: 't-trace', expectedRevision: snapshot.revision,
+    value: { input: { text: '', attachments: [], paused: false, queued: ids.map((id, at) => ({ id: id!, text: at ? 'And one more' : 'Written in the tunnel', attachments: [] })) } } });
+  await next.client.settled();
+  expect((await userPrompts(next.client, 't-trace')).filter(parts => parts.includes('Written in the tunnel'))).toHaveLength(1);
 });
 
 test('a prompt the machine took but never answered is asked again under its id, not handed back to resend', async () => {
@@ -115,49 +91,6 @@ test('a prompt the machine took but never answered is asked again under its id, 
   expect((await userPrompts(phone.client, thread)).filter(parts => parts.includes('It works'))).toHaveLength(1);
 });
 
-test('a refused outbox prompt stays with its reason and is not sent again until asked', async () => {
-  const { thread, ids } = await writtenAway();
-  const next = await machine('one');
-  const original = vi.mocked(next.client.call).getMockImplementation()!;
-  let refuse = true;
-  vi.mocked(next.client.call).mockImplementation(async (method, params) => {
-    if (method === 'turns.start' && refuse) { refuse = false; throw new Error('The account is signed out'); }
-    return original(method, params);
-  });
-  await next.connect();
-  await vi.waitFor(() => expect(next.store.composerStates[thread]?.queued[0]?.request?.failed).toBeDefined(), { timeout: 5000 });
-  expect(next.store.composerStates[thread]!.queued[0]!.request!.failed).toContain('signed out');
-  expect(next.store.composerStates[thread]!.queued).toHaveLength(2);
-  // The failure is kept on the device too.
-  const reopened = await machine('one');
-  await reopened.connect();
-  await vi.waitFor(() => expect(reopened.store.composerStates[thread]?.queued[0]?.request).toMatchObject({ id: ids[0], failed: expect.stringContaining('signed out') }));
-  reopened.store.detach();
-  next.store.retryQueued(thread, 0);
-  await vi.waitFor(() => expect(next.store.composerStates[thread]?.queued).toHaveLength(0), { timeout: 5000 });
-  const prompts = await userPrompts(next.client, thread);
-  expect(prompts.filter(parts => parts.includes('Written in the tunnel'))).toHaveLength(1);
-  expect(prompts.filter(parts => parts.includes('And one more'))).toHaveLength(1);
-});
-
-test('an outbox prompt the machine took is answered while its turn still runs', async () => {
-  // A send whose answer never came joins the outbox under the id it went out with.
-  const { thread, ids } = await writtenAway(undefined, 'interrupted-send');
-  // Slow enough that the turn it started is still running when the phone is back.
-  const next = await machine('one', async client => {
-    await client.call('turns.start', { threadId: thread, prompt: 'Written in the tunnel', clientRequestId: ids[0]!,
-      attachments: [{ kind: 'file', mimeType: 'text/plain', name: 'note.txt', data: 'aGVsbG8=' }] });
-  }, 150);
-  await next.connect();
-  await vi.waitFor(() => expect(next.store.composerStates[thread]?.queued.map(entry => entry.text)).toEqual(['And one more']), { timeout: 5000 });
-  expect(next.store.threads.find(row => row.id === thread)?.status).toBe('running');
-  expect(next.starts[0]!.clientRequestId).toBe(ids[0]);
-  await vi.waitFor(() => expect(next.store.composerStates[thread]?.queued).toHaveLength(0), { timeout: 10000 });
-  const prompts = await userPrompts(next.client, thread);
-  expect(prompts.filter(parts => parts.includes('Written in the tunnel'))).toHaveLength(1);
-  expect(prompts.filter(parts => parts.includes('And one more'))).toHaveLength(1);
-}, 15000);
-
 test('an outbox prompt put back in the box and sent unchanged keeps its request id', async () => {
   const phone = await machine('one');
   await phone.connect();
@@ -176,32 +109,4 @@ test('an outbox prompt put back in the box and sent unchanged keeps its request 
   expect(await phone.store.send(entry.text, thread)).toBe(true);
   expect(phone.starts.map(start => start.clientRequestId)).toEqual([id, id]);
   expect((await userPrompts(phone.client, thread)).filter(parts => parts.includes('Written in the tunnel'))).toHaveLength(1);
-});
-test('a drained batch whose send goes unanswered is saved as its outbox entry alone, never beside its originals', async () => {
-  const phone = await machine('one');
-  await phone.connect();
-  const thread = phone.store.threads.find(row => row.status === 'idle')!.id;
-  await phone.store.open(thread);
-  const original = vi.mocked(phone.client.call).getMockImplementation()!;
-  // The send and its retry under the same id both lose their answer; the outbox then delivers it.
-  let lost = 0;
-  vi.mocked(phone.client.call).mockImplementation(async (method, params) => {
-    if (method === 'turns.start' && lost < 2) { lost++; throw unansweredFailure('turns.start'); }
-    return original(method, params);
-  });
-  const saved = { outbox: 0, beside: 0 };
-  const setItem = Storage.prototype.setItem;
-  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
-    if (key.includes(':entry:') && value.includes('"request"')) {
-      saved.outbox++;
-      if (value.includes('"text":"first"')) saved.beside++;
-    }
-    return setItem.call(this, key, value);
-  });
-  phone.store.composerStates[thread] = { text: '', attachments: [], queued: [{ text: 'first', attachments: [] }, { text: 'second', attachments: [] }], sending: false, paused: false };
-  await vi.waitFor(async () => expect((await userPrompts(phone.client, thread)).filter(parts => parts.includes('first\\n\\nsecond'))).toHaveLength(1), { timeout: 10_000 });
-  // A reload restores what was saved: originals beside the outbox entry would go out twice.
-  expect(saved.outbox).toBeGreaterThan(0);
-  expect(saved.beside).toBe(0);
-  expect(phone.store.composerStates[thread]!.queued).toEqual([]);
 });

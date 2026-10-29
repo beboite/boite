@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { activityCommand, isActivityCommand } from './activity-command';
+import { composerActivity as activityCommand, isComposerActivity as isActivityCommand } from '@boite/contracts';
 
 test('goal and loop commands preserve text and parse duration units', () => {
   expect(activityCommand('/goal Ship the fix\nand verify it')).toEqual({ goal: { objective: 'Ship the fix\nand verify it' } });
@@ -19,6 +19,6 @@ test('empty commands and invalid loop intervals are refused before sending', () 
 test('/goal2 is a reviewed goal with no experiment on', () => {
   expect(activityCommand('/goal2 Ship the fix')).toEqual({ goal: { objective: 'Ship the fix', review: true } });
   expect(isActivityCommand('/goal2 Ship the fix')).toBe(true);
-  expect(() => activityCommand('/goal2')).toThrow('Use /goal2 followed by an objective.');
+  expect(() => activityCommand('/goal2')).toThrow('/goal2: expected an objective or loop cadence and prompt');
   expect(activityCommand('/goal Ship the fix')).toEqual({ goal: { objective: 'Ship the fix' } });
 });
